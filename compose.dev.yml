@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: goerp
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: goerp
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U goerp" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    environment:
+      DATABASE_URL: postgres://goerp:dev@postgres:5432/goerp
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      SERVER_RESET_QUERY: "" # must be empty in transaction mode
+      AUTH_TYPE: scram-sha-256 # match Postgres 18 default
+    ports:
+      - "6432:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h localhost -p 5432 -U goerp" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    ports:
+      - "8001:8001"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.48
+    container_name: meilisearch
+    ports:
+      - "7700:7700"
+    environment:
+      MEILI_ENV: development
+      MEILI_MASTER_KEY: 2f14b775804ecaf5dc4084d32aa034a7
+    volumes:
+      - meili_data:/meili_data
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:7700/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.40
+    container_name: seaweedfs
+    ports:
+      - "8333:8333" # Web UI / Filer Dashboard
+      - "8334:8334" # S3 Storage API Gateway
+    volumes:
+      - seaweedfs_data:/data
+    entrypoint: weed
+    command: "mini -dir=/data -s3 -s3.port=8334"
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/jaeger:2.20.0
+    container_name: jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI
+      - "4318:4318" # OTLP HTTP
+      - "4317:4317" # OTLP gRPC
+      - "16687:16687"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI
+
+  temporal:
+    image: temporalio/temporal:1.8.1
+    container_name: temporal
+    ports:
+      - 7233:7233
+      - 8233:8233
+    volumes:
+      - temporal_data:/home/temporal
+    command: server start-dev --ip 0.0.0.0 --db-filename /home/temporal/temporal.db
+
+volumes:
+  postgres_data:
+  meili_data:
+  seaweedfs_data:
+  temporal_data:
