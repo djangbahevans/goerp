@@ -9,8 +9,9 @@ Implementation work is tracked as GitHub issues.
 ```text
 goerp/
 ├── cmd/
-│   ├── goerp/          # CLI entrypoint
-│   └── module/         # module build entrypoint
+│   ├── engine/            # the engine binary — single process, hosts WASM modules, runs the HTTP server
+│   ├── goerp/             # CLI entrypoint (module build/test/install are subcommands of this)
+│   └── workflow-worker/   # standalone process for modules with workflow declarations
 ├── internal/
 │   ├── engine/          # core subsystems: manifest, schema sync, host ABI, ...
 │   ├── contracttest/     # full-engine test harness (real Postgres/Redis)
