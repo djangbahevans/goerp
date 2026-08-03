@@ -63,7 +63,9 @@ func validateManifest(m Manifest) error {
 	trans, _ := uni.GetTranslator("en")
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	enTranslations.RegisterDefaultTranslations(validate, trans)
+	if err := enTranslations.RegisterDefaultTranslations(validate, trans); err != nil {
+		return err
+	}
 
 	if err := validate.RegisterValidation("name_regex", nameRegex); err != nil {
 		return err
