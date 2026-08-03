@@ -1,0 +1,20 @@
+# Local-only working docs — not part of the repo's shared source of truth.
+docs/
+
+# Local dev artifacts (defaults from internal/engine/config.Config and
+# GOERP_STORAGE_LOCAL_DIR).
+/wasm-cache/
+/storage/
+
+# Env files — never commit secrets.
+.env
+.env.*
+
+# Compiled binaries, if built locally.
+/engine
+/goerp
+/workflow-worker
+
+# OS / editor cruft.
+.DS_Store
+.idea/
