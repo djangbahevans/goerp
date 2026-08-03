@@ -8,7 +8,7 @@ import (
 )
 
 func TestLoadManifestValidMinimal(t *testing.T) {
-	m := []byte(`{"name": "demo", "version": "1.0.0"}`)
+	m := []byte(`{"name": "demo", "version": "1.0.0", "abi_version": "1", "engine": ">=0.5.0 <1.0.0"}`)
 
 	if _, err := LoadManifest(m); err != nil {
 		t.Fatalf("expected valid minimal manifest to pass, got %v", err)
