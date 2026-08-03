@@ -1,0 +1,66 @@
+name: Engine CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Verify Dependencies
+        run: go mod download && go mod verify
+
+      - name: Run Linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
+
+      - name: Run Unit Tests
+        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Start Dev Stack
+        run: docker compose -f compose.dev.yml up -d --wait
+
+      - name: Run Integration Tests
+        run: go test -v -race ./...
+
+      - name: Stop Dev Stack
+        if: always()
+        run: docker compose -f compose.dev.yml down -v
+
+      - name: Build Engine Binary
+        run: CGO_ENABLED=0 go build -o engine ./cmd/engine
+
+      - name: Build Container Image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: goerp-engine:${{ github.sha }}
+          outputs: type=docker,dest=/tmp/goerp-engine.tar
+
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+      - name: Scan Image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          input: /tmp/goerp-engine.tar
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
