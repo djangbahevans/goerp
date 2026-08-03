@@ -42,7 +42,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		rdb.Close()
+		_ = rdb.Close()
 		return nil, fmt.Errorf("ping redis: %w", err)
 	}
 

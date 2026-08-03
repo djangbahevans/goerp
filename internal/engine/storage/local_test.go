@@ -35,7 +35,7 @@ func TestLocalBackendUploadDownload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Download() error: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	if size != int64(len(content)) {
 		t.Errorf("Download() size = %d, want %d", size, len(content))

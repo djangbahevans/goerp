@@ -138,7 +138,7 @@ func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 		t.Fatalf("reserve a test port: %v", err)
 	}
 	addr := ln.Addr().String()
-	ln.Close()
+	_ = ln.Close()
 
 	cfg := baseTestConfig(t)
 	cfg.ListenAddr = addr
@@ -153,7 +153,11 @@ func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 	if err := e.Start(ctx); err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
-	t.Cleanup(func() { e.Shutdown(context.Background()) })
+	t.Cleanup(func() {
+		if err := e.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown() error: %v", err)
+		}
+	})
 
 	var resp *http.Response
 	deadline := time.Now().Add(2 * time.Second)
@@ -167,7 +171,7 @@ func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /_health never succeeded (server may have panicked): %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
