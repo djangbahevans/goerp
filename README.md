@@ -61,3 +61,39 @@ docker compose -f compose.dev.yml down -v
 ### Connecting the engine
 
 Point the locally-run engine binary at PgBouncer (not Postgres directly) and the other services above using their `localhost` ports. All services expose healthchecks where startup ordering matters (PgBouncer waits on Postgres being healthy).
+
+### Running the engine
+
+With the stack up, the only environment variable actually required is `GOERP_DB_PRIMARY_DSN` — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` isn't required either, but without it the local storage backend fails to construct (a startup warning, not a fatal error — object storage checks then read back as unconfigured rather than actually working).
+
+```bash
+export GOERP_DB_PRIMARY_DSN="postgres://goerp:dev@localhost:6432/goerp"
+export GOERP_STORAGE_LOCAL_DIR="./storage"
+
+go run ./cmd/engine
+```
+
+Confirm it's up:
+
+```bash
+curl localhost:8080/_health
+```
+
+A healthy response looks like:
+
+```json
+{
+  "status": "healthy",
+  "version": "dev",
+  "uptime_seconds": 12,
+  "checks": {
+    "postgres_primary": { "status": "ok", "latency_ms": 1.1 },
+    "postgres_replica": { "status": "ok", "latency_ms": 0 },
+    "redis": { "status": "ok", "latency_ms": 0.6 },
+    "meilisearch": { "status": "ok", "latency_ms": 0 },
+    "object_storage": { "status": "ok", "latency_ms": 0.2 }
+  }
+}
+```
+
+`postgres_replica`/`meilisearch` read `"ok"` with `0` latency when they're simply unconfigured (`GOERP_DB_REPLICA_DSN`/`GOERP_MEILISEARCH_URL` unset) — not because they were actually checked. `GET localhost:8080/_ready` reports whether the full startup sequence has completed and is what a Kubernetes readiness probe would check.
