@@ -47,6 +47,9 @@ jobs:
       - name: Build Engine Binary
         run: CGO_ENABLED=0 go build -o engine ./cmd/engine
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
       - name: Build Container Image
         uses: docker/build-push-action@v7
         with:
