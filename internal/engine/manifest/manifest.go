@@ -25,7 +25,7 @@ const (
 	MB
 )
 
-func LoadManifest(m []byte) (*Manifest, error) {
+func Load(m []byte) (*Manifest, error) {
 	if ok := utf8.Valid(m); !ok {
 		return nil, ErrInvalidUtf8
 	}
@@ -39,28 +39,31 @@ func LoadManifest(m []byte) (*Manifest, error) {
 	}
 
 	var manifest Manifest
-	err := json.Unmarshal(m, &manifest)
-	if err != nil {
+	if err := json.Unmarshal(m, &manifest); err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+
+	if err := validateManifest(manifest); err != nil {
+		return nil, fmt.Errorf("validate manifest: %w", err)
 	}
 
 	return &manifest, nil
 }
 
 type Manifest struct {
-	Name                     string                `json:"name"`
-	DisplayName              string                `json:"display_name"`
+	Name                     string                `json:"name" validate:"name_regex"`
+	DisplayName              string                `json:"display_name" validate:"max=128"`
 	Type                     string                `json:"type"`
-	Version                  string                `json:"version"`
-	Description              string                `json:"description"`
-	LongDescription          string                `json:"long_description,omitempty"`
-	ABIVersion               string                `json:"abi_version"`
-	Engine                   string                `json:"engine"`
+	Version                  string                `json:"version" validate:"semver"`
+	Description              string                `json:"description" validate:"max=256"`
+	LongDescription          string                `json:"long_description,omitempty" validate:"max_warn=4096,max=8192"`
+	ABIVersion               string                `json:"abi_version" validate:"abi_version"`
+	Engine                   string                `json:"engine" validate:"version_range"`
 	Author                   string                `json:"author,omitempty"`
 	License                  string                `json:"license,omitempty"`
 	Homepage                 string                `json:"homepage,omitempty"`
 	Repository               string                `json:"repository,omitempty"`
-	Keywords                 []string              `json:"keywords,omitempty"`
+	Keywords                 []string              `json:"keywords,omitempty" validate:"max=10,dive,max=32"`
 	DependsOn                []string              `json:"depends_on"`
 	SoftDependsOn            []string              `json:"soft_depends_on,omitempty"`
 	ConflictsWith            []string              `json:"conflicts_with,omitempty"`
