@@ -34,10 +34,14 @@ func (b *LocalBackend) Upload(ctx context.Context, key string, r io.Reader, opts
 	if err != nil {
 		return "", fmt.Errorf("create file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := io.Copy(f, r); err != nil {
 		return "", fmt.Errorf("write file: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("close file: %w", err)
 	}
 
 	return dest, nil

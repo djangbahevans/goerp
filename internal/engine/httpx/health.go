@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 type CheckResult struct {
@@ -43,12 +45,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if s.healthFn == nil {
-		json.NewEncoder(w).Encode(HealthReport{
+		if err := json.NewEncoder(w).Encode(HealthReport{
 			Status:        "healthy",
 			Version:       "dev",
 			UptimeSeconds: 0,
 			Checks:        map[string]CheckResult{},
-		})
+		}); err != nil {
+			log.Error().Err(err).Msg("encode health response")
+		}
 		return
 	}
 
@@ -58,7 +62,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	json.NewEncoder(w).Encode(report)
+	if err := json.NewEncoder(w).Encode(report); err != nil {
+		log.Error().Err(err).Msg("encode health response")
+	}
 }
 
 func ProbeCheck(ctx context.Context, fn func(context.Context) error) CheckResult {
@@ -79,18 +85,22 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if s.readyFn != nil {
 		if err := s.readyFn(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(ReadyReport{
+			if encErr := json.NewEncoder(w).Encode(ReadyReport{
 				Ready:         false,
 				Modules:       ModulesReport{},
 				FailedModules: []FailedModule{},
-			})
+			}); encErr != nil {
+				log.Error().Err(encErr).Msg("encode ready response")
+			}
 			return
 		}
 	}
 
-	json.NewEncoder(w).Encode(ReadyReport{
+	if err := json.NewEncoder(w).Encode(ReadyReport{
 		Ready:         true,
 		Modules:       ModulesReport{},
 		FailedModules: []FailedModule{},
-	})
+	}); err != nil {
+		log.Error().Err(err).Msg("encode ready response")
+	}
 }

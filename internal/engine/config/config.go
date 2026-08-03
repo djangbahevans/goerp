@@ -51,7 +51,9 @@ type Config struct {
 
 func Load() (*Config, error) {
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	validate.RegisterValidation("loopback", isLoopback)
+	if err := validate.RegisterValidation("loopback", isLoopback); err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{}
 
