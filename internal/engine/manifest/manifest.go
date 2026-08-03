@@ -25,7 +25,7 @@ const (
 	MB
 )
 
-func LoadManifest(m []byte) (*Manifest, error) {
+func Load(m []byte) (*Manifest, error) {
 	if ok := utf8.Valid(m); !ok {
 		return nil, ErrInvalidUtf8
 	}
