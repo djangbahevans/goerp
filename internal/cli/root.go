@@ -27,7 +27,7 @@ func Execute() int {
 	if ec, ok := errors.AsType[clierr.ExitCoder](err); ok {
 		if ec.ExitCode() == 2 {
 			fmt.Fprintln(os.Stderr)
-			cmd.Usage()
+			_ = cmd.Usage()
 		}
 		return ec.ExitCode()
 	}

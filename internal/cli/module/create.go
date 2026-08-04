@@ -26,8 +26,8 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "created module %q in %s\n", name, targetDir)
-			return nil
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "created module %q in %s\n", name, targetDir)
+			return err
 		},
 	}
 

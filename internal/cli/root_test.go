@@ -30,13 +30,13 @@ func runCLI(t *testing.T, args ...string) (exitCode int, stdout, stderr string) 
 
 	exitCode = Execute()
 
-	outW.Close()
-	errW.Close()
+	_ = outW.Close()
+	_ = errW.Close()
 	os.Stdout, os.Stderr = origStdout, origStderr
 
 	var outBuf, errBuf bytes.Buffer
-	io.Copy(&outBuf, outR)
-	io.Copy(&errBuf, errR)
+	_, _ = io.Copy(&outBuf, outR)
+	_, _ = io.Copy(&errBuf, errR)
 
 	return exitCode, outBuf.String(), errBuf.String()
 }
