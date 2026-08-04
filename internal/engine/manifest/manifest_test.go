@@ -4,14 +4,115 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
+// minimalManifestFields returns a JSON-object-shaped map with exactly the
+// required root fields (manifest-spec.md §2) populated with valid values,
+// and no optional fields set.
+func minimalManifestFields() map[string]any {
+	return map[string]any{
+		"name":         "demo",
+		"display_name": "Demo",
+		"type":         "domain",
+		"version":      "1.0.0",
+		"description":  "A demo module",
+		"abi_version":  "1",
+		"engine":       ">=0.5.0 <1.0.0",
+		"depends_on":   []string{},
+		"capabilities": []string{"db.read"},
+		"schema": map[string]any{
+			"owned_models": []string{"sales.order"},
+		},
+		"checksum": "sha256:empty",
+	}
+}
+
 func TestLoadManifestValidMinimal(t *testing.T) {
-	m := []byte(`{"name": "demo", "version": "1.0.0", "abi_version": "1", "engine": ">=0.5.0 <1.0.0"}`)
+	m, err := json.Marshal(minimalManifestFields())
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
 
 	if _, err := Load(m); err != nil {
 		t.Fatalf("expected valid minimal manifest to pass, got %v", err)
+	}
+}
+
+func TestLoadManifestRejectsMissingRequiredFields(t *testing.T) {
+	// jsonField -> the Go struct field name the validator error must
+	// reference, so each missing field produces a distinct, identifiable
+	// error rather than an interchangeable generic one.
+	requiredFields := map[string]string{
+		"name":         "Name",
+		"display_name": "DisplayName",
+		"type":         "Type",
+		"version":      "Version",
+		"description":  "Description",
+		"abi_version":  "ABIVersion",
+		"engine":       "Engine",
+		"depends_on":   "DependsOn",
+		"capabilities": "Capabilities",
+		"schema":       "Schema",
+		"checksum":     "Checksum",
+	}
+
+	for jsonField, goField := range requiredFields {
+		t.Run(jsonField, func(t *testing.T) {
+			fields := minimalManifestFields()
+			delete(fields, jsonField)
+
+			m, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+
+			_, err = Load(m)
+			if err == nil {
+				t.Fatalf("expected missing %q to be rejected", jsonField)
+			}
+			if !strings.Contains(err.Error(), goField) {
+				t.Fatalf("expected error for missing %q to reference field %q, got %v", jsonField, goField, err)
+			}
+		})
+	}
+}
+
+func TestLoadManifestWorkerChecksumRequiredOnlyWithWorkflowTypes(t *testing.T) {
+	workflowType := map[string]any{"name": "wf", "label": "WF", "handler": "h"}
+
+	cases := map[string]struct {
+		workflowTypes  []map[string]any
+		workerChecksum string
+		wantErr        bool
+	}{
+		"no workflow_types, no worker_checksum":          {nil, "", false},
+		"empty workflow_types, no worker_checksum":       {[]map[string]any{}, "", false},
+		"non-empty workflow_types, no worker_checksum":   {[]map[string]any{workflowType}, "", true},
+		"non-empty workflow_types, with worker_checksum": {[]map[string]any{workflowType}, "sha256:deadbeef", false},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			fields := minimalManifestFields()
+			if c.workflowTypes != nil {
+				fields["workflow_types"] = c.workflowTypes
+			}
+			if c.workerChecksum != "" {
+				fields["worker_checksum"] = c.workerChecksum
+			}
+
+			m, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+
+			_, err = Load(m)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("wantErr=%v, got err=%v", c.wantErr, err)
+			}
+		})
 	}
 }
 
