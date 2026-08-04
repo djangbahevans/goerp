@@ -1,8 +1,10 @@
 package manifest
 
 import (
+	"errors"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/go-playground/locales/en"
@@ -11,16 +13,6 @@ import (
 	enTranslations "github.com/go-playground/validator/v10/translations/en"
 	"github.com/rs/zerolog/log"
 )
-
-// ABIVersions is the set of ABI versions this engine build supports. Not yet
-// wired into validation below: abi_version is currently checked for shape
-// only (a bare non-negative integer string). Once engine negotiation exists
-// (host-abi-reference.md §25), abi_version should also be checked against
-// this set so unsupported versions are rejected at manifest-load time,
-// not just at module-load time.
-// TODO: Find a better home for this: the manifest package shouldn't own
-// the engine's supported-ABI-version list.
-var ABIVersions = []string{"1", "2"}
 
 var validNameRegex = regexp.MustCompile("^[a-z][a-z0-9_]{0,63}$")
 var validABIVersionRegex = regexp.MustCompile(`^[0-9]+$`)
@@ -57,6 +49,18 @@ func versionRange(fl validator.FieldLevel) bool {
 	return err == nil
 }
 
+func registerSimpleTranslation(v *validator.Validate, trans ut.Translator, tag, translation string) error {
+	return v.RegisterTranslation(tag, trans,
+		func(ut ut.Translator) error {
+			return ut.Add(tag, translation, true)
+		},
+		func(ut ut.Translator, fe validator.FieldError) string {
+			t, _ := ut.T(tag, fe.Field())
+			return t
+		},
+	)
+}
+
 func validateManifest(m Manifest) error {
 	english := en.New()
 	uni := ut.New(english, english)
@@ -83,5 +87,45 @@ func validateManifest(m Manifest) error {
 		return err
 	}
 
-	return validate.Struct(m)
+	customTranslations := map[string]string{
+		"name_regex":                   "{0} must be lowercase alphanumeric/underscore, starting with a letter (max 64 chars)",
+		"semver":                       "{0} must be a valid semver version",
+		"version_range":                "{0} must be a valid semver range",
+		"abi_version":                  "{0} must be a non-negative integer string",
+		"required_with_workflow_types": "{0} is required when workflow_types is not empty",
+	}
+	for tag, translation := range customTranslations {
+		if err := registerSimpleTranslation(validate, trans, tag, translation); err != nil {
+			return err
+		}
+	}
+
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		m := sl.Current().Interface().(Manifest)
+		if len(m.WorkflowTypes) > 0 && m.WorkerChecksum == "" {
+			sl.ReportError(m.WorkerChecksum,
+				"WorkerChecksum",
+				"worker_checksum",
+				"required_with_workflow_types",
+				"",
+			)
+		}
+	}, Manifest{})
+
+	err := validate.Struct(m)
+	if err == nil {
+		return nil
+	}
+
+	var verrs validator.ValidationErrors
+	if !errors.As(err, &verrs) {
+		return err
+	}
+
+	msgs := make([]string, 0, len(verrs))
+	for _, fe := range verrs {
+		msgs = append(msgs, fe.Translate(trans))
+	}
+
+	return errors.New(strings.Join(msgs, "; "))
 }

@@ -51,23 +51,23 @@ func Load(m []byte) (*Manifest, error) {
 }
 
 type Manifest struct {
-	Name                     string                `json:"name" validate:"name_regex"`
-	DisplayName              string                `json:"display_name" validate:"max=128"`
-	Type                     string                `json:"type"`
-	Version                  string                `json:"version" validate:"semver"`
-	Description              string                `json:"description" validate:"max=256"`
+	Name                     string                `json:"name" validate:"required,name_regex"`
+	DisplayName              string                `json:"display_name" validate:"required,max=128"`
+	Type                     string                `json:"type" validate:"required"`
+	Version                  string                `json:"version" validate:"required,semver"`
+	Description              string                `json:"description" validate:"required,max=256"`
 	LongDescription          string                `json:"long_description,omitempty" validate:"max_warn=4096,max=8192"`
-	ABIVersion               string                `json:"abi_version" validate:"abi_version"`
-	Engine                   string                `json:"engine" validate:"version_range"`
+	ABIVersion               string                `json:"abi_version" validate:"required,abi_version"`
+	Engine                   string                `json:"engine" validate:"required,version_range"`
 	Author                   string                `json:"author,omitempty"`
 	License                  string                `json:"license,omitempty"`
 	Homepage                 string                `json:"homepage,omitempty"`
 	Repository               string                `json:"repository,omitempty"`
 	Keywords                 []string              `json:"keywords,omitempty" validate:"max=10,dive,max=32"`
-	DependsOn                []string              `json:"depends_on"`
+	DependsOn                []string              `json:"depends_on" validate:"required"`
 	SoftDependsOn            []string              `json:"soft_depends_on,omitempty"`
 	ConflictsWith            []string              `json:"conflicts_with,omitempty"`
-	Capabilities             []string              `json:"capabilities"`
+	Capabilities             []string              `json:"capabilities" validate:"required"`
 	HTTPAllowlist            []string              `json:"http_allowlist,omitempty"`
 	Wasm                     bool                  `json:"wasm,omitempty"`
 	Emits                    []EventDeclaration    `json:"emits,omitempty"`
@@ -92,13 +92,13 @@ type Manifest struct {
 	ErrorCodes               []string              `json:"error_codes,omitempty"`
 	RetentionPolicies        []RetentionPolicy     `json:"retention_policies,omitempty"`
 	Hooks                    []Hook                `json:"hooks,omitempty"`
-	L10n                     L10nConfig            `json:"l10n,omitempty"`
+	L10n                     L10nConfig            `json:"l10n"`
 	Provides                 map[string]bool       `json:"provides,omitempty"`
 	OAuthProvider            *OAuthProviderConfig  `json:"oauth_provider,omitempty"`
 	WebhookAdapters          []string              `json:"webhook_adapters,omitempty"`
-	Schema                   SchemaConfig          `json:"schema"`
-	Frontend                 FrontendConfig        `json:"frontend,omitempty"`
-	Checksum                 string                `json:"checksum"`
+	Schema                   SchemaConfig          `json:"schema" validate:"required"`
+	Frontend                 FrontendConfig        `json:"frontend"`
+	Checksum                 string                `json:"checksum" validate:"required"`
 	WorkerChecksum           string                `json:"worker_checksum,omitempty"`
 }
 
