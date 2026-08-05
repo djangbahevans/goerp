@@ -146,3 +146,23 @@ func TestLoadManifestFrontendMissingHashErrorReferencesField(t *testing.T) {
 		t.Fatalf("expected error to reference BundleSHA256, got %v", err)
 	}
 }
+
+func TestLoadManifestFrontendMalformedHashErrorIsTranslated(t *testing.T) {
+	fields := minimalManifestFields()
+	fields["frontend"] = map[string]any{"bundle": true, "bundle_sha256": "not-a-real-hash"}
+
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+
+	_, err = Load(m)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	want := "BundleSHA256 must be a sha256:-prefixed 64-character hex hash"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected translated error %q, got %v", want, err)
+	}
+}

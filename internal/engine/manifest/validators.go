@@ -108,6 +108,7 @@ func validateManifest(m Manifest) error {
 		"semver":                       "{0} must be a valid semver version",
 		"version_range":                "{0} must be a valid semver range",
 		"abi_version":                  "{0} must be a non-negative integer string",
+		"sha256_checksum":              "{0} must be a sha256:-prefixed 64-character hex hash",
 		"required_with_workflow_types": "{0} is required when workflow_types is not empty",
 	}
 	for tag, translation := range customTranslations {
