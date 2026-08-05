@@ -97,7 +97,7 @@ type Manifest struct {
 	OAuthProvider            *OAuthProviderConfig  `json:"oauth_provider,omitempty"`
 	WebhookAdapters          []string              `json:"webhook_adapters,omitempty"`
 	Schema                   SchemaConfig          `json:"schema" validate:"required"`
-	Frontend                 FrontendConfig        `json:"frontend"`
+	Frontend                 *FrontendConfig       `json:"frontend"`
 	Checksum                 string                `json:"checksum" validate:"required"`
 	WorkerChecksum           string                `json:"worker_checksum,omitempty"`
 }
@@ -607,9 +607,25 @@ type SchemaConfig struct {
 }
 
 type FrontendConfig struct {
-	Bundle       bool   `json:"bundle,omitempty"`
+	Bundle       *bool  `json:"bundle,omitempty" validate:"required"`
 	Entry        string `json:"entry,omitempty"`
-	BundleSHA256 string `json:"bundle_sha256,omitempty"`
+	BundleSHA256 string `json:"bundle_sha256,omitempty" validate:"required_if=Bundle true,omitempty,sha256_checksum"`
+}
+
+func (fc *FrontendConfig) UnmarshalJSON(data []byte) error {
+	type Alias FrontendConfig
+
+	aux := &Alias{
+		Entry: "frontend/src/index.ts",
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	*fc = FrontendConfig(*aux)
+
+	return nil
 }
 
 type OAuthProviderConfig struct {

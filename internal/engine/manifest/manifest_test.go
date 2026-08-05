@@ -221,7 +221,7 @@ func TestManifestJSONDecodesCoreFields(t *testing.T) {
 	if !got.Schema.HasDataMigrations {
 		t.Fatalf("expected has_data_migrations to decode")
 	}
-	if !got.Frontend.Bundle {
+	if !*got.Frontend.Bundle {
 		t.Fatalf("expected frontend bundle flag to decode")
 	}
 	if got.Frontend.Entry != "frontend/src/index.ts" {

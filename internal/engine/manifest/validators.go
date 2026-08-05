@@ -16,6 +16,7 @@ import (
 
 var validNameRegex = regexp.MustCompile("^[a-z][a-z0-9_]{0,63}$")
 var validABIVersionRegex = regexp.MustCompile(`^[0-9]+$`)
+var validSha256Regex = regexp.MustCompile("^[a-fA-F0-9]{64}$")
 
 func nameRegex(fl validator.FieldLevel) bool {
 	return validNameRegex.MatchString(fl.Field().String())
@@ -47,6 +48,17 @@ func versionRange(fl validator.FieldLevel) bool {
 
 	_, err := semver.NewConstraint(rangeConstraintStr)
 	return err == nil
+}
+
+func sha256Checksum(fl validator.FieldLevel) bool {
+	val := fl.Field().String()
+
+	hash, found := strings.CutPrefix(val, "sha256:")
+	if !found {
+		return false
+	}
+
+	return validSha256Regex.MatchString(hash)
 }
 
 func registerSimpleTranslation(v *validator.Validate, trans ut.Translator, tag, translation string) error {
@@ -84,6 +96,10 @@ func validateManifest(m Manifest) error {
 	}
 
 	if err := validate.RegisterValidation("abi_version", abiVersion); err != nil {
+		return err
+	}
+
+	if err := validate.RegisterValidation("sha256_checksum", sha256Checksum); err != nil {
 		return err
 	}
 
