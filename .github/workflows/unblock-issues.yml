@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Remove blocked label from issues whose dependencies are all closed
+        id: unblock
         uses: actions/github-script@v9
         with:
           script: |
@@ -30,6 +31,8 @@ jobs:
               { owner, repo, number: closedNumber }
             );
 
+            const unblocked = [];
+
             for (const dependent of repository.issue.blocking.nodes) {
               const result = await github.graphql(
                 `query($owner: String!, $repo: String!, $number: Int!) {
@@ -44,17 +47,63 @@ jobs:
               );
               const issue = result.repository.issue;
 
-              const hasBlockedLabel = issue.labels.nodes.some((l) => l.name === "blocked");
-              if (!hasBlockedLabel) continue;
-
               const stillBlocked = issue.blockedBy.nodes.some((b) => b.state !== "CLOSED");
               if (stillBlocked) continue;
 
-              console.log(`Removing 'blocked' label from #${dependent.number}`);
-              await github.rest.issues.removeLabel({
-                owner,
-                repo,
-                issue_number: dependent.number,
-                name: "blocked",
-              });
+              const hasBlockedLabel = issue.labels.nodes.some((l) => l.name === "blocked");
+              if (hasBlockedLabel) {
+                console.log(`Removing 'blocked' label from #${dependent.number}`);
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: dependent.number,
+                  name: "blocked",
+                });
+              }
+              unblocked.push(dependent.number);
             }
+
+            core.setOutput("closed_number", closedNumber);
+            core.setOutput("unblocked_numbers", unblocked.join(" "));
+
+      - name: Sync GoERP Roadmap project Readiness
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          CLOSED_NUMBER: ${{ steps.unblock.outputs.closed_number }}
+          UNBLOCKED_NUMBERS: ${{ steps.unblock.outputs.unblocked_numbers }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "PROJECTS_TOKEN secret not set — skipping project sync. Add a PAT with the 'project' scope as the PROJECTS_TOKEN repo secret to enable this." >&2
+            exit 0
+          fi
+
+          OWNER=djangbahevans
+          PROJECT_NUMBER=3
+
+          PROJECT_ID=$(gh project view "$PROJECT_NUMBER" --owner "$OWNER" --format json | jq -r '.id')
+          FIELDS_JSON=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json)
+          FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.fields[] | select(.name=="Readiness") | .id')
+          READY_ID=$(echo "$FIELDS_JSON" | jq -r '.fields[] | select(.name=="Readiness") | .options[] | select(.name=="Ready") | .id')
+          DONE_ID=$(echo "$FIELDS_JSON" | jq -r '.fields[] | select(.name=="Readiness") | .options[] | select(.name=="Done") | .id')
+
+          set_readiness() {
+            local issue_number="$1"
+            local option_id="$2"
+            local item_id
+            item_id=$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 200 \
+              | jq -r --arg num "$issue_number" '.items[] | select(.content.number == ($num|tonumber)) | .id')
+            if [ -z "$item_id" ]; then
+              echo "No project item found for issue #$issue_number, skipping"
+              return
+            fi
+            gh project item-edit --project-id "$PROJECT_ID" --id "$item_id" --field-id "$FIELD_ID" --single-select-option-id "$option_id"
+            echo "Set Readiness for #$issue_number"
+          }
+
+          set_readiness "$CLOSED_NUMBER" "$DONE_ID"
+
+          for n in $UNBLOCKED_NUMBERS; do
+            set_readiness "$n" "$READY_ID"
+          done
