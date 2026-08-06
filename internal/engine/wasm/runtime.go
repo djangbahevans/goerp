@@ -42,12 +42,12 @@ func New(cfg *config.Config) (*Runtime, error) {
 	rt := wazero.NewRuntimeWithConfig(ctx, runtimeCfg)
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
-		rt.Close(ctx)
+		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("instantiate wasi: %w", err)
 	}
 
 	if err := abi.RegisterAll(ctx, rt); err != nil {
-		rt.Close(ctx)
+		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host abi: %w", err)
 	}
 

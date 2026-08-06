@@ -145,7 +145,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	runtime, err := wasm.New(cfg)
 	if err != nil {
-		cacheClient.Close()
+		_ = cacheClient.Close()
 		primaryPool.Close()
 		replicaPool.Close()
 
