@@ -1,6 +1,6 @@
 package engine
 
-import "github.com/shamaton/msgpack/v3"
+import "github.com/vmihailenco/msgpack/v5"
 
 func marshal(v any) ([]byte, error) { return msgpack.Marshal(v) }
 
