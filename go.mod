@@ -13,6 +13,7 @@ require (
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/cobra v1.10.2
+	github.com/tetratelabs/wazero v1.12.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 )
 

@@ -24,12 +24,14 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
 type Engine struct {
 	cfg            *config.Config
+	wasmRuntime    *wasm.Runtime
 	secretsBackend secrets.Backend
 	primaryDB      *pgxpool.Pool
 	replicaDB      *pgxpool.Pool
@@ -141,8 +143,18 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 	})
 
+	runtime, err := wasm.New(cfg)
+	if err != nil {
+		cacheClient.Close()
+		primaryPool.Close()
+		replicaPool.Close()
+
+		return nil, fmt.Errorf("create wasm runtime: %w", err)
+	}
+
 	e = &Engine{
 		cfg:            cfg,
+		wasmRuntime:    runtime,
 		secretsBackend: secretsBackend,
 		primaryDB:      primaryPool,
 		replicaDB:      replicaPool,
@@ -175,6 +187,10 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 	if e.cfg.ShutdownDrainDelay > 0 {
 		time.Sleep(e.cfg.ShutdownDrainDelay)
+	}
+
+	if err := e.wasmRuntime.Close(ctx); err != nil {
+		log.Warn().Err(err).Msg("could not close wasm runtime")
 	}
 
 	return nil
