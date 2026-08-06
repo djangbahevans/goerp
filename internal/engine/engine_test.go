@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -33,6 +34,8 @@ func baseTestConfig(t *testing.T) *config.Config {
 		RedisMaxRetries:    1,
 		SecretsBackend:     "env",
 		StorageBackend:     "local",
+		CompilationCache:   filepath.Join(t.TempDir(), "wasm-cache"),
+		PoolMaxMemoryByes:  16 * 1024 * 1024,
 	}
 }
 

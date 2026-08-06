@@ -52,3 +52,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 func (c *Client) Ping(ctx context.Context) error {
 	return c.rdb.Ping(ctx).Err()
 }
+
+func (c *Client) Close() error {
+	return c.rdb.Close()
+}

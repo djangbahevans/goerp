@@ -16,6 +16,14 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
+type Environment string
+
+const (
+	Development Environment = "development"
+	Staging     Environment = "staging"
+	Production  Environment = "production"
+)
+
 type Config struct {
 	// Core
 	ListenAddr         string        `env:"GOERP_LISTEN_ADDR" envDefault:":8080" validate:"hostname_port"`
@@ -23,6 +31,7 @@ type Config struct {
 	Environment        string        `env:"GOERP_ENV" envDefault:"production" validate:"oneof=production staging development"`
 	LogLevel           string        `env:"GOERP_LOG_LEVEL" envDefault:"info" validate:"oneof=debug info warn error"`
 	LogFormat          string        `env:"GOERP_LOG_FORMAT" envDefault:"json" validate:"oneof=json text"`
+	CompilationCache   string        `env:"GOERP_COMPILATION_CACHE" envDefault:"./wasm-cache"`
 	ShutdownTimeout    time.Duration `env:"GOERP_SHUTDOWN_TIMEOUT" envDefault:"30s"`
 	ShutdownDrainDelay time.Duration `env:"GOERP_SHUTDOWN_DRAIN_DELAY" envDefault:"5s"`
 
@@ -47,6 +56,11 @@ type Config struct {
 	// Registration
 	StorageBackend string `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
 	StorageBucket  string `env:"GOERP_STORAGE_BUCKET" envDefault:"goerp-files"`
+
+	PoolWarmSize      int           `env:"GOERP_POOL_WARM_SIZE" envDefault:"4"`
+	PoolMaxSize       int           `env:"GOERP_POOL_MAX_SIZE" envDefault:"16"`
+	PoolBorrowTimeout time.Duration `env:"GOERP_POOL_BORROW_TIMEOUT" envDefault:"5s"`
+	PoolMaxMemoryByes uint32        `env:"GOERP_POOL_MAX_MEMORY_BYTES" envDefault:"16777216"`
 }
 
 func Load() (*Config, error) {
