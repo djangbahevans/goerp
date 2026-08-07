@@ -164,7 +164,7 @@ func TestWithStandardFields_ExpandsToExactlyTheDocumentedSeven(t *testing.T) {
 		"updated_at": `"updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		"deleted_at": `"deleted_at" TIMESTAMPTZ`,
 		"created_by": `"created_by" UUID`,
-		"etag":       `"etag" TEXT NOT NULL DEFAULT `,
+		"etag":       `"etag" TEXT NOT NULL DEFAULT ''`,
 	}
 	for name, want := range wantDDL {
 		if ddls[name] != want {

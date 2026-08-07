@@ -51,6 +51,9 @@ type Config struct {
 	MeilisearchURL    string `env:"GOERP_MEILISEARCH_URL" validate:"omitempty,http_url"`
 	MeilisearchAPIKey string `env:"GOERP_MEILISEARCH_API_KEY"`
 
+	// Events and jobs
+	SchemaSyncDDLStatementTimeout time.Duration `env:"GOERP_SCHEMA_SYNC_STATEMENT_TIMEOUT" envDefault:"30s"`
+
 	// Security
 	SecretsBackend string `env:"GOERP_SECRETS_BACKEND" envDefault:"env" validate:"oneof=env vault aws_secretsmanager"`
 
