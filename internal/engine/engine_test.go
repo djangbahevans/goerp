@@ -14,9 +14,10 @@ import (
 )
 
 // baseTestConfig returns a Config pointing at the compose.dev.yml dev stack
-// (README.md's local development section: PgBouncer on 6432, Redis on
-// 6379, credentials goerp/dev/goerp). Individual tests override the one
-// field they're exercising.
+// (README.md's local development section: PgBouncer on 6432, direct
+// Postgres on 55432 for schema sync, Redis on 6379, credentials
+// goerp/dev/goerp). Individual tests override the one field they're
+// exercising.
 func baseTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
@@ -30,6 +31,7 @@ func baseTestConfig(t *testing.T) *config.Config {
 		ShutdownTimeout:    time.Second,
 		ShutdownDrainDelay: 0,
 		DBPrimaryDSN:       "postgres://goerp:dev@localhost:6432/goerp",
+		DBSchemaSyncDSN:    "postgres://goerp:dev@localhost:55432/goerp",
 		RedisAddr:          "localhost:6379",
 		RedisMaxRetries:    1,
 		SecretsBackend:     "env",
@@ -51,7 +53,7 @@ func TestNewSuccess(t *testing.T) {
 
 	e, err := New(cfg)
 	skipIfInfraUnreachable(t, err)
-	t.Cleanup(func() { e.primaryDB.Close() })
+	t.Cleanup(func() { _ = e.primaryDB.Close() })
 
 	if e.primaryDB == nil {
 		t.Error("primaryDB is nil after a successful New()")
@@ -91,7 +93,7 @@ func TestNewReplicaDBUnreachableWarnsOnly(t *testing.T) {
 
 	e, err := New(cfg)
 	skipIfInfraUnreachable(t, err)
-	t.Cleanup(func() { e.primaryDB.Close() })
+	t.Cleanup(func() { _ = e.primaryDB.Close() })
 
 	if err != nil {
 		t.Fatalf("New() with an unreachable replica DB: expected success (warn-only per engine-internals.md §2 step 4), got error: %v", err)
@@ -132,7 +134,7 @@ func TestNewUnknownSecretsBackendFailsHard(t *testing.T) {
 // configured, both leaving their respective clients nil. This is a
 // regression test for a real panic — the health closure used to call
 // replicaPool.Ping/searchClient.Ping/storageBackend.Exists unconditionally,
-// which segfaults on a nil *pgxpool.Pool/*search.Client/nil interface, and
+// which segfaults on a nil *sql.DB/*search.Client/nil interface, and
 // nil is exactly what those are in this — the default, not edge-case —
 // configuration.
 func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
@@ -148,7 +150,7 @@ func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 
 	e, newErr := New(cfg)
 	skipIfInfraUnreachable(t, newErr)
-	t.Cleanup(func() { e.primaryDB.Close() })
+	t.Cleanup(func() { _ = e.primaryDB.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
