@@ -59,5 +59,5 @@ func (d *ModelDeclaration) WithStandardFields() *ModelDeclaration {
 		Field("updated_at", TimestampTZ().Required().Default("NOW()")).
 		Field("deleted_at", TimestampTZ()).
 		Field("created_by", UUID()).
-		Field("etag", Text().Required().Default(""))
+		Field("etag", Text().Required().Default("''"))
 }
