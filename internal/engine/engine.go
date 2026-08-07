@@ -11,6 +11,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,20 +22,23 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
+	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
 type Engine struct {
-	cfg            *config.Config
-	wasmRuntime    *wasm.Runtime
+	cfg         *config.Config
+	wasmRuntime *wasm.Runtime
+
+	syncPool *schema.SchemaSyncPool
+
 	secretsBackend secrets.Backend
-	primaryDB      *pgxpool.Pool
-	replicaDB      *pgxpool.Pool
+	primaryDB      *sql.DB
+	replicaDB      *sql.DB
 	cacheClient    *cache.Client
 	searchClient   *search.Client
 	storageBackend storage.Backend
@@ -50,17 +54,36 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("create secrets backend: %w", err)
 	}
 
-	primaryPool, err := db.New(ctx, cfg.DBPrimaryDSN)
+	primaryPool, err := db.New(cfg.DBPrimaryDSN)
 	if err != nil {
 		return nil, fmt.Errorf("connect to primary database: %w", err)
 	}
 
-	var replicaPool *pgxpool.Pool
+	var replicaPool *sql.DB
 	if cfg.DBReplicaDSN != "" {
-		replicaPool, err = db.New(ctx, cfg.DBReplicaDSN)
+		replicaPool, err = db.New(cfg.DBReplicaDSN)
 		if err != nil {
 			log.Warn().Err(err).Msg("could not connect to replica db")
 		}
+	}
+
+	schemaPool, err := db.New(cfg.DBSchemaSyncDSN)
+	if err != nil {
+		_ = primaryPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("connect to schema sync database: %w", err)
+	}
+
+	syncPool := schema.NewPool(schemaPool, 30*time.Second)
+	if err := syncPool.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap schema sync tracking table: %w", err)
 	}
 
 	cacheClient, err := cache.New(ctx, cache.Config{
@@ -93,7 +116,7 @@ func New(cfg *config.Config) (*Engine, error) {
 			return errors.New("engine is shutting down")
 		}
 
-		return primaryPool.Ping(ctx)
+		return primaryPool.Ping()
 	}
 	server := httpx.NewServer(&httpx.Config{ListenAddr: cfg.ListenAddr}, readyFn)
 
@@ -102,13 +125,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		checks := make(map[string]httpx.CheckResult)
 
 		checks["postgres_primary"] = httpx.ProbeCheck(ctx, func(ctx context.Context) error {
-			return primaryPool.Ping(ctx)
+			return primaryPool.Ping()
 		})
 		checks["postgres_replica"] = httpx.ProbeCheck(ctx, func(ctx context.Context) error {
 			if replicaPool == nil {
 				return nil
 			}
-			return replicaPool.Ping(ctx)
+			return replicaPool.Ping()
 		})
 		checks["redis"] = httpx.ProbeCheck(ctx, func(ctx context.Context) error {
 			return cacheClient.Ping(ctx)
@@ -146,9 +169,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	runtime, err := wasm.New(cfg)
 	if err != nil {
 		_ = cacheClient.Close()
-		primaryPool.Close()
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
 		if replicaPool != nil {
-			replicaPool.Close()
+			_ = replicaPool.Close()
 		}
 
 		return nil, fmt.Errorf("create wasm runtime: %w", err)
@@ -157,6 +181,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	e = &Engine{
 		cfg:            cfg,
 		wasmRuntime:    runtime,
+		syncPool:       syncPool,
 		secretsBackend: secretsBackend,
 		primaryDB:      primaryPool,
 		replicaDB:      replicaPool,

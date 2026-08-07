@@ -3,7 +3,7 @@
 // "Readiness endpoint"), plus the app router other routes eventually mount
 // on. It takes its own small Config rather than the engine's full
 // *config.Config, and health/readiness checks are injected as closures
-// (HealthFn, readyFn) so this package never needs to import pgxpool, redis,
+// (HealthFn, readyFn) so this package never needs to import database/sql, redis,
 // or anything else it's merely reporting on.
 package httpx
 

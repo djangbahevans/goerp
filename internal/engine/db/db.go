@@ -4,19 +4,19 @@
 package db
 
 import (
-	"context"
+	"database/sql"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func New(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, url)
+func New(url string) (*sql.DB, error) {
+	pool, err := sql.Open("pgx", url)
 	if err != nil {
 		return nil, fmt.Errorf("create connection pool: %w", err)
 	}
 
-	if err := pool.Ping(ctx); err != nil {
+	if err := pool.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
