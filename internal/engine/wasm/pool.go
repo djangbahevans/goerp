@@ -205,3 +205,32 @@ func (p *InstancePool) replenishLoop(ctx context.Context) {
 		}
 	}
 }
+
+func (p *InstancePool) DrainAndClose(ctx context.Context, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+
+	p.mu.Lock()
+	p.draining = true
+	p.mu.Unlock()
+
+	p.stopReplenish()
+	<-p.replenishDone
+
+	close(p.idle)
+	for inst := range p.idle {
+		_ = inst.module.CloseWithExitCode(context.Background(), 0)
+		p.closed.Add(1)
+		<-p.tokens
+	}
+
+	for time.Now().Before(deadline) {
+		if p.borrowed.Load() == 0 {
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+}
