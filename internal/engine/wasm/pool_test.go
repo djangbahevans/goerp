@@ -416,3 +416,100 @@ func TestReplenishLoop_StopsViaStopReplenishAndClosesReplenishDone(t *testing.T)
 		t.Errorf("created kept increasing after stopReplenish (%d -> %d) — the loop did not actually stop", createdAtStop, got)
 	}
 }
+
+func TestInstancePool_DrainAndClose_BorrowReturnsErrPoolDrainingAfterward(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 1, MaxSize: 1, BorrowTimeout: time.Second})
+
+	pool.DrainAndClose(context.Background(), time.Second)
+
+	_, err := pool.Borrow(context.Background())
+	if !errors.Is(err, ErrPoolDraining) {
+		t.Fatalf("Borrow after DrainAndClose error = %v, want ErrPoolDraining", err)
+	}
+}
+
+func TestInstancePool_DrainAndClose_StopsReplenishLoopBeforeClosingIdle(t *testing.T) {
+	// Called immediately, racing replenishLoop's own fill — if the ordering
+	// inside DrainAndClose were wrong (closing idle before confirming the
+	// loop actually stopped), this would panic on a send to a closed
+	// channel. Run with -race -count=N to make that race-detectable.
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 3, MaxSize: 3, BorrowTimeout: time.Second})
+	pool.DrainAndClose(context.Background(), time.Second)
+}
+
+func TestInstancePool_DrainAndClose_ClosesIdleInstancesAndReleasesTokens(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 2, MaxSize: 2, BorrowTimeout: time.Second})
+	waitFor(t, time.Second, func() bool { return len(pool.idle) == 2 })
+
+	pool.DrainAndClose(context.Background(), time.Second)
+
+	if got := pool.closed.Load(); got != 2 {
+		t.Errorf("closed = %d, want 2 — DrainAndClose must close every idle-buffered instance", got)
+	}
+	if n := len(pool.tokens); n != 0 {
+		t.Errorf("len(tokens) = %d, want 0 — closing idle instances must release their tokens", n)
+	}
+}
+
+func TestInstancePool_DrainAndClose_ReturnsOnceBorrowedReachesZero(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 1, MaxSize: 2, BorrowTimeout: time.Second})
+
+	inst, err := pool.Borrow(context.Background())
+	if err != nil {
+		t.Fatalf("Borrow: %v", err)
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		pool.Return(inst)
+	}()
+
+	start := time.Now()
+	pool.DrainAndClose(context.Background(), 5*time.Second)
+	elapsed := time.Since(start)
+
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("DrainAndClose returned after %v, expected to wait for the in-flight Return", elapsed)
+	}
+	if elapsed >= 5*time.Second {
+		t.Errorf("DrainAndClose took %v, expected to return once borrowed reached zero rather than waiting out the full timeout", elapsed)
+	}
+}
+
+func TestInstancePool_DrainAndClose_TimesOutIfBorrowedNeverReturned(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 1, MaxSize: 2, BorrowTimeout: time.Second})
+
+	if _, err := pool.Borrow(context.Background()); err != nil {
+		t.Fatalf("Borrow: %v", err)
+	}
+
+	start := time.Now()
+	pool.DrainAndClose(context.Background(), 100*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if elapsed < 100*time.Millisecond {
+		t.Errorf("DrainAndClose returned after %v, want at least its 100ms timeout", elapsed)
+	}
+	if elapsed >= time.Second {
+		t.Errorf("DrainAndClose took %v, way beyond its 100ms timeout — instances still borrowed past the deadline must be left for the caller's own Return, not blocked on", elapsed)
+	}
+}
+
+func TestInstancePool_DrainAndClose_ContextCancellationReturnsEarly(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 1, MaxSize: 2, BorrowTimeout: time.Second})
+
+	if _, err := pool.Borrow(context.Background()); err != nil {
+		t.Fatalf("Borrow: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	pool.DrainAndClose(ctx, 5*time.Second)
+	elapsed := time.Since(start)
+
+	if elapsed >= time.Second {
+		t.Errorf("DrainAndClose took %v, expected ctx cancellation to cut the wait short well before its 5s timeout", elapsed)
+	}
+}

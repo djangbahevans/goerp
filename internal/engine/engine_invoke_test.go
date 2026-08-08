@@ -66,13 +66,11 @@ var handleRequestTrapsModule = []byte{
 // newTestInstance compiles wasmBytes against a standalone wazero runtime and
 // borrows a real *wasm.ModuleInstance from a pool built on top of it — the
 // only exported path to a ModuleInstance from outside the wasm package.
-//
-// Known limitation: InstancePool has no exported shutdown (DrainAndClose is
-// goerp#79, not built yet), so the pool's replenishLoop goroutine outlives
-// this test's own cleanup. With the runtime/compiled module closed by
-// t.Cleanup, its retries just fail and back off every 100ms until the test
-// binary exits — a bounded, harmless leak, not a correctness issue for what
-// this test verifies.
+// t.Cleanup drains the pool (stopping replenishLoop) rather than leaking it;
+// the instance itself is deliberately never returned to the pool, so the
+// drain's own borrowed==0 wait is expected to time out — DrainAndClose still
+// stops the background goroutine unconditionally before that wait even
+// starts, which is the only thing this cleanup needs.
 func newTestInstance(t *testing.T, wasmBytes []byte) *wasm.ModuleInstance {
 	t.Helper()
 	ctx := context.Background()
@@ -89,6 +87,7 @@ func newTestInstance(t *testing.T, wasmBytes []byte) *wasm.ModuleInstance {
 	pool := wasm.NewInstancePool("testmod", compiled, rt, wasm.PoolConfig{
 		MaxSize: 1, WarmSize: 1, BorrowTimeout: time.Second,
 	})
+	t.Cleanup(func() { pool.DrainAndClose(ctx, 10*time.Millisecond) })
 
 	inst, err := pool.Borrow(ctx)
 	if err != nil {
