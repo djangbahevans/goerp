@@ -23,3 +23,28 @@ type ModuleContext struct {
 
 	capabilities abi.CapabilitySet
 }
+
+func NewModuleContext(requestID, userID, contactID string, roles []string, tenantID, tenantSlug, traceID string, capabilities abi.CapabilitySet) *ModuleContext {
+	return &ModuleContext{
+		RequestID:    requestID,
+		UserID:       userID,
+		ContactID:    contactID,
+		Roles:        roles,
+		TenantID:     tenantID,
+		TenantSlug:   tenantSlug,
+		TraceID:      traceID,
+		transactions: make(map[string]*sql.Tx),
+		capabilities: capabilities,
+	}
+}
+
+func (mc *ModuleContext) OpenTransactions() []*sql.Tx {
+	mc.txMu.Lock()
+	defer mc.txMu.Unlock()
+
+	txs := make([]*sql.Tx, 0, len(mc.transactions))
+	for _, tx := range mc.transactions {
+		txs = append(txs, tx)
+	}
+	return txs
+}

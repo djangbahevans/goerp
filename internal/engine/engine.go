@@ -28,6 +28,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 type Engine struct {
@@ -221,4 +222,46 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func newModuleContext(ctx context.Context, req EngineRequest) *wasm.ModuleContext {
+	return wasm.NewModuleContext(req.ID, req.UserID, "", nil, req.TenantID, req.TenantSlug, req.TraceID, 0)
+}
+
+func (e *Engine) invokeHandler(
+	ctx context.Context,
+	inst *wasm.ModuleInstance,
+	handlerName string,
+	req EngineRequest,
+) (EngineResponse, error) {
+	moduleCtx := newModuleContext(ctx, req)
+	inst.SetModuleContext(moduleCtx)
+	defer func() {
+		for _, tx := range moduleCtx.OpenTransactions() {
+			if err := tx.Rollback(); err != nil {
+				log.Warn().Err(err).Msg("could not roll back transaction left open by module handler")
+			}
+		}
+		inst.SetModuleContext(nil)
+	}()
+
+	reqBytes, err := msgpack.Marshal(req)
+	if err != nil {
+		return EngineResponse{}, fmt.Errorf("marshal request: %w", err)
+	}
+
+	respBytes, err := inst.InvokeHandleRequest(ctx, reqBytes)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return EngineResponse{}, fmt.Errorf("handler %s: %w", handlerName, ctxErr)
+		}
+		return EngineResponse{}, fmt.Errorf("handler %s trapped: %w", handlerName, err)
+	}
+
+	var resp EngineResponse
+	if err := msgpack.Unmarshal(respBytes, &resp); err != nil {
+		return EngineResponse{}, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return resp, nil
 }
