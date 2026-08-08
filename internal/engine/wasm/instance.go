@@ -14,5 +14,6 @@ type ModuleInstance struct {
 	handleRequest api.Function
 	handleEvent   api.Function
 	handleJob     api.Function
+	moduleCtx     *ModuleContext
 	inUse         atomic.Bool
 }
