@@ -34,8 +34,10 @@ type InstancePool struct {
 
 	idle chan *ModuleInstance
 
-	mu       sync.Mutex
-	draining bool
+	mu            sync.Mutex
+	draining      bool
+	stopReplenish context.CancelFunc
+	replenishDone chan struct{}
 
 	seq      atomic.Int64
 	borrowed atomic.Int64
@@ -60,21 +62,37 @@ func (cfg PoolConfig) withDefaults() PoolConfig {
 	return cfg
 }
 
-func NewInstancePool(name string, compiled wazero.CompiledModule, rt wazero.Runtime, cfg PoolConfig) *InstancePool {
+// newPool builds the pool and wires stopReplenish/replenishDone, but does not
+// start replenishLoop — the caller decides that. Split out from
+// NewInstancePool so tests can construct a pool with no background
+// goroutine racing them for tokens.
+func newPool(name string, compiled wazero.CompiledModule, rt wazero.Runtime, cfg PoolConfig) (*InstancePool, context.Context) {
 	cfg = cfg.withDefaults()
-	return &InstancePool{
-		moduleName:  name,
-		compiled:    compiled,
-		wasmRuntime: rt,
-		cfg:         cfg,
-		tokens:      make(chan struct{}, cfg.MaxSize),
-		idle:        make(chan *ModuleInstance, cfg.WarmSize),
+
+	replenishCtx, stopReplenish := context.WithCancel(context.Background())
+	p := &InstancePool{
+		moduleName:    name,
+		compiled:      compiled,
+		wasmRuntime:   rt,
+		cfg:           cfg,
+		tokens:        make(chan struct{}, cfg.MaxSize),
+		idle:          make(chan *ModuleInstance, cfg.WarmSize),
+		stopReplenish: stopReplenish,
+		replenishDone: make(chan struct{}),
 		waitTime: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:        "wasm_instance_pool_borrow_wait_seconds",
 			Help:        "Time Borrow spent waiting for an instance to become available.",
 			ConstLabels: prometheus.Labels{"module": name},
 		}),
 	}
+
+	return p, replenishCtx
+}
+
+func NewInstancePool(name string, compiled wazero.CompiledModule, rt wazero.Runtime, cfg PoolConfig) *InstancePool {
+	p, replenishCtx := newPool(name, compiled, rt, cfg)
+	go p.replenishLoop(replenishCtx)
+	return p
 }
 
 func (p *InstancePool) Borrow(ctx context.Context) (*ModuleInstance, error) {
@@ -161,4 +179,29 @@ func (p *InstancePool) instantiate(ctx context.Context) (*ModuleInstance, error)
 
 	p.created.Add(1)
 	return inst, nil
+}
+
+func (p *InstancePool) replenishLoop(ctx context.Context) {
+	defer close(p.replenishDone)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case p.tokens <- struct{}{}:
+			inst, err := p.instantiate(context.Background())
+			if err != nil {
+				<-p.tokens
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			select {
+			case p.idle <- inst:
+			case <-ctx.Done():
+				_ = inst.module.CloseWithExitCode(context.Background(), 0)
+				p.closed.Add(1)
+				<-p.tokens
+				return
+			}
+		}
+	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/tetratelabs/wazero"
 )
 
 // emptyModule is a minimal valid WASM module with no exports at all. It's
@@ -27,7 +28,10 @@ var initTrapsModule = []byte{
 	0x0A, 0x05, 0x01, 0x03, 0x00, 0x00, 0x0B, // code: locals=0, unreachable, end
 }
 
-func newTestPool(t *testing.T, wasmBytes []byte, cfg PoolConfig) *InstancePool {
+// compileTestModule compiles wasmBytes against a fresh test runtime and
+// returns both, so the caller instantiates against the same runtime the
+// module was compiled with.
+func compileTestModule(t *testing.T, wasmBytes []byte) (*Runtime, wazero.CompiledModule) {
 	t.Helper()
 	ctx := context.Background()
 	rt := newTestRuntime(t, 1<<20)
@@ -37,8 +41,32 @@ func newTestPool(t *testing.T, wasmBytes []byte, cfg PoolConfig) *InstancePool {
 		t.Fatalf("CompileModule: %v", err)
 	}
 	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	return rt, compiled
+}
 
-	return NewInstancePool("testmod", compiled, rt.wazero, cfg)
+// newTestPool builds a pool for exercising Borrow/Return/token mechanics in
+// isolation, via newPool directly so replenishLoop never starts — nothing
+// races these tests for tokens or quietly fills idle in the background.
+// replenishLoop's own behavior gets its own tests via newTestPoolWithReplenish.
+func newTestPool(t *testing.T, wasmBytes []byte, cfg PoolConfig) *InstancePool {
+	t.Helper()
+	rt, compiled := compileTestModule(t, wasmBytes)
+	pool, _ := newPool("testmod", compiled, rt.wazero, cfg)
+	return pool
+}
+
+// newTestPoolWithReplenish builds a pool the normal way, via the real
+// NewInstancePool, so replenishLoop actually runs — for tests of the loop's
+// own behavior rather than Borrow/Return mechanics in isolation.
+func newTestPoolWithReplenish(t *testing.T, wasmBytes []byte, cfg PoolConfig) *InstancePool {
+	t.Helper()
+	rt, compiled := compileTestModule(t, wasmBytes)
+	pool := NewInstancePool("testmod", compiled, rt.wazero, cfg)
+	t.Cleanup(func() {
+		pool.stopReplenish()
+		<-pool.replenishDone
+	})
+	return pool
 }
 
 func TestInstancePool_Borrow_DirectInstantiateWhenTokenFree(t *testing.T) {
@@ -288,5 +316,103 @@ func TestNewInstancePool_AppliesDefaultsToChannelCapacities(t *testing.T) {
 	}
 	if cap(pool.idle) != 4 {
 		t.Errorf("cap(idle) = %d, want 4 (default WarmSize)", cap(pool.idle))
+	}
+}
+
+// waitFor polls cond until it returns true or timeout elapses, failing the
+// test on timeout. Needed because replenishLoop runs on its own goroutine —
+// there's no synchronous signal for "idle has been topped up".
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("condition not met within %v", timeout)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func TestReplenishLoop_FillsIdleUpToWarmSize(t *testing.T) {
+	// WarmSize == MaxSize deliberately: with spare tokens beyond WarmSize,
+	// the loop optimistically instantiates one more (correct throttling
+	// behavior — see TestReplenishLoop_NeverExceedsMaxSizeEvenWhenWarmSizeIsLarger)
+	// which would make created's exact value racy here. Equal sizes keep
+	// this test's assertions deterministic.
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 3, MaxSize: 3, BorrowTimeout: time.Second})
+
+	waitFor(t, time.Second, func() bool { return len(pool.idle) == 3 })
+
+	if got := pool.created.Load(); got != 3 {
+		t.Errorf("created = %d, want 3 once idle has filled to WarmSize", got)
+	}
+	if got := len(pool.tokens); got != 3 {
+		t.Errorf("len(tokens) = %d, want 3 — each idle-buffered instance still holds a token", got)
+	}
+
+	// A Borrow now should be served from idle, not a fresh instantiate.
+	inst, err := pool.Borrow(context.Background())
+	if err != nil {
+		t.Fatalf("Borrow: %v", err)
+	}
+	if inst == nil {
+		t.Fatal("expected a non-nil instance served from idle")
+	}
+	if got := pool.created.Load(); got != 3 {
+		t.Errorf("created = %d after a Borrow served from idle, want unchanged at 3", got)
+	}
+}
+
+func TestReplenishLoop_NeverExceedsMaxSizeEvenWhenWarmSizeIsLarger(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 10, MaxSize: 3, BorrowTimeout: time.Second})
+
+	waitFor(t, time.Second, func() bool { return len(pool.idle) == 3 })
+
+	// Give the loop a bit longer to prove it stays put at MaxSize rather
+	// than merely being caught mid-fill.
+	time.Sleep(50 * time.Millisecond)
+	if got := len(pool.idle); got != 3 {
+		t.Errorf("len(idle) = %d, want 3 — bounded by MaxSize even though WarmSize (10) is larger", got)
+	}
+}
+
+func TestReplenishLoop_BacksOffAndRetriesOnFailureWithoutBusyLooping(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, initTrapsModule, PoolConfig{WarmSize: 1, MaxSize: 1, BorrowTimeout: time.Second})
+
+	time.Sleep(250 * time.Millisecond)
+
+	if got := pool.created.Load(); got != 0 {
+		t.Errorf("created = %d, want 0 — every instantiate attempt traps in init()", got)
+	}
+	// 250ms of 100ms backoff should yield roughly 2-3 attempts, not
+	// thousands — a loose upper bound catches a busy-loop regression
+	// without pinning to exact scheduler timing.
+	if attempts := pool.seq.Load(); attempts > 10 {
+		t.Errorf("seq = %d attempts in 250ms, want a small number — the 100ms backoff isn't being honored", attempts)
+	}
+	if attempts := pool.seq.Load(); attempts < 1 {
+		t.Errorf("seq = %d, want at least 1 attempt", attempts)
+	}
+}
+
+func TestReplenishLoop_StopsViaStopReplenishAndClosesReplenishDone(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 2, MaxSize: 2, BorrowTimeout: time.Second})
+	waitFor(t, time.Second, func() bool { return len(pool.idle) == 2 })
+
+	pool.stopReplenish()
+
+	select {
+	case <-pool.replenishDone:
+	case <-time.After(time.Second):
+		t.Fatal("replenishDone was not closed within 1s of stopReplenish")
+	}
+
+	createdAtStop := pool.created.Load()
+	time.Sleep(50 * time.Millisecond)
+	if got := pool.created.Load(); got != createdAtStop {
+		t.Errorf("created kept increasing after stopReplenish (%d -> %d) — the loop did not actually stop", createdAtStop, got)
 	}
 }
