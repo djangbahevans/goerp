@@ -30,6 +30,10 @@ func (inst *ModuleInstance) ModuleContext() *ModuleContext {
 	return inst.moduleCtx
 }
 
+func (inst *ModuleInstance) Module() api.Module {
+	return inst.module
+}
+
 func (inst *ModuleInstance) InvokeHandleRequest(ctx context.Context, payload []byte) ([]byte, error) {
 	if inst.allocate == nil {
 		return nil, fmt.Errorf("module missing allocate export")

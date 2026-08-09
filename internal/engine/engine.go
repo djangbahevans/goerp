@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
+	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -45,6 +47,9 @@ type Engine struct {
 	storageBackend storage.Backend
 	server         *httpx.Server
 	readiness      atomic.Bool
+
+	instancesMu sync.Mutex
+	instances   map[api.Module]*wasm.ModuleInstance
 }
 
 func New(cfg *config.Config) (*Engine, error) {
@@ -236,7 +241,9 @@ func (e *Engine) invokeHandler(
 ) (EngineResponse, error) {
 	moduleCtx := newModuleContext(ctx, req)
 	inst.SetModuleContext(moduleCtx)
+	e.registerInstance(inst)
 	defer func() {
+		e.unregisterInstance(inst)
 		for _, tx := range moduleCtx.OpenTransactions() {
 			if err := tx.Rollback(); err != nil {
 				log.Warn().Err(err).Msg("could not roll back transaction left open by module handler")
@@ -264,4 +271,28 @@ func (e *Engine) invokeHandler(
 	}
 
 	return resp, nil
+}
+
+func (e *Engine) registerInstance(inst *wasm.ModuleInstance) {
+	e.instancesMu.Lock()
+	defer e.instancesMu.Unlock()
+
+	if e.instances == nil {
+		e.instances = make(map[api.Module]*wasm.ModuleInstance)
+	}
+	e.instances[inst.Module()] = inst
+}
+
+func (e *Engine) unregisterInstance(inst *wasm.ModuleInstance) {
+	e.instancesMu.Lock()
+	defer e.instancesMu.Unlock()
+
+	delete(e.instances, inst.Module())
+}
+
+func (e *Engine) instanceForModule(m api.Module) *wasm.ModuleInstance {
+	e.instancesMu.Lock()
+	defer e.instancesMu.Unlock()
+
+	return e.instances[m]
 }
