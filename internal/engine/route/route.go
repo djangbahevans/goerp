@@ -46,10 +46,8 @@ func New() *RouteTable {
 func (rt *RouteTable) Register(method, path string, entry *RouteEntry) {
 	normalizedPath := normalizePath(path)
 
-	segments := []string{}
-	if len(normalizedPath) == 0 {
-		segments = []string{}
-	} else {
+	var segments []string
+	if len(normalizedPath) != 0 {
 		segments = strings.Split(normalizedPath, "/")
 	}
 
@@ -80,10 +78,8 @@ func (rt *RouteTable) Register(method, path string, entry *RouteEntry) {
 func (rt *RouteTable) Lookup(method, path string) (*RouteEntry, map[string]string, LookupResult, []string) {
 	normalizedPath := normalizePath(path)
 
-	segments := []string{}
-	if len(normalizedPath) == 0 {
-		segments = []string{}
-	} else {
+	var segments []string
+	if len(normalizedPath) != 0 {
 		segments = strings.Split(normalizedPath, "/")
 	}
 
