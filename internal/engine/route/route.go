@@ -20,7 +20,6 @@ type node struct {
 
 type RouteEntry struct {
 	ModuleName   string
-	HandlerName  string
 	Manifest     RouteManifest
 	PathTemplate string
 }

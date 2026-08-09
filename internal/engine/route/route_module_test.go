@@ -233,18 +233,3 @@ func TestRegisterModuleRoutes_DifferentModulesSameShapeBothSucceed(t *testing.T)
 		t.Fatalf("orders lookup result = %v, want RouteFound", result)
 	}
 }
-
-func TestRegisterModuleRoutes_HandlerNameLeftAtZeroValue(t *testing.T) {
-	table := New()
-	if err := RegisterModuleRoutes(table, "contacts", "domain", []ExplicitRoute{{Method: "GET", Path: "/"}}); err != nil {
-		t.Fatalf("RegisterModuleRoutes: %v", err)
-	}
-
-	entry, _, result, _ := table.Lookup("GET", "/contacts")
-	if result != RouteFound {
-		t.Fatalf("result = %v, want RouteFound", result)
-	}
-	if entry.HandlerName != "" {
-		t.Fatalf("HandlerName = %q, want zero value pending goerp#100", entry.HandlerName)
-	}
-}
