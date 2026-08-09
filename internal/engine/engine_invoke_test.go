@@ -115,6 +115,10 @@ func TestInvokeHandler_RoundTripsAndClearsModuleContext(t *testing.T) {
 	if mc := inst.ModuleContext(); mc != nil {
 		t.Errorf("expected moduleCtx to be cleared after invokeHandler returns, got %+v", mc)
 	}
+
+	if got := e.instanceForModule(inst.Module()); got != nil {
+		t.Errorf("expected instanceForModule to be cleared after invokeHandler returns, got %+v", got)
+	}
 }
 
 func TestInvokeHandler_TrapSurfacesAsError(t *testing.T) {
