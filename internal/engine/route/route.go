@@ -121,6 +121,49 @@ func (rt *RouteTable) Lookup(method, path string) (*RouteEntry, map[string]strin
 	return nil, nil, RouteNotFound, nil
 }
 
+func (rt *RouteTable) find(segments []string) *node {
+	current := rt.tree
+
+	for _, segment := range segments {
+		if segment == "" {
+			continue
+		}
+
+		if strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}") {
+			if current.paramChild == nil {
+				return nil
+			}
+			current = current.paramChild
+			continue
+		}
+
+		child, ok := current.staticChildren[segment]
+		if !ok {
+			return nil
+		}
+		current = child
+	}
+
+	return current
+}
+
+func (rt *RouteTable) Registered(method, path string) bool {
+	normalizedPath := normalizePath(path)
+
+	var segments []string
+	if normalizedPath != "" {
+		segments = strings.Split(normalizedPath, "/")
+	}
+
+	n := rt.find(segments)
+	if n == nil {
+		return false
+	}
+
+	_, registered := n.handlers[method]
+	return registered
+}
+
 func normalizePath(path string) string {
 	var b strings.Builder
 	previousSlash := false
