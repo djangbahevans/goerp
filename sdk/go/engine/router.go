@@ -81,3 +81,14 @@ func matchSegments(pattern, path []string) (map[string]string, bool) {
 	}
 	return params, true
 }
+
+func routeDeclarations(routes []route) []RouteDeclaration {
+	decls := make([]RouteDeclaration, 0, len(routes))
+	for _, r := range routes {
+		decls = append(decls, RouteDeclaration{
+			Method: r.method,
+			Path:   "/" + strings.Join(r.segments, "/"),
+		})
+	}
+	return decls
+}
