@@ -7,7 +7,7 @@ import (
 
 func TestRouteTable_Lookup_TrailingSlashEquivalence(t *testing.T) {
 	rt := New()
-	entry := &RouteEntry{HandlerName: "list"}
+	entry := &RouteEntry{}
 	rt.Register("GET", "/contacts", entry)
 
 	got, _, result, _ := rt.Lookup("GET", "/contacts/")
@@ -21,7 +21,7 @@ func TestRouteTable_Lookup_TrailingSlashEquivalence(t *testing.T) {
 
 func TestRouteTable_Lookup_CaseSensitive(t *testing.T) {
 	rt := New()
-	rt.Register("GET", "/contacts", &RouteEntry{HandlerName: "list"})
+	rt.Register("GET", "/contacts", &RouteEntry{})
 
 	_, _, result, _ := rt.Lookup("GET", "/Contacts")
 	if result != RouteNotFound {
@@ -31,7 +31,7 @@ func TestRouteTable_Lookup_CaseSensitive(t *testing.T) {
 
 func TestRouteTable_Lookup_DuplicateSlashCollapse(t *testing.T) {
 	rt := New()
-	entry := &RouteEntry{HandlerName: "list"}
+	entry := &RouteEntry{}
 	rt.Register("GET", "/contacts", entry)
 
 	got, _, result, _ := rt.Lookup("GET", "//contacts")
@@ -45,7 +45,7 @@ func TestRouteTable_Lookup_DuplicateSlashCollapse(t *testing.T) {
 
 func TestRouteTable_Lookup_RejectsDotSegment(t *testing.T) {
 	rt := New()
-	rt.Register("GET", "/a/{id}", &RouteEntry{HandlerName: "get"})
+	rt.Register("GET", "/a/{id}", &RouteEntry{})
 
 	_, _, result, _ := rt.Lookup("GET", "/a/.")
 	if result != RouteBadPath {
@@ -55,7 +55,7 @@ func TestRouteTable_Lookup_RejectsDotSegment(t *testing.T) {
 
 func TestRouteTable_Lookup_RejectsDotDotSegment(t *testing.T) {
 	rt := New()
-	rt.Register("GET", "/a/{id}", &RouteEntry{HandlerName: "get"})
+	rt.Register("GET", "/a/{id}", &RouteEntry{})
 
 	_, _, result, _ := rt.Lookup("GET", "/a/..")
 	if result != RouteBadPath {
@@ -65,7 +65,7 @@ func TestRouteTable_Lookup_RejectsDotDotSegment(t *testing.T) {
 
 func TestRouteTable_Lookup_RejectsMalformedPercentEncoding(t *testing.T) {
 	rt := New()
-	rt.Register("GET", "/a/{id}", &RouteEntry{HandlerName: "get"})
+	rt.Register("GET", "/a/{id}", &RouteEntry{})
 
 	_, _, result, _ := rt.Lookup("GET", "/a/%zz")
 	if result != RouteBadPath {
@@ -75,7 +75,7 @@ func TestRouteTable_Lookup_RejectsMalformedPercentEncoding(t *testing.T) {
 
 func TestRouteTable_Lookup_EncodedDotDotNotRejected(t *testing.T) {
 	rt := New()
-	entry := &RouteEntry{HandlerName: "get"}
+	entry := &RouteEntry{}
 	rt.Register("GET", "/a/{id}", entry)
 
 	got, params, result, _ := rt.Lookup("GET", "/a/%2e%2e")
@@ -92,7 +92,7 @@ func TestRouteTable_Lookup_EncodedDotDotNotRejected(t *testing.T) {
 
 func TestRouteTable_Lookup_PercentEncodedSlashNotResplit(t *testing.T) {
 	rt := New()
-	entry := &RouteEntry{HandlerName: "get"}
+	entry := &RouteEntry{}
 	rt.Register("GET", "/files/{name}", entry)
 
 	got, params, result, _ := rt.Lookup("GET", "/files/a%2Fb")
@@ -109,8 +109,8 @@ func TestRouteTable_Lookup_PercentEncodedSlashNotResplit(t *testing.T) {
 
 func TestRouteTable_Lookup_StaticPrecedence_StaticRegisteredFirst(t *testing.T) {
 	rt := New()
-	static := &RouteEntry{HandlerName: "merge"}
-	param := &RouteEntry{HandlerName: "get"}
+	static := &RouteEntry{}
+	param := &RouteEntry{}
 	rt.Register("GET", "/contacts/merge", static)
 	rt.Register("GET", "/contacts/{id}", param)
 
@@ -125,8 +125,8 @@ func TestRouteTable_Lookup_StaticPrecedence_StaticRegisteredFirst(t *testing.T) 
 
 func TestRouteTable_Lookup_StaticPrecedence_ParamRegisteredFirst(t *testing.T) {
 	rt := New()
-	param := &RouteEntry{HandlerName: "get"}
-	static := &RouteEntry{HandlerName: "merge"}
+	param := &RouteEntry{}
+	static := &RouteEntry{}
 	rt.Register("GET", "/contacts/{id}", param)
 	rt.Register("GET", "/contacts/merge", static)
 
@@ -141,8 +141,8 @@ func TestRouteTable_Lookup_StaticPrecedence_ParamRegisteredFirst(t *testing.T) {
 
 func TestRouteTable_Lookup_ParamStillMatchesNonStaticSegment(t *testing.T) {
 	rt := New()
-	param := &RouteEntry{HandlerName: "get"}
-	static := &RouteEntry{HandlerName: "merge"}
+	param := &RouteEntry{}
+	static := &RouteEntry{}
 	rt.Register("GET", "/contacts/{id}", param)
 	rt.Register("GET", "/contacts/merge", static)
 
@@ -160,8 +160,8 @@ func TestRouteTable_Lookup_ParamStillMatchesNonStaticSegment(t *testing.T) {
 
 func TestRouteTable_Lookup_MethodNotAllowed(t *testing.T) {
 	rt := New()
-	rt.Register("GET", "/contacts/{id}", &RouteEntry{HandlerName: "get"})
-	rt.Register("POST", "/contacts/{id}", &RouteEntry{HandlerName: "update"})
+	rt.Register("GET", "/contacts/{id}", &RouteEntry{})
+	rt.Register("POST", "/contacts/{id}", &RouteEntry{})
 
 	entry, params, result, allowed := rt.Lookup("DELETE", "/contacts/123")
 	if result != RouteMethodNotAllowed {
@@ -181,7 +181,7 @@ func TestRouteTable_Lookup_MethodNotAllowed(t *testing.T) {
 
 func TestRouteTable_Lookup_NotFound(t *testing.T) {
 	rt := New()
-	rt.Register("GET", "/contacts", &RouteEntry{HandlerName: "list"})
+	rt.Register("GET", "/contacts", &RouteEntry{})
 
 	_, _, result, _ := rt.Lookup("GET", "/orders")
 	if result != RouteNotFound {
@@ -191,7 +191,7 @@ func TestRouteTable_Lookup_NotFound(t *testing.T) {
 
 func TestRouteTable_Lookup_BareRoot(t *testing.T) {
 	rt := New()
-	entry := &RouteEntry{HandlerName: "root"}
+	entry := &RouteEntry{}
 	rt.Register("GET", "/", entry)
 
 	got, _, result, _ := rt.Lookup("GET", "/")
