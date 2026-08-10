@@ -1,7 +1,6 @@
 package fieldsec
 
 import (
-	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -42,25 +41,24 @@ func (r *FieldSecurityRegistry) Rule(modelName, fieldName string) (FieldSecurity
 	return FieldSecurityRule{}, false
 }
 
-func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *FieldSecurityRegistry {
-	reg := &FieldSecurityRegistry{rules: make(map[string]map[string]FieldSecurityRule)}
-	for moduleName, m := range modules {
-		for _, decl := range m.ModelDecls {
-			modelName := moduleName + "." + decl.Name
-			for _, field := range decl.Fields {
-				rule, ok := fieldSecurityRuleFor(field)
-				if !ok {
-					continue
-				}
-				if reg.rules[modelName] == nil {
-					reg.rules[modelName] = make(map[string]FieldSecurityRule)
-				}
-				reg.rules[modelName][field.Name] = rule
+func New() *FieldSecurityRegistry {
+	return &FieldSecurityRegistry{rules: make(map[string]map[string]FieldSecurityRule)}
+}
+
+func (r *FieldSecurityRegistry) Register(moduleName string, modelDecls []model.ModelDeclaration) {
+	for _, decl := range modelDecls {
+		modelName := moduleName + "." + decl.Name
+		for _, field := range decl.Fields {
+			rule, ok := fieldSecurityRuleFor(field)
+			if !ok {
+				continue
 			}
+			if r.rules[modelName] == nil {
+				r.rules[modelName] = make(map[string]FieldSecurityRule)
+			}
+			r.rules[modelName][field.Name] = rule
 		}
 	}
-
-	return reg
 }
 
 func fieldSecurityRuleFor(field model.NamedField) (FieldSecurityRule, bool) {

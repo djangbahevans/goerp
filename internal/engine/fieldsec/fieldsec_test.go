@@ -3,34 +3,31 @@ package fieldsec
 import (
 	"testing"
 
-	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-func TestBuildFieldSecRegistry_EmptyModules_ReturnsEmptyRegistry(t *testing.T) {
-	reg := buildFieldSecRegistry(map[string]*module.LoadedModule{})
+func TestFieldSecurityRegistry_Register_NoModelDecls_ReturnsEmptyRegistry(t *testing.T) {
+	reg := New()
+	reg.Register("contacts", nil)
 
 	if _, ok := reg.Rule("contacts.contact", "ssn"); ok {
 		t.Fatalf("expected no rule from an empty registry")
 	}
 }
 
-func TestBuildFieldSecRegistry_ModuleWithModels_NoRulesYet(t *testing.T) {
-	modules := map[string]*module.LoadedModule{
-		"contacts": {
-			ModelDecls: []model.ModelDeclaration{
-				{
-					Name: "contact",
-					Fields: []model.NamedField{
-						{Name: "ssn"},
-						{Name: "name"},
-					},
-				},
+func TestFieldSecurityRegistry_Register_ModelWithFields_NoRulesYet(t *testing.T) {
+	modelDecls := []model.ModelDeclaration{
+		{
+			Name: "contact",
+			Fields: []model.NamedField{
+				{Name: "ssn"},
+				{Name: "name"},
 			},
 		},
 	}
 
-	reg := buildFieldSecRegistry(modules)
+	reg := New()
+	reg.Register("contacts", modelDecls)
 
 	if _, ok := reg.Rule("contacts.contact", "ssn"); ok {
 		t.Fatalf("expected no rule for %q: FieldDef carries no security data until SDK backlog #19 lands", "ssn")
@@ -91,8 +88,8 @@ func TestFieldSecurityRegistry_Rule_KnownModelAndField_ReturnsRule(t *testing.T)
 	}
 }
 
-func TestBuildFieldSecRegistry_MultipleFieldsPerModel_AllRetained(t *testing.T) {
-	// Regression test: an earlier version of buildFieldSecRegistry keyed its
+func TestFieldSecurityRegistry_Register_MultipleFieldsPerModel_AllRetained(t *testing.T) {
+	// Regression test: an earlier version of Register keyed its
 	// "already initialized" check off the bare module name instead of the
 	// qualified model name, so it recreated (and wiped) the inner map on
 	// every field within the same model, silently dropping all but the last
