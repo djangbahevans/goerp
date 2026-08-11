@@ -23,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
+	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
@@ -229,8 +230,8 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func newModuleContext(ctx context.Context, req EngineRequest) *wasm.ModuleContext {
-	return wasm.NewModuleContext(req.ID, req.UserID, "", nil, req.TenantID, req.TenantSlug, req.TraceID, 0)
+func newModuleContext(ctx context.Context, req EngineRequest, mod *module.LoadedModule) *wasm.ModuleContext {
+	return wasm.NewModuleContext(req.ID, req.UserID, "", nil, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities)
 }
 
 func (e *Engine) invokeHandler(
@@ -238,8 +239,9 @@ func (e *Engine) invokeHandler(
 	inst *wasm.ModuleInstance,
 	handlerName string,
 	req EngineRequest,
+	mod *module.LoadedModule,
 ) (EngineResponse, error) {
-	moduleCtx := newModuleContext(ctx, req)
+	moduleCtx := newModuleContext(ctx, req, mod)
 	inst.SetModuleContext(moduleCtx)
 	e.registerInstance(inst)
 	defer func() {

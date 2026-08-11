@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
@@ -179,4 +180,34 @@ func (r *Runtime) CallAndRead(ctx context.Context, moduleName string, fnName str
 	}
 
 	return data, nil
+}
+
+// tempSeq gives every InstantiateTemp call a distinct wazero module name —
+// InstantiateModule rejects a name already in use by a live instance, and
+// nothing otherwise guarantees a caller can't have two temp instances of
+// the same named module outstanding at once (e.g. a load racing a hot
+// reload of the same module).
+var tempSeq atomic.Int64
+
+// CompileModule compiles a module's WASM binary to native code, or loads
+// it from the on-disk compilation cache keyed by its own checksum (§3
+// "Compilation cache" — wazero's own cache, not engine-side logic).
+func (r *Runtime) CompileModule(ctx context.Context, binary []byte) (wazero.CompiledModule, error) {
+	return r.wazero.CompileModule(ctx, binary)
+}
+
+// NewPool builds a module's instance pool against the shared runtime.
+func (r *Runtime) NewPool(name string, compiled wazero.CompiledModule, cfg PoolConfig) *InstancePool {
+	return NewInstancePool(name, compiled, r.wazero, cfg)
+}
+
+// InstantiateTemp creates a throwaway instance for one-off export calls —
+// get_routes/get_model_declarations/get_data_migrations at load time
+// (engine-internals.md §2 Stage 3 steps 17a-17d). Construction matches a
+// pooled instance exactly (same newModuleInstance), so a temp instance
+// exposes the same exports and runs the same init hook a pooled instance
+// would.
+func (r *Runtime) InstantiateTemp(ctx context.Context, name string, compiled wazero.CompiledModule) (*ModuleInstance, error) {
+	tempName := fmt.Sprintf("%s-temp-%d", name, tempSeq.Add(1))
+	return newModuleInstance(ctx, tempName, compiled, r.wazero)
 }

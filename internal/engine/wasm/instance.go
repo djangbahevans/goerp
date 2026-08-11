@@ -7,6 +7,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/rs/zerolog/log"
+	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
 
@@ -22,6 +23,37 @@ type ModuleInstance struct {
 	inUse         atomic.Bool
 }
 
+// newModuleInstance instantiates compiled under the given (already unique)
+// name and wires up its exports — the construction InstancePool.instantiate
+// and Runtime.InstantiateTemp both need, so a pooled instance and a
+// one-off temporary instance (used for load-time export calls) never
+// diverge in what's wired up or whether init runs.
+func newModuleInstance(ctx context.Context, name string, compiled wazero.CompiledModule, rt wazero.Runtime) (*ModuleInstance, error) {
+	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(name))
+	if err != nil {
+		return nil, fmt.Errorf("instantiate %s: %w", name, err)
+	}
+
+	inst := &ModuleInstance{
+		module: mod,
+		memory: mod.Memory(),
+	}
+	inst.allocate = mod.ExportedFunction("allocate")
+	inst.deallocate = mod.ExportedFunction("deallocate")
+	inst.handleRequest = mod.ExportedFunction("handle_request")
+	inst.handleEvent = mod.ExportedFunction("handle_event")
+	inst.handleJob = mod.ExportedFunction("handle_job")
+
+	if initFn := mod.ExportedFunction("init"); initFn != nil {
+		if _, err := initFn.Call(ctx); err != nil {
+			_ = mod.CloseWithExitCode(context.Background(), 0)
+			return nil, fmt.Errorf("init() for %s: %w", name, err)
+		}
+	}
+
+	return inst, nil
+}
+
 func (inst *ModuleInstance) SetModuleContext(mc *ModuleContext) {
 	inst.moduleCtx = mc
 }
@@ -32,6 +64,35 @@ func (inst *ModuleInstance) ModuleContext() *ModuleContext {
 
 func (inst *ModuleInstance) Module() api.Module {
 	return inst.module
+}
+
+func (inst *ModuleInstance) InvokeNoArg(ctx context.Context, fnName string) ([]byte, error) {
+	fn := inst.module.ExportedFunction(fnName)
+	if fn == nil {
+		return nil, fmt.Errorf("module missing %s export", fnName)
+	}
+	if inst.deallocate == nil {
+		return nil, fmt.Errorf("module missing deallocate export")
+	}
+	result, err := fn.Call(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("call %s: %w", fnName, err)
+	}
+
+	raw := result[0]
+	ptr, length := uint32(raw>>32), uint32(raw)
+	view, ok := inst.memory.Read(ptr, length)
+	if !ok {
+		return nil, fmt.Errorf("could not read %s response at ptr=%d len=%d", fnName, ptr, length)
+	}
+	data := make([]byte, len(view))
+	copy(data, view)
+
+	if _, err := inst.deallocate.Call(context.Background(), uint64(ptr), uint64(length)); err != nil {
+		log.Warn().Err(err).Msg("could not deallocate response buffer")
+	}
+
+	return data, nil
 }
 
 func (inst *ModuleInstance) InvokeHandleRequest(ctx context.Context, payload []byte) ([]byte, error) {
