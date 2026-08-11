@@ -21,6 +21,7 @@ import (
 func baseTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
+	t.Setenv("GOERP_ADMIN_TOKEN", "test-admin-token")
 
 	return &config.Config{
 		ListenAddr:         ":0",
@@ -126,6 +127,16 @@ func TestNewUnknownSecretsBackendFailsHard(t *testing.T) {
 	_, err := New(cfg)
 	if err == nil {
 		t.Fatal("New() with an unknown secrets backend: expected an error, got nil")
+	}
+}
+
+func TestNewEmptyAdminTokenFailsHard(t *testing.T) {
+	cfg := baseTestConfig(t)
+	t.Setenv("GOERP_ADMIN_TOKEN", "")
+
+	_, err := New(cfg)
+	if err == nil {
+		t.Fatal("New() with an empty GOERP_ADMIN_TOKEN: expected an error, got nil")
 	}
 }
 
