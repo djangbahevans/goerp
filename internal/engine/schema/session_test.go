@@ -193,3 +193,161 @@ func TestNeedsSync(t *testing.T) {
 		t.Error("NeedsSync() with differing current_version: got false, want true")
 	}
 }
+
+func TestRecordSyncSuccess_UpsertsCurrentVersionAndStatus(t *testing.T) {
+	_, pool := openTestPool(t, 5*time.Second)
+
+	const tenantID = "44444444-4444-4444-4444-444444444444"
+	const tenantSlug = "recordsuccesstest"
+	const moduleName = "sales"
+
+	cleanup, err := db.New(localSchemaSyncDSN)
+	if err != nil {
+		t.Fatalf("db.New() for cleanup connection: %v", err)
+	}
+	defer func() { _ = cleanup.Close() }()
+	if _, err := cleanup.Exec("DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2", tenantID, moduleName); err != nil {
+		t.Fatalf("reset module_schema_versions: %v", err)
+	}
+
+	m := testManifest("1.2.0")
+	sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	if err != nil {
+		t.Fatalf("BeginSync() error: %v", err)
+	}
+
+	if err := sess.RecordSyncSuccess(context.Background()); err != nil {
+		t.Fatalf("RecordSyncSuccess() error: %v", err)
+	}
+	if err := sess.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	var currentVersion, status string
+	var syncedAt sql.NullTime
+	err = cleanup.QueryRow(
+		"SELECT current_version, schema_sync_status, schema_synced_at FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2",
+		tenantID, moduleName,
+	).Scan(&currentVersion, &status, &syncedAt)
+	if err != nil {
+		t.Fatalf("query recorded row: %v", err)
+	}
+	if currentVersion != "1.2.0" {
+		t.Errorf("current_version = %q, want %q", currentVersion, "1.2.0")
+	}
+	if status != "ok" {
+		t.Errorf("schema_sync_status = %q, want %q", status, "ok")
+	}
+	if !syncedAt.Valid {
+		t.Error("expected schema_synced_at to be set")
+	}
+
+	// A second success with a newer version overwrites the row rather than
+	// erroring (ON CONFLICT DO UPDATE, not a plain INSERT).
+	m2 := testManifest("1.3.0")
+	sess2, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m2)
+	if err != nil {
+		t.Fatalf("second BeginSync() error: %v", err)
+	}
+	defer func() { _ = sess2.Close(context.Background()) }()
+	if err := sess2.RecordSyncSuccess(context.Background()); err != nil {
+		t.Fatalf("second RecordSyncSuccess() error: %v", err)
+	}
+	if err := cleanup.QueryRow(
+		"SELECT current_version FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2",
+		tenantID, moduleName,
+	).Scan(&currentVersion); err != nil {
+		t.Fatalf("query recorded row after second success: %v", err)
+	}
+	if currentVersion != "1.3.0" {
+		t.Errorf("current_version after second success = %q, want %q", currentVersion, "1.3.0")
+	}
+}
+
+func TestRecordSyncFailure_UpdatesStatusWithoutTouchingVersion(t *testing.T) {
+	_, pool := openTestPool(t, 5*time.Second)
+
+	const tenantID = "55555555-5555-5555-5555-555555555555"
+	const tenantSlug = "recordfailuretest"
+	const moduleName = "sales"
+
+	cleanup, err := db.New(localSchemaSyncDSN)
+	if err != nil {
+		t.Fatalf("db.New() for cleanup connection: %v", err)
+	}
+	defer func() { _ = cleanup.Close() }()
+	if _, err := cleanup.Exec("DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2", tenantID, moduleName); err != nil {
+		t.Fatalf("reset module_schema_versions: %v", err)
+	}
+	if _, err := cleanup.Exec(
+		"INSERT INTO system.module_schema_versions (tenant_id, module_name, current_version, schema_sync_status) VALUES ($1, $2, $3, 'ok')",
+		tenantID, moduleName, "1.0.0",
+	); err != nil {
+		t.Fatalf("seed module_schema_versions: %v", err)
+	}
+
+	m := testManifest("2.0.0")
+	sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	if err != nil {
+		t.Fatalf("BeginSync() error: %v", err)
+	}
+	defer func() { _ = sess.Close(context.Background()) }()
+
+	if err := sess.RecordSyncFailure(context.Background()); err != nil {
+		t.Fatalf("RecordSyncFailure() error: %v", err)
+	}
+
+	var currentVersion, status string
+	err = cleanup.QueryRow(
+		"SELECT current_version, schema_sync_status FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2",
+		tenantID, moduleName,
+	).Scan(&currentVersion, &status)
+	if err != nil {
+		t.Fatalf("query recorded row: %v", err)
+	}
+	if currentVersion != "1.0.0" {
+		t.Errorf("current_version = %q, want it untouched at %q", currentVersion, "1.0.0")
+	}
+	if status != "failed" {
+		t.Errorf("schema_sync_status = %q, want %q", status, "failed")
+	}
+}
+
+func TestRecordSyncFailure_NoRowIsANoOp(t *testing.T) {
+	_, pool := openTestPool(t, 5*time.Second)
+
+	const tenantID = "66666666-6666-6666-6666-666666666666"
+	const tenantSlug = "recordfailurenorowtest"
+	const moduleName = "sales"
+
+	cleanup, err := db.New(localSchemaSyncDSN)
+	if err != nil {
+		t.Fatalf("db.New() for cleanup connection: %v", err)
+	}
+	defer func() { _ = cleanup.Close() }()
+	if _, err := cleanup.Exec("DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2", tenantID, moduleName); err != nil {
+		t.Fatalf("reset module_schema_versions: %v", err)
+	}
+
+	m := testManifest("1.0.0")
+	sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, m)
+	if err != nil {
+		t.Fatalf("BeginSync() error: %v", err)
+	}
+	defer func() { _ = sess.Close(context.Background()) }()
+
+	if err := sess.RecordSyncFailure(context.Background()); err != nil {
+		t.Fatalf("RecordSyncFailure() with no existing row: expected no error, got %v", err)
+	}
+
+	var count int
+	if err := cleanup.QueryRow(
+		"SELECT COUNT(*) FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2",
+		tenantID, moduleName,
+	).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected no row to have been inserted, got %d", count)
+	}
+}

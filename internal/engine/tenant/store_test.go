@@ -142,3 +142,51 @@ func TestTenantDomainsForeignKey_RejectsUnknownTenant(t *testing.T) {
 		t.Fatal("expected a foreign key violation inserting a domain for a nonexistent tenant")
 	}
 }
+
+func TestActiveTenants_ReturnsOnlyActiveStatus(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	active1, err := store.CreateTenant(ctx, uniqueSlug(t), "Active One")
+	if err != nil {
+		t.Fatalf("CreateTenant(active1) error: %v", err)
+	}
+	active2, err := store.CreateTenant(ctx, uniqueSlug(t), "Active Two")
+	if err != nil {
+		t.Fatalf("CreateTenant(active2) error: %v", err)
+	}
+	provisioning, err := store.CreateTenant(ctx, uniqueSlug(t), "Still Provisioning")
+	if err != nil {
+		t.Fatalf("CreateTenant(provisioning) error: %v", err)
+	}
+
+	for _, id := range []string{active1.ID, active2.ID} {
+		if _, err := store.db.ExecContext(ctx, "UPDATE system.tenants SET status = 'active' WHERE id = $1", id); err != nil {
+			t.Fatalf("mark tenant active: %v", err)
+		}
+	}
+	_ = provisioning // left at its default "provisioning" status deliberately
+
+	got, err := store.ActiveTenants(ctx)
+	if err != nil {
+		t.Fatalf("ActiveTenants() error: %v", err)
+	}
+
+	gotSlugs := make(map[string]bool, len(got))
+	for _, tt := range got {
+		if tt.Status != StatusActive {
+			t.Errorf("ActiveTenants() returned tenant %q with status %q, want %q", tt.Slug, tt.Status, StatusActive)
+		}
+		gotSlugs[tt.Slug] = true
+	}
+
+	if !gotSlugs[active1.Slug] {
+		t.Errorf("expected %q in ActiveTenants() result", active1.Slug)
+	}
+	if !gotSlugs[active2.Slug] {
+		t.Errorf("expected %q in ActiveTenants() result", active2.Slug)
+	}
+	if gotSlugs[provisioning.Slug] {
+		t.Errorf("did not expect provisioning tenant %q in ActiveTenants() result", provisioning.Slug)
+	}
+}

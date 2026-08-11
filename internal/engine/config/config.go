@@ -53,6 +53,7 @@ type Config struct {
 
 	// Events and jobs
 	SchemaSyncDDLStatementTimeout time.Duration `env:"GOERP_SCHEMA_SYNC_STATEMENT_TIMEOUT" envDefault:"30s"`
+	SchemaSyncConcurrency         int           `env:"GOERP_SCHEMA_SYNC_CONCURRENCY" envDefault:"8"`
 
 	// Security
 	SecretsBackend string `env:"GOERP_SECRETS_BACKEND" envDefault:"env" validate:"oneof=env vault aws_secretsmanager"`
