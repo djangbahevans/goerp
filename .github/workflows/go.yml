@@ -10,6 +10,9 @@ permissions:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       go: ${{ steps.filter.outputs.go }}
     steps:
@@ -96,6 +99,10 @@ jobs:
     steps:
       - name: Require build-and-test to have passed when it ran
         run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "changes did not succeed (result: ${{ needs.changes.result }}) — cannot tell whether build-and-test should have run"
+            exit 1
+          fi
           if [ "${{ needs.changes.outputs.go }}" = "true" ] && [ "${{ needs.build-and-test.result }}" != "success" ]; then
             echo "build-and-test did not succeed (result: ${{ needs.build-and-test.result }})"
             exit 1
