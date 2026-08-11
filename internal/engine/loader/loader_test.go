@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,13 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 )
+
+// bareModule is a minimal valid WASM module with no sections at all — no
+// memory, no exports. Enough to compile and instantiate, but every
+// get_*/deallocate export lookup on it fails, so LoadModule always fails
+// after pool creation against it — exactly the failure window that used to
+// leak the pool's replenishLoop goroutine.
+var bareModule = []byte{0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00}
 
 // okModule exports allocate/deallocate/get_routes/get_model_declarations/
 // get_data_migrations, where the three get_* exports return empty msgpack
@@ -266,5 +274,33 @@ func TestLoadAll_SecondModuleFailureLeavesFirstHealthy(t *testing.T) {
 	}
 	if !strings.Contains(auth.FailureReason, "reserved") {
 		t.Errorf("auth.FailureReason = %q, want it to mention the reserved namespace", auth.FailureReason)
+	}
+}
+
+func TestLoadModule_FailureAfterPoolCreationClosesThePool(t *testing.T) {
+	rt := newTestRuntime(t)
+	src := Source{
+		Name:          "widgets",
+		ManifestBytes: manifestJSON(t, "widgets", bareModule, []string{"db.read"}),
+		WasmBytes:     bareModule,
+	}
+
+	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+
+	if m.Status != module.StatusFailed {
+		t.Fatalf("Status = %v, want StatusFailed; FailureReason = %q", m.Status, m.FailureReason)
+	}
+	if m.Pool == nil {
+		t.Fatal("expected a non-nil Pool even on failure")
+	}
+
+	// DrainAndClose sets the pool draining before anything else — Borrow
+	// returning ErrPoolDraining immediately (rather than trying to
+	// instantiate or blocking on BorrowTimeout) confirms the pool was
+	// actually closed on this failure path, not merely abandoned with its
+	// replenishLoop goroutine still running.
+	_, err := m.Pool.Borrow(context.Background())
+	if !errors.Is(err, wasm.ErrPoolDraining) {
+		t.Errorf("Borrow() error = %v, want %v (pool should have been closed on load failure)", err, wasm.ErrPoolDraining)
 	}
 }

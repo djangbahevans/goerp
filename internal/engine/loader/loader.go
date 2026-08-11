@@ -79,13 +79,26 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	m.Capabilities = caps
 
 	m.Pool = rt.NewPool(src.Name, compiled, poolCfg)
+	// NewPool starts replenishLoop immediately, which begins warming live
+	// wasm instances in the background — every step below can still fail
+	// the load, and nothing else in the engine ever closes a StatusFailed
+	// module's pool or compiled module. Without this, a late failure here
+	// (or a route conflict caught by LoadAll after this function returns)
+	// leaks the replenish goroutine and its warmed instances for the
+	// lifetime of the process.
+	defer func() {
+		if m.Status == module.StatusFailed {
+			m.Pool.DrainAndClose(context.Background(), 5*time.Second)
+			_ = compiled.Close(context.Background())
+		}
+	}()
 
 	tempInst, err := rt.InstantiateTemp(ctx, src.Name, compiled)
 	if err != nil {
 		m.Fail(fmt.Sprintf("temp instantiation: %v", err))
 		return m
 	}
-	defer tempInst.Module().Close(ctx)
+	defer func() { _ = tempInst.Module().Close(ctx) }()
 
 	routes, err := callGetRoutes(ctx, tempInst)
 	if err != nil {
