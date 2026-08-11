@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -52,6 +53,7 @@ type Engine struct {
 	searchClient   *search.Client
 	storageBackend storage.Backend
 	server         *httpx.Server
+	adminServer    *adminapi.Server
 	readiness      atomic.Bool
 
 	instancesMu sync.Mutex
@@ -64,6 +66,19 @@ func New(cfg *config.Config) (*Engine, error) {
 	secretsBackend, err := secrets.New(cfg.SecretsBackend)
 	if err != nil {
 		return nil, fmt.Errorf("create secrets backend: %w", err)
+	}
+
+	adminToken, err := secretsBackend.Get(ctx, "GOERP_ADMIN_TOKEN")
+	if err != nil {
+		return nil, fmt.Errorf("load admin token: %w", err)
+	}
+
+	adminServer, err := adminapi.NewServer(&adminapi.Config{
+		ListenAddr: cfg.AdminAddr,
+		AdminToken: adminToken,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create admin server: %w", err)
 	}
 
 	primaryPool, err := db.New(cfg.DBPrimaryDSN)
@@ -212,6 +227,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		searchClient:   searchClient,
 		storageBackend: storageBackend,
 		server:         server,
+		adminServer:    adminServer,
 	}
 
 	return e, nil
@@ -222,6 +238,12 @@ func (e *Engine) Start(ctx context.Context) error {
 	go func() {
 		if err := e.server.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error().Err(err).Msg("http server error")
+		}
+	}()
+
+	go func() {
+		if err := e.adminServer.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error().Err(err).Msg("admin http server error")
 		}
 	}()
 
@@ -237,6 +259,10 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 	if e.cfg.ShutdownDrainDelay > 0 {
 		time.Sleep(e.cfg.ShutdownDrainDelay)
+	}
+
+	if err := e.adminServer.Shutdown(ctx); err != nil {
+		log.Warn().Err(err).Msg("could not shut down admin server")
 	}
 
 	if err := e.wasmRuntime.Close(ctx); err != nil {
