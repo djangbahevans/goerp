@@ -1,8 +1,11 @@
 // Package engine is the composition root: Engine.New runs Stage 1
 // (engine-internals.md §2) — secrets backend, primary/replica Postgres,
-// Redis, Meilisearch (optional), object storage — and wires the results
-// into the HTTP server's injected health/ready checks. Primary Postgres and
-// Redis failures are fail-hard (New returns an error); replica Postgres,
+// Redis, Meilisearch (optional), object storage — plus bootstrapping the
+// system-schema tables owned outright by the engine rather than any module
+// (schema.SchemaSyncPool's module_schema_versions, tenant.Store's
+// tenants/tenant_domains) — and wires the results into the HTTP server's
+// injected health/ready checks. Primary Postgres, Redis, and both system-
+// schema bootstraps are fail-hard (New returns an error); replica Postgres,
 // Meilisearch, and object storage failures only warn and continue, per the
 // explicit warn-only list in engine-internals.md §2. Stage 2+ (module
 // loading, schema sync, instance pooling) is out of scope here — see #34's
@@ -28,6 +31,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero/api"
@@ -38,7 +42,8 @@ type Engine struct {
 	cfg         *config.Config
 	wasmRuntime *wasm.Runtime
 
-	syncPool *schema.SchemaSyncPool
+	syncPool    *schema.SchemaSyncPool
+	tenantStore *tenant.Store
 
 	secretsBackend secrets.Backend
 	primaryDB      *sql.DB
@@ -91,6 +96,16 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap schema sync tracking table: %w", err)
+	}
+
+	tenantStore := tenant.NewStore(primaryPool)
+	if err := tenantStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap tenant registry: %w", err)
 	}
 
 	cacheClient, err := cache.New(ctx, cache.Config{
@@ -189,6 +204,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		cfg:            cfg,
 		wasmRuntime:    runtime,
 		syncPool:       syncPool,
+		tenantStore:    tenantStore,
 		secretsBackend: secretsBackend,
 		primaryDB:      primaryPool,
 		replicaDB:      replicaPool,
