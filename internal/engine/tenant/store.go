@@ -110,3 +110,36 @@ func (s *Store) CreateTenant(ctx context.Context, slug, name string) (*Tenant, e
 
 	return &t, nil
 }
+
+// ActiveTenants returns every tenant with status = 'active' — "active
+// tenants" per multitenancy-internals.md §16's schema-sync definition,
+// the set Stage 4 schema sync runs against. Provisioning/suspended/
+// offboarding/deleted tenants are excluded: a provisioning tenant may not
+// have its tenant_{slug} schema created yet, and sync has no business
+// touching a suspended/offboarding/deleted tenant's schema at all.
+func (s *Store) ActiveTenants(ctx context.Context) ([]Tenant, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, slug, name, plan, status, region, created_at, updated_at
+		FROM system.tenants
+		WHERE status = $1
+		ORDER BY slug
+	`, StatusActive)
+	if err != nil {
+		return nil, fmt.Errorf("query active tenants: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tenants []Tenant
+	for rows.Next() {
+		var t Tenant
+		if err := rows.Scan(&t.ID, &t.Slug, &t.Name, &t.Plan, &t.Status, &t.Region, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan tenant: %w", err)
+		}
+		tenants = append(tenants, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active tenants: %w", err)
+	}
+
+	return tenants, nil
+}

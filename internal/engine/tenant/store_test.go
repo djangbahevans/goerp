@@ -2,6 +2,7 @@ package tenant
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -14,7 +15,16 @@ import (
 // internal/engine/schema's tests — see that package's localSchemaSyncDSN).
 const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
 
-func openTestStore(t *testing.T) *Store {
+// openTestStore returns a Store plus its underlying connection, so callers
+// that create tenants can clean up exactly the rows they created (see
+// deleteTenant below) — NOT a blanket "DELETE FROM system.tenants" on
+// every test's cleanup. system.tenants is a real, shared table on a real
+// Postgres instance with no per-test isolation, and Go runs different
+// packages' test binaries concurrently by default: a blanket wipe here
+// would race with (and had raced with) any other package's tests —
+// internal/engine/tenantsync's, in particular — relying on their own
+// tenant rows surviving for the duration of their own test.
+func openTestStore(t *testing.T) (*Store, *sql.DB) {
 	t.Helper()
 
 	conn, err := db.New(localPostgresDSN)
@@ -27,12 +37,31 @@ func openTestStore(t *testing.T) *Store {
 	if err := store.Bootstrap(context.Background()); err != nil {
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "DELETE FROM system.tenant_domains")
-		_, _ = conn.ExecContext(context.Background(), "DELETE FROM system.tenants")
-	})
 
-	return store
+	return store, conn
+}
+
+// deleteTenant removes exactly the given tenant (and, via tenant_domains'
+// ON DELETE CASCADE, any domains it owns) — the scoped cleanup every test
+// that creates a tenant registers via t.Cleanup.
+func deleteTenant(t *testing.T, conn *sql.DB, id string) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = conn.ExecContext(context.Background(), "DELETE FROM system.tenants WHERE id = $1", id)
+	})
+}
+
+// createTenant creates a tenant, fails the test on error, and registers
+// its scoped cleanup in one call — the pattern every test below that
+// needs a real row follows.
+func createTenant(t *testing.T, store *Store, conn *sql.DB, slug, name string) *Tenant {
+	t.Helper()
+	tt, err := store.CreateTenant(context.Background(), slug, name)
+	if err != nil {
+		t.Fatalf("CreateTenant(%q, %q) error: %v", slug, name, err)
+	}
+	deleteTenant(t, conn, tt.ID)
+	return tt
 }
 
 // uniqueSlug keeps each test's inserted rows from colliding with a
@@ -45,7 +74,7 @@ func uniqueSlug(t *testing.T) string {
 }
 
 func TestBootstrap_CreatesTablesAndIndex(t *testing.T) {
-	store := openTestStore(t)
+	store, _ := openTestStore(t)
 
 	var indexDef string
 	err := store.db.QueryRowContext(context.Background(),
@@ -60,7 +89,7 @@ func TestBootstrap_CreatesTablesAndIndex(t *testing.T) {
 }
 
 func TestBootstrap_IsIdempotent(t *testing.T) {
-	store := openTestStore(t)
+	store, _ := openTestStore(t)
 
 	if err := store.Bootstrap(context.Background()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
@@ -68,13 +97,10 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 }
 
 func TestCreateTenant_Succeeds(t *testing.T) {
-	store := openTestStore(t)
+	store, conn := openTestStore(t)
 	slug := uniqueSlug(t)
 
-	got, err := store.CreateTenant(context.Background(), slug, "Acme Corp")
-	if err != nil {
-		t.Fatalf("CreateTenant() error: %v", err)
-	}
+	got := createTenant(t, store, conn, slug, "Acme Corp")
 
 	if got.ID == "" {
 		t.Error("expected a generated ID")
@@ -100,12 +126,10 @@ func TestCreateTenant_Succeeds(t *testing.T) {
 }
 
 func TestCreateTenant_DuplicateSlugFails(t *testing.T) {
-	store := openTestStore(t)
+	store, conn := openTestStore(t)
 	slug := uniqueSlug(t)
 
-	if _, err := store.CreateTenant(context.Background(), slug, "First"); err != nil {
-		t.Fatalf("first CreateTenant() error: %v", err)
-	}
+	createTenant(t, store, conn, slug, "First")
 
 	_, err := store.CreateTenant(context.Background(), slug, "Second")
 	if err == nil {
@@ -114,7 +138,7 @@ func TestCreateTenant_DuplicateSlugFails(t *testing.T) {
 }
 
 func TestCreateTenant_InvalidSlugFormatFails(t *testing.T) {
-	store := openTestStore(t)
+	store, _ := openTestStore(t)
 
 	cases := []string{
 		"",           // empty
@@ -132,7 +156,7 @@ func TestCreateTenant_InvalidSlugFormatFails(t *testing.T) {
 }
 
 func TestTenantDomainsForeignKey_RejectsUnknownTenant(t *testing.T) {
-	store := openTestStore(t)
+	store, _ := openTestStore(t)
 
 	_, err := store.db.ExecContext(context.Background(), `
 		INSERT INTO system.tenant_domains (tenant_id, domain)
@@ -140,5 +164,44 @@ func TestTenantDomainsForeignKey_RejectsUnknownTenant(t *testing.T) {
 	`)
 	if err == nil {
 		t.Fatal("expected a foreign key violation inserting a domain for a nonexistent tenant")
+	}
+}
+
+func TestActiveTenants_ReturnsOnlyActiveStatus(t *testing.T) {
+	store, conn := openTestStore(t)
+	ctx := context.Background()
+
+	active1 := createTenant(t, store, conn, uniqueSlug(t), "Active One")
+	active2 := createTenant(t, store, conn, uniqueSlug(t), "Active Two")
+	provisioning := createTenant(t, store, conn, uniqueSlug(t), "Still Provisioning")
+
+	for _, id := range []string{active1.ID, active2.ID} {
+		if _, err := store.db.ExecContext(ctx, "UPDATE system.tenants SET status = 'active' WHERE id = $1", id); err != nil {
+			t.Fatalf("mark tenant active: %v", err)
+		}
+	}
+	_ = provisioning // left at its default "provisioning" status deliberately
+
+	got, err := store.ActiveTenants(ctx)
+	if err != nil {
+		t.Fatalf("ActiveTenants() error: %v", err)
+	}
+
+	gotSlugs := make(map[string]bool, len(got))
+	for _, tt := range got {
+		if tt.Status != StatusActive {
+			t.Errorf("ActiveTenants() returned tenant %q with status %q, want %q", tt.Slug, tt.Status, StatusActive)
+		}
+		gotSlugs[tt.Slug] = true
+	}
+
+	if !gotSlugs[active1.Slug] {
+		t.Errorf("expected %q in ActiveTenants() result", active1.Slug)
+	}
+	if !gotSlugs[active2.Slug] {
+		t.Errorf("expected %q in ActiveTenants() result", active2.Slug)
+	}
+	if gotSlugs[provisioning.Slug] {
+		t.Errorf("did not expect provisioning tenant %q in ActiveTenants() result", provisioning.Slug)
 	}
 }

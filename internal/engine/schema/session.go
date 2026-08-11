@@ -63,3 +63,40 @@ func (s *SchemaSyncSession) NeedsSync(ctx context.Context) (bool, error) {
 
 	return !shouldSkipSync(s.manifest.Version, lastSynced), nil
 }
+
+// RecordSyncSuccess upserts this session's (tenant, module) row to the
+// module's current manifest version, "ok" status, and now as
+// schema_synced_at — what NeedsSync's skip-check reads on the next sync
+// attempt (multitenancy-internals.md §16 "Tracking sync state").
+func (s *SchemaSyncSession) RecordSyncSuccess(ctx context.Context) error {
+	_, err := s.conn.ExecContext(ctx, `
+		INSERT INTO system.module_schema_versions (tenant_id, module_name, current_version, schema_synced_at, schema_sync_status)
+		VALUES ($1, $2, $3, NOW(), 'ok')
+		ON CONFLICT (tenant_id, module_name) DO UPDATE SET
+			current_version = EXCLUDED.current_version,
+			schema_synced_at = EXCLUDED.schema_synced_at,
+			schema_sync_status = 'ok'
+	`, s.tenantID, s.moduleName, s.manifest.Version)
+	if err != nil {
+		return fmt.Errorf("record sync success: %w", err)
+	}
+	return nil
+}
+
+// RecordSyncFailure marks this session's (tenant, module) row "failed"
+// without touching current_version/schema_synced_at, so a failed upgrade
+// doesn't claim the new version is live. Deliberately a plain UPDATE, not
+// an upsert: if no row exists yet (this tenant/module has never
+// successfully synced), there is nothing to mark failed — NeedsSync will
+// keep reporting true and retry on the next sync pass, which is exactly
+// what a never-yet-synced pair should do.
+func (s *SchemaSyncSession) RecordSyncFailure(ctx context.Context) error {
+	_, err := s.conn.ExecContext(ctx,
+		`UPDATE system.module_schema_versions SET schema_sync_status = 'failed' WHERE tenant_id = $1 AND module_name = $2`,
+		s.tenantID, s.moduleName,
+	)
+	if err != nil {
+		return fmt.Errorf("record sync failure: %w", err)
+	}
+	return nil
+}
