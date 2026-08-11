@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/tetratelabs/wazero"
 )
@@ -108,7 +109,7 @@ func TestInvokeHandler_RoundTripsAndClearsModuleContext(t *testing.T) {
 	}
 
 	e := &Engine{}
-	if _, err := e.invokeHandler(context.Background(), inst, "handler", req); err != nil {
+	if _, err := e.invokeHandler(context.Background(), inst, "handler", req, &module.LoadedModule{}); err != nil {
 		t.Fatalf("invokeHandler: %v", err)
 	}
 
@@ -125,7 +126,7 @@ func TestInvokeHandler_TrapSurfacesAsError(t *testing.T) {
 	inst := newTestInstance(t, handleRequestTrapsModule)
 
 	e := &Engine{}
-	_, err := e.invokeHandler(context.Background(), inst, "handler", EngineRequest{ID: "req-1"})
+	_, err := e.invokeHandler(context.Background(), inst, "handler", EngineRequest{ID: "req-1"}, &module.LoadedModule{})
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
 	}
@@ -145,7 +146,7 @@ func TestInvokeHandler_ContextCancellationSurfacesAsContextError(t *testing.T) {
 	cancel() // already canceled before the call
 
 	e := &Engine{}
-	_, err := e.invokeHandler(ctx, inst, "handler", EngineRequest{ID: "req-1"})
+	_, err := e.invokeHandler(ctx, inst, "handler", EngineRequest{ID: "req-1"}, &module.LoadedModule{})
 	if err == nil {
 		t.Fatal("expected an error")
 	}

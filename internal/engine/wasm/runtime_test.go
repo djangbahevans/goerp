@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 )
@@ -84,4 +85,73 @@ func TestNew_MemoryGrowBeyondLimitFailsGracefully(t *testing.T) {
 	if result != 0 {
 		t.Fatalf("expected Grow to return 0 on failure, got %d", result)
 	}
+}
+
+func TestRuntime_CompileModule_Succeeds(t *testing.T) {
+	rt := newTestRuntime(t, 1<<20)
+
+	compiled, err := rt.CompileModule(context.Background(), emptyModule)
+	if err != nil {
+		t.Fatalf("CompileModule: %v", err)
+	}
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+}
+
+func TestRuntime_NewPool_BuildsAUsablePool(t *testing.T) {
+	rt := newTestRuntime(t, 1<<20)
+	compiled, err := rt.CompileModule(context.Background(), emptyModule)
+	if err != nil {
+		t.Fatalf("CompileModule: %v", err)
+	}
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+
+	pool := rt.NewPool("testmod", compiled, PoolConfig{MaxSize: 1, WarmSize: 1, BorrowTimeout: time.Second})
+	t.Cleanup(func() { pool.DrainAndClose(context.Background(), 10*time.Millisecond) })
+
+	inst, err := pool.Borrow(context.Background())
+	if err != nil {
+		t.Fatalf("Borrow: %v", err)
+	}
+	if inst == nil {
+		t.Fatal("expected a non-nil instance")
+	}
+}
+
+func TestRuntime_InstantiateTemp_ReturnsAUsableInstance(t *testing.T) {
+	rt := newTestRuntime(t, 1<<20)
+	compiled, err := rt.CompileModule(context.Background(), emptyModule)
+	if err != nil {
+		t.Fatalf("CompileModule: %v", err)
+	}
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+
+	inst, err := rt.InstantiateTemp(context.Background(), "testmod", compiled)
+	if err != nil {
+		t.Fatalf("InstantiateTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Module().Close(context.Background()) })
+}
+
+func TestRuntime_InstantiateTemp_NamesDontCollideAcrossCalls(t *testing.T) {
+	rt := newTestRuntime(t, 1<<20)
+	compiled, err := rt.CompileModule(context.Background(), emptyModule)
+	if err != nil {
+		t.Fatalf("CompileModule: %v", err)
+	}
+	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+
+	instA, err := rt.InstantiateTemp(context.Background(), "testmod", compiled)
+	if err != nil {
+		t.Fatalf("InstantiateTemp (A): %v", err)
+	}
+	t.Cleanup(func() { _ = instA.Module().Close(context.Background()) })
+
+	// Without a distinct wazero module name per call, this second
+	// instantiation (of the same module name, while the first is still
+	// open) would fail — wazero rejects a name already in use.
+	instB, err := rt.InstantiateTemp(context.Background(), "testmod", compiled)
+	if err != nil {
+		t.Fatalf("InstantiateTemp (B): %v", err)
+	}
+	t.Cleanup(func() { _ = instB.Module().Close(context.Background()) })
 }

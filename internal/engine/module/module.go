@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
@@ -16,6 +17,7 @@ type LoadedModule struct {
 	CompiledModule wazero.CompiledModule
 	Pool           *wasm.InstancePool
 	Status         ModuleStatus
+	Capabilities   abi.CapabilitySet
 	// FailureReason is set only when Status == StatusFailed. Set it via
 	// Fail or FailDependency rather than assigning directly, so the two
 	// fields can never go out of sync.

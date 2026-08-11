@@ -155,26 +155,10 @@ func (p *InstancePool) Return(inst *ModuleInstance) {
 func (p *InstancePool) instantiate(ctx context.Context) (*ModuleInstance, error) {
 	seq := p.seq.Add(1)
 	modName := fmt.Sprintf("%s-%d", p.moduleName, seq)
-	mod, err := p.wasmRuntime.InstantiateModule(ctx, p.compiled, wazero.NewModuleConfig().WithName(modName))
+
+	inst, err := newModuleInstance(ctx, modName, p.compiled, p.wasmRuntime)
 	if err != nil {
-		return nil, fmt.Errorf("instantiate %s: %w", p.moduleName, err)
-	}
-
-	inst := &ModuleInstance{
-		module: mod,
-		memory: mod.Memory(),
-	}
-	inst.allocate = mod.ExportedFunction("allocate")
-	inst.deallocate = mod.ExportedFunction("deallocate")
-	inst.handleRequest = mod.ExportedFunction("handle_request")
-	inst.handleEvent = mod.ExportedFunction("handle_event")
-	inst.handleJob = mod.ExportedFunction("handle_job")
-
-	if initFn := mod.ExportedFunction("init"); initFn != nil {
-		if _, err := initFn.Call(ctx); err != nil {
-			_ = mod.CloseWithExitCode(context.Background(), 0)
-			return nil, fmt.Errorf("init() for %s: %w", p.moduleName, err)
-		}
+		return nil, err
 	}
 
 	p.created.Add(1)
