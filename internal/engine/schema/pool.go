@@ -11,6 +11,15 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
+// ModuleSyncStatus is one module's sync record for one tenant — a row of
+// system.module_schema_versions.
+type ModuleSyncStatus struct {
+	ModuleName     string
+	CurrentVersion string
+	Status         string // "ok" | "failed" | "in_progress"
+	SyncedAt       *time.Time
+}
+
 const createModuleSchemaVersionsSchema = `CREATE SCHEMA IF NOT EXISTS system`
 
 const createModuleSchemaVersionsTable = `
@@ -44,6 +53,45 @@ func (p *SchemaSyncPool) Bootstrap(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// StatusForTenant returns every module_schema_versions row for the given
+// tenant — the raw material for the "N of M modules synced" ratio
+// GET /admin/tenants/{slug} reports (adminapi.SyncStatusReader). The
+// denominator is deliberately "modules with a sync record for this
+// tenant," not "every module currently loaded by the engine" — a module
+// that has never attempted sync for this tenant has nothing meaningful to
+// report either way, so this needs no dependency on a live module
+// registry.
+func (p *SchemaSyncPool) StatusForTenant(ctx context.Context, tenantID string) ([]ModuleSyncStatus, error) {
+	rows, err := p.primary.QueryContext(ctx, `
+		SELECT module_name, current_version, schema_sync_status, schema_synced_at
+		FROM system.module_schema_versions
+		WHERE tenant_id = $1
+		ORDER BY module_name
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("query module sync status: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var statuses []ModuleSyncStatus
+	for rows.Next() {
+		var s ModuleSyncStatus
+		var syncedAt sql.NullTime
+		if err := rows.Scan(&s.ModuleName, &s.CurrentVersion, &s.Status, &syncedAt); err != nil {
+			return nil, fmt.Errorf("scan module sync status: %w", err)
+		}
+		if syncedAt.Valid {
+			s.SyncedAt = &syncedAt.Time
+		}
+		statuses = append(statuses, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate module sync status: %w", err)
+	}
+
+	return statuses, nil
 }
 
 func (p *SchemaSyncPool) BeginSync(ctx context.Context, tenantID, tenantSlug, moduleName string, manifest *manifest.Manifest) (*SchemaSyncSession, error) {

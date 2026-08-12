@@ -27,19 +27,20 @@ const (
 )
 
 type Tenant struct {
-	ID            string
-	Slug          string
-	Name          string
-	Plan          Plan
-	Status        Status
-	Region        string
-	TrialEndsAt   *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	SuspendedAt   *time.Time
-	SuspendedBy   *string
-	SuspendReason *string
-	DeletedAt     *time.Time
+	ID            string     `json:"id"`
+	Slug          string     `json:"slug"`
+	Name          string     `json:"name"`
+	Plan          Plan       `json:"plan"`
+	Status        Status     `json:"status"`
+	Region        string     `json:"region"`
+	Country       *string    `json:"country,omitempty"`
+	TrialEndsAt   *time.Time `json:"trial_ends_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	SuspendedAt   *time.Time `json:"suspended_at,omitempty"`
+	SuspendedBy   *string    `json:"suspended_by,omitempty"`
+	SuspendReason *string    `json:"suspend_reason,omitempty"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 }
 
 type DomainType string
@@ -50,11 +51,11 @@ const (
 )
 
 type Domain struct {
-	ID         string
-	TenantID   string
-	Domain     string
-	Type       DomainType
-	IsPrimary  bool
-	VerifiedAt *time.Time
-	CreatedAt  time.Time
+	ID         string     `json:"id"`
+	TenantID   string     `json:"tenant_id"`
+	Domain     string     `json:"domain"`
+	Type       DomainType `json:"type"`
+	IsPrimary  bool       `json:"is_primary"`
+	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
 }

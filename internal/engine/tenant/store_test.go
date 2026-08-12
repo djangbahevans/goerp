@@ -3,6 +3,7 @@ package tenant
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -204,4 +205,152 @@ func TestActiveTenants_ReturnsOnlyActiveStatus(t *testing.T) {
 	if gotSlugs[provisioning.Slug] {
 		t.Errorf("did not expect provisioning tenant %q in ActiveTenants() result", provisioning.Slug)
 	}
+}
+
+func TestGetBySlug_Succeeds(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	created := createTenant(t, store, conn, slug, "Get Me")
+
+	got, err := store.GetBySlug(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("GetBySlug() error: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Errorf("ID = %q, want %q", got.ID, created.ID)
+	}
+	if got.Name != "Get Me" {
+		t.Errorf("Name = %q, want %q", got.Name, "Get Me")
+	}
+}
+
+func TestGetBySlug_NotFoundReturnsErrTenantNotFound(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	_, err := store.GetBySlug(context.Background(), uniqueSlug(t))
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("GetBySlug() error = %v, want ErrTenantNotFound", err)
+	}
+}
+
+func TestUpdateStatus_SuspendSetsSuspendedAtAndReason(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Suspend Me")
+
+	reason := "unpaid invoice"
+	got, err := store.UpdateStatus(context.Background(), slug, StatusSuspended, &reason)
+	if err != nil {
+		t.Fatalf("UpdateStatus() error: %v", err)
+	}
+
+	if got.Status != StatusSuspended {
+		t.Errorf("Status = %q, want %q", got.Status, StatusSuspended)
+	}
+	if got.SuspendedAt == nil {
+		t.Fatal("expected SuspendedAt to be set")
+	}
+	if got.SuspendReason == nil || *got.SuspendReason != reason {
+		t.Errorf("SuspendReason = %v, want %q", got.SuspendReason, reason)
+	}
+}
+
+func TestUpdateStatus_UnsuspendPreservesSuspensionHistory(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Unsuspend Me")
+
+	reason := "security review"
+	suspended, err := store.UpdateStatus(context.Background(), slug, StatusSuspended, &reason)
+	if err != nil {
+		t.Fatalf("suspend UpdateStatus() error: %v", err)
+	}
+
+	unsuspended, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil)
+	if err != nil {
+		t.Fatalf("unsuspend UpdateStatus() error: %v", err)
+	}
+
+	if unsuspended.Status != StatusActive {
+		t.Errorf("Status = %q, want %q", unsuspended.Status, StatusActive)
+	}
+	if unsuspended.SuspendedAt == nil || !unsuspended.SuspendedAt.Equal(*suspended.SuspendedAt) {
+		t.Error("expected SuspendedAt to be preserved across unsuspend, not cleared")
+	}
+	if unsuspended.SuspendReason == nil || *unsuspended.SuspendReason != reason {
+		t.Error("expected SuspendReason to be preserved across unsuspend, not cleared")
+	}
+}
+
+func TestUpdateStatus_NotFoundReturnsErrTenantNotFound(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	_, err := store.UpdateStatus(context.Background(), uniqueSlug(t), StatusActive, nil)
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("UpdateStatus() error = %v, want ErrTenantNotFound", err)
+	}
+}
+
+func TestList_FiltersByStatusAndPlan(t *testing.T) {
+	store, conn := openTestStore(t)
+	ctx := context.Background()
+
+	active := createTenant(t, store, conn, uniqueSlug(t), "Active Plan Test")
+	if _, err := store.db.ExecContext(ctx, "UPDATE system.tenants SET status = 'active' WHERE id = $1", active.ID); err != nil {
+		t.Fatalf("mark tenant active: %v", err)
+	}
+	provisioning := createTenant(t, store, conn, uniqueSlug(t), "Still Provisioning")
+
+	got, _, err := store.List(ctx, ListFilter{Status: StatusActive})
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+
+	gotSlugs := make(map[string]bool, len(got))
+	for _, tt := range got {
+		gotSlugs[tt.Slug] = true
+	}
+	if !gotSlugs[active.Slug] {
+		t.Errorf("expected %q in List(status=active) result", active.Slug)
+	}
+	if gotSlugs[provisioning.Slug] {
+		t.Errorf("did not expect provisioning tenant %q in List(status=active) result", provisioning.Slug)
+	}
+}
+
+func TestList_PaginatesWithCursor(t *testing.T) {
+	store, conn := openTestStore(t)
+	ctx := context.Background()
+
+	var created []*Tenant
+	for range 3 {
+		created = append(created, createTenant(t, store, conn, uniqueSlug(t), "Page Test"))
+	}
+
+	page1, cursor1, err := store.List(ctx, ListFilter{Limit: 2})
+	if err != nil {
+		t.Fatalf("List() page 1 error: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("len(page1) = %d, want 2", len(page1))
+	}
+	if cursor1 == "" {
+		t.Fatal("expected a non-empty cursor after a full first page")
+	}
+
+	page2, _, err := store.List(ctx, ListFilter{Limit: 2, Cursor: cursor1})
+	if err != nil {
+		t.Fatalf("List() page 2 error: %v", err)
+	}
+
+	seen := make(map[string]bool)
+	for _, tt := range page1 {
+		seen[tt.ID] = true
+	}
+	for _, tt := range page2 {
+		if seen[tt.ID] {
+			t.Errorf("tenant %q appeared on both pages", tt.Slug)
+		}
+	}
+	_ = created
 }

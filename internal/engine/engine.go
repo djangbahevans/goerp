@@ -123,6 +123,15 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("bootstrap tenant registry: %w", err)
 	}
 
+	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
+		Store:      tenantStore,
+		SyncStatus: syncPool,
+		// Provisioner, Inviter, Exporter, Importer, Offboarder stay nil
+		// until goerp#149/#148/#15/#150 land — the handlers report
+		// StatusNotImplemented for those routes rather than the wiring
+		// needing a placeholder implementation here.
+	})
+
 	cacheClient, err := cache.New(ctx, cache.Config{
 		Addr:          cfg.RedisAddr,
 		MasterName:    cfg.RedisSentinelMaster,
