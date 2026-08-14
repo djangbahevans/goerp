@@ -1,6 +1,6 @@
 module github.com/djangbahevans/goerp
 
-go 1.26.5
+go 1.26.6
 
 require (
 	ariga.io/atlas v1.3.0
