@@ -27,7 +27,7 @@ func newResendInviteCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "resending invite to %s for tenant %q...\n", email, slug)
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "resending invite to %s for tenant %q...\n", email, slug)
 
 			data, err := client.Post(cmd.Context(),
 				fmt.Sprintf("/admin/tenants/%s/resend-invite", slug),
@@ -38,16 +38,16 @@ func newResendInviteCmd() *cobra.Command {
 			if err != nil {
 				if jsonOut {
 					if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-						fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
+						_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
 					}
 				}
 				return err
 			}
 
 			if jsonOut {
-				fmt.Fprintln(cmd.OutOrStdout(), string(data))
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "invite resent to %s\n", email)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "invite resent to %s\n", email)
 			}
 
 			return nil
