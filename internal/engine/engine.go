@@ -27,12 +27,15 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
+	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero/api"
@@ -123,13 +126,33 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("bootstrap tenant registry: %w", err)
 	}
 
+	userStore := user.NewStore(primaryPool)
+	if err := userStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap user identity store: %w", err)
+	}
+
+	// roleStore's Bootstrap is per-tenant (roles/role_permissions/
+	// user_roles live in each tenant's own schema, not system) — invoked
+	// once a tenant schema actually exists, by provisioning (goerp#149),
+	// not here at engine startup.
+	roleStore := role.NewStore(primaryPool)
+	inviteStore := invite.NewStore(primaryPool, userStore, roleStore, nil, nil)
+
 	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
 		Store:      tenantStore,
 		SyncStatus: syncPool,
-		// Provisioner, Inviter, Exporter, Importer, Offboarder stay nil
-		// until goerp#149/#148/#15/#150 land — the handlers report
+		Inviter:    inviteStore,
+		// Provisioner, Exporter, Importer, Offboarder stay nil until
+		// goerp#149/#15/#150 land — the handlers report
 		// StatusNotImplemented for those routes rather than the wiring
-		// needing a placeholder implementation here.
+		// needing a placeholder implementation here. inviteStore's own
+		// audit/mailer seams are nil until goerp#16/#166 land, same
+		// nil-safe-logs-and-continues pattern.
 	})
 
 	cacheClient, err := cache.New(ctx, cache.Config{
