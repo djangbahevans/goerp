@@ -3,8 +3,12 @@ package tenant
 import "github.com/spf13/cobra"
 
 func NewCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "tenant",
-		Short: "Manage tenants (not yet implemented)",
+		Short: "Manage tenants",
 	}
+
+	cmd.AddCommand(newResendInviteCmd())
+
+	return cmd
 }
