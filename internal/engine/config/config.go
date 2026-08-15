@@ -28,6 +28,8 @@ type Config struct {
 	// Core
 	ListenAddr         string        `env:"GOERP_LISTEN_ADDR" envDefault:":8080" validate:"hostname_port"`
 	AdminAddr          string        `env:"GOERP_ADMIN_ADDR" envDefault:"127.0.0.1:8081" validate:"loopback"`
+	AdminMaxBodyBytes  int64         `env:"GOERP_ADMIN_MAX_BODY_BYTES" envDefault:"10485760"`
+	AdminMaxConcurrent int           `env:"GOERP_ADMIN_MAX_CONCURRENT" envDefault:"20"`
 	Environment        string        `env:"GOERP_ENV" envDefault:"production" validate:"oneof=production staging development"`
 	LogLevel           string        `env:"GOERP_LOG_LEVEL" envDefault:"info" validate:"oneof=debug info warn error"`
 	LogFormat          string        `env:"GOERP_LOG_FORMAT" envDefault:"json" validate:"oneof=json text"`

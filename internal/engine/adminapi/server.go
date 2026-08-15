@@ -2,11 +2,13 @@
 // §11): a second listener, bound to whatever loopback address
 // config.AdminAddr resolves to (loopback-ness is validated once, at config
 // load time — this package trusts its ListenAddr and does not re-validate
-// it), whose entire route tree sits behind adminAuthMiddleware. It shares
-// nothing with httpx's main-server middleware chain (no tenant resolution,
-// no per-tenant rate limiting, no route auth) — the two servers' threat
-// models differ. This package wires only the listener and the bearer-token
-// gate; actual /admin/* routes are registered onto Router() by later work.
+// it), whose entire route tree sits behind adminAuthMiddleware plus a
+// request body cap, a process-wide concurrency cap, and an audit-log
+// write for every mutating request (§11 "Request limits" and "Audit
+// logging"). It shares nothing with httpx's main-server middleware chain
+// (no tenant resolution, no per-tenant rate limiting, no route auth) —
+// the two servers' threat models differ. Actual /admin/* routes are
+// registered onto Router() by tenant.go and later work.
 package adminapi
 
 import (
@@ -15,6 +17,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -27,6 +30,10 @@ type Config struct {
 	// rather than silently minting an auth gate an empty
 	// "Authorization: Bearer " header could satisfy.
 	AdminToken string
+
+	MaxBodyBytes  int64
+	MaxConcurrent int
+	AuditStore    *auditlog.Store
 }
 
 type Server struct {
@@ -41,14 +48,22 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	router := http.NewServeMux()
-	authed := adminAuthMiddleware(cfg.AdminToken)(router)
+
+	// Innermost out: audit (only authenticated requests are attributable
+	// to an operator) -> auth -> concurrency/body limits (guard the
+	// process before spending any cycles on auth or routing).
+	var handler http.Handler = router
+	handler = auditLogMiddleware(cfg.AuditStore)(handler)
+	handler = adminAuthMiddleware(cfg.AdminToken)(handler)
+	handler = concurrencyLimitMiddleware(cfg.MaxConcurrent)(handler)
+	handler = bodyCapMiddleware(cfg.MaxBodyBytes)(handler)
 
 	s := &Server{
 		cfg:    cfg,
 		router: router,
 		http: &http.Server{
 			Addr:         cfg.ListenAddr,
-			Handler:      authed,
+			Handler:      handler,
 			ReadTimeout:  15 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},

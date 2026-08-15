@@ -24,7 +24,7 @@ func TestNewServerRegisteredRouteRequiresAuth(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 
-	s, err := NewServer(&Config{ListenAddr: addr, AdminToken: "correct-token"})
+	s, err := NewServer(&Config{ListenAddr: addr, AdminToken: "correct-token", MaxBodyBytes: 1 << 20, MaxConcurrent: 10})
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
