@@ -37,6 +37,7 @@ type Tenant struct {
 	TrialEndsAt   *time.Time `json:"trial_ends_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+	ActivatedAt   *time.Time `json:"activated_at,omitempty"`
 	SuspendedAt   *time.Time `json:"suspended_at,omitempty"`
 	SuspendedBy   *string    `json:"suspended_by,omitempty"`
 	SuspendReason *string    `json:"suspend_reason,omitempty"`

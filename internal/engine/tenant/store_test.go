@@ -306,6 +306,38 @@ func TestUpdateStatus_UnsuspendPreservesSuspensionHistory(t *testing.T) {
 	}
 }
 
+func TestUpdateStatus_ActivateSetsActivatedAtOnce(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Activate Me")
+
+	activated, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil)
+	if err != nil {
+		t.Fatalf("activate UpdateStatus() error: %v", err)
+	}
+	if activated.ActivatedAt == nil {
+		t.Fatal("expected ActivatedAt to be set on first activation")
+	}
+	firstActivatedAt := *activated.ActivatedAt
+
+	reason := "routine check"
+	suspended, err := store.UpdateStatus(context.Background(), slug, StatusSuspended, &reason)
+	if err != nil {
+		t.Fatalf("suspend UpdateStatus() error: %v", err)
+	}
+	if suspended.ActivatedAt == nil || !suspended.ActivatedAt.Equal(firstActivatedAt) {
+		t.Error("expected ActivatedAt to be preserved across suspend, not cleared")
+	}
+
+	reactivated, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil)
+	if err != nil {
+		t.Fatalf("reactivate UpdateStatus() error: %v", err)
+	}
+	if reactivated.ActivatedAt == nil || !reactivated.ActivatedAt.Equal(firstActivatedAt) {
+		t.Error("expected ActivatedAt to stay at the original activation time, not reset on reactivation")
+	}
+}
+
 func TestUpdateStatus_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 

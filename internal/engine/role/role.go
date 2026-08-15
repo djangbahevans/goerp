@@ -15,11 +15,19 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
 var ErrRoleNotFound = errors.New("role not found")
+
+// ErrAdminUserNotFound is returned by AdminUserID when no user currently
+// holds the tenant's built-in 'admin' role — including a tenant whose
+// schema (and therefore its roles/user_roles tables) hasn't been
+// provisioned yet.
+var ErrAdminUserNotFound = errors.New("tenant has no admin user")
 
 type Store struct {
 	db *sql.DB
@@ -137,4 +145,58 @@ func (s *Store) GetRoleByName(ctx context.Context, tenantSlug, name string) (str
 	}
 
 	return id, nil
+}
+
+// CountUsers returns the number of distinct users holding any role grant
+// in the tenant's schema — the Users column cli-reference.md §5 documents
+// for `goerp tenant list`. Returns 0, not an error, for a tenant whose
+// schema hasn't been provisioned yet, the same count a real
+// freshly-provisioned tenant with no grants yet would report.
+func (s *Store) CountUsers(ctx context.Context, tenantSlug string) (int, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`SELECT COUNT(DISTINCT user_id) FROM %s.user_roles`, schema)
+
+	var count int
+	if err := s.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
+		if isUndefinedTable(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("count tenant users: %w", err)
+	}
+
+	return count, nil
+}
+
+// AdminUserID returns the user_id of the tenant's admin user — the
+// earliest grantee of the built-in 'admin' role in the tenant's schema.
+// Returns ErrAdminUserNotFound if no user currently holds that role.
+func (s *Store) AdminUserID(ctx context.Context, tenantSlug string) (string, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`
+		SELECT ur.user_id
+		FROM %s.user_roles ur
+		JOIN %s.roles r ON r.id = ur.role_id
+		WHERE r.name = 'admin'
+		ORDER BY ur.granted_at ASC
+		LIMIT 1
+	`, schema, schema)
+
+	var userID string
+	if err := s.db.QueryRowContext(ctx, query).Scan(&userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || isUndefinedTable(err) {
+			return "", ErrAdminUserNotFound
+		}
+		return "", fmt.Errorf("get tenant admin user: %w", err)
+	}
+
+	return userID, nil
+}
+
+// isUndefinedTable reports whether err is Postgres' undefined_table error
+// (42P01) — the error a query against a tenant_{slug} schema's tables gets
+// when that tenant's schema (or role.Store.Bootstrap for it) hasn't run
+// yet, as opposed to a genuine query failure.
+func isUndefinedTable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
 }

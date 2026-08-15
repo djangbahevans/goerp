@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS system.tenants (
     trial_ends_at   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    activated_at    TIMESTAMPTZ,
     suspended_at    TIMESTAMPTZ,
     suspended_by    UUID,
     suspend_reason  TEXT,
@@ -64,14 +65,6 @@ CREATE INDEX IF NOT EXISTS idx_tenant_domains_domain ON system.tenant_domains(do
     WHERE verified_at IS NOT NULL OR type = 'subdomain'
 `
 
-// addCountryColumn backfills the country column onto a system.tenants
-// table created before it was added to createTenantsTable — CREATE TABLE
-// IF NOT EXISTS is a no-op against an already-existing table, so a fresh
-// column added to that constant only reaches tables bootstrapped after
-// the change without this. Additive and nullable; never touches existing
-// rows' data.
-const addCountryColumn = `ALTER TABLE system.tenants ADD COLUMN IF NOT EXISTS country TEXT`
-
 type Store struct {
 	db *sql.DB
 }
@@ -96,9 +89,6 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createTenantDomainsTable); err != nil {
 			return fmt.Errorf("create tenant_domains table: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, addCountryColumn); err != nil {
-			return fmt.Errorf("add country column: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, createTenantDomainsDomainIndex); err != nil {
 			return fmt.Errorf("create tenant_domains domain index: %w", err)
@@ -168,7 +158,7 @@ func (s *Store) ActiveTenants(ctx context.Context) ([]Tenant, error) {
 // shared by every method below that returns a complete Tenant (as opposed
 // to CreateTenant/ActiveTenants' narrower, pre-existing column lists,
 // which are left as they were to avoid disturbing their own tests).
-const tenantColumns = `id, slug, name, plan, status, region, country, trial_ends_at, created_at, updated_at, suspended_at, suspended_by, suspend_reason, deleted_at`
+const tenantColumns = `id, slug, name, plan, status, region, country, trial_ends_at, created_at, updated_at, activated_at, suspended_at, suspended_by, suspend_reason, deleted_at`
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows, so scanTenant
 // works for both a single-row QueryRowContext result and one row of a
@@ -180,11 +170,11 @@ type rowScanner interface {
 func scanTenant(sc rowScanner) (*Tenant, error) {
 	var t Tenant
 	var country, suspendedBy, suspendReason sql.NullString
-	var trialEndsAt, suspendedAt, deletedAt sql.NullTime
+	var trialEndsAt, activatedAt, suspendedAt, deletedAt sql.NullTime
 
 	if err := sc.Scan(
 		&t.ID, &t.Slug, &t.Name, &t.Plan, &t.Status, &t.Region, &country,
-		&trialEndsAt, &t.CreatedAt, &t.UpdatedAt, &suspendedAt, &suspendedBy,
+		&trialEndsAt, &t.CreatedAt, &t.UpdatedAt, &activatedAt, &suspendedAt, &suspendedBy,
 		&suspendReason, &deletedAt,
 	); err != nil {
 		return nil, err
@@ -195,6 +185,9 @@ func scanTenant(sc rowScanner) (*Tenant, error) {
 	}
 	if trialEndsAt.Valid {
 		t.TrialEndsAt = &trialEndsAt.Time
+	}
+	if activatedAt.Valid {
+		t.ActivatedAt = &activatedAt.Time
 	}
 	if suspendedAt.Valid {
 		t.SuspendedAt = &suspendedAt.Time
@@ -292,12 +285,18 @@ func (s *Store) GetBySlug(ctx context.Context, slug string) (*Tenant, error) {
 // StatusSuspended, records suspended_at/suspend_reason — those two columns
 // are intentionally never cleared on a later transition (e.g. unsuspend),
 // preserving "when/why was this tenant last suspended" as history rather
-// than losing it the moment the tenant becomes active again.
+// than losing it the moment the tenant becomes active again. Similarly,
+// transitioning to StatusActive sets activated_at only the first time
+// (activated_at IS NULL) — a later suspend/unsuspend cycle back to active
+// leaves the original activation timestamp alone, since it's what
+// `goerp tenant status`'s provisioning-duration figure (activated_at -
+// created_at) is meant to measure.
 func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, reason *string) (*Tenant, error) {
 	row := s.db.QueryRowContext(ctx, `
 		UPDATE system.tenants
 		SET status = $1,
 		    updated_at = NOW(),
+		    activated_at = CASE WHEN $1 = 'active' AND activated_at IS NULL THEN NOW() ELSE activated_at END,
 		    suspended_at = CASE WHEN $1 = 'suspended' THEN NOW() ELSE suspended_at END,
 		    suspend_reason = CASE WHEN $1 = 'suspended' THEN $2 ELSE suspend_reason END
 		WHERE slug = $3
