@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,6 +55,52 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 
 	if err := store.Bootstrap(context.Background(), slug); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
+	}
+}
+
+// TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed guards
+// against goerp#171 directly against the original failure mode — N
+// concurrent first-time Bootstrap calls racing on CREATE TABLE IF NOT
+// EXISTS against tables that don't exist yet, unlike
+// TestBootstrap_IsIdempotent above which only re-runs Bootstrap after
+// openTestStore's own call already created everything. This uses its own
+// fresh tenant_<random> schema (not openTestStore's) specifically so this
+// is the case being tested, and per-test unique schemas make this safe to
+// run alongside every other test/package touching Postgres concurrently
+// — see tenant/store_test.go's openTestStore doc comment for why a
+// shared table couldn't do the same.
+func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	slug := fmt.Sprintf("roleconcurrent%d", time.Now().UnixNano())
+	schema := tenantschema.Name(slug)
+	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatalf("create fixture schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.ExecContext(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	})
+
+	store := NewStore(conn)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 5)
+	for range 5 {
+		wg.Go(func() {
+			errs <- store.Bootstrap(context.Background(), slug)
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent Bootstrap() error: %v", err)
+		}
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/rs/zerolog/log"
 )
@@ -65,36 +66,42 @@ type Mailer interface {
 // given tenant's schema if they don't already exist. Does not create the
 // schema itself, and does not create roles — assumes internal/engine/role's
 // Bootstrap already ran against this tenant (tenant_invitations.role_id
-// references {schema}.roles(id)).
+// references {schema}.roles(id)). Concurrent-safe against other calls
+// racing to bootstrap the same tenant's schema (goerp#171) via
+// db.WithAdvisoryLock, scoped to tenantSlug the same way role.Store.
+// Bootstrap is.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
-	schema := tenantschema.Name(tenantSlug)
+	keys := []int64{db.AdvisoryLockKey("invite.Bootstrap:" + tenantSlug)}
+	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
+		schema := tenantschema.Name(tenantSlug)
 
-	createTable := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s.tenant_invitations (
-		    id           UUID PRIMARY KEY DEFAULT uuidv7(),
-		    email        TEXT NOT NULL,
-		    role_id      UUID NOT NULL REFERENCES %s.roles(id) ON DELETE CASCADE,
-		    invited_by   UUID,
-		    token_hash   TEXT NOT NULL,
-		    expires_at   TIMESTAMPTZ NOT NULL,
-		    accepted_at  TIMESTAMPTZ,
-		    revoked_at   TIMESTAMPTZ,
-		    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)
-	`, schema, schema)
-	if _, err := s.db.ExecContext(ctx, createTable); err != nil {
-		return fmt.Errorf("create tenant_invitations table: %w", err)
-	}
+		createTable := fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s.tenant_invitations (
+			    id           UUID PRIMARY KEY DEFAULT uuidv7(),
+			    email        TEXT NOT NULL,
+			    role_id      UUID NOT NULL REFERENCES %s.roles(id) ON DELETE CASCADE,
+			    invited_by   UUID,
+			    token_hash   TEXT NOT NULL,
+			    expires_at   TIMESTAMPTZ NOT NULL,
+			    accepted_at  TIMESTAMPTZ,
+			    revoked_at   TIMESTAMPTZ,
+			    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)
+		`, schema, schema)
+		if _, err := tx.ExecContext(ctx, createTable); err != nil {
+			return fmt.Errorf("create tenant_invitations table: %w", err)
+		}
 
-	createIndex := fmt.Sprintf(`
-		CREATE UNIQUE INDEX IF NOT EXISTS tenant_invitations_email_pending_unique
-		    ON %s.tenant_invitations(email) WHERE accepted_at IS NULL AND revoked_at IS NULL
-	`, schema)
-	if _, err := s.db.ExecContext(ctx, createIndex); err != nil {
-		return fmt.Errorf("create tenant_invitations email index: %w", err)
-	}
+		createIndex := fmt.Sprintf(`
+			CREATE UNIQUE INDEX IF NOT EXISTS tenant_invitations_email_pending_unique
+			    ON %s.tenant_invitations(email) WHERE accepted_at IS NULL AND revoked_at IS NULL
+		`, schema)
+		if _, err := tx.ExecContext(ctx, createIndex); err != nil {
+			return fmt.Errorf("create tenant_invitations email index: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 const invitationColumns = `id, email, role_id, invited_by, expires_at, accepted_at, revoked_at, created_at`

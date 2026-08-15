@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -86,6 +87,53 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 
 	if err := store.Bootstrap(context.Background(), slug); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
+	}
+}
+
+// TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed guards
+// against goerp#171 directly against the original failure mode — see
+// role's identically-named test for why this needs its own fresh schema
+// rather than reusing openTestStore. role.Store.Bootstrap runs once
+// (single call, not concurrent) first since tenant_invitations.role_id
+// references {schema}.roles(id) — only the tenant_invitations creation
+// itself is exercised concurrently here.
+func TestBootstrap_ConcurrentCallsAgainstFreshSchemaAllSucceed(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	slug := fmt.Sprintf("inviteconcurrent%d", time.Now().UnixNano())
+	schema := tenantschema.Name(slug)
+	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+		t.Fatalf("create fixture schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.ExecContext(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	})
+
+	roleStore := role.NewStore(conn)
+	if err := roleStore.Bootstrap(context.Background(), slug); err != nil {
+		t.Fatalf("role Bootstrap() error: %v", err)
+	}
+
+	store := NewStore(conn, newFakeUserResolver(), roleStore, nil, nil)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 5)
+	for range 5 {
+		wg.Go(func() {
+			errs <- store.Bootstrap(context.Background(), slug)
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent Bootstrap() error: %v", err)
+		}
 	}
 }
 

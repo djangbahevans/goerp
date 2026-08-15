@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/djangbahevans/goerp/internal/engine/db"
 )
 
 var ErrTenantNotFound = errors.New("tenant not found")
-
-const createSchema = `CREATE SCHEMA IF NOT EXISTS system`
 
 // createTenantsTable matches multitenancy-internals.md §2's tenants
 // definition, except suspended_by omits its documented
@@ -83,24 +83,29 @@ func NewStore(db *sql.DB) *Store {
 // Bootstrap creates system.tenants and system.tenant_domains (and their
 // partial index) if they don't already exist. Idempotent — safe to call
 // on every engine startup, same as schema.SchemaSyncPool.Bootstrap.
+// Concurrent-safe against other processes calling Bootstrap at the same
+// time (goerp#171) via db.WithAdvisoryLock.
 func (s *Store) Bootstrap(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, createSchema); err != nil {
-		return fmt.Errorf("create system schema: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, createTenantsTable); err != nil {
-		return fmt.Errorf("create tenants table: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, createTenantDomainsTable); err != nil {
-		return fmt.Errorf("create tenant_domains table: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, addCountryColumn); err != nil {
-		return fmt.Errorf("add country column: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, createTenantDomainsDomainIndex); err != nil {
-		return fmt.Errorf("create tenant_domains domain index: %w", err)
-	}
+	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("tenant.Bootstrap")}
+	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
+		if err := db.EnsureSystemSchema(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, createTenantsTable); err != nil {
+			return fmt.Errorf("create tenants table: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createTenantDomainsTable); err != nil {
+			return fmt.Errorf("create tenant_domains table: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, addCountryColumn); err != nil {
+			return fmt.Errorf("add country column: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createTenantDomainsDomainIndex); err != nil {
+			return fmt.Errorf("create tenant_domains domain index: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // CreateTenant inserts a new tenant with the given slug/name, taking every
