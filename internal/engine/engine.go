@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
+	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -74,14 +75,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	adminToken, err := secretsBackend.Get(ctx, "GOERP_ADMIN_TOKEN")
 	if err != nil {
 		return nil, fmt.Errorf("load admin token: %w", err)
-	}
-
-	adminServer, err := adminapi.NewServer(&adminapi.Config{
-		ListenAddr: cfg.AdminAddr,
-		AdminToken: adminToken,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create admin server: %w", err)
 	}
 
 	primaryPool, err := db.New(cfg.DBPrimaryDSN)
@@ -142,6 +135,32 @@ func New(cfg *config.Config) (*Engine, error) {
 	// not here at engine startup.
 	roleStore := role.NewStore(primaryPool)
 	inviteStore := invite.NewStore(primaryPool, userStore, roleStore, nil, nil)
+
+	auditStore := auditlog.NewStore(primaryPool)
+	if err := auditStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap admin audit log: %w", err)
+	}
+
+	adminServer, err := adminapi.NewServer(&adminapi.Config{
+		ListenAddr:    cfg.AdminAddr,
+		AdminToken:    adminToken,
+		MaxBodyBytes:  cfg.AdminMaxBodyBytes,
+		MaxConcurrent: cfg.AdminMaxConcurrent,
+		AuditStore:    auditStore,
+	})
+	if err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("create admin server: %w", err)
+	}
 
 	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
 		Store:      tenantStore,
