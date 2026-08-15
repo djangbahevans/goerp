@@ -2,11 +2,43 @@ package schema
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
+
+// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171: two
+// concurrent Bootstrap calls racing on CREATE TABLE/SCHEMA IF NOT EXISTS
+// could previously fail one of them with a raw Postgres constraint
+// violation instead of behaving as the idempotent no-op IF NOT EXISTS is
+// supposed to guarantee. openTestPool's own Bootstrap call already
+// created system.module_schema_versions, so this exercises the
+// steady-state case every engine replica after the first hits on
+// restart, not the very first table-creation race itself — see
+// db.TestWithAdvisoryLock_SerializesConcurrentHoldersOfSameKey for a
+// direct test of the underlying locking mechanism against a table that
+// doesn't exist yet.
+func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
+	_, pool := openTestPool(t, 5*time.Second)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 5)
+	for range 5 {
+		wg.Go(func() {
+			errs <- pool.Bootstrap(context.Background())
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent Bootstrap() error: %v", err)
+		}
+	}
+}
 
 func TestStatusForTenant_ReturnsRowsOrderedByModuleName(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)

@@ -9,9 +9,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-)
 
-const createSchema = `CREATE SCHEMA IF NOT EXISTS system`
+	"github.com/djangbahevans/goerp/internal/engine/db"
+)
 
 const createAuditLogTable = `
 CREATE TABLE IF NOT EXISTS system.admin_audit_log (
@@ -45,19 +45,23 @@ func NewStore(db *sql.DB) *Store {
 
 // Bootstrap creates system.admin_audit_log (and its index) if it doesn't
 // already exist. Idempotent — safe to call on every engine startup, same
-// as tenant.Store.Bootstrap.
+// as tenant.Store.Bootstrap. Concurrent-safe against other processes
+// calling Bootstrap at the same time (goerp#171) via db.WithAdvisoryLock.
 func (s *Store) Bootstrap(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, createSchema); err != nil {
-		return fmt.Errorf("create system schema: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, createAuditLogTable); err != nil {
-		return fmt.Errorf("create admin_audit_log table: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, createAuditLogCreatedAtIndex); err != nil {
-		return fmt.Errorf("create admin_audit_log created_at index: %w", err)
-	}
+	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("auditlog.Bootstrap")}
+	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
+		if err := db.EnsureSystemSchema(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, createAuditLogTable); err != nil {
+			return fmt.Errorf("create admin_audit_log table: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createAuditLogCreatedAtIndex); err != nil {
+			return fmt.Errorf("create admin_audit_log created_at index: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // Row is one admin_audit_log entry. OperatorIdentity is never empty — the

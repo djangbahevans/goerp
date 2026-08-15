@@ -3,6 +3,7 @@ package auditlog
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -34,6 +35,29 @@ func TestBootstrap_IsIdempotent(t *testing.T) {
 
 	if err := store.Bootstrap(context.Background()); err != nil {
 		t.Fatalf("second Bootstrap() call error: %v", err)
+	}
+}
+
+// TestBootstrap_ConcurrentCallsAllSucceed guards against goerp#171 — see
+// schema.TestBootstrap_ConcurrentCallsAllSucceed's doc comment for what
+// this does and doesn't prove.
+func TestBootstrap_ConcurrentCallsAllSucceed(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 5)
+	for range 5 {
+		wg.Go(func() {
+			errs <- store.Bootstrap(context.Background())
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent Bootstrap() error: %v", err)
+		}
 	}
 }
 

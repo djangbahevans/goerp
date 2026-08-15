@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
@@ -19,8 +20,6 @@ type ModuleSyncStatus struct {
 	Status         string // "ok" | "failed" | "in_progress"
 	SyncedAt       *time.Time
 }
-
-const createModuleSchemaVersionsSchema = `CREATE SCHEMA IF NOT EXISTS system`
 
 const createModuleSchemaVersionsTable = `
 CREATE TABLE IF NOT EXISTS system.module_schema_versions (
@@ -44,15 +43,21 @@ func NewPool(pool *sql.DB, lockAcquireTimeout time.Duration) *SchemaSyncPool {
 	return &SchemaSyncPool{primary: pool, lockAcquireTimeout: lockAcquireTimeout}
 }
 
+// Bootstrap creates system.module_schema_versions if it doesn't already
+// exist. Concurrent-safe against other processes calling Bootstrap at the
+// same time (goerp#171) via db.WithAdvisoryLock.
 func (p *SchemaSyncPool) Bootstrap(ctx context.Context) error {
-	if _, err := p.primary.ExecContext(ctx, createModuleSchemaVersionsSchema); err != nil {
-		return fmt.Errorf("create system schema: %w", err)
-	}
-	if _, err := p.primary.ExecContext(ctx, createModuleSchemaVersionsTable); err != nil {
-		return fmt.Errorf("create module_schema_versions table: %w", err)
-	}
+	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("schema.Bootstrap")}
+	return db.WithAdvisoryLock(ctx, p.primary, keys, func(tx *sql.Tx) error {
+		if err := db.EnsureSystemSchema(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, createModuleSchemaVersionsTable); err != nil {
+			return fmt.Errorf("create module_schema_versions table: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // StatusForTenant returns every module_schema_versions row for the given

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/djangbahevans/goerp/internal/engine/db"
 )
 
 const createUsersTable = `
@@ -66,15 +68,24 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db}
 }
 
+// Bootstrap creates system.users (and its index) if it doesn't already
+// exist. Relies on the system schema already existing — created by
+// whichever of tenant.Store/schema.SchemaSyncPool/auditlog.Store's own
+// Bootstrap engine.go calls first, not by this package. Concurrent-safe
+// against other processes calling Bootstrap at the same time (goerp#171)
+// via db.WithAdvisoryLock.
 func (s *Store) Bootstrap(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, createUsersTable); err != nil {
-		return fmt.Errorf("create users table: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, createIndex); err != nil {
-		return fmt.Errorf("create users email index: %w", err)
-	}
+	keys := []int64{db.AdvisoryLockKey("user.Bootstrap")}
+	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, createUsersTable); err != nil {
+			return fmt.Errorf("create users table: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createIndex); err != nil {
+			return fmt.Errorf("create users email index: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 const userColumns = `id, email, status, password_hash, created_at, updated_at`

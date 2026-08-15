@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
@@ -42,53 +43,61 @@ func NewStore(db *sql.DB) *Store {
 // time"). A real FK from a tenant_{slug}-schema table to system.users
 // would only resolve if system happened to be on the connection's
 // search_path at creation time, which this package never assumes.
+// Bootstrap is concurrent-safe against other calls racing to bootstrap the
+// same tenant's schema (goerp#171) via db.WithAdvisoryLock, scoped to
+// tenantSlug — bootstrapping two different tenants concurrently doesn't
+// serialize against each other, only two callers targeting the same one
+// do.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
-	schema := tenantschema.Name(tenantSlug)
+	keys := []int64{db.AdvisoryLockKey("role.Bootstrap:" + tenantSlug)}
+	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
+		schema := tenantschema.Name(tenantSlug)
 
-	createRoles := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s.roles (
-		    id           UUID PRIMARY KEY DEFAULT uuidv7(),
-		    name         TEXT NOT NULL,
-		    description  TEXT,
-		    parent_id    UUID REFERENCES %s.roles(id),
-		    is_immutable BOOLEAN NOT NULL DEFAULT FALSE,
-		    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		    UNIQUE (name)
-		)
-	`, schema, schema)
-	if _, err := s.db.ExecContext(ctx, createRoles); err != nil {
-		return fmt.Errorf("create roles table: %w", err)
-	}
+		createRoles := fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s.roles (
+			    id           UUID PRIMARY KEY DEFAULT uuidv7(),
+			    name         TEXT NOT NULL,
+			    description  TEXT,
+			    parent_id    UUID REFERENCES %s.roles(id),
+			    is_immutable BOOLEAN NOT NULL DEFAULT FALSE,
+			    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			    UNIQUE (name)
+			)
+		`, schema, schema)
+		if _, err := tx.ExecContext(ctx, createRoles); err != nil {
+			return fmt.Errorf("create roles table: %w", err)
+		}
 
-	createRolePermissions := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s.role_permissions (
-		    role_id         UUID NOT NULL REFERENCES %s.roles(id) ON DELETE CASCADE,
-		    permission_name TEXT NOT NULL,
-		    granted_by      UUID,
-		    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		    PRIMARY KEY (role_id, permission_name)
-		)
-	`, schema, schema)
-	if _, err := s.db.ExecContext(ctx, createRolePermissions); err != nil {
-		return fmt.Errorf("create role_permissions table: %w", err)
-	}
+		createRolePermissions := fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s.role_permissions (
+			    role_id         UUID NOT NULL REFERENCES %s.roles(id) ON DELETE CASCADE,
+			    permission_name TEXT NOT NULL,
+			    granted_by      UUID,
+			    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			    PRIMARY KEY (role_id, permission_name)
+			)
+		`, schema, schema)
+		if _, err := tx.ExecContext(ctx, createRolePermissions); err != nil {
+			return fmt.Errorf("create role_permissions table: %w", err)
+		}
 
-	createUserRoles := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s.user_roles (
-		    user_id     UUID NOT NULL,
-		    role_id     UUID NOT NULL REFERENCES %s.roles(id) ON DELETE CASCADE,
-		    granted_by  UUID,
-		    granted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		    expires_at  TIMESTAMPTZ,
-		    PRIMARY KEY (user_id, role_id)
-		)
-	`, schema, schema)
-	if _, err := s.db.ExecContext(ctx, createUserRoles); err != nil {
-		return fmt.Errorf("create user_roles table: %w", err)
-	}
+		createUserRoles := fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s.user_roles (
+			    user_id     UUID NOT NULL,
+			    role_id     UUID NOT NULL REFERENCES %s.roles(id) ON DELETE CASCADE,
+			    granted_by  UUID,
+			    granted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			    expires_at  TIMESTAMPTZ,
+			    PRIMARY KEY (user_id, role_id)
+			)
+		`, schema, schema)
+		if _, err := tx.ExecContext(ctx, createUserRoles); err != nil {
+			return fmt.Errorf("create user_roles table: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // SeedBuiltinRoles idempotently inserts the three immutable built-in roles
