@@ -236,3 +236,117 @@ func TestRolePermissionsAndUserRoles_TablesAcceptRows(t *testing.T) {
 		t.Errorf("role_permissions rows after cascading delete = %d, want 0", count)
 	}
 }
+
+func TestCountUsers_CountsDistinctUsersAcrossRoles(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	adminID, err := store.GetRoleByName(ctx, slug, "admin")
+	if err != nil {
+		t.Fatalf("GetRoleByName(admin) error: %v", err)
+	}
+	userRoleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName(user) error: %v", err)
+	}
+
+	userA := "00000000-0000-0000-0000-0000000000a1"
+	userB := "00000000-0000-0000-0000-0000000000b2"
+	rows := []struct{ userID, roleID string }{
+		{userA, adminID},
+		{userA, userRoleID}, // same user, second role — must not double-count
+		{userB, userRoleID},
+	}
+	for _, r := range rows {
+		if _, err := conn.ExecContext(ctx,
+			fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema),
+			r.userID, r.roleID,
+		); err != nil {
+			t.Fatalf("insert user_roles row: %v", err)
+		}
+	}
+
+	got, err := store.CountUsers(ctx, slug)
+	if err != nil {
+		t.Fatalf("CountUsers() error: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("CountUsers() = %d, want 2", got)
+	}
+}
+
+func TestCountUsers_UnprovisionedTenantReturnsZero(t *testing.T) {
+	store, _, _ := openTestStore(t)
+
+	got, err := store.CountUsers(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("CountUsers() error: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("CountUsers() = %d, want 0", got)
+	}
+}
+
+func TestAdminUserID_ReturnsEarliestAdminGrant(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	adminID, err := store.GetRoleByName(ctx, slug, "admin")
+	if err != nil {
+		t.Fatalf("GetRoleByName(admin) error: %v", err)
+	}
+
+	firstAdmin := "00000000-0000-0000-0000-0000000000c1"
+	secondAdmin := "00000000-0000-0000-0000-0000000000c2"
+
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id, granted_at) VALUES ($1, $2, NOW() - interval '1 hour')", schema),
+		firstAdmin, adminID,
+	); err != nil {
+		t.Fatalf("insert first admin grant: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id, granted_at) VALUES ($1, $2, NOW())", schema),
+		secondAdmin, adminID,
+	); err != nil {
+		t.Fatalf("insert second admin grant: %v", err)
+	}
+
+	got, err := store.AdminUserID(ctx, slug)
+	if err != nil {
+		t.Fatalf("AdminUserID() error: %v", err)
+	}
+	if got != firstAdmin {
+		t.Errorf("AdminUserID() = %q, want %q (earliest grant)", got, firstAdmin)
+	}
+}
+
+func TestAdminUserID_NoAdminGrantReturnsErrAdminUserNotFound(t *testing.T) {
+	store, _, slug := openTestStore(t)
+
+	if err := store.SeedBuiltinRoles(context.Background(), slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+
+	_, err := store.AdminUserID(context.Background(), slug)
+	if !errors.Is(err, ErrAdminUserNotFound) {
+		t.Errorf("AdminUserID() error = %v, want ErrAdminUserNotFound", err)
+	}
+}
+
+func TestAdminUserID_UnprovisionedTenantReturnsErrAdminUserNotFound(t *testing.T) {
+	store, _, _ := openTestStore(t)
+
+	_, err := store.AdminUserID(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
+	if !errors.Is(err, ErrAdminUserNotFound) {
+		t.Errorf("AdminUserID() error = %v, want ErrAdminUserNotFound", err)
+	}
+}

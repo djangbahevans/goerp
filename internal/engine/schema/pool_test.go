@@ -2,6 +2,7 @@ package schema
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -121,5 +122,47 @@ func TestStatusForTenant_NoRowsReturnsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("len(got) = %d, want 0", len(got))
+	}
+}
+
+func TestTableCount_CountsTablesInTenantSchema(t *testing.T) {
+	conn, pool := openTestPool(t, 5*time.Second)
+
+	slug := fmt.Sprintf("tablecount%d", time.Now().UnixNano())
+	schemaName := `"tenant_` + slug + `"`
+
+	if _, err := conn.ExecContext(context.Background(), "CREATE SCHEMA "+schemaName); err != nil {
+		t.Fatalf("create fixture schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.ExecContext(context.Background(), "DROP SCHEMA "+schemaName+" CASCADE")
+	})
+
+	for _, table := range []string{"widgets", "gadgets"} {
+		if _, err := conn.ExecContext(context.Background(),
+			fmt.Sprintf("CREATE TABLE %s.%s (id UUID PRIMARY KEY)", schemaName, table),
+		); err != nil {
+			t.Fatalf("create fixture table %q: %v", table, err)
+		}
+	}
+
+	got, err := pool.TableCount(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("TableCount() error: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("TableCount() = %d, want 2", got)
+	}
+}
+
+func TestTableCount_UnknownTenantReturnsZero(t *testing.T) {
+	_, pool := openTestPool(t, 5*time.Second)
+
+	got, err := pool.TableCount(context.Background(), "does-not-exist")
+	if err != nil {
+		t.Fatalf("TableCount() error: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("TableCount() = %d, want 0", got)
 	}
 }

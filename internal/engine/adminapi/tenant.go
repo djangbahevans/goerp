@@ -20,13 +20,18 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
 type TenantDeps struct {
 	Store       *tenant.Store
 	SyncStatus  SyncStatusReader
+	TableCounts TableCounter
+	Membership  TenantMembership
+	Users       UserResolver
 	Provisioner Provisioner
 	Inviter     InviteResender
 	Exporter    TenantExporter
@@ -55,6 +60,32 @@ func RegisterTenantRoutes(mux *http.ServeMux, deps TenantDeps) {
 // orchestration (goerp#159) landing first.
 type SyncStatusReader interface {
 	StatusForTenant(ctx context.Context, tenantID string) ([]schema.ModuleSyncStatus, error)
+}
+
+// TableCounter is satisfied by *schema.SchemaSyncPool (TableCount) — the
+// status route's schema table count, computed directly against
+// information_schema.tables for the tenant's own Postgres schema.
+type TableCounter interface {
+	TableCount(ctx context.Context, tenantSlug string) (int, error)
+}
+
+// TenantMembership is satisfied by *role.Store (CountUsers, AdminUserID) —
+// both derived from the tenant's own tenant_{slug}.user_roles/roles
+// tables, not a system-wide table, since tenant membership is only
+// recorded per-tenant-schema (goerp#3523's RBAC tables). Kept as its own
+// interface rather than folded into SyncStatusReader/TableCounter since it
+// is satisfied by a different concrete store.
+type TenantMembership interface {
+	CountUsers(ctx context.Context, tenantSlug string) (int, error)
+	AdminUserID(ctx context.Context, tenantSlug string) (string, error)
+}
+
+// UserResolver is satisfied by *user.Store (GetByID) — resolves the id
+// TenantMembership.AdminUserID returns into the email the status route
+// reports. system.users has no display-name column yet, so admin_user
+// only ever carries id/email, not a name.
+type UserResolver interface {
+	GetByID(ctx context.Context, id string) (*user.User, error)
 }
 
 type CreateTenantRequest struct {
@@ -105,6 +136,13 @@ func decodeJSON[T any](r *http.Request) (T, error) {
 	return v, err
 }
 
+// tenantListItem is tenant.Tenant plus the Users column cli-reference.md
+// §5 documents for `goerp tenant list`.
+type tenantListItem struct {
+	tenant.Tenant
+	Users int `json:"users"`
+}
+
 func (h *tenantHandlers) list(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 
@@ -119,10 +157,24 @@ func (h *tenantHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	items := make([]tenantListItem, len(tenants))
+	for i, t := range tenants {
+		item := tenantListItem{Tenant: t}
+		if h.deps.Membership != nil {
+			count, err := h.deps.Membership.CountUsers(r.Context(), t.Slug)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", err.Error())
+				return
+			}
+			item.Users = count
+		}
+		items[i] = item
+	}
+
 	writeData(w, http.StatusOK, struct {
-		Tenants    []tenant.Tenant `json:"tenants"`
-		NextCursor string          `json:"next_cursor,omitempty"`
-	}{Tenants: tenants, NextCursor: nextCursor})
+		Tenants    []tenantListItem `json:"tenants"`
+		NextCursor string           `json:"next_cursor,omitempty"`
+	}{Tenants: items, NextCursor: nextCursor})
 }
 
 func (h *tenantHandlers) create(w http.ResponseWriter, r *http.Request) {
@@ -153,14 +205,27 @@ func (h *tenantHandlers) create(w http.ResponseWriter, r *http.Request) {
 	}{Slug: req.Slug, WorkflowID: workflowID})
 }
 
-// tenantStatusResponse is Tenant plus the "N of M modules synced" ratio
-// (§5 "goerp tenant status") — computed from SyncStatusReader, not from a
-// live module registry (see SyncStatusReader's doc comment).
+// tenantStatusResponse is Tenant plus the "N of M modules synced" ratio,
+// schema table count, provisioning duration, and admin user (§5 "goerp
+// tenant status") — computed from SyncStatusReader/TableCounter/
+// TenantMembership/UserResolver, not from a live module registry (see
+// SyncStatusReader's doc comment).
 type tenantStatusResponse struct {
 	tenant.Tenant
-	ModulesSynced int                       `json:"modules_synced"`
-	ModulesTotal  int                       `json:"modules_total"`
-	Modules       []schema.ModuleSyncStatus `json:"modules,omitempty"`
+	SchemaTableCount     int                       `json:"schema_table_count,omitempty"`
+	ModulesSynced        int                       `json:"modules_synced"`
+	ModulesTotal         int                       `json:"modules_total"`
+	Modules              []schema.ModuleSyncStatus `json:"modules,omitempty"`
+	ProvisioningDuration string                    `json:"provisioning_duration,omitempty"`
+	AdminUser            *AdminUserInfo            `json:"admin_user,omitempty"`
+}
+
+// AdminUserInfo is the admin_user field of `goerp tenant status`'s output.
+// system.users has no display-name column yet, so this only ever carries
+// id/email, not a name.
+type AdminUserInfo struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
 }
 
 func (h *tenantHandlers) status(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +254,42 @@ func (h *tenantHandlers) status(w http.ResponseWriter, r *http.Request) {
 			if s.Status == "ok" {
 				resp.ModulesSynced++
 			}
+		}
+	}
+
+	if h.deps.TableCounts != nil {
+		count, err := h.deps.TableCounts.TableCount(r.Context(), t.Slug)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
+		resp.SchemaTableCount = count
+	}
+
+	if t.ActivatedAt != nil {
+		resp.ProvisioningDuration = t.ActivatedAt.Sub(t.CreatedAt).String()
+	}
+
+	if h.deps.Membership != nil {
+		adminUserID, err := h.deps.Membership.AdminUserID(r.Context(), t.Slug)
+		switch {
+		case err == nil:
+			if h.deps.Users != nil {
+				admin, err := h.deps.Users.GetByID(r.Context(), adminUserID)
+				if err != nil {
+					if !errors.Is(err, user.ErrUserNotFound) {
+						writeError(w, http.StatusInternalServerError, "internal", err.Error())
+						return
+					}
+				} else {
+					resp.AdminUser = &AdminUserInfo{ID: admin.ID, Email: admin.Email}
+				}
+			}
+		case errors.Is(err, role.ErrAdminUserNotFound):
+			// No user holds the admin role for this tenant yet.
+		default:
+			writeError(w, http.StatusInternalServerError, "internal", err.Error())
+			return
 		}
 	}
 

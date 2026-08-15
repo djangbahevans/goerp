@@ -163,9 +163,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
-		Store:      tenantStore,
-		SyncStatus: syncPool,
-		Inviter:    inviteStore,
+		Store:       tenantStore,
+		SyncStatus:  syncPool,
+		TableCounts: syncPool,
+		Membership:  roleStore,
+		Users:       userStore,
+		Inviter:     inviteStore,
 		// Provisioner, Exporter, Importer, Offboarder stay nil until
 		// goerp#149/#15/#150 land — the handlers report
 		// StatusNotImplemented for those routes rather than the wiring

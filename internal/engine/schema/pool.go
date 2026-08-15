@@ -99,6 +99,23 @@ func (p *SchemaSyncPool) StatusForTenant(ctx context.Context, tenantID string) (
 	return statuses, nil
 }
 
+// TableCount returns the number of tables in the tenant's own Postgres
+// schema (tenant_{slug}) — the schema table count cli-reference.md §5
+// documents as part of `goerp tenant status`'s output. A tenant whose
+// schema hasn't been created yet reports 0, the same as a real empty
+// schema would — information_schema.tables simply has no matching rows.
+func (p *SchemaSyncPool) TableCount(ctx context.Context, tenantSlug string) (int, error) {
+	var count int
+	err := p.primary.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1
+	`, "tenant_"+tenantSlug).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count tenant schema tables: %w", err)
+	}
+
+	return count, nil
+}
+
 func (p *SchemaSyncPool) BeginSync(ctx context.Context, tenantID, tenantSlug, moduleName string, manifest *manifest.Manifest) (*SchemaSyncSession, error) {
 	conn, err := p.primary.Conn(ctx)
 	if err != nil {
