@@ -8,6 +8,8 @@ func NewCmd() *cobra.Command {
 		Short: "Manage tenants",
 	}
 
+	cmd.AddCommand(newStatusCmd())
+	cmd.AddCommand(newListCmd())
 	cmd.AddCommand(newResendInviteCmd())
 
 	return cmd

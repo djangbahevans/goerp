@@ -2,6 +2,7 @@ package schema
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -122,6 +123,43 @@ func TestStatusForTenant_NoRowsReturnsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("len(got) = %d, want 0", len(got))
+	}
+}
+
+// TestModuleSyncStatus_MarshalsSnakeCase guards against ModuleSyncStatus
+// silently losing its json tags again — GET /admin/tenants/{slug} embeds
+// this type directly as its modules array, and every other field in that
+// response (schema_table_count, modules_synced, admin_user, ...) is
+// snake_case, so a regression here would produce a response with one
+// inconsistently-cased array of objects.
+func TestModuleSyncStatus_MarshalsSnakeCase(t *testing.T) {
+	syncedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	status := ModuleSyncStatus{
+		ModuleName:     "contacts",
+		CurrentVersion: "1.0.0",
+		Status:         "ok",
+		SyncedAt:       &syncedAt,
+	}
+
+	got, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error: %v", err)
+	}
+
+	for _, key := range []string{"module_name", "current_version", "status", "synced_at"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("marshaled JSON %s missing snake_case key %q", got, key)
+		}
+	}
+	for _, key := range []string{"ModuleName", "CurrentVersion", "Status", "SyncedAt"} {
+		if _, ok := decoded[key]; ok {
+			t.Errorf("marshaled JSON %s has PascalCase key %q, want snake_case only", got, key)
+		}
 	}
 }
 
