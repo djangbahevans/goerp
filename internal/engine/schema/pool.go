@@ -15,10 +15,10 @@ import (
 // ModuleSyncStatus is one module's sync record for one tenant — a row of
 // system.module_schema_versions.
 type ModuleSyncStatus struct {
-	ModuleName     string
-	CurrentVersion string
-	Status         string // "ok" | "failed" | "in_progress"
-	SyncedAt       *time.Time
+	ModuleName     string     `json:"module_name"`
+	CurrentVersion string     `json:"current_version"`
+	Status         string     `json:"status"` // "ok" | "failed" | "in_progress"
+	SyncedAt       *time.Time `json:"synced_at,omitempty"`
 }
 
 const createModuleSchemaVersionsTable = `
