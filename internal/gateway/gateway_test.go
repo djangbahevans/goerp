@@ -173,7 +173,7 @@ func setupTestGateway(t *testing.T, adminToken string) *testGateway {
 
 	proxy := newTestReverseProxy(t, cfg.Upstream)
 
-	var handler http.Handler = proxy
+	handler := proxy
 	handler = identityMiddleware(handler)
 	handler = bearerTokenMiddleware(adminToken)(handler)
 
@@ -246,7 +246,7 @@ func TestGateway_ValidCertMissingToken_ReturnsGatewayAuthFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
@@ -276,7 +276,7 @@ func TestGateway_ValidCertWrongToken_ReturnsGatewayAuthFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do() error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
@@ -298,7 +298,7 @@ func TestGateway_ValidCertValidToken_ForwardsAndSetsIdentityHeader(t *testing.T)
 	if err != nil {
 		t.Fatalf("Do() error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -328,7 +328,7 @@ func TestGateway_ClientSuppliedIdentityHeaderIsStripped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do() error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if got := gw.recorder.header.Get(operatorIdentityHeader); got != "real-operator" {
 		t.Errorf("%s = %q, want %q (client-supplied value must be overridden, not forwarded)", operatorIdentityHeader, got, "real-operator")
@@ -349,7 +349,7 @@ func TestGateway_ForwardsBodyUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do() error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if gw.recorder.body != body {
 		t.Errorf("upstream saw body %q, want %q", gw.recorder.body, body)
