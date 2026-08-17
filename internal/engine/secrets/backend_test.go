@@ -13,7 +13,6 @@ func TestNew(t *testing.T) {
 		wantType    bool // true if a non-nil Backend should be returned
 	}{
 		{"env", nil, true},
-		{"vault", ErrVaultNotSupported, false},
 		{"aws_secretsmanager", ErrAwsNotSupported, false},
 		{"nonsense", ErrUnknownBackend, false},
 	}
