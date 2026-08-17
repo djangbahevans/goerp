@@ -30,14 +30,17 @@ func TestClassifyChanges(t *testing.T) {
 	dropTable := &schema.DropTable{T: schema.NewTable("t")}
 	renameColumn := &schema.RenameColumn{From: &schema.Column{Name: "a"}, To: &schema.Column{Name: "b"}}
 	renameTable := &schema.RenameTable{From: schema.NewTable("a"), To: schema.NewTable("b")}
+	addCheck := &schema.AddCheck{C: &schema.Check{Name: "t_c_check", Expr: "c IN ('a')"}}
+	addForeignKey := &schema.AddForeignKey{F: &schema.ForeignKey{Symbol: "t_c_fkey"}}
 
 	changes := []schema.Change{
 		addTable, addIndex, dropIndex,
 		nullableAddColumn, requiredNoDefaultAddColumn, requiredWithDefaultAddColumn,
 		dropColumn, dropTable, renameColumn, renameTable,
+		addCheck, addForeignKey,
 	}
 
-	safe, blocked := e.classifyChanges(changes)
+	safe, deferred, blocked := e.classifyChanges(changes)
 
 	wantSafe := []schema.Change{addTable, addIndex, dropIndex, nullableAddColumn, requiredWithDefaultAddColumn}
 	if len(safe) != len(wantSafe) {
@@ -46,6 +49,16 @@ func TestClassifyChanges(t *testing.T) {
 	for i, c := range wantSafe {
 		if safe[i].change != c {
 			t.Errorf("safe[%d] = %#v, want %#v", i, safe[i].change, c)
+		}
+	}
+
+	wantDeferred := []schema.Change{addCheck, addForeignKey}
+	if len(deferred) != len(wantDeferred) {
+		t.Fatalf("deferred = %d changes, want %d: %v", len(deferred), len(wantDeferred), deferred)
+	}
+	for i, c := range wantDeferred {
+		if deferred[i].change != c {
+			t.Errorf("deferred[%d] = %#v, want %#v", i, deferred[i].change, c)
 		}
 	}
 

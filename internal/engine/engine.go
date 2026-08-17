@@ -399,10 +399,20 @@ func New(cfg *config.Config) (*Engine, error) {
 	// email_send, ...) add their own river.AddWorker call here as they land.
 	jobWorkers := river.NewWorkers()
 	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
+	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: primaryPool})
 	jobQueueClient, err := jobqueue.New(primaryPool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("create job queue client: %w", err)
+	}
+
+	// Enqueues background validation jobs for constraints Stage 4's schema
+	// sync created NOT VALID — the job queue client didn't exist yet when
+	// that ran, so it could only record the pending row (schema.Execute /
+	// schema.EnqueuePendingValidations).
+	if err := schema.EnqueuePendingValidations(ctx, primaryPool, jobQueueClient); err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("enqueue pending constraint validations: %w", err)
 	}
 
 	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{Client: jobQueueClient})

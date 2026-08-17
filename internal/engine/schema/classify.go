@@ -24,11 +24,18 @@ func explodeChanges(changes []schema.Change) []tableChange {
 	return out
 }
 
-func (e *SchemaDiffEngine) classifyChanges(changes []schema.Change) (safe, blocked []tableChange) {
+// classifyChanges sorts changes into three buckets: safe (applied inline as
+// declared), deferred (applied inline but as NOT VALID, then validated in
+// the background — see apply.go's Execute and schema.ValidateConstraintWorker),
+// and blocked (skipped entirely; requires an explicit data migration
+// handler, which does not exist yet).
+func (e *SchemaDiffEngine) classifyChanges(changes []schema.Change) (safe, deferred, blocked []tableChange) {
 	for _, tc := range explodeChanges(changes) {
 		switch c := tc.change.(type) {
 		case *schema.AddTable, *schema.AddIndex, *schema.DropIndex:
 			safe = append(safe, tc)
+		case *schema.AddCheck, *schema.AddForeignKey:
+			deferred = append(deferred, tc)
 		case *schema.AddColumn:
 			if isSafeAddColumn(c) {
 				safe = append(safe, tc)

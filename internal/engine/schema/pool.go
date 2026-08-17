@@ -34,6 +34,25 @@ CREATE TABLE IF NOT EXISTS system.module_schema_versions (
 )
 `
 
+// createPendingConstraintValidationsTable backs constraints created NOT
+// VALID by apply.go's Execute (goerp#20) — one row per constraint awaiting
+// a background VALIDATE CONSTRAINT run. tenant_slug is denormalized
+// alongside tenant_id so schema.ValidateConstraintWorker never needs a
+// separate tenant lookup to build its SET search_path.
+const createPendingConstraintValidationsTable = `
+CREATE TABLE IF NOT EXISTS system.pending_constraint_validations (
+    tenant_id        UUID        NOT NULL,
+    tenant_slug      TEXT        NOT NULL,
+    table_name       TEXT        NOT NULL,
+    constraint_name  TEXT        NOT NULL,
+    status           TEXT        NOT NULL DEFAULT 'pending',
+    error            TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    validated_at     TIMESTAMPTZ,
+    PRIMARY KEY (tenant_id, table_name, constraint_name)
+)
+`
+
 type SchemaSyncPool struct {
 	primary            *sql.DB
 	lockAcquireTimeout time.Duration
@@ -54,6 +73,9 @@ func (p *SchemaSyncPool) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createModuleSchemaVersionsTable); err != nil {
 			return fmt.Errorf("create module_schema_versions table: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createPendingConstraintValidationsTable); err != nil {
+			return fmt.Errorf("create pending_constraint_validations table: %w", err)
 		}
 
 		return nil
