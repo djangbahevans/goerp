@@ -405,6 +405,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("create job queue client: %w", err)
 	}
 
+	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{Client: jobQueueClient})
+
 	e = &Engine{
 		cfg:            cfg,
 		wasmRuntime:    runtime,
