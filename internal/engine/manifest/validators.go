@@ -3,6 +3,7 @@ package manifest
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -120,6 +121,8 @@ func validateManifest(m Manifest) error {
 		"abi_version":                  "{0} must be a non-negative integer string",
 		"sha256_checksum":              "{0} must be a sha256:-prefixed 64-character hex hash",
 		"required_with_workflow_types": "{0} is required when workflow_types is not empty",
+		"required_with_http_fetch":     "{0} must be non-empty when the http.fetch capability is declared",
+		"required_for_emits":           "{0} must include the event.emit capability when emits is not empty",
 	}
 	for tag, translation := range customTranslations {
 		if err := registerSimpleTranslation(validate, trans, tag, translation); err != nil {
@@ -134,6 +137,24 @@ func validateManifest(m Manifest) error {
 				"WorkerChecksum",
 				"worker_checksum",
 				"required_with_workflow_types",
+				"",
+			)
+		}
+
+		if slices.Contains(m.Capabilities, "http.fetch") && len(m.HTTPAllowlist) == 0 {
+			sl.ReportError(m.HTTPAllowlist,
+				"HTTPAllowlist",
+				"http_allowlist",
+				"required_with_http_fetch",
+				"",
+			)
+		}
+
+		if len(m.Emits) > 0 && !slices.Contains(m.Capabilities, "event.emit") {
+			sl.ReportError(m.Capabilities,
+				"Capabilities",
+				"capabilities",
+				"required_for_emits",
 				"",
 			)
 		}
