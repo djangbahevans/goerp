@@ -151,6 +151,17 @@ func setupTestGateway(t *testing.T, adminToken string) *testGateway {
 	}))
 	t.Cleanup(upstream.Close)
 
+	gw := setupTestGatewayWithUpstream(t, adminToken, upstream)
+	gw.recorder = rec
+	return gw
+}
+
+// setupTestGatewayWithUpstream wires the real middleware chain in front of
+// a caller-supplied upstream, for tests that need control over the
+// upstream's own routing behavior (e.g. route-diff parity checks).
+func setupTestGatewayWithUpstream(t *testing.T, adminToken string, upstream *httptest.Server) *testGateway {
+	t.Helper()
+
 	ca := newTestCA(t)
 
 	dir := t.TempDir()
@@ -189,7 +200,7 @@ func setupTestGateway(t *testing.T, adminToken string) *testGateway {
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 
-	return &testGateway{server: srv, ca: ca, upstream: upstream, recorder: rec}
+	return &testGateway{server: srv, ca: ca, upstream: upstream}
 }
 
 func newTestReverseProxy(t *testing.T, upstreamURL string) http.Handler {
