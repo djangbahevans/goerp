@@ -160,19 +160,24 @@ func validateManifest(m Manifest) error {
 		}
 	}, Manifest{})
 
-	err := validate.Struct(m)
-	if err == nil {
+	var msgs []string
+
+	if err := validate.Struct(m); err != nil {
+		var verrs validator.ValidationErrors
+		if !errors.As(err, &verrs) {
+			return err
+		}
+		for _, fe := range verrs {
+			msgs = append(msgs, fe.Translate(trans))
+		}
+	}
+
+	if err := validateModuleType(m); err != nil {
+		msgs = append(msgs, err.Error())
+	}
+
+	if len(msgs) == 0 {
 		return nil
-	}
-
-	var verrs validator.ValidationErrors
-	if !errors.As(err, &verrs) {
-		return err
-	}
-
-	msgs := make([]string, 0, len(verrs))
-	for _, fe := range verrs {
-		msgs = append(msgs, fe.Translate(trans))
 	}
 
 	return errors.New(strings.Join(msgs, "; "))

@@ -219,6 +219,205 @@ func TestLoadManifestEmitsRequiresEventEmitCapability(t *testing.T) {
 	}
 }
 
+// validTypeFields returns a manifest that satisfies every per-type
+// constraint (manifest-spec.md §3) for moduleType — the baseline each
+// negative test case in TestLoadManifestModuleTypeConstraints mutates one
+// field away from.
+func validTypeFields(moduleType string) map[string]any {
+	fields := minimalManifestFields()
+	fields["type"] = moduleType
+	fields["schema"] = map[string]any{"owned_models": []string{}}
+
+	switch moduleType {
+	case "domain":
+		fields["schema"] = map[string]any{"owned_models": []string{"sales.order"}}
+	case "connector":
+		fields["wasm"] = true
+	case "bridge":
+		fields["depends_on"] = []string{"mod_a", "mod_b"}
+	case "theme":
+		fields["wasm"] = false
+		fields["views"] = []map[string]any{{"name": "settings", "type": "list", "resource": "theme.settings", "label": "Settings"}}
+	case "report_bundle":
+		fields["reports"] = []map[string]any{{"name": "r", "label": "R", "template": "t", "data_handler": "h", "formats": []string{"pdf"}, "permissions": []string{}}}
+	case "automation":
+		fields["subscribes"] = []map[string]any{{"name": "demo.order.created"}}
+	case "field_extension":
+		fields["view_extensions"] = []map[string]any{{"extends": "core", "extension": "ext"}}
+		fields["schema"] = map[string]any{
+			"owned_models":   []string{},
+			"extends_module": "core",
+			"extends_models": []string{"sales.order"},
+		}
+	}
+
+	return fields
+}
+
+func TestLoadManifestModuleTypeConstraintsValid(t *testing.T) {
+	for _, moduleType := range []string{"domain", "l10n", "connector", "bridge", "theme", "report_bundle", "automation", "field_extension"} {
+		t.Run(moduleType, func(t *testing.T) {
+			m, err := json.Marshal(validTypeFields(moduleType))
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+			if _, err := Load(m); err != nil {
+				t.Fatalf("expected a valid %s manifest to load, got %v", moduleType, err)
+			}
+		})
+	}
+}
+
+func TestLoadManifestModuleTypeConstraintsViolations(t *testing.T) {
+	cases := map[string]struct {
+		moduleType  string
+		mutate      func(map[string]any)
+		wantErrText string
+	}{
+		"domain wasm required": {
+			"domain",
+			func(f map[string]any) { f["wasm"] = false },
+			`requires wasm: true`,
+		},
+		"l10n owns_schema forbidden": {
+			"l10n",
+			func(f map[string]any) { f["schema"] = map[string]any{"owned_models": []string{"l10n.chart"}} },
+			`must not declare schema.owned_models`,
+		},
+		"connector wasm required": {
+			"connector",
+			func(f map[string]any) { f["wasm"] = false },
+			`requires wasm: true`,
+		},
+		"bridge wasm required": {
+			"bridge",
+			func(f map[string]any) { f["wasm"] = false },
+			`requires wasm: true`,
+		},
+		"bridge owns_schema forbidden": {
+			"bridge",
+			func(f map[string]any) { f["schema"] = map[string]any{"owned_models": []string{"bridge.link"}} },
+			`must not declare schema.owned_models`,
+		},
+		"bridge has_ui forbidden": {
+			"bridge",
+			func(f map[string]any) {
+				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "y", "label": "z"}}
+			},
+			`must not declare views or a frontend bundle`,
+		},
+		"bridge requires depends_on >= 2": {
+			"bridge",
+			func(f map[string]any) { f["depends_on"] = []string{"mod_a"} },
+			`requires depends_on length >= 2`,
+		},
+		"theme requires wasm false": {
+			"theme",
+			func(f map[string]any) { f["wasm"] = true },
+			`requires wasm: false`,
+		},
+		"theme owns_schema forbidden": {
+			"theme",
+			func(f map[string]any) { f["schema"] = map[string]any{"owned_models": []string{"theme.tokens"}} },
+			`must not declare schema.owned_models`,
+		},
+		"theme has_ui required": {
+			"theme",
+			func(f map[string]any) { delete(f, "views") },
+			`requires a view or a frontend bundle`,
+		},
+		"report_bundle owns_schema forbidden": {
+			"report_bundle",
+			func(f map[string]any) { f["schema"] = map[string]any{"owned_models": []string{"reports.thing"}} },
+			`must not declare schema.owned_models`,
+		},
+		"report_bundle has_ui forbidden": {
+			"report_bundle",
+			func(f map[string]any) {
+				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "y", "label": "z"}}
+			},
+			`must not declare views or a frontend bundle`,
+		},
+		"report_bundle requires reports >= 1": {
+			"report_bundle",
+			func(f map[string]any) { delete(f, "reports") },
+			`requires reports length >= 1`,
+		},
+		"automation wasm required": {
+			"automation",
+			func(f map[string]any) { f["wasm"] = false },
+			`requires wasm: true`,
+		},
+		"automation owns_schema forbidden": {
+			"automation",
+			func(f map[string]any) { f["schema"] = map[string]any{"owned_models": []string{"automation.thing"}} },
+			`must not declare schema.owned_models`,
+		},
+		"automation has_ui forbidden": {
+			"automation",
+			func(f map[string]any) {
+				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "y", "label": "z"}}
+			},
+			`must not declare views or a frontend bundle`,
+		},
+		"automation requires subscribes >= 1": {
+			"automation",
+			func(f map[string]any) { delete(f, "subscribes") },
+			`requires subscribes length >= 1`,
+		},
+		"field_extension owns_schema forbidden": {
+			"field_extension",
+			func(f map[string]any) {
+				f["schema"] = map[string]any{
+					"owned_models":   []string{"ext.thing"},
+					"extends_module": "core",
+					"extends_models": []string{"sales.order"},
+				}
+			},
+			`must not declare schema.owned_models`,
+		},
+		"field_extension requires view_extensions or view_extension_definitions": {
+			"field_extension",
+			func(f map[string]any) { delete(f, "view_extensions") },
+			`requires view_extensions or view_extension_definitions`,
+		},
+		"field_extension requires extends_module": {
+			"field_extension",
+			func(f map[string]any) {
+				f["schema"] = map[string]any{"owned_models": []string{}, "extends_models": []string{"sales.order"}}
+			},
+			`requires schema.extends_module`,
+		},
+		"field_extension requires extends_models": {
+			"field_extension",
+			func(f map[string]any) {
+				f["schema"] = map[string]any{"owned_models": []string{}, "extends_module": "core"}
+			},
+			`requires schema.extends_models`,
+		},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			fields := validTypeFields(c.moduleType)
+			c.mutate(fields)
+
+			m, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+
+			_, err = Load(m)
+			if err == nil {
+				t.Fatalf("expected a manifest violating %q to be rejected", name)
+			}
+			if !strings.Contains(err.Error(), c.wantErrText) {
+				t.Fatalf("expected error to contain %q, got %v", c.wantErrText, err)
+			}
+		})
+	}
+}
+
 func TestLoadManifestInvalidUtf8(t *testing.T) {
 	m := []byte(`{"name": "demo`)
 	m = append(m, 0xff, 0xfe) // invalid UTF-8 sequence
