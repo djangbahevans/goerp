@@ -292,7 +292,7 @@ func TestLoadAll_SubscribesToKnownEventSucceeds(t *testing.T) {
 	sources := []Source{
 		{
 			Name: "sales",
-			ManifestBytes: manifestJSONWithFields(t, "sales", okModule, []string{"db.read"}, map[string]any{
+			ManifestBytes: manifestJSONWithFields(t, "sales", okModule, []string{"db.read", "event.emit"}, map[string]any{
 				"emits": []map[string]any{{"name": "sales.order.created"}},
 			}),
 			WasmBytes: okModule,

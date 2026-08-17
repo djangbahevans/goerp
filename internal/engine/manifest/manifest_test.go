@@ -132,6 +132,7 @@ func TestLoadManifestEmitsNameConvention(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			fields := minimalManifestFields()
+			fields["capabilities"] = []string{"db.read", "event.emit"}
 			fields["emits"] = []map[string]any{{"name": c.name}}
 
 			m, err := json.Marshal(fields)
@@ -142,6 +143,77 @@ func TestLoadManifestEmitsNameConvention(t *testing.T) {
 			_, err = Load(m)
 			if (err != nil) != c.wantErr {
 				t.Fatalf("event name %q: wantErr=%v, got err=%v", c.name, c.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestLoadManifestHTTPFetchRequiresNonEmptyAllowlist(t *testing.T) {
+	cases := map[string]struct {
+		capabilities  []string
+		httpAllowlist []string
+		wantErr       bool
+	}{
+		"http.fetch without allowlist":        {[]string{"http.fetch"}, nil, true},
+		"http.fetch with empty allowlist":     {[]string{"http.fetch"}, []string{}, true},
+		"http.fetch with non-empty allowlist": {[]string{"http.fetch"}, []string{"example.com"}, false},
+		"no http.fetch, no allowlist":         {[]string{"db.read"}, nil, false},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			fields := minimalManifestFields()
+			fields["capabilities"] = c.capabilities
+			if c.httpAllowlist != nil {
+				fields["http_allowlist"] = c.httpAllowlist
+			}
+
+			m, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+
+			_, err = Load(m)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("wantErr=%v, got err=%v", c.wantErr, err)
+			}
+			if c.wantErr && !strings.Contains(err.Error(), "HTTPAllowlist") {
+				t.Fatalf("expected error to reference HTTPAllowlist, got %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadManifestEmitsRequiresEventEmitCapability(t *testing.T) {
+	cases := map[string]struct {
+		capabilities []string
+		emits        []map[string]any
+		wantErr      bool
+	}{
+		"emits without event.emit capability": {[]string{"db.read"}, []map[string]any{{"name": "demo.order.created"}}, true},
+		"emits with event.emit capability":    {[]string{"db.read", "event.emit"}, []map[string]any{{"name": "demo.order.created"}}, false},
+		"no emits, no event.emit capability":  {[]string{"db.read"}, nil, false},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			fields := minimalManifestFields()
+			fields["capabilities"] = c.capabilities
+			if c.emits != nil {
+				fields["emits"] = c.emits
+			}
+
+			m, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+
+			_, err = Load(m)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("wantErr=%v, got err=%v", c.wantErr, err)
+			}
+			if c.wantErr && !strings.Contains(err.Error(), "Capabilities") {
+				t.Fatalf("expected error to reference Capabilities, got %v", err)
 			}
 		})
 	}
