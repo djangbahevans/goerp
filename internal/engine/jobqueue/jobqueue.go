@@ -48,11 +48,11 @@ func Migrate(ctx context.Context, pool *sql.DB) error {
 func New(pool *sql.DB, cfg *config.Config, workers *river.Workers) (*river.Client[*sql.Tx], error) {
 	client, err := river.NewClient(riverdatabasesql.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
-			QueueCritical: {MaxWorkers: cfg.QueueCriticalConcurrency},
-			QueueDefault:  {MaxWorkers: cfg.QueueDefaultConcurrency},
-			QueueBulk:     {MaxWorkers: cfg.QueueBulkConcurrency},
-			QueueSearch:   {MaxWorkers: cfg.QueueSearchConcurrency},
-			QueueEmail:    {MaxWorkers: cfg.QueueEmailConcurrency},
+			QueueCritical: {MaxWorkers: withDefault(cfg.QueueCriticalConcurrency, 5)},
+			QueueDefault:  {MaxWorkers: withDefault(cfg.QueueDefaultConcurrency, 10)},
+			QueueBulk:     {MaxWorkers: withDefault(cfg.QueueBulkConcurrency, 20)},
+			QueueSearch:   {MaxWorkers: withDefault(cfg.QueueSearchConcurrency, 5)},
+			QueueEmail:    {MaxWorkers: withDefault(cfg.QueueEmailConcurrency, 5)},
 		},
 		Workers: workers,
 	})
@@ -60,4 +60,14 @@ func New(pool *sql.DB, cfg *config.Config, workers *river.Workers) (*river.Clien
 		return nil, fmt.Errorf("create river client: %w", err)
 	}
 	return client, nil
+}
+
+// withDefault mirrors config.go's own envDefault for each field — needed
+// because River requires MaxWorkers >= 1, and a Config built by hand
+// (rather than via config.Load) leaves unset fields at zero.
+func withDefault(n, def int) int {
+	if n <= 0 {
+		return def
+	}
+	return n
 }

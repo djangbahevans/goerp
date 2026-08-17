@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 )
 
 var idempotencyKeySeq atomic.Int64
@@ -77,24 +78,28 @@ func startedClient(t *testing.T, workers *river.Workers) *river.Client[*sql.Tx] 
 	return client
 }
 
-// waitForCompletion blocks until a job_completed event fires for jobID, or
-// fails the test after timeout.
+// waitForCompletion polls JobGet until jobID reaches JobStateCompleted, or
+// fails the test after timeout. Polling the shared job row (rather than
+// Subscribe, which only delivers events for jobs *this* client instance
+// itself worked) is correct even when another client — a concurrently
+// running test in another package, hitting the same real Postgres — races
+// in and completes the job first.
 func waitForCompletion(t *testing.T, client *river.Client[*sql.Tx], jobID int64, timeout time.Duration) {
 	t.Helper()
 
-	sub, cancel := client.Subscribe(river.EventKindJobCompleted)
-	defer cancel()
-
-	deadline := time.After(timeout)
+	deadline := time.Now().Add(timeout)
 	for {
-		select {
-		case event := <-sub:
-			if event.Job.ID == jobID {
-				return
-			}
-		case <-deadline:
-			t.Fatalf("job %d did not complete within %s", jobID, timeout)
+		job, err := client.JobGet(context.Background(), jobID)
+		if err != nil {
+			t.Fatalf("JobGet(%d): %v", jobID, err)
 		}
+		if job.State == rivertype.JobStateCompleted {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %d did not complete within %s (state: %s)", jobID, timeout, job.State)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -120,27 +125,15 @@ func TestNew_RoutesAllFiveQueues(t *testing.T) {
 	client := startedClient(t, workers)
 
 	ctx := context.Background()
-	sub, cancel := client.Subscribe(river.EventKindJobCompleted)
-	defer cancel()
-
 	for _, queue := range []string{QueueCritical, QueueDefault, QueueBulk, QueueSearch, QueueEmail} {
-		if _, err := client.Insert(ctx, ProbeArgs{
+		row, err := client.Insert(ctx, ProbeArgs{
 			IdempotencyKey: newIdempotencyKey(t),
 			Message:        "queue routing check",
-		}, &river.InsertOpts{Queue: queue}); err != nil {
+		}, &river.InsertOpts{Queue: queue})
+		if err != nil {
 			t.Fatalf("Insert into queue %q: %v", queue, err)
 		}
-	}
-
-	seen := make(map[string]bool, 5)
-	deadline := time.After(10 * time.Second)
-	for len(seen) < 5 {
-		select {
-		case event := <-sub:
-			seen[event.Job.Queue] = true
-		case <-deadline:
-			t.Fatalf("only saw completions from queues %v, want all 5", seen)
-		}
+		waitForCompletion(t, client, row.Job.ID, 10*time.Second)
 	}
 }
 
@@ -223,16 +216,16 @@ func TestQueue_EnforcesPerQueueConcurrencyLimit(t *testing.T) {
 	}()
 
 	const jobCount = 5
-	sub, cancelSub := client.Subscribe(river.EventKindJobCompleted)
-	defer cancelSub()
-
+	jobIDs := make([]int64, jobCount)
 	for i := range jobCount {
-		if _, err := client.Insert(ctx, ProbeArgs{
+		row, err := client.Insert(ctx, ProbeArgs{
 			IdempotencyKey: newIdempotencyKey(t),
 			Message:        fmt.Sprintf("job %d", i),
-		}, &river.InsertOpts{Queue: QueueBulk}); err != nil {
+		}, &river.InsertOpts{Queue: QueueBulk})
+		if err != nil {
 			t.Fatalf("Insert %d: %v", i, err)
 		}
+		jobIDs[i] = row.Job.ID
 	}
 
 	// Give the client time to fetch and start as many jobs as its
@@ -240,15 +233,8 @@ func TestQueue_EnforcesPerQueueConcurrencyLimit(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	close(release)
 
-	completed := 0
-	deadline := time.After(10 * time.Second)
-	for completed < jobCount {
-		select {
-		case <-sub:
-			completed++
-		case <-deadline:
-			t.Fatalf("only %d/%d jobs completed within timeout", completed, jobCount)
-		}
+	for _, id := range jobIDs {
+		waitForCompletion(t, client, id, 10*time.Second)
 	}
 
 	if got := worker.maxSeen.Load(); got > int32(cfg.QueueBulkConcurrency) {

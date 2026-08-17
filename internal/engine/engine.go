@@ -12,8 +12,12 @@
 // New also runs Stage 3 (module discovery/order/cascading load/registry
 // publish, via moduleboot and registry.ModuleRegistry.Update) and Stage 4
 // (tenantsync.SyncAll). A depends_on cycle is fail-hard; individual
-// modules ending up module.StatusFailed are not. Instance pool warming
-// (Stage 5) and opening for traffic (Stage 6) are still out of scope.
+// modules ending up module.StatusFailed are not.
+//
+// Start runs the rest of Stage 6: opening the HTTP/admin servers and
+// starting the River job queue worker (client built in New, started in
+// Start). Instance pool warming (Stage 5) and the workflow-worker half of
+// Stage 6 are still out of scope.
 package engine
 
 import (
@@ -33,6 +37,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
@@ -48,6 +53,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
@@ -60,6 +66,7 @@ type Engine struct {
 	syncPool       *schema.SchemaSyncPool
 	tenantStore    *tenant.Store
 	moduleRegistry *registry.ModuleRegistry
+	jobQueue       *river.Client[*sql.Tx]
 
 	secretsBackend secrets.Backend
 	primaryDB      *sql.DB
@@ -381,12 +388,28 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("sync tenant schemas: %w", err)
 	}
 
+	if err := jobqueue.Migrate(ctx, primaryPool); err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("migrate job queue schema: %w", err)
+	}
+
+	// Baseline liveness-check job type; real ones (event_delivery,
+	// email_send, ...) add their own river.AddWorker call here as they land.
+	jobWorkers := river.NewWorkers()
+	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
+	jobQueueClient, err := jobqueue.New(primaryPool, cfg, jobWorkers)
+	if err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("create job queue client: %w", err)
+	}
+
 	e = &Engine{
 		cfg:            cfg,
 		wasmRuntime:    runtime,
 		syncPool:       syncPool,
 		tenantStore:    tenantStore,
 		moduleRegistry: moduleRegistry,
+		jobQueue:       jobQueueClient,
 		secretsBackend: secretsBackend,
 		primaryDB:      primaryPool,
 		replicaDB:      replicaPool,
@@ -405,6 +428,11 @@ func (e *Engine) ModuleRegistry() *registry.ModuleRegistry {
 	return e.moduleRegistry
 }
 
+// JobQueue returns the River client Start begins processing jobs on.
+func (e *Engine) JobQueue() *river.Client[*sql.Tx] {
+	return e.jobQueue
+}
+
 func (e *Engine) Start(ctx context.Context) error {
 
 	go func() {
@@ -418,6 +446,10 @@ func (e *Engine) Start(ctx context.Context) error {
 			log.Error().Err(err).Msg("admin http server error")
 		}
 	}()
+
+	if err := e.jobQueue.Start(ctx); err != nil {
+		return fmt.Errorf("start job queue worker: %w", err)
+	}
 
 	e.readiness.Store(true)
 
@@ -435,6 +467,10 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 	if err := e.adminServer.Shutdown(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not shut down admin server")
+	}
+
+	if err := e.jobQueue.Stop(ctx); err != nil {
+		log.Warn().Err(err).Msg("could not stop job queue worker")
 	}
 
 	if err := e.wasmRuntime.Close(ctx); err != nil {
