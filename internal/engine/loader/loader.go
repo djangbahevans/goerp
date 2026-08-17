@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/rs/zerolog/log"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -163,7 +165,54 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 		modules[src.Name] = m
 	}
 
+	validateEventSubscriptions(modules)
+
 	return modules
+}
+
+// validateEventSubscriptions checks every loaded module's subscribes[].name
+// against the set of events actually emitted by loaded modules (the event
+// registry goerp#68 builds). A subscribes[].name that names no known
+// event fails the subscribing module's load — unless the event's owning
+// module (the {module} segment of its {module}.{noun}.{verb} name) is
+// declared in the subscriber's soft_depends_on, in which case it's a
+// load-time warning and the module still loads: a soft dependency is
+// allowed to be absent, so its events being unknown is expected, not an
+// error.
+func validateEventSubscriptions(modules map[string]*module.LoadedModule) {
+	knownEmits := make(map[string]bool)
+	for _, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		for _, emit := range m.Manifest.Emits {
+			knownEmits[emit.Name] = true
+		}
+	}
+
+	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+
+		for _, sub := range m.Manifest.Subscribes {
+			if knownEmits[sub.Name] {
+				continue
+			}
+
+			owner, _, _ := strings.Cut(sub.Name, ".")
+			if slices.Contains(m.Manifest.SoftDependsOn, owner) {
+				log.Warn().
+					Str("module", name).
+					Str("event", sub.Name).
+					Msg("subscribes to an event no loaded module emits; owning module is a soft dependency")
+				continue
+			}
+
+			m.Fail(fmt.Sprintf("subscribes to unknown event %q", sub.Name))
+			break
+		}
+	}
 }
 
 // verifyChecksum compares checksum (manifest-spec.md §2's

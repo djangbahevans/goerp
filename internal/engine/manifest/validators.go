@@ -17,9 +17,14 @@ import (
 var validNameRegex = regexp.MustCompile("^[a-z][a-z0-9_]{0,63}$")
 var validABIVersionRegex = regexp.MustCompile(`^[0-9]+$`)
 var validSha256Regex = regexp.MustCompile("^[a-fA-F0-9]{64}$")
+var validEventNameRegex = regexp.MustCompile(`^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`)
 
 func nameRegex(fl validator.FieldLevel) bool {
 	return validNameRegex.MatchString(fl.Field().String())
+}
+
+func eventName(fl validator.FieldLevel) bool {
+	return validEventNameRegex.MatchString(fl.Field().String())
 }
 
 func abiVersion(fl validator.FieldLevel) bool {
@@ -87,6 +92,10 @@ func validateManifest(m Manifest) error {
 		return err
 	}
 
+	if err := validate.RegisterValidation("event_name", eventName); err != nil {
+		return err
+	}
+
 	if err := validate.RegisterValidation("max_warn", maxWarn); err != nil {
 		return err
 	}
@@ -105,6 +114,7 @@ func validateManifest(m Manifest) error {
 
 	customTranslations := map[string]string{
 		"name_regex":                   "{0} must be lowercase alphanumeric/underscore, starting with a letter (max 64 chars)",
+		"event_name":                   "{0} must follow the module.noun.verb naming convention (lowercase, dot-separated)",
 		"semver":                       "{0} must be a valid semver version",
 		"version_range":                "{0} must be a valid semver range",
 		"abi_version":                  "{0} must be a non-negative integer string",

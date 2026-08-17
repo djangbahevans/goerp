@@ -116,6 +116,37 @@ func TestLoadManifestWorkerChecksumRequiredOnlyWithWorkflowTypes(t *testing.T) {
 	}
 }
 
+func TestLoadManifestEmitsNameConvention(t *testing.T) {
+	cases := map[string]struct {
+		name    string
+		wantErr bool
+	}{
+		"valid three-segment name": {"demo.order.created", false},
+		"uppercase rejected":       {"Demo.order.created", true},
+		"two segments rejected":    {"demo.created", true},
+		"four segments rejected":   {"demo.sales.order.created", true},
+		"leading digit segment":    {"demo.1order.created", true},
+		"too long":                 {"demo." + strings.Repeat("a", 120) + ".created", true},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			fields := minimalManifestFields()
+			fields["emits"] = []map[string]any{{"name": c.name}}
+
+			m, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+
+			_, err = Load(m)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("event name %q: wantErr=%v, got err=%v", c.name, c.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestLoadManifestInvalidUtf8(t *testing.T) {
 	m := []byte(`{"name": "demo`)
 	m = append(m, 0xff, 0xfe) // invalid UTF-8 sequence

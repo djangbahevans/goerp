@@ -70,7 +70,7 @@ type Manifest struct {
 	Capabilities             []string              `json:"capabilities" validate:"required"`
 	HTTPAllowlist            []string              `json:"http_allowlist,omitempty"`
 	Wasm                     bool                  `json:"wasm,omitempty"`
-	Emits                    []EventDeclaration    `json:"emits,omitempty"`
+	Emits                    []EventDeclaration    `json:"emits,omitempty" validate:"dive"`
 	Subscribes               []EventSubscription   `json:"subscribes,omitempty"`
 	Permissions              []Permission          `json:"permissions,omitempty"`
 	Policies                 []Policy              `json:"policies,omitempty"`
@@ -103,7 +103,7 @@ type Manifest struct {
 }
 
 type EventDeclaration struct {
-	Name          string         `json:"name"`
+	Name          string         `json:"name" validate:"required,event_name,max=128"`
 	Version       int            `json:"version"`
 	Description   string         `json:"description,omitempty"`
 	PayloadSchema map[string]any `json:"payload_schema,omitempty"`
