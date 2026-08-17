@@ -68,6 +68,16 @@ type Config struct {
 	PoolMaxSize       int           `env:"GOERP_POOL_MAX_SIZE" envDefault:"16"`
 	PoolBorrowTimeout time.Duration `env:"GOERP_POOL_BORROW_TIMEOUT" envDefault:"5s"`
 	PoolMaxMemoryByes uint32        `env:"GOERP_POOL_MAX_MEMORY_BYTES" envDefault:"16777216"`
+
+	// SMTP (invite emails) — defaults match compose.dev.yml's Mailpit
+	// (localhost:1025, no auth); a real deployment overrides Host/Port/
+	// User/Pass to point at its own relay.
+	SMTPHost   string `env:"GOERP_SMTP_HOST" envDefault:"localhost"`
+	SMTPPort   int    `env:"GOERP_SMTP_PORT" envDefault:"1025"`
+	SMTPUser   string `env:"GOERP_SMTP_USER"`
+	SMTPPass   string `env:"GOERP_SMTP_PASSWORD"`
+	SMTPFrom   string `env:"GOERP_SMTP_FROM" envDefault:"noreply@goerp.local"`
+	AppBaseURL string `env:"GOERP_APP_BASE_URL" envDefault:"http://localhost:8080"`
 }
 
 func Load() (*Config, error) {

@@ -29,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
+	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -134,7 +135,16 @@ func New(cfg *config.Config) (*Engine, error) {
 	// once a tenant schema actually exists, by provisioning (goerp#149),
 	// not here at engine startup.
 	roleStore := role.NewStore(primaryPool)
-	inviteStore := invite.NewStore(primaryPool, userStore, roleStore, nil, nil)
+	inviteMailer := mailer.New(mailer.Config{
+		Host:    cfg.SMTPHost,
+		Port:    cfg.SMTPPort,
+		User:    cfg.SMTPUser,
+		Pass:    cfg.SMTPPass,
+		From:    cfg.SMTPFrom,
+		BaseURL: cfg.AppBaseURL,
+	})
+	// audit stays nil until goerp#16 lands.
+	inviteStore := invite.NewStore(primaryPool, userStore, roleStore, nil, inviteMailer)
 
 	auditStore := auditlog.NewStore(primaryPool)
 	if err := auditStore.Bootstrap(ctx); err != nil {
@@ -173,8 +183,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		// goerp#149/#15/#150 land — the handlers report
 		// StatusNotImplemented for those routes rather than the wiring
 		// needing a placeholder implementation here. inviteStore's own
-		// audit/mailer seams are nil until goerp#16/#166 land, same
-		// nil-safe-logs-and-continues pattern.
+		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
 	})
 
 	cacheClient, err := cache.New(ctx, cache.Config{
