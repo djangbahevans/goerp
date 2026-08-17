@@ -263,7 +263,16 @@ func New(cfg *config.Config) (*Engine, error) {
 
 		return primaryPool.Ping()
 	}
-	server := httpx.NewServer(&httpx.Config{ListenAddr: cfg.ListenAddr}, readyFn)
+	server := httpx.NewServer(&httpx.Config{
+		ListenAddr:        cfg.ListenAddr,
+		ReadTimeout:       cfg.ServerReadTimeout,
+		ReadHeaderTimeout: cfg.ServerReadHeaderTimeout,
+		WriteTimeout:      cfg.ServerWriteTimeout,
+		IdleTimeout:       cfg.ServerIdleTimeout,
+		MaxHeaderBytes:    cfg.ServerMaxHeaderBytes,
+		TLSCertFile:       cfg.TLSCertFile,
+		TLSKeyFile:        cfg.TLSKeyFile,
+	}, http.NotFoundHandler(), readyFn)
 
 	startedAt := time.Now()
 	server.SetHealthFn(func(ctx context.Context) httpx.HealthReport {
@@ -377,6 +386,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 		return report, failed
 	})
+
+	builtinRoutes := map[string]http.Handler{
+		"GET /_health": server.HealthHandler(),
+		"GET /_ready":  server.ReadyHandler(),
+	}
+	server.SetHandler(buildDispatchHandler(moduleRegistry, builtinRoutes))
 
 	orderedModules := make([]*module.LoadedModule, len(ordered))
 	for i, src := range ordered {

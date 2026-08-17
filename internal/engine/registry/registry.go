@@ -68,6 +68,7 @@ func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *fieldsec.Fi
 
 func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable, error) {
 	table := route.New()
+	registerBuiltinRoutes(table)
 	for name, m := range modules {
 		if m.Status == module.StatusFailed {
 			continue
@@ -81,6 +82,21 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 		}
 	}
 	return table, nil
+}
+
+// registerBuiltinRoutes registers the engine's own built-in routes into
+// table, so /_health and /_ready resolve through the exact same
+// RouteTable.Lookup module routes do — no second router. Safe against
+// collision by construction: RegisterModuleRoutes already rejects any
+// module route whose top path segment starts with "_" as a reserved
+// engine namespace.
+func registerBuiltinRoutes(table *route.RouteTable) {
+	for _, path := range []string{"/_health", "/_ready"} {
+		table.Register("GET", path, &route.RouteEntry{
+			Manifest:     route.RouteManifest{EngineNative: true},
+			PathTemplate: path,
+		})
+	}
 }
 
 func buildEventRegistry(modules map[string]*module.LoadedModule) *event.EventRegistry {

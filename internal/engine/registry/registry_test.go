@@ -228,6 +228,31 @@ func TestBuildRouteTable_FromModules(t *testing.T) {
 	}
 }
 
+// TestBuildRouteTable_IncludesBuiltinRoutes guards goerp#86: /_health and
+// /_ready must resolve through the same RouteTable module routes do, not a
+// second router — and survive every rebuild (module load, hot reload),
+// not just an initial registration step that could fall out of sync.
+func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
+	modules := map[string]*module.LoadedModule{
+		"contacts": {Manifest: manifest.Manifest{Type: "standard"}},
+	}
+
+	table, err := buildRouteTable(modules)
+	if err != nil {
+		t.Fatalf("buildRouteTable() error = %v", err)
+	}
+
+	for _, path := range []string{"/_health", "/_ready"} {
+		entry, _, result, _ := table.Lookup("GET", path)
+		if result != route.RouteFound {
+			t.Fatalf("Lookup(GET, %q) result = %v, want RouteFound", path, result)
+		}
+		if !entry.Manifest.EngineNative {
+			t.Errorf("Lookup(GET, %q).Manifest.EngineNative = false, want true", path)
+		}
+	}
+}
+
 func TestBuildEventRegistry_FromModules(t *testing.T) {
 	modules := map[string]*module.LoadedModule{
 		"billing": {
