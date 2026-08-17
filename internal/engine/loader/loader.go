@@ -165,12 +165,12 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 		modules[src.Name] = m
 	}
 
-	validateEventSubscriptions(modules)
+	ValidateEventSubscriptions(modules)
 
 	return modules
 }
 
-// validateEventSubscriptions checks every loaded module's subscribes[].name
+// ValidateEventSubscriptions checks every loaded module's subscribes[].name
 // against the set of events actually emitted by loaded modules (the event
 // registry goerp#68 builds). A subscribes[].name that names no known
 // event fails the subscribing module's load — unless the event's owning
@@ -179,7 +179,10 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 // load-time warning and the module still loads: a soft dependency is
 // allowed to be absent, so its events being unknown is expected, not an
 // error.
-func validateEventSubscriptions(modules map[string]*module.LoadedModule) {
+//
+// Exported so a caller loading modules one at a time (not via LoadAll) can
+// still run this same validation once its own loop finishes.
+func ValidateEventSubscriptions(modules map[string]*module.LoadedModule) {
 	knownEmits := make(map[string]bool)
 	for _, m := range modules {
 		if m.Status == module.StatusFailed {
