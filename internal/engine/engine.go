@@ -10,14 +10,13 @@
 // explicit warn-only list in engine-internals.md §2.
 //
 // New also runs Stage 3 (module discovery/order/cascading load/registry
-// publish, via moduleboot and registry.ModuleRegistry.Update) and Stage 4
-// (tenantsync.SyncAll). A depends_on cycle is fail-hard; individual
-// modules ending up module.StatusFailed are not.
+// publish, via moduleboot and registry.ModuleRegistry.Update), Stage 4
+// (tenantsync.SyncAll), and Stage 5 (poolwarm.WarmAll). A depends_on cycle
+// is fail-hard; individual modules ending up module.StatusFailed are not.
 //
 // Start runs the rest of Stage 6: opening the HTTP/admin servers and
 // starting the River job queue worker (client built in New, started in
-// Start). Instance pool warming (Stage 5) and the workflow-worker half of
-// Stage 6 are still out of scope.
+// Start). The workflow-worker half of Stage 6 is still out of scope.
 package engine
 
 import (
@@ -42,6 +41,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
+	"github.com/djangbahevans/goerp/internal/engine/poolwarm"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -387,6 +387,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeOnFailure()
 		return nil, fmt.Errorf("sync tenant schemas: %w", err)
 	}
+
+	poolwarm.WarmAll(ctx, loadedModules)
 
 	if err := jobqueue.Migrate(ctx, primaryPool); err != nil {
 		closeOnFailure()
