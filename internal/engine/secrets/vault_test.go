@@ -252,6 +252,28 @@ func TestNew_VaultDispatchesToVaultBackend(t *testing.T) {
 	}
 }
 
+func TestNewVaultClient_ReturnsAuthenticatedClient(t *testing.T) {
+	srv, fv := newFakeVaultServer(t)
+	t.Setenv("GOERP_VAULT_ADDR", srv.URL)
+	t.Setenv("GOERP_VAULT_AUTH_METHOD", "approle")
+	t.Setenv("GOERP_VAULT_APPROLE_ROLE_ID", "role-id")
+	t.Setenv("GOERP_VAULT_APPROLE_SECRET_ID", "secret-id")
+
+	client, err := NewVaultClient()
+	if err != nil {
+		t.Fatalf("NewVaultClient() error: %v", err)
+	}
+	if client.Token() == "" {
+		t.Error("NewVaultClient() returned a client with no token set")
+	}
+
+	fv.mu.Lock()
+	defer fv.mu.Unlock()
+	if fv.approleLogins != 1 {
+		t.Errorf("approleLogins = %d, want 1", fv.approleLogins)
+	}
+}
+
 func TestAuthenticator_UnsupportedMethodFails(t *testing.T) {
 	if _, err := authenticator(nil, VaultConfig{VaultAuthMethod: "nonsense"}); err == nil {
 		t.Fatal("authenticator() error = nil, want an error for an unsupported auth method")

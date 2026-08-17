@@ -39,44 +39,61 @@ type vaultBackend struct {
 }
 
 func newVaultBackend() (Backend, error) {
+	client, cfg, err := newAuthenticatedVaultClient()
+	if err != nil {
+		return nil, err
+	}
+	return &vaultBackend{client: client, cfg: cfg}, nil
+}
+
+// NewVaultClient returns an authenticated Vault client, sharing the same
+// auth-method dispatch and lease-renewal machinery newVaultBackend uses —
+// for packages needing direct Vault API access beyond the KV-shaped
+// Backend interface (e.g. PKI cert issuance, goerp#179).
+func NewVaultClient() (*api.Client, error) {
+	client, _, err := newAuthenticatedVaultClient()
+	return client, err
+}
+
+func newAuthenticatedVaultClient() (*api.Client, VaultConfig, error) {
 	cfg := VaultConfig{}
 	if err := env.Parse(&cfg); err != nil {
-		return nil, fmt.Errorf("parse vault config: %w", err)
+		return nil, cfg, fmt.Errorf("parse vault config: %w", err)
 	}
 	if err := validator.New(validator.WithRequiredStructEnabled()).Struct(cfg); err != nil {
-		return nil, fmt.Errorf("validate vault config: %w", err)
+		return nil, cfg, fmt.Errorf("validate vault config: %w", err)
 	}
 
 	client, err := api.NewClient(&api.Config{Address: cfg.VaultAddr})
 	if err != nil {
-		return nil, fmt.Errorf("create vault client: %w", err)
+		return nil, cfg, fmt.Errorf("create vault client: %w", err)
 	}
 
 	// token auth is a static credential — no lease to renew.
 	if cfg.VaultAuthMethod == "token" {
 		client.SetToken(cfg.VaultToken)
-		return &vaultBackend{client: client, cfg: cfg}, nil
+		return client, cfg, nil
 	}
 
 	authFn, err := authenticator(client, cfg)
 	if err != nil {
-		return nil, err
+		return nil, cfg, err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	secret, err := authFn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("vault authentication: %w", err)
+		return nil, cfg, fmt.Errorf("vault authentication: %w", err)
 	}
 	if secret == nil || secret.Auth == nil {
-		return nil, errors.New("vault login returned no auth information")
+		return nil, cfg, errors.New("vault login returned no auth information")
 	}
 	client.SetToken(secret.Auth.ClientToken)
 
 	go maintainLease(client, secret, authFn)
 
-	return &vaultBackend{client: client, cfg: cfg}, nil
+	return client, cfg, nil
 }
 
 func authenticator(client *api.Client, cfg VaultConfig) (func(ctx context.Context) (*api.Secret, error), error) {
