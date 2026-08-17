@@ -9,8 +9,25 @@ import (
 	"testing"
 )
 
+// testMux mounts HealthHandler/ReadyHandler the same way a real caller
+// (engine.go's dispatch handler) would — httpx itself no longer owns any
+// routing, so tests exercise the handlers through an explicit mux rather
+// than a private one the package builds for itself.
+func testMux(s *Server) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_health", s.HealthHandler())
+	mux.HandleFunc("GET /_ready", s.ReadyHandler())
+	return mux
+}
+
+func newServer(cfg *Config, readyFn func(context.Context) error) *Server {
+	s := NewServer(cfg, nil, readyFn)
+	s.SetHandler(testMux(s))
+	return s
+}
+
 func newTestServer() *Server {
-	return NewServer(&Config{ListenAddr: ":0"}, nil)
+	return newServer(&Config{ListenAddr: ":0"}, nil)
 }
 
 func doRequest(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
@@ -107,7 +124,7 @@ func TestHandleReadyNoReadyFn(t *testing.T) {
 }
 
 func TestHandleReadySuccess(t *testing.T) {
-	s := NewServer(&Config{ListenAddr: ":0"}, func(ctx context.Context) error { return nil })
+	s := newServer(&Config{ListenAddr: ":0"}, func(ctx context.Context) error { return nil })
 
 	w := doRequest(t, s, http.MethodGet, "/_ready")
 
@@ -117,7 +134,7 @@ func TestHandleReadySuccess(t *testing.T) {
 }
 
 func TestHandleReadyFailure(t *testing.T) {
-	s := NewServer(&Config{ListenAddr: ":0"}, func(ctx context.Context) error {
+	s := newServer(&Config{ListenAddr: ":0"}, func(ctx context.Context) error {
 		return errors.New("engine is shutting down")
 	})
 
@@ -175,7 +192,7 @@ func TestHandleReadyReportsModulesFromModulesFn(t *testing.T) {
 }
 
 func TestHandleReadyReportsModulesEvenWhenNotReady(t *testing.T) {
-	s := NewServer(&Config{ListenAddr: ":0"}, func(ctx context.Context) error {
+	s := newServer(&Config{ListenAddr: ":0"}, func(ctx context.Context) error {
 		return errors.New("engine is shutting down")
 	})
 	s.SetModulesFn(func() (ModulesReport, []FailedModule) {
