@@ -95,6 +95,19 @@ func NewInstancePool(name string, compiled wazero.CompiledModule, rt wazero.Runt
 	return p
 }
 
+// IdleCount returns the number of instances currently idle and ready to
+// borrow.
+func (p *InstancePool) IdleCount() int {
+	return len(p.idle)
+}
+
+// WarmSize returns this pool's configured warm-buffer target, after
+// PoolConfig.withDefaults() was applied at construction — never the raw,
+// possibly-zero value a caller passed to NewInstancePool.
+func (p *InstancePool) WarmSize() int {
+	return p.cfg.WarmSize
+}
+
 func (p *InstancePool) Borrow(ctx context.Context) (*ModuleInstance, error) {
 	start := time.Now()
 

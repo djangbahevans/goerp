@@ -366,6 +366,31 @@ func TestReplenishLoop_FillsIdleUpToWarmSize(t *testing.T) {
 	}
 }
 
+func TestInstancePool_IdleCountAndWarmSize(t *testing.T) {
+	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 3, MaxSize: 3, BorrowTimeout: time.Second})
+
+	if got := pool.WarmSize(); got != 3 {
+		t.Errorf("WarmSize() = %d, want 3", got)
+	}
+
+	waitFor(t, time.Second, func() bool { return pool.IdleCount() == 3 })
+
+	if _, err := pool.Borrow(context.Background()); err != nil {
+		t.Fatalf("Borrow: %v", err)
+	}
+	if got := pool.IdleCount(); got != 2 {
+		t.Errorf("IdleCount() after a Borrow = %d, want 2", got)
+	}
+}
+
+func TestInstancePool_WarmSize_ReflectsDefaultedValue(t *testing.T) {
+	pool := newTestPool(t, emptyModule, PoolConfig{})
+
+	if got := pool.WarmSize(); got != 4 {
+		t.Errorf("WarmSize() = %d, want 4 (the defaulted value, not the raw zero passed in)", got)
+	}
+}
+
 func TestReplenishLoop_NeverExceedsMaxSizeEvenWhenWarmSizeIsLarger(t *testing.T) {
 	pool := newTestPoolWithReplenish(t, emptyModule, PoolConfig{WarmSize: 10, MaxSize: 3, BorrowTimeout: time.Second})
 

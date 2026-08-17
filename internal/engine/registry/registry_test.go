@@ -163,6 +163,24 @@ func TestModuleRegistry_Update_RouteConflict_ReturnsErrorWithoutPublishing(t *te
 	}
 }
 
+func TestModuleRegistry_Snapshot_ReflectsInPlaceStatusMutation(t *testing.T) {
+	r := &ModuleRegistry{}
+	m := &module.LoadedModule{Status: module.StatusSyncing, Manifest: manifest.Manifest{Type: "standard"}}
+
+	snap, err := r.Update(map[string]*module.LoadedModule{"widgets": m})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	// A later stage (e.g. poolwarm.WarmAll) mutates the same *LoadedModule
+	// pointer directly, without calling Update again.
+	m.Status = module.StatusReady
+
+	if got := snap.Modules()["widgets"].Status; got != module.StatusReady {
+		t.Fatalf("already-published snapshot's Status = %v, want StatusReady — Modules() must return the same pointers Update was given, not copies", got)
+	}
+}
+
 func TestModuleRegistry_Update_SkipsFailedModuleEvenWithConflictingRoutes(t *testing.T) {
 	r := &ModuleRegistry{}
 
