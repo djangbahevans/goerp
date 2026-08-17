@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -76,6 +77,14 @@ var oneRouteModule = []byte{
 // verifyChecksum passes.
 func manifestJSON(t *testing.T, name string, wasmBytes []byte, capabilities []string) []byte {
 	t.Helper()
+	return manifestJSONWithFields(t, name, wasmBytes, capabilities, nil)
+}
+
+// manifestJSONWithFields is manifestJSON plus any extra root fields (e.g.
+// emits, subscribes, soft_depends_on) merged in, overriding the defaults on
+// key collision.
+func manifestJSONWithFields(t *testing.T, name string, wasmBytes []byte, capabilities []string, extra map[string]any) []byte {
+	t.Helper()
 	sum := sha256.Sum256(wasmBytes)
 
 	fields := map[string]any{
@@ -93,6 +102,7 @@ func manifestJSON(t *testing.T, name string, wasmBytes []byte, capabilities []st
 		},
 		"checksum": fmt.Sprintf("sha256:%x", sum),
 	}
+	maps.Copy(fields, extra)
 
 	data, err := json.Marshal(fields)
 	if err != nil {
@@ -274,6 +284,76 @@ func TestLoadAll_SecondModuleFailureLeavesFirstHealthy(t *testing.T) {
 	}
 	if !strings.Contains(auth.FailureReason, "reserved") {
 		t.Errorf("auth.FailureReason = %q, want it to mention the reserved namespace", auth.FailureReason)
+	}
+}
+
+func TestLoadAll_SubscribesToKnownEventSucceeds(t *testing.T) {
+	rt := newTestRuntime(t)
+	sources := []Source{
+		{
+			Name: "sales",
+			ManifestBytes: manifestJSONWithFields(t, "sales", okModule, []string{"db.read"}, map[string]any{
+				"emits": []map[string]any{{"name": "sales.order.created"}},
+			}),
+			WasmBytes: okModule,
+		},
+		{
+			Name: "shipping",
+			ManifestBytes: manifestJSONWithFields(t, "shipping", okModule, []string{"db.read"}, map[string]any{
+				"subscribes": []map[string]any{{"name": "sales.order.created"}},
+			}),
+			WasmBytes: okModule,
+		},
+	}
+
+	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+
+	if shipping := modules["shipping"]; shipping.Status != module.StatusSyncing {
+		t.Errorf("shipping.Status = %v, want StatusSyncing; FailureReason = %q", shipping.Status, shipping.FailureReason)
+	}
+}
+
+func TestLoadAll_SubscribesToUnknownEventFails(t *testing.T) {
+	rt := newTestRuntime(t)
+	sources := []Source{
+		{
+			Name: "shipping",
+			ManifestBytes: manifestJSONWithFields(t, "shipping", okModule, []string{"db.read"}, map[string]any{
+				"subscribes": []map[string]any{{"name": "sales.order.created"}},
+			}),
+			WasmBytes: okModule,
+		},
+	}
+
+	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+
+	shipping := modules["shipping"]
+	if shipping.Status != module.StatusFailed {
+		t.Fatalf("shipping.Status = %v, want StatusFailed", shipping.Status)
+	}
+	if !strings.Contains(shipping.FailureReason, "sales.order.created") {
+		t.Errorf("shipping.FailureReason = %q, want it to mention the unknown event", shipping.FailureReason)
+	}
+}
+
+func TestLoadAll_SubscribesToUnknownEventFromSoftDependencyWarnsInsteadOfFailing(t *testing.T) {
+	rt := newTestRuntime(t)
+	sources := []Source{
+		{
+			Name: "shipping",
+			ManifestBytes: manifestJSONWithFields(t, "shipping", okModule, []string{"db.read"}, map[string]any{
+				"subscribes":      []map[string]any{{"name": "sales.order.created"}},
+				"soft_depends_on": []string{"sales"},
+			}),
+			WasmBytes: okModule,
+		},
+	}
+
+	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+
+	shipping := modules["shipping"]
+	if shipping.Status != module.StatusSyncing {
+		t.Fatalf("shipping.Status = %v, want StatusSyncing (soft dependency should warn, not fail); FailureReason = %q", shipping.Status, shipping.FailureReason)
 	}
 }
 
