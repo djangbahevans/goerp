@@ -31,6 +31,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/search"
@@ -38,6 +39,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/user"
+	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero/api"
@@ -156,6 +158,29 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("bootstrap admin audit log: %w", err)
 	}
 
+	operatorCertStore := operatorcert.NewStore(primaryPool)
+	if err := operatorCertStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap operator certificate ledger: %w", err)
+	}
+
+	// PKI issuance/revocation only makes sense with a real PKI backend
+	// behind it; stays nil (routes report StatusNotImplemented) for any
+	// other GOERP_SECRETS_BACKEND.
+	var operatorPKI adminapi.OperatorPKI
+	if cfg.SecretsBackend == "vault" {
+		pki, err := vaultpki.New()
+		if err != nil {
+			log.Warn().Err(err).Msg("could not create vault pki client, operator cert issuance/revocation disabled")
+		} else {
+			operatorPKI = pki
+		}
+	}
+
 	adminServer, err := adminapi.NewServer(&adminapi.Config{
 		ListenAddr:    cfg.AdminAddr,
 		AdminToken:    adminToken,
@@ -184,6 +209,11 @@ func New(cfg *config.Config) (*Engine, error) {
 		// StatusNotImplemented for those routes rather than the wiring
 		// needing a placeholder implementation here. inviteStore's own
 		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
+	})
+
+	adminapi.RegisterOperatorsRoutes(adminServer.Router(), adminapi.OperatorsDeps{
+		PKI:    operatorPKI,
+		Ledger: operatorCertStore,
 	})
 
 	cacheClient, err := cache.New(ctx, cache.Config{
