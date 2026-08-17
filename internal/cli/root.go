@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/cli/admin"
 	"github.com/djangbahevans/goerp/internal/cli/clierr"
 	"github.com/djangbahevans/goerp/internal/cli/events"
 	"github.com/djangbahevans/goerp/internal/cli/jobs"
@@ -51,6 +52,7 @@ func newRootCmd() *cobra.Command {
 		return clierr.Usage(err)
 	})
 
+	rootCmd.AddCommand(admin.NewCmd())
 	rootCmd.AddCommand(events.NewCmd())
 	rootCmd.AddCommand(jobs.NewCmd())
 	rootCmd.AddCommand(module.NewCmd())

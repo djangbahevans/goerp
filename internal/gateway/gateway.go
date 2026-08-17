@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
+	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/rs/zerolog/log"
 )
 
@@ -42,8 +43,20 @@ func NewServer(cfg *Config) (*Gateway, error) {
 		return nil, fmt.Errorf("parse upstream url: %w", err)
 	}
 
-	// nil RevocationChecker until goerp#543 lands.
-	tlsConfig, err := newMTLS(*cfg, nil)
+	// RevocationChecker only makes sense with a real PKI backend behind
+	// it; stays nil for any other GOERP_SECRETS_BACKEND (goerp#181's own
+	// nil-safe-until-wired pattern, same as mtls.go's doc comment).
+	var revocation RevocationChecker
+	if cfg.SecretsBackend == "vault" {
+		pki, err := vaultpki.New()
+		if err != nil {
+			log.Warn().Err(err).Msg("admin gateway: could not create vault pki client, certificate revocation checking disabled")
+		} else {
+			revocation = newCRLRevocationChecker(context.Background(), pki, cfg.RevocationPollInterval)
+		}
+	}
+
+	tlsConfig, err := newMTLS(*cfg, revocation)
 	if err != nil {
 		return nil, fmt.Errorf("build TLS config: %w", err)
 	}

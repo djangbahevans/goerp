@@ -77,8 +77,13 @@ func (ca *testCA) leaf(t *testing.T, cn string, server bool) (certPEM, keyPEM []
 		t.Fatalf("generate leaf key: %v", err)
 	}
 
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		t.Fatalf("generate leaf serial number: %v", err)
+	}
+
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
+		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: cn},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
