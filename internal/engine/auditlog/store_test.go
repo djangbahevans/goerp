@@ -86,6 +86,7 @@ func TestWrite_RoundTripsAllFields(t *testing.T) {
 		TargetScope:      "acme",
 		IdempotencyKey:   "idem-123",
 		JobID:            "job_abc",
+		Reason:           "operator requested",
 		StatusCode:       202,
 	}
 	if err := store.Write(ctx, row); err != nil {
@@ -94,10 +95,10 @@ func TestWrite_RoundTripsAllFields(t *testing.T) {
 
 	var got Row
 	err := conn.QueryRowContext(ctx, `
-		SELECT operator_identity, endpoint, target_scope, COALESCE(idempotency_key, ''), COALESCE(job_id, ''), status_code
+		SELECT operator_identity, endpoint, target_scope, COALESCE(idempotency_key, ''), COALESCE(job_id, ''), COALESCE(reason, ''), status_code
 		FROM system.admin_audit_log
 		WHERE endpoint = $1 AND target_scope = $2
-	`, row.Endpoint, row.TargetScope).Scan(&got.OperatorIdentity, &got.Endpoint, &got.TargetScope, &got.IdempotencyKey, &got.JobID, &got.StatusCode)
+	`, row.Endpoint, row.TargetScope).Scan(&got.OperatorIdentity, &got.Endpoint, &got.TargetScope, &got.IdempotencyKey, &got.JobID, &got.Reason, &got.StatusCode)
 	if err != nil {
 		t.Fatalf("query inserted row: %v", err)
 	}
@@ -127,12 +128,12 @@ func TestWrite_EmptyIdempotencyKeyAndJobIDStoreAsNull(t *testing.T) {
 		_, _ = conn.ExecContext(context.Background(), `DELETE FROM system.admin_audit_log WHERE endpoint = $1 AND target_scope = $2`, row.Endpoint, row.TargetScope)
 	})
 
-	var idemNull, jobNull bool
+	var idemNull, jobNull, reasonNull bool
 	err := conn.QueryRowContext(ctx, `
-		SELECT idempotency_key IS NULL, job_id IS NULL
+		SELECT idempotency_key IS NULL, job_id IS NULL, reason IS NULL
 		FROM system.admin_audit_log
 		WHERE endpoint = $1 AND target_scope = $2
-	`, row.Endpoint, row.TargetScope).Scan(&idemNull, &jobNull)
+	`, row.Endpoint, row.TargetScope).Scan(&idemNull, &jobNull, &reasonNull)
 	if err != nil {
 		t.Fatalf("query inserted row: %v", err)
 	}
@@ -141,5 +142,8 @@ func TestWrite_EmptyIdempotencyKeyAndJobIDStoreAsNull(t *testing.T) {
 	}
 	if !jobNull {
 		t.Error("expected job_id to be NULL for a non-202 write, not an empty string")
+	}
+	if !reasonNull {
+		t.Error("expected reason to be NULL when not sent, not an empty string")
 	}
 }

@@ -50,6 +50,7 @@ func auditLogMiddleware(store *auditlog.Store) func(http.Handler) http.Handler {
 				TargetScope:    targetScope(r),
 				IdempotencyKey: r.Header.Get("Idempotency-Key"),
 				JobID:          jobIDFromResponse(rec.body, rec.status),
+				Reason:         requestReason(r),
 				StatusCode:     rec.status,
 			}
 			if err := store.Write(context.WithoutCancel(r.Context()), row); err != nil {

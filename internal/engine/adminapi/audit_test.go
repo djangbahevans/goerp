@@ -38,22 +38,22 @@ func endpointToken(t *testing.T) string {
 	return fmt.Sprintf("/admin/_audit_test_%d", time.Now().UnixNano())
 }
 
-func latestAuditRow(t *testing.T, conn *sql.DB, endpoint string) (operatorIdentity, targetScope, idempotencyKey, jobID string, statusCode int, found bool) {
+func latestAuditRow(t *testing.T, conn *sql.DB, endpoint string) (operatorIdentity, targetScope, idempotencyKey, jobID, reason string, statusCode int, found bool) {
 	t.Helper()
 	err := conn.QueryRowContext(context.Background(), `
-		SELECT operator_identity, target_scope, COALESCE(idempotency_key, ''), COALESCE(job_id, ''), status_code
+		SELECT operator_identity, target_scope, COALESCE(idempotency_key, ''), COALESCE(job_id, ''), COALESCE(reason, ''), status_code
 		FROM system.admin_audit_log
 		WHERE endpoint = $1
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, endpoint).Scan(&operatorIdentity, &targetScope, &idempotencyKey, &jobID, &statusCode)
+	`, endpoint).Scan(&operatorIdentity, &targetScope, &idempotencyKey, &jobID, &reason, &statusCode)
 	if err == sql.ErrNoRows {
-		return "", "", "", "", 0, false
+		return "", "", "", "", "", 0, false
 	}
 	if err != nil {
 		t.Fatalf("query latest audit row for %q: %v", endpoint, err)
 	}
-	return operatorIdentity, targetScope, idempotencyKey, jobID, statusCode, true
+	return operatorIdentity, targetScope, idempotencyKey, jobID, reason, statusCode, true
 }
 
 func TestAuditLogMiddleware_GETIsNotAudited(t *testing.T) {
@@ -70,7 +70,7 @@ func TestAuditLogMiddleware_GETIsNotAudited(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 
-	if _, _, _, _, _, found := latestAuditRow(t, conn, "GET "+path); found {
+	if _, _, _, _, _, _, found := latestAuditRow(t, conn, "GET "+path); found {
 		t.Error("expected no audit row for a GET request")
 	}
 }
@@ -87,13 +87,19 @@ func TestAuditLogMiddleware_MutatingRequestWritesRow(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("POST "+path+"/{slug}/suspend", h)
 
+	// bodyCapMiddleware normally stashes the buffered body in context ahead
+	// of auditLogMiddleware; wire it in here too since requestReason reads
+	// the request body, and this test exercises auditLogMiddleware
+	// directly rather than through the full server chain.
+	full := bodyCapMiddleware(1 << 20)(mux)
+
 	req := httptest.NewRequest(http.MethodPost, path+"/acme/suspend", strings.NewReader(`{"reason":"test"}`))
 	req.Header.Set("Idempotency-Key", "idem-xyz")
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	full.ServeHTTP(rec, req)
 
 	wantEndpoint := "POST " + path + "/{slug}/suspend"
-	identity, scope, idemKey, jobID, status, found := latestAuditRow(t, conn, wantEndpoint)
+	identity, scope, idemKey, jobID, reason, status, found := latestAuditRow(t, conn, wantEndpoint)
 	if !found {
 		t.Fatal("expected an audit row for the mutating request")
 	}
@@ -108,6 +114,9 @@ func TestAuditLogMiddleware_MutatingRequestWritesRow(t *testing.T) {
 	}
 	if jobID != "" {
 		t.Errorf("job_id = %q, want empty for a 200 response", jobID)
+	}
+	if reason != "test" {
+		t.Errorf("reason = %q, want %q", reason, "test")
 	}
 	if status != http.StatusOK {
 		t.Errorf("status_code = %d, want %d", status, http.StatusOK)
@@ -130,12 +139,41 @@ func TestAuditLogMiddleware_ForwardedIdentityHeaderIsUsed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	identity, _, _, _, _, found := latestAuditRow(t, conn, "POST "+path)
+	identity, _, _, _, _, _, found := latestAuditRow(t, conn, "POST "+path)
 	if !found {
 		t.Fatal("expected an audit row for the mutating request")
 	}
 	if identity != "operator-cn-jane" {
 		t.Errorf("operator_identity = %q, want %q", identity, "operator-cn-jane")
+	}
+}
+
+func TestAuditLogMiddleware_ScopeFromIDPathParam(t *testing.T) {
+	store, conn := openTestAuditStore(t)
+	endpoint := endpointToken(t)
+	path := endpoint
+
+	// Mirrors POST /admin/jobs/{id}/cancel: a 200 response (jobIDFromResponse
+	// only fires on 202) whose route param is {id}, not {slug} — the only
+	// other place target scope can come from.
+	h := auditLogMiddleware(store)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"id":"job_42"},"error":null}`))
+	}))
+	mux := http.NewServeMux()
+	mux.Handle("POST "+path+"/{id}/cancel", h)
+
+	req := httptest.NewRequest(http.MethodPost, path+"/job_42/cancel", strings.NewReader(`{"reason":"test"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	wantEndpoint := "POST " + path + "/{id}/cancel"
+	_, scope, _, _, _, _, found := latestAuditRow(t, conn, wantEndpoint)
+	if !found {
+		t.Fatal("expected an audit row for the mutating request")
+	}
+	if scope != "job_42" {
+		t.Errorf("target_scope = %q, want %q (from the {id} path param)", scope, "job_42")
 	}
 }
 
@@ -160,7 +198,7 @@ func TestAuditLogMiddleware_CreateRouteScopeFromBody(t *testing.T) {
 	rec := httptest.NewRecorder()
 	full.ServeHTTP(rec, req)
 
-	_, scope, _, jobID, status, found := latestAuditRow(t, conn, "POST "+path)
+	_, scope, _, jobID, _, status, found := latestAuditRow(t, conn, "POST "+path)
 	if !found {
 		t.Fatal("expected an audit row for the create request")
 	}
@@ -189,7 +227,7 @@ func TestAuditLogMiddleware_HandlerErrorStillWritesRow(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`)))
 
-	_, _, _, _, status, found := latestAuditRow(t, conn, "POST "+path)
+	_, _, _, _, _, status, found := latestAuditRow(t, conn, "POST "+path)
 	if !found {
 		t.Fatal("expected an audit row even when the handler returns an error status")
 	}

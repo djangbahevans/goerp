@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS system.admin_audit_log (
     target_scope      TEXT NOT NULL DEFAULT '',
     idempotency_key   TEXT,
     job_id            TEXT,
+    reason            TEXT,
     status_code       INT NOT NULL,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
@@ -66,18 +67,20 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 
 // Row is one admin_audit_log entry. OperatorIdentity is never empty — the
 // engine writes "internal" for loopback-direct calls rather than leaving
-// it blank (engine-internals.md §11). IdempotencyKey and JobID are ""
-// when the request didn't send one / didn't return a 202, respectively —
-// stored as SQL NULL, not the empty string, so a query distinguishing
-// "no idempotency key was sent" from "sent as an empty string" (which the
-// admin API itself never accepts, but the column shouldn't quietly assume
-// that on its behalf) stays possible.
+// it blank (engine-internals.md §11). IdempotencyKey, JobID, and Reason
+// are "" when the request didn't send one — stored as SQL NULL, not the
+// empty string, so a query distinguishing "not sent" from "sent as an
+// empty string" (which the admin API itself never accepts, but the
+// column shouldn't quietly assume that on its behalf) stays possible.
+// Reason is whatever the request body's own "reason" field held, for any
+// endpoint that accepts one (e.g. jobs cancel) — not jobs-specific.
 type Row struct {
 	OperatorIdentity string
 	Endpoint         string
 	TargetScope      string
 	IdempotencyKey   string
 	JobID            string
+	Reason           string
 	StatusCode       int
 }
 
@@ -86,9 +89,9 @@ type Row struct {
 func (s *Store) Write(ctx context.Context, row Row) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO system.admin_audit_log
-			(operator_identity, endpoint, target_scope, idempotency_key, job_id, status_code)
-		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), $6)
-	`, row.OperatorIdentity, row.Endpoint, row.TargetScope, row.IdempotencyKey, row.JobID, row.StatusCode)
+			(operator_identity, endpoint, target_scope, idempotency_key, job_id, reason, status_code)
+		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''), $7)
+	`, row.OperatorIdentity, row.Endpoint, row.TargetScope, row.IdempotencyKey, row.JobID, row.Reason, row.StatusCode)
 	if err != nil {
 		return fmt.Errorf("insert admin_audit_log row: %w", err)
 	}
