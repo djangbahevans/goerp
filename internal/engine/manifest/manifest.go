@@ -102,6 +102,24 @@ type Manifest struct {
 	WorkerChecksum           string                `json:"worker_checksum,omitempty"`
 }
 
+// UnmarshalJSON defaults Wasm to true (manifest-spec.md §2's documented
+// default) when the manifest omits the field — plain json.Unmarshal into a
+// bool zero-values it to false, which would misreport every module that
+// relies on the documented default as having no WASM binary.
+func (m *Manifest) UnmarshalJSON(data []byte) error {
+	type Alias Manifest
+
+	aux := &Alias{Wasm: true}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	*m = Manifest(*aux)
+
+	return nil
+}
+
 type EventDeclaration struct {
 	Name          string         `json:"name" validate:"required,event_name,max=128"`
 	Version       int            `json:"version"`
