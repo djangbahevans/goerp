@@ -163,6 +163,29 @@ func TestModuleRegistry_Update_RouteConflict_ReturnsErrorWithoutPublishing(t *te
 	}
 }
 
+func TestModuleRegistry_Update_SkipsFailedModuleEvenWithConflictingRoutes(t *testing.T) {
+	r := &ModuleRegistry{}
+
+	// "auth" is StatusFailed and would conflict with the reserved "auth"
+	// namespace if it were registered — exactly the situation a module
+	// that failed its own route registration during loading is in.
+	// Update must not re-trigger that conflict for a module already
+	// marked failed.
+	_, err := r.Update(map[string]*module.LoadedModule{
+		"contacts": {Manifest: manifest.Manifest{Type: "standard"}},
+		"auth": {
+			Status:   module.StatusFailed,
+			Manifest: manifest.Manifest{Type: "standard"},
+			ExplicitRoutes: []engine.RouteDeclaration{
+				{Method: "GET", Path: "/"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v, want a StatusFailed module's routes to be skipped, not registered", err)
+	}
+}
+
 func TestBuildRouteTable_FromModules(t *testing.T) {
 	modules := map[string]*module.LoadedModule{
 		"contacts": {

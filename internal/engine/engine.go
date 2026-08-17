@@ -7,9 +7,13 @@
 // injected health/ready checks. Primary Postgres, Redis, and both system-
 // schema bootstraps are fail-hard (New returns an error); replica Postgres,
 // Meilisearch, and object storage failures only warn and continue, per the
-// explicit warn-only list in engine-internals.md §2. Stage 2+ (module
-// loading, schema sync, instance pooling) is out of scope here — see #34's
-// notes for why, and #13/#19 for where that lands.
+// explicit warn-only list in engine-internals.md §2.
+//
+// New also runs Stage 3 (module discovery/order/cascading load/registry
+// publish, via moduleboot and registry.ModuleRegistry.Update) and Stage 4
+// (tenantsync.SyncAll). A depends_on cycle is fail-hard; individual
+// modules ending up module.StatusFailed are not. Instance pool warming
+// (Stage 5) and opening for traffic (Stage 6) are still out of scope.
 package engine
 
 import (
@@ -31,13 +35,16 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
+	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantsync"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -50,8 +57,9 @@ type Engine struct {
 	cfg         *config.Config
 	wasmRuntime *wasm.Runtime
 
-	syncPool    *schema.SchemaSyncPool
-	tenantStore *tenant.Store
+	syncPool       *schema.SchemaSyncPool
+	tenantStore    *tenant.Store
+	moduleRegistry *registry.ModuleRegistry
 
 	secretsBackend secrets.Backend
 	primaryDB      *sql.DB
@@ -308,11 +316,77 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("create wasm runtime: %w", err)
 	}
 
+	closeOnFailure := func() {
+		_ = runtime.Close(ctx)
+		_ = cacheClient.Close()
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+	}
+
+	sources, err := moduleboot.Discover(cfg.ModuleDir)
+	if err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("discover module sources: %w", err)
+	}
+
+	ordered, err := moduleboot.Order(sources)
+	if err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("order module dependencies: %w", err)
+	}
+
+	poolCfg := wasm.PoolConfig{
+		WarmSize:      cfg.PoolWarmSize,
+		MaxSize:       cfg.PoolMaxSize,
+		BorrowTimeout: cfg.PoolBorrowTimeout,
+	}
+	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, ordered)
+
+	moduleRegistry := &registry.ModuleRegistry{}
+	if _, err := moduleRegistry.Update(loadedModules); err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("publish module registry: %w", err)
+	}
+
+	server.SetModulesFn(func() (httpx.ModulesReport, []httpx.FailedModule) {
+		snap := moduleRegistry.Snapshot()
+		if snap == nil {
+			return httpx.ModulesReport{}, nil
+		}
+
+		report := httpx.ModulesReport{}
+		var failed []httpx.FailedModule
+		for name, m := range snap.Modules() {
+			report.Total++
+			if m.Status == module.StatusFailed {
+				report.Failed++
+				failed = append(failed, httpx.FailedModule{Name: name, Reason: m.FailureReason})
+				continue
+			}
+			report.Ready++
+		}
+		return report, failed
+	})
+
+	orderedModules := make([]*module.LoadedModule, len(ordered))
+	for i, src := range ordered {
+		orderedModules[i] = loadedModules[src.Name]
+	}
+	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: cfg.SchemaSyncDDLStatementTimeout})
+	if err := tenantsync.SyncAll(ctx, syncPool, diffEngine, tenantStore, orderedModules, cfg.SchemaSyncConcurrency); err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("sync tenant schemas: %w", err)
+	}
+
 	e = &Engine{
 		cfg:            cfg,
 		wasmRuntime:    runtime,
 		syncPool:       syncPool,
 		tenantStore:    tenantStore,
+		moduleRegistry: moduleRegistry,
 		secretsBackend: secretsBackend,
 		primaryDB:      primaryPool,
 		replicaDB:      replicaPool,
@@ -324,6 +398,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	return e, nil
+}
+
+// ModuleRegistry returns the registry Stage 3 published during New.
+func (e *Engine) ModuleRegistry() *registry.ModuleRegistry {
+	return e.moduleRegistry
 }
 
 func (e *Engine) Start(ctx context.Context) error {

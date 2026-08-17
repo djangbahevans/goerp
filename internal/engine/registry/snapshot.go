@@ -19,6 +19,12 @@ type RegistrySnapshot struct {
 	schemaRegistry   *SchemaRegistry
 }
 
+// Modules returns this snapshot's backing map, successful and
+// StatusFailed alike. Callers must treat it as read-only.
+func (s *RegistrySnapshot) Modules() map[string]*module.LoadedModule {
+	return s.modules
+}
+
 // Populated by future tickets (backlog #35, #37, and whatever resolves
 // schemaRegistry). Never rebuilt by any build* step here;
 // carried over unchanged from the prior snapshot on every write.

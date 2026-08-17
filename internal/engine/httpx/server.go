@@ -22,6 +22,7 @@ type Server struct {
 	http      *http.Server
 	readyFn   func(context.Context) error
 	healthFn  HealthFn
+	modulesFn ModulesFn
 }
 
 type Config struct {
@@ -54,6 +55,10 @@ func NewServer(cfg *Config, readyFunc func(context.Context) error) *Server {
 
 func (s *Server) SetHealthFn(fn HealthFn) {
 	s.healthFn = fn
+}
+
+func (s *Server) SetModulesFn(fn ModulesFn) {
+	s.modulesFn = fn
 }
 
 func (s *Server) Start() error {

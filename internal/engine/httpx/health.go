@@ -41,6 +41,11 @@ type FailedModule struct {
 
 type HealthFn func(context.Context) HealthReport
 
+// ModulesFn reports module-load state for GET /_ready (engine-internals.md
+// §11). "Ready" means "Stage 3 load didn't fail," not StatusReady —
+// instance warming (Stage 5) is separate, later scope.
+type ModulesFn func() (ModulesReport, []FailedModule)
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -82,13 +87,21 @@ func ProbeCheck(ctx context.Context, fn func(context.Context) error) CheckResult
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	modules, failedModules := ModulesReport{}, []FailedModule{}
+	if s.modulesFn != nil {
+		modules, failedModules = s.modulesFn()
+		if failedModules == nil {
+			failedModules = []FailedModule{}
+		}
+	}
+
 	if s.readyFn != nil {
 		if err := s.readyFn(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			if encErr := json.NewEncoder(w).Encode(ReadyReport{
 				Ready:         false,
-				Modules:       ModulesReport{},
-				FailedModules: []FailedModule{},
+				Modules:       modules,
+				FailedModules: failedModules,
 			}); encErr != nil {
 				log.Error().Err(encErr).Msg("encode ready response")
 			}
@@ -98,8 +111,8 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewEncoder(w).Encode(ReadyReport{
 		Ready:         true,
-		Modules:       ModulesReport{},
-		FailedModules: []FailedModule{},
+		Modules:       modules,
+		FailedModules: failedModules,
 	}); err != nil {
 		log.Error().Err(err).Msg("encode ready response")
 	}

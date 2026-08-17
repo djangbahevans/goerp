@@ -49,9 +49,18 @@ func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*Regis
 	return newSnap, nil
 }
 
+// The four build* functions below all skip StatusFailed modules — a
+// module that never finished loading shouldn't claim a route, emit an
+// event, or expose a permission, and skipping in buildRouteTable avoids
+// re-triggering a route conflict the caller already resolved by failing
+// that module before calling Update.
+
 func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *fieldsec.FieldSecurityRegistry {
 	reg := fieldsec.New()
 	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
 		reg.Register(name, m.ModelDecls)
 	}
 	return reg
@@ -60,6 +69,9 @@ func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *fieldsec.Fi
 func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable, error) {
 	table := route.New()
 	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
 		explicit := make([]route.ExplicitRoute, len(m.ExplicitRoutes))
 		for i, r := range m.ExplicitRoutes {
 			explicit[i] = route.ExplicitRoute{Method: r.Method, Path: r.Path}
@@ -74,6 +86,9 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 func buildEventRegistry(modules map[string]*module.LoadedModule) *event.EventRegistry {
 	reg := event.NewEventRegistry()
 	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
 		reg.Register(name, m.Manifest)
 	}
 	return reg
@@ -82,6 +97,9 @@ func buildEventRegistry(modules map[string]*module.LoadedModule) *event.EventReg
 func buildPermissionRegistry(modules map[string]*module.LoadedModule) *permission.PermissionRegistry {
 	reg := permission.NewPermissionRegistry()
 	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
 		reg.Register(name, m.Manifest.Permissions)
 	}
 	return reg

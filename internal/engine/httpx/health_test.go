@@ -136,6 +136,63 @@ func TestHandleReadyFailure(t *testing.T) {
 	}
 }
 
+func TestHandleReadyNoModulesFnDefaultsToEmpty(t *testing.T) {
+	s := newTestServer()
+
+	w := doRequest(t, s, http.MethodGet, "/_ready")
+
+	var report ReadyReport
+	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if report.Modules != (ModulesReport{}) {
+		t.Errorf("Modules = %+v, want zero value when no ModulesFn is configured", report.Modules)
+	}
+	if len(report.FailedModules) != 0 {
+		t.Errorf("FailedModules = %+v, want empty", report.FailedModules)
+	}
+}
+
+func TestHandleReadyReportsModulesFromModulesFn(t *testing.T) {
+	s := newTestServer()
+	s.SetModulesFn(func() (ModulesReport, []FailedModule) {
+		return ModulesReport{Total: 2, Ready: 1, Failed: 1},
+			[]FailedModule{{Name: "accounting", Reason: "checksum mismatch"}}
+	})
+
+	w := doRequest(t, s, http.MethodGet, "/_ready")
+
+	var report ReadyReport
+	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if report.Modules != (ModulesReport{Total: 2, Ready: 1, Failed: 1}) {
+		t.Errorf("Modules = %+v, want {2 1 1}", report.Modules)
+	}
+	if len(report.FailedModules) != 1 || report.FailedModules[0].Name != "accounting" {
+		t.Errorf("FailedModules = %+v, want one entry named \"accounting\"", report.FailedModules)
+	}
+}
+
+func TestHandleReadyReportsModulesEvenWhenNotReady(t *testing.T) {
+	s := NewServer(&Config{ListenAddr: ":0"}, func(ctx context.Context) error {
+		return errors.New("engine is shutting down")
+	})
+	s.SetModulesFn(func() (ModulesReport, []FailedModule) {
+		return ModulesReport{Total: 1, Ready: 1}, nil
+	})
+
+	w := doRequest(t, s, http.MethodGet, "/_ready")
+
+	var report ReadyReport
+	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if report.Modules.Total != 1 {
+		t.Errorf("Modules.Total = %d, want 1 even when ready=false", report.Modules.Total)
+	}
+}
+
 func TestProbeCheckSuccess(t *testing.T) {
 	result := ProbeCheck(context.Background(), func(ctx context.Context) error { return nil })
 
