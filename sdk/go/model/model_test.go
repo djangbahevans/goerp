@@ -204,6 +204,41 @@ func TestIndexes_CompileToCorrectDDL(t *testing.T) {
 	}
 }
 
+func TestNewIndexKinds_MsgpackRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		idx  IndexDef
+	}{
+		{"partial", PartialIndex("tenant_id", "status").Where("deleted_at IS NULL")},
+		{"brin", BRINIndex("created_at").PagesPerRange(32)},
+		{"gist", GiSTIndex("path")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := msgpack.Marshal(tt.idx)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+
+			var decoded IndexDef
+			if err := msgpack.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+
+			if decoded.Kind != tt.idx.Kind {
+				t.Errorf("Kind = %v, want %v", decoded.Kind, tt.idx.Kind)
+			}
+			if decoded.WhereExpr != tt.idx.WhereExpr {
+				t.Errorf("WhereExpr = %q, want %q", decoded.WhereExpr, tt.idx.WhereExpr)
+			}
+			if decoded.Pages != tt.idx.Pages {
+				t.Errorf("Pages = %d, want %d", decoded.Pages, tt.idx.Pages)
+			}
+		})
+	}
+}
+
 func TestModelDeclaration_MsgpackRoundTrip(t *testing.T) {
 	original := Define("contacts.contact",
 		Table("contacts"),
