@@ -8,9 +8,12 @@ import (
 type Handler func(*Request) *Response
 
 type route struct {
-	method   string
-	segments []string
-	handler  Handler
+	method     string
+	segments   []string
+	handler    Handler
+	model      string
+	name       string
+	crudAction string
 }
 
 type Router struct {
@@ -26,9 +29,24 @@ var DefaultRouter = NewRouter()
 func (r *Router) register(method, pattern string, h Handler) {
 	r.routes = append(r.routes, route{
 		method:   method,
-		segments: strings.Split(strings.Trim(pattern, "/"), "/"),
+		segments: splitPattern(pattern),
 		handler:  h,
 	})
+}
+
+func (r *Router) registerAction(method, pattern, model, name, crudAction string, h Handler) {
+	r.routes = append(r.routes, route{
+		method:     method,
+		segments:   splitPattern(pattern),
+		handler:    h,
+		model:      model,
+		name:       name,
+		crudAction: crudAction,
+	})
+}
+
+func splitPattern(pattern string) []string {
+	return strings.Split(strings.Trim(pattern, "/"), "/")
 }
 
 func GET(pattern string, h Handler)    { DefaultRouter.register("GET", pattern, h) }
@@ -86,8 +104,11 @@ func routeDeclarations(routes []route) []RouteDeclaration {
 	decls := make([]RouteDeclaration, 0, len(routes))
 	for _, r := range routes {
 		decls = append(decls, RouteDeclaration{
-			Method: r.method,
-			Path:   "/" + strings.Join(r.segments, "/"),
+			Method:     r.method,
+			Path:       "/" + strings.Join(r.segments, "/"),
+			Model:      r.model,
+			Name:       r.name,
+			CRUDAction: r.crudAction,
 		})
 	}
 	return decls
