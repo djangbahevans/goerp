@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -19,9 +20,17 @@ type Runtime struct {
 	wazero       wazero.Runtime
 	moduleConfig wazero.ModuleConfig
 	modules      map[string]api.Module
+
+	registry  instanceRegistry
+	txLimiter *TransactionLimiter
 }
 
-func New(cfg *config.Config) (*Runtime, error) {
+// New builds the shared wazero runtime and registers the host ABI against
+// it. db is the primary connection pool host.db's transaction-lifecycle
+// functions (host-abi-reference.md §5) open transactions on — it must
+// already be connected by the time New is called, since abi.RegisterAll
+// closes over it while building the host.db module.
+func New(cfg *config.Config, db *sql.DB) (*Runtime, error) {
 	ctx := context.Background()
 
 	cacheDir := cfg.CompilationCache
@@ -49,9 +58,24 @@ func New(cfg *config.Config) (*Runtime, error) {
 		return nil, fmt.Errorf("instantiate wasi: %w", err)
 	}
 
+	// r is constructed before any host module is registered so that
+	// registerHostDB's closures (below) can already close over it —
+	// InstanceForModule/RegisterInstance/UnregisterInstance are populated
+	// per-request later (by invokeHandler), but the registry and limiter
+	// themselves must exist now.
+	r := &Runtime{
+		registry:  newInstanceRegistry(),
+		txLimiter: NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
+	}
+
 	if err := abi.RegisterAll(ctx, rt); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host abi: %w", err)
+	}
+
+	if err := registerHostDB(ctx, rt, r, db); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.db: %w", err)
 	}
 
 	stdout := log.With().Str("component", "wasm").Str("stream", "stdout").Logger()
@@ -61,10 +85,9 @@ func New(cfg *config.Config) (*Runtime, error) {
 		WithStdout(stdout).
 		WithStderr(stderr)
 
-	return &Runtime{
-		wazero:       rt,
-		moduleConfig: moduleConfig,
-	}, nil
+	r.wazero = rt
+	r.moduleConfig = moduleConfig
+	return r, nil
 }
 
 func (r *Runtime) ModuleConfig() wazero.ModuleConfig {
