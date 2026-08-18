@@ -3,13 +3,33 @@ package engine
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/tetratelabs/wazero"
 )
+
+// newTestEngine builds an Engine with a real *wasm.Runtime — invokeHandler
+// needs one to register/unregister instances and to source a
+// ModuleContext's TransactionLimiter, even though these tests never touch
+// host.db. db is nil since no test here calls host.db.begin.
+func newTestEngine(t *testing.T) *Engine {
+	t.Helper()
+	rt, err := wasm.New(&config.Config{
+		CompilationCache: filepath.Join(t.TempDir(), "cache"),
+		Environment:      string(config.Production),
+	}, nil)
+	if err != nil {
+		t.Fatalf("wasm.New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+
+	return &Engine{wasmRuntime: rt}
+}
 
 // handleRequestEchoModule exports allocate/deallocate/handle_request, where
 // handle_request echoes back the same (ptr, len) it was called with, packed
@@ -108,7 +128,7 @@ func TestInvokeHandler_RoundTripsAndClearsModuleContext(t *testing.T) {
 		TraceID:    "trace-1",
 	}
 
-	e := &Engine{}
+	e := newTestEngine(t)
 	if _, err := e.invokeHandler(context.Background(), inst, "handler", req, &module.LoadedModule{}); err != nil {
 		t.Fatalf("invokeHandler: %v", err)
 	}
@@ -117,7 +137,7 @@ func TestInvokeHandler_RoundTripsAndClearsModuleContext(t *testing.T) {
 		t.Errorf("expected moduleCtx to be cleared after invokeHandler returns, got %+v", mc)
 	}
 
-	if got := e.instanceForModule(inst.Module()); got != nil {
+	if got := e.wasmRuntime.InstanceForModule(inst.Module()); got != nil {
 		t.Errorf("expected instanceForModule to be cleared after invokeHandler returns, got %+v", got)
 	}
 }
@@ -125,7 +145,7 @@ func TestInvokeHandler_RoundTripsAndClearsModuleContext(t *testing.T) {
 func TestInvokeHandler_TrapSurfacesAsError(t *testing.T) {
 	inst := newTestInstance(t, handleRequestTrapsModule)
 
-	e := &Engine{}
+	e := newTestEngine(t)
 	_, err := e.invokeHandler(context.Background(), inst, "handler", EngineRequest{ID: "req-1"}, &module.LoadedModule{})
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
@@ -145,7 +165,7 @@ func TestInvokeHandler_ContextCancellationSurfacesAsContextError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already canceled before the call
 
-	e := &Engine{}
+	e := newTestEngine(t)
 	_, err := e.invokeHandler(ctx, inst, "handler", EngineRequest{ID: "req-1"}, &module.LoadedModule{})
 	if err == nil {
 		t.Fatal("expected an error")

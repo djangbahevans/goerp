@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,7 +54,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
-	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -77,9 +75,6 @@ type Engine struct {
 	server         *httpx.Server
 	adminServer    *adminapi.Server
 	readiness      atomic.Bool
-
-	instancesMu sync.Mutex
-	instances   map[api.Module]*wasm.ModuleInstance
 }
 
 func New(cfg *config.Config) (*Engine, error) {
@@ -320,7 +315,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 	})
 
-	runtime, err := wasm.New(cfg)
+	runtime, err := wasm.New(cfg, primaryPool)
 	if err != nil {
 		_ = cacheClient.Close()
 		_ = primaryPool.Close()
@@ -509,8 +504,8 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func newModuleContext(ctx context.Context, req EngineRequest, mod *module.LoadedModule) *wasm.ModuleContext {
-	return wasm.NewModuleContext(req.ID, req.UserID, "", nil, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities)
+func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *module.LoadedModule) *wasm.ModuleContext {
+	return wasm.NewModuleContext(req.ID, req.UserID, "", nil, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter())
 }
 
 func (e *Engine) invokeHandler(
@@ -520,16 +515,12 @@ func (e *Engine) invokeHandler(
 	req EngineRequest,
 	mod *module.LoadedModule,
 ) (EngineResponse, error) {
-	moduleCtx := newModuleContext(ctx, req, mod)
+	moduleCtx := e.newModuleContext(ctx, req, mod)
 	inst.SetModuleContext(moduleCtx)
-	e.registerInstance(inst)
+	e.wasmRuntime.RegisterInstance(inst)
 	defer func() {
-		e.unregisterInstance(inst)
-		for _, tx := range moduleCtx.OpenTransactions() {
-			if err := tx.Rollback(); err != nil {
-				log.Warn().Err(err).Msg("could not roll back transaction left open by module handler")
-			}
-		}
+		e.wasmRuntime.UnregisterInstance(inst)
+		moduleCtx.RollbackAll()
 		inst.SetModuleContext(nil)
 	}()
 
@@ -552,28 +543,4 @@ func (e *Engine) invokeHandler(
 	}
 
 	return resp, nil
-}
-
-func (e *Engine) registerInstance(inst *wasm.ModuleInstance) {
-	e.instancesMu.Lock()
-	defer e.instancesMu.Unlock()
-
-	if e.instances == nil {
-		e.instances = make(map[api.Module]*wasm.ModuleInstance)
-	}
-	e.instances[inst.Module()] = inst
-}
-
-func (e *Engine) unregisterInstance(inst *wasm.ModuleInstance) {
-	e.instancesMu.Lock()
-	defer e.instancesMu.Unlock()
-
-	delete(e.instances, inst.Module())
-}
-
-func (e *Engine) instanceForModule(m api.Module) *wasm.ModuleInstance {
-	e.instancesMu.Lock()
-	defer e.instancesMu.Unlock()
-
-	return e.instances[m]
 }

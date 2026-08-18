@@ -22,7 +22,7 @@ func newTestRuntime(t *testing.T) *wasm.Runtime {
 		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
 		PoolMaxMemoryByes: 1 << 20,
 		Environment:       string(config.Production),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("wasm.New: %v", err)
 	}

@@ -46,9 +46,10 @@ type Config struct {
 	ShutdownDrainDelay      time.Duration `env:"GOERP_SHUTDOWN_DRAIN_DELAY" envDefault:"5s"`
 
 	// Database
-	DBPrimaryDSN    string `env:"GOERP_DB_PRIMARY_DSN,required"`
-	DBReplicaDSN    string `env:"GOERP_DB_REPLICA_DSN"`
-	DBSchemaSyncDSN string `env:"GOERP_DB_SCHEMA_SYNC_DSN"`
+	DBPrimaryDSN                string `env:"GOERP_DB_PRIMARY_DSN,required"`
+	DBReplicaDSN                string `env:"GOERP_DB_REPLICA_DSN"`
+	DBSchemaSyncDSN             string `env:"GOERP_DB_SCHEMA_SYNC_DSN"`
+	DBMaxConcurrentTransactions int    `env:"GOERP_DB_MAX_CONCURRENT_TRANSACTIONS" envDefault:"100" validate:"min=1"`
 
 	// Redis
 	RedisAddr           string   `env:"GOERP_REDIS_ADDR" envDefault:"localhost:6379" validate:"hostname_port"`
