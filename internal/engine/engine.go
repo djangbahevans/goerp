@@ -47,6 +47,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/session"
+	"github.com/djangbahevans/goerp/internal/engine/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantsync"
@@ -67,6 +68,7 @@ type Engine struct {
 	syncPool       *schema.SchemaSyncPool
 	tenantStore    *tenant.Store
 	sessionStore   *session.Store
+	signingKeySet  *signingkey.SigningKeySet
 	moduleRegistry *registry.ModuleRegistry
 	jobQueue       *river.Client[pgx.Tx]
 	jobQueuePool   *pgxpool.Pool
@@ -195,6 +197,29 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap sessions table: %w", err)
+	}
+
+	signingKeyStore := signingkey.NewStore(primaryPool, secretsBackend)
+	if err := signingKeyStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap jwt signing keys table: %w", err)
+	}
+	// signingKeySet isn't consumed yet — access-token issuance lands with
+	// goerp#210 — but the engine loads (or generates, on first boot) its
+	// Active RS256 key here at startup regardless, since #210 needs a key
+	// already sitting in memory to sign with, not a lazy first-request load.
+	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
+	if err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("load jwt signing key: %w", err)
 	}
 
 	// PKI issuance/revocation only makes sense with a real PKI backend
@@ -477,6 +502,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		syncPool:       syncPool,
 		tenantStore:    tenantStore,
 		sessionStore:   sessionStore,
+		signingKeySet:  signingKeySet,
 		moduleRegistry: moduleRegistry,
 		jobQueue:       jobQueueClient,
 		jobQueuePool:   jobQueuePool,
