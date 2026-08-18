@@ -36,11 +36,11 @@ func (s DowngradeStatus) String() string {
 	}
 }
 
-// CheckDowngrade diffs newVersion's own declared schema (targetModelDecls,
-// its get_model_declarations output) against the live database schema.
-// newVersion >= currentVersion isn't a downgrade and short-circuits to
-// DowngradeStatusNone.
-func (e *SchemaDiffEngine) CheckDowngrade(ctx context.Context, sess *SchemaSyncSession, currentVersion, newVersion string, targetModelDecls []model.ModelDeclaration) (DowngradeStatus, []string, error) {
+// CheckDowngrade diffs newVersion's own declared schema (targetModelDecls/
+// targetTypeDecls, its get_model_declarations output) against the live
+// database schema. newVersion >= currentVersion isn't a downgrade and
+// short-circuits to DowngradeStatusNone.
+func (e *SchemaDiffEngine) CheckDowngrade(ctx context.Context, sess *SchemaSyncSession, currentVersion, newVersion string, targetModelDecls []model.ModelDeclaration, targetTypeDecls []model.TypeDeclaration) (DowngradeStatus, []string, error) {
 	current, err := semver.NewVersion(currentVersion)
 	if err != nil {
 		return DowngradeStatusNone, nil, fmt.Errorf("parse current version %q: %w", currentVersion, err)
@@ -53,7 +53,7 @@ func (e *SchemaDiffEngine) CheckDowngrade(ctx context.Context, sess *SchemaSyncS
 		return DowngradeStatusNone, nil, nil
 	}
 
-	changes, err := e.Diff(ctx, sess, targetModelDecls)
+	changes, err := e.Diff(ctx, sess, targetModelDecls, targetTypeDecls)
 	if err != nil {
 		return DowngradeStatusNone, nil, err
 	}

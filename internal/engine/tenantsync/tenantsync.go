@@ -97,7 +97,7 @@ func syncTenant(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *sc
 		return nil
 	}
 
-	changes, err := diffEngine.Diff(ctx, sess, mod.ModelDecls)
+	changes, err := diffEngine.Diff(ctx, sess, mod.ModelDecls, mod.TypeDecls)
 	if err != nil {
 		if recErr := sess.RecordSyncFailure(ctx); recErr != nil {
 			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")
