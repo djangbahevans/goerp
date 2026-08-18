@@ -25,7 +25,7 @@ func newTestRuntime(t *testing.T, maxMemoryBytes uint32) *Runtime {
 		Environment:       string(config.Production),
 	}
 
-	rt, err := New(cfg, nil)
+	rt, err := New(cfg, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

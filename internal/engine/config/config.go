@@ -75,8 +75,11 @@ type Config struct {
 	SecretsBackend string `env:"GOERP_SECRETS_BACKEND" envDefault:"env" validate:"oneof=env vault aws_secretsmanager"`
 
 	// Registration
-	StorageBackend string `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
-	StorageBucket  string `env:"GOERP_STORAGE_BUCKET" envDefault:"goerp-files"`
+	StorageBackend      string   `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
+	StorageBucket       string   `env:"GOERP_STORAGE_BUCKET" envDefault:"goerp-files"`
+	StorageMaxFileBytes int64    `env:"GOERP_STORAGE_MAX_FILE_BYTES" envDefault:"104857600"`
+	StorageAllowedTypes []string `env:"GOERP_STORAGE_ALLOWED_TYPES"`
+	StorageBlockedTypes []string `env:"GOERP_STORAGE_BLOCKED_TYPES" envDefault:"application/x-executable,application/x-msdownload,application/x-msdos-program,application/x-sh,application/x-bat,application/vnd.microsoft.portable-executable"`
 
 	PoolWarmSize      int           `env:"GOERP_POOL_WARM_SIZE" envDefault:"4"`
 	PoolMaxSize       int           `env:"GOERP_POOL_MAX_SIZE" envDefault:"16"`

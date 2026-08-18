@@ -22,7 +22,7 @@ func newTestEngine(t *testing.T) *Engine {
 	rt, err := wasm.New(&config.Config{
 		CompilationCache: filepath.Join(t.TempDir(), "cache"),
 		Environment:      string(config.Production),
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("wasm.New: %v", err)
 	}

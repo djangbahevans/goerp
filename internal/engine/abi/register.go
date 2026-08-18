@@ -8,18 +8,18 @@ import (
 )
 
 // hostNamespaces is the complete set of host.* namespaces from
-// host-abi-reference.md §4, minus "host.db" — its begin/commit/rollback
-// functions are registered separately by wasm.registerHostDB (which needs
-// direct access to *sql.DB and Runtime, wasm-package types abi cannot
-// import without an import cycle). Every other namespace here still has no
-// functions attached — the individual host.*.* functions (host.orm.search_read,
-// etc.) are each their own ticket and attach to these builders separately.
+// host-abi-reference.md §4, minus "host.db" and "host.storage" — their
+// real functions are registered separately by wasm.registerHostDB/
+// registerHostStorage (which need direct access to *sql.DB/storage.Backend
+// and Runtime, wasm-package types abi cannot import without an import
+// cycle). Every other namespace here still has no functions attached —
+// the individual host.*.* functions (host.orm.search_read, etc.) are each
+// their own ticket and attach to these builders separately.
 var hostNamespaces = []string{
 	"host.orm",
 	"host.event",
 	"host.cache",
 	"host.http",
-	"host.storage",
 	"host.jobs",
 	"host.connector",
 	"host.notify",
