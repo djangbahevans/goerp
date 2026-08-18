@@ -109,12 +109,13 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 	m.ExplicitRoutes = routes
 
-	models, err := callGetModelDeclarations(ctx, tempInst)
+	models, types, err := callGetModelDeclarations(ctx, tempInst)
 	if err != nil {
 		m.Fail(fmt.Sprintf("get_model_declarations: %v", err))
 		return m
 	}
 	m.ModelDecls = models
+	m.TypeDecls = types
 
 	migrations, err := callGetDataMigrations(ctx, tempInst)
 	if err != nil {
@@ -249,18 +250,18 @@ func callGetRoutes(ctx context.Context, inst *wasm.ModuleInstance) ([]engine.Rou
 }
 
 // callGetModelDeclarations deserializes the get_model_declarations export's
-// actual wire format, model.Schema{Models} (go-sdk-reference.md), and
-// returns its Models half as value types — LoadedModule.ModelDecls is
+// actual wire format, model.Schema{Types, Models} (go-sdk-reference.md),
+// and returns its Models half as value types — LoadedModule.ModelDecls is
 // []model.ModelDeclaration, not the []*ModelDeclaration model.Schema
-// itself carries.
-func callGetModelDeclarations(ctx context.Context, inst *wasm.ModuleInstance) ([]model.ModelDeclaration, error) {
+// itself carries. Types round-trips as-is.
+func callGetModelDeclarations(ctx context.Context, inst *wasm.ModuleInstance) ([]model.ModelDeclaration, []model.TypeDeclaration, error) {
 	data, err := inst.InvokeNoArg(ctx, "get_model_declarations")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var schema model.Schema
 	if err := msgpack.Unmarshal(data, &schema); err != nil {
-		return nil, fmt.Errorf("unmarshal get_model_declarations response: %w", err)
+		return nil, nil, fmt.Errorf("unmarshal get_model_declarations response: %w", err)
 	}
 	decls := make([]model.ModelDeclaration, 0, len(schema.Models))
 	for _, d := range schema.Models {
@@ -268,7 +269,7 @@ func callGetModelDeclarations(ctx context.Context, inst *wasm.ModuleInstance) ([
 			decls = append(decls, *d)
 		}
 	}
-	return decls, nil
+	return decls, schema.Types, nil
 }
 
 func callGetDataMigrations(ctx context.Context, inst *wasm.ModuleInstance) ([]model.DataMigration, error) {

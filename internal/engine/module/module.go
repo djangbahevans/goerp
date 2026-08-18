@@ -28,6 +28,7 @@ type LoadedModule struct {
 
 	ExplicitRoutes []engine.RouteDeclaration
 	ModelDecls     []model.ModelDeclaration
+	TypeDecls      []model.TypeDeclaration
 	DataMigrations []model.DataMigration
 }
 

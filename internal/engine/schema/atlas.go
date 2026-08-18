@@ -10,10 +10,18 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-func ToAtlasSchema(schemaName string, modelDecls []model.ModelDeclaration) (*schema.Schema, error) {
+func ToAtlasSchema(schemaName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) (*schema.Schema, error) {
 	s := schema.New(schemaName)
+
+	enumTypes := make(map[string]*schema.EnumType, len(typeDecls))
+	for _, td := range typeDecls {
+		e := &schema.EnumType{T: td.Name, Schema: s, Values: td.Values}
+		s.AddObjects(e)
+		enumTypes[td.Name] = e
+	}
+
 	for _, md := range modelDecls {
-		t, err := toAtlasTable(md)
+		t, err := toAtlasTable(md, enumTypes)
 		if err != nil {
 			return nil, fmt.Errorf("model %s: %w", md.Name, err)
 		}
@@ -23,7 +31,7 @@ func ToAtlasSchema(schemaName string, modelDecls []model.ModelDeclaration) (*sch
 	return s, nil
 }
 
-func toAtlasTable(md model.ModelDeclaration) (*schema.Table, error) {
+func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumType) (*schema.Table, error) {
 	tableName := md.Table
 	if tableName == "" {
 		tableName = snakeCase(md.Name)
@@ -33,7 +41,7 @@ func toAtlasTable(md model.ModelDeclaration) (*schema.Table, error) {
 
 	var pk []*schema.Column
 	for _, f := range md.Fields {
-		col, err := toAtlasColumn(f.Name, f.Def)
+		col, err := toAtlasColumn(f.Name, f.Def, enumTypes)
 		if err != nil {
 			return nil, fmt.Errorf("field %s: %w", f.Name, err)
 		}
@@ -60,7 +68,7 @@ func toAtlasTable(md model.ModelDeclaration) (*schema.Table, error) {
 	return t, nil
 }
 
-func toAtlasColumn(name string, f model.FieldDef) (*schema.Column, error) {
+func toAtlasColumn(name string, f model.FieldDef, enumTypes map[string]*schema.EnumType) (*schema.Column, error) {
 	c := schema.NewColumn(name).SetNull(!f.IsRequired && !f.IsPrimaryKey)
 
 	switch f.Kind {
@@ -100,10 +108,11 @@ func toAtlasColumn(name string, f model.FieldDef) (*schema.Column, error) {
 		// checks are table-level, not column-level.
 		c.SetType(&schema.StringType{T: postgres.TypeText})
 	case model.KindEnum:
-		// model.TypeDeclaration/model.Schema.Types don't exist yet (goerp#73)
-		// — there is nothing to diff an enum column's type against, so this
-		// fails loudly rather than silently emitting wrong DDL.
-		return nil, fmt.Errorf("enum types not yet supported (goerp#73): field %q wants enum type %q", name, f.EnumType)
+		e, ok := enumTypes[f.EnumType]
+		if !ok {
+			return nil, fmt.Errorf("field %q references undeclared enum type %q (not present in Schema.Types)", name, f.EnumType)
+		}
+		c.SetType(e)
 	default:
 		return nil, fmt.Errorf("unknown field kind %d", f.Kind)
 	}

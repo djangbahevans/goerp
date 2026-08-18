@@ -66,6 +66,19 @@ func columnExists(t *testing.T, conn *sql.DB, schemaName, table, column string) 
 	return exists
 }
 
+func enumTypeExists(t *testing.T, conn *sql.DB, schemaName, typeName string) bool {
+	t.Helper()
+	var exists bool
+	err := conn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid WHERE n.nspname = $1 AND t.typname = $2)",
+		schemaName, typeName,
+	).Scan(&exists)
+	if err != nil {
+		t.Fatalf("enumTypeExists query: %v", err)
+	}
+	return exists
+}
+
 func indexExists(t *testing.T, conn *sql.DB, schemaName, index string) bool {
 	t.Helper()
 	var exists bool
@@ -93,7 +106,7 @@ func TestDiffAndExecute_CreatesNewTableSafely(t *testing.T) {
 
 	modelDecls := []model.ModelDeclaration{widgetModel()}
 
-	changes, err := engine.Diff(context.Background(), sess, modelDecls)
+	changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -121,7 +134,7 @@ func TestDiffAndExecute_CreatesNewTableSafely(t *testing.T) {
 
 	// Re-running Diff against the now-synced schema should find nothing left
 	// to do — proves the round trip (declared -> Atlas -> live) is stable.
-	changes, err = engine.Diff(context.Background(), sess, modelDecls)
+	changes, err = engine.Diff(context.Background(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
@@ -135,7 +148,7 @@ func TestExecute_SafeAddColumnApplied(t *testing.T) {
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModel()}
-	changes, err := engine.Diff(context.Background(), sess, base)
+	changes, err := engine.Diff(context.Background(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -151,7 +164,7 @@ func TestExecute_SafeAddColumnApplied(t *testing.T) {
 		Index("idx_widgets_sku", model.BTreeIndex("sku").Unique())
 	modelDecls := []model.ModelDeclaration{withExtra}
 
-	changes, err = engine.Diff(context.Background(), sess, modelDecls)
+	changes, err = engine.Diff(context.Background(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -172,7 +185,7 @@ func TestExecute_UnsafeDropColumnBlocked(t *testing.T) {
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModel()}
-	changes, err := engine.Diff(context.Background(), sess, base)
+	changes, err := engine.Diff(context.Background(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -186,7 +199,7 @@ func TestExecute_UnsafeDropColumnBlocked(t *testing.T) {
 		Field("name", model.Text().Required())
 	modelDecls := []model.ModelDeclaration{narrowed}
 
-	changes, err = engine.Diff(context.Background(), sess, modelDecls)
+	changes, err = engine.Diff(context.Background(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -212,7 +225,7 @@ func TestApply_AddIndexUsesConcurrently(t *testing.T) {
 	base := *model.Define("sales.widget", model.Table("widgets")).
 		WithStandardFields().
 		Field("name", model.Text().Required())
-	changes, err := engine.Diff(context.Background(), sess, []model.ModelDeclaration{base})
+	changes, err := engine.Diff(context.Background(), sess, []model.ModelDeclaration{base}, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -226,7 +239,7 @@ func TestApply_AddIndexUsesConcurrently(t *testing.T) {
 		Index("idx_widgets_name", model.BTreeIndex("name"))
 	modelDecls := []model.ModelDeclaration{withIndex}
 
-	changes, err = engine.Diff(context.Background(), sess, modelDecls)
+	changes, err = engine.Diff(context.Background(), sess, modelDecls, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -258,5 +271,56 @@ func TestApply_AddIndexUsesConcurrently(t *testing.T) {
 	}
 	if !indexExists(t, conn, "tenant_difftest_concurrently", "idx_widgets_name") {
 		t.Error("idx_widgets_name was not created")
+	}
+}
+
+func TestDiffAndExecute_CreatesEnumTypeAndColumnTogether(t *testing.T) {
+	sess, engine := setupTenantSchema(t, "difftest_enum")
+	conn, _ := openTestPool(t, 5*time.Second)
+
+	typeDecls := []model.TypeDeclaration{
+		model.EnumType("order_state_enum", "draft", "confirmed", "done", "cancelled"),
+	}
+	modelDecls := []model.ModelDeclaration{
+		*model.Define("sales.order", model.Table("sales_orders")).
+			WithStandardFields().
+			Field("state", model.Enum("order_state_enum").Required().Default("'draft'")),
+	}
+
+	changes, err := engine.Diff(context.Background(), sess, modelDecls, typeDecls)
+	if err != nil {
+		t.Fatalf("Diff() error: %v", err)
+	}
+	if len(changes) == 0 {
+		t.Fatal("Diff() on an empty schema returned no changes, want at least AddTable + the enum type")
+	}
+
+	blocked, err := engine.Execute(context.Background(), sess, modelDecls, changes)
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	if len(blocked) != 0 {
+		t.Errorf("Execute() blocked = %v, want none", blocked)
+	}
+
+	if !tableExists(t, conn, "tenant_difftest_enum", "sales_orders") {
+		t.Error("sales_orders table was not created")
+	}
+	if !columnExists(t, conn, "tenant_difftest_enum", "sales_orders", "state") {
+		t.Error("state column was not created")
+	}
+	if !enumTypeExists(t, conn, "tenant_difftest_enum", "order_state_enum") {
+		t.Error("order_state_enum type was not created")
+	}
+
+	// Re-running Diff against the now-synced schema should find nothing
+	// left to do — same stability check TestDiffAndExecute_CreatesNewTableSafely
+	// makes for a plain table.
+	changes, err = engine.Diff(context.Background(), sess, modelDecls, typeDecls)
+	if err != nil {
+		t.Fatalf("second Diff() error: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Errorf("second Diff() on an already-synced schema = %v, want no changes", changes)
 	}
 }

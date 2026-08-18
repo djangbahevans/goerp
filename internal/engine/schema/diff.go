@@ -21,8 +21,8 @@ func NewSchemaDiffEngine(cfg *Config) *SchemaDiffEngine {
 	return &SchemaDiffEngine{cfg: cfg}
 }
 
-func (e *SchemaDiffEngine) Diff(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration) ([]schema.Change, error) {
-	decl, err := newModuleSchemaDeclaration("tenant_"+sess.tenantSlug, sess.moduleName, modelDecls)
+func (e *SchemaDiffEngine) Diff(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) ([]schema.Change, error) {
+	decl, err := newModuleSchemaDeclaration("tenant_"+sess.tenantSlug, sess.moduleName, modelDecls, typeDecls)
 	if err != nil {
 		return nil, err
 	}

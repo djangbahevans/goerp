@@ -71,7 +71,7 @@ func TestExecute_AddCheckDeferredAsNotValid(t *testing.T) {
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModelWithStatusText()}
-	changes, err := engine.Diff(context.Background(), sess, base)
+	changes, err := engine.Diff(context.Background(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestExecute_AddCheckDeferredAsNotValid(t *testing.T) {
 	}
 
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
-	changes, err = engine.Diff(context.Background(), sess, withCheck)
+	changes, err = engine.Diff(context.Background(), sess, withCheck, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestValidateConstraintWorker_SucceedsWhenDataSatisfiesConstraint(t *testing
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModelWithStatusText()}
-	changes, err := engine.Diff(context.Background(), sess, base)
+	changes, err := engine.Diff(context.Background(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestValidateConstraintWorker_SucceedsWhenDataSatisfiesConstraint(t *testing
 	}
 
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
-	changes, err = engine.Diff(context.Background(), sess, withCheck)
+	changes, err = engine.Diff(context.Background(), sess, withCheck, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestValidateConstraintWorker_RecordsFailureWithoutRetryingOnConstraintViola
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModelWithStatusText()}
-	changes, err := engine.Diff(context.Background(), sess, base)
+	changes, err := engine.Diff(context.Background(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestValidateConstraintWorker_RecordsFailureWithoutRetryingOnConstraintViola
 	}
 
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
-	changes, err = engine.Diff(context.Background(), sess, withCheck)
+	changes, err = engine.Diff(context.Background(), sess, withCheck, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 	conn, _ := openTestPool(t, 5*time.Second)
 
 	base := []model.ModelDeclaration{widgetModelWithStatusText()}
-	changes, err := engine.Diff(context.Background(), sess, base)
+	changes, err := engine.Diff(context.Background(), sess, base, nil)
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 		t.Fatalf("Execute() error: %v", err)
 	}
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
-	changes, err = engine.Diff(context.Background(), sess, withCheck)
+	changes, err = engine.Diff(context.Background(), sess, withCheck, nil)
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
