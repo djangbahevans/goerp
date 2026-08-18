@@ -178,7 +178,7 @@ func TestIssue_AccessTokenClaimsMatchDocumentedShape(t *testing.T) {
 	if claims.MFAVerifiedAt != nil {
 		t.Errorf("mfa_verified_at = %v, want nil", claims.MFAVerifiedAt)
 	}
-	if got := claims.ExpiresAt.Time.Sub(claims.IssuedAt.Time); got != 15*time.Minute {
+	if got := claims.ExpiresAt.Sub(claims.IssuedAt.Time); got != 15*time.Minute {
 		t.Errorf("exp - iat = %v, want 15m", got)
 	}
 }
