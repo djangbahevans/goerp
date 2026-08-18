@@ -52,6 +52,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 	"github.com/vmihailenco/msgpack/v5"
@@ -64,7 +66,8 @@ type Engine struct {
 	syncPool       *schema.SchemaSyncPool
 	tenantStore    *tenant.Store
 	moduleRegistry *registry.ModuleRegistry
-	jobQueue       *river.Client[*sql.Tx]
+	jobQueue       *river.Client[pgx.Tx]
+	jobQueuePool   *pgxpool.Pool
 
 	secretsBackend secrets.Backend
 	primaryDB      *sql.DB
@@ -400,7 +403,32 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	poolwarm.WarmAll(ctx, loadedModules)
 
-	if err := jobqueue.Migrate(ctx, primaryPool); err != nil {
+	// jobQueuePool is a separate pool from primaryPool: river's pgx driver
+	// (riverpgxv5) needs a native *pgxpool.Pool, while every other store in
+	// this file takes the database/sql-wrapped *sql.DB primaryPool returns.
+	// Both point at the same DSN. Using pgx here instead of river's generic
+	// database/sql driver (riverdatabasesql) avoids a transitive dependency
+	// on github.com/lib/pq, which govulncheck flags for advisories with no
+	// fixed release — the engine never actually opens a pq connection
+	// (db.go uses pgx/v5/stdlib), but riverdatabasesql pulls the package in
+	// regardless.
+	jobQueuePool, err := db.NewPgxPool(ctx, cfg.DBPrimaryDSN)
+	if err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("connect job queue pool: %w", err)
+	}
+	closeOnFailure = func() {
+		jobQueuePool.Close()
+		_ = runtime.Close(ctx)
+		_ = cacheClient.Close()
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+	}
+
+	if err := jobqueue.Migrate(ctx, jobQueuePool); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("migrate job queue schema: %w", err)
 	}
@@ -410,7 +438,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	jobWorkers := river.NewWorkers()
 	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
 	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: primaryPool})
-	jobQueueClient, err := jobqueue.New(primaryPool, cfg, jobWorkers)
+	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("create job queue client: %w", err)
@@ -434,6 +462,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		tenantStore:    tenantStore,
 		moduleRegistry: moduleRegistry,
 		jobQueue:       jobQueueClient,
+		jobQueuePool:   jobQueuePool,
 		secretsBackend: secretsBackend,
 		primaryDB:      primaryPool,
 		replicaDB:      replicaPool,
@@ -453,7 +482,7 @@ func (e *Engine) ModuleRegistry() *registry.ModuleRegistry {
 }
 
 // JobQueue returns the River client Start begins processing jobs on.
-func (e *Engine) JobQueue() *river.Client[*sql.Tx] {
+func (e *Engine) JobQueue() *river.Client[pgx.Tx] {
 	return e.jobQueue
 }
 
@@ -496,6 +525,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	if err := e.jobQueue.Stop(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not stop job queue worker")
 	}
+	e.jobQueuePool.Close()
 
 	if err := e.wasmRuntime.Close(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not close wasm runtime")
