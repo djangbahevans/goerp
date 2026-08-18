@@ -1,13 +1,14 @@
-// Package session bootstraps the system.sessions table — the row backing
-// JWT/refresh-token issuance, rotation, and revocation (auth-internals.md
-// §4 "Session table"). Only the table schema exists here; issuance and
-// rotation land with goerp#210 and goerp#147.
+// Package session bootstraps the system.sessions table and inserts a
+// session's first row — the table backing JWT/refresh-token issuance,
+// rotation, and revocation (auth-internals.md §4 "Session table").
+// Rotation and revocation land with goerp#147.
 package session
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
@@ -89,4 +90,35 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 
 		return nil
 	})
+}
+
+// Row is one session's insertable fields — a login event's first row in a
+// fresh family (id == family_id). ID is caller-supplied, not left to the
+// table's uuidv7() default, so it can double as a JWT's sid claim without
+// a round trip to read it back.
+type Row struct {
+	ID          string
+	UserID      string
+	TenantID    string
+	DeviceID    string
+	RefreshHash string
+	UserAgent   string
+	IPAddress   string
+	CountryCode string
+	ExpiresAt   time.Time
+}
+
+// Insert creates a new session row. UserAgent, IPAddress, and CountryCode
+// store as SQL NULL when empty, same convention as auditlog.Store.Write.
+func (s *Store) Insert(ctx context.Context, row Row) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO system.sessions
+			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at)
+		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9)
+	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("insert session row: %w", err)
+	}
+
+	return nil
 }
