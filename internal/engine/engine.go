@@ -30,6 +30,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
+	"github.com/djangbahevans/goerp/internal/engine/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -69,6 +70,7 @@ type Engine struct {
 	tenantStore    *tenant.Store
 	sessionStore   *session.Store
 	signingKeySet  *signingkey.SigningKeySet
+	tokenIssuer    *authtoken.Issuer
 	moduleRegistry *registry.ModuleRegistry
 	jobQueue       *river.Client[pgx.Tx]
 	jobQueuePool   *pgxpool.Pool
@@ -185,10 +187,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("bootstrap operator certificate ledger: %w", err)
 	}
 
-	// sessionStore isn't consumed yet — issuance lands with goerp#210,
-	// revocation with goerp#147 — but it bootstraps here alongside every
-	// other system-schema store, the same reasoning auditStore/
-	// operatorCertStore already follow.
 	sessionStore := session.NewStore(primaryPool)
 	if err := sessionStore.Bootstrap(ctx); err != nil {
 		_ = primaryPool.Close()
@@ -208,10 +206,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 		return nil, fmt.Errorf("bootstrap jwt signing keys table: %w", err)
 	}
-	// signingKeySet isn't consumed yet — access-token issuance lands with
-	// goerp#210 — but the engine loads (or generates, on first boot) its
-	// Active RS256 key here at startup regardless, since #210 needs a key
-	// already sitting in memory to sign with, not a lazy first-request load.
+	// Loaded (or generated, on first boot) here at startup rather than
+	// lazily on first login, so tokenIssuer below always has a key ready.
 	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		_ = primaryPool.Close()
@@ -221,6 +217,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 		return nil, fmt.Errorf("load jwt signing key: %w", err)
 	}
+
+	// tokenIssuer isn't consumed yet — a POST /auth/login handler wiring
+	// real credential verification to it is separate, future scope — but
+	// every dependency it needs (tenantStore, roleStore, sessionStore, the
+	// loaded signing key) already exists by this point in New.
+	tokenIssuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
 
 	// PKI issuance/revocation only makes sense with a real PKI backend
 	// behind it; stays nil (routes report StatusNotImplemented) for any
@@ -503,6 +505,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		tenantStore:    tenantStore,
 		sessionStore:   sessionStore,
 		signingKeySet:  signingKeySet,
+		tokenIssuer:    tokenIssuer,
 		moduleRegistry: moduleRegistry,
 		jobQueue:       jobQueueClient,
 		jobQueuePool:   jobQueuePool,

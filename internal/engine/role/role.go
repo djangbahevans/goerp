@@ -192,6 +192,44 @@ func (s *Store) AdminUserID(ctx context.Context, tenantSlug string) (string, err
 	return userID, nil
 }
 
+// RoleNamesForUser returns the names of every unexpired role userID holds
+// in the tenant's schema (expires_at IS NULL or still in the future) — a
+// lapsed grant shouldn't appear in a JWT's roles claim. Returns an empty,
+// non-nil slice for a user with no grants or an unprovisioned tenant.
+func (s *Store) RoleNamesForUser(ctx context.Context, tenantSlug, userID string) ([]string, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`
+		SELECT r.name
+		FROM %s.user_roles ur
+		JOIN %s.roles r ON r.id = ur.role_id
+		WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+		ORDER BY r.name
+	`, schema, schema)
+
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("get role names for user: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan role name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate role names: %w", err)
+	}
+
+	return names, nil
+}
+
 // isUndefinedTable reports whether err is Postgres' undefined_table error
 // (42P01) — the error a query against a tenant_{slug} schema's tables gets
 // when that tenant's schema (or role.Store.Bootstrap for it) hasn't run
