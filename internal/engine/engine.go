@@ -46,6 +46,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
+	"github.com/djangbahevans/goerp/internal/engine/session"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantsync"
@@ -65,6 +66,7 @@ type Engine struct {
 
 	syncPool       *schema.SchemaSyncPool
 	tenantStore    *tenant.Store
+	sessionStore   *session.Store
 	moduleRegistry *registry.ModuleRegistry
 	jobQueue       *river.Client[pgx.Tx]
 	jobQueuePool   *pgxpool.Pool
@@ -179,6 +181,20 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap operator certificate ledger: %w", err)
+	}
+
+	// sessionStore isn't consumed yet — issuance lands with goerp#210,
+	// revocation with goerp#147 — but it bootstraps here alongside every
+	// other system-schema store, the same reasoning auditStore/
+	// operatorCertStore already follow.
+	sessionStore := session.NewStore(primaryPool)
+	if err := sessionStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap sessions table: %w", err)
 	}
 
 	// PKI issuance/revocation only makes sense with a real PKI backend
@@ -460,6 +476,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		wasmRuntime:    runtime,
 		syncPool:       syncPool,
 		tenantStore:    tenantStore,
+		sessionStore:   sessionStore,
 		moduleRegistry: moduleRegistry,
 		jobQueue:       jobQueueClient,
 		jobQueuePool:   jobQueuePool,
