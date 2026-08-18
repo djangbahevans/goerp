@@ -148,3 +148,66 @@ func (inst *ModuleInstance) InvokeHandleRequest(ctx context.Context, payload []b
 
 	return data, nil
 }
+
+// InvokeHandleEvent is InvokeHandleRequest's sync WASM invocation wrapper
+// for a module's handle_event export instead of handle_request — same
+// allocate/write/call/read/deallocate calling convention and the same
+// division of responsibility: a trap or context deadline surfaces here as
+// a plain error, undistinguished from either. Telling them apart is the
+// caller's job — the same ctx.Err() check invokeHandler (engine.go)
+// already applies around InvokeHandleRequest, which the event-dispatch
+// caller (engine-internals.md §9's invokeEventHandler, not yet built)
+// applies the same way around this.
+func (inst *ModuleInstance) InvokeHandleEvent(ctx context.Context, payload []byte) ([]byte, error) {
+	if inst.allocate == nil {
+		return nil, fmt.Errorf("module missing allocate export")
+	}
+	if inst.handleEvent == nil {
+		return nil, fmt.Errorf("module missing handle_event export")
+	}
+	if inst.deallocate == nil {
+		return nil, fmt.Errorf("module missing deallocate export")
+	}
+
+	allocResult, err := inst.allocate.Call(ctx, uint64(len(payload)))
+	if err != nil {
+		return nil, fmt.Errorf("allocate %d bytes: %w", len(payload), err)
+	}
+	if allocResult[0] == 0 {
+		return nil, abi.ErrAllocationFailed
+	}
+	reqPtr := uint32(allocResult[0])
+
+	defer func() {
+		if _, err := inst.deallocate.Call(context.Background(), uint64(reqPtr), uint64(len(payload))); err != nil {
+			log.Warn().Err(err).Msg("could not deallocate request buffer")
+		}
+	}()
+
+	if !inst.memory.Write(reqPtr, payload) {
+		return nil, fmt.Errorf("memory.Write out of bounds at ptr=%d len=%d", reqPtr, len(payload))
+	}
+
+	results, err := inst.handleEvent.Call(ctx, uint64(reqPtr), uint64(len(payload)))
+	if err != nil {
+		return nil, err
+	}
+
+	raw := results[0]
+	respPtr := uint32(raw >> 32)
+	respLen := uint32(raw)
+
+	view, ok := inst.memory.Read(respPtr, respLen)
+	if !ok {
+		return nil, fmt.Errorf("could not read response at ptr=%d len=%d", respPtr, respLen)
+	}
+
+	data := make([]byte, len(view))
+	copy(data, view)
+
+	if _, err := inst.deallocate.Call(context.Background(), uint64(respPtr), uint64(respLen)); err != nil {
+		log.Warn().Err(err).Msg("could not deallocate response buffer")
+	}
+
+	return data, nil
+}
