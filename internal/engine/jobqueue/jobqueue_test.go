@@ -2,14 +2,14 @@ package jobqueue
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -27,19 +27,20 @@ func newIdempotencyKey(t *testing.T) string {
 // (PgBouncer at localhost:6432, user/pass/db goerp/dev/goerp).
 const testDSN = "postgres://goerp:dev@localhost:6432/goerp"
 
-func testPool(t *testing.T) *sql.DB {
+func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	pool, err := sql.Open("pgx", testDSN)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testDSN)
 	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
+		t.Fatalf("pgxpool.New: %v", err)
 	}
-	if err := pool.Ping(); err != nil {
+	if err := pool.Ping(ctx); err != nil {
 		t.Skipf("dev Postgres unreachable at %s (start compose.dev.yml): %v", testDSN, err)
 	}
-	t.Cleanup(func() { _ = pool.Close() })
+	t.Cleanup(pool.Close)
 
-	if err := Migrate(context.Background(), pool); err != nil {
+	if err := Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
@@ -56,7 +57,7 @@ func testConfig() *config.Config {
 	}
 }
 
-func startedClient(t *testing.T, workers *river.Workers) *river.Client[*sql.Tx] {
+func startedClient(t *testing.T, workers *river.Workers) *river.Client[pgx.Tx] {
 	t.Helper()
 	pool := testPool(t)
 
@@ -84,7 +85,7 @@ func startedClient(t *testing.T, workers *river.Workers) *river.Client[*sql.Tx] 
 // itself worked) is correct even when another client — a concurrently
 // running test in another package, hitting the same real Postgres — races
 // in and completes the job first.
-func waitForCompletion(t *testing.T, client *river.Client[*sql.Tx], jobID int64, timeout time.Duration) {
+func waitForCompletion(t *testing.T, client *river.Client[pgx.Tx], jobID int64, timeout time.Duration) {
 	t.Helper()
 
 	deadline := time.Now().Add(timeout)

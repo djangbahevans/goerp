@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/riverqueue/river"
 )
@@ -126,7 +127,7 @@ func isConstraintViolation(err error) bool {
 // sweep a no-op for anything already enqueued or running, which also gives
 // crash recovery for free: a startup that died between the DDL commit and
 // a previous sweep just picks the row back up on the next one.
-func EnqueuePendingValidations(ctx context.Context, pool *sql.DB, client *river.Client[*sql.Tx]) error {
+func EnqueuePendingValidations(ctx context.Context, pool *sql.DB, client *river.Client[pgx.Tx]) error {
 	rows, err := pool.QueryContext(ctx, `
 		SELECT tenant_id, tenant_slug, table_name, constraint_name
 		FROM system.pending_constraint_validations

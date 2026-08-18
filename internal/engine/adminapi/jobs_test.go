@@ -2,7 +2,6 @@ package adminapi
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,25 +11,27 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 )
 
 const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 
-func newTestJobsClient(t *testing.T) *river.Client[*sql.Tx] {
+func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 
-	pool, err := sql.Open("pgx", jobsTestDSN)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, jobsTestDSN)
 	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
+		t.Fatalf("pgxpool.New: %v", err)
 	}
-	if err := pool.Ping(); err != nil {
+	if err := pool.Ping(ctx); err != nil {
 		t.Skipf("dev Postgres unreachable at %s (start compose.dev.yml): %v", jobsTestDSN, err)
 	}
-	t.Cleanup(func() { _ = pool.Close() })
+	t.Cleanup(pool.Close)
 
-	if err := jobqueue.Migrate(context.Background(), pool); err != nil {
+	if err := jobqueue.Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
@@ -57,7 +58,7 @@ func newTestJobsClient(t *testing.T) *river.Client[*sql.Tx] {
 	return client
 }
 
-func insertTestJob(t *testing.T, client *river.Client[*sql.Tx], opts *river.InsertOpts) int64 {
+func insertTestJob(t *testing.T, client *river.Client[pgx.Tx], opts *river.InsertOpts) int64 {
 	t.Helper()
 	row, err := client.Insert(context.Background(), jobqueue.ProbeArgs{
 		IdempotencyKey: t.Name() + "-" + time.Now().String(),

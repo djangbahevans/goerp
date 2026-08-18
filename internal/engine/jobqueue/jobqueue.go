@@ -6,12 +6,13 @@ package jobqueue
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverdatabasesql"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 )
 
@@ -26,8 +27,8 @@ const (
 
 // Migrate applies River's own schema migrations against pool. Idempotent —
 // safe to call on every startup, same as Store.Bootstrap elsewhere.
-func Migrate(ctx context.Context, pool *sql.DB) error {
-	migrator, err := rivermigrate.New(riverdatabasesql.New(pool), nil)
+func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	migrator, err := rivermigrate.New(riverpgxv5.New(pool), nil)
 	if err != nil {
 		return fmt.Errorf("create river migrator: %w", err)
 	}
@@ -45,8 +46,8 @@ func Migrate(ctx context.Context, pool *sql.DB) error {
 // pool is expected to be PgBouncer-pooled (like Store.Bootstrap elsewhere),
 // so River falls back to polling rather than LISTEN/NOTIFY — a latency
 // tradeoff, not a correctness one.
-func New(pool *sql.DB, cfg *config.Config, workers *river.Workers) (*river.Client[*sql.Tx], error) {
-	client, err := river.NewClient(riverdatabasesql.New(pool), &river.Config{
+func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river.Client[pgx.Tx], error) {
+	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
 			QueueCritical: {MaxWorkers: withDefault(cfg.QueueCriticalConcurrency, 5)},
 			QueueDefault:  {MaxWorkers: withDefault(cfg.QueueDefaultConcurrency, 10)},

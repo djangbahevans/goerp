@@ -9,6 +9,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 )
 
@@ -248,12 +249,18 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
-	if err := jobqueue.Migrate(context.Background(), conn); err != nil {
+	pgxPool, err := pgxpool.New(context.Background(), localSchemaSyncDSN)
+	if err != nil {
+		t.Fatalf("pgxpool.New: %v", err)
+	}
+	t.Cleanup(pgxPool.Close)
+
+	if err := jobqueue.Migrate(context.Background(), pgxPool); err != nil {
 		t.Fatalf("jobqueue.Migrate: %v", err)
 	}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &ValidateConstraintWorker{Pool: conn})
-	client, err := jobqueue.New(conn, &config.Config{
+	client, err := jobqueue.New(pgxPool, &config.Config{
 		QueueCriticalConcurrency: 1, QueueDefaultConcurrency: 1, QueueBulkConcurrency: 1,
 		QueueSearchConcurrency: 1, QueueEmailConcurrency: 1,
 	}, workers)

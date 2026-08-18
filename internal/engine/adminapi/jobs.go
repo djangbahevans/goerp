@@ -1,7 +1,6 @@
 package adminapi
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,12 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
 
 type JobsDeps struct {
-	Client *river.Client[*sql.Tx]
+	Client *river.Client[pgx.Tx]
 }
 
 func RegisterJobsRoutes(mux *http.ServeMux, deps JobsDeps) {
