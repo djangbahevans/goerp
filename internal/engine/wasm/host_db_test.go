@@ -77,7 +77,7 @@ func newHostDBTestRuntime(t *testing.T, primaryDB *sql.DB, maxConcurrentTx int) 
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: maxConcurrentTx,
-	}, primaryDB)
+	}, primaryDB, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

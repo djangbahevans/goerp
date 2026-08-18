@@ -9,7 +9,9 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -28,9 +30,12 @@ type Runtime struct {
 // New builds the shared wazero runtime and registers the host ABI against
 // it. db is the primary connection pool host.db's transaction-lifecycle
 // functions (host-abi-reference.md §5) open transactions on — it must
-// already be connected by the time New is called, since abi.RegisterAll
-// closes over it while building the host.db module.
-func New(cfg *config.Config, db *sql.DB) (*Runtime, error) {
+// already be connected by the time New is called, since registerHostDB
+// closes over it while building the host.db module. storageBackend backs
+// host.storage.upload — it is a warn-only dependency (engine.go's
+// storage.New already logs-and-continues on failure), so it may be nil
+// here; registerHostStorage's closures nil-guard it themselves.
+func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend) (*Runtime, error) {
 	ctx := context.Background()
 
 	cacheDir := cfg.CompilationCache
@@ -76,6 +81,16 @@ func New(cfg *config.Config, db *sql.DB) (*Runtime, error) {
 	if err := registerHostDB(ctx, rt, r, db); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.db: %w", err)
+	}
+
+	filesStore := files.NewStore(db)
+	if err := registerHostStorage(ctx, rt, r, storageBackend, filesStore, storageUploadLimits{
+		maxFileBytes: cfg.StorageMaxFileBytes,
+		allowedTypes: cfg.StorageAllowedTypes,
+		blockedTypes: cfg.StorageBlockedTypes,
+	}); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.storage: %w", err)
 	}
 
 	stdout := log.With().Str("component", "wasm").Str("stream", "stdout").Logger()
