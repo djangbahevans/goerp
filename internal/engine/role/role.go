@@ -230,6 +230,65 @@ func (s *Store) RoleNamesForUser(ctx context.Context, tenantSlug, userID string)
 	return names, nil
 }
 
+// IsMember reports whether userID holds any unexpired role grant in the
+// tenant's schema — tenant membership, distinct from RoleNamesForUser's
+// concern of *which* roles.
+func (s *Store) IsMember(ctx context.Context, tenantSlug, userID string) (bool, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT 1 FROM %s.user_roles
+			WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
+		)
+	`, schema)
+
+	var isMember bool
+	if err := s.db.QueryRowContext(ctx, query, userID).Scan(&isMember); err != nil {
+		if isUndefinedTable(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check tenant membership: %w", err)
+	}
+
+	return isMember, nil
+}
+
+// PermissionNamesForUser returns the distinct permission names granted by
+// every unexpired role userID holds in the tenant's schema.
+func (s *Store) PermissionNamesForUser(ctx context.Context, tenantSlug, userID string) ([]string, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`
+		SELECT DISTINCT rp.permission_name
+		FROM %s.user_roles ur
+		JOIN %s.role_permissions rp ON rp.role_id = ur.role_id
+		WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+		ORDER BY rp.permission_name
+	`, schema, schema)
+
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("get permission names for user: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan permission name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate permission names: %w", err)
+	}
+
+	return names, nil
+}
+
 // isUndefinedTable reports whether err is Postgres' undefined_table error
 // (42P01) — the error a query against a tenant_{slug} schema's tables gets
 // when that tenant's schema (or role.Store.Bootstrap for it) hasn't run

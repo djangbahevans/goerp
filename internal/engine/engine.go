@@ -30,6 +30,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
+	"github.com/djangbahevans/goerp/internal/engine/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
@@ -73,6 +74,7 @@ type Engine struct {
 	signingKeySet  *signingkey.SigningKeySet
 	tokenIssuer    *authtoken.Issuer
 	sessionRevoker *sessionrevoke.Revoker
+	authChecker    *authcheck.Checker
 	moduleRegistry *registry.ModuleRegistry
 	jobQueue       *river.Client[pgx.Tx]
 	jobQueuePool   *pgxpool.Pool
@@ -290,6 +292,13 @@ func New(cfg *config.Config) (*Engine, error) {
 	// logout endpoint) is separate scope — but every dependency it needs
 	// already exists by this point in New.
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
+
+	// authChecker isn't consumed yet — wiring it into an actual HTTP
+	// middleware chain is goerp#91, which also owns resolving the current
+	// registry.RegistrySnapshot's PermissionRegistry to pass into
+	// Authenticate per request (this package deliberately doesn't hold one
+	// itself, since it's rebuilt on every module hot reload).
+	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore)
 
 	var searchClient *search.Client
 	if cfg.MeilisearchURL != "" {
@@ -515,6 +524,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		signingKeySet:  signingKeySet,
 		tokenIssuer:    tokenIssuer,
 		sessionRevoker: sessionRevoker,
+		authChecker:    authChecker,
 		moduleRegistry: moduleRegistry,
 		jobQueue:       jobQueueClient,
 		jobQueuePool:   jobQueuePool,
