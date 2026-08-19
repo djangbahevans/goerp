@@ -160,6 +160,10 @@ func (s *Store) ActiveTenants(ctx context.Context) ([]Tenant, error) {
 // which are left as they were to avoid disturbing their own tests).
 const tenantColumns = `id, slug, name, plan, status, region, country, trial_ends_at, created_at, updated_at, activated_at, suspended_at, suspended_by, suspend_reason, deleted_at`
 
+// tenantColumnsPrefixed is tenantColumns qualified with the "t" alias, for
+// queries joining system.tenants against another table.
+const tenantColumnsPrefixed = `t.id, t.slug, t.name, t.plan, t.status, t.region, t.country, t.trial_ends_at, t.created_at, t.updated_at, t.activated_at, t.suspended_at, t.suspended_by, t.suspend_reason, t.deleted_at`
+
 // rowScanner is satisfied by both *sql.Row and *sql.Rows, so scanTenant
 // works for both a single-row QueryRowContext result and one row of a
 // multi-row QueryContext result.
@@ -276,6 +280,56 @@ func (s *Store) GetBySlug(ctx context.Context, slug string) (*Tenant, error) {
 			return nil, ErrTenantNotFound
 		}
 		return nil, fmt.Errorf("get tenant by slug: %w", err)
+	}
+
+	return t, nil
+}
+
+// GetByID returns ErrTenantNotFound for both a nonexistent id and a
+// deleted tenant — the two cases callers doing tenant resolution (e.g.
+// Class B/C routes, auth-internals.md §9) must not distinguish between,
+// per multitenancy-internals.md's "never reveal via a different response
+// whether a tenant exists at all" rule.
+func (s *Store) GetByID(ctx context.Context, id string) (*Tenant, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT `+tenantColumns+`
+		FROM system.tenants
+		WHERE id = $1 AND status != $2
+	`, id, StatusDeleted)
+
+	t, err := scanTenant(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTenantNotFound
+		}
+		return nil, fmt.Errorf("get tenant by id: %w", err)
+	}
+
+	return t, nil
+}
+
+// GetByDomain resolves domain (already normalised by the caller — stripped
+// of port, lowercased) against system.tenant_domains, matching only a
+// verified custom domain or any subdomain (createTenantDomainsDomainIndex's
+// own partial index anticipates exactly this predicate). Returns
+// ErrTenantNotFound for no match and for a deleted tenant alike, same
+// reasoning as GetByID.
+func (s *Store) GetByDomain(ctx context.Context, domain string) (*Tenant, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT `+tenantColumnsPrefixed+`
+		FROM system.tenants t
+		JOIN system.tenant_domains td ON td.tenant_id = t.id
+		WHERE td.domain = $1
+		  AND (td.verified_at IS NOT NULL OR td.type = $2)
+		  AND t.status != $3
+	`, domain, DomainSubdomain, StatusDeleted)
+
+	t, err := scanTenant(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTenantNotFound
+		}
+		return nil, fmt.Errorf("get tenant by domain: %w", err)
 	}
 
 	return t, nil

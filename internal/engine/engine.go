@@ -53,6 +53,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantresolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantsync"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
@@ -75,6 +76,7 @@ type Engine struct {
 	tokenIssuer    *authtoken.Issuer
 	sessionRevoker *sessionrevoke.Revoker
 	authChecker    *authcheck.Checker
+	tenantResolver *tenantresolve.Resolver
 	moduleRegistry *registry.ModuleRegistry
 	jobQueue       *river.Client[pgx.Tx]
 	jobQueuePool   *pgxpool.Pool
@@ -296,6 +298,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	// Authenticate per request (this package deliberately doesn't hold one
 	// itself, since it's rebuilt on every module hot reload).
 	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore)
+
+	// tenantResolver isn't consumed yet either — same goerp#91 middleware
+	// chain wires it in ahead of authChecker, per auth-internals.md §9's
+	// pipeline ordering (tenant resolution before token validation).
+	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient)
 
 	var searchClient *search.Client
 	if cfg.MeilisearchURL != "" {
@@ -522,6 +529,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		tokenIssuer:    tokenIssuer,
 		sessionRevoker: sessionRevoker,
 		authChecker:    authChecker,
+		tenantResolver: tenantResolver,
 		moduleRegistry: moduleRegistry,
 		jobQueue:       jobQueueClient,
 		jobQueuePool:   jobQueuePool,

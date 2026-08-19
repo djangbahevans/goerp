@@ -97,6 +97,53 @@ func TestSetWithTTL_ExpiresKey(t *testing.T) {
 	}
 }
 
+func TestGet_MissReturnsFoundFalse(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+
+	value, found, err := c.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if found {
+		t.Errorf("Get() found = true for an unset key, want false")
+	}
+	if value != "" {
+		t.Errorf("Get() value = %q for an unset key, want empty", value)
+	}
+}
+
+func TestGet_ReadsBackSetValue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+	if err := c.SetWithTTL(ctx, key, "some-value", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL() error: %v", err)
+	}
+
+	value, found, err := c.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if !found {
+		t.Fatal("Get() found = false after SetWithTTL, want true")
+	}
+	if value != "some-value" {
+		t.Errorf("Get() value = %q, want %q", value, "some-value")
+	}
+}
+
 func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
