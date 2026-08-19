@@ -14,6 +14,8 @@ type route struct {
 	model      string
 	name       string
 	crudAction string
+	websocket  bool
+	routeConfig
 }
 
 type Router struct {
@@ -26,11 +28,22 @@ func NewRouter() *Router {
 
 var DefaultRouter = NewRouter()
 
-func (r *Router) register(method, pattern string, h Handler) {
+func (r *Router) register(method, pattern string, h Handler, opts ...RouteOption) {
 	r.routes = append(r.routes, route{
-		method:   method,
-		segments: splitPattern(pattern),
-		handler:  h,
+		method:      method,
+		segments:    splitPattern(pattern),
+		handler:     h,
+		routeConfig: newRouteConfig(opts...),
+	})
+}
+
+func (r *Router) registerWebsocket(method, pattern string, h Handler, opts ...RouteOption) {
+	r.routes = append(r.routes, route{
+		method:      method,
+		segments:    splitPattern(pattern),
+		handler:     h,
+		websocket:   true,
+		routeConfig: newRouteConfig(opts...),
 	})
 }
 
@@ -49,11 +62,31 @@ func splitPattern(pattern string) []string {
 	return strings.Split(strings.Trim(pattern, "/"), "/")
 }
 
-func GET(pattern string, h Handler)    { DefaultRouter.register("GET", pattern, h) }
-func POST(pattern string, h Handler)   { DefaultRouter.register("POST", pattern, h) }
-func PUT(pattern string, h Handler)    { DefaultRouter.register("PUT", pattern, h) }
-func PATCH(pattern string, h Handler)  { DefaultRouter.register("PATCH", pattern, h) }
-func DELETE(pattern string, h Handler) { DefaultRouter.register("DELETE", pattern, h) }
+func GET(pattern string, h Handler, opts ...RouteOption) {
+	DefaultRouter.register("GET", pattern, h, opts...)
+}
+func POST(pattern string, h Handler, opts ...RouteOption) {
+	DefaultRouter.register("POST", pattern, h, opts...)
+}
+func PUT(pattern string, h Handler, opts ...RouteOption) {
+	DefaultRouter.register("PUT", pattern, h, opts...)
+}
+func PATCH(pattern string, h Handler, opts ...RouteOption) {
+	DefaultRouter.register("PATCH", pattern, h, opts...)
+}
+func DELETE(pattern string, h Handler, opts ...RouteOption) {
+	DefaultRouter.register("DELETE", pattern, h, opts...)
+}
+
+// WS registers a WebSocket-upgrade route.
+func WS(pattern string, h Handler, opts ...RouteOption) {
+	DefaultRouter.registerWebsocket("GET", pattern, h, opts...)
+}
+
+// SSE registers a server-sent-events route.
+func SSE(pattern string, h Handler, opts ...RouteOption) {
+	DefaultRouter.register("GET", pattern, h, opts...)
+}
 
 func (r *Router) Handle(req *Request) *Response {
 	reqSegments := strings.Split(strings.Trim(req.Path, "/"), "/")
@@ -104,11 +137,21 @@ func routeDeclarations(routes []route) []RouteDeclaration {
 	decls := make([]RouteDeclaration, 0, len(routes))
 	for _, r := range routes {
 		decls = append(decls, RouteDeclaration{
-			Method:     r.method,
-			Path:       "/" + strings.Join(r.segments, "/"),
-			Model:      r.model,
-			Name:       r.name,
-			CRUDAction: r.crudAction,
+			Method:       r.method,
+			Path:         "/" + strings.Join(r.segments, "/"),
+			Auth:         string(r.auth),
+			Permissions:  r.permissions,
+			RateLimit:    r.rateLimit,
+			MaxBodyBytes: r.maxBodyBytes,
+			TimeoutMs:    r.timeoutMs,
+			Streaming:    r.streaming,
+			Websocket:    r.websocket,
+			RawBody:      r.rawBody,
+			Model:        r.model,
+			Name:         r.name,
+			CRUDAction:   r.crudAction,
+			Embedded:     r.embedded,
+			PathParams:   r.pathParams,
 		})
 	}
 	return decls
