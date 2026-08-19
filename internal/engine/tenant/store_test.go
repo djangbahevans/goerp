@@ -410,3 +410,126 @@ func TestList_PaginatesWithCursor(t *testing.T) {
 	}
 	_ = created
 }
+
+func TestGetByID_Succeeds(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Get By ID")
+
+	got, err := store.GetByID(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if got.Slug != created.Slug {
+		t.Errorf("Slug = %q, want %q", got.Slug, created.Slug)
+	}
+}
+
+func TestGetByID_NotFoundReturnsErrTenantNotFound(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	_, err := store.GetByID(context.Background(), "00000000-0000-0000-0000-000000000000")
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("GetByID() error = %v, want ErrTenantNotFound", err)
+	}
+}
+
+func TestGetByID_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
+	store, conn := openTestStore(t)
+	ctx := context.Background()
+	created := createTenant(t, store, conn, uniqueSlug(t), "Deleted Tenant")
+
+	if _, err := store.db.ExecContext(ctx, "UPDATE system.tenants SET status = 'deleted' WHERE id = $1", created.ID); err != nil {
+		t.Fatalf("mark tenant deleted: %v", err)
+	}
+
+	_, err := store.GetByID(ctx, created.ID)
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("GetByID() error = %v, want ErrTenantNotFound", err)
+	}
+}
+
+// insertDomain inserts a tenant_domains row for tenantID, cleaned up via
+// tenantID's own cascading deleteTenant registration — no separate
+// cleanup needed.
+func insertDomain(t *testing.T, conn *sql.DB, tenantID, domain string, domainType DomainType, verified bool) {
+	t.Helper()
+	var verifiedAt any
+	if verified {
+		verifiedAt = time.Now()
+	}
+	_, err := conn.ExecContext(context.Background(), `
+		INSERT INTO system.tenant_domains (tenant_id, domain, type, verified_at)
+		VALUES ($1, $2, $3, $4)
+	`, tenantID, domain, string(domainType), verifiedAt)
+	if err != nil {
+		t.Fatalf("insert domain %q for tenant %q: %v", domain, tenantID, err)
+	}
+}
+
+func TestGetByDomain_ResolvesSubdomainWithoutVerification(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Subdomain Tenant")
+	domain := created.Slug + ".example.com"
+	insertDomain(t, conn, created.ID, domain, DomainSubdomain, false)
+
+	got, err := store.GetByDomain(context.Background(), domain)
+	if err != nil {
+		t.Fatalf("GetByDomain() error: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Errorf("ID = %q, want %q", got.ID, created.ID)
+	}
+}
+
+func TestGetByDomain_UnverifiedCustomDomainNotResolved(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Unverified Custom")
+	domain := uniqueSlug(t) + ".customdomain.test"
+	insertDomain(t, conn, created.ID, domain, DomainCustom, false)
+
+	_, err := store.GetByDomain(context.Background(), domain)
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("GetByDomain() error = %v, want ErrTenantNotFound for an unverified custom domain", err)
+	}
+}
+
+func TestGetByDomain_VerifiedCustomDomainResolves(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Verified Custom")
+	domain := uniqueSlug(t) + ".customdomain.test"
+	insertDomain(t, conn, created.ID, domain, DomainCustom, true)
+
+	got, err := store.GetByDomain(context.Background(), domain)
+	if err != nil {
+		t.Fatalf("GetByDomain() error: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Errorf("ID = %q, want %q", got.ID, created.ID)
+	}
+}
+
+func TestGetByDomain_NotFoundReturnsErrTenantNotFound(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	_, err := store.GetByDomain(context.Background(), "nonexistent-"+uniqueSlug(t)+".example.com")
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("GetByDomain() error = %v, want ErrTenantNotFound", err)
+	}
+}
+
+func TestGetByDomain_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
+	store, conn := openTestStore(t)
+	ctx := context.Background()
+	created := createTenant(t, store, conn, uniqueSlug(t), "Deleted Domain Tenant")
+	domain := created.Slug + ".example.com"
+	insertDomain(t, conn, created.ID, domain, DomainSubdomain, false)
+
+	if _, err := store.db.ExecContext(ctx, "UPDATE system.tenants SET status = 'deleted' WHERE id = $1", created.ID); err != nil {
+		t.Fatalf("mark tenant deleted: %v", err)
+	}
+
+	_, err := store.GetByDomain(ctx, domain)
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("GetByDomain() error = %v, want ErrTenantNotFound", err)
+	}
+}

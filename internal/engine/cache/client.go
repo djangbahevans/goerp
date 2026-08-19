@@ -6,6 +6,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -73,4 +74,17 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 		return false, fmt.Errorf("check %q: %w", key, err)
 	}
 	return n > 0, nil
+}
+
+// Get reads back key's value. found is false, with a nil error, when key
+// isn't set — a cache miss isn't itself an error.
+func (c *Client) Get(ctx context.Context, key string) (value string, found bool, err error) {
+	value, err = c.rdb.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("get %q: %w", key, err)
+	}
+	return value, true, nil
 }
