@@ -83,8 +83,11 @@ func WS(pattern string, h Handler, opts ...RouteOption) {
 	DefaultRouter.registerWebsocket("GET", pattern, h, opts...)
 }
 
-// SSE registers a server-sent-events route.
+// SSE registers a server-sent-events route. Streaming() is implied, the
+// same way WS implies Websocket — an SSE route is a long-lived streaming
+// response by definition, not an opt-in a module author declares separately.
 func SSE(pattern string, h Handler, opts ...RouteOption) {
+	opts = append([]RouteOption{Streaming()}, opts...)
 	DefaultRouter.register("GET", pattern, h, opts...)
 }
 
