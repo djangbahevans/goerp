@@ -144,6 +144,45 @@ func TestGet_ReadsBackSetValue(t *testing.T) {
 	}
 }
 
+func TestDelete_RemovesKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+	if err := c.SetWithTTL(ctx, key, "1", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL() error: %v", err)
+	}
+
+	if err := c.Delete(ctx, key); err != nil {
+		t.Fatalf("Delete() error: %v", err)
+	}
+
+	exists, err := c.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Exists() error: %v", err)
+	}
+	if exists {
+		t.Error("Exists() = true after Delete, want false")
+	}
+}
+
+func TestDelete_UnsetKeyIsNotAnError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	if err := c.Delete(ctx, "cache-test:"+t.Name()); err != nil {
+		t.Errorf("Delete() on an unset key: error = %v, want nil", err)
+	}
+}
+
 func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

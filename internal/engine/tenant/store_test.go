@@ -533,3 +533,31 @@ func TestGetByDomain_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
 		t.Errorf("GetByDomain() error = %v, want ErrTenantNotFound", err)
 	}
 }
+
+func TestDomainsForTenant_ReturnsVerifiedAndUnverified(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Domains For Tenant")
+	insertDomain(t, conn, created.ID, created.Slug+".example.com", DomainSubdomain, false)
+	insertDomain(t, conn, created.ID, created.Slug+".custom.test", DomainCustom, true)
+
+	got, err := store.DomainsForTenant(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("DomainsForTenant() error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(DomainsForTenant()) = %d, want 2", len(got))
+	}
+}
+
+func TestDomainsForTenant_NoDomainsReturnsEmpty(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "No Domains")
+
+	got, err := store.DomainsForTenant(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("DomainsForTenant() error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(DomainsForTenant()) = %d, want 0", len(got))
+	}
+}

@@ -127,6 +127,13 @@ type cacheEntry struct {
 	Tenant tenant.Tenant
 }
 
+// DomainCacheKey returns the Redis key ResolveByHost caches domain's
+// resolution under — exported so cache-invalidating callers derive the
+// same key rather than duplicating the format.
+func DomainCacheKey(domain string) string {
+	return domainCacheKeyPrefix + normaliseDomain(domain)
+}
+
 // tenantByDomain checks the Redis cache before falling back to Postgres.
 // Any Redis error (read or write) fails open to a direct database lookup
 // rather than blocking resolution on cache availability.

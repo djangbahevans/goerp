@@ -88,3 +88,11 @@ func (c *Client) Get(ctx context.Context, key string) (value string, found bool,
 	}
 	return value, true, nil
 }
+
+// Delete removes key. Not an error if key wasn't set.
+func (c *Client) Delete(ctx context.Context, key string) error {
+	if err := c.rdb.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("delete %q: %w", key, err)
+	}
+	return nil
+}
