@@ -43,23 +43,23 @@ var migrateLockKey = db.AdvisoryLockKey("jobqueue.Migrate")
 // second concurrent caller blocks until the first commits or rolls back
 // rather than racing it.
 //
-// The lock is acquired on a connection reserved from pool via Acquire,
-// separate from whatever connection(s) the migration itself runs on
-// through riverpgxv5.New(pool) — the lock only needs every caller to
-// serialize on it, not to literally run the migration on the locked
-// connection itself. This needs pool to have more than one connection
-// available (always true in practice: pgxpool's default max size is a
-// multiple of NumCPU, and Migrate is only ever called at process startup
-// or in tests, never concurrently with itself from many callers competing
-// for the same small pool).
+// The lock is held on its own connection, opened directly rather than
+// acquired from pool: an earlier version of this function used
+// pool.Acquire, but that connection sits idle for the whole migration
+// while riverpgxv5.New(pool) draws its own connections from that same
+// pool to actually run it — on a small pool (a constrained CI runner, a
+// caller-supplied pool sized for one purpose) that idle reservation can
+// starve the migration of a connection to run on at all, deadlocking
+// until the test framework's timeout kills it. A connection opened
+// outside pool's own accounting can't compete with pool for capacity.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	conn, err := pool.Acquire(ctx)
+	lockConn, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
 	if err != nil {
-		return fmt.Errorf("acquire connection for migration lock: %w", err)
+		return fmt.Errorf("open migration lock connection: %w", err)
 	}
-	defer conn.Release()
+	defer func() { _ = lockConn.Close(ctx) }()
 
-	tx, err := conn.Begin(ctx)
+	tx, err := lockConn.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin migration lock transaction: %w", err)
 	}
