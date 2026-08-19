@@ -79,10 +79,7 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 		if m.Status == module.StatusFailed {
 			continue
 		}
-		explicit := make([]route.ExplicitRoute, len(m.ExplicitRoutes))
-		for i, r := range m.ExplicitRoutes {
-			explicit[i] = route.ExplicitRoute{Method: r.Method, Path: r.Path}
-		}
+		explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
 		if err := route.RegisterModuleRoutes(table, name, m.Manifest.Type, explicit); err != nil {
 			return nil, fmt.Errorf("module %q: %w", name, err)
 		}

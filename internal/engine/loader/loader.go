@@ -162,10 +162,7 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 	for _, src := range sources {
 		m := LoadModule(ctx, rt, poolCfg, src)
 		if m.Status != module.StatusFailed {
-			explicit := make([]route.ExplicitRoute, len(m.ExplicitRoutes))
-			for i, r := range m.ExplicitRoutes {
-				explicit[i] = route.ExplicitRoute{Method: r.Method, Path: r.Path}
-			}
+			explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
 			if err := route.RegisterModuleRoutes(table, src.Name, m.Manifest.Type, explicit); err != nil {
 				m.Fail(err.Error())
 			}
