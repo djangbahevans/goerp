@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/engine"
 )
 
 type ExplicitRoute struct {
@@ -28,7 +28,7 @@ type ExplicitRoute struct {
 // ExplicitRoute — the one place this field-by-field mapping happens, so
 // every LoadAll/LoadCascading/registry.buildRouteTable call site stays in
 // sync instead of repeating the same conversion three times.
-func ExplicitRoutesFrom(decls []sdkengine.RouteDeclaration) []ExplicitRoute {
+func ExplicitRoutesFrom(decls []engine.RouteDeclaration) []ExplicitRoute {
 	out := make([]ExplicitRoute, len(decls))
 	for i, d := range decls {
 		var rl *RateLimitConfig

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/djangbahevans/goerp/sdk/go/engine"
 )
 
 func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
@@ -51,13 +51,13 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 }
 
 func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
-	decls := []sdkengine.RouteDeclaration{
+	decls := []engine.RouteDeclaration{
 		{
 			Method:       "POST",
 			Path:         "/orders",
 			Auth:         "required",
 			Permissions:  []string{"sales:order:write"},
-			RateLimit:    &sdkengine.RateLimitDecl{Requests: 10, WindowSeconds: 60, Scope: sdkengine.PerTenant},
+			RateLimit:    &engine.RateLimitDecl{Requests: 10, WindowSeconds: 60, Scope: engine.PerTenant},
 			MaxBodyBytes: 1024,
 			TimeoutMs:    5000,
 			Streaming:    false,
@@ -89,7 +89,7 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 }
 
 func TestExplicitRoutesFrom_NilRateLimitStaysNil(t *testing.T) {
-	got := ExplicitRoutesFrom([]sdkengine.RouteDeclaration{{Method: "GET", Path: "/x"}})
+	got := ExplicitRoutesFrom([]engine.RouteDeclaration{{Method: "GET", Path: "/x"}})
 	if got[0].RateLimit != nil {
 		t.Fatalf("RateLimit = %+v, want nil", got[0].RateLimit)
 	}
