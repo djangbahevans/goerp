@@ -44,14 +44,14 @@ var migrateLockKey = db.AdvisoryLockKey("jobqueue.Migrate")
 // rather than racing it.
 //
 // The lock is held on its own connection, opened directly rather than
-// acquired from pool: an earlier version of this function used
-// pool.Acquire, but that connection sits idle for the whole migration
-// while riverpgxv5.New(pool) draws its own connections from that same
-// pool to actually run it — on a small pool (a constrained CI runner, a
-// caller-supplied pool sized for one purpose) that idle reservation can
-// starve the migration of a connection to run on at all, deadlocking
-// until the test framework's timeout kills it. A connection opened
-// outside pool's own accounting can't compete with pool for capacity.
+// acquired from pool. Acquiring it from pool instead would leave that
+// connection idle for the whole migration while riverpgxv5.New(pool) draws
+// its own connections from the same pool to actually run it — on a small
+// pool (a constrained CI runner, a caller-supplied pool sized for one
+// purpose) that idle reservation can starve the migration of a connection
+// to run on at all, deadlocking until the caller's own timeout kills it. A
+// connection opened outside pool's own accounting can't compete with pool
+// for capacity.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	lockConn, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
 	if err != nil {
