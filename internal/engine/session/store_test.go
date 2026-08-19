@@ -3,11 +3,17 @@ package session
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/user"
+	"github.com/google/uuid"
 )
 
 // localPostgresDSN points directly at the compose.dev.yml Postgres
@@ -131,6 +137,189 @@ func TestBootstrap_CreatesFamilyIndex(t *testing.T) {
 	}
 	if !containsAll(indexDef, "family_id") {
 		t.Errorf("expected idx_sessions_family to cover family_id, got: %s", indexDef)
+	}
+}
+
+// sessionFixture inserts one real session row (FK-satisfying tenant/user
+// rows created alongside it) and returns its id, cleaning up all three by
+// exact row id — system.tenants/system.users/system.sessions are real
+// shared tables other packages' tests race against concurrently.
+func sessionFixture(t *testing.T, store *Store, conn *sql.DB) (sessionID, userID string) {
+	t.Helper()
+	ctx := context.Background()
+
+	tenantStore := tenant.NewStore(conn)
+	if err := tenantStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("tenant Bootstrap() error: %v", err)
+	}
+	userStore := user.NewStore(conn)
+	if err := userStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("user Bootstrap() error: %v", err)
+	}
+
+	slug := fmt.Sprintf("sessiontest%d", time.Now().UnixNano())
+	tt, err := tenantStore.CreateTenant(ctx, slug, "Session Test Co")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
+
+	userID, err = userStore.FindOrCreateInvited(ctx, slug+"@example.com")
+	if err != nil {
+		t.Fatalf("FindOrCreateInvited() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
+
+	sessionID = uuid.NewString()
+	row := Row{
+		ID:          sessionID,
+		UserID:      userID,
+		TenantID:    tt.ID,
+		DeviceID:    uuid.NewString(),
+		RefreshHash: "fixture-hash",
+		ExpiresAt:   time.Now().Add(30 * 24 * time.Hour),
+	}
+	if err := store.Insert(ctx, row); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, sessionID) })
+
+	return sessionID, userID
+}
+
+func TestInsert_RoundTripsFields(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, userID := sessionFixture(t, store, conn)
+
+	var gotUserID, refreshHash string
+	err := conn.QueryRowContext(context.Background(),
+		`SELECT user_id, refresh_hash FROM system.sessions WHERE id = $1`, sessionID,
+	).Scan(&gotUserID, &refreshHash)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if gotUserID != userID {
+		t.Errorf("user_id = %q, want %q", gotUserID, userID)
+	}
+	if refreshHash != "fixture-hash" {
+		t.Errorf("refresh_hash = %q, want fixture-hash", refreshHash)
+	}
+}
+
+func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, _ := sessionFixture(t, store, conn)
+
+	if err := store.Revoke(context.Background(), sessionID, "logout"); err != nil {
+		t.Fatalf("Revoke() error: %v", err)
+	}
+
+	var revokedAt sql.NullTime
+	var reason string
+	err := conn.QueryRowContext(context.Background(),
+		`SELECT revoked_at, revoke_reason FROM system.sessions WHERE id = $1`, sessionID,
+	).Scan(&revokedAt, &reason)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if !revokedAt.Valid {
+		t.Error("revoked_at is NULL, want set")
+	}
+	if reason != "logout" {
+		t.Errorf("revoke_reason = %q, want logout", reason)
+	}
+}
+
+func TestRevoke_UnknownIDReturnsErrSessionNotFound(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	err := store.Revoke(context.Background(), uuid.NewString(), "logout")
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("Revoke() error = %v, want ErrSessionNotFound", err)
+	}
+}
+
+func TestRevoke_IsIdempotent(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, _ := sessionFixture(t, store, conn)
+
+	if err := store.Revoke(context.Background(), sessionID, "logout"); err != nil {
+		t.Fatalf("first Revoke() error: %v", err)
+	}
+	if err := store.Revoke(context.Background(), sessionID, "password_change"); err != nil {
+		t.Fatalf("second Revoke() error: %v", err)
+	}
+
+	var reason string
+	err := conn.QueryRowContext(context.Background(),
+		`SELECT revoke_reason FROM system.sessions WHERE id = $1`, sessionID,
+	).Scan(&reason)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if reason != "password_change" {
+		t.Errorf("revoke_reason = %q, want password_change (the second call's reason)", reason)
+	}
+}
+
+func TestRevokeAllForUser_RevokesEveryNonRevokedSession(t *testing.T) {
+	store, conn := openTestStore(t)
+	id1, userID := sessionFixture(t, store, conn)
+
+	// A second session for the same user, same fixture tenant/user rows
+	// reused by inserting directly rather than calling sessionFixture
+	// again (which would create a second, unrelated tenant/user pair).
+	id2 := uuid.NewString()
+	var tenantID string
+	if err := conn.QueryRowContext(context.Background(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, id1).Scan(&tenantID); err != nil {
+		t.Fatalf("query tenant_id: %v", err)
+	}
+	if err := store.Insert(context.Background(), Row{
+		ID: id2, UserID: userID, TenantID: tenantID, DeviceID: uuid.NewString(),
+		RefreshHash: "fixture-hash-2", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("Insert() second session: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, id2) })
+
+	if err := store.RevokeAllForUser(context.Background(), userID, "admin"); err != nil {
+		t.Fatalf("RevokeAllForUser() error: %v", err)
+	}
+
+	var revokedCount int
+	err := conn.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM system.sessions WHERE user_id = $1 AND revoked_at IS NOT NULL`, userID,
+	).Scan(&revokedCount)
+	if err != nil {
+		t.Fatalf("count revoked sessions: %v", err)
+	}
+	if revokedCount != 2 {
+		t.Errorf("revoked count = %d, want 2", revokedCount)
+	}
+}
+
+func TestNonRevokedIDsForUser_ExcludesRevoked(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, userID := sessionFixture(t, store, conn)
+
+	ids, err := store.NonRevokedIDsForUser(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("NonRevokedIDsForUser() error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != sessionID {
+		t.Errorf("ids = %v, want [%s]", ids, sessionID)
+	}
+
+	if err := store.Revoke(context.Background(), sessionID, "logout"); err != nil {
+		t.Fatalf("Revoke() error: %v", err)
+	}
+
+	ids, err = store.NonRevokedIDsForUser(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("second NonRevokedIDsForUser() error: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("ids = %v, want empty after revocation", ids)
 	}
 }
 
