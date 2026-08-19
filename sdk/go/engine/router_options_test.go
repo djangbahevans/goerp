@@ -100,6 +100,23 @@ func TestSSE_RegistersGETRoute(t *testing.T) {
 	if got.Websocket {
 		t.Error("Websocket = true, want false — SSE is not a WebSocket upgrade")
 	}
+	if !got.Streaming {
+		t.Error("Streaming = false, want true — an SSE route is a streaming response by definition")
+	}
+}
+
+func TestSSE_ComposesWithDeclaredOptions(t *testing.T) {
+	withFreshRouter(t)
+
+	SSE("/events", func(req *Request) *Response { return OK(nil) }, Requires("sales:order:read"))
+
+	got := routeDeclarations(DefaultRouter.routes)[0]
+	if !got.Streaming {
+		t.Error("Streaming = false, want true")
+	}
+	if len(got.Permissions) != 1 || got.Permissions[0] != "sales:order:read" {
+		t.Errorf("Permissions = %+v, want [sales:order:read]", got.Permissions)
+	}
 }
 
 func TestWS_DispatchesLikeAnyOtherRoute(t *testing.T) {
