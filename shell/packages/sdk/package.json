@@ -1,0 +1,34 @@
+{
+  "name": "@goerp/sdk",
+  "version": "0.0.0",
+  "description": "GoERP frontend SDK — module registration, generic hooks, and the component library shared by module frontend/ projects.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": "./dist/index.js",
+    "./react": "./dist/react/index.js",
+    "./auth": "./dist/auth/index.js",
+    "./components": "./dist/components/index.js",
+    "./i18n": "./dist/i18n/index.js",
+    "./nav": "./dist/nav/index.js",
+    "./realtime": "./dist/realtime/index.js",
+    "./form": "./dist/form/index.js",
+    "./notifications": "./dist/notifications/index.js",
+    "./error": "./dist/error/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "typescript": "7.0.2"
+  }
+}
