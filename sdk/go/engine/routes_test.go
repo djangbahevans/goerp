@@ -118,9 +118,9 @@ func TestRouteDeclarations_MultiSegmentWithParam(t *testing.T) {
 }
 
 func TestRouteDeclarations_RestFieldsAtZeroValue(t *testing.T) {
-	// Nothing on today's minimal GET/POST/etc. registration API can set
-	// Auth/Permissions/RateLimit/etc. — they must come back at zero value,
-	// honestly reflecting what the current SDK can express, not fabricated.
+	// routeDeclarations is a pure field-copy — a route value built by hand,
+	// bypassing register()'s default-seeding in newRouteConfig, must come
+	// back at zero value rather than having defaults fabricated here.
 	decls := routeDeclarations([]route{
 		{method: "GET", segments: []string{"orders"}},
 	})
