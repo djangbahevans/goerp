@@ -7,6 +7,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -55,4 +56,21 @@ func (c *Client) Ping(ctx context.Context) error {
 
 func (c *Client) Close() error {
 	return c.rdb.Close()
+}
+
+// SetWithTTL sets key to value, expiring after ttl.
+func (c *Client) SetWithTTL(ctx context.Context, key, value string, ttl time.Duration) error {
+	if err := c.rdb.Set(ctx, key, value, ttl).Err(); err != nil {
+		return fmt.Errorf("set %q: %w", key, err)
+	}
+	return nil
+}
+
+// Exists reports whether key is currently set.
+func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
+	n, err := c.rdb.Exists(ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("check %q: %w", key, err)
+	}
+	return n > 0, nil
 }

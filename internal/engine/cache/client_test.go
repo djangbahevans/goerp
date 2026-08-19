@@ -42,6 +42,61 @@ func TestNewInvalidAddr(t *testing.T) {
 	}
 }
 
+func TestSetWithTTLAndExists(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+
+	exists, err := c.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Exists() before Set error: %v", err)
+	}
+	if exists {
+		t.Fatal("Exists() = true before Set, want false")
+	}
+
+	if err := c.SetWithTTL(ctx, key, "1", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL() error: %v", err)
+	}
+
+	exists, err = c.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Exists() after Set error: %v", err)
+	}
+	if !exists {
+		t.Error("Exists() = false after SetWithTTL, want true")
+	}
+}
+
+func TestSetWithTTL_ExpiresKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+	if err := c.SetWithTTL(ctx, key, "1", 50*time.Millisecond); err != nil {
+		t.Fatalf("SetWithTTL() error: %v", err)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+
+	exists, err := c.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Exists() error: %v", err)
+	}
+	if exists {
+		t.Error("Exists() = true after TTL elapsed, want false")
+	}
+}
+
 func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

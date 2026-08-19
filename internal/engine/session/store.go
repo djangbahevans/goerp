@@ -1,17 +1,22 @@
-// Package session bootstraps the system.sessions table and inserts a
-// session's first row — the table backing JWT/refresh-token issuance,
-// rotation, and revocation (auth-internals.md §4 "Session table").
-// Rotation and revocation land with goerp#147.
+// Package session bootstraps the system.sessions table, inserts a
+// session's first row, and revokes rows — the table backing
+// JWT/refresh-token issuance, rotation, and revocation (auth-internals.md
+// §4 "Session table"). Rotation (successor rows on refresh) is a separate,
+// unbuilt ticket; revocation only marks a row, it doesn't check any
+// blocklist — that's internal/engine/sessionrevoke.
 package session
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
+
+var ErrSessionNotFound = errors.New("session not found")
 
 // createSessionsTable matches auth-internals.md §4's schema exactly,
 // except mfa_credential_id drops the documented "REFERENCES user_mfa(id)"
@@ -120,5 +125,66 @@ func (s *Store) Insert(ctx context.Context, row Row) error {
 		return fmt.Errorf("insert session row: %w", err)
 	}
 
+	return nil
+}
+
+// Revoke sets id's revoked_at/revoke_reason. Idempotent: revoking an
+// already-revoked row just refreshes revoked_at/revoke_reason rather than
+// erroring — only a genuinely nonexistent id returns ErrSessionNotFound.
+func (s *Store) Revoke(ctx context.Context, id, reason string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $2 WHERE id = $1
+	`, id, reason)
+	if err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+	if n == 0 {
+		return ErrSessionNotFound
+	}
+	return nil
+}
+
+// NonRevokedIDsForUser returns the ids of every session row for userID
+// that isn't already revoked — the set RevokeAllForUser is about to
+// revoke, needed by internal/engine/sessionrevoke.Revoker to also
+// blocklist each one in Redis (a set the bulk UPDATE itself can't hand
+// back after the fact).
+func (s *Store) NonRevokedIDsForUser(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM system.sessions WHERE user_id = $1 AND revoked_at IS NULL
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("query non-revoked sessions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan session id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate session ids: %w", err)
+	}
+
+	return ids, nil
+}
+
+// RevokeAllForUser revokes every non-revoked session row for userID.
+func (s *Store) RevokeAllForUser(ctx context.Context, userID, reason string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $2
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`, userID, reason)
+	if err != nil {
+		return fmt.Errorf("revoke all sessions for user: %w", err)
+	}
 	return nil
 }

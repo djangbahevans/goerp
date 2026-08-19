@@ -48,6 +48,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/session"
+	"github.com/djangbahevans/goerp/internal/engine/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -71,6 +72,7 @@ type Engine struct {
 	sessionStore   *session.Store
 	signingKeySet  *signingkey.SigningKeySet
 	tokenIssuer    *authtoken.Issuer
+	sessionRevoker *sessionrevoke.Revoker
 	moduleRegistry *registry.ModuleRegistry
 	jobQueue       *river.Client[pgx.Tx]
 	jobQueuePool   *pgxpool.Pool
@@ -282,6 +284,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to redis: %w", err)
 	}
+
+	// sessionRevoker isn't consumed yet — an actual "revoke this session"
+	// caller (goerp tenant suspend's emergency containment, an admin
+	// logout endpoint) is separate scope — but every dependency it needs
+	// already exists by this point in New.
+	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 
 	var searchClient *search.Client
 	if cfg.MeilisearchURL != "" {
@@ -506,6 +514,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		sessionStore:   sessionStore,
 		signingKeySet:  signingKeySet,
 		tokenIssuer:    tokenIssuer,
+		sessionRevoker: sessionRevoker,
 		moduleRegistry: moduleRegistry,
 		jobQueue:       jobQueueClient,
 		jobQueuePool:   jobQueuePool,
