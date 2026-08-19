@@ -291,6 +291,139 @@ func TestCountUsers_UnprovisionedTenantReturnsZero(t *testing.T) {
 	}
 }
 
+func TestIsMember_TrueForGrantedUser(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	userID := "00000000-0000-0000-0000-000000000002"
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID,
+	); err != nil {
+		t.Fatalf("insert user_roles row: %v", err)
+	}
+
+	isMember, err := store.IsMember(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("IsMember() error: %v", err)
+	}
+	if !isMember {
+		t.Error("IsMember() = false, want true")
+	}
+}
+
+func TestIsMember_FalseForUngranted(t *testing.T) {
+	store, _, slug := openTestStore(t)
+
+	isMember, err := store.IsMember(context.Background(), slug, "00000000-0000-0000-0000-000000000003")
+	if err != nil {
+		t.Fatalf("IsMember() error: %v", err)
+	}
+	if isMember {
+		t.Error("IsMember() = true for a user with no grants, want false")
+	}
+}
+
+func TestIsMember_FalseForExpiredGrant(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	userID := "00000000-0000-0000-0000-000000000004"
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id, expires_at) VALUES ($1, $2, NOW() - interval '1 hour')", schema), userID, roleID,
+	); err != nil {
+		t.Fatalf("insert expired user_roles row: %v", err)
+	}
+
+	isMember, err := store.IsMember(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("IsMember() error: %v", err)
+	}
+	if isMember {
+		t.Error("IsMember() = true for an expired grant, want false")
+	}
+}
+
+func TestIsMember_UnprovisionedTenantReturnsFalse(t *testing.T) {
+	slug := fmt.Sprintf("roletest-unprovisioned-%d", time.Now().UnixNano())
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	defer func() { _ = conn.Close() }()
+	store := NewStore(conn)
+
+	isMember, err := store.IsMember(context.Background(), slug, "00000000-0000-0000-0000-000000000005")
+	if err != nil {
+		t.Fatalf("IsMember() error: %v", err)
+	}
+	if isMember {
+		t.Error("IsMember() = true for an unprovisioned tenant, want false")
+	}
+}
+
+func TestPermissionNamesForUser_ReturnsDistinctGrantedPermissions(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "admin")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	for _, perm := range []string{"widgets.read", "widgets.write"} {
+		if _, err := conn.ExecContext(ctx,
+			fmt.Sprintf("INSERT INTO %s.role_permissions (role_id, permission_name) VALUES ($1, $2)", schema), roleID, perm,
+		); err != nil {
+			t.Fatalf("insert role_permissions row: %v", err)
+		}
+	}
+	userID := "00000000-0000-0000-0000-000000000006"
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID,
+	); err != nil {
+		t.Fatalf("insert user_roles row: %v", err)
+	}
+
+	names, err := store.PermissionNamesForUser(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("PermissionNamesForUser() error: %v", err)
+	}
+	if len(names) != 2 || names[0] != "widgets.read" || names[1] != "widgets.write" {
+		t.Errorf("PermissionNamesForUser() = %v, want [widgets.read widgets.write]", names)
+	}
+}
+
+func TestPermissionNamesForUser_EmptyForUngranted(t *testing.T) {
+	store, _, slug := openTestStore(t)
+
+	names, err := store.PermissionNamesForUser(context.Background(), slug, "00000000-0000-0000-0000-000000000007")
+	if err != nil {
+		t.Fatalf("PermissionNamesForUser() error: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("PermissionNamesForUser() = %v, want empty", names)
+	}
+}
+
 func TestAdminUserID_ReturnsEarliestAdminGrant(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	schema := tenantschema.Name(slug)
