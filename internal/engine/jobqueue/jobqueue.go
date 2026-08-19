@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -25,9 +26,49 @@ const (
 	QueueEmail    = "email"
 )
 
+// migrateLockKey serializes concurrent Migrate callers against the same
+// pool — see Migrate's own doc comment for why this is needed.
+var migrateLockKey = db.AdvisoryLockKey("jobqueue.Migrate")
+
 // Migrate applies River's own schema migrations against pool. Idempotent —
-// safe to call on every startup, same as Store.Bootstrap elsewhere.
+// safe to call on every startup, same as Store.Bootstrap elsewhere — but
+// unlike Store.Bootstrap/SchemaSyncPool.Bootstrap, River's own migration
+// DDL (CREATE TYPE/CREATE FUNCTION, no IF NOT EXISTS guard) isn't safe
+// against two callers running it at the same time: two concurrent test
+// packages both calling Migrate against the same dev Postgres instance hit
+// "duplicate key value violates unique constraint" on Postgres's own
+// pg_type/pg_proc catalogs. Guarded the same way goerp#171 guarded
+// Store.Bootstrap — a transaction-scoped Postgres advisory lock
+// (pg_advisory_xact_lock) held for the duration of the migration, so a
+// second concurrent caller blocks until the first commits or rolls back
+// rather than racing it.
+//
+// The lock is acquired on a connection reserved from pool via Acquire,
+// separate from whatever connection(s) the migration itself runs on
+// through riverpgxv5.New(pool) — the lock only needs every caller to
+// serialize on it, not to literally run the migration on the locked
+// connection itself. This needs pool to have more than one connection
+// available (always true in practice: pgxpool's default max size is a
+// multiple of NumCPU, and Migrate is only ever called at process startup
+// or in tests, never concurrently with itself from many callers competing
+// for the same small pool).
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire connection for migration lock: %w", err)
+	}
+	defer conn.Release()
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin migration lock transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrateLockKey); err != nil {
+		return fmt.Errorf("acquire migration advisory lock: %w", err)
+	}
+
 	migrator, err := rivermigrate.New(riverpgxv5.New(pool), nil)
 	if err != nil {
 		return fmt.Errorf("create river migrator: %w", err)
@@ -35,6 +76,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
 		return fmt.Errorf("apply river migrations: %w", err)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit migration lock transaction: %w", err)
+	}
+
 	return nil
 }
 

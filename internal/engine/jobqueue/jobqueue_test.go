@@ -3,6 +3,7 @@ package jobqueue
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,45 @@ func newIdempotencyKey(t *testing.T) string {
 // testDSN mirrors README.md's documented dev-stack credentials
 // (PgBouncer at localhost:6432, user/pass/db goerp/dev/goerp).
 const testDSN = "postgres://goerp:dev@localhost:6432/goerp"
+
+// TestMigrate_ConcurrentCallersDoNotRace guards against the race behind
+// this exact failure showing up in CI: two different packages' tests
+// (this one and internal/engine/adminapi's) both call Migrate against the
+// same real dev Postgres instance, and go test ./... runs different
+// packages' test binaries concurrently by default. Without Migrate's own
+// advisory lock, River's migration DDL (CREATE TYPE/CREATE FUNCTION, no
+// IF NOT EXISTS guard) collided on Postgres's pg_type/pg_proc catalogs.
+// This test can't reproduce the cross-package race directly, but it does
+// confirm concurrent same-process callers of Migrate now serialize
+// cleanly instead of erroring.
+func TestMigrate_ConcurrentCallersDoNotRace(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testDSN)
+	if err != nil {
+		t.Fatalf("pgxpool.New: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("dev Postgres unreachable at %s (start compose.dev.yml): %v", testDSN, err)
+	}
+	t.Cleanup(pool.Close)
+
+	const callers = 5
+	var wg sync.WaitGroup
+	errs := make(chan error, callers)
+	for range callers {
+		wg.Go(func() {
+			errs <- Migrate(ctx, pool)
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent Migrate() error: %v", err)
+		}
+	}
+}
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
