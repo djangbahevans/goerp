@@ -67,16 +67,16 @@ func TestMigrate_ConcurrentCallersDoNotRace(t *testing.T) {
 	}
 }
 
-// TestMigrate_SingleConnectionPoolDoesNotDeadlock guards against a real
-// regression an earlier version of Migrate had: it held the advisory lock
-// on a connection reserved from pool via Acquire, while the migration
-// itself (through riverpgxv5.New(pool)) drew its own connections from
-// that same pool — on a pool with no spare capacity, the reserved lock
-// connection starved the migration of a connection to run on, deadlocking
-// until the test framework's timeout killed it (10 minutes in CI, not a
-// quick failure). MaxConns: 1 here reproduces that exact starvation
-// scenario in miniature; a bounded context makes the test fail fast
-// instead of hanging for real if the regression comes back.
+// TestMigrate_SingleConnectionPoolDoesNotDeadlock guards against Migrate
+// holding its advisory lock on a connection reserved from pool via
+// Acquire, rather than one opened independently: reserving a pool
+// connection to hold the lock would leave the migration itself (through
+// riverpgxv5.New(pool)) competing with that reservation for the pool's own
+// connections — on a pool with no spare capacity, the migration would
+// never get one, deadlocking until the caller's own timeout kills it.
+// MaxConns: 1 here reproduces that exact starvation scenario in
+// miniature; a bounded context makes the test fail fast instead of
+// hanging for real if this regresses.
 func TestMigrate_SingleConnectionPoolDoesNotDeadlock(t *testing.T) {
 	cfg, err := pgxpool.ParseConfig(testDSN)
 	if err != nil {
