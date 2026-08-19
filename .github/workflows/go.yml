@@ -52,14 +52,11 @@ jobs:
         with:
           version: v2.12
 
-      - name: Run Unit Tests
-        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
-
       - name: Start Dev Stack
         run: docker compose -f compose.dev.yml up -d --wait
 
-      - name: Run Integration Tests
-        run: go test -v -race ./...
+      - name: Run Tests
+        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Stop Dev Stack
         if: always()
