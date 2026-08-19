@@ -188,3 +188,45 @@ func (s *Store) RevokeAllForUser(ctx context.Context, userID, reason string) err
 	}
 	return nil
 }
+
+// NonRevokedIDsForTenant returns the ids of every session row for tenantID
+// that isn't already revoked — the tenant-scoped counterpart to
+// NonRevokedIDsForUser, needed the same way by
+// internal/engine/sessionrevoke.Revoker.RevokeAllForTenant.
+func (s *Store) NonRevokedIDsForTenant(ctx context.Context, tenantID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM system.sessions WHERE tenant_id = $1 AND revoked_at IS NULL
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("query non-revoked sessions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan session id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate session ids: %w", err)
+	}
+
+	return ids, nil
+}
+
+// RevokeAllForTenant revokes every non-revoked session row for tenantID —
+// what a tenant suspend needs, distinct from RevokeAllForUser's per-user
+// scope.
+func (s *Store) RevokeAllForTenant(ctx context.Context, tenantID, reason string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $2
+		WHERE tenant_id = $1 AND revoked_at IS NULL
+	`, tenantID, reason)
+	if err != nil {
+		return fmt.Errorf("revoke all sessions for tenant: %w", err)
+	}
+	return nil
+}

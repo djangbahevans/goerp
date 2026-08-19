@@ -323,6 +323,73 @@ func TestNonRevokedIDsForUser_ExcludesRevoked(t *testing.T) {
 	}
 }
 
+func TestRevokeAllForTenant_RevokesEveryNonRevokedSession(t *testing.T) {
+	store, conn := openTestStore(t)
+	id1, userID := sessionFixture(t, store, conn)
+
+	var tenantID string
+	if err := conn.QueryRowContext(context.Background(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, id1).Scan(&tenantID); err != nil {
+		t.Fatalf("query tenant_id: %v", err)
+	}
+
+	// A second user's session in the same tenant — a tenant-scoped revoke
+	// must reach across users, unlike RevokeAllForUser.
+	id2 := uuid.NewString()
+	if err := store.Insert(context.Background(), Row{
+		ID: id2, UserID: userID, TenantID: tenantID, DeviceID: uuid.NewString(),
+		RefreshHash: "fixture-hash-2", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("Insert() second session: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, id2) })
+
+	if err := store.RevokeAllForTenant(context.Background(), tenantID, "tenant_suspended"); err != nil {
+		t.Fatalf("RevokeAllForTenant() error: %v", err)
+	}
+
+	var revokedCount int
+	err := conn.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM system.sessions WHERE tenant_id = $1 AND revoked_at IS NOT NULL`, tenantID,
+	).Scan(&revokedCount)
+	if err != nil {
+		t.Fatalf("count revoked sessions: %v", err)
+	}
+	if revokedCount != 2 {
+		t.Errorf("revoked count = %d, want 2", revokedCount)
+	}
+}
+
+func TestNonRevokedIDsForTenant_ExcludesRevokedAndOtherTenants(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, _ := sessionFixture(t, store, conn)
+	otherSessionID, _ := sessionFixture(t, store, conn)
+
+	var tenantID string
+	if err := conn.QueryRowContext(context.Background(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, sessionID).Scan(&tenantID); err != nil {
+		t.Fatalf("query tenant_id: %v", err)
+	}
+
+	ids, err := store.NonRevokedIDsForTenant(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("NonRevokedIDsForTenant() error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != sessionID {
+		t.Errorf("ids = %v, want [%s] (not %s, a different tenant's session)", ids, sessionID, otherSessionID)
+	}
+
+	if err := store.Revoke(context.Background(), sessionID, "logout"); err != nil {
+		t.Fatalf("Revoke() error: %v", err)
+	}
+
+	ids, err = store.NonRevokedIDsForTenant(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("second NonRevokedIDsForTenant() error: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("ids = %v, want empty after revocation", ids)
+	}
+}
+
 func containsAll(s string, substrs ...string) bool {
 	for _, sub := range substrs {
 		if !strings.Contains(s, sub) {

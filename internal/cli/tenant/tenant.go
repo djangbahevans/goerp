@@ -11,6 +11,8 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(newStatusCmd())
 	cmd.AddCommand(newListCmd())
 	cmd.AddCommand(newResendInviteCmd())
+	cmd.AddCommand(newSuspendCmd())
+	cmd.AddCommand(newUnsuspendCmd())
 
 	return cmd
 }
