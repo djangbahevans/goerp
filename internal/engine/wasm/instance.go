@@ -29,7 +29,16 @@ type ModuleInstance struct {
 // one-off temporary instance (used for load-time export calls) never
 // diverge in what's wired up or whether init runs.
 func newModuleInstance(ctx context.Context, name string, compiled wazero.CompiledModule, rt wazero.Runtime) (*ModuleInstance, error) {
-	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(name))
+	// WithStartFunctions includes "_initialize" alongside wazero's own
+	// default ("_start") because a real module compiled with
+	// -buildmode=c-shared (required on wasip1 to produce a WASI
+	// reactor/library rather than a command — go help buildmode) exports
+	// "_initialize", not "_start": Go's wasip1 command-mode "_start" always
+	// calls proc_exit after main() returns, which would close the module
+	// before any wasmexport function could ever be called. A hand-built
+	// test fixture with neither export is unaffected — wazero silently
+	// skips any start function that doesn't exist.
+	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(name).WithStartFunctions("_start", "_initialize"))
 	if err != nil {
 		return nil, fmt.Errorf("instantiate %s: %w", name, err)
 	}
