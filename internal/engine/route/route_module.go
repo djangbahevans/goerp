@@ -3,11 +3,57 @@ package route
 import (
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/engine"
 )
 
 type ExplicitRoute struct {
 	Method string
 	Path   string
+
+	Auth         string
+	Permissions  []string
+	RateLimit    *RateLimitConfig
+	MaxBodyBytes int64
+	RawBody      bool
+	Timeout      time.Duration
+	Streaming    bool
+	Websocket    bool
+	PathParams   map[string]string
+}
+
+// ExplicitRoutesFrom converts a module's deserialized get_routes output
+// (sdk/go/engine.RouteDeclaration, the wire shape) into the engine's own
+// ExplicitRoute — the one place this field-by-field mapping happens, so
+// every LoadAll/LoadCascading/registry.buildRouteTable call site stays in
+// sync instead of repeating the same conversion three times.
+func ExplicitRoutesFrom(decls []engine.RouteDeclaration) []ExplicitRoute {
+	out := make([]ExplicitRoute, len(decls))
+	for i, d := range decls {
+		var rl *RateLimitConfig
+		if d.RateLimit != nil {
+			rl = &RateLimitConfig{
+				Requests:      d.RateLimit.Requests,
+				WindowSeconds: d.RateLimit.WindowSeconds,
+				Scope:         string(d.RateLimit.Scope),
+			}
+		}
+		out[i] = ExplicitRoute{
+			Method:       d.Method,
+			Path:         d.Path,
+			Auth:         d.Auth,
+			Permissions:  d.Permissions,
+			RateLimit:    rl,
+			MaxBodyBytes: int64(d.MaxBodyBytes),
+			RawBody:      d.RawBody,
+			Timeout:      time.Duration(d.TimeoutMs) * time.Millisecond,
+			Streaming:    d.Streaming,
+			Websocket:    d.Websocket,
+			PathParams:   d.PathParams,
+		}
+	}
+	return out
 }
 
 func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, routes []ExplicitRoute) error {
@@ -59,7 +105,21 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 		if scratch.Registered(r.Method, expandedPath) {
 			return fmt.Errorf("route: module %q: duplicate route %s %s", moduleName, r.Method, expandedPath)
 		}
-		entry := &RouteEntry{ModuleName: moduleName, PathTemplate: expandedPath}
+		entry := &RouteEntry{
+			ModuleName:   moduleName,
+			PathTemplate: expandedPath,
+			Manifest: RouteManifest{
+				Auth:         r.Auth,
+				Permissions:  r.Permissions,
+				RateLimit:    r.RateLimit,
+				MaxBodyBytes: r.MaxBodyBytes,
+				RawBody:      r.RawBody,
+				Timeout:      r.Timeout,
+				Streaming:    r.Streaming,
+				Websocket:    r.Websocket,
+				PathParams:   r.PathParams,
+			},
+		}
 		scratch.Register(r.Method, expandedPath, entry)
 		toRegister = append(toRegister, pending{r.Method, expandedPath, entry})
 	}
