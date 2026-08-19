@@ -257,20 +257,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("create admin server: %w", err)
 	}
 
-	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
-		Store:       tenantStore,
-		SyncStatus:  syncPool,
-		TableCounts: syncPool,
-		Membership:  roleStore,
-		Users:       userStore,
-		Inviter:     inviteStore,
-		// Provisioner, Exporter, Importer, Offboarder stay nil until
-		// goerp#149/#15/#150 land — the handlers report
-		// StatusNotImplemented for those routes rather than the wiring
-		// needing a placeholder implementation here. inviteStore's own
-		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
-	})
-
 	adminapi.RegisterOperatorsRoutes(adminServer.Router(), adminapi.OperatorsDeps{
 		PKI:    operatorPKI,
 		Ledger: operatorCertStore,
@@ -287,11 +273,22 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("connect to redis: %w", err)
 	}
 
-	// sessionRevoker isn't consumed yet — an actual "revoke this session"
-	// caller (goerp tenant suspend's emergency containment, an admin
-	// logout endpoint) is separate scope — but every dependency it needs
-	// already exists by this point in New.
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
+
+	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
+		Store:          tenantStore,
+		SyncStatus:     syncPool,
+		TableCounts:    syncPool,
+		Membership:     roleStore,
+		Users:          userStore,
+		SessionRevoker: sessionRevoker,
+		Inviter:        inviteStore,
+		// Provisioner, Exporter, Importer, Offboarder stay nil until
+		// goerp#149/#15/#150 land — the handlers report
+		// StatusNotImplemented for those routes rather than the wiring
+		// needing a placeholder implementation here. inviteStore's own
+		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
+	})
 
 	// authChecker isn't consumed yet — wiring it into an actual HTTP
 	// middleware chain is goerp#91, which also owns resolving the current

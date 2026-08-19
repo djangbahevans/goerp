@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -142,6 +143,99 @@ func TestSuspendRoute_MissingReasonIsBadRequest(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// fakeSessionRevoker records RevokeAllForTenant calls, or returns
+// forcedErr if set, without needing a real sessionrevoke.Revoker (Redis +
+// a populated sessions table).
+type fakeSessionRevoker struct {
+	calledTenantID string
+	calledReason   string
+	forcedErr      error
+}
+
+func (f *fakeSessionRevoker) RevokeAllForTenant(ctx context.Context, tenantID, reason string) error {
+	f.calledTenantID = tenantID
+	f.calledReason = reason
+	return f.forcedErr
+}
+
+func TestSuspendRoute_RevokesActiveSessions(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tenant.NewStore(conn)
+	if err := store.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	created, err := store.CreateTenant(context.Background(), "suspendrevoke1", "Suspend Revoke Test")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
+	})
+
+	revoker := &fakeSessionRevoker{}
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, SessionRevoker: revoker})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/suspendrevoke1/suspend", strings.NewReader(`{"reason":"unpaid invoice"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+	if revoker.calledTenantID != created.ID {
+		t.Errorf("RevokeAllForTenant called with tenant id %q, want %q", revoker.calledTenantID, created.ID)
+	}
+	if revoker.calledReason != "unpaid invoice" {
+		t.Errorf("RevokeAllForTenant called with reason %q, want %q", revoker.calledReason, "unpaid invoice")
+	}
+}
+
+func TestSuspendRoute_RevocationFailureIsReportedButStatusStaysSuspended(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tenant.NewStore(conn)
+	if err := store.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	created, err := store.CreateTenant(context.Background(), "suspendrevokefail1", "Suspend Revoke Failure Test")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
+	})
+
+	revoker := &fakeSessionRevoker{forcedErr: errors.New("redis unreachable")}
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, SessionRevoker: revoker})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/suspendrevokefail1/suspend", strings.NewReader(`{"reason":"unpaid invoice"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	got, err := store.GetBySlug(context.Background(), "suspendrevokefail1")
+	if err != nil {
+		t.Fatalf("GetBySlug() error: %v", err)
+	}
+	if got.Status != tenant.StatusSuspended {
+		t.Errorf("tenant status = %q, want %q — the status flip must not roll back when revocation fails", got.Status, tenant.StatusSuspended)
 	}
 }
 

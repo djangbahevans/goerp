@@ -69,6 +69,28 @@ func (r *Revoker) RevokeAllForUser(ctx context.Context, userID, reason string) e
 	return nil
 }
 
+// RevokeAllForTenant revokes every non-revoked session for tenantID and
+// blocklists each one — what a tenant suspend calls, distinct from
+// RevokeAllForUser's per-user scope.
+func (r *Revoker) RevokeAllForTenant(ctx context.Context, tenantID, reason string) error {
+	ids, err := r.sessions.NonRevokedIDsForTenant(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+
+	if err := r.sessions.RevokeAllForTenant(ctx, tenantID, reason); err != nil {
+		return err
+	}
+
+	for _, id := range ids {
+		if err := r.cache.SetWithTTL(ctx, blocklistKey(id), "1", blocklistTTL); err != nil {
+			return fmt.Errorf("blocklist session %s: %w", id, err)
+		}
+	}
+
+	return nil
+}
+
 // IsBlocked reports whether sessionID is currently blocklisted — the
 // check a future auth middleware (goerp#88) runs on every request, keyed
 // by the access token's sid claim.

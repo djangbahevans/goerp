@@ -27,16 +27,17 @@ import (
 )
 
 type TenantDeps struct {
-	Store       *tenant.Store
-	SyncStatus  SyncStatusReader
-	TableCounts TableCounter
-	Membership  TenantMembership
-	Users       UserResolver
-	Provisioner Provisioner
-	Inviter     InviteResender
-	Exporter    TenantExporter
-	Importer    TenantImporter
-	Offboarder  Offboarder
+	Store          *tenant.Store
+	SyncStatus     SyncStatusReader
+	TableCounts    TableCounter
+	Membership     TenantMembership
+	Users          UserResolver
+	SessionRevoker SessionRevoker
+	Provisioner    Provisioner
+	Inviter        InviteResender
+	Exporter       TenantExporter
+	Importer       TenantImporter
+	Offboarder     Offboarder
 }
 
 func RegisterTenantRoutes(mux *http.ServeMux, deps TenantDeps) {
@@ -86,6 +87,13 @@ type TenantMembership interface {
 // only ever carries id/email, not a name.
 type UserResolver interface {
 	GetByID(ctx context.Context, id string) (*user.User, error)
+}
+
+// SessionRevoker is satisfied by *sessionrevoke.Revoker (RevokeAllForTenant)
+// — terminates a suspended tenant's active sessions immediately rather
+// than waiting out their natural token expiry (goerp#147).
+type SessionRevoker interface {
+	RevokeAllForTenant(ctx context.Context, tenantID, reason string) error
 }
 
 type CreateTenantRequest struct {
@@ -318,6 +326,19 @@ func (h *tenantHandlers) suspend(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+
+	// Terminate active sessions immediately rather than waiting out their
+	// natural token expiry — the status flip alone (above) doesn't do
+	// this. The tenant is already suspended at this point regardless of
+	// whether revocation succeeds; a failure here is reported but doesn't
+	// roll back the status change, since a suspended tenant with sessions
+	// still technically live until the next scheduled cleanup is a safer
+	// failure mode than an operator believing suspend failed entirely when
+	// only the (idempotent, retriable) revocation step did.
+	if err := h.deps.SessionRevoker.RevokeAllForTenant(r.Context(), t.ID, req.Reason); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "tenant suspended, but revoking active sessions failed: "+err.Error())
 		return
 	}
 

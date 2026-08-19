@@ -23,6 +23,7 @@ type fixture struct {
 	revoker   *Revoker
 	sessionID string
 	userID    string
+	tenantID  string
 	conn      *sql.DB
 	cache     *cache.Client
 }
@@ -84,6 +85,7 @@ func newFixture(t *testing.T) *fixture {
 		revoker:   NewRevoker(sessionStore, cacheClient),
 		sessionID: sessionID,
 		userID:    userID,
+		tenantID:  tt.ID,
 		conn:      conn,
 		cache:     cacheClient,
 	}
@@ -140,5 +142,30 @@ func TestRevokeAllForUser_BlocklistsEverySession(t *testing.T) {
 	}
 	if !blocked {
 		t.Error("IsBlocked() = false after RevokeAllForUser, want true")
+	}
+}
+
+func TestRevokeAllForTenant_BlocklistsEverySession(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.revoker.RevokeAllForTenant(ctx, f.tenantID, "tenant_suspended"); err != nil {
+		t.Fatalf("RevokeAllForTenant() error: %v", err)
+	}
+
+	var revokedAt sql.NullTime
+	if err := f.conn.QueryRowContext(ctx, `SELECT revoked_at FROM system.sessions WHERE id = $1`, f.sessionID).Scan(&revokedAt); err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if !revokedAt.Valid {
+		t.Error("revoked_at is NULL, want set")
+	}
+
+	blocked, err := f.revoker.IsBlocked(ctx, f.sessionID)
+	if err != nil {
+		t.Fatalf("IsBlocked() error: %v", err)
+	}
+	if !blocked {
+		t.Error("IsBlocked() = false after RevokeAllForTenant, want true")
 	}
 }
