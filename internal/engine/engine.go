@@ -284,6 +284,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Membership:     roleStore,
 		Users:          userStore,
 		SessionRevoker: sessionRevoker,
+		DomainCache:    cacheClient,
 		Inviter:        inviteStore,
 		// Provisioner, Exporter, Importer, Offboarder stay nil until
 		// goerp#149/#15/#150 land — the handlers report

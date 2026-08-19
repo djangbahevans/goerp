@@ -205,6 +205,25 @@ func TestResolveByHost_CachesNegativeResult(t *testing.T) {
 	}
 }
 
+func TestDomainCacheKey_MatchesResolveByHostsCacheKey(t *testing.T) {
+	resolver, store, conn, cacheClient := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Cache Key Match")
+	domain := "MixedCase." + created.Slug + ".example.com:8443"
+	insertDomain(t, conn, created.ID, strings.ToLower(strings.TrimSuffix(domain, ":8443")))
+
+	if _, err := resolver.ResolveByHost(context.Background(), domain); err != nil {
+		t.Fatalf("ResolveByHost() error: %v", err)
+	}
+
+	_, found, err := cacheClient.Get(context.Background(), DomainCacheKey(domain))
+	if err != nil {
+		t.Fatalf("cacheClient.Get() error: %v", err)
+	}
+	if !found {
+		t.Error("DomainCacheKey(domain) did not match the key ResolveByHost cached under")
+	}
+}
+
 func TestEntitlementSet_LimitAndModuleEnabled(t *testing.T) {
 	set := EntitlementSet{
 		Features:  map[string]bool{"module.sales": true},

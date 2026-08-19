@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantresolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
@@ -33,6 +35,7 @@ type TenantDeps struct {
 	Membership     TenantMembership
 	Users          UserResolver
 	SessionRevoker SessionRevoker
+	DomainCache    DomainCacheInvalidator
 	Provisioner    Provisioner
 	Inviter        InviteResender
 	Exporter       TenantExporter
@@ -94,6 +97,11 @@ type UserResolver interface {
 // than waiting out their natural token expiry (goerp#147).
 type SessionRevoker interface {
 	RevokeAllForTenant(ctx context.Context, tenantID, reason string) error
+}
+
+// DomainCacheInvalidator is satisfied by *cache.Client (Delete).
+type DomainCacheInvalidator interface {
+	Delete(ctx context.Context, key string) error
 }
 
 type CreateTenantRequest struct {
@@ -342,6 +350,12 @@ func (h *tenantHandlers) suspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same not-rolled-back reasoning as session revocation above.
+	if err := h.invalidateDomainCache(r.Context(), t.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "tenant suspended, but invalidating the domain cache failed: "+err.Error())
+		return
+	}
+
 	writeData(w, http.StatusOK, t)
 }
 
@@ -358,7 +372,29 @@ func (h *tenantHandlers) unsuspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same not-rolled-back reasoning as suspend's own invalidation.
+	if err := h.invalidateDomainCache(r.Context(), t.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "tenant unsuspended, but invalidating the domain cache failed: "+err.Error())
+		return
+	}
+
 	writeData(w, http.StatusOK, t)
+}
+
+// invalidateDomainCache deletes every tenantresolve domain-cache entry
+// for tenantID, so a status change takes effect immediately rather than
+// waiting out the cache's TTL (multitenancy-internals.md §9).
+func (h *tenantHandlers) invalidateDomainCache(ctx context.Context, tenantID string) error {
+	domains, err := h.deps.Store.DomainsForTenant(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("list domains: %w", err)
+	}
+	for _, d := range domains {
+		if err := h.deps.DomainCache.Delete(ctx, tenantresolve.DomainCacheKey(d.Domain)); err != nil {
+			return fmt.Errorf("invalidate cache for domain %q: %w", d.Domain, err)
+		}
+	}
+	return nil
 }
 
 func (h *tenantHandlers) resendInvite(w http.ResponseWriter, r *http.Request) {

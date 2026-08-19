@@ -367,3 +367,35 @@ func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, re
 
 	return t, nil
 }
+
+// DomainsForTenant returns every system.tenant_domains row for tenantID,
+// verified and unverified alike.
+func (s *Store) DomainsForTenant(ctx context.Context, tenantID string) ([]Domain, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, tenant_id, domain, type, is_primary, verified_at, created_at
+		FROM system.tenant_domains
+		WHERE tenant_id = $1
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("query domains for tenant: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var domains []Domain
+	for rows.Next() {
+		var d Domain
+		var verifiedAt sql.NullTime
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.Domain, &d.Type, &d.IsPrimary, &verifiedAt, &d.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan domain: %w", err)
+		}
+		if verifiedAt.Valid {
+			d.VerifiedAt = &verifiedAt.Time
+		}
+		domains = append(domains, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate domains for tenant: %w", err)
+	}
+
+	return domains, nil
+}

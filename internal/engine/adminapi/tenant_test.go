@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantresolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
@@ -161,6 +162,18 @@ func (f *fakeSessionRevoker) RevokeAllForTenant(ctx context.Context, tenantID, r
 	return f.forcedErr
 }
 
+// fakeDomainCacheInvalidator records Delete calls, or returns forcedErr if
+// set, without needing a real Redis connection.
+type fakeDomainCacheInvalidator struct {
+	deletedKeys []string
+	forcedErr   error
+}
+
+func (f *fakeDomainCacheInvalidator) Delete(ctx context.Context, key string) error {
+	f.deletedKeys = append(f.deletedKeys, key)
+	return f.forcedErr
+}
+
 func TestSuspendRoute_RevokesActiveSessions(t *testing.T) {
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -182,7 +195,7 @@ func TestSuspendRoute_RevokesActiveSessions(t *testing.T) {
 
 	revoker := &fakeSessionRevoker{}
 	mux := http.NewServeMux()
-	RegisterTenantRoutes(mux, TenantDeps{Store: store, SessionRevoker: revoker})
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, SessionRevoker: revoker, DomainCache: &fakeDomainCacheInvalidator{}})
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/suspendrevoke1/suspend", strings.NewReader(`{"reason":"unpaid invoice"}`))
 	w := httptest.NewRecorder()
@@ -220,7 +233,7 @@ func TestSuspendRoute_RevocationFailureIsReportedButStatusStaysSuspended(t *test
 
 	revoker := &fakeSessionRevoker{forcedErr: errors.New("redis unreachable")}
 	mux := http.NewServeMux()
-	RegisterTenantRoutes(mux, TenantDeps{Store: store, SessionRevoker: revoker})
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, SessionRevoker: revoker, DomainCache: &fakeDomainCacheInvalidator{}})
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/suspendrevokefail1/suspend", strings.NewReader(`{"reason":"unpaid invoice"}`))
 	w := httptest.NewRecorder()
@@ -236,6 +249,185 @@ func TestSuspendRoute_RevocationFailureIsReportedButStatusStaysSuspended(t *test
 	}
 	if got.Status != tenant.StatusSuspended {
 		t.Errorf("tenant status = %q, want %q — the status flip must not roll back when revocation fails", got.Status, tenant.StatusSuspended)
+	}
+}
+
+func TestSuspendRoute_InvalidatesDomainCache(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tenant.NewStore(conn)
+	if err := store.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	created, err := store.CreateTenant(context.Background(), "suspendcache1", "Suspend Cache Test")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
+	})
+	domain := "suspendcache1.example.com"
+	if _, err := conn.Exec(
+		"INSERT INTO system.tenant_domains (tenant_id, domain, type) VALUES ($1, $2, 'subdomain')",
+		created.ID, domain,
+	); err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+
+	cache := &fakeDomainCacheInvalidator{}
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, SessionRevoker: &fakeSessionRevoker{}, DomainCache: cache})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/suspendcache1/suspend", strings.NewReader(`{"reason":"unpaid invoice"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+	want := tenantresolve.DomainCacheKey(domain)
+	if len(cache.deletedKeys) != 1 || cache.deletedKeys[0] != want {
+		t.Errorf("deletedKeys = %v, want [%q]", cache.deletedKeys, want)
+	}
+}
+
+func TestSuspendRoute_CacheInvalidationFailureIsReportedButStatusStaysSuspended(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tenant.NewStore(conn)
+	if err := store.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	created, err := store.CreateTenant(context.Background(), "suspendcachefail1", "Suspend Cache Failure Test")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
+	})
+	if _, err := conn.Exec(
+		"INSERT INTO system.tenant_domains (tenant_id, domain, type) VALUES ($1, $2, 'subdomain')",
+		created.ID, "suspendcachefail1.example.com",
+	); err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+
+	cache := &fakeDomainCacheInvalidator{forcedErr: errors.New("redis unreachable")}
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, SessionRevoker: &fakeSessionRevoker{}, DomainCache: cache})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/suspendcachefail1/suspend", strings.NewReader(`{"reason":"unpaid invoice"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	got, err := store.GetBySlug(context.Background(), "suspendcachefail1")
+	if err != nil {
+		t.Fatalf("GetBySlug() error: %v", err)
+	}
+	if got.Status != tenant.StatusSuspended {
+		t.Errorf("tenant status = %q, want %q — the status flip must not roll back when cache invalidation fails", got.Status, tenant.StatusSuspended)
+	}
+}
+
+func TestUnsuspendRoute_ReactivatesTenant(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tenant.NewStore(conn)
+	if err := store.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	created, err := store.CreateTenant(context.Background(), "unsuspend1", "Unsuspend Test")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
+	})
+	reason := "test suspension"
+	if _, err := store.UpdateStatus(context.Background(), "unsuspend1", tenant.StatusSuspended, &reason); err != nil {
+		t.Fatalf("UpdateStatus() error: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, DomainCache: &fakeDomainCacheInvalidator{}})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/unsuspend1/unsuspend", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	got, err := store.GetBySlug(context.Background(), "unsuspend1")
+	if err != nil {
+		t.Fatalf("GetBySlug() error: %v", err)
+	}
+	if got.Status != tenant.StatusActive {
+		t.Errorf("tenant status = %q, want %q", got.Status, tenant.StatusActive)
+	}
+}
+
+func TestUnsuspendRoute_InvalidatesDomainCache(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tenant.NewStore(conn)
+	if err := store.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	created, err := store.CreateTenant(context.Background(), "unsuspendcache1", "Unsuspend Cache Test")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", created.ID)
+	})
+	reason := "test suspension"
+	if _, err := store.UpdateStatus(context.Background(), "unsuspendcache1", tenant.StatusSuspended, &reason); err != nil {
+		t.Fatalf("UpdateStatus() error: %v", err)
+	}
+	domain := "unsuspendcache1.example.com"
+	if _, err := conn.Exec(
+		"INSERT INTO system.tenant_domains (tenant_id, domain, type) VALUES ($1, $2, 'subdomain')",
+		created.ID, domain,
+	); err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+
+	cache := &fakeDomainCacheInvalidator{}
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, DomainCache: cache})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/unsuspendcache1/unsuspend", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+	want := tenantresolve.DomainCacheKey(domain)
+	if len(cache.deletedKeys) != 1 || cache.deletedKeys[0] != want {
+		t.Errorf("deletedKeys = %v, want [%q]", cache.deletedKeys, want)
 	}
 }
 
