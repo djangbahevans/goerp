@@ -287,6 +287,46 @@ func TestLoadAll_SecondModuleFailureLeavesFirstHealthy(t *testing.T) {
 	}
 }
 
+func TestLoadAll_SecondModuleJobTypeCollisionLeavesFirstHealthy(t *testing.T) {
+	rt := newTestRuntime(t)
+	jobTypes := []any{
+		map[string]any{"name": "send_invoice", "label": "Send Invoice", "handler": "send_invoice", "queue": "default"},
+	}
+	sources := []Source{
+		{
+			Name:          "billing",
+			ManifestBytes: manifestJSONWithFields(t, "billing", okModule, []string{"db.read"}, map[string]any{"job_types": jobTypes}),
+			WasmBytes:     okModule,
+		},
+		{
+			Name:          "contacts",
+			ManifestBytes: manifestJSONWithFields(t, "contacts", okModule, []string{"db.read"}, map[string]any{"job_types": jobTypes}),
+			WasmBytes:     okModule,
+		},
+	}
+
+	modules := LoadAll(context.Background(), rt, testPoolCfg(), sources)
+
+	billing, ok := modules["billing"]
+	if !ok {
+		t.Fatal("expected a \"billing\" entry")
+	}
+	if billing.Status != module.StatusSyncing {
+		t.Errorf("billing.Status = %v, want StatusSyncing; FailureReason = %q", billing.Status, billing.FailureReason)
+	}
+
+	contacts, ok := modules["contacts"]
+	if !ok {
+		t.Fatal("expected a \"contacts\" entry")
+	}
+	if contacts.Status != module.StatusFailed {
+		t.Errorf("contacts.Status = %v, want StatusFailed", contacts.Status)
+	}
+	if !strings.Contains(contacts.FailureReason, "send_invoice") {
+		t.Errorf("contacts.FailureReason = %q, want it to mention the colliding job type name", contacts.FailureReason)
+	}
+}
+
 func TestLoadAll_SubscribesToKnownEventSucceeds(t *testing.T) {
 	rt := newTestRuntime(t)
 	sources := []Source{
