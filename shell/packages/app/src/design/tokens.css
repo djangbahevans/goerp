@@ -1,0 +1,12 @@
+@import "tailwindcss";
+@config "./tailwind.config.ts";
+@import "./themes/default.css";
+@import "./themes/dark.css";
+@import "./themes/high-contrast.css";
+
+@theme {
+  --color-bg: var(--goerp-color-bg);
+  --color-fg: var(--goerp-color-fg);
+  --color-accent: var(--goerp-color-accent);
+  --color-border: var(--goerp-color-border);
+}

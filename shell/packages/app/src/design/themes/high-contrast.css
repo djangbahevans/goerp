@@ -1,0 +1,6 @@
+[data-theme="high-contrast"] {
+  --goerp-color-bg: #000000;
+  --goerp-color-fg: #ffffff;
+  --goerp-color-accent: #ffff00;
+  --goerp-color-border: #ffffff;
+}

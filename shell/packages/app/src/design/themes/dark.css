@@ -1,0 +1,6 @@
+[data-theme="dark"] {
+  --goerp-color-bg: #0f172a;
+  --goerp-color-fg: #f1f5f9;
+  --goerp-color-accent: #60a5fa;
+  --goerp-color-border: #1e293b;
+}
