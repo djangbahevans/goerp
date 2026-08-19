@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -76,6 +77,10 @@ func TestLoadModule_RealCompiledModule_RoundTripsSDKDeclaredData(t *testing.T) {
 	if m.Status == module.StatusFailed {
 		t.Fatalf("Status = StatusFailed, FailureReason = %q", m.FailureReason)
 	}
+	// Registered after newRealFixtureRuntime's rt.Close cleanup, so LIFO
+	// ordering drains the pool's background replenishLoop before the
+	// runtime closes — otherwise the two race.
+	t.Cleanup(func() { m.Pool.DrainAndClose(context.Background(), 5*time.Second) })
 
 	if len(m.ExplicitRoutes) != 1 {
 		t.Fatalf("len(ExplicitRoutes) = %d, want 1", len(m.ExplicitRoutes))

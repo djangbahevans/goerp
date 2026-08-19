@@ -111,6 +111,11 @@ func TestDiffAndExecute_RealCompiledModule_EnumFieldRoundTrips(t *testing.T) {
 	if m.Status == module.StatusFailed {
 		t.Fatalf("LoadModule() failed: %s", m.FailureReason)
 	}
+	// Registered after newEnumFixtureRuntime's rt.Close cleanup, so LIFO
+	// ordering drains the pool's background replenishLoop before the
+	// runtime closes — otherwise the two race (goerp#234's realfixture
+	// test hit this exact race in CI).
+	t.Cleanup(func() { m.Pool.DrainAndClose(context.Background(), 5*time.Second) })
 	if len(m.ModelDecls) != 1 || len(m.TypeDecls) != 1 {
 		t.Fatalf("LoadModule() returned %d model decls, %d type decls, want 1 and 1", len(m.ModelDecls), len(m.TypeDecls))
 	}
