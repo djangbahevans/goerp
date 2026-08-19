@@ -35,7 +35,7 @@ func TestModuleRegistry_Update_PublishesNewSnapshot(t *testing.T) {
 	}
 }
 
-func TestModuleRegistry_Update_CarriesOverJobCronSchemaRegistries(t *testing.T) {
+func TestModuleRegistry_Update_CarriesOverCronSchemaRegistries(t *testing.T) {
 	r := &ModuleRegistry{}
 
 	snap1, err := r.Update(map[string]*module.LoadedModule{
@@ -52,9 +52,6 @@ func TestModuleRegistry_Update_CarriesOverJobCronSchemaRegistries(t *testing.T) 
 		t.Fatalf("second Update() error = %v", err)
 	}
 
-	if snap2.jobRegistry != snap1.jobRegistry {
-		t.Errorf("jobRegistry was rebuilt, want carried over unchanged")
-	}
 	if snap2.cronRegistry != snap1.cronRegistry {
 		t.Errorf("cronRegistry was rebuilt, want carried over unchanged")
 	}
@@ -73,6 +70,70 @@ func TestModuleRegistry_Update_CarriesOverJobCronSchemaRegistries(t *testing.T) 
 	}
 	if snap2.fieldSecRegistry == snap1.fieldSecRegistry {
 		t.Errorf("fieldSecRegistry was carried over, want a fresh rebuild")
+	}
+	if snap2.jobRegistry == snap1.jobRegistry {
+		t.Errorf("jobRegistry was carried over, want a fresh rebuild")
+	}
+}
+
+func TestModuleRegistry_Update_JobTypeCollisionAcrossModulesFails(t *testing.T) {
+	r := &ModuleRegistry{}
+
+	_, err := r.Update(map[string]*module.LoadedModule{
+		"billing": {Manifest: manifest.Manifest{Type: "standard", JobTypes: []manifest.JobType{
+			{Name: "send_invoice", Label: "Send Invoice", Handler: "send_invoice", Queue: "default"},
+		}}},
+		"contacts": {Manifest: manifest.Manifest{Type: "standard", JobTypes: []manifest.JobType{
+			{Name: "send_invoice", Label: "Send Invoice (dupe)", Handler: "send_invoice", Queue: "default"},
+		}}},
+	})
+	if err == nil {
+		t.Fatal("Update() with two modules declaring the same job type name: expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "send_invoice") {
+		t.Errorf("Update() error = %q, want it to mention the colliding job type name", err.Error())
+	}
+}
+
+func TestModuleRegistry_Update_JobTypesRecordedInSnapshot(t *testing.T) {
+	r := &ModuleRegistry{}
+
+	snap, err := r.Update(map[string]*module.LoadedModule{
+		"billing": {Manifest: manifest.Manifest{Type: "standard", JobTypes: []manifest.JobType{
+			{Name: "send_invoice", Label: "Send Invoice", Handler: "send_invoice", Queue: "default"},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	owner, ok := snap.jobRegistry.Owner("send_invoice")
+	if !ok {
+		t.Fatal("expected \"send_invoice\" to be registered")
+	}
+	if owner != "billing" {
+		t.Errorf("Owner(\"send_invoice\") = %q, want %q", owner, "billing")
+	}
+}
+
+func TestModuleRegistry_Update_SkipsFailedModulesJobTypes(t *testing.T) {
+	r := &ModuleRegistry{}
+
+	snap, err := r.Update(map[string]*module.LoadedModule{
+		"billing": func() *module.LoadedModule {
+			m := &module.LoadedModule{Manifest: manifest.Manifest{Type: "standard", JobTypes: []manifest.JobType{
+				{Name: "send_invoice", Label: "Send Invoice", Handler: "send_invoice", Queue: "default"},
+			}}}
+			m.Fail("unrelated load failure")
+			return m
+		}(),
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if _, ok := snap.jobRegistry.Owner("send_invoice"); ok {
+		t.Error("expected a StatusFailed module's job types not to be registered")
 	}
 }
 

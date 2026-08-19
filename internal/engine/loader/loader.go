@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -137,20 +138,26 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	return m
 }
 
-// LoadAll loads every source in order, registering each module's routes
-// against one running table as it's loaded — via route.RegisterModuleRoutes
-// directly, not registry.ModuleRegistry.Update, whose buildRouteTable
-// rebuilds every module's routes from a full map in one pass and aborts
-// the entire batch on the first conflict it finds. Registering
-// incrementally here means a module that fails its own route registration
-// (a reserved namespace, a self-duplicate route) is marked StatusFailed on
-// its own, without invalidating any module already registered before it.
+// LoadAll loads every source in order, registering each module's routes and
+// job types against one running table/registry as it's loaded — via
+// route.RegisterModuleRoutes and job.JobRegistry.Register directly, not
+// registry.ModuleRegistry.Update, whose build* functions each rebuild from
+// a full map in one pass and abort the entire batch on the first conflict
+// they find. Registering incrementally here means a module that fails its
+// own route or job-type registration (a reserved route namespace, a
+// cross-module job type name collision) is marked StatusFailed on its own,
+// without invalidating any module already registered before it. The
+// table/registry built here is discarded once LoadAll returns — only the
+// StatusFailed markings they produced on the returned modules map persist;
+// registry.ModuleRegistry.Update rebuilds the real ones downstream from
+// that map.
 //
 // Determining dependency order is the caller's responsibility, same as
 // Source discovery — sources are loaded in the order given.
 func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sources []Source) map[string]*module.LoadedModule {
 	modules := make(map[string]*module.LoadedModule, len(sources))
 	table := route.New()
+	jobs := job.New()
 
 	for _, src := range sources {
 		m := LoadModule(ctx, rt, poolCfg, src)
@@ -160,6 +167,11 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 				explicit[i] = route.ExplicitRoute{Method: r.Method, Path: r.Path}
 			}
 			if err := route.RegisterModuleRoutes(table, src.Name, m.Manifest.Type, explicit); err != nil {
+				m.Fail(err.Error())
+			}
+		}
+		if m.Status != module.StatusFailed {
+			if err := jobs.Register(src.Name, m.Manifest.JobTypes); err != nil {
 				m.Fail(err.Error())
 			}
 		}

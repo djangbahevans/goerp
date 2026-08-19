@@ -3,6 +3,7 @@ package registry
 import (
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -14,7 +15,7 @@ type RegistrySnapshot struct {
 	eventRegistry    *event.EventRegistry
 	permRegistry     *permission.PermissionRegistry
 	fieldSecRegistry *fieldsec.FieldSecurityRegistry
-	jobRegistry      *JobRegistry
+	jobRegistry      *job.JobRegistry
 	cronRegistry     *CronRegistry
 	schemaRegistry   *SchemaRegistry
 }
@@ -32,9 +33,8 @@ func (s *RegistrySnapshot) RouteTable() *route.RouteTable {
 	return s.routeTable
 }
 
-// Populated by future tickets (backlog #35, #37, and whatever resolves
-// schemaRegistry). Never rebuilt by any build* step here;
-// carried over unchanged from the prior snapshot on every write.
-type JobRegistry struct{}
+// Populated by future tickets (backlog #35, #37). Never rebuilt by any
+// build* step here; carried over unchanged from the prior snapshot on
+// every write.
 type CronRegistry struct{}
 type SchemaRegistry struct{}

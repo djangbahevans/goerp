@@ -7,6 +7,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -32,15 +33,20 @@ func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*Regis
 		return nil, fmt.Errorf("build route table: %w", err)
 	}
 
+	jobRegistry, err := buildJobRegistry(modules)
+	if err != nil {
+		return nil, fmt.Errorf("build job registry: %w", err)
+	}
+
 	newSnap := &RegistrySnapshot{
 		modules:          modules,
 		routeTable:       routeTable,
 		eventRegistry:    buildEventRegistry(modules),
 		permRegistry:     buildPermissionRegistry(modules),
 		fieldSecRegistry: buildFieldSecRegistry(modules),
+		jobRegistry:      jobRegistry,
 	}
 	if old != nil {
-		newSnap.jobRegistry = old.jobRegistry
 		newSnap.cronRegistry = old.cronRegistry
 		newSnap.schemaRegistry = old.schemaRegistry
 	}
@@ -119,4 +125,24 @@ func buildPermissionRegistry(modules map[string]*module.LoadedModule) *permissio
 		reg.Register(name, m.Manifest.Permissions)
 	}
 	return reg
+}
+
+// buildJobRegistry, unlike buildEventRegistry/buildPermissionRegistry/
+// buildFieldSecRegistry, can fail — job_types[].name, like a route, must be
+// unique across all loaded modules, not just within one. By the time this
+// runs, loader.LoadAll's own incremental pass has already marked
+// StatusFailed on whichever module lost a name collision (skipped by the
+// range below), so this full rebuild should not normally hit one itself;
+// it returns an error rather than panicking if it ever does.
+func buildJobRegistry(modules map[string]*module.LoadedModule) (*job.JobRegistry, error) {
+	reg := job.New()
+	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		if err := reg.Register(name, m.Manifest.JobTypes); err != nil {
+			return nil, fmt.Errorf("module %q: %w", name, err)
+		}
+	}
+	return reg, nil
 }
