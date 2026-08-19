@@ -1,0 +1,67 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Detect Relevant Changes
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            frontend:
+              - "shell/**"
+              - "**/frontend/**"
+              - ".github/workflows/frontend.yml"
+
+  build-and-typecheck:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: shell/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: shell
+        run: npm install
+
+      - name: Typecheck
+        working-directory: shell
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: shell
+        run: npm run build
+
+  ci-gate:
+    needs: [changes, build-and-typecheck]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require build-and-typecheck to have passed when it ran
+        run: |
+          if [ "${{ needs.changes.outputs.frontend }}" = "true" ] && [ "${{ needs.build-and-typecheck.result }}" != "success" ]; then
+            echo "build-and-typecheck did not succeed (result: ${{ needs.build-and-typecheck.result }})"
+            exit 1
+          fi
