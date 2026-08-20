@@ -52,6 +52,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantresolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantsync"
@@ -87,6 +88,7 @@ type Engine struct {
 	cacheClient    *cache.Client
 	searchClient   *search.Client
 	storageBackend storage.Backend
+	temporalClient *temporal.Client
 	server         *httpx.Server
 	adminServer    *adminapi.Server
 	readiness      atomic.Bool
@@ -275,6 +277,11 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("connect to redis: %w", err)
 	}
 
+	temporalClient, err := temporal.New(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("could not connect to temporal")
+	}
+
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 
 	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
@@ -365,6 +372,12 @@ func New(cfg *config.Config) (*Engine, error) {
 			}
 			_, err := storageBackend.Exists(ctx, "healthcheck")
 			return err
+		})
+		checks["temporal"] = httpx.ProbeCheck(ctx, func(ctx context.Context) error {
+			if temporalClient == nil {
+				return nil
+			}
+			return temporalClient.Ping(ctx)
 		})
 
 		status := "healthy"
@@ -546,6 +559,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		cacheClient:    cacheClient,
 		searchClient:   searchClient,
 		storageBackend: storageBackend,
+		temporalClient: temporalClient,
 		server:         server,
 		adminServer:    adminServer,
 	}
