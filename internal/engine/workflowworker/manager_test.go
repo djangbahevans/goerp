@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,17 +91,20 @@ func TestSpawnAllSkipsModulesWithoutWorkflows(t *testing.T) {
 	mods := map[string]*module.LoadedModule{
 		"nomod": {Manifest: manifest.Manifest{Name: "nomod"}},
 	}
-	m.SpawnAll(context.Background(), mods)
-
-	if mods["nomod"].Status == module.StatusFailed {
-		t.Error("SpawnAll() marked a module with no workflow types as failed")
+	if err := m.SpawnAll(context.Background(), mods); err != nil {
+		t.Errorf("SpawnAll() for a module with no workflow types: error = %v, want nil", err)
 	}
 	if m.Validate("anything", "nomod") {
 		t.Error("Validate() true for a module SpawnAll never spawned")
 	}
 }
 
-func TestSpawnAllMarksModuleFailedOnBadDependencies(t *testing.T) {
+// TestSpawnAllReturnsErrorOnBadDependencies guards the fail-hard contract:
+// unlike Stage 3/4, a workflow-worker spawn failure must propagate as an
+// error rather than degrade to module.StatusFailed and continue —
+// engine-internals.md §2's startup sequence gets no per-module carve-out
+// for Stage 6.
+func TestSpawnAllReturnsErrorOnBadDependencies(t *testing.T) {
 	m := NewManager(nil, nil, t.TempDir()) // nil storage/temporal
 	mods := map[string]*module.LoadedModule{
 		"wf": {Manifest: manifest.Manifest{
@@ -109,13 +113,33 @@ func TestSpawnAllMarksModuleFailedOnBadDependencies(t *testing.T) {
 			WorkflowTypes:  []manifest.WorkflowType{{Name: "x"}},
 		}},
 	}
-	m.SpawnAll(context.Background(), mods)
-
-	if mods["wf"].Status != module.StatusFailed {
-		t.Errorf("SpawnAll() with no storage/temporal backend: Status = %v, want StatusFailed", mods["wf"].Status)
+	err := m.SpawnAll(context.Background(), mods)
+	if err == nil {
+		t.Fatal("SpawnAll() with no storage/temporal backend: expected an error, got nil")
 	}
-	if mods["wf"].FailureReason == "" {
-		t.Error("SpawnAll() with no storage/temporal backend: FailureReason not set")
+	if !strings.Contains(err.Error(), "wf") {
+		t.Errorf("SpawnAll() error = %q, want it to name the failed module (%q)", err.Error(), "wf")
+	}
+	if mods["wf"].Status == module.StatusFailed {
+		t.Error("SpawnAll() set module.StatusFailed — a fail-hard error shouldn't be conflated with Stage 3/4's per-module degrade status")
+	}
+}
+
+// TestSpawnAllAttemptsEveryModuleBeforeReturning confirms one module's
+// failure doesn't short-circuit the others — SpawnAll reports every
+// failure in a single joined error rather than stopping at the first.
+func TestSpawnAllAttemptsEveryModuleBeforeReturning(t *testing.T) {
+	m := NewManager(nil, nil, t.TempDir()) // nil storage/temporal: every module fails
+	mods := map[string]*module.LoadedModule{
+		"wf-a": {Manifest: manifest.Manifest{Name: "wf-a", WorkerChecksum: "sha256:00", WorkflowTypes: []manifest.WorkflowType{{Name: "x"}}}},
+		"wf-b": {Manifest: manifest.Manifest{Name: "wf-b", WorkerChecksum: "sha256:00", WorkflowTypes: []manifest.WorkflowType{{Name: "x"}}}},
+	}
+	err := m.SpawnAll(context.Background(), mods)
+	if err == nil {
+		t.Fatal("SpawnAll() with no storage/temporal backend: expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "wf-a") || !strings.Contains(err.Error(), "wf-b") {
+		t.Errorf("SpawnAll() error = %q, want it to name both failed modules", err.Error())
 	}
 }
 
