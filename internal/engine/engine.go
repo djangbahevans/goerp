@@ -456,9 +456,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	adminapi.RegisterActivityDispatchRoute(adminServer.UnauthenticatedRouter(), adminapi.ActivityDispatchDeps{
-		Registry:  moduleRegistry,
-		Tenants:   tenantStore,
-		TxLimiter: runtime.TxLimiter(),
+		Registry:    moduleRegistry,
+		Tenants:     tenantStore,
+		TxLimiter:   runtime.TxLimiter(),
+		Credentials: workflowWorkers,
 	})
 
 	server.SetModulesFn(func() (httpx.ModulesReport, []httpx.FailedModule) {
