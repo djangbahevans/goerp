@@ -48,9 +48,14 @@ func TestSetWithTTLAndExists(t *testing.T) {
 
 	c, err := New(ctx, localRedisConfig())
 	skipIfUnreachable(t, err)
-	defer func() { _ = c.Close() }()
+	// t.Cleanup, not defer, for both of these: a deferred Close would run
+	// before t.Cleanup fires, closing c before the key-delete cleanup
+	// below gets a chance to use it. Registered in this order so the
+	// delete (registered second, LIFO) runs before the close (first).
+	t.Cleanup(func() { _ = c.Close() })
 
 	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
 
 	exists, err := c.Exists(ctx, key)
 	if err != nil {
@@ -79,9 +84,10 @@ func TestSetWithTTL_ExpiresKey(t *testing.T) {
 
 	c, err := New(ctx, localRedisConfig())
 	skipIfUnreachable(t, err)
-	defer func() { _ = c.Close() }()
+	t.Cleanup(func() { _ = c.Close() })
 
 	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
 	if err := c.SetWithTTL(ctx, key, "1", 50*time.Millisecond); err != nil {
 		t.Fatalf("SetWithTTL() error: %v", err)
 	}
@@ -125,9 +131,10 @@ func TestGet_ReadsBackSetValue(t *testing.T) {
 
 	c, err := New(ctx, localRedisConfig())
 	skipIfUnreachable(t, err)
-	defer func() { _ = c.Close() }()
+	t.Cleanup(func() { _ = c.Close() })
 
 	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
 	if err := c.SetWithTTL(ctx, key, "some-value", time.Minute); err != nil {
 		t.Fatalf("SetWithTTL() error: %v", err)
 	}
