@@ -3,12 +3,17 @@
 // step 30), and tracks every live process and its credential so StopAll can
 // stop and de-authenticate all of them together at shutdown.
 //
-// A module whose workflow-worker fails to download, verify, spawn, or
-// register is marked module.StatusFailed and skipped — the same
-// per-module failure isolation Stage 3/4 already use (engine-internals.md
-// §2: "individual modules ending up module.StatusFailed" is not
-// fail-hard for the engine as a whole) — rather than halting the rest of
-// Stage 6.
+// Unlike Stage 3/4's per-module failure isolation, a workflow-worker that
+// fails to download, verify, spawn, or register is fail-hard for the
+// whole engine: engine-internals.md §2's startup-sequence section opens
+// with a blanket rule for every step in Stages 1-6 ("If any step fails,
+// the process exits with a non-zero code") that only Stage 1's
+// individually-annotated steps and Stage 3/4's own dedicated carve-out
+// paragraphs narrow — Stage 6 step 30 gets no such carve-out, so the
+// default applies. SpawnAll returns an error accordingly; it does not
+// mark a module module.StatusFailed the way Stage 3/4 failures do, since
+// that status specifically denotes "this degrades gracefully," which a
+// fail-hard startup error is not.
 package workflowworker
 
 import (
@@ -16,6 +21,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -86,20 +92,27 @@ func NewManager(storageBackend storage.Backend, temporalClient *temporal.Client,
 }
 
 // SpawnAll spawns a workflow-worker for every module in modules that
-// declares at least one workflow type, skipping modules that have none.
-// It never returns an error itself — a single module's spawn failure is
-// recorded on that module (module.Fail) and logged, not propagated, per
-// the package doc's failure-isolation rationale.
-func (m *Manager) SpawnAll(ctx context.Context, modules map[string]*module.LoadedModule) {
+// declares at least one workflow type (skipping a module already
+// module.StatusFailed from an earlier stage, and any module with no
+// workflow types). Attempts every qualifying module rather than stopping
+// at the first failure, so a caller that's about to abort startup anyway
+// gets the full picture of what's broken in one error rather than one
+// module at a time across repeated restarts; returns a joined error
+// naming every module that failed, or nil if all of them (or none)
+// succeeded — see the package doc for why this is fail-hard rather than
+// per-module isolation.
+func (m *Manager) SpawnAll(ctx context.Context, modules map[string]*module.LoadedModule) error {
+	var errs []error
 	for _, mod := range modules {
 		if mod.Status == module.StatusFailed || len(mod.Manifest.WorkflowTypes) == 0 {
 			continue
 		}
 		if err := m.spawn(ctx, mod); err != nil {
 			log.Error().Err(err).Str("module", mod.Manifest.Name).Msg("failed to spawn workflow-worker")
-			mod.Fail(fmt.Sprintf("spawn workflow-worker: %v", err))
+			errs = append(errs, fmt.Errorf("module %q: %w", mod.Manifest.Name, err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
 func (m *Manager) spawn(ctx context.Context, mod *module.LoadedModule) error {

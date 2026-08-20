@@ -17,9 +17,11 @@
 // Start runs the rest of Stage 6: opening the HTTP/admin servers, starting
 // the River job queue worker, and spawning each workflow-capable module's
 // workflow-worker process (client/manager built in New, started in Start,
-// same split). A module whose workflow-worker fails to spawn or register
-// with Temporal ends up module.StatusFailed, same as any other Stage 3/4
-// per-module failure — not fail-hard for the engine as a whole.
+// same split). Unlike Stage 3/4's per-module failures, a workflow-worker
+// that fails to spawn or register with Temporal is fail-hard — Start
+// returns an error, same as an HTTP/River start failure — since Stage 6
+// gets no per-module carve-out from engine-internals.md §2's default
+// "any step fails, the process exits non-zero" rule.
 package engine
 
 import (
@@ -610,7 +612,9 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 
 	if snap := e.moduleRegistry.Snapshot(); snap != nil {
-		e.workflowWorkers.SpawnAll(ctx, snap.Modules())
+		if err := e.workflowWorkers.SpawnAll(ctx, snap.Modules()); err != nil {
+			return fmt.Errorf("spawn workflow workers: %w", err)
+		}
 	}
 
 	e.readiness.Store(true)
