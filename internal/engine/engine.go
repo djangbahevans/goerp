@@ -14,9 +14,12 @@
 // (tenantsync.SyncAll), and Stage 5 (poolwarm.WarmAll). A depends_on cycle
 // is fail-hard; individual modules ending up module.StatusFailed are not.
 //
-// Start runs the rest of Stage 6: opening the HTTP/admin servers and
-// starting the River job queue worker (client built in New, started in
-// Start). The workflow-worker half of Stage 6 is still out of scope.
+// Start runs the rest of Stage 6: opening the HTTP/admin servers, starting
+// the River job queue worker, and spawning each workflow-capable module's
+// workflow-worker process (client/manager built in New, started in Start,
+// same split). A module whose workflow-worker fails to spawn or register
+// with Temporal ends up module.StatusFailed, same as any other Stage 3/4
+// per-module failure — not fail-hard for the engine as a whole.
 package engine
 
 import (
@@ -25,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -59,6 +63,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -82,16 +87,17 @@ type Engine struct {
 	jobQueue       *river.Client[pgx.Tx]
 	jobQueuePool   *pgxpool.Pool
 
-	secretsBackend secrets.Backend
-	primaryDB      *sql.DB
-	replicaDB      *sql.DB
-	cacheClient    *cache.Client
-	searchClient   *search.Client
-	storageBackend storage.Backend
-	temporalClient *temporal.Client
-	server         *httpx.Server
-	adminServer    *adminapi.Server
-	readiness      atomic.Bool
+	secretsBackend  secrets.Backend
+	primaryDB       *sql.DB
+	replicaDB       *sql.DB
+	cacheClient     *cache.Client
+	searchClient    *search.Client
+	storageBackend  storage.Backend
+	temporalClient  *temporal.Client
+	workflowWorkers *workflowworker.Manager
+	server          *httpx.Server
+	adminServer     *adminapi.Server
+	readiness       atomic.Bool
 }
 
 func New(cfg *config.Config) (*Engine, error) {
@@ -325,6 +331,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		log.Warn().Err(err).Msg("could not connect to storage backend")
 	}
 
+	// workflowWorkers is constructed here but only spawns processes in
+	// Start (Stage 6 step 30 runs after step 29's River start) — the same
+	// "client built in New, started in Start" split jobQueue and
+	// temporalClient already use.
+	workflowWorkers := workflowworker.NewManager(storageBackend, temporalClient, filepath.Join(cfg.ModuleDir, ".workflow-worker-cache"))
+
 	var e *Engine
 	readyFn := func(ctx context.Context) error {
 		if e != nil && !e.readiness.Load() {
@@ -540,28 +552,29 @@ func New(cfg *config.Config) (*Engine, error) {
 	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{Client: jobQueueClient})
 
 	e = &Engine{
-		cfg:            cfg,
-		wasmRuntime:    runtime,
-		syncPool:       syncPool,
-		tenantStore:    tenantStore,
-		sessionStore:   sessionStore,
-		signingKeySet:  signingKeySet,
-		tokenIssuer:    tokenIssuer,
-		sessionRevoker: sessionRevoker,
-		authChecker:    authChecker,
-		tenantResolver: tenantResolver,
-		moduleRegistry: moduleRegistry,
-		jobQueue:       jobQueueClient,
-		jobQueuePool:   jobQueuePool,
-		secretsBackend: secretsBackend,
-		primaryDB:      primaryPool,
-		replicaDB:      replicaPool,
-		cacheClient:    cacheClient,
-		searchClient:   searchClient,
-		storageBackend: storageBackend,
-		temporalClient: temporalClient,
-		server:         server,
-		adminServer:    adminServer,
+		cfg:             cfg,
+		wasmRuntime:     runtime,
+		syncPool:        syncPool,
+		tenantStore:     tenantStore,
+		sessionStore:    sessionStore,
+		signingKeySet:   signingKeySet,
+		tokenIssuer:     tokenIssuer,
+		sessionRevoker:  sessionRevoker,
+		authChecker:     authChecker,
+		tenantResolver:  tenantResolver,
+		moduleRegistry:  moduleRegistry,
+		jobQueue:        jobQueueClient,
+		jobQueuePool:    jobQueuePool,
+		secretsBackend:  secretsBackend,
+		primaryDB:       primaryPool,
+		replicaDB:       replicaPool,
+		cacheClient:     cacheClient,
+		searchClient:    searchClient,
+		storageBackend:  storageBackend,
+		temporalClient:  temporalClient,
+		workflowWorkers: workflowWorkers,
+		server:          server,
+		adminServer:     adminServer,
 	}
 
 	return e, nil
@@ -595,6 +608,10 @@ func (e *Engine) Start(ctx context.Context) error {
 		return fmt.Errorf("start job queue worker: %w", err)
 	}
 
+	if snap := e.moduleRegistry.Snapshot(); snap != nil {
+		e.workflowWorkers.SpawnAll(ctx, snap.Modules())
+	}
+
 	e.readiness.Store(true)
 
 	return nil
@@ -617,6 +634,8 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		log.Warn().Err(err).Msg("could not stop job queue worker")
 	}
 	e.jobQueuePool.Close()
+
+	e.workflowWorkers.StopAll(ctx)
 
 	if err := e.wasmRuntime.Close(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not close wasm runtime")
