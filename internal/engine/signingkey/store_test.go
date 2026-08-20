@@ -53,11 +53,54 @@ func openTestDB(t *testing.T) *sql.DB {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
+	lockSigningKeyTable(t, conn)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.jwt_signing_keys`)
 	})
 
 	return conn
+}
+
+// lockSigningKeyTable takes a session-scoped Postgres advisory lock
+// (pg_advisory_lock, explicitly released at test cleanup) — a key
+// distinct from the one LoadOrGenerate itself locks internally
+// (db.WithAdvisoryLock's transaction-scoped pg_advisory_xact_lock), since
+// holding that same key here would deadlock this test's own later
+// LoadOrGenerate call against itself (a different pooled connection
+// blocking on a lock this test's own session already holds). This
+// serializes the test against every other package's test touching the
+// shared system.jwt_signing_keys table instead: signingkey, authcheck,
+// and authtoken tests all exercise its single-active-row constraint
+// against the same real compose.dev.yml Postgres instance; without this,
+// one package's in-flight active row is visible mid-test to another
+// package's concurrently running test, whose own (different,
+// process-local) secrets backend has no way to load that row's private
+// key material — "parse private key material ...: no PEM block found".
+// Safe here specifically because localPostgresDSN bypasses PgBouncer —
+// a session-scoped lock isn't safe under PgBouncer's transaction pooling
+// (see db.WithAdvisoryLock's doc comment for why production code uses a
+// transaction-scoped lock instead).
+func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	key := db.AdvisoryLockKey("test.jwt_signing_keys_table")
+
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire dedicated connection for signing-key lock: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
+		t.Fatalf("acquire signing-key advisory lock: %v", err)
+	}
+	t.Cleanup(func() {
+		// sql.Conn.Close returns the connection to the pool for reuse
+		// rather than necessarily terminating the physical session, so it
+		// does not by itself release a session-scoped advisory lock —
+		// unlock explicitly first, or the next test wanting this lock
+		// hangs forever waiting on one nothing will ever release.
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
+		_ = conn.Close()
+	})
 }
 
 func openTestStore(t *testing.T, secretsBackend secrets.Backend) *Store {
