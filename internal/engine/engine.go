@@ -430,6 +430,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("publish module registry: %w", err)
 	}
 
+	adminapi.RegisterActivityDispatchRoute(adminServer.UnauthenticatedRouter(), adminapi.ActivityDispatchDeps{
+		Registry:  moduleRegistry,
+		Tenants:   tenantStore,
+		TxLimiter: runtime.TxLimiter(),
+	})
+
 	server.SetModulesFn(func() (httpx.ModulesReport, []httpx.FailedModule) {
 		snap := moduleRegistry.Snapshot()
 		if snap == nil {

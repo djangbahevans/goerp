@@ -9,6 +9,9 @@
 // (no tenant resolution, no per-tenant rate limiting, no route auth) —
 // the two servers' threat models differ. Actual /admin/* routes are
 // registered onto Router() by tenant.go and later work.
+//
+// One route sits outside that authenticated tree: activity-dispatch (§11
+// "Workflow-worker authentication"), registered via UnauthenticatedRouter.
 package adminapi
 
 import (
@@ -39,6 +42,7 @@ type Config struct {
 type Server struct {
 	cfg    *Config
 	router *http.ServeMux
+	top    *http.ServeMux
 	http   *http.Server
 }
 
@@ -49,18 +53,25 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	router := http.NewServeMux()
 
-	// Innermost out: audit (only authenticated requests are attributable
-	// to an operator) -> auth -> concurrency/body limits (guard the
-	// process before spending any cycles on auth or routing).
-	var handler http.Handler = router
-	handler = auditLogMiddleware(cfg.AuditStore)(handler)
-	handler = adminAuthMiddleware(cfg.AdminToken)(handler)
+	// Innermost out: audit -> auth. Concurrency/body limits wrap top
+	// instead, so they also cover UnauthenticatedRouter routes.
+	var authedHandler http.Handler = router
+	authedHandler = auditLogMiddleware(cfg.AuditStore)(authedHandler)
+	authedHandler = adminAuthMiddleware(cfg.AdminToken)(authedHandler)
+
+	// top: "/" falls through to the authenticated chain; a route
+	// registered directly here bypasses auth/audit entirely.
+	top := http.NewServeMux()
+	top.Handle("/", authedHandler)
+
+	var handler http.Handler = top
 	handler = concurrencyLimitMiddleware(cfg.MaxConcurrent)(handler)
 	handler = bodyCapMiddleware(cfg.MaxBodyBytes)(handler)
 
 	s := &Server{
 		cfg:    cfg,
 		router: router,
+		top:    top,
 		http: &http.Server{
 			Addr:         cfg.ListenAddr,
 			Handler:      handler,
@@ -73,12 +84,16 @@ func NewServer(cfg *Config) (*Server, error) {
 }
 
 // Router returns the authenticated mux admin routes register onto. Every
-// handler added here sits behind adminAuthMiddleware; there is currently
-// no unauthenticated mount point (a future loopback-only-but-unauthenticated
-// workflow-worker activity-dispatch route would need its own separate
-// http.ServeMux wired in ahead of this one's auth wrapper).
+// handler added here sits behind adminAuthMiddleware and gets an
+// admin_audit_log row per mutating request.
 func (s *Server) Router() *http.ServeMux {
 	return s.router
+}
+
+// UnauthenticatedRouter returns the mux for routes that skip
+// adminAuthMiddleware/auditLogMiddleware; callers own their own auth.
+func (s *Server) UnauthenticatedRouter() *http.ServeMux {
+	return s.top
 }
 
 func (s *Server) Start() error {
