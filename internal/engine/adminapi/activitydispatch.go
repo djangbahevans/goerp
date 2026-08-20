@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -13,12 +14,24 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+// CredentialValidator is satisfied by *workflowworker.Manager. Declared
+// here rather than imported so this package doesn't need workflowworker's
+// os/exec/storage/Temporal dependencies just to register this route or
+// test it — a small consumer-defined interface, not the concrete type.
+type CredentialValidator interface {
+	// Validate reports whether token is currently live and authorized to
+	// dispatch activities for moduleName.
+	Validate(token, moduleName string) bool
+}
+
 // ActivityDispatchDeps are the collaborators dispatch needs to resolve a
-// module's WASM pool and build its execution context.
+// module's WASM pool, build its execution context, and authenticate the
+// calling workflow-worker process.
 type ActivityDispatchDeps struct {
-	Registry  *registry.ModuleRegistry
-	Tenants   *tenant.Store
-	TxLimiter *wasm.TransactionLimiter
+	Registry    *registry.ModuleRegistry
+	Tenants     *tenant.Store
+	TxLimiter   *wasm.TransactionLimiter
+	Credentials CredentialValidator
 }
 
 // RegisterActivityDispatchRoute wires POST /admin/_internal/activity-dispatch
@@ -68,6 +81,16 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 	}
 	if req.Module == "" || req.Activity == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "module and activity are required")
+		return
+	}
+
+	// Checked before the registry lookup below, not after: an
+	// unauthenticated caller shouldn't be able to distinguish "wrong
+	// credential" from "module doesn't exist" (engine-internals.md §11
+	// "Workflow-worker authentication").
+	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !h.deps.Credentials.Validate(bearer, req.Module) {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid workflow-worker credential")
 		return
 	}
 

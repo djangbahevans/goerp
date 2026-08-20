@@ -98,12 +98,34 @@ func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.D
 
 	mux := http.NewServeMux()
 	RegisterActivityDispatchRoute(mux, ActivityDispatchDeps{
-		Registry:  reg,
-		Tenants:   tenants,
-		TxLimiter: rt.TxLimiter(),
+		Registry:    reg,
+		Tenants:     tenants,
+		TxLimiter:   rt.TxLimiter(),
+		Credentials: fakeValidator{token: testWorkflowWorkerToken},
 	})
 
 	return mux, tenants, conn
+}
+
+// testWorkflowWorkerToken is the credential fakeValidator accepts in every
+// test below that expects to pass authentication.
+const testWorkflowWorkerToken = "test-credential-token"
+
+// fakeValidator is a CredentialValidator stand-in: a real credential only
+// exists once workflowworker.Manager has actually spawned a process
+// (goerp#134), which these WASM-dispatch tests have no need to do
+// themselves. An empty allowedModule accepts token for any module name —
+// tests that care about module-scoping set it explicitly.
+type fakeValidator struct {
+	token         string
+	allowedModule string
+}
+
+func (f fakeValidator) Validate(token, moduleName string) bool {
+	if token != f.token {
+		return false
+	}
+	return f.allowedModule == "" || f.allowedModule == moduleName
 }
 
 func createTestTenant(t *testing.T, tenants *tenant.Store, conn *sql.DB, slug string) *tenant.Tenant {
@@ -118,13 +140,18 @@ func createTestTenant(t *testing.T, tenants *tenant.Store, conn *sql.DB, slug st
 	return tn
 }
 
-func postActivityDispatch(t *testing.T, mux *http.ServeMux, body any) *httptest.ResponseRecorder {
+// postActivityDispatch posts body with an "Authorization: Bearer token"
+// header — pass "" to send no header at all.
+func postActivityDispatch(t *testing.T, mux *http.ServeMux, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	buf, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal request body: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/admin/_internal/activity-dispatch", bytes.NewReader(buf))
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	return w
@@ -134,7 +161,7 @@ func TestActivityDispatch_SuccessRoundTripsJSONThroughWASM(t *testing.T) {
 	mux, tenants, conn := newActivityDispatchMux(t)
 	tn := createTestTenant(t, tenants, conn, "acme-dispatch")
 
-	w := postActivityDispatch(t, mux, map[string]any{
+	w := postActivityDispatch(t, mux, testWorkflowWorkerToken, map[string]any{
 		"module":      "activityfixture",
 		"activity":    "reserve_inventory",
 		"payload":     map[string]any{"order_id": "ord-1"},
@@ -173,7 +200,7 @@ func TestActivityDispatch_ActivityBusinessErrorIsHTTP200(t *testing.T) {
 	mux, tenants, conn := newActivityDispatchMux(t)
 	tn := createTestTenant(t, tenants, conn, "acme-dispatch-err")
 
-	w := postActivityDispatch(t, mux, map[string]any{
+	w := postActivityDispatch(t, mux, testWorkflowWorkerToken, map[string]any{
 		"module":      "activityfixture",
 		"activity":    "reserve_inventory",
 		"payload":     map[string]any{"order_id": ""},
@@ -204,7 +231,7 @@ func TestActivityDispatch_UnknownModuleIsNotFound(t *testing.T) {
 	mux, tenants, conn := newActivityDispatchMux(t)
 	tn := createTestTenant(t, tenants, conn, "acme-dispatch-nomod")
 
-	w := postActivityDispatch(t, mux, map[string]any{
+	w := postActivityDispatch(t, mux, testWorkflowWorkerToken, map[string]any{
 		"module":    "does_not_exist",
 		"activity":  "reserve_inventory",
 		"tenant_id": tn.ID,
@@ -222,7 +249,7 @@ func TestActivityDispatch_UnknownModuleIsNotFound(t *testing.T) {
 func TestActivityDispatch_UnknownTenantIsNotFound(t *testing.T) {
 	mux, _, _ := newActivityDispatchMux(t)
 
-	w := postActivityDispatch(t, mux, map[string]any{
+	w := postActivityDispatch(t, mux, testWorkflowWorkerToken, map[string]any{
 		"module":    "activityfixture",
 		"activity":  "reserve_inventory",
 		"tenant_id": "00000000-0000-0000-0000-000000000000",
@@ -262,9 +289,13 @@ func TestActivityDispatch_FailedModuleReturnsCleanError(t *testing.T) {
 		t.Fatalf("registry Update: %v", err)
 	}
 	brokenMux := http.NewServeMux()
-	RegisterActivityDispatchRoute(brokenMux, ActivityDispatchDeps{Registry: reg, Tenants: tenants})
+	RegisterActivityDispatchRoute(brokenMux, ActivityDispatchDeps{
+		Registry:    reg,
+		Tenants:     tenants,
+		Credentials: fakeValidator{token: testWorkflowWorkerToken},
+	})
 
-	w := postActivityDispatch(t, brokenMux, map[string]any{
+	w := postActivityDispatch(t, brokenMux, testWorkflowWorkerToken, map[string]any{
 		"module":    "brokenmod",
 		"activity":  "whatever",
 		"tenant_id": tn.ID,
@@ -282,9 +313,73 @@ func TestActivityDispatch_FailedModuleReturnsCleanError(t *testing.T) {
 func TestActivityDispatch_MissingFieldsIsBadRequest(t *testing.T) {
 	mux, _, _ := newActivityDispatchMux(t)
 
-	w := postActivityDispatch(t, mux, map[string]any{"tenant_id": "whatever"})
+	w := postActivityDispatch(t, mux, testWorkflowWorkerToken, map[string]any{"tenant_id": "whatever"})
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestActivityDispatch_MissingCredentialIsUnauthorized(t *testing.T) {
+	mux, tenants, conn := newActivityDispatchMux(t)
+	tn := createTestTenant(t, tenants, conn, "acme-dispatch-nocred")
+
+	w := postActivityDispatch(t, mux, "", map[string]any{
+		"module":    "activityfixture",
+		"activity":  "reserve_inventory",
+		"tenant_id": tn.ID,
+	})
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	env := decodeEnvelope(t, w)
+	if env.Error == nil || env.Error.Code != "unauthorized" {
+		t.Errorf("envelope.Error = %+v, want code unauthorized", env.Error)
+	}
+}
+
+func TestActivityDispatch_WrongCredentialIsUnauthorized(t *testing.T) {
+	mux, tenants, conn := newActivityDispatchMux(t)
+	tn := createTestTenant(t, tenants, conn, "acme-dispatch-wrongcred")
+
+	w := postActivityDispatch(t, mux, "not-the-right-token", map[string]any{
+		"module":    "activityfixture",
+		"activity":  "reserve_inventory",
+		"tenant_id": tn.ID,
+	})
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+}
+
+// TestActivityDispatch_CredentialForDifferentModuleIsUnauthorized guards
+// module scoping: a workflow-worker's credential must not authorize
+// dispatch for any module other than its own (engine-internals.md §11).
+func TestActivityDispatch_CredentialForDifferentModuleIsUnauthorized(t *testing.T) {
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(map[string]*module.LoadedModule{
+		"othermod": {Manifest: manifest.Manifest{Name: "othermod"}, Status: module.StatusReady},
+	}); err != nil {
+		t.Fatalf("registry Update: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterActivityDispatchRoute(mux, ActivityDispatchDeps{
+		Registry: reg,
+		// Scoped to "activityfixture" — a request for "othermod" with
+		// this same token must be rejected.
+		Credentials: fakeValidator{token: testWorkflowWorkerToken, allowedModule: "activityfixture"},
+	})
+
+	w := postActivityDispatch(t, mux, testWorkflowWorkerToken, map[string]any{
+		"module":    "othermod",
+		"activity":  "whatever",
+		"tenant_id": "00000000-0000-0000-0000-000000000000",
+	})
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
 	}
 }

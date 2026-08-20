@@ -13,6 +13,7 @@ package workflowworker
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -227,14 +228,17 @@ func (m *Manager) watch(name string, p *process) {
 }
 
 // Validate reports whether token is currently live and authorized for
-// moduleName — the hook goerp#256's activity-dispatch auth middleware
-// checks against.
+// moduleName — checked by the activity-dispatch endpoint's auth check
+// (goerp#256) before it will dispatch a request. hmac.Equal, not ==,
+// matching adminAuthMiddleware's own token comparison in adminapi —
+// a credential compare is exactly the kind of thing a timing attack
+// targets.
 func (m *Manager) Validate(token, moduleName string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	p, ok := m.processes[moduleName]
-	return ok && p.credential.Token == token
+	return ok && hmac.Equal([]byte(p.credential.Token), []byte(token))
 }
 
 // StopAll sends SIGTERM to every tracked process, waits up to ctx's
