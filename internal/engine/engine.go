@@ -169,9 +169,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	// billingStore isn't stored as an Engine field or passed to any
-	// adminapi.Register* call — nothing consumes plans/entitlements yet
-	// (goerp#229, entitlement loading, is still blocked). Bootstrapped here,
-	// after tenantStore, since tenant_subscriptions/
+	// adminapi.Register* call — tenantResolver below is its only consumer.
+	// Bootstrapped here, after tenantStore, since tenant_subscriptions/
 	// tenant_entitlement_overrides both FK-reference system.tenants.
 	billingStore := billing.NewStore(primaryPool)
 	if err := billingStore.Bootstrap(ctx); err != nil {
@@ -329,7 +328,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	// tenantResolver isn't consumed yet either — same goerp#91 middleware
 	// chain wires it in ahead of authChecker, per auth-internals.md §9's
 	// pipeline ordering (tenant resolution before token validation).
-	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient)
+	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 
 	var searchClient *search.Client
 	if cfg.MeilisearchURL != "" {
