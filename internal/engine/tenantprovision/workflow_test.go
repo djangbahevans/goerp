@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,9 +34,16 @@ func widgetModel() model.ModelDeclaration {
 		Field("name", model.Text().Required())
 }
 
+// slugCounter guarantees uniqueSlug never repeats within a test run, even
+// across calls close enough together to land on the same wall-clock
+// nanosecond reading — time.Now() alone collided in practice (two tests
+// racing to insert the same slug into system.tenants, and to start a
+// Temporal workflow with the same derived ID, corrupting both runs).
+var slugCounter atomic.Uint64
+
 func uniqueSlug(t *testing.T) string {
 	t.Helper()
-	return "prov" + time.Now().Format("20060102150405999999999")
+	return fmt.Sprintf("prov%d%d", time.Now().UnixNano(), slugCounter.Add(1))
 }
 
 // testEnv wires every real dependency ProvisionTenantWorkflow's activities
