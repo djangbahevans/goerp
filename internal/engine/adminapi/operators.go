@@ -49,10 +49,12 @@ const defaultCertTTL = 90 * 24 * time.Hour
 
 var dayDurationPattern = regexp.MustCompile(`^(\d+)d$`)
 
-// parseExpiry accepts a Go duration string ("2160h") or a bare day count
-// ("90d") — cli-reference.md's `--expires` default is "90d", a unit Go's
-// own time.ParseDuration doesn't support.
-func parseExpiry(s string) (time.Duration, error) {
+// parseDayDuration accepts a Go duration string ("2160h") or a bare day
+// count ("90d"/"30d") — several cli-reference.md flags (`--expires`,
+// `--grace-period`) default to an "Nd" value, a unit Go's own
+// time.ParseDuration doesn't support. Shared across every admin handler
+// that takes one of these flags, not specific to certificate expiry.
+func parseDayDuration(s string) (time.Duration, error) {
 	if m := dayDurationPattern.FindStringSubmatch(s); m != nil {
 		days, err := strconv.Atoi(m[1])
 		if err != nil {
@@ -81,7 +83,7 @@ func (h *operatorsHandlers) issueCert(w http.ResponseWriter, r *http.Request) {
 
 	ttl := defaultCertTTL
 	if req.Expires != "" {
-		parsed, err := parseExpiry(req.Expires)
+		parsed, err := parseDayDuration(req.Expires)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid expires value: %s", err.Error()))
 			return

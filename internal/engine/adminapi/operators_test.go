@@ -180,7 +180,7 @@ func TestRevokeCertRoute_UnknownNameReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestParseExpiry(t *testing.T) {
+func TestParseDayDuration(t *testing.T) {
 	cases := []struct {
 		in      string
 		want    time.Duration
@@ -192,19 +192,19 @@ func TestParseExpiry(t *testing.T) {
 		{"not-a-duration", 0, true},
 	}
 	for _, c := range cases {
-		got, err := parseExpiry(c.in)
+		got, err := parseDayDuration(c.in)
 		if c.wantErr {
 			if err == nil {
-				t.Errorf("parseExpiry(%q) error = nil, want an error", c.in)
+				t.Errorf("parseDayDuration(%q) error = nil, want an error", c.in)
 			}
 			continue
 		}
 		if err != nil {
-			t.Errorf("parseExpiry(%q) error: %v", c.in, err)
+			t.Errorf("parseDayDuration(%q) error: %v", c.in, err)
 			continue
 		}
 		if got != c.want {
-			t.Errorf("parseExpiry(%q) = %v, want %v", c.in, got, c.want)
+			t.Errorf("parseDayDuration(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }

@@ -476,6 +476,11 @@ func (h *tenantHandlers) importTenant(w http.ResponseWriter, r *http.Request) {
 	}{JobID: jobID})
 }
 
+// defaultGracePeriod matches cli-reference.md §5's documented
+// `--grace-period` default ("30d") — same convention as operators.go's
+// defaultCertTTL.
+const defaultGracePeriod = 30 * 24 * time.Hour
+
 func (h *tenantHandlers) offboard(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Offboarder == nil {
 		writeNotImplemented(w, "goerp#150")
@@ -484,16 +489,25 @@ func (h *tenantHandlers) offboard(w http.ResponseWriter, r *http.Request) {
 
 	slug := r.PathValue("slug")
 	req, err := decodeJSON[struct {
-		GracePeriodDays int    `json:"grace_period_days"`
-		Immediate       bool   `json:"immediate"`
-		Confirm         string `json:"confirm"`
+		GracePeriod string `json:"grace_period"`
+		Immediate   bool   `json:"immediate"`
+		Confirm     string `json:"confirm"`
 	}](r)
 	if err != nil || req.Confirm != slug {
 		writeError(w, http.StatusBadRequest, "invalid_request", "confirm must equal the tenant slug")
 		return
 	}
 
-	result, err := h.deps.Offboarder.StartOffboard(r.Context(), slug, time.Duration(req.GracePeriodDays)*24*time.Hour, req.Immediate)
+	gracePeriod := defaultGracePeriod
+	if req.GracePeriod != "" {
+		gracePeriod, err = parseDayDuration(req.GracePeriod)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid grace_period value: %s", err.Error()))
+			return
+		}
+	}
+
+	result, err := h.deps.Offboarder.StartOffboard(r.Context(), slug, gracePeriod, req.Immediate)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return

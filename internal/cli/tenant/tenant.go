@@ -13,6 +13,7 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(newResendInviteCmd())
 	cmd.AddCommand(newSuspendCmd())
 	cmd.AddCommand(newUnsuspendCmd())
+	cmd.AddCommand(newOffboardCmd())
 
 	return cmd
 }
