@@ -74,6 +74,7 @@ type Config struct {
 
 	// Security
 	SecretsBackend string `env:"GOERP_SECRETS_BACKEND" envDefault:"env" validate:"oneof=env vault aws_secretsmanager"`
+	EnableAPIKeys  bool   `env:"GOERP_ENABLE_API_KEYS" envDefault:"false"`
 
 	// Registration
 	StorageBackend      string   `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
