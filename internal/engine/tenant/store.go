@@ -368,6 +368,55 @@ func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, re
 	return t, nil
 }
 
+// DeleteProvisioning permanently removes a tenant row that never got past
+// StatusProvisioning — the compensating action a failed provisioning
+// workflow takes to release its slug reservation (multitenancy-
+// internals.md §6 step 2's compensation, on a schema-creation failure).
+// Scoped to status = 'provisioning' so it can never delete a tenant that
+// reached activation, even if called with a stale or wrong id. Returns
+// ErrTenantNotFound if no provisioning-status tenant with id exists.
+func (s *Store) DeleteProvisioning(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM system.tenants WHERE id = $1 AND status = $2
+	`, id, StatusProvisioning)
+	if err != nil {
+		return fmt.Errorf("delete provisioning tenant: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete provisioning tenant: %w", err)
+	}
+	if n == 0 {
+		return ErrTenantNotFound
+	}
+	return nil
+}
+
+// CreateDomain registers a domain for tenantID — e.g. the default
+// subdomain ProvisionTenantWorkflow's RegisterDomain activity creates
+// (multitenancy-internals.md §6 step 8). A domain that already exists
+// (system.tenant_domains.domain is UNIQUE) returns the underlying
+// Postgres constraint-violation error unwrapped beyond %w, same
+// convention CreateTenant already uses for its own uniqueness violations.
+func (s *Store) CreateDomain(ctx context.Context, tenantID, domain string, domainType DomainType, isPrimary bool) (*Domain, error) {
+	row := s.db.QueryRowContext(ctx, `
+		INSERT INTO system.tenant_domains (tenant_id, domain, type, is_primary)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, tenant_id, domain, type, is_primary, verified_at, created_at
+	`, tenantID, domain, string(domainType), isPrimary)
+
+	var d Domain
+	var verifiedAt sql.NullTime
+	if err := row.Scan(&d.ID, &d.TenantID, &d.Domain, &d.Type, &d.IsPrimary, &verifiedAt, &d.CreatedAt); err != nil {
+		return nil, fmt.Errorf("insert domain: %w", err)
+	}
+	if verifiedAt.Valid {
+		d.VerifiedAt = &verifiedAt.Time
+	}
+
+	return &d, nil
+}
+
 // DomainsForTenant returns every system.tenant_domains row for tenantID,
 // verified and unverified alike.
 func (s *Store) DomainsForTenant(ctx context.Context, tenantID string) ([]Domain, error) {

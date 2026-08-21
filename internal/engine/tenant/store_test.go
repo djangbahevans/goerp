@@ -561,3 +561,83 @@ func TestDomainsForTenant_NoDomainsReturnsEmpty(t *testing.T) {
 		t.Errorf("len(DomainsForTenant()) = %d, want 0", len(got))
 	}
 }
+
+func TestCreateDomain_InsertsAndReturnsRow(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Create Domain")
+
+	d, err := store.CreateDomain(context.Background(), created.ID, created.Slug+".goerp.io", DomainSubdomain, true)
+	if err != nil {
+		t.Fatalf("CreateDomain() error: %v", err)
+	}
+	if d.TenantID != created.ID {
+		t.Errorf("TenantID = %q, want %q", d.TenantID, created.ID)
+	}
+	if d.Domain != created.Slug+".goerp.io" {
+		t.Errorf("Domain = %q, want %q", d.Domain, created.Slug+".goerp.io")
+	}
+	if d.Type != DomainSubdomain {
+		t.Errorf("Type = %q, want %q", d.Type, DomainSubdomain)
+	}
+	if !d.IsPrimary {
+		t.Error("IsPrimary = false, want true")
+	}
+	if d.VerifiedAt != nil {
+		t.Error("VerifiedAt is set, want nil for a freshly created domain")
+	}
+
+	got, err := store.DomainsForTenant(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("DomainsForTenant() error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(DomainsForTenant()) = %d, want 1", len(got))
+	}
+}
+
+func TestCreateDomain_DuplicateDomainFails(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Duplicate Domain")
+
+	if _, err := store.CreateDomain(context.Background(), created.ID, created.Slug+".goerp.io", DomainSubdomain, true); err != nil {
+		t.Fatalf("first CreateDomain() error: %v", err)
+	}
+	if _, err := store.CreateDomain(context.Background(), created.ID, created.Slug+".goerp.io", DomainSubdomain, false); err == nil {
+		t.Error("second CreateDomain() with the same domain: expected an error, got nil")
+	}
+}
+
+func TestDeleteProvisioning_RemovesProvisioningTenant(t *testing.T) {
+	store, _ := openTestStore(t)
+	created, err := store.CreateTenant(context.Background(), uniqueSlug(t), "Delete Provisioning")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	// Not deleteTenant(t, conn, created.ID) — DeleteProvisioning is the
+	// thing under test; a leftover row would only mask a bug in it.
+
+	if err := store.DeleteProvisioning(context.Background(), created.ID); err != nil {
+		t.Fatalf("DeleteProvisioning() error: %v", err)
+	}
+
+	if _, err := store.GetByID(context.Background(), created.ID); !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("GetByID() after DeleteProvisioning() error = %v, want ErrTenantNotFound", err)
+	}
+}
+
+func TestDeleteProvisioning_NonProvisioningTenantReturnsNotFound(t *testing.T) {
+	store, conn := openTestStore(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Active Tenant")
+	if _, err := store.UpdateStatus(context.Background(), created.Slug, StatusActive, nil); err != nil {
+		t.Fatalf("UpdateStatus() error: %v", err)
+	}
+
+	if err := store.DeleteProvisioning(context.Background(), created.ID); !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("DeleteProvisioning() on an active tenant: error = %v, want ErrTenantNotFound", err)
+	}
+
+	// Confirm it really wasn't deleted, not just that the error looked right.
+	if _, err := store.GetByID(context.Background(), created.ID); err != nil {
+		t.Errorf("GetByID() after a rejected DeleteProvisioning(): error = %v, want nil (tenant should still exist)", err)
+	}
+}

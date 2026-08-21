@@ -100,3 +100,12 @@ func (c *Client) WaitForPollers(ctx context.Context, taskQueue string) error {
 func (c *Client) NewWorker(taskQueue string, options worker.Options) worker.Worker {
 	return worker.New(c.sdk, taskQueue, options)
 }
+
+// ExecuteWorkflow starts workflow (a registered workflow function or its
+// registered name) and returns a handle to the run. A thin passthrough to
+// the underlying SDK client — options.ID and options.TaskQueue are the
+// caller's (currently internal/engine/tenantprovision's) to set; this
+// method makes no decision about workflow ID or reuse policy itself.
+func (c *Client) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow any, args ...any) (client.WorkflowRun, error) {
+	return c.sdk.ExecuteWorkflow(ctx, options, workflow, args...)
+}

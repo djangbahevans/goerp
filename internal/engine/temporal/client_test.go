@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
 )
 
 // localConfig points at the compose.dev.yml Temporal instance
@@ -103,5 +105,41 @@ func TestWaitForPollersTimesOutWithNoWorker(t *testing.T) {
 
 	if err := c.WaitForPollers(ctx, "goerp:no-such-queue"); err == nil {
 		t.Error("WaitForPollers() with no worker registered: expected an error, got nil")
+	}
+}
+
+func echoWorkflow(ctx workflow.Context, in string) (string, error) {
+	return in, nil
+}
+
+func TestExecuteWorkflowRunsToCompletion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	c := newTestClient(t, ctx)
+	defer c.Close()
+
+	const taskQueue = "test-executeworkflow-queue"
+	w := c.NewWorker(taskQueue, worker.Options{})
+	w.RegisterWorkflow(echoWorkflow)
+	if err := w.Start(); err != nil {
+		t.Fatalf("worker.Start() error: %v", err)
+	}
+	defer w.Stop()
+	if err := c.WaitForPollers(ctx, taskQueue); err != nil {
+		t.Fatalf("WaitForPollers() error: %v", err)
+	}
+
+	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{TaskQueue: taskQueue}, echoWorkflow, "hello")
+	if err != nil {
+		t.Fatalf("ExecuteWorkflow() error: %v", err)
+	}
+
+	var out string
+	if err := run.Get(ctx, &out); err != nil {
+		t.Fatalf("run.Get() error: %v", err)
+	}
+	if out != "hello" {
+		t.Errorf("workflow result = %q, want %q", out, "hello")
 	}
 }
