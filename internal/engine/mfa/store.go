@@ -120,7 +120,7 @@ func (s *Store) ListActiveByUser(ctx context.Context, userID string) ([]*Credent
 	if err != nil {
 		return nil, fmt.Errorf("list mfa credentials: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var creds []*Credential
 	for rows.Next() {
