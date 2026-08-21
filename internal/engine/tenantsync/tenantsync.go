@@ -63,7 +63,7 @@ func syncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *sc
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			if err := syncTenant(ctx, pool, diffEngine, t, mod); err != nil {
+			if err := SyncOne(ctx, pool, diffEngine, t, mod); err != nil {
 				log.Error().Err(err).
 					Str("tenant", t.Slug).
 					Str("module", mod.Manifest.Name).
@@ -75,7 +75,13 @@ func syncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *sc
 	wg.Wait()
 }
 
-func syncTenant(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule) error {
+// SyncOne runs schema sync for a single (tenant, module) pair — the same
+// logic SyncAll fans out across every active tenant, exported for a
+// caller with exactly one tenant already in hand and no need to go
+// through ActiveTenants (e.g. goerp#149's provisioning workflow, syncing
+// a tenant that's still StatusProvisioning and therefore not yet
+// "active" — ActiveTenants wouldn't return it at all).
+func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule) error {
 	sess, err := pool.BeginSync(ctx, t.ID, t.Slug, mod.Manifest.Name, &mod.Manifest)
 	if err != nil {
 		return fmt.Errorf("begin sync session: %w", err)

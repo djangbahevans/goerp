@@ -265,3 +265,24 @@ func TestSyncAll_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
 		t.Fatal("expected an error when active tenants can't be enumerated")
 	}
 }
+
+// TestSyncOne_CreatesTable guards SyncOne directly against a tenant
+// SyncAll/ActiveTenants would never see — goerp#149's provisioning
+// workflow needs it for exactly this: a tenant still StatusProvisioning,
+// which ActiveTenants filters out entirely.
+func TestSyncOne_CreatesTable(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	tt := env.activeTenant(t, slug) // schema setup only — status doesn't matter to SyncOne itself
+	tt.Status = tenant.StatusProvisioning
+
+	mod := loadedModule(t, "widgets_"+slug, widgetModel())
+
+	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, mod); err != nil {
+		t.Fatalf("SyncOne() error: %v", err)
+	}
+
+	if !tableExists(t, env.conn, "tenant_"+slug, "widgets") {
+		t.Error("expected the widgets table to have been created")
+	}
+}
