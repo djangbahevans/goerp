@@ -124,7 +124,7 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 
 	taskQueue := "test-tenantoffboard-" + uniqueSlug(t)
 	w := temporalClient.NewWorker(taskQueue, worker.Options{})
-	w.RegisterWorkflow(Workflow)
+	w.RegisterWorkflow(OffboardTenantWorkflow)
 	w.RegisterActivity(activities)
 	if err := w.Start(); err != nil {
 		t.Fatalf("worker.Start() error: %v", err)
@@ -180,7 +180,7 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) *tenant.Tenant {
 
 func (e *testEnv) runWorkflow(t *testing.T, ctx context.Context, input Input) error {
 	t.Helper()
-	run, err := e.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{TaskQueue: e.taskQueue}, Workflow, input)
+	run, err := e.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{TaskQueue: e.taskQueue}, OffboardTenantWorkflow, input)
 	if err != nil {
 		t.Fatalf("ExecuteWorkflow() error: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestOffboardTenantWorkflow_CancelledDuringGracePeriodDeletesNothing(t *test
 	tt := env.activeTenant(t, slug)
 	ctx := context.Background()
 
-	run, err := env.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{TaskQueue: env.taskQueue}, Workflow, Input{
+	run, err := env.temporalClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{TaskQueue: env.taskQueue}, OffboardTenantWorkflow, Input{
 		TenantID: tt.ID, TenantSlug: slug, GracePeriod: 3 * time.Second,
 	})
 	if err != nil {

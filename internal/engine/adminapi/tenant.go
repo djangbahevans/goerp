@@ -424,7 +424,7 @@ func (h *tenantHandlers) resendInvite(w http.ResponseWriter, r *http.Request) {
 
 func (h *tenantHandlers) export(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Exporter == nil {
-		writeNotImplemented(w, "goerp#15")
+		writeNotImplemented(w, "goerp#156")
 		return
 	}
 
@@ -451,7 +451,7 @@ func (h *tenantHandlers) export(w http.ResponseWriter, r *http.Request) {
 
 func (h *tenantHandlers) importTenant(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Importer == nil {
-		writeNotImplemented(w, "goerp#15")
+		writeNotImplemented(w, "goerp#157")
 		return
 	}
 

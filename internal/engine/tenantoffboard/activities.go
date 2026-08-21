@@ -16,7 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Activities implements every activity Workflow calls, registered as a
+// Activities implements every activity OffboardTenantWorkflow calls, registered as a
 // whole via worker.RegisterActivity(a *Activities) — each exported method
 // becomes an activity named after itself (e.g. "MarkOffboarding"). The
 // immediate-offboard River job (job.go) calls these same methods directly,
@@ -74,7 +74,7 @@ func (a *Activities) MarkOffboarding(ctx context.Context, slug string) error {
 // offboard_deletion_started_at, racing against CancelOffboard's own CAS
 // update on the same guard (tenant.Store.MarkDeletionStarted's doc
 // comment). started reports whether this call won that race — false
-// means CancelOffboard got there first, and Workflow must stop without
+// means CancelOffboard got there first, and OffboardTenantWorkflow must stop without
 // running any deletion step.
 func (a *Activities) MarkDeletionStarted(ctx context.Context, slug string) (started bool, err error) {
 	started, err = a.tenantStore.MarkDeletionStarted(ctx, slug)
