@@ -330,6 +330,15 @@ func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
 	}
 }
 
+func TestRevoke_UnknownIDReturnsErrAPIKeyNotFound(t *testing.T) {
+	env := openTestEnv(t)
+
+	err := env.store.Revoke(context.Background(), "00000000-0000-0000-0000-000000000000", "no such key")
+	if !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Errorf("Revoke() error = %v, want ErrAPIKeyNotFound", err)
+	}
+}
+
 func TestUpdateLastUsed_SetsTimestampAndIP(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
