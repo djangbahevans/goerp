@@ -13,10 +13,12 @@ package files
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Store struct {
@@ -129,4 +131,46 @@ func (s *Store) Insert(ctx context.Context, tenantSlug string, row InsertRow) er
 	}
 
 	return nil
+}
+
+// StorageKeysForTenant returns every storage_key ever recorded for the
+// tenant, soft-deleted rows included — offboarding needs every object
+// storage key that could still exist under this tenant, not just the ones
+// some other consumer still considers live. object-storage-guide.md §12's
+// key layout is purpose-first ("{purpose}/{tenant_id}/..."), specifically
+// so no single tenant-scoped prefix exists to bulk-delete by; this table
+// is the only way to enumerate one tenant's objects across every purpose.
+// Returns an empty slice, not an error, if the tenant's files table
+// doesn't exist — never bootstrapped, or already dropped by a retried
+// offboard job that got past the schema-drop step before crashing.
+func (s *Store) StorageKeysForTenant(ctx context.Context, tenantSlug string) ([]string, error) {
+	schema := tenantschema.Name(tenantSlug)
+
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`SELECT storage_key FROM %s.files`, schema))
+	if err != nil {
+		if isUndefinedTable(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query storage keys for tenant %q: %w", tenantSlug, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scan storage key: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate storage keys for tenant %q: %w", tenantSlug, err)
+	}
+
+	return keys, nil
+}
+
+func isUndefinedTable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P01" // undefined_table
 }

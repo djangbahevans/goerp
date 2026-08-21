@@ -141,3 +141,53 @@ func TestInsert_DuplicateStorageKeyFails(t *testing.T) {
 		t.Fatal("expected a duplicate storage_key to fail (UNIQUE constraint)")
 	}
 }
+
+func TestStorageKeysForTenant_ReturnsEveryInsertedKey(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	ctx := context.Background()
+
+	tenantID, _ := uuid.NewV7()
+	want := make(map[string]bool)
+	for i := range 3 {
+		fileID, _ := uuid.NewV7()
+		key := fmt.Sprintf("attachments/%s/2026/08/%s-%d.txt", tenantID.String(), fileID.String(), i)
+		if err := store.Insert(ctx, slug, InsertRow{
+			ID: fileID.String(), TenantID: tenantID.String(), StorageKey: key,
+			OriginalName: "f.txt", ContentType: "text/plain", SizeBytes: 1, Purpose: "attachments",
+		}); err != nil {
+			t.Fatalf("Insert() error: %v", err)
+		}
+		want[key] = true
+	}
+
+	got, err := store.StorageKeysForTenant(ctx, slug)
+	if err != nil {
+		t.Fatalf("StorageKeysForTenant() error: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d", len(got), len(want))
+	}
+	for _, key := range got {
+		if !want[key] {
+			t.Errorf("unexpected key %q", key)
+		}
+	}
+}
+
+func TestStorageKeysForTenant_NoFilesTableReturnsEmpty(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	ctx := context.Background()
+
+	schema := tenantschema.Name(slug)
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s.files", schema)); err != nil {
+		t.Fatalf("drop files table: %v", err)
+	}
+
+	got, err := store.StorageKeysForTenant(ctx, slug)
+	if err != nil {
+		t.Fatalf("StorageKeysForTenant() error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(got) = %d, want 0", len(got))
+	}
+}

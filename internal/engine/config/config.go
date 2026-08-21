@@ -70,6 +70,7 @@ type Config struct {
 	QueueBulkConcurrency          int           `env:"GOERP_QUEUE_BULK_CONCURRENCY" envDefault:"20"`
 	QueueSearchConcurrency        int           `env:"GOERP_QUEUE_SEARCH_CONCURRENCY" envDefault:"5"`
 	QueueEmailConcurrency         int           `env:"GOERP_QUEUE_EMAIL_CONCURRENCY" envDefault:"5"`
+	QueueAdminConcurrency         int           `env:"GOERP_QUEUE_ADMIN_CONCURRENCY" envDefault:"5"`
 
 	// Security
 	SecretsBackend string `env:"GOERP_SECRETS_BACKEND" envDefault:"env" validate:"oneof=env vault aws_secretsmanager"`
