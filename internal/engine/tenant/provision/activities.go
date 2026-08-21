@@ -14,8 +14,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
-	"github.com/djangbahevans/goerp/internal/engine/tenantsync"
 	"github.com/rs/zerolog/log"
 )
 
