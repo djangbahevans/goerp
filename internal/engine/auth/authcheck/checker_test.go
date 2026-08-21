@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
@@ -33,6 +34,7 @@ const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
 const localRedisAddr = "localhost:6379"
 
 const testPermission = "widgets.read"
+const testPermission2 = "widgets.write" // granted to the fixture's admin role too, for API-key scope-restriction tests
 
 // fixture is one login's worth of real, FK-satisfying rows, plus an
 // Issuer to mint real tokens and a Checker to validate them against.
@@ -48,6 +50,7 @@ type fixture struct {
 	conn        *sql.DB
 	roleCache   *permcache.RoleCache
 	roleMap     *permcache.RolePermissionMap
+	apiKeys     *apikey.Store
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -131,11 +134,14 @@ func newFixture(t *testing.T) *fixture {
 	if _, err := conn.Exec(fmt.Sprintf("INSERT INTO %s.role_permissions (role_id, permission_name) VALUES ($1, $2)", schema), roleID, testPermission); err != nil {
 		t.Fatalf("grant permission: %v", err)
 	}
+	if _, err := conn.Exec(fmt.Sprintf("INSERT INTO %s.role_permissions (role_id, permission_name) VALUES ($1, $2)", schema), roleID, testPermission2); err != nil {
+		t.Fatalf("grant permission: %v", err)
+	}
 
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE user_id = $1`, userID) })
 
 	registry := permission.NewPermissionRegistry()
-	registry.Register("widgets", []manifest.Permission{{Name: testPermission}})
+	registry.Register("widgets", []manifest.Permission{{Name: testPermission}, {Name: testPermission2}})
 
 	roleMap := permcache.NewRolePermissionMap()
 	if err := roleMap.RebuildAll(ctx, tenantStore, roleStore, registry); err != nil {
@@ -143,9 +149,14 @@ func newFixture(t *testing.T) *fixture {
 	}
 	roleCache := permcache.NewRoleCache(cacheClient)
 
+	apiKeys := apikey.NewStore(conn)
+	if err := apiKeys.Bootstrap(ctx); err != nil {
+		t.Fatalf("apikey Bootstrap() error: %v", err)
+	}
+
 	return &fixture{
 		issuer:      authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore),
-		checker:     NewChecker(&keySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap),
+		checker:     NewChecker(&keySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap, apiKeys, true),
 		tenantID:    tt.ID,
 		tenantSlug:  slug,
 		userID:      userID,
@@ -153,6 +164,7 @@ func newFixture(t *testing.T) *fixture {
 		conn:        conn,
 		roleCache:   roleCache,
 		roleMap:     roleMap,
+		apiKeys:     apiKeys,
 	}
 }
 
@@ -218,7 +230,7 @@ func TestAuthenticate_ValidTokenProducesAuthenticatedContext(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
 
-	authCtx, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	authCtx, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
@@ -254,7 +266,7 @@ func TestAuthenticate_PermissionSetPopulatesRoleCacheOnMiss(t *testing.T) {
 	token := f.issueToken(t, "")
 	ctx := context.Background()
 
-	if _, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, f.permissions, nil); err != nil {
+	if _, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil); err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
 
@@ -278,7 +290,7 @@ func TestAuthenticate_UsesCachedRolesOnSecondCall(t *testing.T) {
 	// the cache was actually consulted rather than bypassed.
 	f.roleCache.Set(ctx, f.tenantID, f.userID, []string{"00000000-0000-0000-0000-000000000000"})
 
-	authCtx, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	authCtx, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
@@ -310,7 +322,7 @@ func TestAuthenticate_StaleMarkerBypassesRoleCache(t *testing.T) {
 		t.Fatalf("MarkRolesStale() error: %v", err)
 	}
 
-	authCtx, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	authCtx, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
@@ -326,7 +338,7 @@ func TestAuthenticate_StaleMarkerBypassesRoleCache(t *testing.T) {
 func TestAuthenticate_EmptyTokenIsAnonymousNotError(t *testing.T) {
 	f := newFixture(t)
 
-	authCtx, err := f.checker.Authenticate(context.Background(), "", f.tenantID, f.tenantSlug, f.permissions, nil)
+	authCtx, err := f.checker.Authenticate(context.Background(), "", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v, want nil for empty token", err)
 	}
@@ -338,7 +350,7 @@ func TestAuthenticate_EmptyTokenIsAnonymousNotError(t *testing.T) {
 func TestAuthenticate_MalformedTokenIsRejected(t *testing.T) {
 	f := newFixture(t)
 
-	_, err := f.checker.Authenticate(context.Background(), "not-a-jwt", f.tenantID, f.tenantSlug, f.permissions, nil)
+	_, err := f.checker.Authenticate(context.Background(), "not-a-jwt", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("Authenticate() error = %v, want ErrInvalidToken", err)
 	}
@@ -360,7 +372,7 @@ func TestAuthenticate_ExpiredTokenIsRejected(t *testing.T) {
 		AMR:       []string{"pwd"},
 	})
 
-	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("Authenticate() error = %v, want ErrInvalidToken (expired)", err)
 	}
@@ -393,7 +405,7 @@ func TestAuthenticate_WrongSignatureIsRejected(t *testing.T) {
 		t.Fatalf("sign with other key: %v", err)
 	}
 
-	_, err = f.checker.Authenticate(context.Background(), signed, f.tenantID, f.tenantSlug, f.permissions, nil)
+	_, err = f.checker.Authenticate(context.Background(), signed, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("Authenticate() error = %v, want ErrInvalidToken (wrong signature)", err)
 	}
@@ -413,7 +425,7 @@ func TestAuthenticate_RevokedSessionIsRejected(t *testing.T) {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
-	_, err = f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	_, err = f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrSessionRevoked) {
 		t.Errorf("Authenticate() error = %v, want ErrSessionRevoked", err)
 	}
@@ -423,7 +435,7 @@ func TestAuthenticate_TenantMismatchIsRejected(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
 
-	_, err := f.checker.Authenticate(context.Background(), token, "00000000-0000-0000-0000-000000000000", f.tenantSlug, f.permissions, nil)
+	_, err := f.checker.Authenticate(context.Background(), token, "00000000-0000-0000-0000-000000000000", f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrTenantMismatch) {
 		t.Errorf("Authenticate() error = %v, want ErrTenantMismatch", err)
 	}
@@ -437,7 +449,7 @@ func TestAuthenticate_SuspendedUserIsRejected(t *testing.T) {
 		t.Fatalf("suspend fixture user: %v", err)
 	}
 
-	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrUserNotActive) {
 		t.Errorf("Authenticate() error = %v, want ErrUserNotActive", err)
 	}
@@ -452,7 +464,7 @@ func TestAuthenticate_NonMemberIsRejected(t *testing.T) {
 		t.Fatalf("remove membership: %v", err)
 	}
 
-	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
 	if !errors.Is(err, ErrNotTenantMember) {
 		t.Errorf("Authenticate() error = %v, want ErrNotTenantMember", err)
 	}
@@ -462,7 +474,7 @@ func TestAuthenticate_MissingRequiredPermissionIsRejected(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
 
-	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, f.permissions, []string{"widgets.delete"})
+	_, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{"widgets.delete"})
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Errorf("Authenticate() error = %v, want ErrPermissionDenied", err)
 	}
@@ -472,7 +484,7 @@ func TestAuthenticate_GrantedRequiredPermissionSucceeds(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")
 
-	authCtx, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, f.permissions, []string{testPermission})
+	authCtx, err := f.checker.Authenticate(context.Background(), token, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{testPermission})
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
@@ -520,4 +532,240 @@ func (f *fixture) signRawClaims(t *testing.T, claims authtoken.Claims) string {
 		t.Fatalf("sign claims: %v", err)
 	}
 	return signed
+}
+
+func TestAuthenticate_APIKeyValidKeySucceeds(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	fullKey, key, err := f.apiKeys.IssueKey(ctx, f.tenantID, &f.userID, "Test Key", []string{testPermission, testPermission2}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	authCtx, err := f.checker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+	if !authCtx.IsAuthenticated {
+		t.Fatal("IsAuthenticated = false, want true")
+	}
+	if authCtx.AuthMethod != "api_key" {
+		t.Errorf("AuthMethod = %q, want %q", authCtx.AuthMethod, "api_key")
+	}
+	if authCtx.UserID != f.userID {
+		t.Errorf("UserID = %q, want %q", authCtx.UserID, f.userID)
+	}
+	if authCtx.APIKey == nil || authCtx.APIKey.ID != key.ID {
+		t.Errorf("APIKey = %v, want the issued key %q", authCtx.APIKey, key.ID)
+	}
+	idx, _ := f.permissions.Index(testPermission)
+	if !authCtx.PermissionSet.Has(idx) {
+		t.Error("PermissionSet does not have the granted permission")
+	}
+}
+
+func TestAuthenticate_APIKeyServiceKeyUsesOnlyScopes(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Service Key", []string{testPermission}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	authCtx, err := f.checker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+	if authCtx.UserID != "" {
+		t.Errorf("UserID = %q, want empty for a service key", authCtx.UserID)
+	}
+	idx1, _ := f.permissions.Index(testPermission)
+	if !authCtx.PermissionSet.Has(idx1) {
+		t.Error("PermissionSet does not have the key's own scope")
+	}
+	idx2, _ := f.permissions.Index(testPermission2)
+	if authCtx.PermissionSet.Has(idx2) {
+		t.Error("PermissionSet has a permission outside the key's scopes — service keys must not get any RBAC-derived permission")
+	}
+}
+
+func TestAuthenticate_APIKeyScopeRestrictsBeyondUserPermissions(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	// f.userID's admin role already grants both testPermission and
+	// testPermission2 (fixture setup) — the key here is scoped to only
+	// one of them.
+	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, &f.userID, "Scoped Key", []string{testPermission}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	authCtx, err := f.checker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+	idx1, _ := f.permissions.Index(testPermission)
+	if !authCtx.PermissionSet.Has(idx1) {
+		t.Error("PermissionSet does not have the key's own scope")
+	}
+	idx2, _ := f.permissions.Index(testPermission2)
+	if authCtx.PermissionSet.Has(idx2) {
+		t.Error("PermissionSet has a permission the user's role grants but the key's scopes don't — scopes must restrict, never expand")
+	}
+}
+
+func TestAuthenticate_APIKeyUnknownKeyReturnsErrAPIKeyInvalid(t *testing.T) {
+	f := newFixture(t)
+
+	_, err := f.checker.Authenticate(context.Background(), "erp_notreal_notreal", f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if !errors.Is(err, ErrAPIKeyInvalid) {
+		t.Errorf("Authenticate() error = %v, want ErrAPIKeyInvalid", err)
+	}
+}
+
+func TestAuthenticate_APIKeyRevokedKeyReturnsErrAPIKeyInvalid(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	fullKey, key, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "To Revoke", nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+	if err := f.apiKeys.Revoke(ctx, key.ID, "test"); err != nil {
+		t.Fatalf("Revoke() error: %v", err)
+	}
+
+	_, err = f.checker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if !errors.Is(err, ErrAPIKeyInvalid) {
+		t.Errorf("Authenticate() error = %v, want ErrAPIKeyInvalid", err)
+	}
+}
+
+func TestAuthenticate_APIKeyExpiredKeyReturnsErrAPIKeyExpired(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	past := time.Now().Add(-time.Hour)
+	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Expired Key", nil, nil, &past, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	_, err = f.checker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if !errors.Is(err, ErrAPIKeyExpired) {
+		t.Errorf("Authenticate() error = %v, want ErrAPIKeyExpired", err)
+	}
+}
+
+func TestAuthenticate_APIKeyDisallowedIPReturnsErrAPIKeyIPNotAllowed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "IP Restricted", nil, []string{"10.0.0.1"}, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	_, err = f.checker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if !errors.Is(err, ErrAPIKeyIPNotAllowed) {
+		t.Errorf("Authenticate() error = %v, want ErrAPIKeyIPNotAllowed", err)
+	}
+}
+
+func TestAuthenticate_APIKeyTenantMismatchReturnsErrTenantMismatch(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Mismatch", nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	_, err = f.checker.Authenticate(ctx, fullKey, "00000000-0000-0000-0000-000000000000", f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if !errors.Is(err, ErrTenantMismatch) {
+		t.Errorf("Authenticate() error = %v, want ErrTenantMismatch", err)
+	}
+}
+
+func TestAuthenticate_APIKeyDisabledFlagFallsThroughToInvalidToken(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	fullKey, _, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Disabled Flag", nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	disabledChecker := &Checker{
+		signingKey:    f.checker.signingKey,
+		revoker:       f.checker.revoker,
+		users:         f.checker.users,
+		roles:         f.checker.roles,
+		roleCache:     f.checker.roleCache,
+		roleMap:       f.checker.roleMap,
+		apiKeys:       f.checker.apiKeys,
+		enableAPIKeys: false,
+	}
+
+	_, err = disabledChecker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("Authenticate() error = %v, want ErrInvalidToken (erp_ branch should have nothing to dispatch to when disabled)", err)
+	}
+}
+
+func TestAuthenticate_APIKeyUpdatesLastUsedAsync(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	fullKey, key, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Track Usage", nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	if _, err := f.checker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.7", f.permissions, nil); err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var lastUsedAt sql.NullTime
+		if err := f.conn.QueryRowContext(ctx, "SELECT last_used_at FROM system.api_keys WHERE id = $1", key.ID).Scan(&lastUsedAt); err != nil {
+			t.Fatalf("query last_used_at: %v", err)
+		}
+		if lastUsedAt.Valid {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("last_used_at was not set within the deadline — the fire-and-forget UpdateLastUsed goroutine may not have run")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestAuthenticate_APIKeyUpdatesLastUsedEvenWhenPermissionDenied(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	// Scoped narrower than what's required below — auth-internals.md §7
+	// step 10 (update last_used_at) happens before step 11 (permission
+	// evaluation), so a key that authenticates fine but is then denied
+	// for a specific required permission must still get its last_used_at
+	// updated.
+	fullKey, key, err := f.apiKeys.IssueKey(ctx, f.tenantID, nil, "Denied But Used", []string{testPermission}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("IssueKey() error: %v", err)
+	}
+
+	_, err = f.checker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.7", f.permissions, []string{testPermission2})
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("Authenticate() error = %v, want ErrPermissionDenied", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var lastUsedAt sql.NullTime
+		if err := f.conn.QueryRowContext(ctx, "SELECT last_used_at FROM system.api_keys WHERE id = $1", key.ID).Scan(&lastUsedAt); err != nil {
+			t.Fatalf("query last_used_at: %v", err)
+		}
+		if lastUsedAt.Valid {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("last_used_at was not set within the deadline — a permission-denied request must still count as key usage")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

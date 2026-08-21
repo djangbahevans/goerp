@@ -41,3 +41,16 @@ func (b *PermissionBitfield) Or(other PermissionBitfield) {
 		(*b)[word] |= bits
 	}
 }
+
+// And restricts b to only the bits also set in other — auth-internals.md §7
+// "Scope restriction": an API key's scopes narrow, never expand, its
+// associated user's permission set.
+func (b *PermissionBitfield) And(other PermissionBitfield) {
+	for word := range *b {
+		if word >= len(other) {
+			(*b)[word] = 0
+		} else {
+			(*b)[word] &= other[word]
+		}
+	}
+}

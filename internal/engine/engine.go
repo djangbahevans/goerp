@@ -193,10 +193,10 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("bootstrap user identity store: %w", err)
 	}
 
-	// apiKeyStore isn't stored as an Engine field or passed anywhere yet —
-	// no consumer until goerp#223 (the erp_-prefix auth middleware branch).
-	// Bootstrapped here, after both tenantStore and userStore, since
-	// api_keys FK-references system.tenants and system.users.
+	// apiKeyStore isn't stored as an Engine field — authChecker below is
+	// its only consumer. Bootstrapped here, after both tenantStore and
+	// userStore, since api_keys FK-references system.tenants and
+	// system.users.
 	apiKeyStore := apikey.NewStore(primaryPool)
 	if err := apiKeyStore.Bootstrap(ctx); err != nil {
 		_ = primaryPool.Close()
@@ -509,7 +509,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	// itself, since it's rebuilt on every module hot reload). Constructed
 	// here, after rolePermissionMap, since its permission-context hydration
 	// step needs both roleCache and rolePermissionMap.
-	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore, roleCache, rolePermissionMap)
+	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore, roleCache, rolePermissionMap, apiKeyStore, cfg.EnableAPIKeys)
 
 	adminapi.RegisterActivityDispatchRoute(adminServer.UnauthenticatedRouter(), adminapi.ActivityDispatchDeps{
 		Registry:    moduleRegistry,
