@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -23,7 +25,7 @@ func localRedisConfig() cache.Config {
 	return cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1}
 }
 
-func openTestResolver(t *testing.T) (*Resolver, *tenant.Store, *sql.DB, *cache.Client) {
+func openTestResolver(t *testing.T) (*Resolver, *tenant.Store, *sql.DB, *cache.Client, *billing.Store) {
 	t.Helper()
 
 	conn, err := db.New(localPostgresDSN)
@@ -37,6 +39,11 @@ func openTestResolver(t *testing.T) (*Resolver, *tenant.Store, *sql.DB, *cache.C
 		t.Fatalf("Bootstrap() error: %v", err)
 	}
 
+	billingStore := billing.NewStore(conn)
+	if err := billingStore.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("billing Bootstrap() error: %v", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cacheClient, err := cache.New(ctx, localRedisConfig())
@@ -45,7 +52,7 @@ func openTestResolver(t *testing.T) (*Resolver, *tenant.Store, *sql.DB, *cache.C
 	}
 	t.Cleanup(func() { _ = cacheClient.Close() })
 
-	return NewResolver(tenantStore, cacheClient), tenantStore, conn, cacheClient
+	return NewResolver(tenantStore, cacheClient, billingStore), tenantStore, conn, cacheClient, billingStore
 }
 
 func uniqueSlug(t *testing.T) string {
@@ -77,7 +84,7 @@ func insertDomain(t *testing.T, conn *sql.DB, tenantID, domain string) {
 }
 
 func TestResolveByHost_ResolvesActiveTenant(t *testing.T) {
-	resolver, store, conn, _ := openTestResolver(t)
+	resolver, store, conn, _, _ := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Active Resolve")
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
@@ -95,7 +102,7 @@ func TestResolveByHost_ResolvesActiveTenant(t *testing.T) {
 }
 
 func TestResolveByHost_StripsPortAndLowercases(t *testing.T) {
-	resolver, store, conn, _ := openTestResolver(t)
+	resolver, store, conn, _, _ := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Mixed Case")
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
@@ -110,7 +117,7 @@ func TestResolveByHost_StripsPortAndLowercases(t *testing.T) {
 }
 
 func TestResolveByHost_UnresolvedDomainReturnsErrTenantNotFound(t *testing.T) {
-	resolver, _, _, _ := openTestResolver(t)
+	resolver, _, _, _, _ := openTestResolver(t)
 
 	_, err := resolver.ResolveByHost(context.Background(), "nonexistent-"+uniqueSlug(t)+".example.com")
 	if !errors.Is(err, ErrTenantNotFound) {
@@ -119,7 +126,7 @@ func TestResolveByHost_UnresolvedDomainReturnsErrTenantNotFound(t *testing.T) {
 }
 
 func TestResolveByHost_SuspendedTenantReturnsErrTenantSuspended(t *testing.T) {
-	resolver, store, conn, _ := openTestResolver(t)
+	resolver, store, conn, _, _ := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Suspended Resolve")
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
@@ -135,7 +142,7 @@ func TestResolveByHost_SuspendedTenantReturnsErrTenantSuspended(t *testing.T) {
 }
 
 func TestResolveByHost_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
-	resolver, store, conn, _ := openTestResolver(t)
+	resolver, store, conn, _, _ := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Deleted Resolve")
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
@@ -151,7 +158,7 @@ func TestResolveByHost_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
 }
 
 func TestResolveByHost_CachesPositiveResultAcrossStoreDeletion(t *testing.T) {
-	resolver, store, conn, cacheClient := openTestResolver(t)
+	resolver, store, conn, cacheClient, _ := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Cached Positive")
 	domain := created.Slug + ".example.com"
 	insertDomain(t, conn, created.ID, domain)
@@ -185,7 +192,7 @@ func TestResolveByHost_CachesPositiveResultAcrossStoreDeletion(t *testing.T) {
 }
 
 func TestResolveByHost_CachesNegativeResult(t *testing.T) {
-	resolver, store, conn, _ := openTestResolver(t)
+	resolver, store, conn, _, _ := openTestResolver(t)
 	domain := uniqueSlug(t) + ".example.com"
 
 	_, err := resolver.ResolveByHost(context.Background(), domain)
@@ -206,7 +213,7 @@ func TestResolveByHost_CachesNegativeResult(t *testing.T) {
 }
 
 func TestDomainCacheKey_MatchesResolveByHostsCacheKey(t *testing.T) {
-	resolver, store, conn, cacheClient := openTestResolver(t)
+	resolver, store, conn, cacheClient, _ := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Cache Key Match")
 	domain := "MixedCase." + created.Slug + ".example.com:8443"
 	insertDomain(t, conn, created.ID, strings.ToLower(strings.TrimSuffix(domain, ":8443")))
@@ -246,5 +253,161 @@ func TestEntitlementSet_LimitAndModuleEnabled(t *testing.T) {
 	}
 	if _, ok := set.Limit("unknown"); ok {
 		t.Error("Limit(\"unknown\") ok = true, want false")
+	}
+}
+
+// createPlanWithEntitlement creates a plan granting exactly one
+// feature/value entitlement, registering the plan row's cleanup (which
+// cascades to plan_entitlements) — the pattern every LoadEntitlements test
+// below follows.
+func createPlanWithEntitlement(t *testing.T, billingStore *billing.Store, conn *sql.DB, feature, value string) *billing.Plan {
+	t.Helper()
+	name := fmt.Sprintf("trplan%d", time.Now().UnixNano())
+	p, err := billingStore.CreatePlan(context.Background(), name, "Test Plan", nil, nil)
+	if err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec("DELETE FROM system.plans WHERE id = $1", p.ID) })
+
+	if err := billingStore.UpsertPlanEntitlement(context.Background(), p.ID, feature, value); err != nil {
+		t.Fatalf("UpsertPlanEntitlement() error: %v", err)
+	}
+	return p
+}
+
+// subscribeTenant subscribes tenantID to planID — tenant_subscriptions
+// cascades on the tenant's own cleanup (createTenant), so no separate
+// cleanup is needed here.
+func subscribeTenant(t *testing.T, billingStore *billing.Store, tenantID, planID string) {
+	t.Helper()
+	now := time.Now()
+	if _, err := billingStore.CreateSubscription(context.Background(), tenantID, planID, now, now.Add(30*24*time.Hour)); err != nil {
+		t.Fatalf("CreateSubscription() error: %v", err)
+	}
+}
+
+func TestLoadEntitlements_MergesModuleFeatureFromPlan(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Module Feature")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "module.sales", "true")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if !ents.ModuleEnabled("sales") {
+		t.Error("ModuleEnabled(\"sales\") = false, want true")
+	}
+}
+
+func TestLoadEntitlements_MergesNumericLimitFromPlan(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Numeric Limit")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if v, ok := ents.Limit("users.max"); !ok || v != 10 {
+		t.Errorf("Limit(\"users.max\") = (%d, %v), want (10, true)", v, ok)
+	}
+}
+
+func TestLoadEntitlements_UnlimitedValueSetsUnlimitedFlag(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Unlimited")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "storage_gb", "unlimited")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if v, ok := ents.Limit("storage_gb"); !ok || v != math.MaxInt64 {
+		t.Errorf("Limit(\"storage_gb\") = (%d, %v), want (math.MaxInt64, true)", v, ok)
+	}
+}
+
+func TestLoadEntitlements_OverrideWinsOverPlanEntitlement(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Override Wins")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	if err := billingStore.UpsertEntitlementOverride(context.Background(), created.ID, "users.max", "50", nil, nil, nil); err != nil {
+		t.Fatalf("UpsertEntitlementOverride() error: %v", err)
+	}
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if v, ok := ents.Limit("users.max"); !ok || v != 50 {
+		t.Errorf("Limit(\"users.max\") = (%d, %v), want (50, true) — override should win", v, ok)
+	}
+}
+
+func TestLoadEntitlements_ExpiredOverrideIsIgnored(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Expired Override")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	past := time.Now().Add(-time.Hour)
+	if err := billingStore.UpsertEntitlementOverride(context.Background(), created.ID, "users.max", "999", nil, &past, nil); err != nil {
+		t.Fatalf("UpsertEntitlementOverride() error: %v", err)
+	}
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if v, ok := ents.Limit("users.max"); !ok || v != 10 {
+		t.Errorf("Limit(\"users.max\") = (%d, %v), want (10, true) — expired override must not apply", v, ok)
+	}
+}
+
+func TestLoadEntitlements_CachesResult(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Cached Entitlements")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "users.max", "10")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	if _, err := resolver.LoadEntitlements(context.Background(), created.ID); err != nil {
+		t.Fatalf("first LoadEntitlements() error: %v", err)
+	}
+
+	// Delete the underlying subscription — a second call within the TTL
+	// should still return the cached (now-orphaned) result.
+	if _, err := conn.ExecContext(context.Background(), "DELETE FROM system.tenant_subscriptions WHERE tenant_id = $1", created.ID); err != nil {
+		t.Fatalf("delete subscription: %v", err)
+	}
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("second LoadEntitlements() error: %v", err)
+	}
+	if v, ok := ents.Limit("users.max"); !ok || v != 10 {
+		t.Errorf("Limit(\"users.max\") = (%d, %v), want (10, true) from cache despite the row being gone", v, ok)
+	}
+}
+
+func TestResolveByHost_PopulatesEntitlements(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Resolve Entitlements")
+	domain := created.Slug + ".example.com"
+	insertDomain(t, conn, created.ID, domain)
+	plan := createPlanWithEntitlement(t, billingStore, conn, "module.sales", "true")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	got, err := resolver.ResolveByHost(context.Background(), domain)
+	if err != nil {
+		t.Fatalf("ResolveByHost() error: %v", err)
+	}
+	if !got.Entitlements.ModuleEnabled("sales") {
+		t.Error("Entitlements.ModuleEnabled(\"sales\") = false, want true")
 	}
 }
