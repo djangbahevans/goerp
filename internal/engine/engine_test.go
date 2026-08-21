@@ -22,6 +22,10 @@ func baseTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
 	t.Setenv("GOERP_ADMIN_TOKEN", "test-admin-token")
+	// 127.0.0.1, not "localhost": gRPC's dialer can stall for several
+	// seconds trying an unreachable ::1 first in IPv6-loopback-but-
+	// unrouted environments (see internal/engine/temporal's own tests).
+	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:7233")
 
 	return &config.Config{
 		ListenAddr:         ":0",

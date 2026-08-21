@@ -8,10 +8,17 @@ package temporal
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/worker"
+)
+
+const (
+	pollerConfirmTimeout  = 30 * time.Second
+	pollerConfirmInterval = 200 * time.Millisecond
 )
 
 type Config struct {
@@ -54,4 +61,42 @@ func (c *Client) HasPollers(ctx context.Context, taskQueue string) (bool, error)
 		return false, fmt.Errorf("describe task queue %q: %w", taskQueue, err)
 	}
 	return len(resp.GetPollers()) > 0, nil
+}
+
+// WaitForPollers polls HasPollers until taskQueue has at least one
+// registered poller, or returns an error after pollerConfirmTimeout (or
+// if ctx is done first) — the shared "confirm a just-started worker
+// actually connected" check both workflowworker.Manager (per-module
+// workflow-worker processes) and systemworker.Worker (the engine's own
+// in-process Temporal worker) use.
+func (c *Client) WaitForPollers(ctx context.Context, taskQueue string) error {
+	deadline := time.Now().Add(pollerConfirmTimeout)
+	ticker := time.NewTicker(pollerConfirmInterval)
+	defer ticker.Stop()
+
+	for {
+		has, err := c.HasPollers(ctx, taskQueue)
+		if err != nil {
+			return err
+		}
+		if has {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no poller registered on %q after %s", taskQueue, pollerConfirmTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// NewWorker constructs a Temporal worker.Worker on taskQueue, using this
+// Client's underlying connection — a thin factory so callers (currently
+// just internal/engine/systemworker) never need their own import of
+// go.temporal.io/sdk/client to build one.
+func (c *Client) NewWorker(taskQueue string, options worker.Options) worker.Worker {
+	return worker.New(c.sdk, taskQueue, options)
 }

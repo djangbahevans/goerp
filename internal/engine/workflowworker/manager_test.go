@@ -200,7 +200,9 @@ func TestSpawnConfirmAndStopAll(t *testing.T) {
 		WorkflowTypes:  []manifest.WorkflowType{{Name: "x"}},
 	}}
 
-	ctx, cancel := context.WithTimeout(context.Background(), pollerConfirmTimeout+10*time.Second)
+	// 40s: temporal.WaitForPollers' own 30s timeout plus a buffer for the
+	// binary build/spawn/dial steps preceding it.
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 
 	if err := m.spawn(ctx, mod); err != nil {
