@@ -302,15 +302,13 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 
+	// roleCache (auth-internals.md §14 cache layer 2) only needs
+	// cacheClient, so it's built here even though its consumer, authChecker
+	// below, isn't constructed until rolePermissionMap (layer 3) exists.
+	roleCache := permcache.NewRoleCache(cacheClient)
+
 	// adminapi.RegisterTenantRoutes is called further down, once
 	// jobQueueClient exists (tenantoffboard.NewOffboarder needs it).
-
-	// authChecker isn't consumed yet — wiring it into an actual HTTP
-	// middleware chain is goerp#91, which also owns resolving the current
-	// registry.RegistrySnapshot's PermissionRegistry to pass into
-	// Authenticate per request (this package deliberately doesn't hold one
-	// itself, since it's rebuilt on every module hot reload).
-	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore)
 
 	// tenantResolver isn't consumed yet either — same goerp#91 middleware
 	// chain wires it in ahead of authChecker, per auth-internals.md §9's
@@ -473,6 +471,15 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeOnFailure()
 		return nil, fmt.Errorf("build role permission map: %w", err)
 	}
+
+	// authChecker isn't consumed yet — wiring it into an actual HTTP
+	// middleware chain is goerp#91, which also owns resolving the current
+	// registry.RegistrySnapshot's PermissionRegistry to pass into
+	// Authenticate per request (this package deliberately doesn't hold one
+	// itself, since it's rebuilt on every module hot reload). Constructed
+	// here, after rolePermissionMap, since its permission-context hydration
+	// step needs both roleCache and rolePermissionMap.
+	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore, roleCache, rolePermissionMap)
 
 	adminapi.RegisterActivityDispatchRoute(adminServer.UnauthenticatedRouter(), adminapi.ActivityDispatchDeps{
 		Registry:    moduleRegistry,
