@@ -44,6 +44,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -165,6 +166,21 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap tenant registry: %w", err)
+	}
+
+	// billingStore isn't stored as an Engine field or passed to any
+	// adminapi.Register* call — nothing consumes plans/entitlements yet
+	// (goerp#229, entitlement loading, is still blocked). Bootstrapped here,
+	// after tenantStore, since tenant_subscriptions/
+	// tenant_entitlement_overrides both FK-reference system.tenants.
+	billingStore := billing.NewStore(primaryPool)
+	if err := billingStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap billing schema: %w", err)
 	}
 
 	userStore := user.NewStore(primaryPool)
