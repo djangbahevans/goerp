@@ -107,6 +107,7 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 			QueueBulk:     {MaxWorkers: withDefault(cfg.QueueBulkConcurrency, 20)},
 			QueueSearch:   {MaxWorkers: withDefault(cfg.QueueSearchConcurrency, 5)},
 			QueueEmail:    {MaxWorkers: withDefault(cfg.QueueEmailConcurrency, 5)},
+			QueueAdmin:    {MaxWorkers: withDefault(cfg.QueueAdminConcurrency, 5)},
 		},
 		Workers: workers,
 	})

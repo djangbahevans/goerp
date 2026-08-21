@@ -104,8 +104,34 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, createTenantDomainsDomainIndex); err != nil {
 			return fmt.Errorf("create tenant_domains domain index: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, addOffboardDeletionStartedAtColumn); err != nil {
-			return fmt.Errorf("add offboard_deletion_started_at column: %w", err)
+
+		// Checked first, not run unconditionally: ADD COLUMN needs an
+		// ACCESS EXCLUSIVE lock on system.tenants even when IF NOT EXISTS
+		// makes it a no-op, and Bootstrap runs on every engine startup and
+		// at the top of nearly every package's test suite across this
+		// repo — dozens of concurrent `go test ./...` processes all
+		// hitting the same dev Postgres. Taking that lock unconditionally
+		// on every single call reproduced a genuine "deadlock detected"
+		// failure against ordinary concurrent reads/writes elsewhere in
+		// the suite; skipping the ALTER once the column already exists
+		// (true for every Bootstrap call after the very first one against
+		// a given database) avoids acquiring the lock at all in the
+		// overwhelmingly common case.
+		var hasColumn bool
+		err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'system' AND table_name = 'tenants'
+				  AND column_name = 'offboard_deletion_started_at'
+			)
+		`).Scan(&hasColumn)
+		if err != nil {
+			return fmt.Errorf("check offboard_deletion_started_at column: %w", err)
+		}
+		if !hasColumn {
+			if _, err := tx.ExecContext(ctx, addOffboardDeletionStartedAtColumn); err != nil {
+				return fmt.Errorf("add offboard_deletion_started_at column: %w", err)
+			}
 		}
 
 		return nil
