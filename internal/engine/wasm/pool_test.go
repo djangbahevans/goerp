@@ -90,6 +90,12 @@ func TestInstancePool_Borrow_DirectInstantiateWhenTokenFree(t *testing.T) {
 	}
 }
 
+// TestInstancePool_Borrow_WaitsThenSucceedsOnceTokenFrees asserts blocking
+// via two synchronization checkpoints rather than a wall-clock deadline —
+// an earlier version compared elapsed time against the delay before
+// Return, which flaked on a loaded CI runner (a second Borrow legitimately
+// returning a few hundred microseconds under the nominal delay isn't
+// evidence it didn't wait for Return, just scheduling jitter).
 func TestInstancePool_Borrow_WaitsThenSucceedsOnceTokenFrees(t *testing.T) {
 	pool := newTestPool(t, emptyModule, PoolConfig{MaxSize: 1, BorrowTimeout: 2 * time.Second})
 
@@ -98,21 +104,34 @@ func TestInstancePool_Borrow_WaitsThenSucceedsOnceTokenFrees(t *testing.T) {
 		t.Fatalf("first Borrow: %v", err)
 	}
 
+	borrowed := make(chan *ModuleInstance, 1)
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		pool.Return(inst1)
+		inst2, err := pool.Borrow(context.Background())
+		if err != nil {
+			t.Errorf("second Borrow: %v", err)
+			return
+		}
+		borrowed <- inst2
 	}()
 
-	start := time.Now()
-	inst2, err := pool.Borrow(context.Background())
-	if err != nil {
-		t.Fatalf("second Borrow: %v", err)
+	// Checkpoint 1: confirm the second Borrow is still blocked — a
+	// generous window against scheduling jitter, not a tight deadline.
+	select {
+	case <-borrowed:
+		t.Fatal("second Borrow returned before the first instance was returned")
+	case <-time.After(50 * time.Millisecond):
 	}
-	if elapsed := time.Since(start); elapsed < 50*time.Millisecond {
-		t.Errorf("second Borrow returned after %v, expected to wait for the first Return", elapsed)
-	}
-	if inst2 == nil {
-		t.Fatal("expected a non-nil instance once the token freed")
+
+	pool.Return(inst1)
+
+	// Checkpoint 2: confirm it unblocks once the token frees.
+	select {
+	case inst2 := <-borrowed:
+		if inst2 == nil {
+			t.Fatal("expected a non-nil instance once the token freed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Borrow did not return after Return freed the token")
 	}
 }
 
