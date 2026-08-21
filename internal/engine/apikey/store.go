@@ -260,14 +260,25 @@ func (s *Store) LookupByHash(ctx context.Context, fullKey string) (*APIKey, erro
 
 // Revoke marks id revoked with reason. Immediate — no TTL delay,
 // idx_api_keys_hash's own WHERE revoked_at IS NULL means the next
-// LookupByHash for this key's hash simply stops matching.
+// LookupByHash for this key's hash simply stops matching. Returns
+// ErrAPIKeyNotFound if id doesn't match any row — same
+// RowsAffected-checking convention session.Store.Revoke already uses in
+// this codebase, so a typo'd or already-deleted id doesn't silently
+// report success.
 func (s *Store) Revoke(ctx context.Context, id, reason string) error {
-	_, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 		UPDATE system.api_keys SET revoked_at = NOW(), revoke_reason = $2
 		WHERE id = $1
 	`, id, reason)
 	if err != nil {
 		return fmt.Errorf("revoke api key: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke api key: %w", err)
+	}
+	if n == 0 {
+		return ErrAPIKeyNotFound
 	}
 	return nil
 }

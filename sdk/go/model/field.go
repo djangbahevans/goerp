@@ -60,6 +60,6 @@ func Selection(values ...string) FieldDef {
 }
 func Enum(typeName string) FieldDef { return FieldDef{Kind: KindEnum, EnumType: typeName} }
 
-func (f FieldDef) Required() FieldDef { f.IsRequired = true; return f }
-func (f FieldDef) PrimaryKey() FieldDef { f.IsPrimaryKey = true; return f }
+func (f FieldDef) Required() FieldDef           { f.IsRequired = true; return f }
+func (f FieldDef) PrimaryKey() FieldDef         { f.IsPrimaryKey = true; return f }
 func (f FieldDef) Default(expr string) FieldDef { f.DefaultExpr = &expr; return f }
