@@ -64,6 +64,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/systemworker"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantprovision"
 	"github.com/djangbahevans/goerp/internal/engine/tenantresolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantsync"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -306,8 +307,9 @@ func New(cfg *config.Config) (*Engine, error) {
 		SessionRevoker: sessionRevoker,
 		DomainCache:    cacheClient,
 		Inviter:        inviteStore,
-		// Provisioner, Exporter, Importer, Offboarder stay nil until
-		// goerp#149/#15/#150 land — the handlers report
+		Provisioner:    tenantprovision.NewProvisioner(temporalClient, systemworker.TaskQueue),
+		// Exporter, Importer, Offboarder stay nil until
+		// goerp#15/#150 land — the handlers report
 		// StatusNotImplemented for those routes rather than the wiring
 		// needing a placeholder implementation here. inviteStore's own
 		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
@@ -511,6 +513,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeOnFailure()
 		return nil, fmt.Errorf("sync tenant schemas: %w", err)
 	}
+
+	// ProvisionTenantWorkflow's activities need moduleRegistry/diffEngine,
+	// which don't exist until here — registered on systemWorker (built
+	// earlier, alongside temporalClient) now, started later in Start.
+	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain)
+	systemWorker.RegisterWorkflow(tenantprovision.Workflow)
+	systemWorker.RegisterActivity(provisionActivities)
 
 	poolwarm.WarmAll(ctx, loadedModules)
 

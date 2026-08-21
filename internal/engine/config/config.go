@@ -95,6 +95,12 @@ type Config struct {
 	SMTPPass   string `env:"GOERP_SMTP_PASSWORD"`
 	SMTPFrom   string `env:"GOERP_SMTP_FROM" envDefault:"noreply@goerp.local"`
 	AppBaseURL string `env:"GOERP_APP_BASE_URL" envDefault:"http://localhost:8080"`
+
+	// PlatformDomain is appended to a tenant's slug to build its default
+	// subdomain at provisioning time (e.g. slug "acme" + PlatformDomain
+	// "goerp.local" = "acme.goerp.local") — multitenancy-internals.md §6
+	// step 8 "RegisterDomain".
+	PlatformDomain string `env:"GOERP_PLATFORM_DOMAIN" envDefault:"goerp.local"`
 }
 
 func Load() (*Config, error) {
