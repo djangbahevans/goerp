@@ -52,6 +52,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
+	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/poolwarm"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -84,17 +85,18 @@ type Engine struct {
 	cfg         *config.Config
 	wasmRuntime *wasm.Runtime
 
-	syncPool       *schema.SchemaSyncPool
-	tenantStore    *tenant.Store
-	sessionStore   *session.Store
-	signingKeySet  *signingkey.SigningKeySet
-	tokenIssuer    *authtoken.Issuer
-	sessionRevoker *sessionrevoke.Revoker
-	authChecker    *authcheck.Checker
-	tenantResolver *tenantresolve.Resolver
-	moduleRegistry *registry.ModuleRegistry
-	jobQueue       *river.Client[pgx.Tx]
-	jobQueuePool   *pgxpool.Pool
+	syncPool          *schema.SchemaSyncPool
+	tenantStore       *tenant.Store
+	sessionStore      *session.Store
+	signingKeySet     *signingkey.SigningKeySet
+	tokenIssuer       *authtoken.Issuer
+	sessionRevoker    *sessionrevoke.Revoker
+	authChecker       *authcheck.Checker
+	tenantResolver    *tenantresolve.Resolver
+	moduleRegistry    *registry.ModuleRegistry
+	rolePermissionMap *permcache.RolePermissionMap
+	jobQueue          *river.Client[pgx.Tx]
+	jobQueuePool      *pgxpool.Pool
 
 	secretsBackend  secrets.Backend
 	primaryDB       *sql.DB
@@ -454,9 +456,22 @@ func New(cfg *config.Config) (*Engine, error) {
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, ordered)
 
 	moduleRegistry := &registry.ModuleRegistry{}
-	if _, err := moduleRegistry.Update(loadedModules); err != nil {
+	snap, err := moduleRegistry.Update(loadedModules)
+	if err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("publish module registry: %w", err)
+	}
+
+	// permcache.RolePermissionMap (auth-internals.md §14 cache layer 3)
+	// has to be rebuilt in lockstep with the permission registry above —
+	// a stale map would resolve role bitfields against index assignments
+	// that no longer match modulePerms. This is registry.Update's only
+	// caller anywhere in the engine, so this is the only place layer 3
+	// ever needs rebuilding too.
+	rolePermissionMap := permcache.NewRolePermissionMap()
+	if err := rolePermissionMap.RebuildAll(ctx, tenantStore, roleStore, snap.PermissionRegistry()); err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("build role permission map: %w", err)
 	}
 
 	adminapi.RegisterActivityDispatchRoute(adminServer.UnauthenticatedRouter(), adminapi.ActivityDispatchDeps{
@@ -595,30 +610,31 @@ func New(cfg *config.Config) (*Engine, error) {
 	})
 
 	e = &Engine{
-		cfg:             cfg,
-		wasmRuntime:     runtime,
-		syncPool:        syncPool,
-		tenantStore:     tenantStore,
-		sessionStore:    sessionStore,
-		signingKeySet:   signingKeySet,
-		tokenIssuer:     tokenIssuer,
-		sessionRevoker:  sessionRevoker,
-		authChecker:     authChecker,
-		tenantResolver:  tenantResolver,
-		moduleRegistry:  moduleRegistry,
-		jobQueue:        jobQueueClient,
-		jobQueuePool:    jobQueuePool,
-		secretsBackend:  secretsBackend,
-		primaryDB:       primaryPool,
-		replicaDB:       replicaPool,
-		cacheClient:     cacheClient,
-		searchClient:    searchClient,
-		storageBackend:  storageBackend,
-		temporalClient:  temporalClient,
-		workflowWorkers: workflowWorkers,
-		systemWorker:    systemWorker,
-		server:          server,
-		adminServer:     adminServer,
+		cfg:               cfg,
+		wasmRuntime:       runtime,
+		syncPool:          syncPool,
+		tenantStore:       tenantStore,
+		sessionStore:      sessionStore,
+		signingKeySet:     signingKeySet,
+		tokenIssuer:       tokenIssuer,
+		sessionRevoker:    sessionRevoker,
+		authChecker:       authChecker,
+		tenantResolver:    tenantResolver,
+		moduleRegistry:    moduleRegistry,
+		rolePermissionMap: rolePermissionMap,
+		jobQueue:          jobQueueClient,
+		jobQueuePool:      jobQueuePool,
+		secretsBackend:    secretsBackend,
+		primaryDB:         primaryPool,
+		replicaDB:         replicaPool,
+		cacheClient:       cacheClient,
+		searchClient:      searchClient,
+		storageBackend:    storageBackend,
+		temporalClient:    temporalClient,
+		workflowWorkers:   workflowWorkers,
+		systemWorker:      systemWorker,
+		server:            server,
+		adminServer:       adminServer,
 	}
 
 	return e, nil

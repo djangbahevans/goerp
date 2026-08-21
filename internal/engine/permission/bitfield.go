@@ -26,3 +26,18 @@ func (b *PermissionBitfield) Set(idx int) {
 
 	(*b)[word] |= 1 << (idx % bitsPerWord)
 }
+
+// Or merges other's set bits into b, growing b if other is longer — the
+// "child's bitfield OR'd with its parent's" mechanic role inheritance
+// resolution needs (auth-internals.md §10 "Role inheritance").
+func (b *PermissionBitfield) Or(other PermissionBitfield) {
+	if len(other) > len(*b) {
+		grown := make(PermissionBitfield, len(other))
+		copy(grown, *b)
+		*b = grown
+	}
+
+	for word, bits := range other {
+		(*b)[word] |= bits
+	}
+}
