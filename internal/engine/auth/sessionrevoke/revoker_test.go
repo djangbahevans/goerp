@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
-	"github.com/djangbahevans/goerp/internal/engine/session"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/google/uuid"

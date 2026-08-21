@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
-	"github.com/djangbahevans/goerp/internal/engine/session"
 )
 
 // blocklistTTL matches the access token's max lifetime

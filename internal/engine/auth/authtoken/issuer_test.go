@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/session"
+	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
-	"github.com/djangbahevans/goerp/internal/engine/session"
-	"github.com/djangbahevans/goerp/internal/engine/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"

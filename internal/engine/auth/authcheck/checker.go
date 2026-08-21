@@ -22,12 +22,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djangbahevans/goerp/internal/engine/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
+	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/sessionrevoke"
-	"github.com/djangbahevans/goerp/internal/engine/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/golang-jwt/jwt/v5"
 )
