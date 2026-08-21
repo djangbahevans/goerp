@@ -25,3 +25,14 @@ func TestNewUnreachable(t *testing.T) {
 		t.Fatal("New() against an unreachable URL: expected an error, got nil")
 	}
 }
+
+func TestDeleteIndex_NonexistentIndexIsNotAnError(t *testing.T) {
+	c, err := New(localMeilisearchURL, localMeilisearchKey)
+	if err != nil {
+		t.Skipf("meilisearch not reachable at %s (start compose.dev.yml): %v", localMeilisearchURL, err)
+	}
+
+	if err := c.DeleteIndex("nonexistent-index-" + t.Name()); err != nil {
+		t.Errorf("DeleteIndex() on a nonexistent index: error = %v, want nil", err)
+	}
+}

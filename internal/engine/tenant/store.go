@@ -36,8 +36,19 @@ CREATE TABLE IF NOT EXISTS system.tenants (
     suspended_at    TIMESTAMPTZ,
     suspended_by    UUID,
     suspend_reason  TEXT,
-    deleted_at      TIMESTAMPTZ
+    deleted_at      TIMESTAMPTZ,
+    offboard_deletion_started_at TIMESTAMPTZ
 )
+`
+
+// addOffboardDeletionStartedAtColumn backfills offboard_deletion_started_at
+// onto a system.tenants table created before this column existed —
+// createTenantsTable's own CREATE TABLE IF NOT EXISTS only reaches a
+// brand-new database, so an already-bootstrapped one needs this separate
+// idempotent ALTER TABLE the same way suspended_by's comment above
+// anticipates a future one for its own REFERENCES constraint.
+const addOffboardDeletionStartedAtColumn = `
+ALTER TABLE system.tenants ADD COLUMN IF NOT EXISTS offboard_deletion_started_at TIMESTAMPTZ
 `
 
 const createTenantDomainsTable = `
@@ -92,6 +103,9 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createTenantDomainsDomainIndex); err != nil {
 			return fmt.Errorf("create tenant_domains domain index: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, addOffboardDeletionStartedAtColumn); err != nil {
+			return fmt.Errorf("add offboard_deletion_started_at column: %w", err)
 		}
 
 		return nil
@@ -158,11 +172,11 @@ func (s *Store) ActiveTenants(ctx context.Context) ([]Tenant, error) {
 // shared by every method below that returns a complete Tenant (as opposed
 // to CreateTenant/ActiveTenants' narrower, pre-existing column lists,
 // which are left as they were to avoid disturbing their own tests).
-const tenantColumns = `id, slug, name, plan, status, region, country, trial_ends_at, created_at, updated_at, activated_at, suspended_at, suspended_by, suspend_reason, deleted_at`
+const tenantColumns = `id, slug, name, plan, status, region, country, trial_ends_at, created_at, updated_at, activated_at, suspended_at, suspended_by, suspend_reason, deleted_at, offboard_deletion_started_at`
 
 // tenantColumnsPrefixed is tenantColumns qualified with the "t" alias, for
 // queries joining system.tenants against another table.
-const tenantColumnsPrefixed = `t.id, t.slug, t.name, t.plan, t.status, t.region, t.country, t.trial_ends_at, t.created_at, t.updated_at, t.activated_at, t.suspended_at, t.suspended_by, t.suspend_reason, t.deleted_at`
+const tenantColumnsPrefixed = `t.id, t.slug, t.name, t.plan, t.status, t.region, t.country, t.trial_ends_at, t.created_at, t.updated_at, t.activated_at, t.suspended_at, t.suspended_by, t.suspend_reason, t.deleted_at, t.offboard_deletion_started_at`
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows, so scanTenant
 // works for both a single-row QueryRowContext result and one row of a
@@ -174,12 +188,12 @@ type rowScanner interface {
 func scanTenant(sc rowScanner) (*Tenant, error) {
 	var t Tenant
 	var country, suspendedBy, suspendReason sql.NullString
-	var trialEndsAt, activatedAt, suspendedAt, deletedAt sql.NullTime
+	var trialEndsAt, activatedAt, suspendedAt, deletedAt, offboardDeletionStartedAt sql.NullTime
 
 	if err := sc.Scan(
 		&t.ID, &t.Slug, &t.Name, &t.Plan, &t.Status, &t.Region, &country,
 		&trialEndsAt, &t.CreatedAt, &t.UpdatedAt, &activatedAt, &suspendedAt, &suspendedBy,
-		&suspendReason, &deletedAt,
+		&suspendReason, &deletedAt, &offboardDeletionStartedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -204,6 +218,9 @@ func scanTenant(sc rowScanner) (*Tenant, error) {
 	}
 	if deletedAt.Valid {
 		t.DeletedAt = &deletedAt.Time
+	}
+	if offboardDeletionStartedAt.Valid {
+		t.OffboardDeletionStartedAt = &offboardDeletionStartedAt.Time
 	}
 
 	return &t, nil
@@ -344,7 +361,10 @@ func (s *Store) GetByDomain(ctx context.Context, domain string) (*Tenant, error)
 // (activated_at IS NULL) — a later suspend/unsuspend cycle back to active
 // leaves the original activation timestamp alone, since it's what
 // `goerp tenant status`'s provisioning-duration figure (activated_at -
-// created_at) is meant to measure.
+// created_at) is meant to measure. deleted_at follows the same
+// set-once-and-keep pattern as activated_at, for the same reason:
+// OffboardTenantWorkflow's MarkTenantDeleted step is the only caller that
+// ever transitions to StatusDeleted, and it does so exactly once.
 func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, reason *string) (*Tenant, error) {
 	row := s.db.QueryRowContext(ctx, `
 		UPDATE system.tenants
@@ -352,7 +372,8 @@ func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, re
 		    updated_at = NOW(),
 		    activated_at = CASE WHEN $1 = 'active' AND activated_at IS NULL THEN NOW() ELSE activated_at END,
 		    suspended_at = CASE WHEN $1 = 'suspended' THEN NOW() ELSE suspended_at END,
-		    suspend_reason = CASE WHEN $1 = 'suspended' THEN $2 ELSE suspend_reason END
+		    suspend_reason = CASE WHEN $1 = 'suspended' THEN $2 ELSE suspend_reason END,
+		    deleted_at = CASE WHEN $1 = 'deleted' AND deleted_at IS NULL THEN NOW() ELSE deleted_at END
 		WHERE slug = $3
 		RETURNING `+tenantColumns+`
 	`, string(status), reason, slug)
@@ -363,6 +384,90 @@ func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, re
 			return nil, ErrTenantNotFound
 		}
 		return nil, fmt.Errorf("update tenant status: %w", err)
+	}
+
+	return t, nil
+}
+
+// ErrOffboardNotCancellable is returned by CancelOffboarding when the
+// tenant isn't in a state offboarding can be reversed from — either it was
+// never offboarding, or offboard deletion has already started
+// (multitenancy-internals.md §9's "point of no return"). Callers surface
+// this as cli-reference.md §5's "nothing to cancel" error.
+var ErrOffboardNotCancellable = errors.New("tenant offboard is not cancellable")
+
+// BeginOffboarding transitions an active tenant to StatusOffboarding — the
+// first step of OffboardTenantWorkflow (and the immediate-offboard River
+// job). Scoped to status = 'active' so it can't be called twice for the
+// same tenant or fired against a tenant in some other state; returns
+// ErrTenantNotFound if no active tenant with slug exists (which also
+// covers "already offboarding" — a real distinction callers might want
+// later, but not one this ticket's callers need to make).
+func (s *Store) BeginOffboarding(ctx context.Context, slug string) (*Tenant, error) {
+	row := s.db.QueryRowContext(ctx, `
+		UPDATE system.tenants
+		SET status = $1, updated_at = NOW()
+		WHERE slug = $2 AND status = $3
+		RETURNING `+tenantColumns+`
+	`, StatusOffboarding, slug, StatusActive)
+
+	t, err := scanTenant(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTenantNotFound
+		}
+		return nil, fmt.Errorf("begin offboarding: %w", err)
+	}
+
+	return t, nil
+}
+
+// MarkDeletionStarted sets offboard_deletion_started_at, the point past
+// which CancelOffboarding refuses to run. Scoped to status = 'offboarding'
+// AND offboard_deletion_started_at IS NULL, so it's safe to call
+// concurrently with CancelOffboarding: whichever of the two CAS updates
+// commits first wins the race, and the loser sees 0 rows affected. started
+// reports which one this call was — false means CancelOffboarding got
+// there first and the caller (OffboardTenantWorkflow, or the immediate
+// River job) must stop before running any deletion step.
+func (s *Store) MarkDeletionStarted(ctx context.Context, slug string) (started bool, err error) {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE system.tenants
+		SET offboard_deletion_started_at = NOW(), updated_at = NOW()
+		WHERE slug = $1 AND status = $2 AND offboard_deletion_started_at IS NULL
+	`, slug, StatusOffboarding)
+	if err != nil {
+		return false, fmt.Errorf("mark deletion started: %w", err)
+	}
+
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("mark deletion started: %w", err)
+	}
+
+	return n > 0, nil
+}
+
+// CancelOffboarding reverses a still-cancellable offboard back to
+// StatusActive. Scoped to status = 'offboarding' AND
+// offboard_deletion_started_at IS NULL — the same CAS guard
+// MarkDeletionStarted races against — so a tenant whose deletion has
+// already started (or that was never offboarding) returns
+// ErrOffboardNotCancellable rather than silently doing nothing.
+func (s *Store) CancelOffboarding(ctx context.Context, slug string) (*Tenant, error) {
+	row := s.db.QueryRowContext(ctx, `
+		UPDATE system.tenants
+		SET status = $1, updated_at = NOW()
+		WHERE slug = $2 AND status = $3 AND offboard_deletion_started_at IS NULL
+		RETURNING `+tenantColumns+`
+	`, StatusActive, slug, StatusOffboarding)
+
+	t, err := scanTenant(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrOffboardNotCancellable
+		}
+		return nil, fmt.Errorf("cancel offboarding: %w", err)
 	}
 
 	return t, nil

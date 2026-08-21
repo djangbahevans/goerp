@@ -67,6 +67,20 @@ func (b *LocalBackend) Delete(ctx context.Context, key string) error {
 	return os.Remove(filepath.Join(b.dir, filepath.FromSlash(key)))
 }
 
+// DeleteByPrefix removes every file under prefix (a directory relative to
+// b.dir, e.g. a tenant's slug) — OffboardTenantWorkflow's
+// DeleteTenantStorageFiles step. Not an error if prefix has no files, or
+// doesn't exist at all.
+func (b *LocalBackend) DeleteByPrefix(ctx context.Context, prefix string) error {
+	dir := filepath.Join(b.dir, filepath.FromSlash(prefix))
+
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("delete files under %q: %w", prefix, err)
+	}
+
+	return nil
+}
+
 func (b *LocalBackend) SignedURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	return b.localURL(key), nil
 }
