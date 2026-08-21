@@ -48,7 +48,7 @@ type Input struct {
 // documented anywhere.
 const activityTimeout = 30 * time.Second
 
-// Workflow marks the tenant offboarding, waits out input.GracePeriod
+// OffboardTenantWorkflow marks the tenant offboarding, waits out input.GracePeriod
 // (during which CancelOffboard can still reverse it — see
 // Activities.MarkDeletionStarted's doc comment for the race-safety
 // mechanism), then deletes its search indexes, cache entries, storage
@@ -60,7 +60,7 @@ const activityTimeout = 30 * time.Second
 // purpose-first key layout means there's no tenant-scoped prefix to
 // delete by any other way), and that table lives in the tenant's own
 // schema, gone the moment DropTenantSchema runs.
-func Workflow(ctx workflow.Context, input Input) error {
+func OffboardTenantWorkflow(ctx workflow.Context, input Input) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: activityTimeout})
 	logger := workflow.GetLogger(ctx)
 

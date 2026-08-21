@@ -44,6 +44,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
@@ -64,6 +65,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/systemworker"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantoffboard"
 	"github.com/djangbahevans/goerp/internal/engine/tenantprovision"
 	"github.com/djangbahevans/goerp/internal/engine/tenantresolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantsync"
@@ -298,22 +300,8 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 
-	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
-		Store:          tenantStore,
-		SyncStatus:     syncPool,
-		TableCounts:    syncPool,
-		Membership:     roleStore,
-		Users:          userStore,
-		SessionRevoker: sessionRevoker,
-		DomainCache:    cacheClient,
-		Inviter:        inviteStore,
-		Provisioner:    tenantprovision.NewProvisioner(temporalClient, systemworker.TaskQueue),
-		// Exporter, Importer, Offboarder stay nil until
-		// goerp#15/#150 land — the handlers report
-		// StatusNotImplemented for those routes rather than the wiring
-		// needing a placeholder implementation here. inviteStore's own
-		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
-	})
+	// adminapi.RegisterTenantRoutes is called further down, once
+	// jobQueueClient exists (tenantoffboard.NewOffboarder needs it).
 
 	// authChecker isn't consumed yet — wiring it into an actual HTTP
 	// middleware chain is goerp#91, which also owns resolving the current
@@ -521,6 +509,17 @@ func New(cfg *config.Config) (*Engine, error) {
 	systemWorker.RegisterWorkflow(tenantprovision.Workflow)
 	systemWorker.RegisterActivity(provisionActivities)
 
+	// OffboardTenantWorkflow's activities need moduleRegistry too (its
+	// DeleteSearchIndexes step enumerates each loaded module's declared
+	// SearchIndexes) — registered here for the same reason
+	// provisionActivities is. filesStore is this package's only
+	// construction of internal/engine/files.Store; DeleteTenantStorageFiles
+	// is the one activity that reads it.
+	filesStore := files.NewStore(primaryPool)
+	offboardActivities := tenantoffboard.NewActivities(tenantStore, filesStore, cacheClient, searchClient, storageBackend, schemaPool, moduleRegistry)
+	systemWorker.RegisterWorkflow(tenantoffboard.OffboardTenantWorkflow)
+	systemWorker.RegisterActivity(offboardActivities)
+
 	poolwarm.WarmAll(ctx, loadedModules)
 
 	// jobQueuePool is a separate pool from primaryPool: river's pgx driver
@@ -558,6 +557,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	jobWorkers := river.NewWorkers()
 	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
 	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: primaryPool})
+	river.AddWorker(jobWorkers, &tenantoffboard.ImmediateWorker{Activities: offboardActivities, TenantStore: tenantStore})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()
@@ -574,6 +574,25 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{Client: jobQueueClient})
+
+	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
+		Store:          tenantStore,
+		SyncStatus:     syncPool,
+		TableCounts:    syncPool,
+		Membership:     roleStore,
+		Users:          userStore,
+		SessionRevoker: sessionRevoker,
+		DomainCache:    cacheClient,
+		Inviter:        inviteStore,
+		Provisioner:    tenantprovision.NewProvisioner(temporalClient, systemworker.TaskQueue),
+		Offboarder:     tenantoffboard.NewOffboarder(tenantStore, temporalClient, systemworker.TaskQueue, jobQueueClient, jobqueue.QueueAdmin),
+		// Exporter, Importer stay nil until goerp#156/#157 land — both
+		// blocked on unfiled prerequisites (see tenantoffboard's package
+		// doc comment for #156's). The handlers report
+		// StatusNotImplemented for those routes rather than the wiring
+		// needing a placeholder implementation here. inviteStore's own
+		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
+	})
 
 	e = &Engine{
 		cfg:             cfg,

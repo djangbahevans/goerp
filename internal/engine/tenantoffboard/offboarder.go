@@ -95,7 +95,7 @@ func (o *Offboarder) StartOffboard(ctx context.Context, tenantSlug string, grace
 	_, err = o.temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        WorkflowID(tenantSlug),
 		TaskQueue: o.taskQueue,
-	}, Workflow, Input{
+	}, OffboardTenantWorkflow, Input{
 		TenantID:    t.ID,
 		TenantSlug:  t.Slug,
 		GracePeriod: gracePeriod,
