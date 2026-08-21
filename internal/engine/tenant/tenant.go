@@ -42,6 +42,12 @@ type Tenant struct {
 	SuspendedBy   *string    `json:"suspended_by,omitempty"`
 	SuspendReason *string    `json:"suspend_reason,omitempty"`
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	// OffboardDeletionStartedAt is set the moment OffboardTenantWorkflow (or
+	// the immediate-offboard River job) commits to actually deleting the
+	// tenant's data — the single source of truth for "is this offboard still
+	// cancellable." nil while the tenant is only marked StatusOffboarding
+	// and still inside its grace period.
+	OffboardDeletionStartedAt *time.Time `json:"offboard_deletion_started_at,omitempty"`
 }
 
 type DomainType string

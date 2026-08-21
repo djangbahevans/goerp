@@ -625,6 +625,163 @@ func TestDeleteProvisioning_RemovesProvisioningTenant(t *testing.T) {
 	}
 }
 
+func TestUpdateStatus_DeleteSetsDeletedAtOnce(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Delete Me")
+
+	deleted, err := store.UpdateStatus(context.Background(), slug, StatusDeleted, nil)
+	if err != nil {
+		t.Fatalf("delete UpdateStatus() error: %v", err)
+	}
+	if deleted.DeletedAt == nil {
+		t.Fatal("expected DeletedAt to be set on first delete")
+	}
+	firstDeletedAt := *deleted.DeletedAt
+
+	redelivered, err := store.UpdateStatus(context.Background(), slug, StatusDeleted, nil)
+	if err != nil {
+		t.Fatalf("second delete UpdateStatus() error: %v", err)
+	}
+	if redelivered.DeletedAt == nil || !redelivered.DeletedAt.Equal(firstDeletedAt) {
+		t.Error("expected DeletedAt to stay at the original deletion time, not reset")
+	}
+}
+
+func TestBeginOffboarding_ActiveTenantTransitionsToOffboarding(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	created := createTenant(t, store, conn, slug, "Offboard Me")
+	if _, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil); err != nil {
+		t.Fatalf("activate UpdateStatus() error: %v", err)
+	}
+
+	got, err := store.BeginOffboarding(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("BeginOffboarding() error: %v", err)
+	}
+	if got.Status != StatusOffboarding {
+		t.Errorf("Status = %q, want %q", got.Status, StatusOffboarding)
+	}
+	if got.ID != created.ID {
+		t.Errorf("ID = %q, want %q", got.ID, created.ID)
+	}
+}
+
+func TestBeginOffboarding_NonActiveTenantReturnsNotFound(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Still Provisioning")
+	// Left at its default "provisioning" status deliberately.
+
+	if _, err := store.BeginOffboarding(context.Background(), slug); !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("BeginOffboarding() on a provisioning tenant: error = %v, want ErrTenantNotFound", err)
+	}
+}
+
+func TestMarkDeletionStarted_FirstCallWinsSecondLoses(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Deletion Race")
+	if _, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil); err != nil {
+		t.Fatalf("activate UpdateStatus() error: %v", err)
+	}
+	if _, err := store.BeginOffboarding(context.Background(), slug); err != nil {
+		t.Fatalf("BeginOffboarding() error: %v", err)
+	}
+
+	first, err := store.MarkDeletionStarted(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("first MarkDeletionStarted() error: %v", err)
+	}
+	if !first {
+		t.Error("first MarkDeletionStarted() = false, want true")
+	}
+
+	second, err := store.MarkDeletionStarted(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("second MarkDeletionStarted() error: %v", err)
+	}
+	if second {
+		t.Error("second MarkDeletionStarted() = true, want false (already started)")
+	}
+
+	got, err := store.GetBySlug(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("GetBySlug() error: %v", err)
+	}
+	if got.OffboardDeletionStartedAt == nil {
+		t.Error("expected OffboardDeletionStartedAt to be set")
+	}
+}
+
+func TestMarkDeletionStarted_NonOffboardingTenantReturnsFalse(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Not Offboarding")
+
+	started, err := store.MarkDeletionStarted(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("MarkDeletionStarted() error: %v", err)
+	}
+	if started {
+		t.Error("MarkDeletionStarted() on a non-offboarding tenant = true, want false")
+	}
+}
+
+func TestCancelOffboarding_DuringGracePeriodRestoresActive(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Cancel Me")
+	if _, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil); err != nil {
+		t.Fatalf("activate UpdateStatus() error: %v", err)
+	}
+	if _, err := store.BeginOffboarding(context.Background(), slug); err != nil {
+		t.Fatalf("BeginOffboarding() error: %v", err)
+	}
+
+	got, err := store.CancelOffboarding(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("CancelOffboarding() error: %v", err)
+	}
+	if got.Status != StatusActive {
+		t.Errorf("Status = %q, want %q", got.Status, StatusActive)
+	}
+}
+
+func TestCancelOffboarding_AfterDeletionStartedFails(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Too Late To Cancel")
+	if _, err := store.UpdateStatus(context.Background(), slug, StatusActive, nil); err != nil {
+		t.Fatalf("activate UpdateStatus() error: %v", err)
+	}
+	if _, err := store.BeginOffboarding(context.Background(), slug); err != nil {
+		t.Fatalf("BeginOffboarding() error: %v", err)
+	}
+	started, err := store.MarkDeletionStarted(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("MarkDeletionStarted() error: %v", err)
+	}
+	if !started {
+		t.Fatal("expected MarkDeletionStarted() to win the race")
+	}
+
+	if _, err := store.CancelOffboarding(context.Background(), slug); !errors.Is(err, ErrOffboardNotCancellable) {
+		t.Errorf("CancelOffboarding() after deletion started: error = %v, want ErrOffboardNotCancellable", err)
+	}
+}
+
+func TestCancelOffboarding_NotOffboardingFails(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	createTenant(t, store, conn, slug, "Never Offboarding")
+
+	if _, err := store.CancelOffboarding(context.Background(), slug); !errors.Is(err, ErrOffboardNotCancellable) {
+		t.Errorf("CancelOffboarding() on a non-offboarding tenant: error = %v, want ErrOffboardNotCancellable", err)
+	}
+}
+
 func TestDeleteProvisioning_NonProvisioningTenantReturnsNotFound(t *testing.T) {
 	store, conn := openTestStore(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Active Tenant")

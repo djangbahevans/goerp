@@ -80,6 +80,43 @@ func TestLocalBackendDelete(t *testing.T) {
 	}
 }
 
+func TestLocalBackendDeleteByPrefix(t *testing.T) {
+	b := newTestLocalBackend(t)
+	ctx := context.Background()
+
+	if _, err := b.Upload(ctx, "tenant-acme/files/a.txt", strings.NewReader("a"), UploadOptions{}); err != nil {
+		t.Fatalf("Upload() error: %v", err)
+	}
+	if _, err := b.Upload(ctx, "tenant-acme/files/b.txt", strings.NewReader("b"), UploadOptions{}); err != nil {
+		t.Fatalf("Upload() error: %v", err)
+	}
+	if _, err := b.Upload(ctx, "tenant-other/c.txt", strings.NewReader("c"), UploadOptions{}); err != nil {
+		t.Fatalf("Upload() error: %v", err)
+	}
+
+	if err := b.DeleteByPrefix(ctx, "tenant-acme"); err != nil {
+		t.Fatalf("DeleteByPrefix() error: %v", err)
+	}
+
+	if _, _, err := b.Download(ctx, "tenant-acme/files/a.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Download() of a deleted prefix's file error = %v, want os.ErrNotExist", err)
+	}
+	if _, _, err := b.Download(ctx, "tenant-acme/files/b.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Download() of a deleted prefix's file error = %v, want os.ErrNotExist", err)
+	}
+	if _, size, err := b.Download(ctx, "tenant-other/c.txt"); err != nil || size == 0 {
+		t.Errorf("Download() of an unrelated prefix's file: size=%d err=%v, want it to survive", size, err)
+	}
+}
+
+func TestLocalBackendDeleteByPrefixMissingPrefixIsNotAnError(t *testing.T) {
+	b := newTestLocalBackend(t)
+
+	if err := b.DeleteByPrefix(context.Background(), "does-not-exist"); err != nil {
+		t.Errorf("DeleteByPrefix() on a nonexistent prefix: error = %v, want nil", err)
+	}
+}
+
 func TestLocalBackendSignedAndPublicURL(t *testing.T) {
 	b := newTestLocalBackend(t)
 	ctx := context.Background()

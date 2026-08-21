@@ -21,6 +21,7 @@ type Backend interface {
 	Upload(ctx context.Context, key string, r io.Reader, opts UploadOptions) (string, error)
 	Download(ctx context.Context, fileID string) (io.ReadCloser, int64, error)
 	Delete(ctx context.Context, fileID string) error
+	DeleteByPrefix(ctx context.Context, prefix string) error
 	SignedURL(ctx context.Context, fileID string, expiry time.Duration) (string, error)
 	PublicURL(ctx context.Context, fileID string) (string, error)
 	Exists(ctx context.Context, key string) (bool, error)

@@ -190,6 +190,64 @@ func TestDelete_UnsetKeyIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestDeleteByPrefix_RemovesOnlyMatchingKeys(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	prefix := "cache-test:" + t.Name() + ":"
+	matching := []string{prefix + "a", prefix + "b", prefix + "c"}
+	other := "cache-test:" + t.Name() + "-unrelated"
+	t.Cleanup(func() { _ = c.Delete(context.Background(), other) })
+
+	for _, key := range matching {
+		if err := c.SetWithTTL(ctx, key, "1", time.Minute); err != nil {
+			t.Fatalf("SetWithTTL(%q) error: %v", key, err)
+		}
+	}
+	if err := c.SetWithTTL(ctx, other, "1", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL(%q) error: %v", other, err)
+	}
+
+	if err := c.DeleteByPrefix(ctx, prefix); err != nil {
+		t.Fatalf("DeleteByPrefix() error: %v", err)
+	}
+
+	for _, key := range matching {
+		exists, err := c.Exists(ctx, key)
+		if err != nil {
+			t.Fatalf("Exists(%q) error: %v", key, err)
+		}
+		if exists {
+			t.Errorf("Exists(%q) = true after DeleteByPrefix, want false", key)
+		}
+	}
+
+	exists, err := c.Exists(ctx, other)
+	if err != nil {
+		t.Fatalf("Exists(%q) error: %v", other, err)
+	}
+	if !exists {
+		t.Errorf("Exists(%q) = false after DeleteByPrefix of a different prefix, want true", other)
+	}
+}
+
+func TestDeleteByPrefix_NoMatchesIsNotAnError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	if err := c.DeleteByPrefix(ctx, "cache-test:"+t.Name()+":nonexistent:"); err != nil {
+		t.Errorf("DeleteByPrefix() with no matches: error = %v, want nil", err)
+	}
+}
+
 func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

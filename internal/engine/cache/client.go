@@ -96,3 +96,33 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+// DeleteByPrefix removes every key matching prefix+"*" — multitenancy-
+// internals.md §12's tenant cache flush, used by OffboardTenantWorkflow's
+// FlushTenantCache step. Uses SCAN rather than KEYS so it doesn't block the
+// Redis event loop on a large keyspace; not an error if no keys match.
+func (c *Client) DeleteByPrefix(ctx context.Context, prefix string) error {
+	iter := c.rdb.Scan(ctx, 0, prefix+"*", 0).Iterator()
+
+	var keys []string
+	for iter.Next(ctx) {
+		keys = append(keys, iter.Val())
+		if len(keys) >= 500 {
+			if err := c.rdb.Del(ctx, keys...).Err(); err != nil {
+				return fmt.Errorf("delete keys matching %q*: %w", prefix, err)
+			}
+			keys = keys[:0]
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("scan keys matching %q*: %w", prefix, err)
+	}
+
+	if len(keys) > 0 {
+		if err := c.rdb.Del(ctx, keys...).Err(); err != nil {
+			return fmt.Errorf("delete keys matching %q*: %w", prefix, err)
+		}
+	}
+
+	return nil
+}

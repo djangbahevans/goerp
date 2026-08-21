@@ -24,6 +24,13 @@ const (
 	QueueBulk     = "bulk"
 	QueueSearch   = "search"
 	QueueEmail    = "email"
+	// QueueAdmin is the reserved queue for admin API async operations
+	// (engine-internals.md §11a) — module install/downgrade, schema
+	// sync/accept/drop-index, tenant export/import, and immediate tenant
+	// offboard. Distinct from the 5 business queues above so an admin
+	// operator's own long-running request never contends with ordinary
+	// tenant job throughput.
+	QueueAdmin = "admin"
 )
 
 // migrateLockKey serializes concurrent Migrate callers against the same

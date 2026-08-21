@@ -29,3 +29,15 @@ func (c *Client) Ping() error {
 	_, err := c.client.Health()
 	return err
 }
+
+// DeleteIndex deletes the Meilisearch index identified by indexUID —
+// multitenancy-internals.md §13's per-tenant index naming, used by
+// OffboardTenantWorkflow's DeleteSearchIndex step. Not an error if the
+// index doesn't exist (Meilisearch's own delete is idempotent for that
+// case, returning a task that succeeds trivially).
+func (c *Client) DeleteIndex(indexUID string) error {
+	if _, err := c.client.DeleteIndex(indexUID); err != nil {
+		return fmt.Errorf("delete index %q: %w", indexUID, err)
+	}
+	return nil
+}
