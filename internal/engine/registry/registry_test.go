@@ -35,6 +35,29 @@ func TestModuleRegistry_Update_PublishesNewSnapshot(t *testing.T) {
 	}
 }
 
+func TestModuleRegistry_Update_SnapshotExposesPermissionRegistry(t *testing.T) {
+	r := &ModuleRegistry{}
+	modules := map[string]*module.LoadedModule{
+		"contacts": {
+			Status:   module.StatusReady,
+			Manifest: manifest.Manifest{Type: "standard", Permissions: []manifest.Permission{{Name: "contacts:contact:read"}}},
+		},
+	}
+
+	snap, err := r.Update(modules)
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	reg := snap.PermissionRegistry()
+	if reg == nil {
+		t.Fatal("PermissionRegistry() = nil")
+	}
+	if _, ok := reg.Index("contacts:contact:read"); !ok {
+		t.Error("expected the module's declared permission to be registered")
+	}
+}
+
 func TestModuleRegistry_Update_CarriesOverCronSchemaRegistries(t *testing.T) {
 	r := &ModuleRegistry{}
 

@@ -289,6 +289,118 @@ func (s *Store) PermissionNamesForUser(ctx context.Context, tenantSlug, userID s
 	return names, nil
 }
 
+// RoleIDsForUser returns the role_id of every unexpired role userID holds
+// in the tenant's schema — same predicate RoleNamesForUser uses, without
+// the join to roles.name. Populates permcache's Redis role-assignment
+// cache (auth-internals.md §14 layer 2).
+func (s *Store) RoleIDsForUser(ctx context.Context, tenantSlug, userID string) ([]string, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`
+		SELECT role_id
+		FROM %s.user_roles
+		WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
+		ORDER BY role_id
+	`, schema)
+
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("get role ids for user: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan role id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate role ids: %w", err)
+	}
+
+	return ids, nil
+}
+
+// Role is one roles table row — enough to resolve inheritance
+// (auth-internals.md §10 "Role inheritance") without a second round trip.
+type Role struct {
+	ID       string
+	Name     string
+	ParentID *string
+}
+
+// AllRoles returns every role in the tenant's schema, parent_id included.
+// permcache.RolePermissionMap.RebuildAll walks these to resolve each
+// role's full, inheritance-merged permission set.
+func (s *Store) AllRoles(ctx context.Context, tenantSlug string) ([]Role, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`SELECT id, name, parent_id FROM %s.roles`, schema)
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return []Role{}, nil
+		}
+		return nil, fmt.Errorf("get all roles: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	roles := []Role{}
+	for rows.Next() {
+		var r Role
+		var parentID sql.NullString
+		if err := rows.Scan(&r.ID, &r.Name, &parentID); err != nil {
+			return nil, fmt.Errorf("scan role: %w", err)
+		}
+		if parentID.Valid {
+			r.ParentID = &parentID.String
+		}
+		roles = append(roles, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate roles: %w", err)
+	}
+
+	return roles, nil
+}
+
+// AllRolePermissions returns every role_permissions grant in the tenant's
+// schema, keyed by role_id — one query for the whole tenant rather than
+// one per role, since permcache.RolePermissionMap.RebuildAll needs every
+// role's own grants to resolve inheritance.
+func (s *Store) AllRolePermissions(ctx context.Context, tenantSlug string) (map[string][]string, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`SELECT role_id, permission_name FROM %s.role_permissions`, schema)
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return map[string][]string{}, nil
+		}
+		return nil, fmt.Errorf("get all role permissions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	byRole := map[string][]string{}
+	for rows.Next() {
+		var roleID, permName string
+		if err := rows.Scan(&roleID, &permName); err != nil {
+			return nil, fmt.Errorf("scan role permission: %w", err)
+		}
+		byRole[roleID] = append(byRole[roleID], permName)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate role permissions: %w", err)
+	}
+
+	return byRole, nil
+}
+
 // isUndefinedTable reports whether err is Postgres' undefined_table error
 // (42P01) — the error a query against a tenant_{slug} schema's tables gets
 // when that tenant's schema (or role.Store.Bootstrap for it) hasn't run

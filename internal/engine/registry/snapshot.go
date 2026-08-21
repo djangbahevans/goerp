@@ -33,6 +33,14 @@ func (s *RegistrySnapshot) RouteTable() *route.RouteTable {
 	return s.routeTable
 }
 
+// PermissionRegistry returns this snapshot's permission registry — the
+// current process's live permission-name-to-bitfield-index assignments
+// (permcache.RolePermissionMap.RebuildAll needs these to resolve each
+// role's bitfield against this process's own indices).
+func (s *RegistrySnapshot) PermissionRegistry() *permission.PermissionRegistry {
+	return s.permRegistry
+}
+
 // Populated by future tickets (backlog #35, #37). Never rebuilt by any
 // build* step here; carried over unchanged from the prior snapshot on
 // every write.

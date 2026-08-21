@@ -89,3 +89,40 @@ func TestPermissionBitfield_SetAndHas(t *testing.T) {
 		t.Error("Has(200) = true, want false — beyond the bitfield's current length")
 	}
 }
+
+func TestPermissionBitfield_Or(t *testing.T) {
+	var child PermissionBitfield
+	child.Set(3)
+
+	var parent PermissionBitfield
+	parent.Set(3)  // overlapping bit
+	parent.Set(70) // past the first word, growing child
+
+	child.Or(parent)
+
+	for _, idx := range []int{3, 70} {
+		if !child.Has(idx) {
+			t.Errorf("Has(%d) = false after Or, want true", idx)
+		}
+	}
+	if child.Has(4) {
+		t.Error("Has(4) = true, want false")
+	}
+}
+
+func TestPermissionBitfield_Or_ShorterOtherLeavesExistingBitsAlone(t *testing.T) {
+	var b PermissionBitfield
+	b.Set(70)
+
+	var other PermissionBitfield
+	other.Set(3)
+
+	b.Or(other)
+
+	if !b.Has(70) {
+		t.Error("Has(70) = false after Or, want true (should survive)")
+	}
+	if !b.Has(3) {
+		t.Error("Has(3) = false after Or, want true")
+	}
+}

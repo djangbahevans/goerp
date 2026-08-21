@@ -483,3 +483,169 @@ func TestAdminUserID_UnprovisionedTenantReturnsErrAdminUserNotFound(t *testing.T
 		t.Errorf("AdminUserID() error = %v, want ErrAdminUserNotFound", err)
 	}
 }
+
+func TestRoleIDsForUser_ReturnsUnexpiredRoleIDs(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	adminID, err := store.GetRoleByName(ctx, slug, "admin")
+	if err != nil {
+		t.Fatalf("GetRoleByName(admin) error: %v", err)
+	}
+	userID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName(user) error: %v", err)
+	}
+
+	grantee := "00000000-0000-0000-0000-000000000008"
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), grantee, adminID,
+	); err != nil {
+		t.Fatalf("insert unexpired grant: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id, expires_at) VALUES ($1, $2, NOW() - interval '1 hour')", schema), grantee, userID,
+	); err != nil {
+		t.Fatalf("insert expired grant: %v", err)
+	}
+
+	ids, err := store.RoleIDsForUser(ctx, slug, grantee)
+	if err != nil {
+		t.Fatalf("RoleIDsForUser() error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != adminID {
+		t.Errorf("RoleIDsForUser() = %v, want [%s]", ids, adminID)
+	}
+}
+
+func TestRoleIDsForUser_UnprovisionedTenantReturnsEmpty(t *testing.T) {
+	store, _, _ := openTestStore(t)
+
+	ids, err := store.RoleIDsForUser(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()), "u1")
+	if err != nil {
+		t.Fatalf("RoleIDsForUser() error: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("RoleIDsForUser() = %v, want empty", ids)
+	}
+}
+
+func TestAllRoles_ReturnsEveryRoleWithParentID(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	adminID, err := store.GetRoleByName(ctx, slug, "admin")
+	if err != nil {
+		t.Fatalf("GetRoleByName(admin) error: %v", err)
+	}
+
+	var childID string
+	if err := conn.QueryRowContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.roles (name, parent_id) VALUES ('sales_manager', $1) RETURNING id", schema), adminID,
+	).Scan(&childID); err != nil {
+		t.Fatalf("insert child role: %v", err)
+	}
+
+	roles, err := store.AllRoles(ctx, slug)
+	if err != nil {
+		t.Fatalf("AllRoles() error: %v", err)
+	}
+
+	byID := make(map[string]Role, len(roles))
+	for _, r := range roles {
+		byID[r.ID] = r
+	}
+
+	admin, ok := byID[adminID]
+	if !ok {
+		t.Fatal("expected the admin role in AllRoles() result")
+	}
+	if admin.ParentID != nil {
+		t.Errorf("admin.ParentID = %v, want nil", admin.ParentID)
+	}
+
+	child, ok := byID[childID]
+	if !ok {
+		t.Fatal("expected the sales_manager role in AllRoles() result")
+	}
+	if child.ParentID == nil || *child.ParentID != adminID {
+		t.Errorf("child.ParentID = %v, want %q", child.ParentID, adminID)
+	}
+	if child.Name != "sales_manager" {
+		t.Errorf("child.Name = %q, want %q", child.Name, "sales_manager")
+	}
+}
+
+func TestAllRoles_UnprovisionedTenantReturnsEmpty(t *testing.T) {
+	store, _, _ := openTestStore(t)
+
+	roles, err := store.AllRoles(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("AllRoles() error: %v", err)
+	}
+	if len(roles) != 0 {
+		t.Errorf("AllRoles() = %v, want empty", roles)
+	}
+}
+
+func TestAllRolePermissions_ReturnsGrantsKeyedByRoleID(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	adminID, err := store.GetRoleByName(ctx, slug, "admin")
+	if err != nil {
+		t.Fatalf("GetRoleByName(admin) error: %v", err)
+	}
+	userID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName(user) error: %v", err)
+	}
+
+	for _, grant := range []struct{ roleID, perm string }{
+		{adminID, "widgets.read"},
+		{adminID, "widgets.write"},
+		{userID, "widgets.read"},
+	} {
+		if _, err := conn.ExecContext(ctx,
+			fmt.Sprintf("INSERT INTO %s.role_permissions (role_id, permission_name) VALUES ($1, $2)", schema), grant.roleID, grant.perm,
+		); err != nil {
+			t.Fatalf("insert role_permissions row: %v", err)
+		}
+	}
+
+	byRole, err := store.AllRolePermissions(ctx, slug)
+	if err != nil {
+		t.Fatalf("AllRolePermissions() error: %v", err)
+	}
+
+	if len(byRole[adminID]) != 2 {
+		t.Errorf("byRole[admin] = %v, want 2 permissions", byRole[adminID])
+	}
+	if len(byRole[userID]) != 1 || byRole[userID][0] != "widgets.read" {
+		t.Errorf("byRole[user] = %v, want [widgets.read]", byRole[userID])
+	}
+}
+
+func TestAllRolePermissions_UnprovisionedTenantReturnsEmpty(t *testing.T) {
+	store, _, _ := openTestStore(t)
+
+	byRole, err := store.AllRolePermissions(context.Background(), fmt.Sprintf("nosuchtenant%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("AllRolePermissions() error: %v", err)
+	}
+	if len(byRole) != 0 {
+		t.Errorf("AllRolePermissions() = %v, want empty", byRole)
+	}
+}
