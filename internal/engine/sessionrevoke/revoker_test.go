@@ -145,6 +145,35 @@ func TestRevokeAllForUser_BlocklistsEverySession(t *testing.T) {
 	}
 }
 
+func TestIsRolesStale_FalseWhenNeverMarked(t *testing.T) {
+	f := newFixture(t)
+
+	stale, err := f.revoker.IsRolesStale(context.Background(), f.sessionID)
+	if err != nil {
+		t.Fatalf("IsRolesStale() error: %v", err)
+	}
+	if stale {
+		t.Error("IsRolesStale() = true for a never-marked session, want false")
+	}
+}
+
+func TestMarkRolesStale_ThenIsRolesStaleReturnsTrue(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	if err := f.revoker.MarkRolesStale(ctx, f.sessionID); err != nil {
+		t.Fatalf("MarkRolesStale() error: %v", err)
+	}
+
+	stale, err := f.revoker.IsRolesStale(ctx, f.sessionID)
+	if err != nil {
+		t.Fatalf("IsRolesStale() error: %v", err)
+	}
+	if !stale {
+		t.Error("IsRolesStale() = false after MarkRolesStale, want true")
+	}
+}
+
 func TestRevokeAllForTenant_BlocklistsEverySession(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

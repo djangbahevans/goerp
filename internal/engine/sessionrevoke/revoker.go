@@ -26,6 +26,15 @@ func blocklistKey(sessionID string) string {
 	return "auth:session:revoked:" + sessionID
 }
 
+// staleRolesTTL matches blocklistTTL for the same reason: §14's "stale
+// session" mechanism only needs to force re-evaluation for as long as a
+// token minted before the role change could still be presented.
+const staleRolesTTL = 15 * time.Minute
+
+func staleRolesKey(sessionID string) string {
+	return "auth:session:stale:" + sessionID
+}
+
 type Revoker struct {
 	sessions *session.Store
 	cache    *cache.Client
@@ -100,4 +109,30 @@ func (r *Revoker) IsBlocked(ctx context.Context, sessionID string) (bool, error)
 		return false, fmt.Errorf("check blocklist for session %s: %w", sessionID, err)
 	}
 	return blocked, nil
+}
+
+// MarkRolesStale marks sessionID's cached roles stale — auth-internals.md
+// §14 "Cache invalidation on role change" step 3, called by whatever future
+// flow grants or revokes a role (mirroring RoleCache.Invalidate's own
+// "primitive with no caller yet" status in internal/engine/permcache).
+// Forces authcheck.Checker to bypass permcache.RoleCache and re-read roles
+// from Postgres for the remaining lifetime of any access token already
+// issued to this session, since that token's own roles claim may now be
+// stale.
+func (r *Revoker) MarkRolesStale(ctx context.Context, sessionID string) error {
+	if err := r.cache.SetWithTTL(ctx, staleRolesKey(sessionID), "1", staleRolesTTL); err != nil {
+		return fmt.Errorf("mark roles stale for session %s: %w", sessionID, err)
+	}
+	return nil
+}
+
+// IsRolesStale reports whether sessionID's cached roles have been marked
+// stale by MarkRolesStale — the check authcheck.Checker runs before
+// trusting permcache.RoleCache for this session.
+func (r *Revoker) IsRolesStale(ctx context.Context, sessionID string) (bool, error) {
+	stale, err := r.cache.Exists(ctx, staleRolesKey(sessionID))
+	if err != nil {
+		return false, fmt.Errorf("check stale-roles marker for session %s: %w", sessionID, err)
+	}
+	return stale, nil
 }

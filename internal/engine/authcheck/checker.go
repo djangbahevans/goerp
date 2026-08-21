@@ -6,9 +6,12 @@
 //
 // Checker.Authenticate assumes tenant resolution (goerp#89) has already
 // happened — it takes the resolved tenant, it doesn't resolve one itself —
-// and doesn't wire into any actual HTTP middleware chain (goerp#91). The
-// mfa_token and erp_ API-key branches, and MFA/permission-cache hydration,
-// are separate, still-blocked tickets (goerp#223/#224/#225).
+// and doesn't wire into any actual HTTP middleware chain (goerp#91).
+// Permission-context hydration (§9 step 10) goes through
+// internal/engine/permcache's RoleCache/RolePermissionMap rather than
+// querying Postgres on every request. The mfa_token and erp_ API-key
+// branches, and MFA enforcement, are separate, still-blocked tickets
+// (goerp#223/#224).
 package authcheck
 
 import (
@@ -20,6 +23,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/sessionrevoke"
@@ -75,6 +79,8 @@ type Checker struct {
 	revoker    *sessionrevoke.Revoker
 	users      *user.Store
 	roles      *role.Store
+	roleCache  *permcache.RoleCache
+	roleMap    *permcache.RolePermissionMap
 }
 
 func NewChecker(
@@ -82,12 +88,16 @@ func NewChecker(
 	revoker *sessionrevoke.Revoker,
 	users *user.Store,
 	roles *role.Store,
+	roleCache *permcache.RoleCache,
+	roleMap *permcache.RolePermissionMap,
 ) *Checker {
 	return &Checker{
 		signingKey: signingKey,
 		revoker:    revoker,
 		users:      users,
 		roles:      roles,
+		roleCache:  roleCache,
+		roleMap:    roleMap,
 	}
 }
 
@@ -97,10 +107,13 @@ func NewChecker(
 // caller's current registry.RegistrySnapshot's PermissionRegistry — it's
 // rebuilt on every module hot reload, not a static object this package
 // can hold onto, so a future auth middleware (goerp#91) is expected to
-// resolve it once per request the same way it resolves the route.
-// requiredPermissions is the resolved route's declared permission
-// requirement, checked last (§9 step 11) so a call can skip the extra
-// lookups entirely for a route that declares none.
+// resolve it once per request the same way it resolves the route. It's
+// used only for requiredPermissions' index lookups below — permission-set
+// hydration itself resolves indexes via permcache.RolePermissionMap,
+// already built against the same registry generation (see
+// hydratePermissionSet). requiredPermissions is the resolved route's
+// declared permission requirement, checked last (§9 step 11) so a call can
+// skip the extra lookups entirely for a route that declares none.
 //
 // rawToken == "" is Anonymous, not an error — auth-internals.md §9 step 7:
 // "No token present: Set auth = Anonymous, Continue (route may be
@@ -155,15 +168,9 @@ func (c *Checker) Authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		return nil, fmt.Errorf("load live roles: %w", err)
 	}
 
-	permNames, err := c.roles.PermissionNamesForUser(ctx, tenantSlug, claims.Subject)
+	permSet, err := c.hydratePermissionSet(ctx, claims.TenantID, tenantSlug, claims.Subject, claims.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("load permissions: %w", err)
-	}
-	var permSet permission.PermissionBitfield
-	for _, name := range permNames {
-		if idx, ok := permissions.Index(name); ok {
-			permSet.Set(idx)
-		}
+		return nil, fmt.Errorf("hydrate permission set: %w", err)
 	}
 
 	for _, required := range requiredPermissions {
@@ -192,6 +199,59 @@ func (c *Checker) Authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		RolesLive:       rolesLive,
 		PermissionSet:   permSet,
 	}, nil
+}
+
+// hydratePermissionSet builds userID's permission bitfield for tenantSlug,
+// per auth-internals.md §14's cache layers: it prefers permcache.RoleCache
+// (layer 2, Redis, 60s TTL) over a Postgres round trip, resolving each
+// cached role ID through permcache.RolePermissionMap (layer 3, in-process).
+// A role ID RolePermissionMap doesn't currently resolve (e.g. a role
+// created since the map's last rebuild) is skipped rather than treated as
+// an error — the same log-and-skip failure isolation
+// internal/engine/permcache's own buildTenantRoles/resolveRoleBitfield use
+// for the identical situation.
+//
+// sessionrevoke.Revoker.IsRolesStale is checked first: a session marked
+// stale by a future role-grant/revoke flow (§14 "Cache invalidation on
+// role change" step 3) bypasses RoleCache entirely and re-reads from
+// Postgres, since the cached entry — and the JWT's own roles claim — may
+// no longer reflect the live grant. A staleness-check error fails open
+// (treated as not-stale) — the same convention RoleCache.Get already
+// applies to its own Redis errors, and consistent with §14's documented
+// "Role cache / permission set: fail over to the authoritative source"
+// behavior for the cache layers themselves.
+//
+// No PermissionRegistry parameter is needed here — RolePermissionMap's
+// bitfields are already resolved against index assignments at RebuildAll
+// time, and engine.go rebuilds it in lockstep with every registry update
+// (its own doc comment), so a lookup by role ID needs no further
+// name-to-index resolution the way the old direct-Postgres path did.
+func (c *Checker) hydratePermissionSet(ctx context.Context, tenantID, tenantSlug, userID, sessionID string) (permission.PermissionBitfield, error) {
+	stale, err := c.revoker.IsRolesStale(ctx, sessionID)
+	if err != nil {
+		stale = false
+	}
+
+	var roleIDs []string
+	var found bool
+	if !stale {
+		roleIDs, found = c.roleCache.Get(ctx, tenantID, userID)
+	}
+	if !found {
+		roleIDs, err = c.roles.RoleIDsForUser(ctx, tenantSlug, userID)
+		if err != nil {
+			return nil, fmt.Errorf("load role ids: %w", err)
+		}
+		c.roleCache.Set(ctx, tenantID, userID, roleIDs)
+	}
+
+	var bits permission.PermissionBitfield
+	for _, roleID := range roleIDs {
+		if roleBits, ok := c.roleMap.Lookup(roleID); ok {
+			bits.Or(roleBits)
+		}
+	}
+	return bits, nil
 }
 
 // hasMFAFactor reports whether amr contains an MFA factor type, per

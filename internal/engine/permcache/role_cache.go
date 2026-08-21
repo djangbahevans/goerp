@@ -1,15 +1,14 @@
 // Package permcache implements the two permission-caching layers
-// auth-internals.md §14 describes that goerp#225 (permission-context
-// hydration in the auth middleware, not yet built) needs to populate a
-// request's permission bitfield without hitting Postgres every time:
-// RoleCache (§14 layer 2, Redis, 60s TTL) and RolePermissionMap (§14
-// layer 3, in-process, rebuilt on module load/hot-reload). Neither type
-// here is wired into any consumer yet — no auth middleware exists to call
-// RoleCache.Get, and no role-grant/revoke flow exists anywhere in the
-// engine yet to call RoleCache.Invalidate — same "build the primitive,
-// leave the flow that consumes it to the ticket that owns it" pattern
-// internal/engine/tenantresolve's own package doc comment describes for
-// goerp#91's still-unbuilt middleware chain.
+// auth-internals.md §14 describes for populating a request's permission
+// bitfield without hitting Postgres every time: RoleCache (§14 layer 2,
+// Redis, 60s TTL) and RolePermissionMap (§14 layer 3, in-process, rebuilt
+// on module load/hot-reload). Both are consumed by
+// internal/engine/authcheck.Checker's permission-context hydration step.
+// RoleCache.Invalidate has no caller yet, though — no role-grant/revoke
+// flow exists anywhere in the engine yet to call it — same "build the
+// primitive, leave the flow that consumes it to the ticket that owns it"
+// pattern internal/engine/tenantresolve's own package doc comment
+// describes for goerp#91's still-unbuilt middleware chain.
 package permcache
 
 import (
@@ -22,8 +21,9 @@ import (
 )
 
 // RoleCache is auth-internals.md §14's cache layer 2 — the tenant's
-// user_roles grants for one user, cached in Redis so goerp#225's future
-// hydration step doesn't query Postgres on every request.
+// user_roles grants for one user, cached in Redis so
+// internal/engine/authcheck.Checker's hydration step doesn't query
+// Postgres on every request.
 type RoleCache struct {
 	cache *cache.Client
 }

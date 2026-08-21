@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
@@ -45,6 +46,8 @@ type fixture struct {
 	userID      string
 	permissions *permission.PermissionRegistry
 	conn        *sql.DB
+	roleCache   *permcache.RoleCache
+	roleMap     *permcache.RolePermissionMap
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -91,6 +94,10 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
+	// RolePermissionMap.RebuildAll only resolves roles for active tenants.
+	if _, err := tenantStore.UpdateStatus(ctx, slug, tenant.StatusActive, nil); err != nil {
+		t.Fatalf("activate fixture tenant: %v", err)
+	}
 
 	userID, err := userStore.FindOrCreateInvited(ctx, slug+"@example.com")
 	if err != nil {
@@ -130,14 +137,22 @@ func newFixture(t *testing.T) *fixture {
 	registry := permission.NewPermissionRegistry()
 	registry.Register("widgets", []manifest.Permission{{Name: testPermission}})
 
+	roleMap := permcache.NewRolePermissionMap()
+	if err := roleMap.RebuildAll(ctx, tenantStore, roleStore, registry); err != nil {
+		t.Fatalf("RebuildAll() error: %v", err)
+	}
+	roleCache := permcache.NewRoleCache(cacheClient)
+
 	return &fixture{
 		issuer:      authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore),
-		checker:     NewChecker(&keySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore),
+		checker:     NewChecker(&keySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap),
 		tenantID:    tt.ID,
 		tenantSlug:  slug,
 		userID:      userID,
 		permissions: registry,
 		conn:        conn,
+		roleCache:   roleCache,
+		roleMap:     roleMap,
 	}
 }
 
@@ -231,6 +246,80 @@ func TestAuthenticate_ValidTokenProducesAuthenticatedContext(t *testing.T) {
 	}
 	if authCtx.MFAVerified {
 		t.Error("MFAVerified = true, want false — no MFA support yet")
+	}
+}
+
+func TestAuthenticate_PermissionSetPopulatesRoleCacheOnMiss(t *testing.T) {
+	f := newFixture(t)
+	token := f.issueToken(t, "")
+	ctx := context.Background()
+
+	if _, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, f.permissions, nil); err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+
+	roleIDs, found := f.roleCache.Get(ctx, f.tenantID, f.userID)
+	if !found {
+		t.Fatal("RoleCache.Get() found = false after Authenticate, want true")
+	}
+	if len(roleIDs) != 1 {
+		t.Errorf("cached roleIDs = %v, want exactly the admin role", roleIDs)
+	}
+}
+
+func TestAuthenticate_UsesCachedRolesOnSecondCall(t *testing.T) {
+	f := newFixture(t)
+	token := f.issueToken(t, "")
+	ctx := context.Background()
+
+	// A cache entry naming a role RolePermissionMap doesn't resolve — a
+	// live DB read would still find the real (correctly granted) admin
+	// role, so if Authenticate's result reflects this instead, it proves
+	// the cache was actually consulted rather than bypassed.
+	f.roleCache.Set(ctx, f.tenantID, f.userID, []string{"00000000-0000-0000-0000-000000000000"})
+
+	authCtx, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	if err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+	idx, ok := f.permissions.Index(testPermission)
+	if !ok {
+		t.Fatalf("test setup: %s not registered", testPermission)
+	}
+	if authCtx.PermissionSet.Has(idx) {
+		t.Error("PermissionSet has the granted permission, want it absent — cached (bogus) role should have taken precedence over the live DB grant")
+	}
+}
+
+func TestAuthenticate_StaleMarkerBypassesRoleCache(t *testing.T) {
+	f := newFixture(t)
+	token := f.issueToken(t, "")
+	ctx := context.Background()
+
+	claims := &authtoken.Claims{}
+	if _, err := jwt.ParseWithClaims(token, claims, f.checker.keyFunc); err != nil {
+		t.Fatalf("parse issued token: %v", err)
+	}
+
+	// Same bogus cache entry as TestAuthenticate_UsesCachedRolesOnSecondCall,
+	// but this time the session is marked stale first — Authenticate should
+	// bypass the cache and read the real (correctly granted) role from
+	// Postgres instead.
+	f.roleCache.Set(ctx, f.tenantID, f.userID, []string{"00000000-0000-0000-0000-000000000000"})
+	if err := f.checker.revoker.MarkRolesStale(ctx, claims.SessionID); err != nil {
+		t.Fatalf("MarkRolesStale() error: %v", err)
+	}
+
+	authCtx, err := f.checker.Authenticate(ctx, token, f.tenantID, f.tenantSlug, f.permissions, nil)
+	if err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+	idx, ok := f.permissions.Index(testPermission)
+	if !ok {
+		t.Fatalf("test setup: %s not registered", testPermission)
+	}
+	if !authCtx.PermissionSet.Has(idx) {
+		t.Error("PermissionSet does not have the granted permission — stale marker should have forced a live DB read past the bogus cache entry")
 	}
 }
 
