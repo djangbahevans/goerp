@@ -15,13 +15,16 @@
 // is fail-hard; individual modules ending up module.StatusFailed are not.
 //
 // Start runs the rest of Stage 6: opening the HTTP/admin servers, starting
-// the River job queue worker, and spawning each workflow-capable module's
-// workflow-worker process (client/manager built in New, started in Start,
-// same split). Unlike Stage 3/4's per-module failures, a workflow-worker
-// that fails to spawn or register with Temporal is fail-hard — Start
-// returns an error, same as an HTTP/River start failure — since Stage 6
-// gets no per-module carve-out from engine-internals.md §2's default
-// "any step fails, the process exits non-zero" rule.
+// the River job queue worker, spawning each workflow-capable module's
+// workflow-worker process, and starting the engine's own in-process
+// Temporal worker for system workflows like tenant provisioning/
+// offboarding (systemworker.Worker; client/manager/worker all built in
+// New, started in Start, same split). Unlike Stage 3/4's per-module
+// failures, any of these three failing to start or register with Temporal
+// is fail-hard — Start returns an error, same as an HTTP/River start
+// failure — since Stage 6 gets no per-module carve-out from
+// engine-internals.md §2's default "any step fails, the process exits
+// non-zero" rule.
 package engine
 
 import (
@@ -58,6 +61,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/systemworker"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantresolve"
@@ -97,6 +101,7 @@ type Engine struct {
 	storageBackend  storage.Backend
 	temporalClient  *temporal.Client
 	workflowWorkers *workflowworker.Manager
+	systemWorker    *systemworker.Worker
 	server          *httpx.Server
 	adminServer     *adminapi.Server
 	readiness       atomic.Bool
@@ -339,6 +344,13 @@ func New(cfg *config.Config) (*Engine, error) {
 	// temporalClient already use.
 	workflowWorkers := workflowworker.NewManager(storageBackend, temporalClient, filepath.Join(cfg.ModuleDir, ".workflow-worker-cache"))
 
+	// systemWorker hosts the engine's own Temporal workflows (goerp#149,
+	// goerp#150) — distinct from workflowWorkers above, which is
+	// module-scoped. Same New-vs-Start split: constructed here so future
+	// tickets have somewhere to RegisterWorkflow/RegisterActivity before
+	// Start actually begins polling.
+	systemWorker := systemworker.New(temporalClient)
+
 	var e *Engine
 	readyFn := func(ctx context.Context) error {
 		if e != nil && !e.readiness.Load() {
@@ -576,6 +588,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		storageBackend:  storageBackend,
 		temporalClient:  temporalClient,
 		workflowWorkers: workflowWorkers,
+		systemWorker:    systemWorker,
 		server:          server,
 		adminServer:     adminServer,
 	}
@@ -617,6 +630,10 @@ func (e *Engine) Start(ctx context.Context) error {
 		}
 	}
 
+	if err := e.systemWorker.Start(ctx); err != nil {
+		return fmt.Errorf("start system worker: %w", err)
+	}
+
 	e.readiness.Store(true)
 
 	return nil
@@ -641,6 +658,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	e.jobQueuePool.Close()
 
 	e.workflowWorkers.StopAll(ctx)
+	e.systemWorker.Stop()
 
 	if err := e.wasmRuntime.Close(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not close wasm runtime")

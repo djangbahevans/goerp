@@ -30,18 +30,12 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/rs/zerolog/log"
-)
-
-const (
-	pollerConfirmTimeout  = 30 * time.Second
-	pollerConfirmInterval = 200 * time.Millisecond
 )
 
 // Credential authorizes exactly one workflow-worker process to call the
@@ -150,7 +144,7 @@ func (m *Manager) spawn(ctx context.Context, mod *module.LoadedModule) error {
 	// ("polls the module's task queue (`goerp:{module_name}`)") — one
 	// queue per module, not per declared workflow type.
 	taskQueue := "goerp:" + mf.Name
-	if err := m.confirmRegistered(ctx, taskQueue); err != nil {
+	if err := m.temporal.WaitForPollers(ctx, taskQueue); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait() // reap it so it doesn't linger as a zombie
 		return fmt.Errorf("confirm task queue registration: %w", err)
@@ -193,30 +187,6 @@ func (m *Manager) fetchAndVerify(ctx context.Context, mf manifest.Manifest) (str
 	}
 
 	return binPath, nil
-}
-
-func (m *Manager) confirmRegistered(ctx context.Context, taskQueue string) error {
-	deadline := time.Now().Add(pollerConfirmTimeout)
-	ticker := time.NewTicker(pollerConfirmInterval)
-	defer ticker.Stop()
-
-	for {
-		has, err := m.temporal.HasPollers(ctx, taskQueue)
-		if err != nil {
-			return err
-		}
-		if has {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("no poller registered on %q after %s", taskQueue, pollerConfirmTimeout)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
 }
 
 // watch waits for p's process to exit and respawns it, unless the exit was

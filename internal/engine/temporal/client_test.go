@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"go.temporal.io/sdk/worker"
 )
 
 // localConfig points at the compose.dev.yml Temporal instance
@@ -70,5 +72,36 @@ func TestHasPollersNoPollers(t *testing.T) {
 	}
 	if has {
 		t.Error("HasPollers() = true for a task queue with no workers, want false")
+	}
+}
+
+func TestNewWorkerAndWaitForPollers(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	c := newTestClient(t, ctx)
+	defer c.Close()
+
+	const taskQueue = "test-newworker-queue"
+	w := c.NewWorker(taskQueue, worker.Options{})
+	if err := w.Start(); err != nil {
+		t.Fatalf("worker.Start() error: %v", err)
+	}
+	defer w.Stop()
+
+	if err := c.WaitForPollers(ctx, taskQueue); err != nil {
+		t.Errorf("WaitForPollers() error: %v", err)
+	}
+}
+
+func TestWaitForPollersTimesOutWithNoWorker(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c := newTestClient(t, ctx)
+	defer c.Close()
+
+	if err := c.WaitForPollers(ctx, "goerp:no-such-queue"); err == nil {
+		t.Error("WaitForPollers() with no worker registered: expected an error, got nil")
 	}
 }
