@@ -161,6 +161,30 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateCredentialAfterUse overwrites id's credential bytes — the
+// caller's freshly re-serialized/re-encrypted blob, reflecting updated
+// internal state such as WebAuthn's sign count (goerp#301) — and sets
+// last_used_at = NOW(), in one statement. Returns ErrCredentialNotFound
+// if id doesn't match any non-revoked row, same RowsAffected-checking
+// convention Revoke/ConsumeOnce use.
+func (s *Store) UpdateCredentialAfterUse(ctx context.Context, id string, credential []byte) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE system.user_mfa SET credential = $2, last_used_at = NOW()
+		WHERE id = $1 AND revoked_at IS NULL
+	`, id, credential)
+	if err != nil {
+		return fmt.Errorf("update mfa credential: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update mfa credential: %w", err)
+	}
+	if n == 0 {
+		return ErrCredentialNotFound
+	}
+	return nil
+}
+
 // ConsumeOnce atomically revokes id only if it isn't already revoked,
 // returning ErrCredentialNotFound both when id doesn't exist and when
 // it's already been consumed — a caller can't tell the two apart, which
