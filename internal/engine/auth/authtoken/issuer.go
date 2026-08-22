@@ -30,8 +30,10 @@ const (
 )
 
 // Claims is the access token's JSON shape, auth-internals.md §4 "Access
-// token structure". Every token this package issues has AMR=["pwd"] and
-// MFAVerifiedAt=nil — MFA support is a separate ticket (§8).
+// token structure". AMR/MFAVerifiedAt reflect LoginParams' MFA fields —
+// ["pwd"]/nil for an ordinary password-only login, ["pwd", method]/the
+// verification timestamp once a caller (goerp#304's mfa_token branch)
+// passes them.
 type Claims struct {
 	jwt.RegisteredClaims
 	SessionID     string   `json:"sid"`
@@ -66,6 +68,15 @@ type LoginParams struct {
 	UserAgent   string
 	IPAddress   string
 	CountryCode string
+
+	// MFAMethod/MFAVerifiedAt/MFACredentialID are set only when this login
+	// already completed MFA verification before Issue is called — e.g.
+	// goerp#304's mfa_token branch, issuing the final session after a
+	// successful factor check. Left zero-value for an ordinary
+	// password-only login.
+	MFAMethod       string
+	MFAVerifiedAt   *time.Time
+	MFACredentialID string
 }
 
 // Tokens is one issued access/refresh token pair.
@@ -103,20 +114,23 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 	sessionID := uuid.NewString()
 
 	if err := i.sessions.Insert(ctx, session.Row{
-		ID:          sessionID,
-		UserID:      p.UserID,
-		TenantID:    t.ID,
-		DeviceID:    deviceID,
-		RefreshHash: refreshHash,
-		UserAgent:   p.UserAgent,
-		IPAddress:   p.IPAddress,
-		CountryCode: p.CountryCode,
-		ExpiresAt:   now.Add(refreshTokenTTL),
+		ID:              sessionID,
+		UserID:          p.UserID,
+		TenantID:        t.ID,
+		DeviceID:        deviceID,
+		RefreshHash:     refreshHash,
+		UserAgent:       p.UserAgent,
+		IPAddress:       p.IPAddress,
+		CountryCode:     p.CountryCode,
+		ExpiresAt:       now.Add(refreshTokenTTL),
+		MFAMethod:       p.MFAMethod,
+		MFAVerifiedAt:   p.MFAVerifiedAt,
+		MFACredentialID: p.MFACredentialID,
 	}); err != nil {
 		return nil, fmt.Errorf("record session: %w", err)
 	}
 
-	accessToken, err := i.signAccessToken(sessionID, t.ID, p.UserID, roleNames, now)
+	accessToken, err := i.signAccessToken(sessionID, t.ID, p.UserID, roleNames, p.MFAMethod, p.MFAVerifiedAt, now)
 	if err != nil {
 		return nil, fmt.Errorf("sign access token: %w", err)
 	}
@@ -128,7 +142,21 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 	}, nil
 }
 
-func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames []string, now time.Time) (string, error) {
+// signAccessToken mints and signs the access token. amr always includes
+// "pwd"; mfaMethod is appended when non-empty, per auth-internals.md §4's
+// documented "an MFA factor type is appended once this session has
+// completed MFA" shape — never a replacement for "pwd".
+func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, now time.Time) (string, error) {
+	amr := []string{"pwd"}
+	var mfaVerifiedAtClaim *int64
+	if mfaMethod != "" {
+		amr = append(amr, mfaMethod)
+	}
+	if mfaVerifiedAt != nil {
+		unix := mfaVerifiedAt.Unix()
+		mfaVerifiedAtClaim = &unix
+	}
+
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    issuerName,
@@ -137,11 +165,12 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenTTL)),
 			ID:        uuid.NewString(),
 		},
-		SessionID: sessionID,
-		TenantID:  tenantID,
-		Roles:     roleNames,
-		Scope:     []string{"api"},
-		AMR:       []string{"pwd"},
+		SessionID:     sessionID,
+		TenantID:      tenantID,
+		Roles:         roleNames,
+		Scope:         []string{"api"},
+		AMR:           amr,
+		MFAVerifiedAt: mfaVerifiedAtClaim,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
