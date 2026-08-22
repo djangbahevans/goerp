@@ -111,16 +111,28 @@ type Row struct {
 	IPAddress   string
 	CountryCode string
 	ExpiresAt   time.Time
+
+	// MFAMethod/MFAVerifiedAt/MFACredentialID are set only for a session
+	// that completed MFA before this row is created (auth-internals.md §8
+	// "Representing MFA assurance in sessions and tokens") — e.g. the
+	// login flow's mfa_token branch (goerp#304) issuing the final session
+	// after a successful factor verification. Left zero-value for an
+	// ordinary password-only login, storing as SQL NULL the same way
+	// UserAgent/IPAddress/CountryCode do.
+	MFAMethod       string
+	MFAVerifiedAt   *time.Time
+	MFACredentialID string
 }
 
-// Insert creates a new session row. UserAgent, IPAddress, and CountryCode
-// store as SQL NULL when empty, same convention as auditlog.Store.Write.
+// Insert creates a new session row. UserAgent, IPAddress, CountryCode, and
+// the MFA fields store as SQL NULL when empty, same convention
+// auditlog.Store.Write uses.
 func (s *Store) Insert(ctx context.Context, row Row) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO system.sessions
-			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at)
-		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9)
-	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt)
+			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at, mfa_verified_at, mfa_method, mfa_credential_id)
+		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, '')::uuid)
+	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt, row.MFAVerifiedAt, row.MFAMethod, row.MFACredentialID)
 	if err != nil {
 		return fmt.Errorf("insert session row: %w", err)
 	}

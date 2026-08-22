@@ -206,6 +206,71 @@ func TestInsert_RoundTripsFields(t *testing.T) {
 	}
 }
 
+func TestInsert_MFAFieldsRoundTripWhenSet(t *testing.T) {
+	store, conn := openTestStore(t)
+	fixtureSessionID, userID := sessionFixture(t, store, conn)
+
+	var tenantID string
+	if err := conn.QueryRowContext(context.Background(),
+		`SELECT tenant_id FROM system.sessions WHERE id = $1`, fixtureSessionID,
+	).Scan(&tenantID); err != nil {
+		t.Fatalf("query fixture tenant_id: %v", err)
+	}
+
+	credID := uuid.NewString()
+	verifiedAt := time.Now().Add(-time.Minute)
+	mfaSessionID := uuid.NewString()
+	if err := store.Insert(context.Background(), Row{
+		ID:              mfaSessionID,
+		UserID:          userID,
+		TenantID:        tenantID,
+		DeviceID:        uuid.NewString(),
+		RefreshHash:     "mfa-fixture-hash",
+		ExpiresAt:       time.Now().Add(30 * 24 * time.Hour),
+		MFAMethod:       "totp",
+		MFAVerifiedAt:   &verifiedAt,
+		MFACredentialID: credID,
+	}); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, mfaSessionID) })
+
+	var gotMethod, gotCredID string
+	var gotVerifiedAt time.Time
+	err := conn.QueryRowContext(context.Background(),
+		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE id = $1`, mfaSessionID,
+	).Scan(&gotMethod, &gotVerifiedAt, &gotCredID)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if gotMethod != "totp" {
+		t.Errorf("mfa_method = %q, want totp", gotMethod)
+	}
+	if gotVerifiedAt.Unix() != verifiedAt.Unix() {
+		t.Errorf("mfa_verified_at = %v, want %v", gotVerifiedAt, verifiedAt)
+	}
+	if gotCredID != credID {
+		t.Errorf("mfa_credential_id = %q, want %q", gotCredID, credID)
+	}
+}
+
+func TestInsert_MFAFieldsAreNullWhenUnset(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, _ := sessionFixture(t, store, conn)
+
+	var method, credID sql.NullString
+	var verifiedAt sql.NullTime
+	err := conn.QueryRowContext(context.Background(),
+		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE id = $1`, sessionID,
+	).Scan(&method, &verifiedAt, &credID)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if method.Valid || verifiedAt.Valid || credID.Valid {
+		t.Errorf("mfa_method/mfa_verified_at/mfa_credential_id = %v/%v/%v, want all NULL", method, verifiedAt, credID)
+	}
+}
+
 func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, _ := sessionFixture(t, store, conn)

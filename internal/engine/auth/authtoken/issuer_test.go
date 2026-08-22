@@ -226,6 +226,103 @@ func TestIssue_AccessTokenClaimsMatchDocumentedShape(t *testing.T) {
 	}
 }
 
+func TestIssue_MFAParamsPopulateSessionRowAndClaims(t *testing.T) {
+	f := newFixture(t)
+	verifiedAt := time.Now().Add(-2 * time.Minute)
+	credID := uuid.NewString()
+
+	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
+		UserID:          f.userID,
+		TenantSlug:      f.tenantSlug,
+		DeviceID:        uuid.NewString(),
+		MFAMethod:       "totp",
+		MFAVerifiedAt:   &verifiedAt,
+		MFACredentialID: credID,
+	})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	var gotMethod string
+	var gotVerifiedAt time.Time
+	var gotCredID string
+	err = f.conn.QueryRow(
+		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE user_id = $1`, f.userID,
+	).Scan(&gotMethod, &gotVerifiedAt, &gotCredID)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if gotMethod != "totp" {
+		t.Errorf("sessions.mfa_method = %q, want %q", gotMethod, "totp")
+	}
+	if gotVerifiedAt.Unix() != verifiedAt.Unix() {
+		t.Errorf("sessions.mfa_verified_at = %v, want %v", gotVerifiedAt, verifiedAt)
+	}
+	if gotCredID != credID {
+		t.Errorf("sessions.mfa_credential_id = %q, want %q", gotCredID, credID)
+	}
+
+	pub := f.issuer.signingKey.Public
+	parsed, err := jwt.ParseWithClaims(tokens.AccessToken, &Claims{}, func(tok *jwt.Token) (any, error) {
+		return pub, nil
+	})
+	if err != nil || !parsed.Valid {
+		t.Fatalf("ParseWithClaims() error: %v, valid: %v", err, parsed != nil && parsed.Valid)
+	}
+	claims := parsed.Claims.(*Claims)
+
+	if len(claims.AMR) != 2 || claims.AMR[0] != "pwd" || claims.AMR[1] != "totp" {
+		t.Errorf("amr = %v, want [pwd totp]", claims.AMR)
+	}
+	if claims.MFAVerifiedAt == nil {
+		t.Fatal("mfa_verified_at is nil, want the verification timestamp")
+	}
+	if *claims.MFAVerifiedAt != verifiedAt.Unix() {
+		t.Errorf("mfa_verified_at = %d, want %d", *claims.MFAVerifiedAt, verifiedAt.Unix())
+	}
+}
+
+func TestIssue_NoMFAParamsLeavesSessionRowAndClaimsAtDefaults(t *testing.T) {
+	f := newFixture(t)
+
+	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
+		UserID:     f.userID,
+		TenantSlug: f.tenantSlug,
+		DeviceID:   uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	var gotMethod, gotCredID sql.NullString
+	var gotVerifiedAt sql.NullTime
+	err = f.conn.QueryRow(
+		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE user_id = $1`, f.userID,
+	).Scan(&gotMethod, &gotVerifiedAt, &gotCredID)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if gotMethod.Valid || gotVerifiedAt.Valid || gotCredID.Valid {
+		t.Errorf("mfa_method/mfa_verified_at/mfa_credential_id = %v/%v/%v, want all NULL for a password-only login", gotMethod, gotVerifiedAt, gotCredID)
+	}
+
+	pub := f.issuer.signingKey.Public
+	parsed, err := jwt.ParseWithClaims(tokens.AccessToken, &Claims{}, func(tok *jwt.Token) (any, error) {
+		return pub, nil
+	})
+	if err != nil || !parsed.Valid {
+		t.Fatalf("ParseWithClaims() error: %v, valid: %v", err, parsed != nil && parsed.Valid)
+	}
+	claims := parsed.Claims.(*Claims)
+
+	if len(claims.AMR) != 1 || claims.AMR[0] != "pwd" {
+		t.Errorf("amr = %v, want [pwd]", claims.AMR)
+	}
+	if claims.MFAVerifiedAt != nil {
+		t.Errorf("mfa_verified_at = %v, want nil", claims.MFAVerifiedAt)
+	}
+}
+
 func TestIssue_RefreshTokenStoredOnlyAsHash(t *testing.T) {
 	f := newFixture(t)
 

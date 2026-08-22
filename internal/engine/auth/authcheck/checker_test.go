@@ -257,7 +257,39 @@ func TestAuthenticate_ValidTokenProducesAuthenticatedContext(t *testing.T) {
 		t.Error("PermissionSet does not have the granted permission")
 	}
 	if authCtx.MFAVerified {
-		t.Error("MFAVerified = true, want false — no MFA support yet")
+		t.Error("MFAVerified = true, want false for an ordinary password-only login")
+	}
+}
+
+func TestAuthenticate_MFAVerifiedSessionPopulatesMFAFields(t *testing.T) {
+	f := newFixture(t)
+	verifiedAt := time.Now().Add(-time.Minute)
+	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+		UserID:        f.userID,
+		TenantSlug:    f.tenantSlug,
+		DeviceID:      "11111111-1111-1111-1111-111111111111",
+		MFAMethod:     "totp",
+		MFAVerifiedAt: &verifiedAt,
+	})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	authCtx, err := f.checker.Authenticate(context.Background(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+	if !authCtx.MFAVerified {
+		t.Error("MFAVerified = false, want true for a token minted with MFAMethod set")
+	}
+	if len(authCtx.AMR) != 2 || authCtx.AMR[0] != "pwd" || authCtx.AMR[1] != "totp" {
+		t.Errorf("AMR = %v, want [pwd totp]", authCtx.AMR)
+	}
+	if authCtx.MFAVerifiedAt == nil {
+		t.Fatal("MFAVerifiedAt is nil, want the verification timestamp")
+	}
+	if authCtx.MFAVerifiedAt.Unix() != verifiedAt.Unix() {
+		t.Errorf("MFAVerifiedAt = %v, want %v", authCtx.MFAVerifiedAt, verifiedAt)
 	}
 }
 

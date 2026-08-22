@@ -438,8 +438,11 @@ func (c *Checker) hydratePermissionSet(ctx context.Context, tenantID, tenantSlug
 }
 
 // hasMFAFactor reports whether amr contains an MFA factor type, per
-// auth-internals.md §4/§9 — always false until goerp#224's MFA cluster
-// lands, since authtoken.Issue only ever sets AMR to ["pwd"] today.
+// auth-internals.md §4/§9. authtoken.Issue only appends one when its
+// caller passes LoginParams.MFAMethod — always false for an ordinary
+// password-only login (the only kind any caller issues today, since
+// goerp#304's mfa_token branch, the actual MFA-verified login path,
+// hasn't landed yet).
 func hasMFAFactor(amr []string) bool {
 	for _, m := range amr {
 		switch m {
