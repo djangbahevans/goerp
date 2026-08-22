@@ -1,8 +1,8 @@
 // Package authcheck validates a request's JWT access token and hydrates
 // the auth-internals.md §9 pipeline's user/tenant/permission context — the
-// portion of that 12-step pipeline buildable now (steps 6, 7's JWT branch,
-// 8, 11) against authtoken/signingkey/sessionrevoke's already-landed
-// issuance and revocation infrastructure (goerp#210/#217/#147).
+// portion of that 12-step pipeline buildable now (steps 6, 7, 8, 9, 11)
+// against authtoken/signingkey/sessionrevoke's already-landed issuance and
+// revocation infrastructure (goerp#210/#217/#147).
 //
 // Checker.Authenticate assumes tenant resolution (goerp#89) has already
 // happened — it takes the resolved tenant, it doesn't resolve one itself —
@@ -10,9 +10,13 @@
 // Permission-context hydration (§9 step 10) goes through
 // internal/engine/permcache's RoleCache/RolePermissionMap rather than
 // querying Postgres on every request. Authenticate also handles the erp_
-// API-key branch (§7), gated behind GOERP_ENABLE_API_KEYS. The mfa_token
-// branch and MFA enforcement are a separate, still-blocked ticket
-// (goerp#224).
+// API-key branch (§7), gated behind GOERP_ENABLE_API_KEYS.
+// AuthenticateMFAToken covers step 7's third branch (the mfa_token
+// presented to POST /auth/mfa/verify) and EnforceMFA covers step 9's MFA
+// enforcement decision — both delegate to internal/engine/auth/mfatoken
+// and internal/engine/mfa/enforce respectively, this package only wires
+// their results into an AuthContext/Decision the way it already does for
+// the JWT/API-key branches.
 package authcheck
 
 import (
@@ -26,8 +30,11 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -48,6 +55,11 @@ var (
 	ErrAPIKeyIPNotAllowed = errors.New("api key not allowed from this ip")
 )
 
+// ErrMFATokenTenantMismatch mirrors ErrTenantMismatch for the mfa_token
+// branch — a token issued for one tenant presented against a different
+// tenant's Host-resolved subdomain.
+var ErrMFATokenTenantMismatch = errors.New("mfa_token was not issued for this tenant")
+
 const accessTokenCookieName = "__Host-access_token"
 
 // ExtractToken returns the bearer token from r — the Authorization header
@@ -64,8 +76,9 @@ func ExtractToken(r *http.Request) string {
 }
 
 // AuthContext is the auth-internals.md §9 "Auth context object" fields
-// this package's slice of the pipeline populates. MFAPending stays
-// zero-valued — the mfa_token branch is goerp#224, not this package.
+// this package's slice of the pipeline populates. MFAPending is set by
+// AuthenticateMFAToken's step 7 third branch — every other branch leaves
+// it false.
 type AuthContext struct {
 	IsAuthenticated bool
 	UserID          string
@@ -84,6 +97,10 @@ type AuthContext struct {
 	// otherwise — the key itself is the request's principal (§7 step 9),
 	// distinct from UserID (which may be empty for a service key).
 	APIKey *apikey.APIKey
+	// MFAPending is true when AuthenticateMFAToken accepted a valid
+	// mfa_token — the caller is mid-login, not yet a fully authenticated
+	// principal (IsAuthenticated stays false in that case).
+	MFAPending bool
 }
 
 type Checker struct {
@@ -95,6 +112,9 @@ type Checker struct {
 	roleMap       *permcache.RolePermissionMap
 	apiKeys       *apikey.Store
 	enableAPIKeys bool
+	mfaTokens     *mfatoken.Codec
+	mfaCreds      *mfa.Store
+	mfaPolicies   *enforce.Store
 }
 
 func NewChecker(
@@ -106,6 +126,9 @@ func NewChecker(
 	roleMap *permcache.RolePermissionMap,
 	apiKeys *apikey.Store,
 	enableAPIKeys bool,
+	mfaTokens *mfatoken.Codec,
+	mfaCreds *mfa.Store,
+	mfaPolicies *enforce.Store,
 ) *Checker {
 	return &Checker{
 		signingKey:    signingKey,
@@ -116,6 +139,9 @@ func NewChecker(
 		roleMap:       roleMap,
 		apiKeys:       apiKeys,
 		enableAPIKeys: enableAPIKeys,
+		mfaTokens:     mfaTokens,
+		mfaCreds:      mfaCreds,
+		mfaPolicies:   mfaPolicies,
 	}
 }
 
@@ -231,6 +257,70 @@ func (c *Checker) Authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		PermissionSet:   permSet,
 		AuthMethod:      "jwt",
 	}, nil
+}
+
+// AuthenticateMFAToken implements auth-internals.md §9 step 7's third
+// branch: the mfa_token presented in POST /auth/mfa/verify's own JSON body
+// (not the Authorization header/cookie Authenticate reads). It validates
+// rawToken's HMAC signature, expiry, and purpose via mfatoken.Codec.Verify,
+// then cross-checks the token's tid claim against tenantID — defense in
+// depth against a captured token replayed on a different tenant's
+// subdomain, the same reasoning Authenticate's own tenant-mismatch check
+// documents.
+//
+// This method does not consume the token's txn marker, check the Origin
+// header, or touch the MFA attempt lockout counter — auth-internals.md §8
+// steps 3-5 are already implemented in mfaverify.Handler and stay there;
+// this method only covers what step 7 itself specifies. The returned
+// AuthContext has MFAPending true and IsAuthenticated false: the caller is
+// mid-login, not yet a fully authenticated principal.
+func (c *Checker) AuthenticateMFAToken(rawToken, tenantID string) (*AuthContext, error) {
+	claims, err := c.mfaTokens.Verify(rawToken)
+	if err != nil {
+		return nil, err
+	}
+	if claims.TenantID != tenantID {
+		return nil, ErrMFATokenTenantMismatch
+	}
+
+	return &AuthContext{
+		IsAuthenticated: false,
+		MFAPending:      true,
+		UserID:          claims.Subject,
+		TenantID:        claims.TenantID,
+	}, nil
+}
+
+// EnforceMFA implements auth-internals.md §8/§9 step 9's MFA enforcement
+// decision for an already-JWT-authenticated request (authCtx, as returned
+// by Authenticate's JWT branch). path is the resolved route's path, used
+// only for enforce.RouteExempt's fixed-path exemption check — a request to
+// an exempt route (mfa enroll/verify/reverify) short-circuits to Allowed
+// without loading policy or querying enrollment, since those routes either
+// carry no full session yet or are the handler that resolves a prior
+// ReverifyRequired/FactorRequired/SetupRequired decision.
+func (c *Checker) EnforceMFA(ctx context.Context, path, tenantID string, authCtx *AuthContext) (enforce.Decision, error) {
+	if enforce.RouteExempt(path) {
+		return enforce.Allowed, nil
+	}
+
+	policy, err := c.mfaPolicies.LoadPolicy(ctx, tenantID)
+	if err != nil {
+		return "", fmt.Errorf("load mfa policy: %w", err)
+	}
+
+	creds, err := c.mfaCreds.ListActiveByUser(ctx, authCtx.UserID)
+	if err != nil {
+		return "", fmt.Errorf("load mfa credentials: %w", err)
+	}
+
+	evalCtx := enforce.Context{
+		UserRoles:     authCtx.RolesLive,
+		Enrolled:      len(creds) > 0,
+		AMRHasFactor:  hasMFAFactor(authCtx.AMR),
+		MFAVerifiedAt: authCtx.MFAVerifiedAt,
+	}
+	return enforce.Evaluate(policy, evalCtx, time.Now()), nil
 }
 
 // authenticateAPIKey validates an erp_-prefixed rawToken per

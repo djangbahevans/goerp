@@ -14,17 +14,21 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/golang-jwt/jwt/v5"
@@ -41,16 +45,20 @@ const testPermission2 = "widgets.write" // granted to the fixture's admin role t
 // Cleaned up by exact row id — system.tenants/system.users/system.sessions
 // are real shared tables other packages' tests race against concurrently.
 type fixture struct {
-	issuer      *authtoken.Issuer
-	checker     *Checker
-	tenantID    string
-	tenantSlug  string
-	userID      string
-	permissions *permission.PermissionRegistry
-	conn        *sql.DB
-	roleCache   *permcache.RoleCache
-	roleMap     *permcache.RolePermissionMap
-	apiKeys     *apikey.Store
+	issuer       *authtoken.Issuer
+	checker      *Checker
+	tenantID     string
+	tenantSlug   string
+	userID       string
+	permissions  *permission.PermissionRegistry
+	conn         *sql.DB
+	roleCache    *permcache.RoleCache
+	roleMap      *permcache.RolePermissionMap
+	apiKeys      *apikey.Store
+	mfaTokens    *mfatoken.Codec
+	mfaTokenKey  *mfatoken.Key
+	mfaCreds     *mfa.Store
+	tenantConfig *tenantconfig.Store
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -63,6 +71,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	lockSigningKeyTable(t, conn)
+	lockMFATokenSigningKeyTable(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: localRedisAddr, DB: 0, MaxRetries: 1})
 	if err != nil {
@@ -89,6 +98,22 @@ func newFixture(t *testing.T) *fixture {
 	keySet, err := signingKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("LoadOrGenerate() error: %v", err)
+	}
+	mfaTokenKeyStore := mfatoken.NewStore(conn, &secrets.EnvBackend{})
+	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("mfatoken Bootstrap() error: %v", err)
+	}
+	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
+	if err != nil {
+		t.Fatalf("mfatoken LoadOrGenerate() error: %v", err)
+	}
+	mfaCreds := mfa.NewStore(conn)
+	if err := mfaCreds.Bootstrap(ctx); err != nil {
+		t.Fatalf("mfa Bootstrap() error: %v", err)
+	}
+	tenantConfig := tenantconfig.NewStore(conn)
+	if err := tenantConfig.Bootstrap(ctx); err != nil {
+		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
 	}
 
 	slug := fmt.Sprintf("authchecktest%d", time.Now().UnixNano())
@@ -139,6 +164,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE user_id = $1`, userID) })
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, userID) })
 
 	registry := permission.NewPermissionRegistry()
 	registry.Register("widgets", []manifest.Permission{{Name: testPermission}, {Name: testPermission2}})
@@ -154,17 +180,24 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("apikey Bootstrap() error: %v", err)
 	}
 
+	mfaTokens := mfatoken.NewCodec(&mfaTokenKeySet.Active)
+	mfaPolicies := enforce.NewStore(tenantConfig)
+
 	return &fixture{
-		issuer:      authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore),
-		checker:     NewChecker(&keySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap, apiKeys, true),
-		tenantID:    tt.ID,
-		tenantSlug:  slug,
-		userID:      userID,
-		permissions: registry,
-		conn:        conn,
-		roleCache:   roleCache,
-		roleMap:     roleMap,
-		apiKeys:     apiKeys,
+		issuer:       authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore),
+		checker:      NewChecker(&keySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap, apiKeys, true, mfaTokens, mfaCreds, mfaPolicies),
+		tenantID:     tt.ID,
+		tenantSlug:   slug,
+		userID:       userID,
+		permissions:  registry,
+		conn:         conn,
+		roleCache:    roleCache,
+		roleMap:      roleMap,
+		apiKeys:      apiKeys,
+		mfaTokens:    mfaTokens,
+		mfaTokenKey:  &mfaTokenKeySet.Active,
+		mfaCreds:     mfaCreds,
+		tenantConfig: tenantConfig,
 	}
 }
 
@@ -205,6 +238,28 @@ func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
 		// does not by itself release a session-scoped advisory lock —
 		// unlock explicitly first, or the next test wanting this lock
 		// hangs forever waiting on one nothing will ever release.
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
+		_ = conn.Close()
+	})
+}
+
+// lockMFATokenSigningKeyTable mirrors lockSigningKeyTable — serializes
+// this package's tests against every other package's test touching the
+// shared system.mfa_token_signing_keys table (mfatoken, mfaverify,
+// loginflow all exercise its own single-active-row constraint).
+func lockMFATokenSigningKeyTable(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	key := db.AdvisoryLockKey("test.mfa_token_signing_keys_table")
+
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire dedicated connection for mfa-token-key lock: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
+		t.Fatalf("acquire mfa-token-key advisory lock: %v", err)
+	}
+	t.Cleanup(func() {
 		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
 		_ = conn.Close()
 	})
@@ -732,6 +787,9 @@ func TestAuthenticate_APIKeyDisabledFlagFallsThroughToInvalidToken(t *testing.T)
 		roleMap:       f.checker.roleMap,
 		apiKeys:       f.checker.apiKeys,
 		enableAPIKeys: false,
+		mfaTokens:     f.checker.mfaTokens,
+		mfaCreds:      f.checker.mfaCreds,
+		mfaPolicies:   f.checker.mfaPolicies,
 	}
 
 	_, err = disabledChecker.Authenticate(ctx, fullKey, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
@@ -799,5 +857,207 @@ func TestAuthenticate_APIKeyUpdatesLastUsedEvenWhenPermissionDenied(t *testing.T
 			t.Fatal("last_used_at was not set within the deadline — a permission-denied request must still count as key usage")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestAuthenticateMFAToken_ValidTokenReturnsMFAPending(t *testing.T) {
+	f := newFixture(t)
+	token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, "https://example.com")
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	authCtx, err := f.checker.AuthenticateMFAToken(token, f.tenantID)
+	if err != nil {
+		t.Fatalf("AuthenticateMFAToken() error: %v", err)
+	}
+	if !authCtx.MFAPending {
+		t.Error("MFAPending = false, want true")
+	}
+	if authCtx.IsAuthenticated {
+		t.Error("IsAuthenticated = true, want false — mid-login, not a fully authenticated principal")
+	}
+	if authCtx.UserID != f.userID {
+		t.Errorf("UserID = %q, want %q", authCtx.UserID, f.userID)
+	}
+}
+
+func TestAuthenticateMFAToken_ExpiredTokenIsRejected(t *testing.T) {
+	f := newFixture(t)
+	claims := mfatoken.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   f.userID,
+			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		},
+		TenantID: f.tenantID,
+		Txn:      "expired-txn",
+		Purpose:  mfatoken.PurposeMFALogin,
+		Origin:   "https://example.com",
+	}
+	token := f.signRawMFAClaims(t, claims)
+
+	_, err := f.checker.AuthenticateMFAToken(token, f.tenantID)
+	if !errors.Is(err, mfatoken.ErrInvalidToken) {
+		t.Errorf("AuthenticateMFAToken() error = %v, want mfatoken.ErrInvalidToken", err)
+	}
+}
+
+func TestAuthenticateMFAToken_MalformedTokenIsRejected(t *testing.T) {
+	f := newFixture(t)
+
+	_, err := f.checker.AuthenticateMFAToken("not-a-jwt", f.tenantID)
+	if !errors.Is(err, mfatoken.ErrInvalidToken) {
+		t.Errorf("AuthenticateMFAToken() error = %v, want mfatoken.ErrInvalidToken", err)
+	}
+}
+
+func TestAuthenticateMFAToken_TenantMismatchIsRejected(t *testing.T) {
+	f := newFixture(t)
+	token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, "https://example.com")
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	_, err = f.checker.AuthenticateMFAToken(token, "00000000-0000-0000-0000-000000000000")
+	if !errors.Is(err, ErrMFATokenTenantMismatch) {
+		t.Errorf("AuthenticateMFAToken() error = %v, want ErrMFATokenTenantMismatch", err)
+	}
+}
+
+// signRawMFAClaims signs claims with the fixture's real mfa_token key,
+// bypassing mfatoken.Codec.Issue — needed for test cases (expired, etc.)
+// Issue's own API doesn't let a caller construct.
+func (f *fixture) signRawMFAClaims(t *testing.T, claims mfatoken.Claims) string {
+	t.Helper()
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tok.Header["kid"] = f.mfaTokenKey.KeyID
+	signed, err := tok.SignedString(f.mfaTokenKey.Secret)
+	if err != nil {
+		t.Fatalf("sign mfa claims: %v", err)
+	}
+	return signed
+}
+
+func TestEnforceMFA_ExemptRouteAllowsWithoutLoadingPolicy(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	// A policy that would otherwise deny everything (required, no
+	// enrollment) — proves the exempt-route short-circuit happens before
+	// policy loading or enrollment lookup, not just that it happens to
+	// allow.
+	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+
+	decision, err := f.checker.EnforceMFA(ctx, "/auth/mfa/verify", f.tenantID, &AuthContext{UserID: f.userID})
+	if err != nil {
+		t.Fatalf("EnforceMFA() error: %v", err)
+	}
+	if decision != enforce.Allowed {
+		t.Errorf("EnforceMFA() = %q, want Allowed", decision)
+	}
+}
+
+func TestEnforceMFA_OptionalPolicyAllows(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	decision, err := f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{UserID: f.userID})
+	if err != nil {
+		t.Fatalf("EnforceMFA() error: %v", err)
+	}
+	if decision != enforce.Allowed {
+		t.Errorf("EnforceMFA() = %q, want Allowed for the default optional policy", decision)
+	}
+}
+
+func TestEnforceMFA_RequiredAndUnenrolledReturnsSetupRequired(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+
+	decision, err := f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{UserID: f.userID})
+	if err != nil {
+		t.Fatalf("EnforceMFA() error: %v", err)
+	}
+	if decision != enforce.SetupRequired {
+		t.Errorf("EnforceMFA() = %q, want SetupRequired", decision)
+	}
+}
+
+func TestEnforceMFA_RequiredAndEnrolledButAMRMissingFactorReturnsFactorRequired(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+	if _, err := f.mfaCreds.Insert(ctx, f.userID, mfa.CredentialTOTP, []byte("opaque"), nil); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+
+	decision, err := f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{UserID: f.userID, AMR: []string{"pwd"}})
+	if err != nil {
+		t.Fatalf("EnforceMFA() error: %v", err)
+	}
+	if decision != enforce.FactorRequired {
+		t.Errorf("EnforceMFA() = %q, want FactorRequired", decision)
+	}
+}
+
+func TestEnforceMFA_AssuranceAgedPastPolicyReturnsReverifyRequired(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.max_assurance_age_hours", "1"); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+	if _, err := f.mfaCreds.Insert(ctx, f.userID, mfa.CredentialTOTP, []byte("opaque"), nil); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	verifiedAt := time.Now().Add(-2 * time.Hour)
+
+	decision, err := f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{
+		UserID:        f.userID,
+		AMR:           []string{"pwd", "totp"},
+		MFAVerifiedAt: &verifiedAt,
+	})
+	if err != nil {
+		t.Fatalf("EnforceMFA() error: %v", err)
+	}
+	if decision != enforce.ReverifyRequired {
+		t.Errorf("EnforceMFA() = %q, want ReverifyRequired", decision)
+	}
+}
+
+func TestEnforceMFA_RequiredForRolesOnlyAppliesToMatchingRole(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequiredForRoles)); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+	if err := f.tenantConfig.Set(ctx, f.tenantID, "mfa.required_roles", "billing_admin"); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+
+	decision, err := f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{UserID: f.userID, RolesLive: []string{"admin"}})
+	if err != nil {
+		t.Fatalf("EnforceMFA() error: %v", err)
+	}
+	if decision != enforce.Allowed {
+		t.Errorf("EnforceMFA() = %q, want Allowed for a role the policy doesn't require MFA for", decision)
+	}
+
+	decision, err = f.checker.EnforceMFA(ctx, "/widgets", f.tenantID, &AuthContext{UserID: f.userID, RolesLive: []string{"billing_admin"}})
+	if err != nil {
+		t.Fatalf("EnforceMFA() error: %v", err)
+	}
+	if decision != enforce.SetupRequired {
+		t.Errorf("EnforceMFA() = %q, want SetupRequired for a role the policy does require MFA for", decision)
 	}
 }
