@@ -606,7 +606,7 @@ type L10nConfig struct {
 	TinFormat              string       `json:"tin_format,omitempty"`
 	VatLabel               string       `json:"vat_label,omitempty"`
 	InvoiceSequenceFormat  string       `json:"invoice_sequence_format,omitempty"`
-	Provides               L10nProvides `json:"provides,omitempty"`
+	Provides               L10nProvides `json:"provides"`
 }
 
 type L10nProvides struct {
