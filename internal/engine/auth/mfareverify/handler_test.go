@@ -1,4 +1,4 @@
-package mfaverify
+package mfareverify
 
 import (
 	"bytes"
@@ -13,31 +13,43 @@ import (
 
 	pquernatotp "github.com/pquerna/otp/totp"
 
+	"github.com/djangbahevans/goerp/internal/engine/apikey"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
-	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
+	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
+	"github.com/djangbahevans/goerp/internal/engine/permcache"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
 const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
-const testOrigin = "https://acmecorp.goerp.io"
 
+// fixture is one authenticated session's worth of real, FK-satisfying
+// rows — a tenant with a resolvable subdomain, an active user with an
+// admin role grant, and both an Issuer/Checker pair (to mint and validate
+// real tokens) and a Resolver (to resolve the fixture's own Host header)
+// — mirroring authcheck's and tenantresolve's own test fixture shapes,
+// combined, since this handler is the first real caller of both together.
 type fixture struct {
 	handler    *Handler
-	mfaTokens  *mfatoken.Codec
+	issuer     *authtoken.Issuer
 	rowKeys    *rowcrypt.RowKeySet
+	domain     string
 	tenantID   string
 	tenantSlug string
 	userID     string
@@ -56,6 +68,12 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = conn.Close() })
 	lockSharedKeyTables(t, conn)
 
+	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
+	if err != nil {
+		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
+	}
+	t.Cleanup(func() { _ = cacheClient.Close() })
+
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenant Bootstrap() error: %v", err)
@@ -73,6 +91,14 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
 	roleStore := role.NewStore(conn)
+	apiKeys := apikey.NewStore(conn)
+	if err := apiKeys.Bootstrap(ctx); err != nil {
+		t.Fatalf("apikey Bootstrap() error: %v", err)
+	}
+	billingStore := billing.NewStore(conn)
+	if err := billingStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("billing Bootstrap() error: %v", err)
+	}
 
 	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
 	if err := signingKeyStore.Bootstrap(ctx); err != nil {
@@ -83,22 +109,6 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("signingkey LoadOrGenerate() error: %v", err)
 	}
 
-	mfaTokenKeyStore := mfatoken.NewStore(conn, &secrets.EnvBackend{})
-	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
-		t.Fatalf("mfatoken Bootstrap() error: %v", err)
-	}
-	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
-	if err != nil {
-		t.Fatalf("mfatoken LoadOrGenerate() error: %v", err)
-	}
-	mfaTokens := mfatoken.NewCodec(&mfaTokenKeySet.Active)
-
-	// EnvBackend (ephemeral, never persists) — same reasoning as
-	// signingKeyStore/mfaTokenKeyStore above: LoadOrGenerate must produce
-	// a fresh, usable key every test run regardless of what a previous
-	// test in this package left in system.row_encryption_keys, since a
-	// row without recoverable key material (e.g. from another test's own
-	// in-process memoryBackend) would otherwise break decryption here.
 	rowCryptStore := rowcrypt.NewStore(conn, &secrets.EnvBackend{})
 	if err := rowCryptStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("rowcrypt Bootstrap() error: %v", err)
@@ -109,23 +119,31 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("rowcrypt LoadOrGenerate() error: %v", err)
 	}
 
-	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
-	if err != nil {
-		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
-	}
-	t.Cleanup(func() { _ = cacheClient.Close() })
-
+	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 	issuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
+	roleCache := permcache.NewRoleCache(cacheClient)
+	roleMap := permcache.NewRolePermissionMap()
+	registry := permission.NewPermissionRegistry()
+	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap, apiKeys, false)
 	totpService := totp.NewService(mfaStore, rowKeys, cacheClient)
 	recoveryService := recoverycode.NewService(mfaStore)
-	handler := NewHandler(mfaTokens, cacheClient, totpService, recoveryService, tenantStore, issuer)
+	lockoutCounter := lockout.NewCounter(cacheClient)
+	handler := NewHandler(tenantResolver, authChecker, sessionStore, issuer, totpService, recoveryService, lockoutCounter)
 
-	slug := fmt.Sprintf("mfaverifytest%d", time.Now().UnixNano())
-	tt, err := tenantStore.CreateTenant(ctx, slug, "MFA Verify Test Co")
+	slug := fmt.Sprintf("mfareverifytest%d", time.Now().UnixNano())
+	tt, err := tenantStore.CreateTenant(ctx, slug, "MFA Reverify Test Co")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
+	if _, err := tenantStore.UpdateStatus(ctx, slug, tenant.StatusActive, nil); err != nil {
+		t.Fatalf("activate fixture tenant: %v", err)
+	}
+
+	domain := slug + ".goerp.test"
+	if _, err := tenantStore.CreateDomain(ctx, tt.ID, domain, tenant.DomainSubdomain, true); err != nil {
+		t.Fatalf("CreateDomain() error: %v", err)
+	}
 
 	email := slug + "@example.com"
 	userID, err := userStore.FindOrCreateInvited(ctx, email)
@@ -158,10 +176,15 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("grant admin role: %v", err)
 	}
 
+	if err := roleMap.RebuildAll(ctx, tenantStore, roleStore, registry); err != nil {
+		t.Fatalf("RebuildAll() error: %v", err)
+	}
+
 	return &fixture{
 		handler:    handler,
-		mfaTokens:  mfaTokens,
+		issuer:     issuer,
 		rowKeys:    rowKeys,
+		domain:     domain,
 		tenantID:   tt.ID,
 		tenantSlug: slug,
 		userID:     userID,
@@ -170,18 +193,13 @@ func newFixture(t *testing.T) *fixture {
 	}
 }
 
-// lockSharedKeyTables mirrors loginflow/totp's own lock helpers —
-// serializes this package's tests against every other package's test
-// touching the same shared signing-key/row-encryption-key/mfa-token-key
-// tables.
+// lockSharedKeyTables mirrors mfaverify's own lock helper — serializes
+// this package's tests against every other package's test touching the
+// same shared signing-key/row-encryption-key tables.
 func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
-	for _, name := range []string{
-		"test.jwt_signing_keys_table",
-		"test.row_encryption_keys_table",
-		"test.mfa_token_signing_keys_table",
-	} {
+	for _, name := range []string{"test.jwt_signing_keys_table", "test.row_encryption_keys_table"} {
 		key := db.AdvisoryLockKey(name)
 		conn, err := pool.Conn(ctx)
 		if err != nil {
@@ -195,6 +213,21 @@ func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
 			_ = conn.Close()
 		})
 	}
+}
+
+// issueAccessToken mints a real, currently-valid access token for the
+// fixture's user — the "already-Authenticated session" reverify requires.
+func (f *fixture) issueAccessToken(t *testing.T) string {
+	t.Helper()
+	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+		UserID:     f.userID,
+		TenantSlug: f.tenantSlug,
+		DeviceID:   "11111111-1111-1111-1111-111111111111",
+	})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+	return tokens.AccessToken
 }
 
 func (f *fixture) enrollTOTP(t *testing.T) (code string) {
@@ -221,23 +254,18 @@ func (f *fixture) enrollTOTP(t *testing.T) (code string) {
 	return code
 }
 
-func (f *fixture) issueMFAToken(t *testing.T, origin string) (token, txn string) {
-	t.Helper()
-	token, txn, err := f.mfaTokens.Issue(f.userID, f.tenantID, origin)
-	if err != nil {
-		t.Fatalf("Issue() error: %v", err)
-	}
-	return token, txn
-}
-
-func (f *fixture) doVerify(t *testing.T, body map[string]any, headers map[string]string) *httptest.ResponseRecorder {
+func (f *fixture) doReverify(t *testing.T, accessToken string, body map[string]any, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	b, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal request body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/auth/mfa/verify", bytes.NewReader(b))
+	req := httptest.NewRequest(http.MethodPost, "/auth/mfa/reverify", bytes.NewReader(b))
+	req.Host = f.domain
 	req.RemoteAddr = "203.0.113.7:54321"
+	if accessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -246,21 +274,15 @@ func (f *fixture) doVerify(t *testing.T, body map[string]any, headers map[string
 	return rec
 }
 
-func TestServeHTTP_ValidTOTPCodeIssuesSession(t *testing.T) {
+func TestServeHTTP_ValidTOTPCodeRefreshesAssuranceAndReissuesAccessToken(t *testing.T) {
 	f := newFixture(t)
 	code := f.enrollTOTP(t)
-	token, _ := f.issueMFAToken(t, testOrigin)
+	accessToken := f.issueAccessToken(t)
 
-	rec := f.doVerify(t, map[string]any{
-		"mfa_token": token,
-		"type":      "totp",
-		"code":      code,
-		"device_id": "",
-	}, map[string]string{
-		"Origin":        testOrigin,
-		"X-Client-Type": "cli",
-		"Content-Type":  "application/json",
-	})
+	rec := f.doReverify(t, accessToken, map[string]any{
+		"type": "totp",
+		"code": code,
+	}, map[string]string{"X-Client-Type": "cli"})
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
@@ -269,147 +291,111 @@ func TestServeHTTP_ValidTOTPCodeIssuesSession(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if resp["access_token"] == "" || resp["access_token"] == nil {
-		t.Error("access_token missing or empty")
+	newAccessToken, _ := resp["access_token"].(string)
+	if newAccessToken == "" {
+		t.Fatal("access_token missing or empty")
 	}
-	if resp["refresh_token"] == "" || resp["refresh_token"] == nil {
-		t.Error("refresh_token missing or empty")
+	if newAccessToken == accessToken {
+		t.Error("access_token unchanged, want a freshly reissued token")
 	}
 
 	var mfaMethod string
 	var mfaVerifiedAt sql.NullTime
-	var mfaCredentialID sql.NullString
 	if err := f.conn.QueryRowContext(context.Background(),
-		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE user_id = $1`, f.userID,
-	).Scan(&mfaMethod, &mfaVerifiedAt, &mfaCredentialID); err != nil {
+		`SELECT mfa_method, mfa_verified_at FROM system.sessions WHERE user_id = $1`, f.userID,
+	).Scan(&mfaMethod, &mfaVerifiedAt); err != nil {
 		t.Fatalf("query session row: %v", err)
 	}
 	if mfaMethod != "totp" {
-		t.Errorf("sessions.mfa_method = %q, want %q", mfaMethod, "totp")
+		t.Errorf("sessions.mfa_method = %q, want totp", mfaMethod)
 	}
 	if !mfaVerifiedAt.Valid {
 		t.Error("sessions.mfa_verified_at is NULL, want set")
 	}
-	if !mfaCredentialID.Valid || mfaCredentialID.String == "" {
-		t.Error("sessions.mfa_credential_id is NULL/empty, want the matched credential's id")
+}
+
+func TestServeHTTP_NoAccessTokenRejected(t *testing.T) {
+	f := newFixture(t)
+
+	rec := f.doReverify(t, "", map[string]any{"type": "totp", "code": "123456"}, nil)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestServeHTTP_ValidRecoveryCodeConsumesItAndIssuesSession(t *testing.T) {
+func TestServeHTTP_MalformedAccessTokenRejected(t *testing.T) {
 	f := newFixture(t)
-	svc := recoverycode.NewService(mfa.NewStore(f.conn))
-	codes, err := svc.Enroll(context.Background(), f.userID)
-	if err != nil {
-		t.Fatalf("Enroll() error: %v", err)
-	}
-	token, _ := f.issueMFAToken(t, testOrigin)
 
-	rec := f.doVerify(t, map[string]any{
-		"mfa_token": token,
-		"type":      "recovery_code",
-		"code":      codes[0],
-	}, map[string]string{"Origin": testOrigin, "X-Client-Type": "cli"})
+	rec := f.doReverify(t, "not-a-real-token", map[string]any{"type": "totp", "code": "123456"}, nil)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
-
-	// A second attempt with the same recovery code must fail — it was
-	// consumed by the first successful verification.
-	token2, _ := f.issueMFAToken(t, testOrigin)
-	rec2 := f.doVerify(t, map[string]any{
-		"mfa_token": token2,
-		"type":      "recovery_code",
-		"code":      codes[0],
-	}, map[string]string{"Origin": testOrigin, "X-Client-Type": "cli"})
-	if rec2.Code != http.StatusUnauthorized {
-		t.Errorf("second use status = %d, want 401 (code already consumed)", rec2.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestServeHTTP_WrongCodeRejected(t *testing.T) {
 	f := newFixture(t)
 	f.enrollTOTP(t)
-	token, _ := f.issueMFAToken(t, testOrigin)
+	accessToken := f.issueAccessToken(t)
 
-	rec := f.doVerify(t, map[string]any{
-		"mfa_token": token,
-		"type":      "totp",
-		"code":      "000000",
-	}, map[string]string{"Origin": testOrigin, "X-Client-Type": "cli"})
+	rec := f.doReverify(t, accessToken, map[string]any{"type": "totp", "code": "000000"}, nil)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestServeHTTP_TokenIsSingleUse(t *testing.T) {
+func TestServeHTTP_UnresolvableHostRejected(t *testing.T) {
 	f := newFixture(t)
-	code := f.enrollTOTP(t)
-	token, _ := f.issueMFAToken(t, testOrigin)
+	accessToken := f.issueAccessToken(t)
 
-	first := f.doVerify(t, map[string]any{
-		"mfa_token": token, "type": "totp", "code": code,
-	}, map[string]string{"Origin": testOrigin, "X-Client-Type": "cli"})
-	if first.Code != http.StatusOK {
-		t.Fatalf("first attempt status = %d, want 200; body = %s", first.Code, first.Body.String())
-	}
+	b, _ := json.Marshal(map[string]any{"type": "totp", "code": "123456"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/mfa/reverify", bytes.NewReader(b))
+	req.Host = "no-such-tenant.goerp.test"
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
 
-	second := f.doVerify(t, map[string]any{
-		"mfa_token": token, "type": "totp", "code": code,
-	}, map[string]string{"Origin": testOrigin, "X-Client-Type": "cli"})
-	if second.Code != http.StatusUnauthorized {
-		t.Errorf("replayed mfa_token status = %d, want 401", second.Code)
-	}
-}
-
-func TestServeHTTP_OriginMismatchRejected(t *testing.T) {
-	f := newFixture(t)
-	code := f.enrollTOTP(t)
-	token, _ := f.issueMFAToken(t, testOrigin)
-
-	rec := f.doVerify(t, map[string]any{
-		"mfa_token": token, "type": "totp", "code": code,
-	}, map[string]string{"Origin": "https://evil.example.com", "X-Client-Type": "cli"})
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body = %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestServeHTTP_LocksOutAfterFiveFailures(t *testing.T) {
 	f := newFixture(t)
 	f.enrollTOTP(t)
+	accessToken := f.issueAccessToken(t)
 
 	for attempt := range lockout.MaxAttempts {
-		token, _ := f.issueMFAToken(t, testOrigin)
-		rec := f.doVerify(t, map[string]any{
-			"mfa_token": token, "type": "totp", "code": "000000",
-		}, map[string]string{"Origin": testOrigin, "X-Client-Type": "cli"})
+		rec := f.doReverify(t, accessToken, map[string]any{"type": "totp", "code": "000000"}, nil)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("attempt %d status = %d, want 401", attempt+1, rec.Code)
 		}
 	}
 
-	// The 6th attempt, even with the correct code, must be locked out.
 	code := f.enrollTOTP(t)
-	token, _ := f.issueMFAToken(t, testOrigin)
-	rec := f.doVerify(t, map[string]any{
-		"mfa_token": token, "type": "totp", "code": code,
-	}, map[string]string{"Origin": testOrigin, "X-Client-Type": "cli"})
+	rec := f.doReverify(t, accessToken, map[string]any{"type": "totp", "code": code}, nil)
 	if rec.Code != http.StatusLocked {
 		t.Errorf("status after %d failures = %d, want 423", lockout.MaxAttempts, rec.Code)
 	}
 }
 
-func TestServeHTTP_MalformedMFATokenRejected(t *testing.T) {
+func TestServeHTTP_ValidRecoveryCodeCompletesReverify(t *testing.T) {
 	f := newFixture(t)
+	svc := recoverycode.NewService(mfa.NewStore(f.conn))
+	codes, err := svc.Enroll(context.Background(), f.userID)
+	if err != nil {
+		t.Fatalf("Enroll() error: %v", err)
+	}
+	accessToken := f.issueAccessToken(t)
 
-	rec := f.doVerify(t, map[string]any{
-		"mfa_token": "not-a-real-token", "type": "totp", "code": "123456",
-	}, map[string]string{"Origin": testOrigin})
+	rec := f.doReverify(t, accessToken, map[string]any{
+		"type": "recovery_code",
+		"code": codes[0],
+	}, map[string]string{"X-Client-Type": "cli"})
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
 }

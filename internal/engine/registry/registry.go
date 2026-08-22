@@ -88,11 +88,12 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 }
 
 // registerBuiltinRoutes registers the engine's own built-in routes into
-// table, so /_health, /_ready, /auth/login, and /auth/mfa/verify resolve
-// through the exact same RouteTable.Lookup module routes do — no second
-// router. Safe against collision by construction: RegisterModuleRoutes
-// already rejects any module route whose top path segment starts with
-// "_", or is exactly "auth" or "admin", as a reserved engine namespace.
+// table, so /_health, /_ready, /auth/login, /auth/mfa/verify, and
+// /auth/mfa/reverify resolve through the exact same RouteTable.Lookup
+// module routes do — no second router. Safe against collision by
+// construction: RegisterModuleRoutes already rejects any module route
+// whose top path segment starts with "_", or is exactly "auth" or
+// "admin", as a reserved engine namespace.
 func registerBuiltinRoutes(table *route.RouteTable) {
 	for _, path := range []string{"/_health", "/_ready"} {
 		table.Register("GET", path, &route.RouteEntry{
@@ -100,7 +101,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: path,
 		})
 	}
-	for _, path := range []string{"/auth/login", "/auth/mfa/verify"} {
+	for _, path := range []string{"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify"} {
 		table.Register("POST", path, &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true},
 			PathTemplate: path,

@@ -271,6 +271,94 @@ func TestInsert_MFAFieldsAreNullWhenUnset(t *testing.T) {
 	}
 }
 
+func TestUpdateMFAAssurance_SetsColumnsOnExistingRow(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, _ := sessionFixture(t, store, conn)
+
+	credID := uuid.NewString()
+	verifiedAt := time.Now().Add(-30 * time.Second)
+	if err := store.UpdateMFAAssurance(context.Background(), sessionID, "totp", verifiedAt, credID); err != nil {
+		t.Fatalf("UpdateMFAAssurance() error: %v", err)
+	}
+
+	var gotMethod, gotCredID string
+	var gotVerifiedAt time.Time
+	err := conn.QueryRowContext(context.Background(),
+		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE id = $1`, sessionID,
+	).Scan(&gotMethod, &gotVerifiedAt, &gotCredID)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if gotMethod != "totp" {
+		t.Errorf("mfa_method = %q, want totp", gotMethod)
+	}
+	if gotVerifiedAt.Unix() != verifiedAt.Unix() {
+		t.Errorf("mfa_verified_at = %v, want %v", gotVerifiedAt, verifiedAt)
+	}
+	if gotCredID != credID {
+		t.Errorf("mfa_credential_id = %q, want %q", gotCredID, credID)
+	}
+}
+
+func TestUpdateMFAAssurance_OverwritesPreviousValue(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, _ := sessionFixture(t, store, conn)
+	ctx := context.Background()
+
+	first := uuid.NewString()
+	if err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now().Add(-time.Hour), first); err != nil {
+		t.Fatalf("first UpdateMFAAssurance() error: %v", err)
+	}
+
+	second := uuid.NewString()
+	verifiedAt := time.Now()
+	if err := store.UpdateMFAAssurance(ctx, sessionID, "webauthn", verifiedAt, second); err != nil {
+		t.Fatalf("second UpdateMFAAssurance() error: %v", err)
+	}
+
+	var gotMethod, gotCredID string
+	var gotVerifiedAt time.Time
+	err := conn.QueryRowContext(ctx,
+		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE id = $1`, sessionID,
+	).Scan(&gotMethod, &gotVerifiedAt, &gotCredID)
+	if err != nil {
+		t.Fatalf("query session row: %v", err)
+	}
+	if gotMethod != "webauthn" {
+		t.Errorf("mfa_method = %q, want webauthn (reverify's new factor)", gotMethod)
+	}
+	if gotCredID != second {
+		t.Errorf("mfa_credential_id = %q, want %q (the second call's credential)", gotCredID, second)
+	}
+	if gotVerifiedAt.Unix() != verifiedAt.Unix() {
+		t.Errorf("mfa_verified_at = %v, want %v", gotVerifiedAt, verifiedAt)
+	}
+}
+
+func TestUpdateMFAAssurance_UnknownIDReturnsErrSessionNotFound(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	err := store.UpdateMFAAssurance(context.Background(), uuid.NewString(), "totp", time.Now(), uuid.NewString())
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("UpdateMFAAssurance() error = %v, want ErrSessionNotFound", err)
+	}
+}
+
+func TestUpdateMFAAssurance_RevokedSessionReturnsErrSessionNotFound(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, _ := sessionFixture(t, store, conn)
+	ctx := context.Background()
+
+	if err := store.Revoke(ctx, sessionID, "test"); err != nil {
+		t.Fatalf("Revoke() error: %v", err)
+	}
+
+	err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now(), uuid.NewString())
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("UpdateMFAAssurance() on a revoked session error = %v, want ErrSessionNotFound", err)
+	}
+}
+
 func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, _ := sessionFixture(t, store, conn)

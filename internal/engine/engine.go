@@ -43,6 +43,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfareverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
@@ -59,6 +60,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -621,11 +623,14 @@ func New(cfg *config.Config) (*Engine, error) {
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
 	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
+	mfaLockout := lockout.NewCounter(cacheClient)
+	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
 	builtinRoutes := map[string]http.Handler{
-		"GET /_health":          server.HealthHandler(),
-		"GET /_ready":           server.ReadyHandler(),
-		"POST /auth/login":      loginHandler,
-		"POST /auth/mfa/verify": mfaVerifyHandler,
+		"GET /_health":            server.HealthHandler(),
+		"GET /_ready":             server.ReadyHandler(),
+		"POST /auth/login":        loginHandler,
+		"POST /auth/mfa/verify":   mfaVerifyHandler,
+		"POST /auth/mfa/reverify": mfaReverifyHandler,
 	}
 	server.SetHandler(buildDispatchHandler(moduleRegistry, builtinRoutes))
 

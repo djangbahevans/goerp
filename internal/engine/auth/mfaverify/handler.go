@@ -23,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -33,17 +34,6 @@ import (
 // runs no middleware ahead of them), same reasoning as loginflow's own cap.
 const maxBodyBytes = 64 * 1024
 
-// maxAttempts/lockoutWindow are auth-internals.md §8's own "5 consecutive
-// failures ... lock MFA for 15 minutes" numbers — deliberately a
-// different threshold and window from loginflow's password brute-force
-// lockout (10 failures/30 min), since they guard different attack
-// surfaces (password guessing vs. MFA code guessing once the password is
-// already known).
-const (
-	maxAttempts   = 5
-	lockoutWindow = 15 * time.Minute
-)
-
 type Handler struct {
 	mfaTokens *mfatoken.Codec
 	cache     *cache.Client
@@ -51,6 +41,7 @@ type Handler struct {
 	recovery  *recoverycode.Service
 	tenants   *tenant.Store
 	issuer    *authtoken.Issuer
+	lockout   *lockout.Counter
 }
 
 func NewHandler(mfaTokens *mfatoken.Codec, cacheClient *cache.Client, totpService *totp.Service, recoveryService *recoverycode.Service, tenants *tenant.Store, issuer *authtoken.Issuer) *Handler {
@@ -61,6 +52,7 @@ func NewHandler(mfaTokens *mfatoken.Codec, cacheClient *cache.Client, totpServic
 		recovery:  recoveryService,
 		tenants:   tenants,
 		issuer:    issuer,
+		lockout:   lockout.NewCounter(cacheClient),
 	}
 }
 
@@ -130,19 +122,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: lockout check, before spending effort verifying the code.
-	attempts, _, err := h.cache.Get(ctx, attemptsKey(claims.Subject, claims.TenantID))
+	locked, err := h.lockout.Locked(ctx, claims.Subject, claims.TenantID)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
-	if attempts == maxAttemptsMarker {
+	if locked {
 		writeJSONError(w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
 		return
 	}
 
 	// Step 6: verify the submitted code against an enrolled factor of the
 	// requested type.
-	valid, credentialID, err := h.verifyCode(ctx, claims.Subject, req.Type, req.Code)
+	valid, credentialID, err := VerifyCode(ctx, h.totp, h.recovery, req.Type, claims.Subject, req.Code)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
@@ -150,16 +142,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !valid {
 		// Step 8: on failure, increment the (user_id, tenant_id) attempt
 		// counter — never the already-consumed txn from step 4.
-		count, incErr := h.cache.IncrWithTTL(ctx, attemptsKey(claims.Subject, claims.TenantID), lockoutWindow)
-		if incErr != nil {
+		if err := h.lockout.RecordFailure(ctx, claims.Subject, claims.TenantID); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 			return
-		}
-		if count >= maxAttempts {
-			if setErr := h.cache.SetWithTTL(ctx, attemptsKey(claims.Subject, claims.TenantID), maxAttemptsMarker, lockoutWindow); setErr != nil {
-				writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
-				return
-			}
 		}
 		writeJSONError(w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
 		return
@@ -203,7 +188,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Reset the attempt counter on success so a later, separate login
 	// attempt doesn't inherit an in-progress failure count.
-	if err := h.cache.Delete(ctx, attemptsKey(claims.Subject, claims.TenantID)); err != nil {
+	if err := h.lockout.Reset(ctx, claims.Subject, claims.TenantID); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
@@ -211,16 +196,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser)
 }
 
-// verifyCode dispatches to the Service matching req.Type. totp and
+// VerifyCode dispatches to whichever Service matches mfaType. totp and
 // recoverycode share the same (bool, credentialID, error) shape by
 // design, so both branches compose identically; webauthn (goerp#301)
-// isn't built yet.
-func (h *Handler) verifyCode(ctx context.Context, userID, mfaType, code string) (valid bool, credentialID string, err error) {
+// isn't built yet. Exported so mfareverify (goerp#307) can reuse the same
+// dispatch instead of a second copy of this switch.
+func VerifyCode(ctx context.Context, totpSvc *totp.Service, recoverySvc *recoverycode.Service, mfaType, userID, code string) (valid bool, credentialID string, err error) {
 	switch mfa.CredentialType(mfaType) {
 	case mfa.CredentialTOTP:
-		return h.totp.Verify(ctx, userID, code)
+		return totpSvc.Verify(ctx, userID, code)
 	case mfa.CredentialRecoveryCode:
-		return h.recovery.Verify(ctx, userID, code)
+		return recoverySvc.Verify(ctx, userID, code)
 	default:
 		return false, "", nil
 	}
@@ -231,16 +217,3 @@ func (h *Handler) verifyCode(ctx context.Context, userID, mfaType, code string) 
 func consumedKey(txn string) string {
 	return "auth:mfa_token:consumed:" + txn
 }
-
-// attemptsKey scopes the MFA lockout counter to (user_id, tenant_id), per
-// auth-internals.md §8's "Attempt counter scope" — never to txn, since a
-// per-transaction counter would reset to zero on every fresh
-// POST /auth/login.
-func attemptsKey(userID, tenantID string) string {
-	return "auth:mfa_attempts:" + userID + ":" + tenantID
-}
-
-// maxAttemptsMarker is the sentinel value attemptsKey is set to once the
-// lockout threshold is reached — distinguishing "locked" from "still
-// counting" without a second Redis key.
-const maxAttemptsMarker = "locked"
