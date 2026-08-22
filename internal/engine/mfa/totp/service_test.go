@@ -177,7 +177,7 @@ func TestVerify_AcceptsCurrentValidCode(t *testing.T) {
 		t.Fatalf("GenerateCode() error: %v", err)
 	}
 
-	ok, err := env.service.Verify(context.Background(), userID, code)
+	ok, _, err := env.service.Verify(context.Background(), userID, code)
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestVerify_RejectsWrongCode(t *testing.T) {
 		t.Fatalf("Enroll() error: %v", err)
 	}
 
-	ok, err := env.service.Verify(context.Background(), userID, "000000")
+	ok, _, err := env.service.Verify(context.Background(), userID, "000000")
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestVerify_AcceptsPreviousWindowWithinSkew(t *testing.T) {
 		t.Fatalf("GenerateCode() error: %v", err)
 	}
 
-	ok, err := env.service.Verify(context.Background(), userID, code)
+	ok, _, err := env.service.Verify(context.Background(), userID, code)
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestVerify_RejectsTwoWindowsAgo(t *testing.T) {
 		t.Fatalf("GenerateCode() error: %v", err)
 	}
 
-	ok, err := env.service.Verify(context.Background(), userID, code)
+	ok, _, err := env.service.Verify(context.Background(), userID, code)
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestVerify_RejectsReplayedCode(t *testing.T) {
 		t.Fatalf("GenerateCode() error: %v", err)
 	}
 
-	first, err := env.service.Verify(context.Background(), userID, code)
+	first, _, err := env.service.Verify(context.Background(), userID, code)
 	if err != nil {
 		t.Fatalf("first Verify() error: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestVerify_RejectsReplayedCode(t *testing.T) {
 		t.Fatal("first Verify() = false, want true")
 	}
 
-	second, err := env.service.Verify(context.Background(), userID, code)
+	second, _, err := env.service.Verify(context.Background(), userID, code)
 	if err != nil {
 		t.Fatalf("second Verify() error: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestVerify_UndecryptableFactorDoesNotBlockAnotherValidFactor(t *testing.T) 
 		t.Fatalf("GenerateCode() error: %v", err)
 	}
 
-	ok, err := env.service.Verify(context.Background(), userID, code)
+	ok, _, err := env.service.Verify(context.Background(), userID, code)
 	if err != nil {
 		t.Fatalf("Verify() error: %v, want nil — the valid factor should still be found", err)
 	}
@@ -326,7 +326,7 @@ func TestVerify_AllFactorsUndecryptableReturnsError(t *testing.T) {
 		t.Fatalf("Insert() error: %v", err)
 	}
 
-	_, err := env.service.Verify(context.Background(), userID, "123456")
+	_, _, err := env.service.Verify(context.Background(), userID, "123456")
 	if err == nil {
 		t.Error("Verify() error = nil, want a decrypt error surfaced when every candidate is undecryptable")
 	}
@@ -336,7 +336,7 @@ func TestVerify_NoEnrolledFactorsReturnsFalse(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	ok, err := env.service.Verify(context.Background(), userID, "123456")
+	ok, _, err := env.service.Verify(context.Background(), userID, "123456")
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}

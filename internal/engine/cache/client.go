@@ -80,6 +80,26 @@ func (c *Client) SetNXWithTTL(ctx context.Context, key, value string, ttl time.D
 	return set, nil
 }
 
+// IncrWithTTL atomically increments key (creating it at 1 if unset) and
+// returns the new count. The expiry is set only on the increment that
+// creates key (count == 1), so an existing counter's remaining TTL is
+// never extended by a later increment — auth-internals.md §8's MFA
+// lockout counter needs failures within a single ttl-wide window to
+// accumulate toward the threshold, not have that window keep sliding
+// forward on every failed attempt.
+func (c *Client) IncrWithTTL(ctx context.Context, key string, ttl time.Duration) (count int64, err error) {
+	count, err = c.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, fmt.Errorf("incr %q: %w", key, err)
+	}
+	if count == 1 {
+		if err := c.rdb.Expire(ctx, key, ttl).Err(); err != nil {
+			return count, fmt.Errorf("expire %q: %w", key, err)
+		}
+	}
+	return count, nil
+}
+
 // Exists reports whether key is currently set.
 func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 	n, err := c.rdb.Exists(ctx, key).Result()

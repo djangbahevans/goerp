@@ -14,6 +14,7 @@ import (
 	"github.com/alexedwards/argon2id"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -51,6 +52,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	lockSigningKeyTable(t, conn)
+	lockMFATokenSigningKeyTable(t, conn)
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
@@ -75,6 +77,14 @@ func newFixture(t *testing.T) *fixture {
 	keySet, err := signingKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("LoadOrGenerate() error: %v", err)
+	}
+	mfaTokenKeyStore := mfatoken.NewStore(conn, &secrets.EnvBackend{})
+	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("mfatoken Bootstrap() error: %v", err)
+	}
+	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
+	if err != nil {
+		t.Fatalf("mfatoken LoadOrGenerate() error: %v", err)
 	}
 	roleStore := role.NewStore(conn)
 
@@ -124,7 +134,8 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, userID) })
 
 	issuer := authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore)
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer)
+	mfaTokens := mfatoken.NewCodec(&mfaTokenKeySet.Active)
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens)
 
 	return &fixture{
 		handler:    handler,
@@ -151,6 +162,27 @@ func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
 	}
 	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
 		t.Fatalf("acquire signing-key advisory lock: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
+		_ = conn.Close()
+	})
+}
+
+// lockMFATokenSigningKeyTable mirrors lockSigningKeyTable — serializes
+// this package's tests against every other package's test touching the
+// shared system.mfa_token_signing_keys table.
+func lockMFATokenSigningKeyTable(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	key := db.AdvisoryLockKey("test.mfa_token_signing_keys_table")
+
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire dedicated connection for mfa-token-key lock: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
+		t.Fatalf("acquire mfa-token-key advisory lock: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)

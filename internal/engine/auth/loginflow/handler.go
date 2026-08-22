@@ -12,28 +12,21 @@
 // #291). This handler implements only the single-tier lockout
 // user.Store.IncrementFailedLogins already provides, enough for step 5
 // ("check brute force counters — reject if locked") to be real.
-//
-// The mfa_token this handler returns on an MFA-required login is a
-// placeholder: a random opaque string with no server-side validation of
-// its own. auth-internals.md §8 specifies the real format (a short-lived,
-// 5-minute-TTL HMAC-signed token encoding user_id, txn, origin) — that's
-// goerp#304's scope (MFA token flow, POST /auth/mfa/verify), the endpoint
-// that will actually mint and validate it.
 package loginflow
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/alexedwards/argon2id"
-	"github.com/google/uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -74,15 +67,16 @@ func init() {
 }
 
 type Handler struct {
-	users   *user.Store
-	tenants *tenant.Store
-	roles   *role.Store
-	mfa     *mfa.Store
-	issuer  *authtoken.Issuer
+	users     *user.Store
+	tenants   *tenant.Store
+	roles     *role.Store
+	mfa       *mfa.Store
+	issuer    *authtoken.Issuer
+	mfaTokens *mfatoken.Codec
 }
 
-func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer) *Handler {
-	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer}
+func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec) *Handler {
+	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens}
 }
 
 type loginRequest struct {
@@ -162,7 +156,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// system.tenants' own CHECK-constrained format — a guarantee that
 	// holds for req.Tenant only once it's round-tripped through a real
 	// tenant row lookup, not for the raw, unvalidated request field.
-	if _, err := h.tenants.GetBySlug(ctx, req.Tenant); err != nil {
+	t, err := h.tenants.GetBySlug(ctx, req.Tenant)
+	if err != nil {
 		if errors.Is(err, tenant.ErrTenantNotFound) {
 			writeInvalidCredentials(w)
 			return
@@ -223,48 +218,42 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(factors) > 0 {
+		mfaToken, _, err := h.mfaTokens.Issue(u.ID, t.ID, r.Header.Get("Origin"))
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"mfa_required": true,
-			"mfa_token":    generatePlaceholderMFAToken(),
+			"mfa_token":    mfaToken,
+			"mfa_methods":  enrolledMethods(factors),
 		})
 		return
 	}
 
 	// Step 11: full session issuance.
-	nonBrowser := r.Header.Get("X-Client-Type") == "cli"
-	deviceID, deviceIDIsFresh := resolveDeviceID(r, req.DeviceID, nonBrowser)
+	nonBrowser := loginsession.IsNonBrowser(r)
+	deviceID, deviceIDIsFresh := loginsession.ResolveDeviceID(r, req.DeviceID, nonBrowser)
 
 	tokens, err := h.issuer.Issue(ctx, authtoken.LoginParams{
 		UserID:      u.ID,
 		TenantSlug:  req.Tenant,
 		DeviceID:    deviceID,
 		UserAgent:   r.UserAgent(),
-		IPAddress:   clientIP(r),
+		IPAddress:   loginsession.ClientIP(r),
 		CountryCode: "",
 	})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
-	if err := h.users.ResetLoginState(ctx, u.ID, clientIP(r)); err != nil {
+	if err := h.users.ResetLoginState(ctx, u.ID, loginsession.ClientIP(r)); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if nonBrowser {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token":  tokens.AccessToken,
-			"refresh_token": tokens.RefreshToken,
-			"device_id":     deviceID,
-			"expires_in":    tokens.ExpiresIn,
-		})
-		return
-	}
-
-	setLoginCookies(w, tokens, deviceID, deviceIDIsFresh)
-	_ = json.NewEncoder(w).Encode(map[string]any{"expires_in": tokens.ExpiresIn})
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser)
 }
 
 // runDummyCompare performs one Argon2id comparison against a fixed,
@@ -284,73 +273,22 @@ func paramsMatch(got, want *argon2id.Params) bool {
 		got.KeyLength == want.KeyLength
 }
 
-// resolveDeviceID returns the effective device_id and whether it was
-// freshly generated (never seen before this request) — a web client's
-// existing device_id travels as a cookie, a non-browser client's as an
-// explicit body field, per the request sample's own "non-browser clients
-// only" annotation on the body field (auth-internals.md §3).
-func resolveDeviceID(r *http.Request, bodyDeviceID string, nonBrowser bool) (id string, isFresh bool) {
-	var candidate string
-	if nonBrowser {
-		candidate = bodyDeviceID
-	} else if cookie, err := r.Cookie("device_id"); err == nil {
-		candidate = cookie.Value
+// enrolledMethods returns the distinct set of credential types among
+// factors, in a fixed, deterministic order — the mfa_methods field
+// auth-internals.md §8's mfa_required response sample documents, telling
+// the client which `type` values POST /auth/mfa/verify will accept for
+// this user.
+func enrolledMethods(factors []*mfa.Credential) []string {
+	seen := make(map[mfa.CredentialType]bool, len(factors))
+	for _, f := range factors {
+		seen[f.Type] = true
 	}
 
-	if candidate != "" {
-		if _, err := uuid.Parse(candidate); err == nil {
-			return candidate, false
+	var methods []string
+	for _, t := range []mfa.CredentialType{mfa.CredentialTOTP, mfa.CredentialWebAuthn, mfa.CredentialRecoveryCode} {
+		if seen[t] {
+			methods = append(methods, string(t))
 		}
 	}
-	return uuid.NewString(), true
-}
-
-// clientIP extracts the request's remote address, stripping the port.
-// Real-IP resolution behind a proxy (X-Forwarded-For, etc.) is goerp#91's
-// own scope (the middleware chain's "real IP resolution" step) — this is
-// the unproxied fallback until that lands.
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-func setLoginCookies(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh bool) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "__Host-access_token",
-		Value:    tokens.AccessToken,
-		Path:     "/",
-		MaxAge:   tokens.ExpiresIn,
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    tokens.RefreshToken,
-		Path:     "/auth/refresh",
-		MaxAge:   30 * 24 * 60 * 60,
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-	})
-	if deviceIDIsFresh {
-		http.SetCookie(w, &http.Cookie{
-			Name:     "device_id",
-			Value:    deviceID,
-			Path:     "/auth/refresh",
-			MaxAge:   30 * 24 * 60 * 60,
-			HttpOnly: true,
-			Secure:   true,
-			SameSite: http.SameSiteStrictMode,
-		})
-	}
-}
-
-// generatePlaceholderMFAToken returns a random opaque string — see the
-// package doc comment for why this is not the real mfa_token format.
-func generatePlaceholderMFAToken() string {
-	return uuid.NewString()
+	return methods
 }

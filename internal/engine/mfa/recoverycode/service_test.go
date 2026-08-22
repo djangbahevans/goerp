@@ -120,7 +120,7 @@ func TestVerify_AcceptsAnEnrolledCode(t *testing.T) {
 	userID := env.createUser(t)
 	env.insertCode(t, userID, "AAAAA-AAAAA")
 
-	ok, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+	ok, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestVerify_RejectsWrongCode(t *testing.T) {
 	userID := env.createUser(t)
 	env.insertCode(t, userID, "AAAAA-AAAAA")
 
-	ok, err := env.service.Verify(context.Background(), userID, "BBBBB-BBBBB")
+	ok, _, err := env.service.Verify(context.Background(), userID, "BBBBB-BBBBB")
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestVerify_ConsumesTheCodeSoItCannotBeReused(t *testing.T) {
 	userID := env.createUser(t)
 	env.insertCode(t, userID, "AAAAA-AAAAA")
 
-	first, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+	first, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
 	if err != nil {
 		t.Fatalf("first Verify() error: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestVerify_ConsumesTheCodeSoItCannotBeReused(t *testing.T) {
 		t.Fatal("first Verify() = false, want true")
 	}
 
-	second, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+	second, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
 	if err != nil {
 		t.Fatalf("second Verify() error: %v", err)
 	}
@@ -171,11 +171,11 @@ func TestVerify_ConsumingOneCodeDoesNotAffectOthers(t *testing.T) {
 	env.insertCode(t, userID, "AAAAA-AAAAA")
 	env.insertCode(t, userID, "BBBBB-BBBBB")
 
-	if ok, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA"); err != nil || !ok {
+	if ok, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA"); err != nil || !ok {
 		t.Fatalf("Verify(AAAAA-AAAAA) = %v, %v, want true, nil", ok, err)
 	}
 
-	ok, err := env.service.Verify(context.Background(), userID, "BBBBB-BBBBB")
+	ok, _, err := env.service.Verify(context.Background(), userID, "BBBBB-BBBBB")
 	if err != nil {
 		t.Fatalf("Verify(BBBBB-BBBBB) error: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestVerify_ConcurrentCallsWithSameCodeOnlyOneSucceeds(t *testing.T) {
 	results := make(chan bool, 10)
 	for range 10 {
 		wg.Go(func() {
-			ok, _ := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+			ok, _, _ := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
 			results <- ok
 		})
 	}
@@ -218,7 +218,7 @@ func TestVerify_NoEnrolledCodesReturnsFalse(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	ok, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+	ok, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}

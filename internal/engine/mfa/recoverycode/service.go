@@ -50,19 +50,16 @@ func (s *Service) Enroll(ctx context.Context, userID string) ([]string, error) {
 }
 
 // Verify checks code against userID's enrolled, non-revoked recovery
-// codes. A match is consumed atomically via mfa.Store.ConsumeOnce, so two
-// concurrent Verify calls for the same code cannot both succeed — see
-// ConsumeOnce's own doc comment for why this differs from Store.Revoke.
-//
-// auth-internals.md §8 additionally specifies that a successful
-// verification's revoke happens "in the same transaction that issues the
-// session" — composing that with session issuance is goerp#304's job
-// (the MFA token flow endpoint that actually issues sessions); this
-// method's own guarantee is limited to the recovery-code row itself.
-func (s *Service) Verify(ctx context.Context, userID, code string) (bool, error) {
+// codes, and if matched, consumes it and returns its user_mfa row ID —
+// the caller's mfa_credential_id (session row and access token claim,
+// auth-internals.md §4/§8). The match is consumed atomically via
+// mfa.Store.ConsumeOnce, so two concurrent Verify calls for the same code
+// cannot both succeed — see ConsumeOnce's own doc comment for why this
+// differs from Store.Revoke.
+func (s *Service) Verify(ctx context.Context, userID, code string) (valid bool, credentialID string, err error) {
 	creds, err := s.store.ListActiveByUser(ctx, userID)
 	if err != nil {
-		return false, fmt.Errorf("list mfa credentials: %w", err)
+		return false, "", fmt.Errorf("list mfa credentials: %w", err)
 	}
 
 	for _, c := range creds {
@@ -78,12 +75,12 @@ func (s *Service) Verify(ctx context.Context, userID, code string) (bool, error)
 				// Consumed by a concurrent Verify call between our list
 				// and this ConsumeOnce — the code was raced away, not a
 				// system failure.
-				return false, nil
+				return false, "", nil
 			}
-			return false, fmt.Errorf("consume recovery code: %w", err)
+			return false, "", fmt.Errorf("consume recovery code: %w", err)
 		}
-		return true, nil
+		return true, c.ID, nil
 	}
 
-	return false, nil
+	return false, "", nil
 }
