@@ -61,6 +61,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
@@ -218,10 +219,10 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("bootstrap api key store: %w", err)
 	}
 
-	// mfaStore isn't stored as an Engine field or consumed by anything yet
-	// — the TOTP/WebAuthn/recovery-code enrollment tickets that will call
-	// it (goerp#300/#301/#302) haven't landed. Bootstrapped here, after
-	// userStore, since user_mfa FK-references system.users.
+	// mfaStore isn't stored as an Engine field — loginHandler,
+	// totpService, recoveryCodeService, mfaResetHandler, and authChecker
+	// below are its consumers. Bootstrapped here, after userStore, since
+	// user_mfa FK-references system.users.
 	mfaStore := mfa.NewStore(primaryPool)
 	if err := mfaStore.Bootstrap(ctx); err != nil {
 		_ = primaryPool.Close()
@@ -591,7 +592,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	// itself, since it's rebuilt on every module hot reload). Constructed
 	// here, after rolePermissionMap, since its permission-context hydration
 	// step needs both roleCache and rolePermissionMap.
-	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore, roleCache, rolePermissionMap, apiKeyStore, cfg.EnableAPIKeys)
+	mfaPolicyStore := enforce.NewStore(tenantConfigStore)
+	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore, roleCache, rolePermissionMap, apiKeyStore, cfg.EnableAPIKeys, mfaTokenCodec, mfaStore, mfaPolicyStore)
 
 	adminapi.RegisterActivityDispatchRoute(adminServer.UnauthenticatedRouter(), adminapi.ActivityDispatchDeps{
 		Registry:    moduleRegistry,

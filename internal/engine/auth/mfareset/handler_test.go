@@ -150,7 +150,7 @@ func newFixture(t *testing.T) *fixture {
 	roleCache := permcache.NewRoleCache(cacheClient)
 	roleMap := permcache.NewRolePermissionMap()
 	registry := permission.NewPermissionRegistry()
-	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap, apiKeys, false)
+	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap, apiKeys, false, nil, nil, nil)
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 	mailer := &spyMailer{}
 	audit := &spyAudit{}
