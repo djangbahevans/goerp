@@ -67,6 +67,19 @@ func (c *Client) SetWithTTL(ctx context.Context, key, value string, ttl time.Dur
 	return nil
 }
 
+// SetNXWithTTL sets key to value, expiring after ttl, only if key isn't
+// already set — Redis SETNX. Returns whether this call was the one that
+// set it, so callers doing atomic claim-a-slot-once patterns (auth-
+// internals.md §7/§8's mfa_token consumption and TOTP replay protection)
+// don't need a separate check-then-set that could race.
+func (c *Client) SetNXWithTTL(ctx context.Context, key, value string, ttl time.Duration) (set bool, err error) {
+	set, err = c.rdb.SetNX(ctx, key, value, ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("setnx %q: %w", key, err)
+	}
+	return set, nil
+}
+
 // Exists reports whether key is currently set.
 func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 	n, err := c.rdb.Exists(ctx, key).Result()
