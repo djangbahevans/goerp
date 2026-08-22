@@ -103,6 +103,66 @@ func TestSetWithTTL_ExpiresKey(t *testing.T) {
 	}
 }
 
+func TestSetNXWithTTL_SetsUnsetKeyAndReportsTrue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	set, err := c.SetNXWithTTL(ctx, key, "1", time.Minute)
+	if err != nil {
+		t.Fatalf("SetNXWithTTL() error: %v", err)
+	}
+	if !set {
+		t.Error("SetNXWithTTL() set = false for a previously unset key, want true")
+	}
+
+	exists, err := c.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Exists() error: %v", err)
+	}
+	if !exists {
+		t.Error("Exists() = false after SetNXWithTTL, want true")
+	}
+}
+
+func TestSetNXWithTTL_AlreadySetReportsFalseAndDoesNotOverwrite(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	if err := c.SetWithTTL(ctx, key, "first", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL() error: %v", err)
+	}
+
+	set, err := c.SetNXWithTTL(ctx, key, "second", time.Minute)
+	if err != nil {
+		t.Fatalf("SetNXWithTTL() error: %v", err)
+	}
+	if set {
+		t.Error("SetNXWithTTL() set = true for an already-set key, want false")
+	}
+
+	value, _, err := c.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if value != "first" {
+		t.Errorf("value = %q after a failed SetNXWithTTL, want unchanged %q", value, "first")
+	}
+}
+
 func TestGet_MissReturnsFoundFalse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
