@@ -32,6 +32,10 @@ func testDispatchHandler(t *testing.T) http.Handler {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"healthy"}`))
 		}),
+		"POST /auth/login": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"expires_in":900}`))
+		}),
 	}
 	return buildDispatchHandler(reg, builtins)
 }
@@ -47,6 +51,21 @@ func TestDispatchHandler_BuiltinRouteReachesRegisteredHandler(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 	if w.Body.String() != `{"status":"healthy"}` {
+		t.Errorf("body = %q, want the built-in handler's own body", w.Body.String())
+	}
+}
+
+func TestDispatchHandler_AuthLoginRouteReachesRegisteredHandler(t *testing.T) {
+	h := testDispatchHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if w.Body.String() != `{"expires_in":900}` {
 		t.Errorf("body = %q, want the built-in handler's own body", w.Body.String())
 	}
 }
