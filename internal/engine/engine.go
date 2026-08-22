@@ -75,6 +75,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant/provision"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -236,6 +237,20 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap row encryption keys table: %w", err)
+	}
+
+	// tenantConfigStore isn't stored as an Engine field — adminapi's config
+	// route below and MFA enforcement (goerp#308) are its only consumers.
+	// Bootstrapped here, after tenantStore, since tenant_config_overrides
+	// FK-references system.tenants.
+	tenantConfigStore := tenantconfig.NewStore(primaryPool)
+	if err := tenantConfigStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap tenant config overrides table: %w", err)
 	}
 
 	// roleStore's Bootstrap is per-tenant (roles/role_permissions/
@@ -673,6 +688,11 @@ func New(cfg *config.Config) (*Engine, error) {
 		// StatusNotImplemented for those routes rather than the wiring
 		// needing a placeholder implementation here. inviteStore's own
 		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
+	})
+
+	adminapi.RegisterConfigRoutes(adminServer.Router(), adminapi.ConfigDeps{
+		Tenants: tenantStore,
+		Config:  tenantConfigStore,
 	})
 
 	e = &Engine{
