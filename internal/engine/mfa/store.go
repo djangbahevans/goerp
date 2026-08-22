@@ -185,6 +185,21 @@ func (s *Store) UpdateCredentialAfterUse(ctx context.Context, id string, credent
 	return nil
 }
 
+// RevokeAllForUser marks every one of userID's non-revoked user_mfa rows
+// revoked, regardless of type — goerp#306's admin MFA reset, which
+// revokes every enrolled factor at once. Unlike single-row Revoke, a
+// no-op (a user with no enrolled factors) is not an error.
+func (s *Store) RevokeAllForUser(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.user_mfa SET revoked_at = NOW()
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`, userID)
+	if err != nil {
+		return fmt.Errorf("revoke all mfa credentials for user: %w", err)
+	}
+	return nil
+}
+
 // ConsumeOnce atomically revokes id only if it isn't already revoked,
 // returning ErrCredentialNotFound both when id doesn't exist and when
 // it's already been consumed — a caller can't tell the two apart, which

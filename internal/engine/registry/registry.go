@@ -88,12 +88,17 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 }
 
 // registerBuiltinRoutes registers the engine's own built-in routes into
-// table, so /_health, /_ready, /auth/login, /auth/mfa/verify, and
-// /auth/mfa/reverify resolve through the exact same RouteTable.Lookup
-// module routes do — no second router. Safe against collision by
-// construction: RegisterModuleRoutes already rejects any module route
-// whose top path segment starts with "_", or is exactly "auth" or
-// "admin", as a reserved engine namespace.
+// table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
+// /auth/mfa/reverify, and /admin/users/{id}/mfa/reset resolve through the
+// exact same RouteTable.Lookup module routes do — no second router. Safe
+// against collision by construction: RegisterModuleRoutes already
+// rejects any module route whose top path segment starts with "_", or is
+// exactly "auth" or "admin", as a reserved engine namespace.
+//
+// /admin/users/{id}/mfa/reset is a tenant-facing route despite its
+// "/admin/" prefix — see internal/engine/auth/mfareset's own package doc
+// for why that prefix doesn't mean it belongs to the separate
+// internal/engine/adminapi operator surface.
 func registerBuiltinRoutes(table *route.RouteTable) {
 	for _, path := range []string{"/_health", "/_ready"} {
 		table.Register("GET", path, &route.RouteEntry{
@@ -101,7 +106,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: path,
 		})
 	}
-	for _, path := range []string{"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify"} {
+	for _, path := range []string{"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify", "/admin/users/{id}/mfa/reset"} {
 		table.Register("POST", path, &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true},
 			PathTemplate: path,

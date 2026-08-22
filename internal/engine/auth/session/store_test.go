@@ -543,6 +543,87 @@ func TestNonRevokedIDsForTenant_ExcludesRevokedAndOtherTenants(t *testing.T) {
 	}
 }
 
+// secondTenantForUser creates a fresh tenant and inserts sessionID as a
+// new session row for the same userID inside it — simulating a user who
+// belongs to (and has an active session in) more than one tenant, the
+// scenario RevokeAllForUserInTenant/NonRevokedIDsForUserInTenant must not
+// reach across.
+func secondTenantForUser(t *testing.T, conn *sql.DB, userID string) (tenantID, sessionID string) {
+	t.Helper()
+	ctx := context.Background()
+
+	tenantStore := tenant.NewStore(conn)
+	slug := fmt.Sprintf("sessiontest%d", time.Now().UnixNano())
+	tt, err := tenantStore.CreateTenant(ctx, slug, "Session Test Co 2")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
+
+	sessionID = uuid.NewString()
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO system.sessions (id, user_id, tenant_id, family_id, device_id, refresh_hash, expires_at)
+		VALUES ($1, $2, $3, $1, $4, $5, $6)
+	`, sessionID, userID, tt.ID, uuid.NewString(), "fixture-hash-other-tenant", time.Now().Add(30*24*time.Hour)); err != nil {
+		t.Fatalf("insert session in second tenant: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, sessionID) })
+
+	return tt.ID, sessionID
+}
+
+func TestRevokeAllForUserInTenant_OnlyRevokesThatTenantsSessions(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, userID := sessionFixture(t, store, conn)
+	ctx := context.Background()
+
+	var tenantID string
+	if err := conn.QueryRowContext(ctx, `SELECT tenant_id FROM system.sessions WHERE id = $1`, sessionID).Scan(&tenantID); err != nil {
+		t.Fatalf("query tenant_id: %v", err)
+	}
+	_, otherSessionID := secondTenantForUser(t, conn, userID)
+
+	if err := store.RevokeAllForUserInTenant(ctx, userID, tenantID, "admin_mfa_reset"); err != nil {
+		t.Fatalf("RevokeAllForUserInTenant() error: %v", err)
+	}
+
+	var revokedAt sql.NullTime
+	if err := conn.QueryRowContext(ctx, `SELECT revoked_at FROM system.sessions WHERE id = $1`, sessionID).Scan(&revokedAt); err != nil {
+		t.Fatalf("query fixture session: %v", err)
+	}
+	if !revokedAt.Valid {
+		t.Error("fixture session's revoked_at is NULL, want set")
+	}
+
+	var otherRevokedAt sql.NullTime
+	if err := conn.QueryRowContext(ctx, `SELECT revoked_at FROM system.sessions WHERE id = $1`, otherSessionID).Scan(&otherRevokedAt); err != nil {
+		t.Fatalf("query other-tenant session: %v", err)
+	}
+	if otherRevokedAt.Valid {
+		t.Error("other tenant's session was revoked, want it untouched — RevokeAllForUserInTenant must be tenant-scoped")
+	}
+}
+
+func TestNonRevokedIDsForUserInTenant_ExcludesOtherTenants(t *testing.T) {
+	store, conn := openTestStore(t)
+	sessionID, userID := sessionFixture(t, store, conn)
+	ctx := context.Background()
+
+	var tenantID string
+	if err := conn.QueryRowContext(ctx, `SELECT tenant_id FROM system.sessions WHERE id = $1`, sessionID).Scan(&tenantID); err != nil {
+		t.Fatalf("query tenant_id: %v", err)
+	}
+	secondTenantForUser(t, conn, userID)
+
+	ids, err := store.NonRevokedIDsForUserInTenant(ctx, userID, tenantID)
+	if err != nil {
+		t.Fatalf("NonRevokedIDsForUserInTenant() error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != sessionID {
+		t.Errorf("ids = %v, want [%s]", ids, sessionID)
+	}
+}
+
 func containsAll(s string, substrs ...string) bool {
 	for _, sub := range substrs {
 		if !strings.Contains(s, sub) {

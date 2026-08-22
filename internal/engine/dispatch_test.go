@@ -9,6 +9,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 )
 
@@ -67,6 +68,39 @@ func TestDispatchHandler_AuthLoginRouteReachesRegisteredHandler(t *testing.T) {
 	}
 	if w.Body.String() != `{"expires_in":900}` {
 		t.Errorf("body = %q, want the built-in handler's own body", w.Body.String())
+	}
+}
+
+// TestDispatchHandler_PathParamsReachBuiltinHandlerViaContext proves the
+// route.WithParams/ParamsFromContext plumbing dispatch.go adds actually
+// carries a builtin route's extracted path params (e.g. {id} in
+// /admin/users/{id}/mfa/reset) through to the handler — real production
+// registerBuiltinRoutes registers that exact template, so this exercises
+// the genuine path, not a synthetic one.
+func TestDispatchHandler_PathParamsReachBuiltinHandlerViaContext(t *testing.T) {
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(map[string]*module.LoadedModule{}); err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+
+	var gotID string
+	builtins := map[string]http.Handler{
+		"POST /admin/users/{id}/mfa/reset": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotID = route.ParamsFromContext(r.Context())["id"]
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+	h := buildDispatchHandler(reg, builtins)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/users/target-user-123/mfa/reset", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if gotID != "target-user-123" {
+		t.Errorf("params[\"id\"] = %q, want %q", gotID, "target-user-123")
 	}
 }
 

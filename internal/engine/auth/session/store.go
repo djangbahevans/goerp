@@ -225,6 +225,52 @@ func (s *Store) RevokeAllForUser(ctx context.Context, userID, reason string) err
 	return nil
 }
 
+// NonRevokedIDsForUserInTenant returns the ids of every session row for
+// userID within tenantID that isn't already revoked — the
+// (user, tenant)-scoped counterpart to NonRevokedIDsForUser, needed the
+// same way by internal/engine/sessionrevoke.Revoker.
+// RevokeAllForUserInTenant. Distinct from plain NonRevokedIDsForUser:
+// goerp#306's admin MFA reset must only revoke a target's sessions in the
+// admin's own tenant, not every tenant that user happens to also belong
+// to.
+func (s *Store) NonRevokedIDsForUserInTenant(ctx context.Context, userID, tenantID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM system.sessions WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+	`, userID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("query non-revoked sessions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan session id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate session ids: %w", err)
+	}
+
+	return ids, nil
+}
+
+// RevokeAllForUserInTenant revokes every non-revoked session row for
+// userID within tenantID — the (user, tenant)-scoped counterpart to
+// RevokeAllForUser, same reasoning as NonRevokedIDsForUserInTenant.
+func (s *Store) RevokeAllForUserInTenant(ctx context.Context, userID, tenantID, reason string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $3
+		WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+	`, userID, tenantID, reason)
+	if err != nil {
+		return fmt.Errorf("revoke all sessions for user in tenant: %w", err)
+	}
+	return nil
+}
+
 // NonRevokedIDsForTenant returns the ids of every session row for tenantID
 // that isn't already revoked — the tenant-scoped counterpart to
 // NonRevokedIDsForUser, needed the same way by

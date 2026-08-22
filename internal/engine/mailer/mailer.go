@@ -54,6 +54,22 @@ func (m *SMTPMailer) SendInvite(ctx context.Context, email, tenantSlug, rawToken
 	return m.send(ctx, email, subject, text, html)
 }
 
+// SendMFAReset notifies email that an administrator reset their MFA
+// enrollment — auth-internals.md §8 "Account recovery when all factors
+// are lost" step 4. One hardcoded template, same minimal-slice approach
+// SendInvite already takes for this package.
+func (m *SMTPMailer) SendMFAReset(ctx context.Context, email string) error {
+	const subject = "Your multi-factor authentication has been reset"
+	text := "An administrator has reset your multi-factor authentication (MFA) settings.\n\n" +
+		"You'll need to enroll a new MFA factor the next time this is required.\n\n" +
+		"If you did not expect this, contact your administrator immediately.\n"
+	html := "<p>An administrator has reset your multi-factor authentication (MFA) settings.</p>" +
+		"<p>You'll need to enroll a new MFA factor the next time this is required.</p>" +
+		"<p>If you did not expect this, contact your administrator immediately.</p>"
+
+	return m.send(ctx, email, subject, text, html)
+}
+
 func (m *SMTPMailer) send(ctx context.Context, to, subject, text, html string) error {
 	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
 

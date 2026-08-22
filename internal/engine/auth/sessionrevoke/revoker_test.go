@@ -174,6 +174,51 @@ func TestMarkRolesStale_ThenIsRolesStaleReturnsTrue(t *testing.T) {
 	}
 }
 
+func TestRevokeAllForUserInTenant_OnlyBlocklistsThatTenantsSessions(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	// A second session for the same user, in a different tenant — must
+	// stay untouched by a tenant-scoped revoke.
+	tenantStore := tenant.NewStore(f.conn)
+	slug2 := fmt.Sprintf("revoketest2%d", time.Now().UnixNano())
+	tt2, err := tenantStore.CreateTenant(ctx, slug2, "Revoke Test Co 2")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt2.ID) })
+
+	otherSessionID := uuid.NewString()
+	sessionStore := session.NewStore(f.conn)
+	if err := sessionStore.Insert(ctx, session.Row{
+		ID: otherSessionID, UserID: f.userID, TenantID: tt2.ID, DeviceID: uuid.NewString(),
+		RefreshHash: "fixture-hash-other-tenant", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("Insert() second session error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, otherSessionID) })
+
+	if err := f.revoker.RevokeAllForUserInTenant(ctx, f.userID, f.tenantID, "admin_mfa_reset"); err != nil {
+		t.Fatalf("RevokeAllForUserInTenant() error: %v", err)
+	}
+
+	blocked, err := f.revoker.IsBlocked(ctx, f.sessionID)
+	if err != nil {
+		t.Fatalf("IsBlocked() fixture session error: %v", err)
+	}
+	if !blocked {
+		t.Error("IsBlocked() = false for the fixture tenant's session, want true")
+	}
+
+	otherBlocked, err := f.revoker.IsBlocked(ctx, otherSessionID)
+	if err != nil {
+		t.Fatalf("IsBlocked() other-tenant session error: %v", err)
+	}
+	if otherBlocked {
+		t.Error("IsBlocked() = true for the other tenant's session, want false — must be tenant-scoped")
+	}
+}
+
 func TestRevokeAllForTenant_BlocklistsEverySession(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

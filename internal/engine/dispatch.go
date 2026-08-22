@@ -25,7 +25,7 @@ func buildDispatchHandler(reg *registry.ModuleRegistry, builtins map[string]http
 			return
 		}
 
-		entry, _, result, allowedMethods := snap.RouteTable().Lookup(r.Method, r.URL.Path)
+		entry, params, result, allowedMethods := snap.RouteTable().Lookup(r.Method, r.URL.Path)
 		switch result {
 		case route.RouteNotFound, route.RouteBadPath:
 			writeRouteError(w, http.StatusNotFound, "route_not_found", "No route matches this path")
@@ -38,6 +38,7 @@ func buildDispatchHandler(reg *registry.ModuleRegistry, builtins map[string]http
 
 		if entry.Manifest.EngineNative {
 			if h, ok := builtins[r.Method+" "+entry.PathTemplate]; ok {
+				r = r.WithContext(route.WithParams(r.Context(), params))
 				h.ServeHTTP(w, r)
 				return
 			}

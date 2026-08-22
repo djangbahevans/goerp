@@ -229,6 +229,56 @@ func TestRevoke_SetsRevokedAt(t *testing.T) {
 	}
 }
 
+func TestRevokeAllForUser_RevokesEveryActiveCredentialRegardlessOfType(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+	ctx := context.Background()
+
+	totp, err := env.store.Insert(ctx, userID, CredentialTOTP, []byte("x"), nil)
+	if err != nil {
+		t.Fatalf("Insert() totp error: %v", err)
+	}
+	webauthn, err := env.store.Insert(ctx, userID, CredentialWebAuthn, []byte("y"), nil)
+	if err != nil {
+		t.Fatalf("Insert() webauthn error: %v", err)
+	}
+	recovery, err := env.store.Insert(ctx, userID, CredentialRecoveryCode, []byte("z"), nil)
+	if err != nil {
+		t.Fatalf("Insert() recovery error: %v", err)
+	}
+
+	if err := env.store.RevokeAllForUser(ctx, userID); err != nil {
+		t.Fatalf("RevokeAllForUser() error: %v", err)
+	}
+
+	active, err := env.store.ListActiveByUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListActiveByUser() error: %v", err)
+	}
+	if len(active) != 0 {
+		t.Errorf("ListActiveByUser() = %v, want empty after RevokeAllForUser", active)
+	}
+
+	for _, id := range []string{totp.ID, webauthn.ID, recovery.ID} {
+		var revokedAt sql.NullTime
+		if err := env.conn.QueryRowContext(ctx, "SELECT revoked_at FROM system.user_mfa WHERE id = $1", id).Scan(&revokedAt); err != nil {
+			t.Fatalf("query row %s: %v", id, err)
+		}
+		if !revokedAt.Valid {
+			t.Errorf("credential %s revoked_at is NULL, want set", id)
+		}
+	}
+}
+
+func TestRevokeAllForUser_NoEnrolledCredentialsIsNotAnError(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+
+	if err := env.store.RevokeAllForUser(context.Background(), userID); err != nil {
+		t.Errorf("RevokeAllForUser() error = %v, want nil for a user with no enrolled factors", err)
+	}
+}
+
 func TestRevoke_UnknownIDReturnsErrCredentialNotFound(t *testing.T) {
 	env := openTestEnv(t)
 
