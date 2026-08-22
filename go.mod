@@ -30,6 +30,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.45.0
 	go.temporal.io/api v1.63.4
 	go.temporal.io/sdk v1.48.0
+	golang.org/x/crypto v0.54.0
 )
 
 require (
@@ -95,7 +96,6 @@ require (
 	github.com/zclconf/go-cty-yaml v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.45.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

@@ -257,3 +257,88 @@ func TestRevoke_AlreadyRevokedStillSucceeds(t *testing.T) {
 		t.Errorf("second Revoke() error = %v, want nil (idempotent)", err)
 	}
 }
+
+func TestConsumeOnce_SetsRevokedAt(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+
+	c, err := env.store.Insert(context.Background(), userID, CredentialRecoveryCode, []byte("x"), nil)
+	if err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	if err := env.store.ConsumeOnce(context.Background(), c.ID); err != nil {
+		t.Fatalf("ConsumeOnce() error: %v", err)
+	}
+
+	var revokedAt sql.NullTime
+	if err := env.conn.QueryRowContext(context.Background(), "SELECT revoked_at FROM system.user_mfa WHERE id = $1", c.ID).Scan(&revokedAt); err != nil {
+		t.Fatalf("query revoked row: %v", err)
+	}
+	if !revokedAt.Valid {
+		t.Error("revoked_at is NULL, want set")
+	}
+}
+
+func TestConsumeOnce_UnknownIDReturnsErrCredentialNotFound(t *testing.T) {
+	env := openTestEnv(t)
+
+	err := env.store.ConsumeOnce(context.Background(), "00000000-0000-0000-0000-000000000000")
+	if !errors.Is(err, ErrCredentialNotFound) {
+		t.Errorf("ConsumeOnce() error = %v, want ErrCredentialNotFound", err)
+	}
+}
+
+func TestConsumeOnce_AlreadyConsumedReturnsErrCredentialNotFound(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+
+	c, err := env.store.Insert(context.Background(), userID, CredentialRecoveryCode, []byte("x"), nil)
+	if err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	if err := env.store.ConsumeOnce(context.Background(), c.ID); err != nil {
+		t.Fatalf("first ConsumeOnce() error: %v", err)
+	}
+
+	// Unlike Revoke, a second ConsumeOnce on the same id must fail — this
+	// is the whole point of the method for a single-use token.
+	err = env.store.ConsumeOnce(context.Background(), c.ID)
+	if !errors.Is(err, ErrCredentialNotFound) {
+		t.Errorf("second ConsumeOnce() error = %v, want ErrCredentialNotFound", err)
+	}
+}
+
+// TestConsumeOnce_ConcurrentCallsOnlyOneSucceeds guards the exact property
+// ConsumeOnce exists for: two callers racing to consume the same
+// single-use credential must not both report success.
+func TestConsumeOnce_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+
+	c, err := env.store.Insert(context.Background(), userID, CredentialRecoveryCode, []byte("x"), nil)
+	if err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	results := make(chan error, 10)
+	for range 10 {
+		wg.Go(func() {
+			results <- env.store.ConsumeOnce(context.Background(), c.ID)
+		})
+	}
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+		} else if !errors.Is(err, ErrCredentialNotFound) {
+			t.Errorf("ConsumeOnce() error = %v, want nil or ErrCredentialNotFound", err)
+		}
+	}
+	if successes != 1 {
+		t.Errorf("successes = %d across 10 concurrent ConsumeOnce() calls, want exactly 1", successes)
+	}
+}
