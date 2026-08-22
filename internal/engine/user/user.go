@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS system.users (
     last_login_at          TIMESTAMPTZ,
     last_login_ip          INET,
     locked_until           TIMESTAMPTZ,
-    locked_by              TEXT
+    locked_by              TEXT,
+    failed_login_count     INTEGER NOT NULL DEFAULT 0
 )
 `
 
@@ -38,6 +39,19 @@ const createIndex = `
     CREATE UNIQUE INDEX IF NOT EXISTS users_email_active_unique_idx
         ON system.users (email) WHERE deleted_at IS NULL;
 `
+
+// failedLoginLockThreshold/lockDuration are the minimal single-tier
+// lockout auth-internals.md §3 step 5/§15's login flow requires
+// ("brute force counters ... reject if locked"). The full escalating
+// policy (doubling duration on repeated lockouts within 24h, a security
+// notification email, an audit log entry, admin manual-unlock) is
+// backlog #291 ("Account lockout after repeated failures"), unfiled and
+// explicitly out of scope here — this is enough for a login attempt to
+// actually be gated on repeated failures, not the complete policy.
+const (
+	failedLoginLockThreshold = 10
+	lockDuration             = 30 * time.Minute
+)
 
 type Status string
 
@@ -52,12 +66,14 @@ const (
 var ErrUserNotFound = errors.New("user not found")
 
 type User struct {
-	ID           string
-	Email        string
-	Status       Status
-	PasswordHash *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID               string
+	Email            string
+	Status           Status
+	PasswordHash     *string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	LockedUntil      *time.Time
+	FailedLoginCount int
 }
 
 type Store struct {
@@ -88,7 +104,7 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	})
 }
 
-const userColumns = `id, email, status, password_hash, created_at, updated_at`
+const userColumns = `id, email, status, password_hash, created_at, updated_at, locked_until, failed_login_count`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -96,7 +112,7 @@ type rowScanner interface {
 
 func scanUser(sc rowScanner) (*User, error) {
 	var u User
-	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -166,4 +182,62 @@ func (s *Store) FindOrCreateInvited(ctx context.Context, email string) (string, 
 	}
 
 	return id, nil
+}
+
+// IncrementFailedLogins increments id's failed_login_count and, once it
+// reaches failedLoginLockThreshold, sets locked_until lockDuration from
+// now. The lock timestamp is computed in Go and bound as a plain
+// parameter — a Postgres interval literal built from Go's own
+// Duration.String() ("30m0s") isn't valid interval syntax, so this
+// avoids that class of mistake entirely rather than working around it in
+// SQL. A single UPDATE, so a concurrent increment for the same id can't
+// read a stale count and under-count the threshold check.
+func (s *Store) IncrementFailedLogins(ctx context.Context, id string) error {
+	lockUntil := time.Now().Add(lockDuration)
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.users
+		SET failed_login_count = failed_login_count + 1,
+		    locked_until = CASE
+		        WHEN failed_login_count + 1 >= $2 THEN $3
+		        ELSE locked_until
+		    END
+		WHERE id = $1
+	`, id, failedLoginLockThreshold, lockUntil)
+	if err != nil {
+		return fmt.Errorf("increment failed logins: %w", err)
+	}
+	return nil
+}
+
+// ResetLoginState clears id's failure counter and lock, and records a
+// successful login's timestamp/IP — auth-internals.md §3 step 11's
+// "Reset brute force counter" and "Update last_login_at and
+// last_login_ip", done together since both only ever happen on the same
+// successful-login path. ip stores as SQL NULL when empty.
+func (s *Store) ResetLoginState(ctx context.Context, id, ip string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.users
+		SET failed_login_count = 0,
+		    locked_until = NULL,
+		    last_login_at = NOW(),
+		    last_login_ip = NULLIF($2, '')::inet
+		WHERE id = $1
+	`, id, ip)
+	if err != nil {
+		return fmt.Errorf("reset login state: %w", err)
+	}
+	return nil
+}
+
+// UpdatePasswordHash overwrites id's stored hash — auth-internals.md §3
+// step 9's transparent re-hash when a verified password's stored hash
+// used outdated Argon2id params.
+func (s *Store) UpdatePasswordHash(ctx context.Context, id, hash string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.users SET password_hash = $2, updated_at = NOW() WHERE id = $1
+	`, id, hash)
+	if err != nil {
+		return fmt.Errorf("update password hash: %w", err)
+	}
+	return nil
 }

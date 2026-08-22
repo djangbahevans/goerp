@@ -267,3 +267,123 @@ func TestGetByEmail_DeletedUserNotFound(t *testing.T) {
 		t.Error("expected a new row for a re-invited, previously-deleted email")
 	}
 }
+
+func TestIncrementFailedLogins_IncrementsCounter(t *testing.T) {
+	store, conn := openTestStore(t)
+	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	if err != nil {
+		t.Fatalf("FindOrCreateInvited() error: %v", err)
+	}
+	defer deleteUser(t, conn, id)
+
+	if err := store.IncrementFailedLogins(context.Background(), id); err != nil {
+		t.Fatalf("IncrementFailedLogins() error: %v", err)
+	}
+
+	got, err := store.GetByID(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if got.FailedLoginCount != 1 {
+		t.Errorf("FailedLoginCount = %d, want 1", got.FailedLoginCount)
+	}
+	if got.LockedUntil != nil {
+		t.Errorf("LockedUntil = %v, want nil below the threshold", got.LockedUntil)
+	}
+}
+
+func TestIncrementFailedLogins_LocksAtThreshold(t *testing.T) {
+	store, conn := openTestStore(t)
+	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	if err != nil {
+		t.Fatalf("FindOrCreateInvited() error: %v", err)
+	}
+	defer deleteUser(t, conn, id)
+
+	for range failedLoginLockThreshold {
+		if err := store.IncrementFailedLogins(context.Background(), id); err != nil {
+			t.Fatalf("IncrementFailedLogins() error: %v", err)
+		}
+	}
+
+	got, err := store.GetByID(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if got.FailedLoginCount != failedLoginLockThreshold {
+		t.Errorf("FailedLoginCount = %d, want %d", got.FailedLoginCount, failedLoginLockThreshold)
+	}
+	if got.LockedUntil == nil {
+		t.Fatal("LockedUntil is nil, want set at the threshold")
+	}
+	if !got.LockedUntil.After(time.Now()) {
+		t.Errorf("LockedUntil = %v, want a future timestamp", got.LockedUntil)
+	}
+}
+
+func TestResetLoginState_ClearsCounterAndLockAndSetsLastLogin(t *testing.T) {
+	store, conn := openTestStore(t)
+	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	if err != nil {
+		t.Fatalf("FindOrCreateInvited() error: %v", err)
+	}
+	defer deleteUser(t, conn, id)
+
+	for range failedLoginLockThreshold {
+		if err := store.IncrementFailedLogins(context.Background(), id); err != nil {
+			t.Fatalf("IncrementFailedLogins() error: %v", err)
+		}
+	}
+
+	if err := store.ResetLoginState(context.Background(), id, "203.0.113.5"); err != nil {
+		t.Fatalf("ResetLoginState() error: %v", err)
+	}
+
+	got, err := store.GetByID(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if got.FailedLoginCount != 0 {
+		t.Errorf("FailedLoginCount = %d, want 0", got.FailedLoginCount)
+	}
+	if got.LockedUntil != nil {
+		t.Errorf("LockedUntil = %v, want nil", got.LockedUntil)
+	}
+
+	var lastLoginAt sql.NullTime
+	var lastLoginIP sql.NullString
+	if err := conn.QueryRowContext(context.Background(),
+		"SELECT last_login_at, last_login_ip FROM system.users WHERE id = $1", id,
+	).Scan(&lastLoginAt, &lastLoginIP); err != nil {
+		t.Fatalf("query last_login fields: %v", err)
+	}
+	if !lastLoginAt.Valid {
+		t.Error("last_login_at is NULL, want set")
+	}
+	if lastLoginIP.String != "203.0.113.5" {
+		t.Errorf("last_login_ip = %q, want %q", lastLoginIP.String, "203.0.113.5")
+	}
+}
+
+func TestUpdatePasswordHash_OverwritesHash(t *testing.T) {
+	store, conn := openTestStore(t)
+	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
+	if err != nil {
+		t.Fatalf("FindOrCreateInvited() error: %v", err)
+	}
+	defer deleteUser(t, conn, id)
+
+	if err := store.UpdatePasswordHash(context.Background(), id, "new-hash-value"); err != nil {
+		t.Fatalf("UpdatePasswordHash() error: %v", err)
+	}
+
+	var hash sql.NullString
+	if err := conn.QueryRowContext(context.Background(),
+		"SELECT password_hash FROM system.users WHERE id = $1", id,
+	).Scan(&hash); err != nil {
+		t.Fatalf("query password_hash: %v", err)
+	}
+	if hash.String != "new-hash-value" {
+		t.Errorf("password_hash = %q, want %q", hash.String, "new-hash-value")
+	}
+}

@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	ariga.io/atlas v1.3.0
 	github.com/Masterminds/semver/v3 v3.5.0
+	github.com/alexedwards/argon2id v1.0.0
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/go-openapi/inflect v0.19.0
 	github.com/go-playground/locales v0.14.1

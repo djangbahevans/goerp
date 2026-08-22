@@ -42,6 +42,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
@@ -304,10 +305,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("load jwt signing key: %w", err)
 	}
 
-	// tokenIssuer isn't consumed yet — a POST /auth/login handler wiring
-	// real credential verification to it is separate, future scope — but
-	// every dependency it needs (tenantStore, roleStore, sessionStore, the
-	// loaded signing key) already exists by this point in New.
 	tokenIssuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
 
 	// PKI issuance/revocation only makes sense with a real PKI backend
@@ -568,9 +565,11 @@ func New(cfg *config.Config) (*Engine, error) {
 		return report, failed
 	})
 
+	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer)
 	builtinRoutes := map[string]http.Handler{
-		"GET /_health": server.HealthHandler(),
-		"GET /_ready":  server.ReadyHandler(),
+		"GET /_health":     server.HealthHandler(),
+		"GET /_ready":      server.ReadyHandler(),
+		"POST /auth/login": loginHandler,
 	}
 	server.SetHandler(buildDispatchHandler(moduleRegistry, builtinRoutes))
 

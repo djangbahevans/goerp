@@ -312,10 +312,11 @@ func TestBuildRouteTable_FromModules(t *testing.T) {
 	}
 }
 
-// TestBuildRouteTable_IncludesBuiltinRoutes guards goerp#86: /_health and
-// /_ready must resolve through the same RouteTable module routes do, not a
-// second router — and survive every rebuild (module load, hot reload),
-// not just an initial registration step that could fall out of sync.
+// TestBuildRouteTable_IncludesBuiltinRoutes guards goerp#86: /_health,
+// /_ready, and POST /auth/login must resolve through the same RouteTable
+// module routes do, not a second router — and survive every rebuild
+// (module load, hot reload), not just an initial registration step that
+// could fall out of sync.
 func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	modules := map[string]*module.LoadedModule{
 		"contacts": {Manifest: manifest.Manifest{Type: "standard"}},
@@ -334,6 +335,14 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 		if !entry.Manifest.EngineNative {
 			t.Errorf("Lookup(GET, %q).Manifest.EngineNative = false, want true", path)
 		}
+	}
+
+	entry, _, result, _ := table.Lookup("POST", "/auth/login")
+	if result != route.RouteFound {
+		t.Fatalf("Lookup(POST, /auth/login) result = %v, want RouteFound", result)
+	}
+	if !entry.Manifest.EngineNative {
+		t.Error("Lookup(POST, /auth/login).Manifest.EngineNative = false, want true")
 	}
 }
 
