@@ -160,6 +160,30 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 	return nil
 }
 
+// UpdateMFAAssurance sets id's mfa_verified_at/mfa_method/mfa_credential_id
+// columns — auth-internals.md §8 "Step-up re-verification" step 2,
+// refreshing a session's MFA assurance in place without creating a new
+// session row. Returns ErrSessionNotFound if id doesn't match any
+// non-revoked row, same RowsAffected-checking convention Revoke uses.
+func (s *Store) UpdateMFAAssurance(ctx context.Context, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE system.sessions
+		SET mfa_verified_at = $2, mfa_method = $3, mfa_credential_id = NULLIF($4, '')::uuid
+		WHERE id = $1 AND revoked_at IS NULL
+	`, id, mfaVerifiedAt, mfaMethod, mfaCredentialID)
+	if err != nil {
+		return fmt.Errorf("update session mfa assurance: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update session mfa assurance: %w", err)
+	}
+	if n == 0 {
+		return ErrSessionNotFound
+	}
+	return nil
+}
+
 // NonRevokedIDsForUser returns the ids of every session row for userID
 // that isn't already revoked — the set RevokeAllForUser is about to
 // revoke, needed by internal/engine/sessionrevoke.Revoker to also

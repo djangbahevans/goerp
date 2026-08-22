@@ -142,6 +142,23 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 	}, nil
 }
 
+// ReissueAccessToken mints a fresh access token for an existing session
+// — sessionID/tenantID/userID/roleNames describing that session's
+// current state — without creating a new session row or refresh token.
+// auth-internals.md §8 "Step-up re-verification" step 2: same session,
+// refresh token unchanged, only the access token (and its updated
+// amr/mfa_verified_at claims) is refreshed. The caller is responsible for
+// persisting the session row's own mfa_verified_at/mfa_method/
+// mfa_credential_id columns first (session.Store.UpdateMFAAssurance) —
+// this method only signs the token, it doesn't touch the database.
+func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time) (accessToken string, expiresIn int, err error) {
+	accessToken, err = i.signAccessToken(sessionID, tenantID, userID, roleNames, mfaMethod, mfaVerifiedAt, time.Now())
+	if err != nil {
+		return "", 0, fmt.Errorf("sign access token: %w", err)
+	}
+	return accessToken, int(accessTokenTTL.Seconds()), nil
+}
+
 // signAccessToken mints and signs the access token. amr always includes
 // "pwd"; mfaMethod is appended when non-empty, per auth-internals.md §4's
 // documented "an MFA factor type is appended once this session has

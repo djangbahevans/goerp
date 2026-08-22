@@ -282,6 +282,63 @@ func TestIssue_MFAParamsPopulateSessionRowAndClaims(t *testing.T) {
 	}
 }
 
+func TestReissueAccessToken_CarriesUpdatedAMRAndMFAVerifiedAt(t *testing.T) {
+	f := newFixture(t)
+
+	initial, err := f.issuer.Issue(context.Background(), LoginParams{
+		UserID:     f.userID,
+		TenantSlug: f.tenantSlug,
+		DeviceID:   uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	pub := f.issuer.signingKey.Public
+	parseInitial, err := jwt.ParseWithClaims(initial.AccessToken, &Claims{}, func(tok *jwt.Token) (any, error) {
+		return pub, nil
+	})
+	if err != nil || !parseInitial.Valid {
+		t.Fatalf("ParseWithClaims() on initial token error: %v, valid: %v", err, parseInitial != nil && parseInitial.Valid)
+	}
+	initialClaims := parseInitial.Claims.(*Claims)
+
+	verifiedAt := time.Now()
+	reissued, expiresIn, err := f.issuer.ReissueAccessToken(initialClaims.SessionID, initialClaims.TenantID, f.userID, initialClaims.Roles, "totp", &verifiedAt)
+	if err != nil {
+		t.Fatalf("ReissueAccessToken() error: %v", err)
+	}
+	if expiresIn != int(accessTokenTTL.Seconds()) {
+		t.Errorf("expiresIn = %d, want %d", expiresIn, int(accessTokenTTL.Seconds()))
+	}
+
+	parsed, err := jwt.ParseWithClaims(reissued, &Claims{}, func(tok *jwt.Token) (any, error) {
+		return pub, nil
+	})
+	if err != nil || !parsed.Valid {
+		t.Fatalf("ParseWithClaims() on reissued token error: %v, valid: %v", err, parsed != nil && parsed.Valid)
+	}
+	claims := parsed.Claims.(*Claims)
+
+	if claims.SessionID != initialClaims.SessionID {
+		t.Errorf("sid = %q, want the same session id %q — reverify must not create a new session", claims.SessionID, initialClaims.SessionID)
+	}
+	if len(claims.AMR) != 2 || claims.AMR[0] != "pwd" || claims.AMR[1] != "totp" {
+		t.Errorf("amr = %v, want [pwd totp]", claims.AMR)
+	}
+	if claims.MFAVerifiedAt == nil || *claims.MFAVerifiedAt != verifiedAt.Unix() {
+		t.Errorf("mfa_verified_at = %v, want %d", claims.MFAVerifiedAt, verifiedAt.Unix())
+	}
+
+	var sessionCount int
+	if err := f.conn.QueryRow(`SELECT count(*) FROM system.sessions WHERE user_id = $1`, f.userID).Scan(&sessionCount); err != nil {
+		t.Fatalf("count session rows: %v", err)
+	}
+	if sessionCount != 1 {
+		t.Errorf("session row count = %d, want 1 — ReissueAccessToken must not insert a new session row", sessionCount)
+	}
+}
+
 func TestIssue_NoMFAParamsLeavesSessionRowAndClaimsAtDefaults(t *testing.T) {
 	f := newFixture(t)
 
