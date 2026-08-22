@@ -54,6 +54,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
+	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
@@ -205,6 +206,20 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap api key store: %w", err)
+	}
+
+	// mfaStore isn't stored as an Engine field or consumed by anything yet
+	// — the TOTP/WebAuthn/recovery-code enrollment tickets that will call
+	// it (goerp#300/#301/#302) haven't landed. Bootstrapped here, after
+	// userStore, since user_mfa FK-references system.users.
+	mfaStore := mfa.NewStore(primaryPool)
+	if err := mfaStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap mfa credential store: %w", err)
 	}
 
 	// roleStore's Bootstrap is per-tenant (roles/role_permissions/
