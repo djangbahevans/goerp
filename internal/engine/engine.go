@@ -42,6 +42,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
@@ -220,6 +221,20 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap mfa credential store: %w", err)
+	}
+
+	// rowCryptStore isn't stored as an Engine field or consumed by anything
+	// yet either — TOTP enrollment (goerp#300) is its first real caller.
+	// Bootstrapped (table only, not LoadOrGenerate) here so the table
+	// exists from first boot, same reasoning as apiKeyStore/mfaStore above.
+	rowCryptStore := rowcrypt.NewStore(primaryPool, secretsBackend)
+	if err := rowCryptStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap row encryption keys table: %w", err)
 	}
 
 	// roleStore's Bootstrap is per-tenant (roles/role_permissions/
