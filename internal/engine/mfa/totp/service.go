@@ -88,17 +88,19 @@ func (s *Service) Enroll(ctx context.Context, userID, accountName string, label 
 }
 
 // Verify reports whether code matches one of userID's enrolled TOTP
-// factors within the current ±1 window. A code already accepted within
-// the last 90 seconds is rejected even if it's still cryptographically
-// valid — auth-internals.md §8's replay window, claimed atomically via
-// Redis SETNX so two concurrent verify calls for the same code can't both
-// succeed. The bool return carries the verification outcome; error is
-// reserved for infrastructure failures (DB/Redis/decrypt), not a wrong or
-// replayed code.
-func (s *Service) Verify(ctx context.Context, userID, code string) (bool, error) {
+// factors within the current ±1 window, and if so, the matched
+// credential's user_mfa row ID — the caller's mfa_credential_id (session
+// row and access token claim, auth-internals.md §4/§8). A code already
+// accepted within the last 90 seconds is rejected even if it's still
+// cryptographically valid — auth-internals.md §8's replay window, claimed
+// atomically via Redis SETNX so two concurrent verify calls for the same
+// code can't both succeed. The bool return carries the verification
+// outcome; error is reserved for infrastructure failures
+// (DB/Redis/decrypt), not a wrong or replayed code.
+func (s *Service) Verify(ctx context.Context, userID, code string) (valid bool, credentialID string, err error) {
 	creds, err := s.store.ListActiveByUser(ctx, userID)
 	if err != nil {
-		return false, fmt.Errorf("list mfa credentials: %w", err)
+		return false, "", fmt.Errorf("list mfa credentials: %w", err)
 	}
 
 	now := time.Now()
@@ -121,22 +123,25 @@ func (s *Service) Verify(ctx context.Context, userID, code string) (bool, error)
 			continue
 		}
 
-		valid, err := totp.ValidateCustom(code, string(secret), now, validateOpts)
+		validCode, err := totp.ValidateCustom(code, string(secret), now, validateOpts)
 		if err != nil {
-			return false, fmt.Errorf("validate totp code: %w", err)
+			return false, "", fmt.Errorf("validate totp code: %w", err)
 		}
-		if !valid {
+		if !validCode {
 			continue
 		}
 
 		claimed, err := s.cache.SetNXWithTTL(ctx, replayKey(userID, code), "1", replayTTL)
 		if err != nil {
-			return false, fmt.Errorf("claim totp replay slot: %w", err)
+			return false, "", fmt.Errorf("claim totp replay slot: %w", err)
 		}
-		return claimed, nil
+		if !claimed {
+			return false, "", nil
+		}
+		return true, c.ID, nil
 	}
 
-	return false, decryptErr
+	return false, "", decryptErr
 }
 
 // replayKey matches auth-internals.md §8's totp:used:{user_id}:{code}

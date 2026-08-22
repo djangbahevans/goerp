@@ -43,6 +43,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfaverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
@@ -57,6 +59,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
@@ -225,10 +229,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("bootstrap mfa credential store: %w", err)
 	}
 
-	// rowCryptStore isn't stored as an Engine field or consumed by anything
-	// yet either — TOTP enrollment (goerp#300) is its first real caller.
-	// Bootstrapped (table only, not LoadOrGenerate) here so the table
-	// exists from first boot, same reasoning as apiKeyStore/mfaStore above.
+	// rowCryptStore isn't stored as an Engine field — goerp#304's
+	// mfaverify.Handler (via totp.Service) is its first real caller.
 	rowCryptStore := rowcrypt.NewStore(primaryPool, secretsBackend)
 	if err := rowCryptStore.Bootstrap(ctx); err != nil {
 		_ = primaryPool.Close()
@@ -237,6 +239,18 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap row encryption keys table: %w", err)
+	}
+	// Loaded (or generated, on first boot) here at startup, same reasoning
+	// as signingKeySet/mfaTokenKeySet below — totp.Service needs a key
+	// ready before it can decrypt any enrolled TOTP secret.
+	rowKeySet, err := rowCryptStore.LoadOrGenerate(ctx)
+	if err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("load row encryption key: %w", err)
 	}
 
 	// tenantConfigStore isn't stored as an Engine field — adminapi's config
@@ -321,6 +335,29 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	tokenIssuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
+
+	mfaTokenKeyStore := mfatoken.NewStore(primaryPool, secretsBackend)
+	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap mfa token signing keys table: %w", err)
+	}
+	// Loaded (or generated, on first boot) here at startup, same reasoning
+	// as signingKeySet above — loginHandler and mfaVerifyHandler both need
+	// a key ready, and both must agree on the same one.
+	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
+	if err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("load mfa token signing key: %w", err)
+	}
+	mfaTokenCodec := mfatoken.NewCodec(&mfaTokenKeySet.Active)
 
 	// PKI issuance/revocation only makes sense with a real PKI backend
 	// behind it; stays nil (routes report StatusNotImplemented) for any
@@ -580,11 +617,15 @@ func New(cfg *config.Config) (*Engine, error) {
 		return report, failed
 	})
 
-	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer)
+	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec)
+	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
+	recoveryCodeService := recoverycode.NewService(mfaStore)
+	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
 	builtinRoutes := map[string]http.Handler{
-		"GET /_health":     server.HealthHandler(),
-		"GET /_ready":      server.ReadyHandler(),
-		"POST /auth/login": loginHandler,
+		"GET /_health":          server.HealthHandler(),
+		"GET /_ready":           server.ReadyHandler(),
+		"POST /auth/login":      loginHandler,
+		"POST /auth/mfa/verify": mfaVerifyHandler,
 	}
 	server.SetHandler(buildDispatchHandler(moduleRegistry, builtinRoutes))
 
