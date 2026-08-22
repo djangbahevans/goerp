@@ -13,6 +13,14 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 )
 
+// composedDispatchHandler wraps buildDispatchHandler with
+// routeResolutionMiddleware — the same composition buildChain uses in
+// production — since route resolution moved out of buildDispatchHandler
+// itself and into that middleware (goerp#330).
+func composedDispatchHandler(reg *registry.ModuleRegistry, builtins map[string]http.Handler) http.Handler {
+	return routeResolutionMiddleware(reg)(buildDispatchHandler(builtins))
+}
+
 func testDispatchHandler(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -38,7 +46,7 @@ func testDispatchHandler(t *testing.T) http.Handler {
 			_, _ = w.Write([]byte(`{"expires_in":900}`))
 		}),
 	}
-	return buildDispatchHandler(reg, builtins)
+	return composedDispatchHandler(reg, builtins)
 }
 
 func TestDispatchHandler_BuiltinRouteReachesRegisteredHandler(t *testing.T) {
@@ -90,7 +98,7 @@ func TestDispatchHandler_PathParamsReachBuiltinHandlerViaContext(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}),
 	}
-	h := buildDispatchHandler(reg, builtins)
+	h := composedDispatchHandler(reg, builtins)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/users/target-user-123/mfa/reset", nil)
 	w := httptest.NewRecorder()
@@ -152,7 +160,7 @@ func TestDispatchHandler_ModuleRouteReturns501(t *testing.T) {
 
 func TestDispatchHandler_NilSnapshotReturns503(t *testing.T) {
 	reg := &registry.ModuleRegistry{} // Update never called — Snapshot() is nil
-	h := buildDispatchHandler(reg, nil)
+	h := composedDispatchHandler(reg, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/_health", nil)
 	w := httptest.NewRecorder()

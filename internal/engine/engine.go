@@ -423,9 +423,9 @@ func New(cfg *config.Config) (*Engine, error) {
 	// adminapi.RegisterTenantRoutes is called further down, once
 	// jobQueueClient exists (tenantoffboard.NewOffboarder needs it).
 
-	// tenantResolver isn't consumed yet either — same goerp#91 middleware
-	// chain wires it in ahead of authChecker, per auth-internals.md §9's
-	// pipeline ordering (tenant resolution before token validation).
+	// tenantResolver isn't stored as an Engine field — mfareverifyHandler,
+	// mfaResetHandler, and buildChain's tenantResolutionMiddleware below
+	// are its consumers.
 	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 
 	var searchClient *search.Client
@@ -637,7 +637,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/mfa/reverify":          mfaReverifyHandler,
 		"POST /admin/users/{id}/mfa/reset": mfaResetHandler,
 	}
-	server.SetHandler(buildDispatchHandler(moduleRegistry, builtinRoutes))
+	server.SetHandler(buildChain(moduleRegistry, builtinRoutes, cfg.TrustedProxies, tenantResolver, authChecker))
 
 	orderedModules := make([]*module.LoadedModule, len(ordered))
 	for i, src := range ordered {
