@@ -160,3 +160,31 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// ConsumeOnce atomically revokes id only if it isn't already revoked,
+// returning ErrCredentialNotFound both when id doesn't exist and when
+// it's already been consumed — a caller can't tell the two apart, which
+// is exactly the point: two concurrent callers racing to consume the same
+// single-use credential (e.g. a recovery code) via ConsumeOnce can never
+// both succeed. This is the opposite guarantee from Revoke, which is
+// deliberately idempotent (an administrative action where a second call
+// succeeding harmlessly, e.g. an admin double-clicking "revoke", is the
+// desired behavior) — ConsumeOnce is for tokens where a second "success"
+// would be a replay.
+func (s *Store) ConsumeOnce(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE system.user_mfa SET revoked_at = NOW()
+		WHERE id = $1 AND revoked_at IS NULL
+	`, id)
+	if err != nil {
+		return fmt.Errorf("consume mfa credential: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("consume mfa credential: %w", err)
+	}
+	if n == 0 {
+		return ErrCredentialNotFound
+	}
+	return nil
+}
