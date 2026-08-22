@@ -34,16 +34,22 @@ type Config struct {
 	ServerMaxHeaderBytes    int           `env:"GOERP_SERVER_MAX_HEADER_BYTES" envDefault:"1048576"`
 	TLSCertFile             string        `env:"GOERP_TLS_CERT_FILE"`
 	TLSKeyFile              string        `env:"GOERP_TLS_KEY_FILE"`
-	AdminAddr               string        `env:"GOERP_ADMIN_ADDR" envDefault:"127.0.0.1:8081" validate:"loopback"`
-	AdminMaxBodyBytes       int64         `env:"GOERP_ADMIN_MAX_BODY_BYTES" envDefault:"10485760"`
-	AdminMaxConcurrent      int           `env:"GOERP_ADMIN_MAX_CONCURRENT" envDefault:"20"`
-	Environment             string        `env:"GOERP_ENV" envDefault:"production" validate:"oneof=production staging development"`
-	LogLevel                string        `env:"GOERP_LOG_LEVEL" envDefault:"info" validate:"oneof=debug info warn error"`
-	LogFormat               string        `env:"GOERP_LOG_FORMAT" envDefault:"json" validate:"oneof=json text"`
-	CompilationCache        string        `env:"GOERP_COMPILATION_CACHE" envDefault:"./wasm-cache"`
-	ModuleDir               string        `env:"GOERP_MODULE_DIR" envDefault:"./modules"`
-	ShutdownTimeout         time.Duration `env:"GOERP_SHUTDOWN_TIMEOUT" envDefault:"30s"`
-	ShutdownDrainDelay      time.Duration `env:"GOERP_SHUTDOWN_DRAIN_DELAY" envDefault:"5s"`
+	// TrustedProxies is the set of IPs/CIDRs realIPMiddleware trusts to
+	// report a client's real address via X-Forwarded-For/X-Real-IP —
+	// engine-internals.md §6 step 3. An untrusted peer's own
+	// X-Forwarded-For is never honored, so an empty list (the default)
+	// means every request's real IP is simply its raw RemoteAddr.
+	TrustedProxies     []string      `env:"GOERP_TRUSTED_PROXIES"`
+	AdminAddr          string        `env:"GOERP_ADMIN_ADDR" envDefault:"127.0.0.1:8081" validate:"loopback"`
+	AdminMaxBodyBytes  int64         `env:"GOERP_ADMIN_MAX_BODY_BYTES" envDefault:"10485760"`
+	AdminMaxConcurrent int           `env:"GOERP_ADMIN_MAX_CONCURRENT" envDefault:"20"`
+	Environment        string        `env:"GOERP_ENV" envDefault:"production" validate:"oneof=production staging development"`
+	LogLevel           string        `env:"GOERP_LOG_LEVEL" envDefault:"info" validate:"oneof=debug info warn error"`
+	LogFormat          string        `env:"GOERP_LOG_FORMAT" envDefault:"json" validate:"oneof=json text"`
+	CompilationCache   string        `env:"GOERP_COMPILATION_CACHE" envDefault:"./wasm-cache"`
+	ModuleDir          string        `env:"GOERP_MODULE_DIR" envDefault:"./modules"`
+	ShutdownTimeout    time.Duration `env:"GOERP_SHUTDOWN_TIMEOUT" envDefault:"30s"`
+	ShutdownDrainDelay time.Duration `env:"GOERP_SHUTDOWN_DRAIN_DELAY" envDefault:"5s"`
 
 	// Database
 	DBPrimaryDSN                string `env:"GOERP_DB_PRIMARY_DSN,required"`
