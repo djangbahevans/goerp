@@ -11,6 +11,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
+	"google.golang.org/grpc"
 )
 
 // baseTestConfig returns a Config pointing at the compose.dev.yml dev stack
@@ -28,21 +29,24 @@ func baseTestConfig(t *testing.T) *config.Config {
 	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:7233")
 
 	return &config.Config{
-		ListenAddr:         ":0",
-		AdminAddr:          "127.0.0.1:0",
-		Environment:        "development",
-		LogLevel:           "info",
-		LogFormat:          "text",
-		ShutdownTimeout:    time.Second,
-		ShutdownDrainDelay: 0,
-		DBPrimaryDSN:       "postgres://goerp:dev@localhost:6432/goerp",
-		DBSchemaSyncDSN:    "postgres://goerp:dev@localhost:55432/goerp",
-		RedisAddr:          "localhost:6379",
-		RedisMaxRetries:    1,
-		SecretsBackend:     "env",
-		StorageBackend:     "local",
-		CompilationCache:   filepath.Join(t.TempDir(), "wasm-cache"),
-		PoolMaxMemoryByes:  16 * 1024 * 1024,
+		ListenAddr:               ":0",
+		AdminAddr:                "127.0.0.1:0",
+		Environment:              "development",
+		LogLevel:                 "info",
+		LogFormat:                "text",
+		ShutdownTimeout:          time.Second,
+		ShutdownDrainDelay:       0,
+		DBPrimaryDSN:             "postgres://goerp:dev@localhost:6432/goerp",
+		DBSchemaSyncDSN:          "postgres://goerp:dev@localhost:55432/goerp",
+		RedisAddr:                "localhost:6379",
+		RedisMaxRetries:          1,
+		SecretsBackend:           "env",
+		StorageBackend:           "local",
+		CompilationCache:         filepath.Join(t.TempDir(), "wasm-cache"),
+		PoolMaxMemoryByes:        16 * 1024 * 1024,
+		OTelExporterOTLPEndpoint: "",
+		OTelServiceName:          "goerp-engine",
+		OTelInsecure:             true,
 	}
 }
 
@@ -68,6 +72,9 @@ func TestNewSuccess(t *testing.T) {
 	}
 	if e.secretsBackend == nil {
 		t.Error("secretsBackend is nil after a successful New()")
+	}
+	if e.Tracer() == nil {
+		t.Error("Tracer() is nil after a successful New()")
 	}
 }
 
@@ -209,5 +216,65 @@ func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 		if _, ok := report.Checks[name]; !ok {
 			t.Errorf("Checks missing %q", name)
 		}
+	}
+}
+
+func TestNewWithOTelEndpoint(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a test port: %v", err)
+	}
+	srv := grpc.NewServer()
+	go func() { _ = srv.Serve(ln) }()
+	defer srv.Stop()
+
+	cfg := baseTestConfig(t)
+	cfg.OTelExporterOTLPEndpoint = ln.Addr().String()
+
+	e, newErr := New(cfg)
+	skipIfInfraUnreachable(t, newErr)
+	t.Cleanup(func() { _ = e.primaryDB.Close() })
+
+	if e.Tracer() == nil {
+		t.Fatal("expected non-nil Tracer(), got nil")
+	}
+	if e.tracerProvider == nil {
+		t.Fatal("expected non-nil tracerProvider, got nil")
+	}
+
+	_, span := e.Tracer().Start(context.Background(), "engine.test.span")
+	span.End()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := e.Shutdown(shutdownCtx); err != nil {
+		t.Errorf("Shutdown() error: %v", err)
+	}
+}
+
+// TestNewMalformedOTelEndpointWarnsOnly uses a genuinely malformed
+// endpoint (a control character gRPC's target parser rejects
+// synchronously), not merely an unresolvable hostname — otlptracegrpc's
+// own doc for WithDialOption notes grpc.WithBlock/WithTimeout/
+// WithReturnConnectionError are all ignored, so the exporter's gRPC
+// connection is always dialed lazily: a plain unreachable-but-
+// syntactically-valid host (e.g. a nonexistent DNS name) never makes
+// otlptracegrpc.New itself return an error, so a test using one wouldn't
+// actually exercise SetupTracing's error branch or this warn-only
+// handling at all, regardless of whether either existed. A malformed
+// target string is the one case that does fail synchronously.
+func TestNewMalformedOTelEndpointWarnsOnly(t *testing.T) {
+	cfg := baseTestConfig(t)
+	cfg.OTelExporterOTLPEndpoint = "not a valid endpoint!!! \x00"
+
+	e, err := New(cfg)
+	skipIfInfraUnreachable(t, err)
+	t.Cleanup(func() { _ = e.primaryDB.Close() })
+
+	if err != nil {
+		t.Fatalf("New() with a malformed OTel endpoint: expected success (warn-only per engine-internals.md §2), got error: %v", err)
+	}
+	if e.Tracer() == nil {
+		t.Fatal("expected non-nil Tracer() fallback, got nil")
 	}
 }

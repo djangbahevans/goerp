@@ -104,6 +104,18 @@ type Config struct {
 	SMTPFrom   string `env:"GOERP_SMTP_FROM" envDefault:"noreply@goerp.local"`
 	AppBaseURL string `env:"GOERP_APP_BASE_URL" envDefault:"http://localhost:8080"`
 
+	// Observability — engine-internals.md's own env var table names these
+	// two bare (not GOERP_-prefixed) to match the standard OTel SDK
+	// environment variable names every OTel language SDK and collector
+	// config already recognizes. OTelExporterOTLPEndpoint's empty default
+	// (the doc's own "—") means tracing is off — a no-op tracer — unless
+	// a deployment or developer explicitly opts in. OTelInsecure isn't in
+	// that table but is itself a standard OTel env var name; defaulted to
+	// true since compose.dev.yml's own Jaeger accepts plain-text OTLP.
+	OTelExporterOTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
+	OTelServiceName          string `env:"OTEL_SERVICE_NAME" envDefault:"goerp-engine"`
+	OTelInsecure             bool   `env:"OTEL_EXPORTER_OTLP_INSECURE" envDefault:"true"`
+
 	// PlatformDomain is appended to a tenant's slug to build its default
 	// subdomain at provisioning time (e.g. slug "acme" + PlatformDomain
 	// "goerp.local" = "acme.goerp.local") — multitenancy-internals.md §6
