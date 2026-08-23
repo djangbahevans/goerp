@@ -35,6 +35,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 const chainTestPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
@@ -266,7 +267,7 @@ func (f *chainFixture) issueToken(t *testing.T) string {
 }
 
 func (f *chainFixture) chain(builtins map[string]http.Handler) http.Handler {
-	return buildChain(f.reg, builtins, nil, f.resolver, f.checker)
+	return buildChain(f.reg, builtins, nil, f.resolver, f.checker, noop.NewTracerProvider().Tracer("test"))
 }
 
 func decodeErrorCode(t *testing.T, w *httptest.ResponseRecorder) string {
