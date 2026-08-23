@@ -77,6 +77,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/systemworker"
+	"github.com/djangbahevans/goerp/internal/engine/telemetry"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/offboard"
@@ -93,6 +94,8 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 	"github.com/vmihailenco/msgpack/v5"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Engine struct {
@@ -111,6 +114,9 @@ type Engine struct {
 	rolePermissionMap *permcache.RolePermissionMap
 	jobQueue          *river.Client[pgx.Tx]
 	jobQueuePool      *pgxpool.Pool
+
+	tracer         trace.Tracer
+	tracerProvider *sdktrace.TracerProvider
 
 	secretsBackend  secrets.Backend
 	primaryDB       *sql.DB
@@ -537,7 +543,30 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("create wasm runtime: %w", err)
 	}
 
+	// Telemetry setup happens here, immediately before closeOnFailure is
+	// first defined, rather than at the top of New() — SetupTracing opens
+	// a live gRPC connection and starts a background export goroutine
+	// on success, and every earlier fail-hard bootstrap step above
+	// already returns directly (nothing existed yet for it to clean up);
+	// constructing the tracer any earlier would leak that connection on
+	// each of those return paths, since none of them know to shut it
+	// down. Failure here is warn-only, matching every other observability
+	// dependency's posture — this is optional infrastructure, not a
+	// Stage 1 fail-hard dependency (engine-internals.md §2).
+	tracerProvider, tracer, err := telemetry.SetupTracing(ctx, telemetry.Config{
+		Endpoint:    cfg.OTelExporterOTLPEndpoint,
+		ServiceName: cfg.OTelServiceName,
+		Environment: cfg.Environment,
+		Insecure:    cfg.OTelInsecure,
+	})
+	if err != nil {
+		log.Warn().Err(err).Msg("could not initialize OpenTelemetry tracer provider, falling back to no-op tracer")
+	}
+
 	closeOnFailure := func() {
+		if tracerProvider != nil {
+			_ = tracerProvider.Shutdown(ctx)
+		}
 		_ = runtime.Close(ctx)
 		_ = cacheClient.Close()
 		_ = primaryPool.Close()
@@ -684,6 +713,9 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("connect job queue pool: %w", err)
 	}
 	closeOnFailure = func() {
+		if tracerProvider != nil {
+			_ = tracerProvider.Shutdown(ctx)
+		}
 		jobQueuePool.Close()
 		_ = runtime.Close(ctx)
 		_ = cacheClient.Close()
@@ -772,6 +804,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		systemWorker:      systemWorker,
 		server:            server,
 		adminServer:       adminServer,
+		tracer:            tracer,
+		tracerProvider:    tracerProvider,
 	}
 
 	return e, nil
@@ -785,6 +819,11 @@ func (e *Engine) ModuleRegistry() *registry.ModuleRegistry {
 // JobQueue returns the River client Start begins processing jobs on.
 func (e *Engine) JobQueue() *river.Client[pgx.Tx] {
 	return e.jobQueue
+}
+
+// Tracer returns the OpenTelemetry tracer for the engine.
+func (e *Engine) Tracer() trace.Tracer {
+	return e.tracer
 }
 
 func (e *Engine) Start(ctx context.Context) error {
@@ -843,6 +882,12 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 	if err := e.wasmRuntime.Close(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not close wasm runtime")
+	}
+
+	if e.tracerProvider != nil {
+		if err := e.tracerProvider.Shutdown(ctx); err != nil {
+			log.Warn().Err(err).Msg("could not shut down OpenTelemetry tracer provider")
+		}
 	}
 
 	return nil
