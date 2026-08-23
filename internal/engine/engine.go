@@ -666,7 +666,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/mfa/reverify":          mfaReverifyHandler,
 		"POST /admin/users/{id}/mfa/reset": mfaResetHandler,
 	}
-	server.SetHandler(buildChain(moduleRegistry, builtinRoutes, cfg.TrustedProxies, tenantResolver, authChecker))
+	server.SetHandler(buildChain(moduleRegistry, builtinRoutes, cfg.TrustedProxies, tenantResolver, authChecker, tracer))
 
 	orderedModules := make([]*module.LoadedModule, len(ordered))
 	for i, src := range ordered {
