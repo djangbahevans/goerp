@@ -41,6 +41,7 @@ type FieldDef struct {
 	EnumType        string    `msgpack:"enum_type,omitempty"`
 	IsRequired      bool      `msgpack:"required,omitempty"`
 	IsPrimaryKey    bool      `msgpack:"primary_key,omitempty"`
+	IsPrimary       bool      `msgpack:"primary,omitempty"` // the model's display/label field, distinct from IsPrimaryKey
 	DefaultExpr     *string   `msgpack:"default_expr,omitempty"`
 
 	// Many2One (KindMany2One only)
@@ -90,6 +91,11 @@ func Many2One(relatedModel string) FieldDef {
 func (f FieldDef) Required() FieldDef           { f.IsRequired = true; return f }
 func (f FieldDef) PrimaryKey() FieldDef         { f.IsPrimaryKey = true; return f }
 func (f FieldDef) Default(expr string) FieldDef { f.DefaultExpr = &expr; return f }
+
+// Primary marks this field as the model's display/label field (like
+// Odoo's _rec_name or Frappe's title_field) — at most one field per model
+// may declare it.
+func (f FieldDef) Primary() FieldDef { f.IsPrimary = true; return f }
 
 // Domain sets a SQL filter expression consumed by UI pickers and
 // host.orm's relation-expansion query (Many2One fields only).

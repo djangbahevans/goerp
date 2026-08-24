@@ -120,6 +120,7 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 	t := schema.NewTable(tableName)
 
 	var pk []*schema.Column
+	var primaryField string
 	for _, f := range md.Fields {
 		col, err := toAtlasColumn(f.Name, f.Def, enumTypes)
 		if err != nil {
@@ -128,6 +129,12 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 		t.AddColumns(col)
 		if f.Def.IsPrimaryKey {
 			pk = append(pk, col)
+		}
+		if f.Def.IsPrimary {
+			if primaryField != "" {
+				return nil, fmt.Errorf("at most one field may declare .Primary(), found %q and %q", primaryField, f.Name)
+			}
+			primaryField = f.Name
 		}
 		if f.Def.Kind == model.KindSelection && len(f.Def.SelectionValues) > 0 {
 			t.AddChecks(selectionCheck(tableName, f.Name, f.Def.SelectionValues))
