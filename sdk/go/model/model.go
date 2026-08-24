@@ -7,6 +7,7 @@ type ModelDeclaration struct {
 	LabelPlural string       `msgpack:"label_plural,omitempty"`
 	Fields      []NamedField `msgpack:"fields"`
 	Indexes     []NamedIndex `msgpack:"indexes,omitempty"`
+	EnabledOps  []Op         `msgpack:"enabled_ops,omitempty"`
 }
 
 type NamedField struct {
@@ -48,6 +49,17 @@ func (d *ModelDeclaration) Field(name string, def FieldDef) *ModelDeclaration {
 
 func (d *ModelDeclaration) Index(name string, def IndexDef) *ModelDeclaration {
 	d.Indexes = append(d.Indexes, NamedIndex{Name: name, Def: def})
+	return d
+}
+
+// EnableOps allowlists which of the six reserved CRUD/list operations
+// this model exposes — an allowlist, not a default: a model with no
+// EnableOps call has no operations enabled. Route derivation, response
+// envelopes, and collision handling against a hand-registered
+// engine.Action are dispatch-side behavior, not part of this
+// declaration.
+func (d *ModelDeclaration) EnableOps(ops ...Op) *ModelDeclaration {
+	d.EnabledOps = append(d.EnabledOps, ops...)
 	return d
 }
 
