@@ -12,27 +12,31 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// registerHostORM attaches host.orm.search/search_read/read to the
-// runtime. Lives in the wasm package for the same import-cycle reason
+// registerHostORM attaches host.orm's read half (search/search_read/read,
+// this file) and write half (create/write/unlink, host_orm_write.go) to
+// the runtime. Lives in the wasm package for the same import-cycle reason
 // registerHostDB does (host_db.go) — its closures need direct access to
-// *sql.DB and the Runtime's instance registry.
+// *sql.DB and the Runtime's instance registry. insertClient is the same
+// never-Start()'d river.Client[*sql.Tx] registerHostEvent uses, threaded
+// through so the write half can emit orm.record.* events transactionally
+// (host_orm_write.go's emitRecordEvent) without a second client.
 //
-// Relation-field expansion (a Many2One field resolving to both {field}_id
-// and the expanded {field} object) is not implemented here: sdk/go/model
-// has no relation field type yet (goerp#349), so there is nothing for any
-// model to declare that this pipeline would need to expand. host.orm.
-// create/write/unlink (goerp#343) and dispatchORMRoute (goerp#346) are
-// separate tickets.
-func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.DB) error {
+// dispatchORMRoute (goerp#346, EnableOps' HTTP entry point) is a separate
+// ticket — nothing here derives or serves an HTTP route.
+func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) error {
 	_, err := rt.NewHostModuleBuilder("host.orm").
 		NewFunctionBuilder().WithFunc(makeORMSearch(r, db)).Export("search").
 		NewFunctionBuilder().WithFunc(makeORMSearchRead(r, db)).Export("search_read").
 		NewFunctionBuilder().WithFunc(makeORMRead(r, db)).Export("read").
+		NewFunctionBuilder().WithFunc(makeORMCreate(r, db, insertClient)).Export("create").
+		NewFunctionBuilder().WithFunc(makeORMWrite(r, db, insertClient)).Export("write").
+		NewFunctionBuilder().WithFunc(makeORMUnlink(r, db, insertClient)).Export("unlink").
 		Instantiate(ctx)
 	return err
 }
