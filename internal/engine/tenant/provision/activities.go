@@ -116,12 +116,24 @@ CREATE TABLE IF NOT EXISTS %s.module_config (
 )
 `
 
+const createSequencesTable = `
+CREATE TABLE IF NOT EXISTS %s.sequences (
+    model       TEXT NOT NULL,
+    field       TEXT NOT NULL,
+    period_key  TEXT NOT NULL,
+    next_value  BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (model, field, period_key)
+)
+`
+
 // CreateEngineTables creates the engine-owned tables a fresh tenant needs
 // before module schema sync and config seeding can run: roles/
 // role_permissions/user_roles (role.Store.Bootstrap), tenant_invitations
 // (invite.Store.Bootstrap — requires roles to exist first, per its own
-// foreign key), and module_config (this ticket's own SeedTenantConfig
-// step). multitenancy-internals.md §6 step 3 lists several further
+// foreign key), module_config (this ticket's own SeedTenantConfig step),
+// and sequences (backing store for Sequence-kind fields' per-tenant
+// counters, keyed by (model, field, period_key)).
+// multitenancy-internals.md §6 step 3 lists several further
 // engine-owned tables (event_log, files, notifications,
 // notification_preferences, saved_filters, record_shares,
 // view_overrides) — deliberately not created here: nothing in this
@@ -145,6 +157,11 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 	query := fmt.Sprintf(createModuleConfigTable, tenantschema.Name(slug))
 	if _, err := a.schemaSyncPool.ExecContext(ctx, query); err != nil {
 		return fmt.Errorf("create module_config table: %w", err)
+	}
+
+	seqQuery := fmt.Sprintf(createSequencesTable, tenantschema.Name(slug))
+	if _, err := a.schemaSyncPool.ExecContext(ctx, seqQuery); err != nil {
+		return fmt.Errorf("create sequences table: %w", err)
 	}
 
 	return nil

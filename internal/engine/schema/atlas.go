@@ -175,6 +175,11 @@ func toAtlasColumn(name string, f model.FieldDef, enumTypes map[string]*schema.E
 		c.SetType(&schema.IntegerType{T: postgres.TypeInteger})
 	case model.KindBigInt:
 		c.SetType(&schema.IntegerType{T: postgres.TypeBigInt})
+	case model.KindSequence:
+		// Holds the resolved counter value on the record's own row, written
+		// by the acquisition step immediately before INSERT — no native
+		// Postgres SEQUENCE object involved.
+		c.SetType(&schema.IntegerType{T: postgres.TypeBigInt})
 	case model.KindFloat:
 		c.SetType(&schema.FloatType{T: postgres.TypeDouble})
 	case model.KindDecimal:

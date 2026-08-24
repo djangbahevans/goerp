@@ -19,6 +19,7 @@ const (
 	KindSelection
 	KindEnum
 	KindMany2One
+	KindSequence
 )
 
 // OnDeleteBehaviour is a Many2One field's FOREIGN KEY ON DELETE action.
@@ -49,6 +50,9 @@ type FieldDef struct {
 	RelationDomain   string            `msgpack:"relation_domain,omitempty"`
 	RelationLabel    string            `msgpack:"relation_label,omitempty"`
 	RelationOnDelete OnDeleteBehaviour `msgpack:"relation_on_delete,omitempty"`
+
+	// Sequence (KindSequence only)
+	SequenceFormat string `msgpack:"sequence_format,omitempty"`
 }
 
 // Char(n) sets VARCHAR(n); called with no argument it's an unbounded TEXT column.
@@ -86,6 +90,13 @@ func Enum(typeName string) FieldDef { return FieldDef{Kind: KindEnum, EnumType: 
 // §22 "Many2One".
 func Many2One(relatedModel string) FieldDef {
 	return FieldDef{Kind: KindMany2One, RelatedModel: relatedModel, RelationOnDelete: Restrict}
+}
+
+// Sequence declares a gapless, per-tenant counter field. format supports
+// period tokens (e.g. "{year}") resolved against the acquisition time —
+// see internal/engine/orm.ResolvePeriodKey.
+func Sequence(format string) FieldDef {
+	return FieldDef{Kind: KindSequence, SequenceFormat: format}
 }
 
 func (f FieldDef) Required() FieldDef           { f.IsRequired = true; return f }
