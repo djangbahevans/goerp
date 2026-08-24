@@ -31,11 +31,17 @@ func ToAtlasSchema(schemaName string, modelDecls []model.ModelDeclaration, typeD
 	return s, nil
 }
 
-func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumType) (*schema.Table, error) {
-	tableName := md.Table
-	if tableName == "" {
-		tableName = snakeCase(md.Name)
+// tableNameFor resolves a model declaration's Postgres table name: its
+// explicit Table override, or snake_case(Name) otherwise.
+func tableNameFor(md model.ModelDeclaration) string {
+	if md.Table != "" {
+		return md.Table
 	}
+	return snakeCase(md.Name)
+}
+
+func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumType) (*schema.Table, error) {
+	tableName := tableNameFor(md)
 
 	t := schema.NewTable(tableName)
 
