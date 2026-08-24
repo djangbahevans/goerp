@@ -194,6 +194,17 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		t.Error("expected the widgets table to have been created by module schema sync")
 	}
 
+	var sequencesExists bool
+	if err := env.conn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'sequences')",
+		"tenant_"+slug,
+	).Scan(&sequencesExists); err != nil {
+		t.Fatalf("check sequences table: %v", err)
+	}
+	if !sequencesExists {
+		t.Error("expected the sequences table to have been created by CreateEngineTables")
+	}
+
 	var configValue []byte
 	err = env.conn.QueryRow(
 		`SELECT value FROM ` + tenantschema.Name(slug) + `.module_config WHERE module_name = 'widgets' AND key = 'currency'`,
