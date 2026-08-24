@@ -5,12 +5,15 @@ import (
 	"sync"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/trace"
 )
 
 type ModuleContext struct {
 	RequestID  string
+	ModuleName string
 	UserID     string
 	ContactID  string
 	Roles      []string
@@ -24,21 +27,46 @@ type ModuleContext struct {
 	txLimiter    *TransactionLimiter
 
 	capabilities abi.CapabilitySet
+
+	// modelDecls is the calling module's own declared models — host.orm
+	// calls resolve a model name against this list, never against another
+	// module's models (internal/engine/wasm/host_orm.go).
+	modelDecls []model.ModelDeclaration
+
+	// fieldSecRegistry is the field security registry from the registry
+	// snapshot in effect when this request started, so a hot reload
+	// mid-request can't change which rule a single request's host.orm
+	// calls see.
+	fieldSecRegistry *fieldsec.FieldSecurityRegistry
 }
 
-func NewModuleContext(requestID, userID, contactID string, roles []string, tenantID, tenantSlug, traceID string, capabilities abi.CapabilitySet, txLimiter *TransactionLimiter) *ModuleContext {
+func NewModuleContext(requestID, moduleName, userID, contactID string, roles []string, tenantID, tenantSlug, traceID string, capabilities abi.CapabilitySet, txLimiter *TransactionLimiter, modelDecls []model.ModelDeclaration, fieldSecRegistry *fieldsec.FieldSecurityRegistry) *ModuleContext {
 	return &ModuleContext{
-		RequestID:    requestID,
-		UserID:       userID,
-		ContactID:    contactID,
-		Roles:        roles,
-		TenantID:     tenantID,
-		TenantSlug:   tenantSlug,
-		TraceID:      traceID,
-		transactions: make(map[string]*sql.Tx),
-		capabilities: capabilities,
-		txLimiter:    txLimiter,
+		RequestID:        requestID,
+		ModuleName:       moduleName,
+		UserID:           userID,
+		ContactID:        contactID,
+		Roles:            roles,
+		TenantID:         tenantID,
+		TenantSlug:       tenantSlug,
+		TraceID:          traceID,
+		transactions:     make(map[string]*sql.Tx),
+		capabilities:     capabilities,
+		txLimiter:        txLimiter,
+		modelDecls:       modelDecls,
+		fieldSecRegistry: fieldSecRegistry,
 	}
+}
+
+// ModelDecls returns the calling module's own declared models.
+func (mc *ModuleContext) ModelDecls() []model.ModelDeclaration {
+	return mc.modelDecls
+}
+
+// FieldSecRegistry returns the field security registry in effect for this
+// request.
+func (mc *ModuleContext) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
+	return mc.fieldSecRegistry
 }
 
 // RollbackAll rolls back every transaction still open in this context and

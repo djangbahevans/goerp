@@ -40,6 +40,16 @@ const (
 	ErrCodeCommitFailed             = "db.commit_failed"
 )
 
+// host.orm error codes (host-abi-reference.md §5a "host.orm.search"/
+// "host.orm.search_read"/"host.orm.read").
+const (
+	ErrCodeModelNotFound      = "orm.model_not_found"
+	ErrCodeDomainInvalid      = "orm.domain_invalid"
+	ErrCodeFieldNotSearchable = "orm.field_not_searchable"
+	ErrCodeFieldUnknown       = "orm.field_unknown"
+	ErrCodeNotFound           = "orm.not_found"
+)
+
 func CapabilityDenied(capability string) *HostError {
 	return &HostError{
 		Code:    ErrCodeCapabilityDenied,

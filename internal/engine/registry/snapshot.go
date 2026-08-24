@@ -41,6 +41,14 @@ func (s *RegistrySnapshot) PermissionRegistry() *permission.PermissionRegistry {
 	return s.permRegistry
 }
 
+// FieldSecRegistry returns this snapshot's field security registry —
+// always read this way rather than cached on a longer-lived struct, so a
+// hot reload's rebuilt registry takes effect on the next request rather
+// than never (see buildFieldSecRegistry).
+func (s *RegistrySnapshot) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
+	return s.fieldSecRegistry
+}
+
 // Populated by future tickets (backlog #35, #37). Never rebuilt by any
 // build* step here; carried over unchanged from the prior snapshot on
 // every write.

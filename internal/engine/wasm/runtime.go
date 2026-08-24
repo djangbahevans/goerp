@@ -83,6 +83,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend) (*Runti
 		return nil, fmt.Errorf("register host.db: %w", err)
 	}
 
+	if err := registerHostORM(ctx, rt, r, db); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.orm: %w", err)
+	}
+
 	filesStore := files.NewStore(db)
 	if err := registerHostStorage(ctx, rt, r, storageBackend, filesStore, storageUploadLimits{
 		maxFileBytes: cfg.StorageMaxFileBytes,

@@ -93,7 +93,7 @@ func resolvePolicyTarget(policy manifest.Policy, modelDecls []model.ModelDeclara
 		return "", false, fmt.Errorf("applies_to %q: unrecognized action %q (expected read/write/delete)", policy.AppliesTo, action)
 	}
 
-	return tableNameFor(md), forAll, nil
+	return TableNameFor(md), forAll, nil
 }
 
 // postgresPolicyName turns a manifest policy name like
