@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
-	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -98,28 +97,18 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 			eventID = uuid.NewSHA1(idempotencyKeyNamespace, []byte(modCtx.TenantID+"|"+input.Name+"|"+idempotencyKey))
 		}
 
-		_, err = insertClient.InsertTx(ctx, tx, &jobqueue.EventDeliveryArgs{
-			EventID:       eventID.String(),
-			EventName:     input.Name,
-			EventVersion:  input.Version,
-			EmitterModule: modCtx.ModuleName,
-			TenantID:      modCtx.TenantID,
-			UserID:        modCtx.UserID,
-			TraceID:       modCtx.TraceID,
-			Payload:       input.Payload,
-		}, &river.InsertOpts{
-			Queue:       jobqueue.QueueEvents,
-			Priority:    1,
-			ScheduledAt: time.Now().Add(time.Duration(input.DelayMs) * time.Millisecond),
-			// Bounded to 24h, not unbounded, so a legitimately new event
-			// that happens to reuse an idempotency key after a long gap
-			// isn't silently dropped forever. ByState explicitly includes
-			// terminal states — River's default ByState only counts
-			// "active" jobs, which would let a retry arriving after the
-			// original event already finished dispatching insert a
-			// second, duplicate job, defeating the guarantee
-			// idempotency_key exists to provide.
-			UniqueOpts: river.UniqueOpts{
+		err = insertEventDeliveryTx(ctx, insertClient, tx, eventID, input.Name, input.Version,
+			modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, input.Payload,
+			time.Duration(input.DelayMs)*time.Millisecond,
+			&river.UniqueOpts{
+				// Bounded to 24h, not unbounded, so a legitimately new event
+				// that happens to reuse an idempotency key after a long gap
+				// isn't silently dropped forever. ByState explicitly includes
+				// terminal states — River's default ByState only counts
+				// "active" jobs, which would let a retry arriving after the
+				// original event already finished dispatching insert a
+				// second, duplicate job, defeating the guarantee
+				// idempotency_key exists to provide.
 				ByArgs:   true,
 				ByPeriod: 24 * time.Hour,
 				// Available/Pending/Running/Scheduled are required by
@@ -137,8 +126,7 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 					rivertype.JobStateRetryable, rivertype.JobStateCompleted,
 					rivertype.JobStateDiscarded,
 				},
-			},
-		})
+			})
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
 		}

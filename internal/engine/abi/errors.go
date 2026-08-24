@@ -50,6 +50,15 @@ const (
 	ErrCodeNotFound           = "orm.not_found"
 )
 
+// host.orm write error codes (host-abi-reference.md §5a "host.orm.create"/
+// "host.orm.write"/"host.orm.unlink").
+const (
+	ErrCodeValidationFailed    = "orm.validation_failed"
+	ErrCodeUniqueViolation     = "orm.unique_violation"
+	ErrCodeEtagMismatch        = "orm.etag_mismatch"
+	ErrCodeForeignKeyViolation = "orm.foreign_key_violation"
+)
+
 // host.event error codes (host-abi-reference.md "host.event.emit_tx").
 const (
 	ErrCodeNoTransaction = "event.no_transaction"

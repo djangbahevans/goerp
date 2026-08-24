@@ -85,11 +85,6 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend) (*Runti
 		return nil, fmt.Errorf("register host.db: %w", err)
 	}
 
-	if err := registerHostORM(ctx, rt, r, db); err != nil {
-		_ = rt.Close(ctx)
-		return nil, fmt.Errorf("register host.orm: %w", err)
-	}
-
 	// eventInsertClient is a separate, never-started river.Client[*sql.Tx]
 	// purely so host.event.emit_tx's InsertTx can accept the stdlib *sql.Tx
 	// modCtx.Transaction returns — the engine's own job-working client
@@ -97,12 +92,21 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend) (*Runti
 	// with that transaction type. A job inserted through this client is
 	// fully visible to and worked by the pgx-based client regardless
 	// (River's job table is driver-agnostic) — see registerHostEvent's
-	// own doc comment for the full reasoning.
+	// own doc comment for the full reasoning. Constructed before
+	// registerHostORM (not just registerHostEvent) since host.orm's write
+	// half (goerp#343) also emits orm.record.* events transactionally
+	// through this same client.
 	eventInsertClient, err := river.NewClient(riverdatabasesql.New(db), &river.Config{})
 	if err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("create event insert client: %w", err)
 	}
+
+	if err := registerHostORM(ctx, rt, r, db, eventInsertClient); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.orm: %w", err)
+	}
+
 	if err := registerHostEvent(ctx, rt, r, eventInsertClient); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.event: %w", err)
