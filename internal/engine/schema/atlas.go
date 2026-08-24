@@ -29,6 +29,11 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 
 	tables := make(map[string]*schema.Table, len(modelDecls))
 	for _, md := range modelDecls {
+		if md.Backend != "" {
+			// A non-default backend (currently only Virtual) has no
+			// table for schema sync to create or manage.
+			continue
+		}
 		t, err := toAtlasTable(md, enumTypes)
 		if err != nil {
 			return nil, fmt.Errorf("model %s: %w", md.Name, err)
