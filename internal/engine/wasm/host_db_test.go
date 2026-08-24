@@ -150,7 +150,7 @@ func callHost(t *testing.T, ctx context.Context, inst *ModuleInstance, exportNam
 }
 
 func newTestModuleContext(tenantSlug string, caps abi.CapabilitySet, txLimiter *TransactionLimiter) *ModuleContext {
-	return NewModuleContext("req-1", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", tenantSlug, "trace-1", caps, txLimiter)
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", tenantSlug, "trace-1", caps, txLimiter, nil, nil)
 }
 
 func createFixtureTenantSchema(t *testing.T, conn *sql.DB, slug string) {

@@ -31,9 +31,9 @@ func ToAtlasSchema(schemaName string, modelDecls []model.ModelDeclaration, typeD
 	return s, nil
 }
 
-// tableNameFor resolves a model declaration's Postgres table name: its
+// TableNameFor resolves a model declaration's Postgres table name: its
 // explicit Table override, or snake_case(Name) otherwise.
-func tableNameFor(md model.ModelDeclaration) string {
+func TableNameFor(md model.ModelDeclaration) string {
 	if md.Table != "" {
 		return md.Table
 	}
@@ -41,7 +41,7 @@ func tableNameFor(md model.ModelDeclaration) string {
 }
 
 func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumType) (*schema.Table, error) {
-	tableName := tableNameFor(md)
+	tableName := TableNameFor(md)
 
 	t := schema.NewTable(tableName)
 

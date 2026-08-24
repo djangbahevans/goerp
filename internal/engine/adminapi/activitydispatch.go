@@ -151,7 +151,7 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 	}
 	defer mod.Pool.Return(inst)
 
-	moduleCtx := wasm.NewModuleContext(req.WorkflowID, req.UserID, "", nil, req.TenantID, t.Slug, req.TraceID, mod.Capabilities, h.deps.TxLimiter)
+	moduleCtx := wasm.NewModuleContext(req.WorkflowID, mod.Manifest.Name, req.UserID, "", nil, req.TenantID, t.Slug, req.TraceID, mod.Capabilities, h.deps.TxLimiter, mod.ModelDecls, snap.FieldSecRegistry())
 	inst.SetModuleContext(moduleCtx)
 	defer func() {
 		moduleCtx.RollbackAll()
