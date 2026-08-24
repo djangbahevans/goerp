@@ -13,7 +13,7 @@ type moduleSchemaDeclaration struct {
 }
 
 func newModuleSchemaDeclaration(schemaName, moduleName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) (*moduleSchemaDeclaration, error) {
-	atlas, err := ToAtlasSchema(schemaName, modelDecls, typeDecls)
+	atlas, err := ToAtlasSchema(schemaName, moduleName, modelDecls, typeDecls)
 	if err != nil {
 		return nil, err
 	}

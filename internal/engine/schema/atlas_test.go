@@ -17,7 +17,7 @@ func TestToAtlasSchema_EnumField_ResolvesAgainstDeclaredType(t *testing.T) {
 			Field("state", model.Enum("order_state_enum").Required()),
 	}
 
-	s, err := ToAtlasSchema("tenant_acme", modelDecls, typeDecls)
+	s, err := ToAtlasSchema("tenant_acme", "sales", modelDecls, typeDecls)
 	if err != nil {
 		t.Fatalf("ToAtlasSchema() error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestToAtlasSchema_EnumField_UndeclaredTypeErrors(t *testing.T) {
 			Field("state", model.Enum("order_state_enum").Required()),
 	}
 
-	_, err := ToAtlasSchema("tenant_acme", modelDecls, nil)
+	_, err := ToAtlasSchema("tenant_acme", "sales", modelDecls, nil)
 	if err == nil {
 		t.Fatal("expected an error for a field referencing an undeclared enum type")
 	}

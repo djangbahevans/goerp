@@ -10,7 +10,14 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-func ToAtlasSchema(schemaName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) (*schema.Schema, error) {
+// ToAtlasSchema builds an Atlas schema from one module's own model
+// declarations. moduleName qualifies a Many2One field's relatedModel for
+// resolution against this same modelDecls slice — cross-module relations
+// aren't resolvable here (no aggregation of other modules' declarations
+// exists at this layer yet), so a Many2One field whose relatedModel isn't
+// one of this module's own models fails with a clear error rather than
+// silently skipping the foreign key.
+func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) (*schema.Schema, error) {
 	s := schema.New(schemaName)
 
 	enumTypes := make(map[string]*schema.EnumType, len(typeDecls))
@@ -20,15 +27,82 @@ func ToAtlasSchema(schemaName string, modelDecls []model.ModelDeclaration, typeD
 		enumTypes[td.Name] = e
 	}
 
+	tables := make(map[string]*schema.Table, len(modelDecls))
 	for _, md := range modelDecls {
 		t, err := toAtlasTable(md, enumTypes)
 		if err != nil {
 			return nil, fmt.Errorf("model %s: %w", md.Name, err)
 		}
 		s.AddTables(t)
+		tables[md.Name] = t
+	}
+
+	// Foreign keys are added in a second pass, once every table in this
+	// module exists, so a Many2One field can target a model declared
+	// later in modelDecls (or itself, for a self-referencing relation)
+	// without ordering constraints.
+	for _, md := range modelDecls {
+		for _, f := range md.Fields {
+			if f.Def.Kind != model.KindMany2One {
+				continue
+			}
+			if err := addForeignKey(tables[md.Name], f, moduleName, modelDecls, tables); err != nil {
+				return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
+			}
+		}
 	}
 
 	return s, nil
+}
+
+func addForeignKey(t *schema.Table, f model.NamedField, moduleName string, modelDecls []model.ModelDeclaration, tables map[string]*schema.Table) error {
+	prefix := moduleName + "."
+	if !strings.HasPrefix(f.Def.RelatedModel, prefix) {
+		return fmt.Errorf("related_model %q must be module-qualified as %q (cross-module Many2One relations aren't resolvable yet)", f.Def.RelatedModel, prefix+"...")
+	}
+	targetModelName := strings.TrimPrefix(f.Def.RelatedModel, prefix)
+	targetTable, ok := tables[targetModelName]
+	if !ok {
+		return fmt.Errorf("related_model %q is not one of this module's own declared models", f.Def.RelatedModel)
+	}
+
+	targetPK, ok := primaryKeyColumnOf(targetTable)
+	if !ok {
+		return fmt.Errorf("related_model %q declares no primary key field", f.Def.RelatedModel)
+	}
+
+	col, ok := t.Column(f.Name)
+	if !ok {
+		return fmt.Errorf("column %q not found on its own table", f.Name)
+	}
+
+	fk := schema.NewForeignKey(fmt.Sprintf("%s_%s_fkey", t.Name, f.Name)).
+		SetTable(t).
+		AddColumns(col).
+		SetRefTable(targetTable).
+		AddRefColumns(targetPK).
+		SetOnDelete(onDeleteOption(f.Def.RelationOnDelete))
+	t.AddForeignKeys(fk)
+
+	return nil
+}
+
+func primaryKeyColumnOf(t *schema.Table) (*schema.Column, bool) {
+	if t.PrimaryKey == nil || len(t.PrimaryKey.Parts) == 0 {
+		return nil, false
+	}
+	return t.PrimaryKey.Parts[0].C, t.PrimaryKey.Parts[0].C != nil
+}
+
+func onDeleteOption(b model.OnDeleteBehaviour) schema.ReferenceOption {
+	switch b {
+	case model.SetNull:
+		return schema.SetNull
+	case model.Cascade:
+		return schema.Cascade
+	default:
+		return schema.Restrict
+	}
 }
 
 // TableNameFor resolves a model declaration's Postgres table name: its
@@ -77,6 +151,10 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 func toAtlasColumn(name string, f model.FieldDef, enumTypes map[string]*schema.EnumType) (*schema.Column, error) {
 	c := schema.NewColumn(name).SetNull(!f.IsRequired && !f.IsPrimaryKey)
 
+	if f.Kind == model.KindMany2One && !strings.HasSuffix(name, "_id") {
+		return nil, fmt.Errorf("Many2One field %q must be named with an _id suffix", name)
+	}
+
 	switch f.Kind {
 	case model.KindChar:
 		if f.Length > 0 {
@@ -97,6 +175,13 @@ func toAtlasColumn(name string, f model.FieldDef, enumTypes map[string]*schema.E
 	case model.KindBoolean:
 		c.SetType(&schema.BoolType{T: postgres.TypeBoolean})
 	case model.KindUUID:
+		c.SetType(&schema.UUIDType{T: postgres.TypeUUID})
+	case model.KindMany2One:
+		// The FOREIGN KEY constraint itself is added in a second pass
+		// (ToAtlasSchema), once every table in the module exists. The
+		// referenced column's type is assumed UUID, matching this
+		// codebase's WithStandardFields() convention for primary keys —
+		// not a codebase-enforced guarantee, a scoped assumption.
 		c.SetType(&schema.UUIDType{T: postgres.TypeUUID})
 	case model.KindTimestampTZ:
 		c.SetType(&schema.TimeType{T: postgres.TypeTimestampTZ})
