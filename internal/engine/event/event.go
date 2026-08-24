@@ -7,9 +7,10 @@ import (
 )
 
 type EventRegistry struct {
-	emitters    map[string][]string            // event_name → emitting module names
-	subscribers map[string][]EventSubscription // event_name → subscriptions
-	moduleEmits map[string]map[string]bool     // module_name → event_name → true
+	emitters             map[string][]string            // event_name → emitting module names
+	subscribers          map[string][]EventSubscription // event_name → subscriptions
+	moduleEmits          map[string]map[string]bool     // module_name → event_name → true
+	emitIdempotencyField map[string]map[string]string   // module_name → event_name → idempotency_key_field
 }
 
 type EventSubscription struct {
@@ -31,9 +32,10 @@ type RetryPolicy struct {
 
 func NewEventRegistry() *EventRegistry {
 	return &EventRegistry{
-		emitters:    make(map[string][]string),
-		subscribers: make(map[string][]EventSubscription),
-		moduleEmits: make(map[string]map[string]bool),
+		emitters:             make(map[string][]string),
+		subscribers:          make(map[string][]EventSubscription),
+		moduleEmits:          make(map[string]map[string]bool),
+		emitIdempotencyField: make(map[string]map[string]string),
 	}
 }
 
@@ -45,6 +47,13 @@ func (r *EventRegistry) Register(moduleName string, m manifest.Manifest) {
 			r.moduleEmits[moduleName] = make(map[string]bool)
 		}
 		r.moduleEmits[moduleName][emit.Name] = true
+
+		if emit.IdempotencyKeyField != "" {
+			if r.emitIdempotencyField[moduleName] == nil {
+				r.emitIdempotencyField[moduleName] = make(map[string]string)
+			}
+			r.emitIdempotencyField[moduleName][emit.Name] = emit.IdempotencyKeyField
+		}
 	}
 
 	for _, sub := range m.Subscribes {
@@ -94,4 +103,14 @@ func (r *EventRegistry) ModuleEmits(moduleName, eventName string) bool {
 	}
 
 	return false
+}
+
+// IdempotencyKeyField returns the manifest-declared
+// emits[].idempotency_key_field for (moduleName, eventName), if any.
+func (r *EventRegistry) IdempotencyKeyField(moduleName, eventName string) (string, bool) {
+	if fields, ok := r.emitIdempotencyField[moduleName]; ok {
+		field, ok := fields[eventName]
+		return field, ok
+	}
+	return "", false
 }

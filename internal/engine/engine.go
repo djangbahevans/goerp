@@ -55,6 +55,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
@@ -898,12 +899,18 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *module.LoadedModule) *wasm.ModuleContext {
 	var fieldSecRegistry *fieldsec.FieldSecurityRegistry
+	var eventRegistry *event.EventRegistry
 	if e.moduleRegistry != nil {
 		if snap := e.moduleRegistry.Snapshot(); snap != nil {
 			fieldSecRegistry = snap.FieldSecRegistry()
+			eventRegistry = snap.EventRegistry()
 		}
 	}
-	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, "", nil, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), mod.ModelDecls, fieldSecRegistry)
+	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, "", nil, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), wasm.ModuleSnapshot{
+		ModelDecls:       mod.ModelDecls,
+		FieldSecRegistry: fieldSecRegistry,
+		EventRegistry:    eventRegistry,
+	})
 }
 
 func (e *Engine) invokeHandler(

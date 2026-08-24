@@ -49,6 +49,11 @@ func (s *RegistrySnapshot) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
 	return s.fieldSecRegistry
 }
 
+// EventRegistry returns this snapshot's event registry.
+func (s *RegistrySnapshot) EventRegistry() *event.EventRegistry {
+	return s.eventRegistry
+}
+
 // Populated by future tickets (backlog #35, #37). Never rebuilt by any
 // build* step here; carried over unchanged from the prior snapshot on
 // every write.

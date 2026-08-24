@@ -5,11 +5,32 @@ import (
 	"sync"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// ModuleSnapshot bundles the pieces of a registry snapshot a host function
+// needs, captured once at ModuleContext construction time so a hot reload
+// mid-request can't change what a single request's host.* calls see.
+// Extend this struct for new registry-derived data, rather than growing
+// NewModuleContext's own positional parameter list further.
+type ModuleSnapshot struct {
+	// ModelDecls is the calling module's own declared models — host.orm
+	// calls resolve a model name against this list, never against another
+	// module's models (internal/engine/wasm/host_orm.go).
+	ModelDecls []model.ModelDeclaration
+
+	// FieldSecRegistry is the field security registry in effect for this
+	// request.
+	FieldSecRegistry *fieldsec.FieldSecurityRegistry
+
+	// EventRegistry is the event registry in effect for this request —
+	// host.event.emit_tx validates a caller's event name against it.
+	EventRegistry *event.EventRegistry
+}
 
 type ModuleContext struct {
 	RequestID  string
@@ -28,45 +49,40 @@ type ModuleContext struct {
 
 	capabilities abi.CapabilitySet
 
-	// modelDecls is the calling module's own declared models — host.orm
-	// calls resolve a model name against this list, never against another
-	// module's models (internal/engine/wasm/host_orm.go).
-	modelDecls []model.ModelDeclaration
-
-	// fieldSecRegistry is the field security registry from the registry
-	// snapshot in effect when this request started, so a hot reload
-	// mid-request can't change which rule a single request's host.orm
-	// calls see.
-	fieldSecRegistry *fieldsec.FieldSecurityRegistry
+	snapshot ModuleSnapshot
 }
 
-func NewModuleContext(requestID, moduleName, userID, contactID string, roles []string, tenantID, tenantSlug, traceID string, capabilities abi.CapabilitySet, txLimiter *TransactionLimiter, modelDecls []model.ModelDeclaration, fieldSecRegistry *fieldsec.FieldSecurityRegistry) *ModuleContext {
+func NewModuleContext(requestID, moduleName, userID, contactID string, roles []string, tenantID, tenantSlug, traceID string, capabilities abi.CapabilitySet, txLimiter *TransactionLimiter, snapshot ModuleSnapshot) *ModuleContext {
 	return &ModuleContext{
-		RequestID:        requestID,
-		ModuleName:       moduleName,
-		UserID:           userID,
-		ContactID:        contactID,
-		Roles:            roles,
-		TenantID:         tenantID,
-		TenantSlug:       tenantSlug,
-		TraceID:          traceID,
-		transactions:     make(map[string]*sql.Tx),
-		capabilities:     capabilities,
-		txLimiter:        txLimiter,
-		modelDecls:       modelDecls,
-		fieldSecRegistry: fieldSecRegistry,
+		RequestID:    requestID,
+		ModuleName:   moduleName,
+		UserID:       userID,
+		ContactID:    contactID,
+		Roles:        roles,
+		TenantID:     tenantID,
+		TenantSlug:   tenantSlug,
+		TraceID:      traceID,
+		transactions: make(map[string]*sql.Tx),
+		capabilities: capabilities,
+		txLimiter:    txLimiter,
+		snapshot:     snapshot,
 	}
 }
 
 // ModelDecls returns the calling module's own declared models.
 func (mc *ModuleContext) ModelDecls() []model.ModelDeclaration {
-	return mc.modelDecls
+	return mc.snapshot.ModelDecls
 }
 
 // FieldSecRegistry returns the field security registry in effect for this
 // request.
 func (mc *ModuleContext) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
-	return mc.fieldSecRegistry
+	return mc.snapshot.FieldSecRegistry
+}
+
+// EventRegistry returns the event registry in effect for this request.
+func (mc *ModuleContext) EventRegistry() *event.EventRegistry {
+	return mc.snapshot.EventRegistry
 }
 
 // RollbackAll rolls back every transaction still open in this context and

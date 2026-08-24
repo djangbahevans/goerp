@@ -121,10 +121,11 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 }
 
 type EventDeclaration struct {
-	Name          string         `json:"name" validate:"required,event_name,max=128"`
-	Version       int            `json:"version"`
-	Description   string         `json:"description,omitempty"`
-	PayloadSchema map[string]any `json:"payload_schema,omitempty"`
+	Name                string         `json:"name" validate:"required,event_name,max=128"`
+	Version             int            `json:"version"`
+	Description         string         `json:"description,omitempty"`
+	PayloadSchema       map[string]any `json:"payload_schema,omitempty"`
+	IdempotencyKeyField string         `json:"idempotency_key_field,omitempty"`
 }
 
 type EventSubscription struct {

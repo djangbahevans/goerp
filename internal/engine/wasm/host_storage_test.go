@@ -182,7 +182,7 @@ func TestStorageUpload_SuccessRoundTripsFileRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("uuid.NewV7: %v", err)
 	}
-	mc := NewModuleContext("req-1", "testmodule", "", "", nil, tenantID.String(), slug, "trace-1", abi.CapStorageWrite, rt.TxLimiter(), nil, nil)
+	mc := NewModuleContext("req-1", "testmodule", "", "", nil, tenantID.String(), slug, "trace-1", abi.CapStorageWrite, rt.TxLimiter(), ModuleSnapshot{})
 	ctx := context.Background()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
