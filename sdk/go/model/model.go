@@ -8,7 +8,18 @@ type ModelDeclaration struct {
 	Fields      []NamedField `msgpack:"fields"`
 	Indexes     []NamedIndex `msgpack:"indexes,omitempty"`
 	EnabledOps  []Op         `msgpack:"enabled_ops,omitempty"`
+	Backend     ModelBackend `msgpack:"backend,omitempty"`
 }
+
+// ModelBackend selects what storage backend a model is read/written
+// through. The zero value is the default: a Postgres table (Table sets
+// its name). A non-default backend has no table for schema sync to
+// create — see ToAtlasSchema (internal/engine/schema).
+type ModelBackend string
+
+// BackendVirtual routes a model's host.orm calls to a module-registered
+// backend function (Virtual) instead of a Postgres table — see Virtual.
+const BackendVirtual ModelBackend = "virtual"
 
 type NamedField struct {
 	Name string   `msgpack:"name"`
@@ -32,6 +43,15 @@ func Define(name string, opts ...ModelOption) *ModelDeclaration {
 
 func Table(tableName string) ModelOption {
 	return func(d *ModelDeclaration) { d.Table = tableName }
+}
+
+// Virtual declares a model with no Postgres table at all — its
+// host.orm calls route to a module-registered backend function instead
+// (sdk/go/orm.RegisterVirtualBackend). Permitted only in modules of
+// type: connector; declared elsewhere it is a load-time error
+// (internal/engine/loader).
+func Virtual() ModelOption {
+	return func(d *ModelDeclaration) { d.Backend = BackendVirtual }
 }
 
 func Label(singular string) ModelOption {

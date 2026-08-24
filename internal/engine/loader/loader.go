@@ -118,6 +118,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	m.ModelDecls = models
 	m.TypeDecls = types
 
+	if err := validateVirtualModels(ctx, tempInst, mf, models); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
 	migrations, err := callGetDataMigrations(ctx, tempInst)
 	if err != nil {
 		m.Fail(fmt.Sprintf("get_data_migrations: %v", err))
@@ -291,4 +296,64 @@ func callGetDataMigrations(ctx context.Context, inst *wasm.ModuleInstance) ([]mo
 		return nil, fmt.Errorf("unmarshal get_data_migrations response: %w", err)
 	}
 	return migrations, nil
+}
+
+// validateVirtualModels enforces the two Virtual-model load-time rules
+// go-sdk-reference.md §22 documents: a Virtual model may only be declared
+// in a type: connector module, and (once that holds) EnableOps(Create)
+// requires a registered Create backend function while EnableOps(List)
+// rejects any declared ABAC condition — row-filtered access to a Virtual
+// model is Get-by-ID only, since ABAC filtering happens after the
+// backend has already fetched and paginated against the external
+// source. get_virtual_backends is only called when at least one model
+// actually declares Virtual — InvokeNoArg errors hard on a missing
+// export, so calling it unconditionally would require every module,
+// Virtual or not, to implement it.
+func validateVirtualModels(ctx context.Context, inst *wasm.ModuleInstance, mf *manifest.Manifest, models []model.ModelDeclaration) error {
+	hasVirtual := false
+	for _, md := range models {
+		if md.Backend == model.BackendVirtual {
+			hasVirtual = true
+			break
+		}
+	}
+	if !hasVirtual {
+		return nil
+	}
+	if mf.Type != "connector" {
+		return fmt.Errorf("model.Virtual() is only permitted in modules of type: connector")
+	}
+
+	backends, err := callGetVirtualBackends(ctx, inst)
+	if err != nil {
+		return fmt.Errorf("get_virtual_backends: %w", err)
+	}
+
+	for _, md := range models {
+		if md.Backend != model.BackendVirtual {
+			continue
+		}
+		registeredOps := backends[md.Name]
+		for _, op := range md.EnabledOps {
+			if op.Name == "list" && op.Condition != "" {
+				return fmt.Errorf("model %s: EnableOps(List) with an ABAC condition is not allowed on a Virtual model", md.Name)
+			}
+			if op.Name == "create" && !slices.Contains(registeredOps, "create") {
+				return fmt.Errorf("model %s: EnableOps(Create) declared with no registered Create backend function", md.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func callGetVirtualBackends(ctx context.Context, inst *wasm.ModuleInstance) (map[string][]string, error) {
+	data, err := inst.InvokeNoArg(ctx, "get_virtual_backends")
+	if err != nil {
+		return nil, err
+	}
+	var backends map[string][]string
+	if err := msgpack.Unmarshal(data, &backends); err != nil {
+		return nil, fmt.Errorf("unmarshal get_virtual_backends response: %w", err)
+	}
+	return backends, nil
 }
