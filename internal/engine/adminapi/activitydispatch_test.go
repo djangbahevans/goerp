@@ -68,7 +68,7 @@ func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.D
 		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
 		PoolMaxMemoryByes: 64 << 20,
 		Environment:       string(config.Production),
-	}, nil, nil)
+	}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("wasm.New: %v", err)
 	}

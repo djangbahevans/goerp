@@ -187,6 +187,88 @@ func (c *Client) SlidingWindowAllow(ctx context.Context, key string, limit int, 
 	return allowedInt == 1, time.Duration(retryAfterMs) * time.Millisecond, nil
 }
 
+// GetHash reads back every field of the Redis hash at key. found is
+// false, with a nil error, when key isn't set — a cache miss isn't
+// itself an error.
+func (c *Client) GetHash(ctx context.Context, key string) (fields map[string]string, found bool, err error) {
+	fields, err = c.rdb.HGetAll(ctx, key).Result()
+	if err != nil {
+		return nil, false, fmt.Errorf("hgetall %q: %w", key, err)
+	}
+	if len(fields) == 0 {
+		return nil, false, nil
+	}
+	return fields, true, nil
+}
+
+// compareAndSetHashScript atomically HSETs dataField/etagField on key and
+// refreshes its TTL, gated by two independent flags rather than by
+// treating an empty expectedEtag as its own sentinel — a legitimately
+// stored etag can itself be the empty string (a freshly created record's
+// initial etag, matching WithStandardFields()'s "" default on the Table
+// path), so "no precondition requested" has to be signaled separately
+// from "the precondition is an empty string." requireExists alone (no
+// etag check) still has to be enforced inside this same EVAL, not as a
+// separate existence check before the call — a Go-side check-then-set
+// has a TOCTOU gap a concurrent delete could slip through between the
+// two round trips, silently resurrecting a just-deleted key. Returns 1
+// on success, 0 on any precondition failure (missing key when required,
+// or a mismatched etag).
+const compareAndSetHashScript = `
+local key = KEYS[1]
+local etag_field = ARGV[1]
+local require_exists = ARGV[2]
+local check_etag = ARGV[3]
+local expected_etag = ARGV[4]
+local data_field = ARGV[5]
+local data_value = ARGV[6]
+local new_etag = ARGV[7]
+local ttl_ms = tonumber(ARGV[8])
+
+local exists = redis.call('EXISTS', key) == 1
+
+if require_exists == '1' and not exists then
+    return 0
+end
+if check_etag == '1' then
+    local current = redis.call('HGET', key, etag_field)
+    if current ~= expected_etag then
+        return 0
+    end
+end
+
+redis.call('HSET', key, data_field, data_value, etag_field, new_etag)
+redis.call('PEXPIRE', key, ttl_ms)
+return 1
+`
+
+// CompareAndSetHash sets key's dataField/etagField hash fields to
+// dataValue/newEtag and refreshes its TTL to ttl. requireExists rejects
+// a missing key outright (write's own two flavors both set this — write
+// must never conjure a record that was never created; create leaves it
+// false, since a fresh key is exactly the expected case). checkEtag,
+// when true, additionally requires key's current etagField value to
+// equal expectedEtag — this is what write's own expectedEtag precondition
+// compiles to; the caller decides both flags, this method just runs the
+// one atomic EVAL either combination needs.
+func (c *Client) CompareAndSetHash(ctx context.Context, key, etagField string, requireExists, checkEtag bool, expectedEtag, dataField, dataValue, newEtag string, ttl time.Duration) (ok bool, err error) {
+	res, err := c.rdb.Eval(ctx, compareAndSetHashScript, []string{key},
+		etagField, luaBool(requireExists), luaBool(checkEtag), expectedEtag, dataField, dataValue, newEtag, ttl.Milliseconds(),
+	).Result()
+	if err != nil {
+		return false, fmt.Errorf("compare-and-set hash %q: %w", key, err)
+	}
+	n, _ := res.(int64)
+	return n == 1, nil
+}
+
+func luaBool(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
 // DeleteByPrefix removes every key matching prefix+"*" — multitenancy-
 // internals.md §12's tenant cache flush, used by OffboardTenantWorkflow's
 // FlushTenantCache step. Uses SCAN rather than KEYS so it doesn't block the

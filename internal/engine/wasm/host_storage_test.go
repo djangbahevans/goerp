@@ -46,7 +46,7 @@ func newHostStorageTestRuntime(t *testing.T, primaryDB *sql.DB, backend storage.
 		PoolMaxMemoryByes:   1 << 20,
 		StorageMaxFileBytes: 100 << 20,
 		StorageBlockedTypes: []string{"application/x-executable"},
-	}, primaryDB, backend)
+	}, primaryDB, backend, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

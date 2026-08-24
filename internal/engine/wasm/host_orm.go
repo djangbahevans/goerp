@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -19,24 +20,27 @@ import (
 )
 
 // registerHostORM attaches host.orm's read half (search/search_read/read,
-// this file) and write half (create/write/unlink, host_orm_write.go) to
-// the runtime. Lives in the wasm package for the same import-cycle reason
-// registerHostDB does (host_db.go) — its closures need direct access to
-// *sql.DB and the Runtime's instance registry. insertClient is the same
-// never-Start()'d river.Client[*sql.Tx] registerHostEvent uses, threaded
-// through so the write half can emit orm.record.* events transactionally
+// this file), write half (create/write/unlink, host_orm_write.go), and
+// Transient-model routing (host_orm_transient.go) to the runtime. Lives
+// in the wasm package for the same import-cycle reason registerHostDB
+// does (host_db.go) — its closures need direct access to *sql.DB and the
+// Runtime's instance registry. insertClient is the same never-Start()'d
+// river.Client[*sql.Tx] registerHostEvent uses, threaded through so the
+// write half can emit orm.record.* events transactionally
 // (host_orm_write.go's emitRecordEvent) without a second client.
+// cacheClient backs Transient-model create/read/write/unlink
+// (host_orm_transient.go) — Table-backed models never touch it.
 //
 // dispatchORMRoute (goerp#346, EnableOps' HTTP entry point) is a separate
 // ticket — nothing here derives or serves an HTTP route.
-func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) error {
+func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) error {
 	_, err := rt.NewHostModuleBuilder("host.orm").
 		NewFunctionBuilder().WithFunc(makeORMSearch(r, db)).Export("search").
 		NewFunctionBuilder().WithFunc(makeORMSearchRead(r, db)).Export("search_read").
-		NewFunctionBuilder().WithFunc(makeORMRead(r, db)).Export("read").
-		NewFunctionBuilder().WithFunc(makeORMCreate(r, db, insertClient)).Export("create").
-		NewFunctionBuilder().WithFunc(makeORMWrite(r, db, insertClient)).Export("write").
-		NewFunctionBuilder().WithFunc(makeORMUnlink(r, db, insertClient)).Export("unlink").
+		NewFunctionBuilder().WithFunc(makeORMRead(r, db, cacheClient)).Export("read").
+		NewFunctionBuilder().WithFunc(makeORMCreate(r, db, insertClient, cacheClient)).Export("create").
+		NewFunctionBuilder().WithFunc(makeORMWrite(r, db, insertClient, cacheClient)).Export("write").
+		NewFunctionBuilder().WithFunc(makeORMUnlink(r, db, insertClient, cacheClient)).Export("unlink").
 		Instantiate(ctx)
 	return err
 }
@@ -101,6 +105,9 @@ func makeORMSearch(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Modul
 		md, ok := resolveModel(modCtx, input.Model)
 		if !ok {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
+		}
+		if md.Backend == model.BackendTransient {
+			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"})
 		}
 
 		whereFrag, args, hostErr := compileDomain(input.Domain)
@@ -173,6 +180,9 @@ func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.M
 		md, ok := resolveModel(modCtx, input.Model)
 		if !ok {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
+		}
+		if md.Backend == model.BackendTransient {
+			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"})
 		}
 
 		pkCol, ok := primaryKeyColumn(md)
@@ -249,7 +259,7 @@ func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.M
 	}
 }
 
-func makeORMRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+func makeORMRead(r *Runtime, db *sql.DB, cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
@@ -271,6 +281,14 @@ func makeORMRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		md, ok := resolveModel(modCtx, input.Model)
 		if !ok {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
+		}
+
+		if md.Backend == model.BackendTransient {
+			out, hostErr := transientRead(ctx, cacheClient, modCtx, input.Model, input.IDs)
+			if hostErr != nil {
+				return abi.EncodeHostError(ctx, m, allocate, hostErr)
+			}
+			return abi.WriteToModule(ctx, m, allocate, out)
 		}
 
 		pkCol, ok := primaryKeyColumn(md)

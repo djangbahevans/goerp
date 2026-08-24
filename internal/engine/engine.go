@@ -534,7 +534,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 	})
 
-	runtime, err := wasm.New(cfg, primaryPool, storageBackend)
+	runtime, err := wasm.New(cfg, primaryPool, storageBackend, cacheClient)
 	if err != nil {
 		_ = cacheClient.Close()
 		_ = primaryPool.Close()
