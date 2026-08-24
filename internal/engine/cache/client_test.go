@@ -308,6 +308,140 @@ func TestDeleteByPrefix_NoMatchesIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestSlidingWindowAllow_AllowsUpToLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+	defer func() { _ = c.Delete(ctx, key) }()
+
+	for i := range 3 {
+		allowed, _, err := c.SlidingWindowAllow(ctx, key, 3, time.Minute)
+		if err != nil {
+			t.Fatalf("SlidingWindowAllow() request %d error: %v", i, err)
+		}
+		if !allowed {
+			t.Fatalf("SlidingWindowAllow() request %d = false, want true (within limit)", i)
+		}
+	}
+}
+
+func TestSlidingWindowAllow_RejectsOverLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+	defer func() { _ = c.Delete(ctx, key) }()
+
+	for i := range 2 {
+		if _, _, err := c.SlidingWindowAllow(ctx, key, 2, time.Minute); err != nil {
+			t.Fatalf("SlidingWindowAllow() request %d error: %v", i, err)
+		}
+	}
+
+	allowed, retryAfter, err := c.SlidingWindowAllow(ctx, key, 2, time.Minute)
+	if err != nil {
+		t.Fatalf("SlidingWindowAllow() error: %v", err)
+	}
+	if allowed {
+		t.Fatal("SlidingWindowAllow() = true, want false (over limit)")
+	}
+	if retryAfter <= 0 || retryAfter > time.Minute {
+		t.Errorf("retryAfter = %v, want a positive duration within the 1-minute window", retryAfter)
+	}
+}
+
+func TestSlidingWindowAllow_WindowExpiryFreesASlot(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+	defer func() { _ = c.Delete(ctx, key) }()
+
+	window := 500 * time.Millisecond
+	if _, _, err := c.SlidingWindowAllow(ctx, key, 1, window); err != nil {
+		t.Fatalf("SlidingWindowAllow() first request error: %v", err)
+	}
+
+	allowed, _, err := c.SlidingWindowAllow(ctx, key, 1, window)
+	if err != nil {
+		t.Fatalf("SlidingWindowAllow() second request error: %v", err)
+	}
+	if allowed {
+		t.Fatal("second request within the window should have been rejected")
+	}
+
+	time.Sleep(window + 100*time.Millisecond)
+
+	allowed, _, err = c.SlidingWindowAllow(ctx, key, 1, window)
+	if err != nil {
+		t.Fatalf("SlidingWindowAllow() third request error: %v", err)
+	}
+	if !allowed {
+		t.Error("request after the window expired should have been allowed — the oldest entry should have aged out")
+	}
+}
+
+// TestSlidingWindowAllow_NoBurstAcrossWindowBoundary is the AC this
+// ticket calls out explicitly: a fixed-window counter (IncrWithTTL's own
+// approach) lets 2x the limit through across a single window-boundary
+// reset — limit requests just before the boundary, limit more just after,
+// both windows individually under the cap. A genuine sliding-window log
+// has no boundary to burst across: this drives requests across what would
+// be a fixed-window reset point and confirms the total allowed within any
+// window-sized span never exceeds the limit.
+func TestSlidingWindowAllow_NoBurstAcrossWindowBoundary(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	defer func() { _ = c.Close() }()
+
+	key := "cache-test:" + t.Name()
+	defer func() { _ = c.Delete(ctx, key) }()
+
+	const limit = 2
+	window := 400 * time.Millisecond
+
+	// Exhaust the limit right away.
+	for i := range limit {
+		allowed, _, err := c.SlidingWindowAllow(ctx, key, limit, window)
+		if err != nil {
+			t.Fatalf("SlidingWindowAllow() warmup request %d error: %v", i, err)
+		}
+		if !allowed {
+			t.Fatalf("SlidingWindowAllow() warmup request %d = false, want true", i)
+		}
+	}
+
+	// A fixed-window counter keyed by wall-clock window bucket would have
+	// reset by now if this sleep crossed its boundary — a sliding window
+	// must not, since less than a full window has elapsed since the
+	// first of the two requests above.
+	time.Sleep(window / 2)
+
+	allowed, _, err := c.SlidingWindowAllow(ctx, key, limit, window)
+	if err != nil {
+		t.Fatalf("SlidingWindowAllow() error: %v", err)
+	}
+	if allowed {
+		t.Error("request at half the window elapsed should still be rejected — no fixed-window boundary to burst across")
+	}
+}
+
 func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

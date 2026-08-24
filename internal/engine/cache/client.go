@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -128,6 +129,62 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("delete %q: %w", key, err)
 	}
 	return nil
+}
+
+// slidingWindowScript implements a genuine sliding-window log (a Redis
+// sorted set of per-request timestamps), not a fixed-window counter:
+// IncrWithTTL's fixed-window approach lets a burst of 2x limit through
+// across a single window-boundary reset (limit requests just before the
+// boundary, limit more just after) — the sorted set's own score-based
+// eviction has no boundary to burst across. Runs as one EVAL so the
+// trim/count/conditional-add sequence is atomic against a concurrent
+// request racing the same key; a Go-side read-then-write would have a
+// TOCTOU gap two concurrent requests could both slip through.
+const slidingWindowScript = `
+local key = KEYS[1]
+local now_ms = tonumber(ARGV[1])
+local window_ms = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+local member = ARGV[4]
+
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now_ms - window_ms)
+local count = redis.call('ZCARD', key)
+
+if count < limit then
+    redis.call('ZADD', key, now_ms, member)
+    redis.call('PEXPIRE', key, window_ms)
+    return {1, 0}
+end
+
+local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+local retry_after_ms = window_ms - (now_ms - tonumber(oldest[2]))
+if retry_after_ms < 0 then
+    retry_after_ms = 0
+end
+return {0, retry_after_ms}
+`
+
+// SlidingWindowAllow reports whether one more request against key is
+// allowed within limit requests per window, atomically recording this
+// request if so. retryAfter is only meaningful when allowed is false —
+// the time until the window's oldest recorded request ages out and a
+// slot frees up.
+func (c *Client) SlidingWindowAllow(ctx context.Context, key string, limit int, window time.Duration) (allowed bool, retryAfter time.Duration, err error) {
+	member := fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Int64())
+	res, err := c.rdb.Eval(ctx, slidingWindowScript, []string{key},
+		time.Now().UnixMilli(), window.Milliseconds(), limit, member,
+	).Result()
+	if err != nil {
+		return false, 0, fmt.Errorf("sliding window check %q: %w", key, err)
+	}
+
+	values, ok := res.([]any)
+	if !ok || len(values) != 2 {
+		return false, 0, fmt.Errorf("sliding window check %q: unexpected script result %#v", key, res)
+	}
+	allowedInt, _ := values[0].(int64)
+	retryAfterMs, _ := values[1].(int64)
+	return allowedInt == 1, time.Duration(retryAfterMs) * time.Millisecond, nil
 }
 
 // DeleteByPrefix removes every key matching prefix+"*" — multitenancy-
