@@ -446,13 +446,11 @@ func TestAuthenticate_MalformedTokenIsRejected(t *testing.T) {
 func TestAuthenticate_ExpiredTokenIsRejected(t *testing.T) {
 	f := newFixture(t)
 	token := f.signRawClaims(t, authtoken.Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    "goerp",
-			Subject:   f.userID,
-			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-time.Hour)),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
-			ID:        "expired-jti",
-		},
+		Issuer:    "goerp",
+		Subject:   f.userID,
+		IssuedAt:  jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		ID:        "expired-jti",
 		SessionID: "22222222-2222-2222-2222-222222222222",
 		TenantID:  f.tenantID,
 		Scope:     []string{"api"},
@@ -473,13 +471,11 @@ func TestAuthenticate_WrongSignatureIsRejected(t *testing.T) {
 		t.Fatalf("generate other key: %v", err)
 	}
 	claims := authtoken.Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    "goerp",
-			Subject:   f.userID,
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
-			ID:        "wrong-sig-jti",
-		},
+		Issuer:    "goerp",
+		Subject:   f.userID,
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+		ID:        "wrong-sig-jti",
 		SessionID: "33333333-3333-3333-3333-333333333333",
 		TenantID:  f.tenantID,
 		Scope:     []string{"api"},
@@ -885,15 +881,13 @@ func TestAuthenticateMFAToken_ValidTokenReturnsMFAPending(t *testing.T) {
 func TestAuthenticateMFAToken_ExpiredTokenIsRejected(t *testing.T) {
 	f := newFixture(t)
 	claims := mfatoken.Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   f.userID,
-			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-time.Hour)),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
-		},
-		TenantID: f.tenantID,
-		Txn:      "expired-txn",
-		Purpose:  mfatoken.PurposeMFALogin,
-		Origin:   "https://example.com",
+		Subject:   f.userID,
+		IssuedAt:  jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		TenantID:  f.tenantID,
+		Txn:       "expired-txn",
+		Purpose:   mfatoken.PurposeMFALogin,
+		Origin:    "https://example.com",
 	}
 	token := f.signRawMFAClaims(t, claims)
 

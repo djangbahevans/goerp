@@ -59,15 +59,13 @@ func (c *Codec) Issue(userID, tenantID, origin string) (token, txn string, err e
 	txn = uuid.NewString()
 
 	claims := Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   userID,
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(TTL)),
-		},
-		TenantID: tenantID,
-		Txn:      txn,
-		Purpose:  PurposeMFALogin,
-		Origin:   origin,
+		Subject:   userID,
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(TTL)),
+		TenantID:  tenantID,
+		Txn:       txn,
+		Purpose:   PurposeMFALogin,
+		Origin:    origin,
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
