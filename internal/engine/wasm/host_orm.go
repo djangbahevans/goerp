@@ -228,6 +228,10 @@ func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.M
 
 		applyFieldMasking(modCtx, input.Model, records)
 
+		if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
+		}
+
 		var nextCursor string
 		if input.Cursor != "" || (limit > 0 && len(records) == limit) {
 			if len(records) > 0 {
@@ -312,6 +316,10 @@ func makeORMRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		}
 
 		applyFieldMasking(modCtx, input.Model, records)
+
+		if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
+		}
 
 		return abi.WriteToModule(ctx, m, allocate, ormReadOutput{Records: records})
 	}
