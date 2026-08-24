@@ -57,15 +57,16 @@ const chainTestUngrantedPermission = "widgets.delete"
 // rest of this codebase's integration tests use (no mocks) — enough to
 // drive requests through buildChain end-to-end.
 type chainFixture struct {
-	conn       *sql.DB
-	resolver   *tenantresolve.Resolver
-	checker    *authcheck.Checker
-	issuer     *authtoken.Issuer
-	reg        *registry.ModuleRegistry
-	tenantID   string
-	tenantSlug string
-	domain     string
-	userID     string
+	conn        *sql.DB
+	cacheClient *cache.Client
+	resolver    *tenantresolve.Resolver
+	checker     *authcheck.Checker
+	issuer      *authtoken.Issuer
+	reg         *registry.ModuleRegistry
+	tenantID    string
+	tenantSlug  string
+	domain      string
+	userID      string
 }
 
 func newChainFixture(t *testing.T) *chainFixture {
@@ -210,15 +211,16 @@ func newChainFixture(t *testing.T) *chainFixture {
 	issuer := authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore)
 
 	return &chainFixture{
-		conn:       conn,
-		resolver:   resolver,
-		checker:    checker,
-		issuer:     issuer,
-		reg:        reg,
-		tenantID:   tt.ID,
-		tenantSlug: slug,
-		domain:     domain,
-		userID:     userID,
+		conn:        conn,
+		cacheClient: cacheClient,
+		resolver:    resolver,
+		checker:     checker,
+		issuer:      issuer,
+		reg:         reg,
+		tenantID:    tt.ID,
+		tenantSlug:  slug,
+		domain:      domain,
+		userID:      userID,
 	}
 }
 
@@ -267,7 +269,12 @@ func (f *chainFixture) issueToken(t *testing.T) string {
 }
 
 func (f *chainFixture) chain(builtins map[string]http.Handler) http.Handler {
-	return buildChain(f.reg, builtins, nil, f.resolver, f.checker, noop.NewTracerProvider().Tracer("test"))
+	// A generous default so existing tests firing several requests in a
+	// row don't trip the limiter incidentally — rate limiting itself is
+	// covered by its own dedicated tests using a deliberately tight
+	// limit.
+	generousDefault := route.RateLimitConfig{Requests: 10000, WindowSeconds: 60, Scope: "ip"}
+	return buildChain(f.reg, builtins, nil, f.resolver, f.checker, noop.NewTracerProvider().Tracer("test"), f.cacheClient, generousDefault)
 }
 
 func decodeErrorCode(t *testing.T, w *httptest.ResponseRecorder) string {

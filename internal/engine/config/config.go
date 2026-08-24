@@ -39,7 +39,12 @@ type Config struct {
 	// engine-internals.md §6 step 3. An untrusted peer's own
 	// X-Forwarded-For is never honored, so an empty list (the default)
 	// means every request's real IP is simply its raw RemoteAddr.
-	TrustedProxies     []string      `env:"GOERP_TRUSTED_PROXIES"`
+	TrustedProxies []string `env:"GOERP_TRUSTED_PROXIES"`
+	// RateLimitMax/RateLimitWindow are the engine-wide default rate limit
+	// rateLimitMiddleware applies to any route that doesn't declare its
+	// own stricter RouteManifest.RateLimit.
+	RateLimitMax       int           `env:"GOERP_RATE_LIMIT_MAX" envDefault:"600"`
+	RateLimitWindow    time.Duration `env:"GOERP_RATE_LIMIT_WINDOW" envDefault:"60s"`
 	AdminAddr          string        `env:"GOERP_ADMIN_ADDR" envDefault:"127.0.0.1:8081" validate:"loopback"`
 	AdminMaxBodyBytes  int64         `env:"GOERP_ADMIN_MAX_BODY_BYTES" envDefault:"10485760"`
 	AdminMaxConcurrent int           `env:"GOERP_ADMIN_MAX_CONCURRENT" envDefault:"20"`
