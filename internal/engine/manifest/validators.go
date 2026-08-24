@@ -176,6 +176,10 @@ func validateManifest(m Manifest) error {
 		msgs = append(msgs, err.Error())
 	}
 
+	if err := validatePolicies(m); err != nil {
+		msgs = append(msgs, err.Error())
+	}
+
 	if len(msgs) == 0 {
 		return nil
 	}
