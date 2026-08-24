@@ -59,6 +59,11 @@ const (
 	ErrCodeForeignKeyViolation = "orm.foreign_key_violation"
 )
 
+// Transient-model error codes (go-sdk-reference.md §22 "Transient models").
+const (
+	ErrCodeTransientNotListable = "orm.transient_not_listable"
+)
+
 // host.event error codes (host-abi-reference.md "host.event.emit_tx").
 const (
 	ErrCodeNoTransaction = "event.no_transaction"

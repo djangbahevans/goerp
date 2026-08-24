@@ -1,14 +1,17 @@
 package model
 
+import "time"
+
 type ModelDeclaration struct {
-	Name        string       `msgpack:"name"`
-	Table       string       `msgpack:"table,omitempty"`
-	Label       string       `msgpack:"label,omitempty"`
-	LabelPlural string       `msgpack:"label_plural,omitempty"`
-	Fields      []NamedField `msgpack:"fields"`
-	Indexes     []NamedIndex `msgpack:"indexes,omitempty"`
-	EnabledOps  []Op         `msgpack:"enabled_ops,omitempty"`
-	Backend     ModelBackend `msgpack:"backend,omitempty"`
+	Name                string       `msgpack:"name"`
+	Table               string       `msgpack:"table,omitempty"`
+	Label               string       `msgpack:"label,omitempty"`
+	LabelPlural         string       `msgpack:"label_plural,omitempty"`
+	Fields              []NamedField `msgpack:"fields"`
+	Indexes             []NamedIndex `msgpack:"indexes,omitempty"`
+	EnabledOps          []Op         `msgpack:"enabled_ops,omitempty"`
+	Backend             ModelBackend `msgpack:"backend,omitempty"`
+	TransientTTLSeconds int          `msgpack:"transient_ttl_seconds,omitempty"`
 }
 
 // ModelBackend selects what storage backend a model is read/written
@@ -17,9 +20,16 @@ type ModelDeclaration struct {
 // create — see ToAtlasSchema (internal/engine/schema).
 type ModelBackend string
 
-// BackendVirtual routes a model's host.orm calls to a module-registered
-// backend function (Virtual) instead of a Postgres table — see Virtual.
-const BackendVirtual ModelBackend = "virtual"
+const (
+	// BackendVirtual routes a model's host.orm calls to a
+	// module-registered backend function instead of a Postgres table —
+	// see Virtual.
+	BackendVirtual ModelBackend = "virtual"
+
+	// BackendTransient routes a model's host.orm calls to a Redis-backed
+	// key instead of a Postgres table — see Transient.
+	BackendTransient ModelBackend = "transient"
+)
 
 type NamedField struct {
 	Name string   `msgpack:"name"`
@@ -52,6 +62,18 @@ func Table(tableName string) ModelOption {
 // (internal/engine/loader).
 func Virtual() ModelOption {
 	return func(d *ModelDeclaration) { d.Backend = BackendVirtual }
+}
+
+// Transient declares a model backed by Redis instead of a Postgres
+// table — ephemeral, multi-step-wizard-shaped state with a sliding TTL,
+// refreshed on every write. ttl is rounded down to the nearest second;
+// zero or negative disables expiry checks at the SDK level (the engine
+// still requires a positive TTL — a load-time error, not enforced here).
+func Transient(ttl time.Duration) ModelOption {
+	return func(d *ModelDeclaration) {
+		d.Backend = BackendTransient
+		d.TransientTTLSeconds = int(ttl / time.Second)
+	}
 }
 
 func Label(singular string) ModelOption {

@@ -123,6 +123,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 
+	if err := validateTransientModels(models); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
 	migrations, err := callGetDataMigrations(ctx, tempInst)
 	if err != nil {
 		m.Fail(fmt.Sprintf("get_data_migrations: %v", err))
@@ -340,6 +345,32 @@ func validateVirtualModels(ctx context.Context, inst *wasm.ModuleInstance, mf *m
 			}
 			if op.Name == "create" && !slices.Contains(registeredOps, "create") {
 				return fmt.Errorf("model %s: EnableOps(Create) declared with no registered Create backend function", md.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// validateTransientModels enforces the two Transient-model load-time
+// rules go-sdk-reference.md §22 documents: EnableOps(List) is rejected
+// outright (a Transient model has no browse semantics — it's addressed
+// directly by the ID create returns), and a declared TTL must be
+// positive (a zero or negative TTL would mean every SET immediately
+// expires, or Redis rejecting the EXPIRE outright, either way a
+// model that can never actually hold state). Unlike Virtual, Transient
+// carries no connector-only restriction — any module type may declare
+// one.
+func validateTransientModels(models []model.ModelDeclaration) error {
+	for _, md := range models {
+		if md.Backend != model.BackendTransient {
+			continue
+		}
+		if md.TransientTTLSeconds <= 0 {
+			return fmt.Errorf("model %s: Transient() requires a positive TTL", md.Name)
+		}
+		for _, op := range md.EnabledOps {
+			if op.Name == "list" {
+				return fmt.Errorf("model %s: EnableOps(List) is not allowed on a Transient model", md.Name)
 			}
 		}
 	}

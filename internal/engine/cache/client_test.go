@@ -442,6 +442,265 @@ func TestSlidingWindowAllow_NoBurstAcrossWindowBoundary(t *testing.T) {
 	}
 }
 
+func TestGetHash_MissReturnsFoundFalse(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	_, found, err := c.GetHash(ctx, "cache-test:"+t.Name())
+	if err != nil {
+		t.Fatalf("GetHash() error: %v", err)
+	}
+	if found {
+		t.Error("expected found = false for an unset key")
+	}
+}
+
+func TestCompareAndSetHash_Create_NoRequireExistsNoCheckEtag_SucceedsUnconditionally(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	ok, err := c.CompareAndSetHash(ctx, key, "etag", false, false, "", "data", "payload-1", "etag-1", time.Minute)
+	if err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected the create path to succeed")
+	}
+
+	fields, found, err := c.GetHash(ctx, key)
+	if err != nil {
+		t.Fatalf("GetHash() error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected the hash to exist after create")
+	}
+	if fields["data"] != "payload-1" || fields["etag"] != "etag-1" {
+		t.Errorf("fields = %+v, want data=payload-1 etag=etag-1", fields)
+	}
+}
+
+func TestCompareAndSetHash_MatchingEtag_Succeeds(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	if _, err := c.CompareAndSetHash(ctx, key, "etag", false, false, "", "data", "payload-1", "etag-1", time.Minute); err != nil {
+		t.Fatalf("initial create: %v", err)
+	}
+
+	ok, err := c.CompareAndSetHash(ctx, key, "etag", true, true, "etag-1", "data", "payload-2", "etag-2", time.Minute)
+	if err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected a matching etag to succeed")
+	}
+
+	fields, _, err := c.GetHash(ctx, key)
+	if err != nil {
+		t.Fatalf("GetHash() error: %v", err)
+	}
+	if fields["data"] != "payload-2" || fields["etag"] != "etag-2" {
+		t.Errorf("fields = %+v, want data=payload-2 etag=etag-2", fields)
+	}
+}
+
+func TestCompareAndSetHash_MismatchedEtag_Fails(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	if _, err := c.CompareAndSetHash(ctx, key, "etag", false, false, "", "data", "payload-1", "etag-1", time.Minute); err != nil {
+		t.Fatalf("initial create: %v", err)
+	}
+
+	ok, err := c.CompareAndSetHash(ctx, key, "etag", true, true, "stale-etag", "data", "payload-2", "etag-2", time.Minute)
+	if err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected a mismatched etag to fail")
+	}
+
+	fields, _, err := c.GetHash(ctx, key)
+	if err != nil {
+		t.Fatalf("GetHash() error: %v", err)
+	}
+	if fields["data"] != "payload-1" || fields["etag"] != "etag-1" {
+		t.Errorf("expected the original fields to survive a failed CAS, got %+v", fields)
+	}
+}
+
+func TestCompareAndSetHash_CheckEtagOnMissingKey_Fails(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+
+	ok, err := c.CompareAndSetHash(ctx, key, "etag", true, true, "some-etag", "data", "payload", "etag-new", time.Minute)
+	if err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected checkEtag against a missing key to fail")
+	}
+}
+
+// TestCompareAndSetHash_RequireExistsWithoutCheckEtag_SucceedsOnExistingKey
+// is the shape host.orm.write's "no expectedEtag supplied, but the record
+// must already exist" path uses (goerp#344) — requireExists=true,
+// checkEtag=false. This is also the fix for the TOCTOU bug a Go-side
+// GetHash-then-CompareAndSetHash sequence had: existence is enforced
+// inside the same EVAL as the set, not as a separate round trip a
+// concurrent delete could slip between.
+func TestCompareAndSetHash_RequireExistsWithoutCheckEtag_SucceedsOnExistingKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	if _, err := c.CompareAndSetHash(ctx, key, "etag", false, false, "", "data", "payload-1", "etag-1", time.Minute); err != nil {
+		t.Fatalf("initial create: %v", err)
+	}
+
+	ok, err := c.CompareAndSetHash(ctx, key, "etag", true, false, "", "data", "payload-2", "etag-2", time.Minute)
+	if err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected requireExists=true, checkEtag=false to succeed against an existing key regardless of its stored etag")
+	}
+
+	fields, _, err := c.GetHash(ctx, key)
+	if err != nil {
+		t.Fatalf("GetHash() error: %v", err)
+	}
+	if fields["data"] != "payload-2" || fields["etag"] != "etag-2" {
+		t.Errorf("fields = %+v, want data=payload-2 etag=etag-2", fields)
+	}
+}
+
+func TestCompareAndSetHash_RequireExistsWithoutCheckEtag_FailsOnMissingKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+
+	ok, err := c.CompareAndSetHash(ctx, key, "etag", true, false, "", "data", "payload", "etag-1", time.Minute)
+	if err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected requireExists=true against a missing key to fail even without an etag check")
+	}
+}
+
+// TestCompareAndSetHash_EmptyStringEtagIsARealPrecondition proves the
+// bug fix directly: a stored etag that happens to be the empty string
+// (e.g. a freshly created record's initial etag, matching
+// WithStandardFields()'s ” default on the Table path) is still a real
+// value checkEtag can match against — it is not confusable with "no
+// precondition requested," which is signaled by checkEtag=false, not by
+// expectedEtag=="".
+func TestCompareAndSetHash_EmptyStringEtagIsARealPrecondition(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	// Create with an empty-string etag, matching a fresh record's real
+	// initial value.
+	if _, err := c.CompareAndSetHash(ctx, key, "etag", false, false, "", "data", "payload-1", "", time.Minute); err != nil {
+		t.Fatalf("initial create: %v", err)
+	}
+
+	// A write asserting the wrong non-empty etag against a record whose
+	// real stored etag is "" must fail.
+	ok, err := c.CompareAndSetHash(ctx, key, "etag", true, true, "not-the-real-etag", "data", "payload-2", "etag-2", time.Minute)
+	if err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected checkEtag with the wrong value to fail even though the real stored etag is empty")
+	}
+
+	// Asserting the correct empty-string etag succeeds.
+	ok, err = c.CompareAndSetHash(ctx, key, "etag", true, true, "", "data", "payload-2", "etag-2", time.Minute)
+	if err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected checkEtag with the correct empty-string etag to succeed")
+	}
+}
+
+func TestCompareAndSetHash_TTLExpiresKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+
+	if _, err := c.CompareAndSetHash(ctx, key, "etag", false, false, "", "data", "payload", "etag-1", 200*time.Millisecond); err != nil {
+		t.Fatalf("CompareAndSetHash() error: %v", err)
+	}
+
+	time.Sleep(400 * time.Millisecond)
+
+	_, found, err := c.GetHash(ctx, key)
+	if err != nil {
+		t.Fatalf("GetHash() error: %v", err)
+	}
+	if found {
+		t.Error("expected the key to have expired")
+	}
+}
+
 func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

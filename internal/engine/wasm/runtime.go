@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -37,7 +38,10 @@ type Runtime struct {
 // host.storage.upload — it is a warn-only dependency (engine.go's
 // storage.New already logs-and-continues on failure), so it may be nil
 // here; registerHostStorage's closures nil-guard it themselves.
-func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend) (*Runtime, error) {
+// cacheClient backs Transient-model host.orm routing (goerp#344) — unlike
+// storageBackend, Redis is fail-hard at Stage 1 (engine-internals.md §2),
+// so cacheClient is never nil by the time New is called.
+func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheClient *cache.Client) (*Runtime, error) {
 	ctx := context.Background()
 
 	cacheDir := cfg.CompilationCache
@@ -102,7 +106,7 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend) (*Runti
 		return nil, fmt.Errorf("create event insert client: %w", err)
 	}
 
-	if err := registerHostORM(ctx, rt, r, db, eventInsertClient); err != nil {
+	if err := registerHostORM(ctx, rt, r, db, eventInsertClient, cacheClient); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.orm: %w", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/google/uuid"
@@ -59,7 +60,7 @@ type ormUnlinkOutput struct {
 	Deleted bool `msgpack:"deleted"`
 }
 
-func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
@@ -88,6 +89,14 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) 
 
 		if hostErr := validateRequired(md, record, true); hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
+		}
+
+		if md.Backend == model.BackendTransient {
+			out, hostErr := transientCreate(ctx, cacheClient, modCtx, md, input.Model, record)
+			if hostErr != nil {
+				return abi.EncodeHostError(ctx, m, allocate, hostErr)
+			}
+			return abi.WriteToModule(ctx, m, allocate, out)
 		}
 
 		tx, err := beginTenantScopedWrite(ctx, db, modCtx)
@@ -140,7 +149,7 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) 
 	}
 }
 
-func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
@@ -163,10 +172,6 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) f
 		if !ok {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
 		}
-		pkCol, ok := primaryKeyColumn(md)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"})
-		}
 
 		if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
@@ -177,6 +182,19 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) f
 		newEtag := uuid.Must(uuid.NewV7()).String()
 		if hasField(md, "etag") {
 			record["etag"] = newEtag
+		}
+
+		if md.Backend == model.BackendTransient {
+			out, hostErr := transientWrite(ctx, cacheClient, modCtx, md, input.Model, input.ID, record, newEtag, input.ExpectedEtag)
+			if hostErr != nil {
+				return abi.EncodeHostError(ctx, m, allocate, hostErr)
+			}
+			return abi.WriteToModule(ctx, m, allocate, out)
+		}
+
+		pkCol, ok := primaryKeyColumn(md)
+		if !ok {
+			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"})
 		}
 
 		tx, err := beginTenantScopedWrite(ctx, db, modCtx)
@@ -236,7 +254,7 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) f
 	}
 }
 
-func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
@@ -259,6 +277,15 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) 
 		if !ok {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
 		}
+
+		if md.Backend == model.BackendTransient {
+			out, hostErr := transientUnlink(ctx, cacheClient, modCtx, input.Model, input.ID)
+			if hostErr != nil {
+				return abi.EncodeHostError(ctx, m, allocate, hostErr)
+			}
+			return abi.WriteToModule(ctx, m, allocate, out)
+		}
+
 		pkCol, ok := primaryKeyColumn(md)
 		if !ok {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"})
