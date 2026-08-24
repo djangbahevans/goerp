@@ -50,6 +50,12 @@ const (
 	ErrCodeNotFound           = "orm.not_found"
 )
 
+// host.event error codes (host-abi-reference.md "host.event.emit_tx").
+const (
+	ErrCodeNoTransaction = "event.no_transaction"
+	ErrCodeUndeclared    = "event.undeclared"
+)
+
 func CapabilityDenied(capability string) *HostError {
 	return &HostError{
 		Code:    ErrCodeCapabilityDenied,

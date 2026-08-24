@@ -31,6 +31,10 @@ const (
 	// operator's own long-running request never contends with ordinary
 	// tenant job throughput.
 	QueueAdmin = "admin"
+	// QueueEvents carries EventDelivery jobs inserted by host.event.emit_tx
+	// (engine-internals.md §9) — separate from the 5 business queues above
+	// so event fan-out throughput never contends with them.
+	QueueEvents = "events"
 )
 
 // migrateLockKey serializes concurrent Migrate callers against the same
@@ -108,6 +112,7 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 			QueueSearch:   {MaxWorkers: withDefault(cfg.QueueSearchConcurrency, 5)},
 			QueueEmail:    {MaxWorkers: withDefault(cfg.QueueEmailConcurrency, 5)},
 			QueueAdmin:    {MaxWorkers: withDefault(cfg.QueueAdminConcurrency, 5)},
+			QueueEvents:   {MaxWorkers: withDefault(cfg.QueueEventsConcurrency, 10)},
 		},
 		Workers: workers,
 	})

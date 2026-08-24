@@ -12,6 +12,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverdatabasesql"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -86,6 +88,24 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend) (*Runti
 	if err := registerHostORM(ctx, rt, r, db); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.orm: %w", err)
+	}
+
+	// eventInsertClient is a separate, never-started river.Client[*sql.Tx]
+	// purely so host.event.emit_tx's InsertTx can accept the stdlib *sql.Tx
+	// modCtx.Transaction returns — the engine's own job-working client
+	// (jobqueue.New) is pgx-based and generic over pgx.Tx, incompatible
+	// with that transaction type. A job inserted through this client is
+	// fully visible to and worked by the pgx-based client regardless
+	// (River's job table is driver-agnostic) — see registerHostEvent's
+	// own doc comment for the full reasoning.
+	eventInsertClient, err := river.NewClient(riverdatabasesql.New(db), &river.Config{})
+	if err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("create event insert client: %w", err)
+	}
+	if err := registerHostEvent(ctx, rt, r, eventInsertClient); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.event: %w", err)
 	}
 
 	filesStore := files.NewStore(db)

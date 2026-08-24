@@ -323,7 +323,7 @@ func TestHostORM_SearchRead_RelationExpansionRespectsRLS(t *testing.T) {
 	r := newHostDBTestRuntime(t, readerDB, 10)
 	// ContactID does NOT match the contact's owner_contact_id — RLS should
 	// exclude the related contacts row entirely.
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "55555555-5555-5555-5555-555555555555", []string{"admin"}, "tenant-id-1", slug, "trace-1", abi.CapDBRead, nil, contactAndOrderModels(), nil)
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "55555555-5555-5555-5555-555555555555", []string{"admin"}, "tenant-id-1", slug, "trace-1", abi.CapDBRead, nil, ModuleSnapshot{ModelDecls: contactAndOrderModels()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
 	var out ormSearchReadOutput
