@@ -1,17 +1,22 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // defaultHandlerTimeout is the wall-clock budget for a route's handler
@@ -20,6 +25,14 @@ import (
 // 30s if the module didn't declare one"), and, per that same doc, "the
 // only execution-control limit the engine has at all."
 const defaultHandlerTimeout = 30 * time.Second
+
+// defaultMaxBodyBytes is the request body cap used when a route's
+// RouteManifest.MaxBodyBytes is unset (0) — route.RegisterModelRoutes
+// never sets one on EnableOps-derived routes, so falling back to a literal
+// 0-byte MaxBytesReader limit would reject every EnableOps create/update
+// request outright. Mirrors defaultHandlerTimeout's own "manifest didn't
+// declare one" fallback pattern.
+const defaultMaxBodyBytes = 1 << 20 // 1 MiB
 
 // Path parameter kinds — go-sdk-reference.md's engine.UUIDParam/
 // SlugParam/IntParam wire values, RouteManifest.PathParams' own map
@@ -42,7 +55,7 @@ var slugParamPattern = regexp.MustCompile(`^[a-z][a-z0-9\-]{1,62}[a-z0-9]$`)
 // this handler only reads the stashed result, never re-resolves, per
 // engine-internals.md §6's "Route resolution happens once, early in the
 // chain — not inside dispatchHandler."
-func buildDispatchHandler(builtins map[string]http.Handler) http.Handler {
+func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rr := routeResolutionFromContext(r.Context())
 		if rr == nil {
@@ -66,7 +79,12 @@ func buildDispatchHandler(builtins map[string]http.Handler) http.Handler {
 		defer cancel()
 		r = r.WithContext(ctx)
 
-		if rr.entry.Manifest.EngineNative {
+		// EngineBuiltin (goerp#369), not EngineNative: the 6 hardcoded
+		// infra routes set both, but EnableOps CRUD routes (goerp#366)
+		// also set EngineNative (a pure "don't borrow WASM" signal) without
+		// being builtin — EngineBuiltin is the field that actually names
+		// "this route lives in the builtins map."
+		if rr.entry.Manifest.EngineBuiltin {
 			if h, ok := builtins[r.Method+" "+rr.entry.PathTemplate]; ok {
 				r = r.WithContext(route.WithParams(r.Context(), rr.pathParams))
 				h.ServeHTTP(w, r)
@@ -74,14 +92,161 @@ func buildDispatchHandler(builtins map[string]http.Handler) http.Handler {
 			}
 		}
 
-		// Module-route dispatch to invokeHandler needs a populated
-		// EngineResponse (goerp#92, still unbuilt) — an explicit 501
-		// rather than a silent no-op or a faked success. Auth/tenant
-		// context, and now the timeout-bounded context above, are
-		// already populated on r.Context() by the time #92 lands and
-		// needs to read them.
-		writeRouteError(w, http.StatusNotImplemented, "dispatch_not_implemented", "module route dispatch is not yet implemented")
+		mod, ok := rr.snap.Modules()[rr.entry.ModuleName]
+		if !ok || mod.Status != module.StatusReady {
+			writeRouteError(w, http.StatusServiceUnavailable, "module_unavailable", "module is not ready")
+			return
+		}
+
+		maxBody := rr.entry.Manifest.MaxBodyBytes
+		if maxBody <= 0 {
+			maxBody = defaultMaxBodyBytes
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+
+		// EnableOps-served routes (Table/Transient models) never borrow a
+		// WASM instance — the entire point of go-sdk-reference.md's
+		// "auto-generated CRUD routes" guarantee. dispatchORMRoute keeps
+		// its existing signature (writes straight to a ResponseWriter,
+		// unchanged since goerp#346) — recorded here so both dispatch
+		// paths still end at the one shared writeResponse call below.
+		if rr.entry.Manifest.EngineNative {
+			rec := newEngineResponseRecorder()
+			e.dispatchORMRoute(rec, r)
+			writeResponse(w, rec.EngineResponse())
+			return
+		}
+
+		e.dispatchWASMRoute(ctx, w, r, rr, mod)
 	})
+}
+
+// dispatchWASMRoute borrows a module instance and invokes its handler for
+// any route that isn't EngineNative (a hand-registered WASM route, or a
+// Virtual-backend EnableOps route once goerp#373 lands — dispatchORMRoute
+// itself still owns Virtual dispatch's own WASM call, not this path).
+func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r *http.Request, rr *routeResolution, mod *module.LoadedModule) {
+	entry := rr.entry
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		// The only way this read fails is the MaxBytesReader limit set
+		// just before this call.
+		writeRouteError(w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
+		return
+	}
+	var bodyMap map[string]any
+	if len(bodyBytes) > 0 {
+		// Best-effort: a handler that cares about a malformed body sees an
+		// empty one, rather than the request failing here before the
+		// handler (which may not even read Body, e.g. GET/DELETE) runs.
+		_ = json.Unmarshal(bodyBytes, &bodyMap)
+	}
+
+	authCtx := authFromContext(ctx)
+	tenantCtx := tenantFromContext(ctx)
+	if authCtx == nil || tenantCtx == nil {
+		// Unreachable via the real middleware chain — tenantResolutionMiddleware/
+		// authMiddleware both run for any non-EngineBuiltin route (goerp#369)
+		// before dispatchWASMRoute is ever reached. Guarded for direct-call
+		// testability, matching dispatchORMRoute's own identical guard.
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		return
+	}
+
+	inst, err := mod.Pool.Borrow(ctx)
+	if err != nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "pool_exhausted", fmt.Sprintf("module %s is at capacity", entry.ModuleName))
+		return
+	}
+	defer mod.Pool.Return(inst)
+
+	headers := make(map[string]string, len(r.Header))
+	for k := range r.Header {
+		headers[k] = r.Header.Get(k)
+	}
+	query := make(map[string]string, len(r.URL.Query()))
+	for k, v := range r.URL.Query() {
+		if len(v) > 0 {
+			query[k] = v[0]
+		}
+	}
+
+	req := EngineRequest{
+		ID:          requestIDFromContext(ctx),
+		Method:      r.Method,
+		Path:        r.URL.Path,
+		PathParams:  rr.pathParams,
+		QueryParams: query,
+		Headers:     headers,
+		Body:        bodyMap,
+		UserID:      authCtx.UserID,
+		TenantID:    tenantCtx.TenantID,
+		TenantSlug:  tenantCtx.Slug,
+		TraceID:     trace.SpanFromContext(ctx).SpanContext().TraceID().String(),
+		RequestAt:   time.Now(),
+	}
+
+	resp, err := e.invokeHandler(ctx, inst, entry.PathTemplate, req, mod)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			timeout := entry.Manifest.Timeout
+			if timeout <= 0 {
+				timeout = defaultHandlerTimeout
+			}
+			writeRouteError(w, http.StatusServiceUnavailable, "computation_limit_exceeded", fmt.Sprintf("handler exceeded its %s timeout", timeout))
+			return
+		}
+		writeRouteError(w, http.StatusInternalServerError, "dispatch_error", err.Error())
+		return
+	}
+
+	writeResponse(w, resp)
+}
+
+// writeResponse is the one place either dispatch path — dispatchORMRoute
+// (via engineResponseRecorder, for EngineNative routes) or invokeHandler
+// (for WASM-backed routes) — writes an EngineResponse to the wire, so both
+// produce a byte-identical envelope through one function rather than two
+// independently-maintained copies.
+func writeResponse(w http.ResponseWriter, resp EngineResponse) {
+	for k, v := range resp.Headers {
+		w.Header().Set(k, v)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	if _, err := w.Write(resp.Body); err != nil {
+		log.Error().Err(err).Msg("dispatch: write response")
+	}
+}
+
+// engineResponseRecorder is an http.ResponseWriter that buffers what it's
+// given instead of writing to the wire, so dispatchORMRoute — which writes
+// directly to a ResponseWriter and predates this ticket — can still be
+// funneled through writeResponse without changing its signature or
+// touching its already-shipped, already-tested CRUD handlers.
+type engineResponseRecorder struct {
+	header     http.Header
+	statusCode int
+	body       bytes.Buffer
+}
+
+func newEngineResponseRecorder() *engineResponseRecorder {
+	return &engineResponseRecorder{header: make(http.Header), statusCode: http.StatusOK}
+}
+
+func (r *engineResponseRecorder) Header() http.Header { return r.header }
+
+func (r *engineResponseRecorder) Write(b []byte) (int, error) { return r.body.Write(b) }
+
+func (r *engineResponseRecorder) WriteHeader(statusCode int) { r.statusCode = statusCode }
+
+func (r *engineResponseRecorder) EngineResponse() EngineResponse {
+	headers := make(map[string]string, len(r.header))
+	for k := range r.header {
+		headers[k] = r.header.Get(k)
+	}
+	return EngineResponse{StatusCode: r.statusCode, Headers: headers, Body: r.body.Bytes()}
 }
 
 // validatePathParams reports the first path param (if any) whose

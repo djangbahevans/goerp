@@ -18,7 +18,7 @@ import (
 // production — since route resolution moved out of buildDispatchHandler
 // itself and into that middleware (goerp#330).
 func composedDispatchHandler(reg *registry.ModuleRegistry, builtins map[string]http.Handler) http.Handler {
-	return routeResolutionMiddleware(reg)(buildDispatchHandler(builtins))
+	return routeResolutionMiddleware(reg)((&Engine{}).buildDispatchHandler(builtins))
 }
 
 func testDispatchHandler(t *testing.T) http.Handler {
@@ -141,21 +141,23 @@ func TestDispatchHandler_WrongMethodReturns405WithAllowHeader(t *testing.T) {
 	assertRouteErrorCode(t, w, "method_not_allowed")
 }
 
-// TestDispatchHandler_ModuleRouteReturns501 proves a real module route
-// resolves through the same RouteTable as built-ins (it isn't a 404), but
-// isn't silently faked as a success — invokeHandler needs a populated
-// EngineResponse and an auth/tenant pipeline that don't exist yet.
-func TestDispatchHandler_ModuleRouteReturns501(t *testing.T) {
+// TestDispatchHandler_ModuleRouteNotReadyReturns503 proves a real module
+// route resolves through the same RouteTable as built-ins (it isn't a
+// 404), but a module that hasn't reached module.StatusReady (the
+// "contacts" fixture module here is left at its zero-value Status) can't
+// be dispatched to — neither dispatchORMRoute nor a borrowed WASM instance
+// makes sense against a module that never finished loading.
+func TestDispatchHandler_ModuleRouteNotReadyReturns503(t *testing.T) {
 	h := testDispatchHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/contacts/ping", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusNotImplemented)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
 	}
-	assertRouteErrorCode(t, w, "dispatch_not_implemented")
+	assertRouteErrorCode(t, w, "module_unavailable")
 }
 
 func TestDispatchHandler_NilSnapshotReturns503(t *testing.T) {

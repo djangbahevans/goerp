@@ -401,3 +401,72 @@ func TestDispatchORMRoute_Preview_NotImplemented(t *testing.T) {
 		t.Fatalf("status = %d, want 501; body: %s", w.Code, w.Body.String())
 	}
 }
+
+// TestDispatchHandler_EngineNativeRouteReachesDispatchORMRoute drives the
+// same create-then-get flow as TestDispatchORMRoute_Create_Then_Get, but
+// through buildDispatchHandler (goerp#92) rather than calling
+// dispatchORMRoute directly — proving the module_unavailable gate lets a
+// StatusReady module through, and that dispatchORMRoute's response
+// survives the engineResponseRecorder -> writeResponse round trip
+// unchanged (status, body, and the Content-Type header it sets itself).
+func TestDispatchHandler_EngineNativeRouteReachesDispatchORMRoute(t *testing.T) {
+	f := newDispatchORMFixture(t)
+	h := f.e.buildDispatchHandler(nil)
+
+	createBody, _ := json.Marshal(map[string]any{"id": "55555555-5555-5555-5555-555555555555", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A", "code": "W-92"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, f.request(http.MethodPost, "/testmodule/widgets", createBody, f.entryCreate, nil))
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var created map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatal("created record has no id")
+	}
+
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, f.request(http.MethodGet, "/testmodule/widgets/"+id, nil, f.entryGet, map[string]string{"id": id}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var fetched map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if fetched["id"] != id {
+		t.Errorf("fetched[id] = %v, want %v", fetched["id"], id)
+	}
+}
+
+// TestDispatchHandler_EngineNativeOversizedBodyReturns413 proves
+// buildDispatchHandler enforces RouteManifest.MaxBodyBytes on an
+// EngineNative route (dispatchORMCreate never gets the chance to run) —
+// the AC's "rejected outright, not silently truncated" requirement.
+func TestDispatchHandler_EngineNativeOversizedBodyReturns413(t *testing.T) {
+	f := newDispatchORMFixture(t)
+	h := f.e.buildDispatchHandler(nil)
+
+	entry := &route.RouteEntry{
+		ModuleName:   f.entryCreate.ModuleName,
+		PathTemplate: f.entryCreate.PathTemplate,
+		Manifest:     f.entryCreate.Manifest,
+	}
+	entry.Manifest.MaxBodyBytes = 8
+
+	body, _ := json.Marshal(map[string]any{"id": "66666666-6666-6666-6666-666666666666", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, f.request(http.MethodPost, "/testmodule/widgets", body, entry, nil))
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body: %s", w.Code, w.Body.String())
+	}
+	assertRouteErrorCode(t, w, "body_too_large")
+}

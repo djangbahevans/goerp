@@ -113,13 +113,14 @@ func TestDispatchHandler_ValidPathParamReachesDispatch(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	// Module dispatch itself isn't built yet (goerp#92) — reaching the
-	// 501 stub, rather than the 400 the invalid-param test above gets,
-	// is what proves a validly-shaped param passed the check.
-	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501; body: %s", w.Code, w.Body.String())
+	// The "widgets" fixture module is left at its zero-value Status (never
+	// StatusReady), so it hits the module_unavailable gate — rather than
+	// the 400 the invalid-param test above gets, which is what proves a
+	// validly-shaped param passed the check.
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
 	}
-	assertRouteErrorCode(t, w, "dispatch_not_implemented")
+	assertRouteErrorCode(t, w, "module_unavailable")
 }
 
 func TestDispatchHandler_TimeoutDefaultsTo30sWhenManifestTimeoutUnset(t *testing.T) {
@@ -157,9 +158,10 @@ func TestDispatchHandler_TimeoutDefaultsTo30sWhenManifestTimeoutUnset(t *testing
 // buildDispatchHandler directly (bypassing routeResolutionMiddleware)
 // with a manually-constructed routeResolution declaring a short
 // Timeout, and observes that the context handed downstream is actually
-// bounded by it. Module dispatch itself 501s immediately today
-// (goerp#92 isn't built), so a builtin handler is used to observe the
-// context deadline the way a real handler eventually would.
+// bounded by it. Uses a builtin route (EngineBuiltin, not just
+// EngineNative — goerp#92/#369) to observe the context deadline via a
+// handler under this test's own control, without needing a real module or
+// WASM instance.
 func TestDispatchHandler_ManifestTimeoutCancelsContext(t *testing.T) {
 	var canceled bool
 	builtins := map[string]http.Handler{
@@ -175,10 +177,10 @@ func TestDispatchHandler_ManifestTimeoutCancelsContext(t *testing.T) {
 
 	rr := &routeResolution{entry: &route.RouteEntry{
 		PathTemplate: "/widgets/slow",
-		Manifest:     route.RouteManifest{EngineNative: true, Timeout: 20 * time.Millisecond},
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true, Timeout: 20 * time.Millisecond},
 	}}
 
-	h := buildDispatchHandler(builtins)
+	h := (&Engine{}).buildDispatchHandler(builtins)
 	req := httptest.NewRequest(http.MethodGet, "/widgets/slow", nil)
 	req = req.WithContext(withRouteResolution(req.Context(), rr))
 	w := httptest.NewRecorder()
