@@ -20,6 +20,7 @@ const (
 	KindEnum
 	KindMany2One
 	KindSequence
+	KindDynamicLink
 )
 
 // OnDeleteBehaviour is a Many2One field's FOREIGN KEY ON DELETE action.
@@ -51,8 +52,19 @@ type FieldDef struct {
 	RelationLabel    string            `msgpack:"relation_label,omitempty"`
 	RelationOnDelete OnDeleteBehaviour `msgpack:"relation_on_delete,omitempty"`
 
+	// Tree (Many2One only — go-sdk-reference.md §22 "Tree"). Requires
+	// RelatedModel to be the declaring model's own qualified name;
+	// enforced at schema-sync time (the builder doesn't know its own
+	// model's name yet), not here.
+	IsTree bool `msgpack:"is_tree,omitempty"`
+
 	// Sequence (KindSequence only)
 	SequenceFormat string `msgpack:"sequence_format,omitempty"`
+
+	// DynamicLink (KindDynamicLink only) — go-sdk-reference.md §22
+	// "DynamicLink". ReferenceTypeField names the sibling Selection field
+	// whose value picks this record's target model per row.
+	ReferenceTypeField string `msgpack:"reference_type_field,omitempty"`
 
 	// Computed field recomputation (go-sdk-reference.md §22 "Computed
 	// field recomputation")
@@ -106,6 +118,15 @@ func Sequence(format string) FieldDef {
 	return FieldDef{Kind: KindSequence, SequenceFormat: format}
 }
 
+// DynamicLink declares a polymorphic relation field — its target model
+// varies per record, named by the sibling Selection field
+// referenceTypeField (go-sdk-reference.md §22 "DynamicLink"). No FK: a
+// Postgres FK can only reference one table, and the target table varies
+// per row.
+func DynamicLink(referenceTypeField string) FieldDef {
+	return FieldDef{Kind: KindDynamicLink, ReferenceTypeField: referenceTypeField}
+}
+
 func (f FieldDef) Required() FieldDef           { f.IsRequired = true; return f }
 func (f FieldDef) PrimaryKey() FieldDef         { f.IsPrimaryKey = true; return f }
 func (f FieldDef) Default(expr string) FieldDef { f.DefaultExpr = &expr; return f }
@@ -124,6 +145,11 @@ func (f FieldDef) Label(s string) FieldDef { f.RelationLabel = s; return f }
 
 // OnDelete sets a Many2One field's FOREIGN KEY ON DELETE action.
 func (f FieldDef) OnDelete(d OnDeleteBehaviour) FieldDef { f.RelationOnDelete = d; return f }
+
+// Tree marks a self-referential Many2One field as a hierarchy field —
+// go-sdk-reference.md §22 "Tree". The engine auto-declares a companion
+// {field}_path ltree column and maintains it on create/reparent.
+func (f FieldDef) Tree() FieldDef { f.IsTree = true; return f }
 
 // Computed declares this field as engine-recomputed rather than
 // caller-settable — fnName is the WASM export name (go-sdk-reference.md
