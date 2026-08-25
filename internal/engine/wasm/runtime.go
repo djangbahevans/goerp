@@ -26,8 +26,9 @@ type Runtime struct {
 	moduleConfig wazero.ModuleConfig
 	modules      map[string]api.Module
 
-	registry  instanceRegistry
-	txLimiter *TransactionLimiter
+	registry          instanceRegistry
+	txLimiter         *TransactionLimiter
+	eventInsertClient *river.Client[*sql.Tx]
 }
 
 // New builds the shared wazero runtime and registers the host ABI against
@@ -135,6 +136,7 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 
 	r.wazero = rt
 	r.moduleConfig = moduleConfig
+	r.eventInsertClient = eventInsertClient
 	return r, nil
 }
 

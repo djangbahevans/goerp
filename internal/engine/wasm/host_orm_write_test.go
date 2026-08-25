@@ -147,8 +147,8 @@ func TestHostORM_Create_Succeeds_AcquiresSequence_EmitsEvent(t *testing.T) {
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	id := "11111111-1111-1111-1111-111111111111"
-	var out ormCreateOutput
-	env := callORMHost(t, ctx, inst, "call_create", ormCreateInput{
+	var out ORMCreateOutput
+	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A"},
 	}, &out)
@@ -179,7 +179,7 @@ func TestHostORM_Create_MissingRequiredField_ValidationFailed(t *testing.T) {
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_create", ormCreateInput{
+	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001"},
 	}, nil)
@@ -206,14 +206,14 @@ func TestHostORM_Create_UniqueViolation(t *testing.T) {
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	first := ormCreateInput{Model: "testmodule.item", Record: map[string]any{
+	first := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
 		"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "DUP",
 	}}
 	if env := callORMHost(t, ctx, inst, "call_create", first, nil); !env.OK {
 		t.Fatalf("first create failed: %+v", env.Error)
 	}
 
-	second := ormCreateInput{Model: "testmodule.item", Record: map[string]any{
+	second := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
 		"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B", "code": "DUP",
 	}}
 	env := callORMHost(t, ctx, inst, "call_create", second, nil)
@@ -241,8 +241,8 @@ func TestHostORM_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	id := "11111111-1111-1111-1111-111111111111"
-	var created ormCreateOutput
-	if env := callORMHost(t, ctx, inst, "call_create", ormCreateInput{
+	var created ORMCreateOutput
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
 	}, &created); !env.OK {
@@ -250,8 +250,8 @@ func TestHostORM_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
 	}
 	originalEtag := created.Record["etag"].(string)
 
-	var out ormWriteOutput
-	env := callORMHost(t, ctx, inst, "call_write", ormWriteInput{
+	var out ORMWriteOutput
+	env := callORMHost(t, ctx, inst, "call_write", ORMWriteInput{
 		Model: "testmodule.item", ID: id, Record: map[string]any{"name": "A renamed"}, ExpectedEtag: originalEtag,
 	}, &out)
 	if !env.OK {
@@ -282,14 +282,14 @@ func TestHostORM_Write_StaleEtag_EtagMismatch(t *testing.T) {
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	id := "11111111-1111-1111-1111-111111111111"
-	if env := callORMHost(t, ctx, inst, "call_create", ormCreateInput{
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
 	}, nil); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
 
-	env := callORMHost(t, ctx, inst, "call_write", ormWriteInput{
+	env := callORMHost(t, ctx, inst, "call_write", ORMWriteInput{
 		Model: "testmodule.item", ID: id, Record: map[string]any{"name": "A renamed"}, ExpectedEtag: "stale-etag",
 	}, nil)
 	if env.OK {
@@ -312,7 +312,7 @@ func TestHostORM_Write_MissingRecord_NotFound(t *testing.T) {
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_write", ormWriteInput{
+	env := callORMHost(t, ctx, inst, "call_write", ORMWriteInput{
 		Model: "testmodule.item", ID: "99999999-9999-9999-9999-999999999999", Record: map[string]any{"name": "X"}, ExpectedEtag: "whatever",
 	}, nil)
 	if env.OK {
@@ -336,15 +336,15 @@ func TestHostORM_Unlink_SoftDeletesWithStandardFields(t *testing.T) {
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	id := "11111111-1111-1111-1111-111111111111"
-	if env := callORMHost(t, ctx, inst, "call_create", ormCreateInput{
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
 	}, nil); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
 
-	var out ormUnlinkOutput
-	env := callORMHost(t, ctx, inst, "call_unlink", ormUnlinkInput{Model: "testmodule.item", ID: id}, &out)
+	var out ORMUnlinkOutput
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", ID: id}, &out)
 	if !env.OK {
 		t.Fatalf("unlink failed: %+v", env.Error)
 	}
@@ -382,8 +382,8 @@ func TestHostORM_Unlink_HardDeletesWithoutStandardFields(t *testing.T) {
 		t.Fatalf("insert fixture row: %v", err)
 	}
 
-	var out ormUnlinkOutput
-	env := callORMHost(t, ctx, inst, "call_unlink", ormUnlinkInput{Model: "testmodule.hard_item", ID: id}, &out)
+	var out ORMUnlinkOutput
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.hard_item", ID: id}, &out)
 	if !env.OK {
 		t.Fatalf("unlink failed: %+v", env.Error)
 	}
@@ -409,7 +409,7 @@ func TestHostORM_Unlink_MissingRecord_NotFound(t *testing.T) {
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_unlink", ormUnlinkInput{Model: "testmodule.item", ID: "99999999-9999-9999-9999-999999999999"}, nil)
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", ID: "99999999-9999-9999-9999-999999999999"}, nil)
 	if env.OK {
 		t.Fatal("expected unlink of a missing record to fail")
 	}
@@ -447,7 +447,7 @@ func TestHostORM_Unlink_ForeignKeyViolation(t *testing.T) {
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_unlink", ormUnlinkInput{Model: "testmodule.hard_item", ID: parentID}, nil)
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.hard_item", ID: parentID}, nil)
 	if env.OK {
 		t.Fatal("expected a Restrict FK violation to fail")
 	}
