@@ -739,7 +739,8 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureItemsTable(t, primaryDB, slug)
 
-	insertClient := newHostDBTestRuntime(t, primaryDB, 10).EventInsertClient()
+	testRuntime := newHostDBTestRuntime(t, primaryDB, 10)
+	insertClient := testRuntime.EventInsertClient()
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 
 	const n = 8
@@ -750,7 +751,7 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			out, hostErr := ORMFirstOrCreate(ctx, primaryDB, insertClient, mc, ORMFirstOrCreateInput{
+			out, hostErr := ORMFirstOrCreate(ctx, testRuntime, primaryDB, insertClient, mc, ORMFirstOrCreateInput{
 				Model:  "testmodule.item",
 				Domain: "record.code = 'FOC-RACE'",
 				Record: map[string]any{

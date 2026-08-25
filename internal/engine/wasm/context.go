@@ -5,12 +5,28 @@ import (
 	"sync"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// ComputeTarget bundles what's needed to invoke a module's .Computed()
+// functions from outside that module's own request — its instance pool
+// to borrow a fresh WASM instance from, its own declared capabilities
+// (for any host.orm call the compute function itself makes), and its own
+// declared models (for resolveModel to succeed inside that nested call).
+// One ComputeTarget exists per loaded module, not per calling module, so
+// a computed field's owning module is reachable regardless of which
+// module's write triggered the recompute (host_orm_write.go's
+// Many2One-hop case, go-sdk-reference.md §22).
+type ComputeTarget struct {
+	Pool         *InstancePool
+	Capabilities abi.CapabilitySet
+	ModelDecls   []model.ModelDeclaration
+}
 
 // ModuleSnapshot bundles the pieces of a registry snapshot a host function
 // needs, captured once at ModuleContext construction time so a hot reload
@@ -30,6 +46,17 @@ type ModuleSnapshot struct {
 	// EventRegistry is the event registry in effect for this request —
 	// host.event.emit_tx validates a caller's event name against it.
 	EventRegistry *event.EventRegistry
+
+	// ComputedIndex is the reverse-dependency index (internal/engine/computed)
+	// host.orm's write/read halves consult to find which computed fields
+	// need to recompute after a write, or fresh on a read.
+	ComputedIndex *computed.Index
+
+	// ComputeTargets holds one ComputeTarget per loaded module (keyed by
+	// module name), letting host.orm's write/read halves invoke a
+	// computed field's compute function regardless of which module owns
+	// it — always a fresh instance, never the currently-executing one.
+	ComputeTargets map[string]ComputeTarget
 }
 
 type ModuleContext struct {
@@ -83,6 +110,18 @@ func (mc *ModuleContext) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
 // EventRegistry returns the event registry in effect for this request.
 func (mc *ModuleContext) EventRegistry() *event.EventRegistry {
 	return mc.snapshot.EventRegistry
+}
+
+// ComputedIndex returns the computed-field reverse-dependency index in
+// effect for this request.
+func (mc *ModuleContext) ComputedIndex() *computed.Index {
+	return mc.snapshot.ComputedIndex
+}
+
+// ComputeTargets returns the per-module compute-dispatch targets in
+// effect for this request.
+func (mc *ModuleContext) ComputeTargets() map[string]ComputeTarget {
+	return mc.snapshot.ComputeTargets
 }
 
 // RollbackAll rolls back every transaction still open in this context and

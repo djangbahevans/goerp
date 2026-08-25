@@ -22,19 +22,24 @@ import (
 )
 
 // This file holds host.orm's write half — create/create_batch/
-// first_or_create/write/write_many/write_where/unlink (goerp#343/#380).
-// Computed-field recompute (Store(true)/.Depends() has no SDK primitive
-// yet), orm.RegisterConstraint/OnDelete hooks (no SDK primitive yet),
-// DynamicLink/.Tree() validation (no such field kinds exist yet), and
+// first_or_create/write/write_many/write_where/unlink (goerp#343/#380),
+// plus Store(true)/.Depends() computed-field recompute (goerp#377) for
+// Table-backed models: recomputeAfterWrite runs inside the same
+// transaction as the triggering create/write, for both same-record and
+// one-hop Many2One dependencies. orm.RegisterConstraint/OnDelete hooks
+// (no SDK primitive yet), DynamicLink/.Tree() validation (no such field
+// kinds exist yet), One2Many child-triggered recompute (goerp#388), and
 // audit logging (goerp#363, tracked separately — no audited_tables
 // trigger mechanism exists anywhere in the engine despite this ticket's
 // own original text assuming one did) are all explicitly out of scope for
-// this file — see goerp#381/#382/#383.
+// this file — see goerp#381/#382/#383/#388.
 //
 // create_batch/first_or_create/write_many/write_where are not supported
 // for Transient-backed models (a Redis-backed key has no domain-query or
 // multi-row-transaction story the way a Postgres table does) — each
-// returns a descriptive error rather than silently misbehaving.
+// returns a descriptive error rather than silently misbehaving. Computed
+// fields on a Transient model are likewise out of scope here — recompute
+// is wired only for the Postgres-backed create/write cores below.
 
 type OnConflictOption struct {
 	Fields []string `msgpack:"fields"`
@@ -129,7 +134,7 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		out, hostErr := ORMCreate(ctx, db, insertClient, cacheClient, modCtx, input)
+		out, hostErr := ORMCreate(ctx, r, db, insertClient, cacheClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -141,8 +146,10 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 // comment (host_orm.go) for the shared-entry-point rationale. Branches to
 // transientCreate (host_orm_transient.go) for Transient-backed models
 // internally. The single-row insert itself is createOneRecordTx, shared
-// with ORMCreateBatch/ORMFirstOrCreate below.
-func ORMCreate(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMCreateInput) (ORMCreateOutput, *abi.HostError) {
+// with ORMCreateBatch/ORMFirstOrCreate below. r is only used for
+// recomputeAfterWrite's cross-module compute dispatch — every other
+// dependency stays a plain arg, matching this file's existing style.
+func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMCreateInput) (ORMCreateOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMCreateOutput{}, abi.CapabilityDenied("db.write")
 	}
@@ -188,6 +195,10 @@ func ORMCreate(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.
 		return ORMCreateOutput{}, nil
 	}
 
+	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
+		return ORMCreateOutput{}, hostErr
+	}
+
 	eventName := "orm.record.created"
 	if !inserted {
 		eventName = "orm.record.updated"
@@ -218,7 +229,7 @@ func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		out, hostErr := ORMCreateBatch(ctx, db, insertClient, modCtx, input)
+		out, hostErr := ORMCreateBatch(ctx, r, db, insertClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -238,7 +249,7 @@ func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.
 // genuinely-inserted record, orm.record.updated listing any
 // OnConflictUpdate rows — matching the doc's explicit "batched into one
 // event with all IDs for create_batch, not one event per row".
-func ORMCreateBatch(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMCreateBatchInput) (ORMCreateBatchOutput, *abi.HostError) {
+func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMCreateBatchInput) (ORMCreateBatchOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMCreateBatchOutput{}, abi.CapabilityDenied("db.write")
 	}
@@ -278,6 +289,9 @@ func ORMCreateBatch(ctx context.Context, db *sql.DB, insertClient *river.Client[
 		}
 		if row == nil {
 			continue // OnConflictIgnore skipped this one
+		}
+		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
 		}
 		all = append(all, row)
 		if inserted {
@@ -320,7 +334,7 @@ func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sq
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		out, hostErr := ORMFirstOrCreate(ctx, db, insertClient, modCtx, input)
+		out, hostErr := ORMFirstOrCreate(ctx, r, db, insertClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -337,7 +351,7 @@ func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sq
 // keyed INSERT...ON CONFLICT DO UPDATE upsert pattern. The lock only
 // serializes callers racing the identical (tenant, model, domain) triple;
 // it's released automatically at commit/rollback.
-func ORMFirstOrCreate(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMFirstOrCreateInput) (ORMFirstOrCreateOutput, *abi.HostError) {
+func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMFirstOrCreateInput) (ORMFirstOrCreateOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMFirstOrCreateOutput{}, abi.CapabilityDenied("db.write")
 	}
@@ -397,6 +411,10 @@ func ORMFirstOrCreate(ctx context.Context, db *sql.DB, insertClient *river.Clien
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
 
+	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
+
 	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, row); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
@@ -422,7 +440,7 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		out, hostErr := ORMWrite(ctx, db, insertClient, cacheClient, modCtx, input)
+		out, hostErr := ORMWrite(ctx, r, db, insertClient, cacheClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -437,7 +455,7 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 // Branches to transientWrite (host_orm_transient.go) for Transient-backed
 // models internally. The single-row update itself is writeOneRecordTx,
 // shared with ORMWriteMany/ORMWriteWhere below.
-func ORMWrite(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMWriteInput) (ORMWriteOutput, *abi.HostError) {
+func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMWriteInput) (ORMWriteOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMWriteOutput{}, abi.CapabilityDenied("db.write")
 	}
@@ -478,6 +496,10 @@ func ORMWrite(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.T
 		return ORMWriteOutput{}, hostErr
 	}
 
+	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(input.Record), updated); hostErr != nil {
+		return ORMWriteOutput{}, hostErr
+	}
+
 	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", input.Model, updated); err != nil {
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
@@ -504,7 +526,7 @@ func makeORMWriteMany(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		out, hostErr := ORMWriteMany(ctx, db, insertClient, modCtx, input)
+		out, hostErr := ORMWriteMany(ctx, r, db, insertClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -520,7 +542,7 @@ func makeORMWriteMany(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx
 // explicitly asked to update. One orm.record.updated event per affected
 // record (not batched) — the doc's own explicit distinction from
 // create_batch's batching.
-func ORMWriteMany(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMWriteManyInput) (ExecResult, *abi.HostError) {
+func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMWriteManyInput) (ExecResult, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ExecResult{}, abi.CapabilityDenied("db.write")
 	}
@@ -553,7 +575,7 @@ func ORMWriteMany(ctx context.Context, db *sql.DB, insertClient *river.Client[*s
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, hostErr := writeManyIDsTx(ctx, tx, insertClient, modCtx, md, pkCol, input.Model, input.IDs, record)
+	result, hostErr := writeManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, input.IDs, record)
 	if hostErr != nil {
 		return ExecResult{}, hostErr
 	}
@@ -580,7 +602,7 @@ func makeORMWriteWhere(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.T
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		out, hostErr := ORMWriteWhere(ctx, db, insertClient, modCtx, input)
+		out, hostErr := ORMWriteWhere(ctx, r, db, insertClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -595,7 +617,7 @@ func makeORMWriteWhere(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.T
 // A domain matching zero rows is a legitimate, non-error result
 // (ExecResult{Count: 0}) — unlike single write-by-ID, a bulk "where" that
 // happens to match nothing isn't exceptional.
-func ORMWriteWhere(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMWriteWhereInput) (ExecResult, *abi.HostError) {
+func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMWriteWhereInput) (ExecResult, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ExecResult{}, abi.CapabilityDenied("db.write")
 	}
@@ -651,7 +673,7 @@ func ORMWriteWhere(ctx context.Context, db *sql.DB, insertClient *river.Client[*
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 
-	result, hostErr := writeManyIDsTx(ctx, tx, insertClient, modCtx, md, pkCol, input.Model, ids, record)
+	result, hostErr := writeManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, ids, record)
 	if hostErr != nil {
 		return ExecResult{}, hostErr
 	}
@@ -836,15 +858,22 @@ func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelNam
 // and returns parallel (quoted column name, positional placeholder
 // value) slices ready to interpolate into an INSERT's column/VALUES
 // lists or an UPDATE's SET list — the caller decides which shape to
-// build from the returned columns/args.
+// build from the returned columns/args. A .Computed() field — Store(true)
+// or Store(false) alike — is never directly settable
+// (go-sdk-reference.md §22 "Computed field recomputation"): orm.write's
+// own recomputeAfterWrite is the only path that ever assigns one.
 func buildAssignment(md model.ModelDeclaration, record map[string]any) (cols []string, args []any, hostErr *abi.HostError) {
-	known := make(map[string]bool, len(md.Fields))
+	fields := make(map[string]model.FieldDef, len(md.Fields))
 	for _, f := range md.Fields {
-		known[f.Name] = true
+		fields[f.Name] = f.Def
 	}
 	for k, v := range record {
-		if !known[k] {
+		def, known := fields[k]
+		if !known {
 			return nil, nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unknown field " + k, Details: map[string]any{"field": k}}
+		}
+		if def.IsComputed {
+			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is computed and cannot be written directly", Details: map[string]any{"field": k}}
 		}
 		cols = append(cols, quoteIdentORM(k))
 		args = append(args, v)
@@ -1010,11 +1039,15 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration
 // ORMWriteMany (caller-supplied IDs) and ORMWriteWhere (IDs resolved from
 // a domain first). A missing ID or validation failure aborts the whole
 // transaction, matching the AC's all-or-nothing requirement.
-func writeManyIDsTx(ctx context.Context, tx *sql.Tx, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (ExecResult, *abi.HostError) {
+func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (ExecResult, *abi.HostError) {
+	changedFields := changedFieldNames(record)
 	affected := make([]string, 0, len(ids))
 	for _, id := range ids {
 		updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, id, record, "")
 		if hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, qualifiedModel, md, changedFields, updated); hostErr != nil {
 			return ExecResult{}, hostErr
 		}
 		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", qualifiedModel, updated); err != nil {
@@ -1023,6 +1056,138 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, insertClient *river.Client[
 		affected = append(affected, id)
 	}
 	return ExecResult{Count: len(affected), IDs: affected}, nil
+}
+
+// changedFieldNames returns record's keys as a slice — for create/
+// create_batch/first_or_create, record is the row actually inserted (every
+// field is "new," so every dependency is trivially satisfied); for
+// write/write_many/write_where, record is the literal diff the caller
+// supplied, matching host-abi-reference.md's own "changed_fields ...
+// computes this from the vals map" framing for event emission.
+func changedFieldNames(record map[string]any) []string {
+	names := make([]string, 0, len(record))
+	for k := range record {
+		names = append(names, k)
+	}
+	return names
+}
+
+// recomputeAfterWrite runs every Store(true) computed field that depends
+// on a field in changedFields — same-record and one-hop Many2One
+// dependencies alike — inside tx, before it commits
+// (go-sdk-reference.md §22 "Computed field recomputation"). No
+// recursion: a recomputed field's own new value is applied directly and
+// never re-triggers a second recompute pass, matching the AC's
+// single-hop-only scope.
+func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, changedFields []string, row map[string]any) *abi.HostError {
+	idx := modCtx.ComputedIndex()
+	if idx == nil || len(changedFields) == 0 {
+		return nil
+	}
+
+	for _, dep := range idx.Lookup(qualifiedModel, changedFields) {
+		depPK, ok := primaryKeyColumn(dep.ModelDecl)
+		if !ok {
+			continue
+		}
+
+		if dep.ViaFKField == "" {
+			// Same-record: the dependent field lives on the row just
+			// written.
+			value, hostErr := invokeCompute(ctx, r, modCtx, dep, row)
+			if hostErr != nil {
+				return hostErr
+			}
+			if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, row[depPK], dep.Field, value); hostErr != nil {
+				return hostErr
+			}
+			row[dep.Field] = value
+			continue
+		}
+
+		// Many2One hop: dep.ModelDecl's own ViaFKField column points at
+		// the model just written. Find every dependent row referencing
+		// it and recompute each independently.
+		writtenPK, ok := primaryKeyColumn(md)
+		if !ok {
+			continue
+		}
+		depIDs, err := fkReferencingIDs(ctx, tx, dep.ModelDecl, depPK, dep.ViaFKField, row[writtenPK])
+		if err != nil {
+			return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		}
+
+		for _, depID := range depIDs {
+			depRow, hostErr := fetchRowByPK(ctx, tx, dep.ModelDecl, depPK, depID)
+			if hostErr != nil {
+				return hostErr
+			}
+			value, hostErr := invokeCompute(ctx, r, modCtx, dep, depRow)
+			if hostErr != nil {
+				return hostErr
+			}
+			if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, depID, dep.Field, value); hostErr != nil {
+				return hostErr
+			}
+		}
+	}
+	return nil
+}
+
+// fkReferencingIDs returns every depMD row's primary key where its fkCol
+// equals fkValue — the Many2One-hop case's "which dependent records point
+// at the record that just changed" query.
+func fkReferencingIDs(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclaration, depPK, fkCol string, fkValue any) ([]any, error) {
+	table := quoteIdentORM(tableNameForORM(depMD))
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", quoteIdentORM(depPK), table, quoteIdentORM(fkCol))
+	rows, err := tx.QueryContext(ctx, sqlStr, fkValue)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []any
+	for rows.Next() {
+		var id any
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// fetchRowByPK re-selects one full row by primary key on tx, so a
+// Many2One-hop compute function sees the dependent record's current
+// column values rather than a stale copy.
+func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any) (map[string]any, *abi.HostError) {
+	table := quoteIdentORM(tableNameForORM(md))
+	sqlStr := fmt.Sprintf("SELECT * FROM %s WHERE %s = $1", table, quoteIdentORM(pkCol))
+	rows, err := tx.QueryContext(ctx, sqlStr, pkValue)
+	if err != nil {
+		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	records, err := scanRowsToMaps(rows)
+	if err != nil {
+		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	if len(records) == 0 {
+		return nil, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+	}
+	return records[0], nil
+}
+
+// applyComputedValue writes a single computed field's new value directly
+// — never routed back through writeOneRecordTx, which would rotate the
+// row's etag, re-emit orm.record.updated, and re-trigger recompute
+// (single-hop only, no cascading, per the AC).
+func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, field string, value any) *abi.HostError {
+	table := quoteIdentORM(tableNameForORM(md))
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2", table, quoteIdentORM(field), quoteIdentORM(pkCol))
+	if _, err := tx.ExecContext(ctx, sqlStr, value, pkValue); err != nil {
+		return translateWriteError(err, md)
+	}
+	return nil
 }
 
 // translateWriteError maps a Postgres write failure to the structured
