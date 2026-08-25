@@ -12,16 +12,17 @@ import (
 )
 
 type ModuleInstance struct {
-	module         api.Module
-	memory         api.Memory
-	allocate       api.Function
-	deallocate     api.Function
-	handleRequest  api.Function
-	handleEvent    api.Function
-	handleJob      api.Function
-	handleActivity api.Function
-	moduleCtx      *ModuleContext
-	inUse          atomic.Bool
+	module          api.Module
+	memory          api.Memory
+	allocate        api.Function
+	deallocate      api.Function
+	handleRequest   api.Function
+	handleEvent     api.Function
+	handleJob       api.Function
+	handleActivity  api.Function
+	handleVirtualOp api.Function
+	moduleCtx       *ModuleContext
+	inUse           atomic.Bool
 }
 
 // newModuleInstance instantiates compiled under the given (already unique)
@@ -54,6 +55,7 @@ func newModuleInstance(ctx context.Context, name string, compiled wazero.Compile
 	inst.handleEvent = mod.ExportedFunction("handle_event")
 	inst.handleJob = mod.ExportedFunction("handle_job")
 	inst.handleActivity = mod.ExportedFunction("handle_activity")
+	inst.handleVirtualOp = mod.ExportedFunction("handle_virtual_op")
 
 	if initFn := mod.ExportedFunction("init"); initFn != nil {
 		if _, err := initFn.Call(ctx); err != nil {
@@ -193,6 +195,68 @@ func (inst *ModuleInstance) InvokeHandleActivity(ctx context.Context, payload []
 	}
 
 	results, err := inst.handleActivity.Call(ctx, uint64(reqPtr), uint64(len(payload)))
+	if err != nil {
+		return nil, err
+	}
+
+	raw := results[0]
+	respPtr := uint32(raw >> 32)
+	respLen := uint32(raw)
+
+	view, ok := inst.memory.Read(respPtr, respLen)
+	if !ok {
+		return nil, fmt.Errorf("could not read response at ptr=%d len=%d", respPtr, respLen)
+	}
+
+	data := make([]byte, len(view))
+	copy(data, view)
+
+	if _, err := inst.deallocate.Call(context.Background(), uint64(respPtr), uint64(respLen)); err != nil {
+		log.Warn().Err(err).Msg("could not deallocate response buffer")
+	}
+
+	return data, nil
+}
+
+// InvokeHandleVirtualOp is InvokeHandleActivity's sync WASM invocation
+// wrapper for a module's handle_virtual_op export — the entry point
+// sdk/go/orm.DispatchVirtualOp exports for a Virtual-backed model's
+// registered backend function (go-sdk-reference.md §22 "Virtual models").
+// A module with no Virtual-backed models never exports handle_virtual_op
+// at all; the nil-check below surfaces that as a descriptive error rather
+// than a panic, the same way every other Invoke* method here handles a
+// missing export.
+func (inst *ModuleInstance) InvokeHandleVirtualOp(ctx context.Context, payload []byte) ([]byte, error) {
+	if inst.allocate == nil {
+		return nil, fmt.Errorf("module missing allocate export")
+	}
+	if inst.handleVirtualOp == nil {
+		return nil, fmt.Errorf("module missing handle_virtual_op export")
+	}
+	if inst.deallocate == nil {
+		return nil, fmt.Errorf("module missing deallocate export")
+	}
+
+	allocResult, err := inst.allocate.Call(ctx, uint64(len(payload)))
+	if err != nil {
+		return nil, fmt.Errorf("allocate %d bytes: %w", len(payload), err)
+	}
+	if allocResult[0] == 0 {
+		return nil, abi.ErrAllocationFailed
+	}
+	reqPtr := uint32(allocResult[0])
+
+	defer func() {
+		if _, err := inst.deallocate.Call(context.Background(), uint64(reqPtr), uint64(len(payload))); err != nil {
+			log.Warn().Err(err).Msg("could not deallocate request buffer")
+		}
+	}()
+
+	if !inst.memory.Write(reqPtr, payload) {
+		return nil, fmt.Errorf("memory.Write out of bounds at ptr=%d len=%d", reqPtr, len(payload))
+	}
+
+	results, err := inst.handleVirtualOp.Call(ctx, uint64(reqPtr), uint64(len(payload)))
 	if err != nil {
 		return nil, err
 	}
