@@ -366,7 +366,7 @@ func TestBuildChain_ModuleRouteMissingPermissionReturns403(t *testing.T) {
 	}
 }
 
-func TestBuildChain_EngineNativeRouteBypassesTenantAndAuthMiddleware(t *testing.T) {
+func TestBuildChain_EngineBuiltinRouteBypassesTenantAndAuthMiddleware(t *testing.T) {
 	f := newChainFixture(t)
 	var sawTenant, sawAuth bool
 	builtins := map[string]http.Handler{
@@ -379,8 +379,11 @@ func TestBuildChain_EngineNativeRouteBypassesTenantAndAuthMiddleware(t *testing.
 	h := f.chain(builtins)
 
 	// A Host that would fail Class A tenant resolution — proving the
-	// builtin route never even attempted it, since EngineNative routes
+	// builtin route never even attempted it, since EngineBuiltin routes
 	// are a deliberate no-op in tenantResolutionMiddleware/authMiddleware.
+	// registerBuiltinRoutes (registry.go) sets EngineBuiltin: true on
+	// /_health, which is what f.reg's route table (built via
+	// registry.ModuleRegistry.Update -> buildRouteTable) carries here.
 	req := httptest.NewRequest(http.MethodGet, "/_health", nil)
 	req.Host = "no-such-tenant.example.com"
 	w := httptest.NewRecorder()
@@ -390,10 +393,10 @@ func TestBuildChain_EngineNativeRouteBypassesTenantAndAuthMiddleware(t *testing.
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 	if sawTenant {
-		t.Error("tenantFromContext was populated for an EngineNative route — tenantResolutionMiddleware should have been a no-op")
+		t.Error("tenantFromContext was populated for an EngineBuiltin route — tenantResolutionMiddleware should have been a no-op")
 	}
 	if sawAuth {
-		t.Error("authFromContext was populated for an EngineNative route — authMiddleware should have been a no-op")
+		t.Error("authFromContext was populated for an EngineBuiltin route — authMiddleware should have been a no-op")
 	}
 }
 
@@ -479,8 +482,8 @@ func TestRouteAuthMiddleware_RequiredAuthWithAuthenticatedContextPasses(t *testi
 	}
 }
 
-func TestRouteAuthMiddleware_EngineNativeRouteBypassesCheckEvenWithoutAuthContext(t *testing.T) {
-	rr := &routeResolution{entry: &route.RouteEntry{Manifest: route.RouteManifest{Auth: "required", EngineNative: true}}}
+func TestRouteAuthMiddleware_EngineBuiltinRouteBypassesCheckEvenWithoutAuthContext(t *testing.T) {
+	rr := &routeResolution{entry: &route.RouteEntry{Manifest: route.RouteManifest{Auth: "required", EngineBuiltin: true}}}
 	var called bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -494,6 +497,31 @@ func TestRouteAuthMiddleware_EngineNativeRouteBypassesCheckEvenWithoutAuthContex
 	h.ServeHTTP(w, req)
 
 	if !called {
-		t.Error("routeAuthMiddleware should be a no-op for EngineNative routes regardless of RouteManifest.Auth")
+		t.Error("routeAuthMiddleware should be a no-op for EngineBuiltin routes regardless of RouteManifest.Auth")
+	}
+}
+
+// TestRouteAuthMiddleware_EngineNativeAloneDoesNotBypassCheck encodes
+// goerp#369's fix: EngineNative (a dispatch-routing signal — see its doc
+// comment on RouteManifest) and EngineBuiltin (an auth-bypass signal)
+// used to be the same field. An EnableOps-derived Table/Transient CRUD
+// route (route.RegisterModelRoutes) sets EngineNative: true but never
+// EngineBuiltin — it must still enforce RouteManifest.Auth == "required"
+// like any other module route, not be silently treated as a bypass
+// route the way it would have been before this fix.
+func TestRouteAuthMiddleware_EngineNativeAloneDoesNotBypassCheck(t *testing.T) {
+	rr := &routeResolution{entry: &route.RouteEntry{Manifest: route.RouteManifest{Auth: "required", EngineNative: true}}}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("next handler called for a required-auth EngineNative route with no AuthContext")
+	})
+	h := routeAuthMiddleware()(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req = req.WithContext(withRouteResolution(req.Context(), rr))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 — EngineNative alone (without EngineBuiltin) must not bypass routeAuthMiddleware", w.Code)
 	}
 }
