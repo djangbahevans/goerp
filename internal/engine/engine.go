@@ -58,6 +58,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/event"
+	"github.com/djangbahevans/goerp/internal/engine/eventdelivery"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
@@ -737,12 +738,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("migrate job queue schema: %w", err)
 	}
 
-	// Baseline liveness-check job type; real ones (event_delivery,
-	// email_send, ...) add their own river.AddWorker call here as they land.
+	// Baseline liveness-check job type; real ones (email_send, ...) add
+	// their own river.AddWorker call here as they land.
 	jobWorkers := river.NewWorkers()
 	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
 	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: primaryPool})
 	river.AddWorker(jobWorkers, &tenantoffboard.ImmediateWorker{Activities: offboardActivities, TenantStore: tenantStore})
+	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()

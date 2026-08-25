@@ -149,24 +149,45 @@ CREATE TABLE IF NOT EXISTS %s.audit_log (
 )
 `
 
+// createEventLogTable mirrors multitenancy-internals.md's event_log
+// schema, minus the same deferred-partitioning caveat createAuditLogTable
+// already documents (goerp#194 covers it generically) — a single-column
+// id UUID PRIMARY KEY is used instead of the doc's composite
+// (id, emitted_at) key the range-partitioned version needs, which also
+// makes EventDeliveryWorker's own "ON CONFLICT (id) DO NOTHING" a valid
+// conflict target (the doc's own composite-keyed schema would reject an
+// ON CONFLICT naming id alone).
+const createEventLogTable = `
+CREATE TABLE IF NOT EXISTS %s.event_log (
+    id             UUID PRIMARY KEY DEFAULT uuidv7(),
+    event_name     TEXT NOT NULL,
+    event_version  INT NOT NULL DEFAULT 1,
+    emitter_module TEXT NOT NULL,
+    payload        BYTEA NOT NULL,
+    trace_id       TEXT,
+    user_id        UUID,
+    emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+`
+
 // CreateEngineTables creates the engine-owned tables a fresh tenant needs
 // before module schema sync and config seeding can run: roles/
 // role_permissions/user_roles (role.Store.Bootstrap), tenant_invitations
 // (invite.Store.Bootstrap — requires roles to exist first, per its own
 // foreign key), module_config (this ticket's own SeedTenantConfig step),
 // sequences (backing store for Sequence-kind fields' per-tenant
-// counters, keyed by (model, field, period_key)), and audit_log
-// (goerp#363 — host.orm's write path records one row here per
-// INSERT/UPDATE/DELETE on a module's own audited_tables[]).
-// multitenancy-internals.md §6 step 3 lists several further
-// engine-owned tables (event_log, files, notifications,
-// notification_preferences, saved_filters, record_shares,
-// view_overrides) — deliberately not created here: nothing in this
-// codebase reads or writes any of them yet (each is its own separate,
-// untriaged feature area), and this ticket's own acceptance criteria
-// don't exercise them, only "seeded config" (module_config) and
-// "default roles". Creating unconsumed tables now would be schema no
-// code can yet verify against.
+// counters, keyed by (model, field, period_key)), audit_log (goerp#363 —
+// host.orm's write path records one row here per INSERT/UPDATE/DELETE on
+// a module's own audited_tables[]), and event_log (goerp#16 —
+// eventdelivery.Worker records one row here per dispatched domain
+// event). multitenancy-internals.md §6 step 3 lists several further
+// engine-owned tables (files, notifications, notification_preferences,
+// saved_filters, record_shares, view_overrides) — deliberately not
+// created here: nothing in this codebase reads or writes any of them yet
+// (each is its own separate, untriaged feature area), and this ticket's
+// own acceptance criteria don't exercise them, only "seeded config"
+// (module_config) and "default roles". Creating unconsumed tables now
+// would be schema no code can yet verify against.
 func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error {
 	if err := role.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
 		return fmt.Errorf("bootstrap roles: %w", err)
@@ -192,6 +213,11 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 	auditQuery := fmt.Sprintf(createAuditLogTable, tenantschema.Name(slug))
 	if _, err := a.schemaSyncPool.ExecContext(ctx, auditQuery); err != nil {
 		return fmt.Errorf("create audit_log table: %w", err)
+	}
+
+	eventLogQuery := fmt.Sprintf(createEventLogTable, tenantschema.Name(slug))
+	if _, err := a.schemaSyncPool.ExecContext(ctx, eventLogQuery); err != nil {
+		return fmt.Errorf("create event_log table: %w", err)
 	}
 
 	return nil

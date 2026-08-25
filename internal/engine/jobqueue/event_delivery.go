@@ -5,15 +5,11 @@ import "github.com/riverqueue/river"
 // EventDeliveryArgs is the River job host.event.emit_tx inserts
 // transactionally (engine-internals.md §9) — the record of a domain
 // event, dispatched to subscribers only once the inserting transaction
-// commits. No Worker is registered for this kind yet: the fan-out-to-
-// subscribers step (EventDeliveryWorker, engine-internals.md §9 "Event
-// delivery worker") is separate, unfiled work. Until it exists, an
-// inserted job sits in the "events" queue, gets fetched by the started
-// client's producer, fails with river.UnknownJobKindError, and is
-// retried per River's default retry policy before eventually landing in
-// "discarded" — a known, temporary, non-fatal state (per-job failures,
-// not a process-level outage), not something this ticket's own scope
-// (emission, not dispatch) needs to solve.
+// commits. Processed by eventdelivery.Worker (internal/engine/
+// eventdelivery, goerp#16 — lives outside this package to avoid an
+// import cycle, see that package's own doc comment), which fans the
+// event out to its async subscribers as SubscriberDeliveryArgs jobs and
+// writes the event_log audit row.
 type EventDeliveryArgs struct {
 	// EventID is river:"unique"-tagged alone — the deterministic UUID
 	// derivation (engine-internals.md §9) already encodes tenant/event
