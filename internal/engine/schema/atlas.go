@@ -51,6 +51,17 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 			if f.Def.Kind != model.KindMany2One {
 				continue
 			}
+			if f.Def.IsTree {
+				// .Tree() is a modifier on a self-referential Many2One —
+				// go-sdk-reference.md §22 "Tree": "requires relatedModel
+				// to be the model's own name." No FK is skipped for
+				// this: Tree fields still get the ordinary Many2One FK
+				// below, this only rejects a .Tree() field that isn't
+				// actually self-referential.
+				if f.Def.RelatedModel != moduleName+"."+md.Name {
+					return nil, fmt.Errorf("model %s: field %s: .Tree() requires related_model %q to be the declaring model's own name %q", md.Name, f.Name, f.Def.RelatedModel, moduleName+"."+md.Name)
+				}
+			}
 			if err := addForeignKey(tables[md.Name], f, moduleName, modelDecls, tables); err != nil {
 				return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
 			}
@@ -144,6 +155,28 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 		if f.Def.Kind == model.KindSelection && len(f.Def.SelectionValues) > 0 {
 			t.AddChecks(selectionCheck(tableName, f.Name, f.Def.SelectionValues))
 		}
+		if f.Def.IsTree {
+			// Companion path column — go-sdk-reference.md §22 "Tree":
+			// "the engine auto-declares a companion parent_id_path
+			// ltree column, the same way .Translatable() auto-declares
+			// a companion {field}_i18n JSONB column." Nullable: a root
+			// row's path is set on create the same as any other row's,
+			// but the column itself can't be NOT NULL until every
+			// existing row has one (out of scope here — see backlog
+			// #644's backfill job).
+			pathCol := schema.NewColumn(f.Name + "_path").SetNull(true).SetType(&postgres.UserDefinedType{T: "ltree"})
+			t.AddColumns(pathCol)
+		}
+		if f.Def.Kind == model.KindDynamicLink {
+			idx, err := toAtlasIndex(t, model.NamedIndex{
+				Name: tableName + "_" + f.Name + "_" + f.Def.ReferenceTypeField + "_idx",
+				Def:  model.BTreeIndex(f.Def.ReferenceTypeField, f.Name),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("field %s: auto-declared DynamicLink index: %w", f.Name, err)
+			}
+			t.AddIndexes(idx)
+		}
 	}
 	if len(pk) > 0 {
 		t.SetPrimaryKey(schema.NewPrimaryKey(pk...))
@@ -199,6 +232,11 @@ func toAtlasColumn(name string, f model.FieldDef, enumTypes map[string]*schema.E
 		// referenced column's type is assumed UUID, matching this
 		// codebase's WithStandardFields() convention for primary keys —
 		// not a codebase-enforced guarantee, a scoped assumption.
+		c.SetType(&schema.UUIDType{T: postgres.TypeUUID})
+	case model.KindDynamicLink:
+		// No FK — go-sdk-reference.md §22 "DynamicLink": "a Postgres FK
+		// can only reference one table, and reference_type varies per
+		// row." Same UUID-PK assumption as Many2One above.
 		c.SetType(&schema.UUIDType{T: postgres.TypeUUID})
 	case model.KindTimestampTZ:
 		c.SetType(&schema.TimeType{T: postgres.TypeTimestampTZ})

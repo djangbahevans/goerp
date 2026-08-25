@@ -168,6 +168,9 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
+	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
+		return ORMCreateOutput{}, hostErr
+	}
 
 	if md.Backend == model.BackendTransient {
 		return transientCreate(ctx, cacheClient, modCtx, md, input.Model, record)
@@ -179,6 +182,12 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
+		return ORMCreateOutput{}, hostErr
+	}
+	if hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
+		return ORMCreateOutput{}, hostErr
+	}
 	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
@@ -283,6 +292,15 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		maps.Copy(record, rec)
 
 		if hostErr := validateRequired(md, record, true); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+		if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+		if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+		if hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
 		if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
@@ -411,6 +429,15 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
+	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
+	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
+	if hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
 	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -480,6 +507,9 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
+	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
+		return ORMWriteOutput{}, hostErr
+	}
 
 	record := make(map[string]any, len(input.Record)+1)
 	maps.Copy(record, input.Record)
@@ -503,11 +533,18 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
+		return ORMWriteOutput{}, hostErr
+	}
+
 	updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, input.ID, record, input.ExpectedEtag)
 	if hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
 
+	if hostErr := maintainTreePathOnWrite(ctx, tx, md, pkCol, input.ID, input.Record); hostErr != nil {
+		return ORMWriteOutput{}, hostErr
+	}
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(input.Record), updated); hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
@@ -572,6 +609,9 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
 		return ExecResult{}, hostErr
 	}
+	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
+		return ExecResult{}, hostErr
+	}
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
@@ -589,6 +629,10 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
+		return ExecResult{}, hostErr
+	}
 
 	result, hostErr := writeManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, input.IDs, record)
 	if hostErr != nil {
@@ -647,6 +691,9 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
 		return ExecResult{}, hostErr
 	}
+	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
+		return ExecResult{}, hostErr
+	}
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
@@ -686,6 +733,10 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 	}
 	if err := rows.Err(); err != nil {
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
+		return ExecResult{}, hostErr
 	}
 
 	result, hostErr := writeManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, ids, record)
@@ -894,6 +945,13 @@ func buildAssignment(md model.ModelDeclaration, record map[string]any) (cols []s
 	fields := make(map[string]model.FieldDef, len(md.Fields))
 	for _, f := range md.Fields {
 		fields[f.Name] = f.Def
+		if f.Def.IsTree {
+			// {field}_path is an engine-managed companion column
+			// (schema.toAtlasTable, goerp#379) — never declared in
+			// md.Fields itself, but a legitimate column
+			// injectTreePathOnCreate/maintainTreePathOnWrite write to.
+			fields[f.Name+"_path"] = model.FieldDef{}
+		}
 	}
 	for k, v := range record {
 		def, known := fields[k]
@@ -1073,6 +1131,9 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 	for _, id := range ids {
 		updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, id, record, "")
 		if hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if hostErr := maintainTreePathOnWrite(ctx, tx, md, pkCol, id, record); hostErr != nil {
 			return ExecResult{}, hostErr
 		}
 		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, qualifiedModel, md, changedFields, updated); hostErr != nil {
