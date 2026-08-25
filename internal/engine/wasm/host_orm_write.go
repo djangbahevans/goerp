@@ -66,10 +66,6 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 		modCtx := inst.ModuleContext()
 		allocate := inst.allocate
 
-		if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-			return abi.EncodeHostError(ctx, m, allocate, abi.CapabilityDenied("db.write"))
-		}
-
 		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
@@ -79,74 +75,86 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		md, ok := resolveModel(modCtx, input.Model)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
-		}
-
-		record := make(map[string]any, len(input.Record))
-		maps.Copy(record, input.Record)
-
-		if hostErr := validateRequired(md, record, true); hostErr != nil {
-			return abi.EncodeHostError(ctx, m, allocate, hostErr)
-		}
-
-		if md.Backend == model.BackendTransient {
-			out, hostErr := transientCreate(ctx, cacheClient, modCtx, md, input.Model, record)
-			if hostErr != nil {
-				return abi.EncodeHostError(ctx, m, allocate, hostErr)
-			}
-			return abi.WriteToModule(ctx, m, allocate, out)
-		}
-
-		tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-		defer func() { _ = tx.Rollback() }()
-
-		if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
-			return abi.EncodeHostError(ctx, m, allocate, hostErr)
-		}
-
-		cols, args, hostErr := buildAssignment(md, record)
+		out, hostErr := ORMCreate(ctx, db, insertClient, cacheClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
-		if len(cols) == 0 {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to insert"})
-		}
-		placeholders := make([]string, len(args))
-		for i := range args {
-			placeholders[i] = fmt.Sprintf("$%d", i+1)
-		}
-
-		table := quoteIdentORM(tableNameForORM(md))
-		insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
-			table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-
-		rows, err := tx.QueryContext(ctx, insertSQL, args...)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, translateWriteError(err, md))
-		}
-		created, err := scanRowsToMaps(rows)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-		if len(created) != 1 {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "insert did not return exactly one row"})
-		}
-
-		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, created[0]); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-
-		if err := tx.Commit(); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()})
-		}
-
-		return abi.WriteToModule(ctx, m, allocate, ormCreateOutput{Record: created[0]})
+		return abi.WriteToModule(ctx, m, allocate, out)
 	}
+}
+
+// ORMCreate is host.orm create's plain-Go core — see ORMSearch's doc
+// comment (host_orm.go) for the shared-entry-point rationale. Branches to
+// transientCreate (host_orm_transient.go) for Transient-backed models
+// internally.
+func ORMCreate(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ormCreateInput) (ormCreateOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
+		return ormCreateOutput{}, abi.CapabilityDenied("db.write")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ormCreateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+
+	record := make(map[string]any, len(input.Record))
+	maps.Copy(record, input.Record)
+
+	if hostErr := validateRequired(md, record, true); hostErr != nil {
+		return ormCreateOutput{}, hostErr
+	}
+
+	if md.Backend == model.BackendTransient {
+		return transientCreate(ctx, cacheClient, modCtx, md, input.Model, record)
+	}
+
+	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
+	if err != nil {
+		return ormCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
+		return ormCreateOutput{}, hostErr
+	}
+
+	cols, args, hostErr := buildAssignment(md, record)
+	if hostErr != nil {
+		return ormCreateOutput{}, hostErr
+	}
+	if len(cols) == 0 {
+		return ormCreateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to insert"}
+	}
+	placeholders := make([]string, len(args))
+	for i := range args {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	table := quoteIdentORM(tableNameForORM(md))
+	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
+		table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
+
+	rows, err := tx.QueryContext(ctx, insertSQL, args...)
+	if err != nil {
+		return ormCreateOutput{}, translateWriteError(err, md)
+	}
+	created, err := scanRowsToMaps(rows)
+	if err != nil {
+		return ormCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	if len(created) != 1 {
+		return ormCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "insert did not return exactly one row"}
+	}
+
+	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, created[0]); err != nil {
+		return ormCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ormCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	}
+
+	return ormCreateOutput{Record: created[0]}, nil
 }
 
 func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -154,10 +162,6 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
 		allocate := inst.allocate
-
-		if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-			return abi.EncodeHostError(ctx, m, allocate, abi.CapabilityDenied("db.write"))
-		}
 
 		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
 		if err != nil {
@@ -168,90 +172,103 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		md, ok := resolveModel(modCtx, input.Model)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
-		}
-
-		if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
-			return abi.EncodeHostError(ctx, m, allocate, hostErr)
-		}
-
-		record := make(map[string]any, len(input.Record)+1)
-		maps.Copy(record, input.Record)
-		newEtag := uuid.Must(uuid.NewV7()).String()
-		if hasField(md, "etag") {
-			record["etag"] = newEtag
-		}
-
-		if md.Backend == model.BackendTransient {
-			out, hostErr := transientWrite(ctx, cacheClient, modCtx, md, input.Model, input.ID, record, newEtag, input.ExpectedEtag)
-			if hostErr != nil {
-				return abi.EncodeHostError(ctx, m, allocate, hostErr)
-			}
-			return abi.WriteToModule(ctx, m, allocate, out)
-		}
-
-		pkCol, ok := primaryKeyColumn(md)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"})
-		}
-
-		tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-		defer func() { _ = tx.Rollback() }()
-
-		sets, args, hostErr := buildAssignment(md, record)
+		out, hostErr := ORMWrite(ctx, db, insertClient, cacheClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
-		if len(sets) == 0 {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to update"})
-		}
-
-		table := quoteIdentORM(tableNameForORM(md))
-		pkColQuoted := quoteIdentORM(pkCol)
-		setClauses := make([]string, len(sets))
-		for i, col := range sets {
-			setClauses[i] = col + " = $" + fmt.Sprint(i+1)
-		}
-
-		args = append(args, input.ID)
-		whereClause := fmt.Sprintf("%s = $%d", pkColQuoted, len(args))
-		if input.ExpectedEtag != "" && hasField(md, "etag") {
-			args = append(args, input.ExpectedEtag)
-			whereClause += fmt.Sprintf(" AND %s = $%d", quoteIdentORM("etag"), len(args))
-		}
-
-		updateSQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s RETURNING *",
-			table, strings.Join(setClauses, ", "), whereClause)
-
-		rows, err := tx.QueryContext(ctx, updateSQL, args...)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, translateWriteError(err, md))
-		}
-		updated, err := scanRowsToMaps(rows)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-
-		if len(updated) == 0 {
-			hostErr := diagnoseZeroRowWrite(ctx, tx, table, pkColQuoted, input.ID, input.ExpectedEtag)
-			return abi.EncodeHostError(ctx, m, allocate, hostErr)
-		}
-
-		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", input.Model, updated[0]); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-
-		if err := tx.Commit(); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()})
-		}
-
-		return abi.WriteToModule(ctx, m, allocate, ormWriteOutput{Record: updated[0]})
+		return abi.WriteToModule(ctx, m, allocate, out)
 	}
+}
+
+// ORMWrite is host.orm write's plain-Go core — see ORMSearch's doc
+// comment (host_orm.go) for the shared-entry-point rationale. The etag
+// rotation happens before the Transient/Table branch deliberately — both
+// backends get the same new-etag-on-every-write semantics uniformly.
+// Branches to transientWrite (host_orm_transient.go) for Transient-backed
+// models internally.
+func ORMWrite(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ormWriteInput) (ormWriteOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
+		return ormWriteOutput{}, abi.CapabilityDenied("db.write")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ormWriteOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+
+	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
+		return ormWriteOutput{}, hostErr
+	}
+
+	record := make(map[string]any, len(input.Record)+1)
+	maps.Copy(record, input.Record)
+	newEtag := uuid.Must(uuid.NewV7()).String()
+	if hasField(md, "etag") {
+		record["etag"] = newEtag
+	}
+
+	if md.Backend == model.BackendTransient {
+		return transientWrite(ctx, cacheClient, modCtx, md, input.Model, input.ID, record, newEtag, input.ExpectedEtag)
+	}
+
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return ormWriteOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+	}
+
+	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
+	if err != nil {
+		return ormWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	sets, args, hostErr := buildAssignment(md, record)
+	if hostErr != nil {
+		return ormWriteOutput{}, hostErr
+	}
+	if len(sets) == 0 {
+		return ormWriteOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to update"}
+	}
+
+	table := quoteIdentORM(tableNameForORM(md))
+	pkColQuoted := quoteIdentORM(pkCol)
+	setClauses := make([]string, len(sets))
+	for i, col := range sets {
+		setClauses[i] = col + " = $" + fmt.Sprint(i+1)
+	}
+
+	args = append(args, input.ID)
+	whereClause := fmt.Sprintf("%s = $%d", pkColQuoted, len(args))
+	if input.ExpectedEtag != "" && hasField(md, "etag") {
+		args = append(args, input.ExpectedEtag)
+		whereClause += fmt.Sprintf(" AND %s = $%d", quoteIdentORM("etag"), len(args))
+	}
+
+	updateSQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s RETURNING *",
+		table, strings.Join(setClauses, ", "), whereClause)
+
+	rows, err := tx.QueryContext(ctx, updateSQL, args...)
+	if err != nil {
+		return ormWriteOutput{}, translateWriteError(err, md)
+	}
+	updated, err := scanRowsToMaps(rows)
+	if err != nil {
+		return ormWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	if len(updated) == 0 {
+		return ormWriteOutput{}, diagnoseZeroRowWrite(ctx, tx, table, pkColQuoted, input.ID, input.ExpectedEtag)
+	}
+
+	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", input.Model, updated[0]); err != nil {
+		return ormWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ormWriteOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	}
+
+	return ormWriteOutput{Record: updated[0]}, nil
 }
 
 func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -259,10 +276,6 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
 		allocate := inst.allocate
-
-		if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-			return abi.EncodeHostError(ctx, m, allocate, abi.CapabilityDenied("db.write"))
-		}
 
 		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
 		if err != nil {
@@ -273,59 +286,71 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		md, ok := resolveModel(modCtx, input.Model)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
+		out, hostErr := ORMUnlink(ctx, db, insertClient, cacheClient, modCtx, input)
+		if hostErr != nil {
+			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
-
-		if md.Backend == model.BackendTransient {
-			out, hostErr := transientUnlink(ctx, cacheClient, modCtx, input.Model, input.ID)
-			if hostErr != nil {
-				return abi.EncodeHostError(ctx, m, allocate, hostErr)
-			}
-			return abi.WriteToModule(ctx, m, allocate, out)
-		}
-
-		pkCol, ok := primaryKeyColumn(md)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"})
-		}
-
-		tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-		defer func() { _ = tx.Rollback() }()
-
-		table := quoteIdentORM(tableNameForORM(md))
-		pkColQuoted := quoteIdentORM(pkCol)
-
-		var deletedID string
-		if hasField(md, "deleted_at") {
-			deleteSQL := fmt.Sprintf("UPDATE %s SET %s = NOW() WHERE %s = $1 AND %s IS NULL RETURNING %s",
-				table, quoteIdentORM("deleted_at"), pkColQuoted, quoteIdentORM("deleted_at"), pkColQuoted)
-			err = tx.QueryRowContext(ctx, deleteSQL, input.ID).Scan(&deletedID)
-		} else {
-			deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1 RETURNING %s", table, pkColQuoted, pkColQuoted)
-			err = tx.QueryRowContext(ctx, deleteSQL, input.ID).Scan(&deletedID)
-		}
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"})
-			}
-			return abi.EncodeHostError(ctx, m, allocate, translateWriteError(err, md))
-		}
-
-		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.deleted", input.Model, map[string]any{"id": deletedID}); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-
-		if err := tx.Commit(); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()})
-		}
-
-		return abi.WriteToModule(ctx, m, allocate, ormUnlinkOutput{Deleted: true})
+		return abi.WriteToModule(ctx, m, allocate, out)
 	}
+}
+
+// ORMUnlink is host.orm unlink's plain-Go core — see ORMSearch's doc
+// comment (host_orm.go) for the shared-entry-point rationale. Branches to
+// transientUnlink (host_orm_transient.go) for Transient-backed models
+// internally.
+func ORMUnlink(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ormUnlinkInput) (ormUnlinkOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
+		return ormUnlinkOutput{}, abi.CapabilityDenied("db.write")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ormUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+
+	if md.Backend == model.BackendTransient {
+		return transientUnlink(ctx, cacheClient, modCtx, input.Model, input.ID)
+	}
+
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return ormUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+	}
+
+	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
+	if err != nil {
+		return ormUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	table := quoteIdentORM(tableNameForORM(md))
+	pkColQuoted := quoteIdentORM(pkCol)
+
+	var deletedID string
+	if hasField(md, "deleted_at") {
+		deleteSQL := fmt.Sprintf("UPDATE %s SET %s = NOW() WHERE %s = $1 AND %s IS NULL RETURNING %s",
+			table, quoteIdentORM("deleted_at"), pkColQuoted, quoteIdentORM("deleted_at"), pkColQuoted)
+		err = tx.QueryRowContext(ctx, deleteSQL, input.ID).Scan(&deletedID)
+	} else {
+		deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1 RETURNING %s", table, pkColQuoted, pkColQuoted)
+		err = tx.QueryRowContext(ctx, deleteSQL, input.ID).Scan(&deletedID)
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ormUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+		}
+		return ormUnlinkOutput{}, translateWriteError(err, md)
+	}
+
+	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.deleted", input.Model, map[string]any{"id": deletedID}); err != nil {
+		return ormUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ormUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	}
+
+	return ormUnlinkOutput{Deleted: true}, nil
 }
 
 // beginTenantScopedWrite is beginTenantScopedRead without ReadOnly — same
