@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/rs/zerolog/log"
 )
 
 type ModuleRegistry struct {
@@ -82,6 +83,14 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 		explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
 		if err := route.RegisterModuleRoutes(table, name, m.Manifest.Type, explicit); err != nil {
 			return nil, fmt.Errorf("module %q: %w", name, err)
+		}
+		suppressed, err := route.RegisterModelRoutes(table, name, m.Manifest.Type, m.ModelDecls)
+		if err != nil {
+			return nil, fmt.Errorf("module %q: %w", name, err)
+		}
+		for _, s := range suppressed {
+			log.Warn().Str("module", name).Str("model", s.Model).Str("op", s.Op).
+				Msg("EnableOps: explicit route already registered, auto-derived route suppressed")
 		}
 	}
 	return table, nil

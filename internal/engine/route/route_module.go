@@ -82,10 +82,7 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 			}
 		}
 
-		prefix := "/" + moduleName
-		if moduleType == "connector" {
-			prefix = "/connectors/" + moduleName
-		}
+		prefix := modulePathPrefix(moduleName, moduleType)
 		expandedPath := prefix
 		if r.Path != "/" {
 			expandedPath = prefix + r.Path
