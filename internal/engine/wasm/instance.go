@@ -21,6 +21,7 @@ type ModuleInstance struct {
 	handleJob       api.Function
 	handleActivity  api.Function
 	handleVirtualOp api.Function
+	handleCompute   api.Function
 	moduleCtx       *ModuleContext
 	inUse           atomic.Bool
 }
@@ -56,6 +57,7 @@ func newModuleInstance(ctx context.Context, name string, compiled wazero.Compile
 	inst.handleJob = mod.ExportedFunction("handle_job")
 	inst.handleActivity = mod.ExportedFunction("handle_activity")
 	inst.handleVirtualOp = mod.ExportedFunction("handle_virtual_op")
+	inst.handleCompute = mod.ExportedFunction("handle_orm_compute")
 
 	if initFn := mod.ExportedFunction("init"); initFn != nil {
 		if _, err := initFn.Call(ctx); err != nil {
@@ -257,6 +259,68 @@ func (inst *ModuleInstance) InvokeHandleVirtualOp(ctx context.Context, payload [
 	}
 
 	results, err := inst.handleVirtualOp.Call(ctx, uint64(reqPtr), uint64(len(payload)))
+	if err != nil {
+		return nil, err
+	}
+
+	raw := results[0]
+	respPtr := uint32(raw >> 32)
+	respLen := uint32(raw)
+
+	view, ok := inst.memory.Read(respPtr, respLen)
+	if !ok {
+		return nil, fmt.Errorf("could not read response at ptr=%d len=%d", respPtr, respLen)
+	}
+
+	data := make([]byte, len(view))
+	copy(data, view)
+
+	if _, err := inst.deallocate.Call(context.Background(), uint64(respPtr), uint64(respLen)); err != nil {
+		log.Warn().Err(err).Msg("could not deallocate response buffer")
+	}
+
+	return data, nil
+}
+
+// InvokeHandleComputed is InvokeHandleActivity's sync WASM invocation
+// wrapper for a module's handle_orm_compute export — the entry point
+// sdk/go/orm.DispatchComputed exports for a .Computed(fnName) field's
+// registered compute function (go-sdk-reference.md §22 "Computed field
+// recomputation"). A module with no Computed fields declared never
+// exports handle_orm_compute at all; the nil-check below surfaces that as
+// a descriptive error rather than a panic, the same way every other
+// Invoke* method here handles a missing export.
+func (inst *ModuleInstance) InvokeHandleComputed(ctx context.Context, payload []byte) ([]byte, error) {
+	if inst.allocate == nil {
+		return nil, fmt.Errorf("module missing allocate export")
+	}
+	if inst.handleCompute == nil {
+		return nil, fmt.Errorf("module missing handle_orm_compute export")
+	}
+	if inst.deallocate == nil {
+		return nil, fmt.Errorf("module missing deallocate export")
+	}
+
+	allocResult, err := inst.allocate.Call(ctx, uint64(len(payload)))
+	if err != nil {
+		return nil, fmt.Errorf("allocate %d bytes: %w", len(payload), err)
+	}
+	if allocResult[0] == 0 {
+		return nil, abi.ErrAllocationFailed
+	}
+	reqPtr := uint32(allocResult[0])
+
+	defer func() {
+		if _, err := inst.deallocate.Call(context.Background(), uint64(reqPtr), uint64(len(payload))); err != nil {
+			log.Warn().Err(err).Msg("could not deallocate request buffer")
+		}
+	}()
+
+	if !inst.memory.Write(reqPtr, payload) {
+		return nil, fmt.Errorf("memory.Write out of bounds at ptr=%d len=%d", reqPtr, len(payload))
+	}
+
+	results, err := inst.handleCompute.Call(ctx, uint64(reqPtr), uint64(len(payload)))
 	if err != nil {
 		return nil, err
 	}

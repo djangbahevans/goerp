@@ -3,12 +3,14 @@ package registry
 import (
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -21,6 +23,7 @@ type RegistrySnapshot struct {
 	jobRegistry      *job.JobRegistry
 	cronRegistry     *CronRegistry
 	schemaRegistry   *SchemaRegistry
+	computedIndex    *computed.Index
 }
 
 // Modules returns this snapshot's backing map, successful and
@@ -57,6 +60,13 @@ func (s *RegistrySnapshot) EventRegistry() *event.EventRegistry {
 	return s.eventRegistry
 }
 
+// ComputedIndex returns this snapshot's computed-field reverse-dependency
+// index (go-sdk-reference.md §22 "Computed field recomputation") — which
+// fields elsewhere need to recompute when a given model's field changes.
+func (s *RegistrySnapshot) ComputedIndex() *computed.Index {
+	return s.computedIndex
+}
+
 // ModelByName resolves a RouteManifest.Model-shaped "{module}.{resource}"
 // string (route.RegisterModelRoutes's own qualifiedModel convention —
 // moduleName + "." + the model's bare, undotted Name) back to the owning
@@ -79,6 +89,30 @@ func (s *RegistrySnapshot) ModelByName(qualified string) (moduleName string, mod
 		}
 	}
 	return "", nil, model.ModelDeclaration{}, false
+}
+
+// ComputeTargets builds one wasm.ComputeTarget per loaded, non-failed
+// module in snap — the per-request data host.orm's write/read halves need
+// to borrow a fresh WASM instance from any module and invoke its
+// .Computed() functions (go-sdk-reference.md §22 "Computed field
+// recomputation"), regardless of which module's own write or read
+// triggered the recompute. Lives here (not in wasm) because it needs
+// module.LoadedModule's Pool/Capabilities/ModelDecls, and wasm cannot
+// import module without an import cycle (module.LoadedModule itself holds
+// a *wasm.InstancePool).
+func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
+	targets := make(map[string]wasm.ComputeTarget, len(snap.modules))
+	for name, m := range snap.modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		targets[name] = wasm.ComputeTarget{
+			Pool:         m.Pool,
+			Capabilities: m.Capabilities,
+			ModelDecls:   m.ModelDecls,
+		}
+	}
+	return targets
 }
 
 // Populated by future tickets (backlog #35, #37). Never rebuilt by any

@@ -58,6 +58,7 @@ const (
 	ErrCodeEtagMismatch          = "orm.etag_mismatch"
 	ErrCodeForeignKeyViolation   = "orm.foreign_key_violation"
 	ErrCodeConflictTargetInvalid = "orm.conflict_target_invalid"
+	ErrCodeFieldNotWritable      = "orm.field_not_writable"
 )
 
 // Transient-model error codes (go-sdk-reference.md §22 "Transient models").

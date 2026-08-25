@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
@@ -46,6 +47,7 @@ func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*Regis
 		permRegistry:     buildPermissionRegistry(modules),
 		fieldSecRegistry: buildFieldSecRegistry(modules),
 		jobRegistry:      jobRegistry,
+		computedIndex:    buildComputedIndex(modules),
 	}
 	if old != nil {
 		newSnap.cronRegistry = old.cronRegistry
@@ -71,6 +73,17 @@ func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *fieldsec.Fi
 		reg.Register(name, m.ModelDecls)
 	}
 	return reg
+}
+
+func buildComputedIndex(modules map[string]*module.LoadedModule) *computed.Index {
+	idx := computed.New()
+	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		idx.Register(name, m.ModelDecls)
+	}
+	return idx
 }
 
 func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable, error) {

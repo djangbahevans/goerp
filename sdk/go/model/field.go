@@ -53,6 +53,13 @@ type FieldDef struct {
 
 	// Sequence (KindSequence only)
 	SequenceFormat string `msgpack:"sequence_format,omitempty"`
+
+	// Computed field recomputation (go-sdk-reference.md §22 "Computed
+	// field recomputation")
+	IsComputed bool     `msgpack:"is_computed,omitempty"`
+	ComputeFn  string   `msgpack:"compute_fn,omitempty"` // WASM export name the engine dispatches to
+	IsStored   bool     `msgpack:"is_stored,omitempty"`  // Store(true): persisted, recomputed on write. Store(false): computed fresh on read
+	DependsOn  []string `msgpack:"depends_on,omitempty"` // field names, or "relField.remoteField" through a Many2One
 }
 
 // Char(n) sets VARCHAR(n); called with no argument it's an unbounded TEXT column.
@@ -117,3 +124,24 @@ func (f FieldDef) Label(s string) FieldDef { f.RelationLabel = s; return f }
 
 // OnDelete sets a Many2One field's FOREIGN KEY ON DELETE action.
 func (f FieldDef) OnDelete(d OnDeleteBehaviour) FieldDef { f.RelationOnDelete = d; return f }
+
+// Computed declares this field as engine-recomputed rather than
+// caller-settable — fnName is the WASM export name (go-sdk-reference.md
+// §22 "Computed field recomputation") the engine dispatches to. Pair with
+// .Store() and .Depends() to complete the declaration.
+func (f FieldDef) Computed(fnName string) FieldDef {
+	f.IsComputed = true
+	f.ComputeFn = fnName
+	return f
+}
+
+// Store selects whether a Computed field persists its value (true,
+// recomputed synchronously on any orm.Create/Write/WriteMany touching a
+// .Depends() field) or is computed fresh on every orm.Read/search_read
+// (false, never persisted).
+func (f FieldDef) Store(stored bool) FieldDef { f.IsStored = stored; return f }
+
+// Depends names the fields this Computed field's value depends on —
+// either a bare field name on the same record, or "relField.remoteField"
+// through a Many2One field named relField+"_id" on the same model.
+func (f FieldDef) Depends(paths ...string) FieldDef { f.DependsOn = paths; return f }

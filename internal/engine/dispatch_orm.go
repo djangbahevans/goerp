@@ -199,7 +199,7 @@ func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r
 		return
 	}
 
-	out, hostErr := wasm.ORMCreate(ctx, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMCreateInput{
+	out, hostErr := wasm.ORMCreate(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMCreateInput{
 		Model:  entry.Manifest.Model,
 		Record: record,
 	})
@@ -223,7 +223,7 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 		return
 	}
 
-	out, hostErr := wasm.ORMWrite(ctx, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMWriteInput{
+	out, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMWriteInput{
 		Model:        entry.Manifest.Model,
 		ID:           id,
 		Record:       record,

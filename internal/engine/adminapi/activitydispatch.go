@@ -155,6 +155,8 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		ModelDecls:       mod.ModelDecls,
 		FieldSecRegistry: snap.FieldSecRegistry(),
 		EventRegistry:    snap.EventRegistry(),
+		ComputedIndex:    snap.ComputedIndex(),
+		ComputeTargets:   registry.ComputeTargets(snap),
 	})
 	inst.SetModuleContext(moduleCtx)
 	defer func() {
