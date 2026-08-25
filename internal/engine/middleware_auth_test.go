@@ -274,7 +274,11 @@ func (f *chainFixture) chain(builtins map[string]http.Handler) http.Handler {
 	// covered by its own dedicated tests using a deliberately tight
 	// limit.
 	generousDefault := route.RateLimitConfig{Requests: 10000, WindowSeconds: 60, Scope: "ip"}
-	return buildChain(f.reg, builtins, nil, f.resolver, f.checker, noop.NewTracerProvider().Tracer("test"), f.cacheClient, generousDefault)
+	// The fixture's "widgets" module is always left at its zero-value
+	// Status (never StatusReady), so every test in this file hits the
+	// module_unavailable gate in buildDispatchHandler before touching any
+	// *Engine field — a zero-value Engine is enough here.
+	return buildChain(&Engine{}, f.reg, builtins, nil, f.resolver, f.checker, noop.NewTracerProvider().Tracer("test"), f.cacheClient, generousDefault)
 }
 
 func decodeErrorCode(t *testing.T, w *httptest.ResponseRecorder) string {
@@ -303,7 +307,7 @@ func TestBuildChain_ModuleRouteRequiredAuthNoTokenReturns401(t *testing.T) {
 	}
 }
 
-func TestBuildChain_ModuleRouteValidJWTReachesDispatchWith501(t *testing.T) {
+func TestBuildChain_ModuleRouteValidJWTReachesDispatchWith503(t *testing.T) {
 	f := newChainFixture(t)
 	h := f.chain(nil)
 	token := f.issueToken(t)
@@ -314,15 +318,16 @@ func TestBuildChain_ModuleRouteValidJWTReachesDispatchWith501(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	// Module dispatch itself (goerp#92) isn't built yet — reaching the
-	// terminal handler's 501, rather than a 401/403/404 from any auth/
-	// tenant middleware, is what proves the JWT branch populated a valid
+	// The fixture's "widgets" module is left at its zero-value Status
+	// (never StatusReady) — reaching the terminal handler's
+	// module_unavailable, rather than a 401/403/404 from any auth/tenant
+	// middleware, is what proves the JWT branch populated a valid
 	// AuthContext/TenantContext and every step let the request through.
-	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501 (dispatch_not_implemented); body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (module_unavailable); body: %s", w.Code, w.Body.String())
 	}
-	if code := decodeErrorCode(t, w); code != "dispatch_not_implemented" {
-		t.Errorf("error.code = %q, want %q", code, "dispatch_not_implemented")
+	if code := decodeErrorCode(t, w); code != "module_unavailable" {
+		t.Errorf("error.code = %q, want %q", code, "module_unavailable")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -244,10 +245,17 @@ func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, p
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// decodeJSONRecord decodes r's body into a record map for create/update,
-// writing a 400 and returning ok=false on an empty or malformed body.
+// decodeJSONRecord decodes r's body into a record map for create/update.
+// r.Body is wrapped in an http.MaxBytesReader by buildDispatchHandler
+// before dispatchORMRoute ever runs (goerp#92) — exceeding that limit
+// surfaces here as a *http.MaxBytesError, which gets its own 413 rather
+// than being folded into the generic 400 a malformed body gets.
 func decodeJSONRecord(w http.ResponseWriter, r *http.Request) (record map[string]any, ok bool) {
 	if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			writeRouteError(w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
+			return nil, false
+		}
 		writeRouteError(w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
 		return nil, false
 	}

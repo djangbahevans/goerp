@@ -30,6 +30,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -92,6 +93,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -670,7 +672,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /admin/users/{id}/mfa/reset": mfaResetHandler,
 	}
 	defaultRateLimit := route.RateLimitConfig{Requests: cfg.RateLimitMax, WindowSeconds: int(cfg.RateLimitWindow.Seconds()), Scope: "ip"}
-	server.SetHandler(buildChain(moduleRegistry, builtinRoutes, cfg.TrustedProxies, tenantResolver, authChecker, tracer, cacheClient, defaultRateLimit))
 
 	orderedModules := make([]*module.LoadedModule, len(ordered))
 	for i, src := range ordered {
@@ -812,6 +813,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		tracerProvider:    tracerProvider,
 	}
 
+	// buildChain needs e (dispatchORMRoute/invokeHandler are *Engine
+	// methods), which doesn't exist until the literal above — this call
+	// used to sit right after builtinRoutes/defaultRateLimit were built,
+	// moved here since nothing between there and here reads or depends on
+	// the HTTP handler being set earlier.
+	server.SetHandler(buildChain(e, moduleRegistry, builtinRoutes, cfg.TrustedProxies, tenantResolver, authChecker, tracer, cacheClient, defaultRateLimit))
+
 	return e, nil
 }
 
@@ -942,10 +950,20 @@ func (e *Engine) invokeHandler(
 		return EngineResponse{}, fmt.Errorf("handler %s trapped: %w", handlerName, err)
 	}
 
-	var resp EngineResponse
-	if err := msgpack.Unmarshal(respBytes, &resp); err != nil {
+	// Decode into the Go Module SDK's own wire type (sdk/go/engine.Response)
+	// rather than EngineResponse directly — Body is `any` on the wire (a
+	// module returns engine.OK(myStruct), not raw bytes), while
+	// EngineResponse.Body is already-serialized bytes ready for
+	// writeResponse's w.Write. The re-encode below bridges the two.
+	var wire sdkengine.Response
+	if err := msgpack.Unmarshal(respBytes, &wire); err != nil {
 		return EngineResponse{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	return resp, nil
+	bodyBytes, err := json.Marshal(wire.Body)
+	if err != nil {
+		return EngineResponse{}, fmt.Errorf("marshal response body: %w", err)
+	}
+
+	return EngineResponse{StatusCode: wire.StatusCode, Headers: wire.Headers, Body: bodyBytes}, nil
 }
