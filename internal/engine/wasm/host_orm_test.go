@@ -104,8 +104,8 @@ func TestHostORM_Search_ReturnsIDsAndCount(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ormSearchOutput
-	env := callORMHost(t, ctx, inst, "call_search", ormSearchInput{Model: "testmodule.widget"}, &out)
+	var out ORMSearchOutput
+	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "testmodule.widget"}, &out)
 	if !env.OK {
 		t.Fatalf("search failed: %+v", env.Error)
 	}
@@ -128,8 +128,8 @@ func TestHostORM_Search_DomainFilters(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ormSearchOutput
-	env := callORMHost(t, ctx, inst, "call_search", ormSearchInput{Model: "testmodule.widget", Domain: "record.name = 'Widget A'"}, &out)
+	var out ORMSearchOutput
+	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "testmodule.widget", Domain: "record.name = 'Widget A'"}, &out)
 	if !env.OK {
 		t.Fatalf("search failed: %+v", env.Error)
 	}
@@ -156,8 +156,8 @@ func TestHostORM_Search_CountIgnoresLimitOffset(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ormSearchOutput
-	env := callORMHost(t, ctx, inst, "call_search", ormSearchInput{Model: "testmodule.widget", Limit: 1}, &out)
+	var out ORMSearchOutput
+	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "testmodule.widget", Limit: 1}, &out)
 	if !env.OK {
 		t.Fatalf("search failed: %+v", env.Error)
 	}
@@ -180,7 +180,7 @@ func TestHostORM_Search_UnknownModel(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_search", ormSearchInput{Model: "testmodule.nonexistent"}, nil)
+	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "testmodule.nonexistent"}, nil)
 	if env.OK {
 		t.Fatal("expected an error for an unknown model")
 	}
@@ -203,7 +203,7 @@ func TestHostORM_Search_OtherModulesModelIsAlsoNotFound(t *testing.T) {
 	// "widget" is declared, but under a different module prefix than
 	// this caller's own ("testmodule") — a module can only address its
 	// own models through host.orm.
-	env := callORMHost(t, ctx, inst, "call_search", ormSearchInput{Model: "othermodule.widget"}, nil)
+	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "othermodule.widget"}, nil)
 	if env.OK {
 		t.Fatal("expected an error resolving another module's model")
 	}
@@ -224,7 +224,7 @@ func TestHostORM_Search_InvalidDomain(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_search", ormSearchInput{Model: "testmodule.widget", Domain: "record.name ==="}, nil)
+	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "testmodule.widget", Domain: "record.name ==="}, nil)
 	if env.OK {
 		t.Fatal("expected an error for an unparseable domain")
 	}
@@ -245,7 +245,7 @@ func TestHostORM_Search_CapabilityDenied(t *testing.T) {
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", slug, "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{widgetModelDecl()}})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_search", ormSearchInput{Model: "testmodule.widget"}, nil)
+	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "testmodule.widget"}, nil)
 	if env.OK {
 		t.Fatal("expected an error without db.read capability")
 	}
@@ -268,8 +268,8 @@ func TestHostORM_SearchRead_ReturnsRequestedFields(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ormSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ormSearchReadInput{Model: "testmodule.widget", Fields: []string{"id", "name"}}, &out)
+	var out ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget", Fields: []string{"id", "name"}}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}
@@ -299,8 +299,8 @@ func TestHostORM_SearchRead_EmptyFieldsReturnsAll(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ormSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ormSearchReadInput{Model: "testmodule.widget"}, &out)
+	var out ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget"}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}
@@ -324,7 +324,7 @@ func TestHostORM_SearchRead_UnknownFieldRejected(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_search_read", ormSearchReadInput{Model: "testmodule.widget", Fields: []string{"nonexistent_field"}}, nil)
+	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget", Fields: []string{"nonexistent_field"}}, nil)
 	if env.OK {
 		t.Fatal("expected an error for an unknown field")
 	}
@@ -351,8 +351,8 @@ func TestHostORM_SearchRead_CursorPagination(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var page1 ormSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ormSearchReadInput{Model: "testmodule.widget", Limit: 2}, &page1)
+	var page1 ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget", Limit: 2}, &page1)
 	if !env.OK {
 		t.Fatalf("search_read page 1 failed: %+v", env.Error)
 	}
@@ -360,8 +360,8 @@ func TestHostORM_SearchRead_CursorPagination(t *testing.T) {
 		t.Fatalf("page 1 = %+v, want 2 records and a next_cursor", page1)
 	}
 
-	var page2 ormSearchReadOutput
-	env = callORMHost(t, ctx, inst, "call_search_read", ormSearchReadInput{Model: "testmodule.widget", Limit: 2, Cursor: page1.NextCursor}, &page2)
+	var page2 ORMSearchReadOutput
+	env = callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget", Limit: 2, Cursor: page1.NextCursor}, &page2)
 	if !env.OK {
 		t.Fatalf("search_read page 2 failed: %+v", env.Error)
 	}
@@ -392,8 +392,8 @@ func TestHostORM_Read_ByIDs(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ormReadOutput
-	env := callORMHost(t, ctx, inst, "call_read", ormReadInput{Model: "testmodule.widget", IDs: []string{id1}}, &out)
+	var out ORMReadOutput
+	env := callORMHost(t, ctx, inst, "call_read", ORMReadInput{Model: "testmodule.widget", IDs: []string{id1}}, &out)
 	if !env.OK {
 		t.Fatalf("read failed: %+v", env.Error)
 	}
@@ -417,8 +417,8 @@ func TestHostORM_Read_EmptyIDsReturnsEmptyRecords(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ormReadOutput
-	env := callORMHost(t, ctx, inst, "call_read", ormReadInput{Model: "testmodule.widget", IDs: nil}, &out)
+	var out ORMReadOutput
+	env := callORMHost(t, ctx, inst, "call_read", ORMReadInput{Model: "testmodule.widget", IDs: nil}, &out)
 	if !env.OK {
 		t.Fatalf("read failed: %+v", env.Error)
 	}
@@ -442,8 +442,8 @@ func TestHostORM_Read_MissingIDsAreSilentlyAbsent(t *testing.T) {
 	inst := newHostORMCaller(t, ctx, r, mc)
 
 	missing := "99999999-9999-9999-9999-999999999999"
-	var out ormReadOutput
-	env := callORMHost(t, ctx, inst, "call_read", ormReadInput{Model: "testmodule.widget", IDs: []string{id1, missing}}, &out)
+	var out ORMReadOutput
+	env := callORMHost(t, ctx, inst, "call_read", ORMReadInput{Model: "testmodule.widget", IDs: []string{id1, missing}}, &out)
 	if !env.OK {
 		t.Fatalf("read failed: %+v", env.Error)
 	}
@@ -547,8 +547,8 @@ func TestHostORM_Search_RespectsRLS(t *testing.T) {
 	mc := NewModuleContext("req-1", "testmodule", "user-1", repID, []string{"admin"}, "tenant-id-1", slug, "trace-1", abi.CapDBRead, nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{widgetModel}})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ormSearchOutput
-	env := callORMHost(t, ctx, inst, "call_search", ormSearchInput{Model: "testmodule.widget"}, &out)
+	var out ORMSearchOutput
+	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "testmodule.widget"}, &out)
 	if !env.OK {
 		t.Fatalf("search failed: %+v", env.Error)
 	}

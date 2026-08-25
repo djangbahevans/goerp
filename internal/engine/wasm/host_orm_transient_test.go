@@ -72,8 +72,8 @@ func TestHostORM_Transient_CreateThenRead_RoundTrips(t *testing.T) {
 	writeInst := newHostORMWriteCaller(t, ctx, rt, mc)
 	readInst := newHostORMCaller(t, ctx, rt, mc)
 
-	var created ormCreateOutput
-	env := callORMHost(t, ctx, writeInst, "call_create", ormCreateInput{
+	var created ORMCreateOutput
+	env := callORMHost(t, ctx, writeInst, "call_create", ORMCreateInput{
 		Model:  "testmodule.wizard_item",
 		Record: map[string]any{"name": "Step 1"},
 	}, &created)
@@ -86,8 +86,8 @@ func TestHostORM_Transient_CreateThenRead_RoundTrips(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cacheClient.Delete(context.Background(), transientKey(slug, "testmodule.wizard_item", id)) })
 
-	var read ormReadOutput
-	env = callORMHost(t, ctx, readInst, "call_read", ormReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, &read)
+	var read ORMReadOutput
+	env = callORMHost(t, ctx, readInst, "call_read", ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, &read)
 	if !env.OK {
 		t.Fatalf("read failed: %+v", env.Error)
 	}
@@ -108,8 +108,8 @@ func TestHostORM_Transient_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T
 
 	writeInst := newHostORMWriteCaller(t, ctx, rt, mc)
 
-	var created ormCreateOutput
-	if env := callORMHost(t, ctx, writeInst, "call_create", ormCreateInput{
+	var created ORMCreateOutput
+	if env := callORMHost(t, ctx, writeInst, "call_create", ORMCreateInput{
 		Model: "testmodule.wizard_item", Record: map[string]any{"name": "Step 1"},
 	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
@@ -118,8 +118,8 @@ func TestHostORM_Transient_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T
 	originalEtag := created.Record["etag"].(string)
 	t.Cleanup(func() { _ = cacheClient.Delete(context.Background(), transientKey(slug, "testmodule.wizard_item", id)) })
 
-	var written ormWriteOutput
-	env := callORMHost(t, ctx, writeInst, "call_write", ormWriteInput{
+	var written ORMWriteOutput
+	env := callORMHost(t, ctx, writeInst, "call_write", ORMWriteInput{
 		Model: "testmodule.wizard_item", ID: id, Record: map[string]any{"name": "Step 2"}, ExpectedEtag: originalEtag,
 	}, &written)
 	if !env.OK {
@@ -145,8 +145,8 @@ func TestHostORM_Transient_Write_StaleEtag_EtagMismatch(t *testing.T) {
 
 	writeInst := newHostORMWriteCaller(t, ctx, rt, mc)
 
-	var created ormCreateOutput
-	if env := callORMHost(t, ctx, writeInst, "call_create", ormCreateInput{
+	var created ORMCreateOutput
+	if env := callORMHost(t, ctx, writeInst, "call_create", ORMCreateInput{
 		Model: "testmodule.wizard_item", Record: map[string]any{"name": "Step 1"},
 	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
@@ -154,7 +154,7 @@ func TestHostORM_Transient_Write_StaleEtag_EtagMismatch(t *testing.T) {
 	id := created.Record["id"].(string)
 	t.Cleanup(func() { _ = cacheClient.Delete(context.Background(), transientKey(slug, "testmodule.wizard_item", id)) })
 
-	env := callORMHost(t, ctx, writeInst, "call_write", ormWriteInput{
+	env := callORMHost(t, ctx, writeInst, "call_write", ORMWriteInput{
 		Model: "testmodule.wizard_item", ID: id, Record: map[string]any{"name": "Step 2"}, ExpectedEtag: "stale-etag",
 	}, nil)
 	if env.OK {
@@ -176,7 +176,7 @@ func TestHostORM_Transient_ReadMissingKey_NotFound(t *testing.T) {
 	mc := newTransientTestModuleContext(slug, []model.ModelDeclaration{md})
 	readInst := newHostORMCaller(t, ctx, rt, mc)
 
-	env := callORMHost(t, ctx, readInst, "call_read", ormReadInput{
+	env := callORMHost(t, ctx, readInst, "call_read", ORMReadInput{
 		Model: "testmodule.wizard_item", IDs: []string{"99999999-9999-9999-9999-999999999999"},
 	}, nil)
 	if env.OK {
@@ -199,8 +199,8 @@ func TestHostORM_Transient_ExpiredKey_NotFound(t *testing.T) {
 	writeInst := newHostORMWriteCaller(t, ctx, rt, mc)
 	readInst := newHostORMCaller(t, ctx, rt, mc)
 
-	var created ormCreateOutput
-	if env := callORMHost(t, ctx, writeInst, "call_create", ormCreateInput{
+	var created ORMCreateOutput
+	if env := callORMHost(t, ctx, writeInst, "call_create", ORMCreateInput{
 		Model: "testmodule.wizard_item", Record: map[string]any{"name": "Step 1"},
 	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
@@ -209,7 +209,7 @@ func TestHostORM_Transient_ExpiredKey_NotFound(t *testing.T) {
 
 	time.Sleep(400 * time.Millisecond)
 
-	env := callORMHost(t, ctx, readInst, "call_read", ormReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, nil)
+	env := callORMHost(t, ctx, readInst, "call_read", ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, nil)
 	if env.OK {
 		t.Fatal("expected read of an expired key to fail")
 	}
@@ -229,7 +229,7 @@ func TestHostORM_Transient_SearchAndSearchRead_NotListable(t *testing.T) {
 	mc := newTransientTestModuleContext(slug, []model.ModelDeclaration{md})
 	readInst := newHostORMCaller(t, ctx, rt, mc)
 
-	env := callORMHost(t, ctx, readInst, "call_search", ormSearchInput{Model: "testmodule.wizard_item"}, nil)
+	env := callORMHost(t, ctx, readInst, "call_search", ORMSearchInput{Model: "testmodule.wizard_item"}, nil)
 	if env.OK {
 		t.Fatal("expected search on a Transient model to fail")
 	}
@@ -237,7 +237,7 @@ func TestHostORM_Transient_SearchAndSearchRead_NotListable(t *testing.T) {
 		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeTransientNotListable)
 	}
 
-	env = callORMHost(t, ctx, readInst, "call_search_read", ormSearchReadInput{Model: "testmodule.wizard_item"}, nil)
+	env = callORMHost(t, ctx, readInst, "call_search_read", ORMSearchReadInput{Model: "testmodule.wizard_item"}, nil)
 	if env.OK {
 		t.Fatal("expected search_read on a Transient model to fail")
 	}
@@ -258,16 +258,16 @@ func TestHostORM_Transient_Unlink_RemovesKey(t *testing.T) {
 	writeInst := newHostORMWriteCaller(t, ctx, rt, mc)
 	readInst := newHostORMCaller(t, ctx, rt, mc)
 
-	var created ormCreateOutput
-	if env := callORMHost(t, ctx, writeInst, "call_create", ormCreateInput{
+	var created ORMCreateOutput
+	if env := callORMHost(t, ctx, writeInst, "call_create", ORMCreateInput{
 		Model: "testmodule.wizard_item", Record: map[string]any{"name": "Step 1"},
 	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
 	id := created.Record["id"].(string)
 
-	var out ormUnlinkOutput
-	env := callORMHost(t, ctx, writeInst, "call_unlink", ormUnlinkInput{Model: "testmodule.wizard_item", ID: id}, &out)
+	var out ORMUnlinkOutput
+	env := callORMHost(t, ctx, writeInst, "call_unlink", ORMUnlinkInput{Model: "testmodule.wizard_item", ID: id}, &out)
 	if !env.OK {
 		t.Fatalf("unlink failed: %+v", env.Error)
 	}
@@ -275,7 +275,7 @@ func TestHostORM_Transient_Unlink_RemovesKey(t *testing.T) {
 		t.Error("expected Deleted = true")
 	}
 
-	env = callORMHost(t, ctx, readInst, "call_read", ormReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, nil)
+	env = callORMHost(t, ctx, readInst, "call_read", ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, nil)
 	if env.OK {
 		t.Fatal("expected read after unlink to fail")
 	}
@@ -301,7 +301,7 @@ func TestHostORM_Transient_TenantScoping_NoCrossTenantCollision(t *testing.T) {
 	readInstB := newHostORMCaller(t, ctx, rt, mcB)
 
 	id := "11111111-1111-1111-1111-111111111111"
-	if env := callORMHost(t, ctx, writeInstA, "call_create", ormCreateInput{
+	if env := callORMHost(t, ctx, writeInstA, "call_create", ORMCreateInput{
 		Model: "testmodule.wizard_item", Record: map[string]any{"id": id, "name": "Tenant A's data"},
 	}, nil); !env.OK {
 		t.Fatalf("tenant A create failed: %+v", env.Error)
@@ -312,7 +312,7 @@ func TestHostORM_Transient_TenantScoping_NoCrossTenantCollision(t *testing.T) {
 
 	// Tenant B never created this ID — must read as not_found, not
 	// tenant A's record.
-	env := callORMHost(t, ctx, readInstB, "call_read", ormReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, nil)
+	env := callORMHost(t, ctx, readInstB, "call_read", ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, nil)
 	if env.OK {
 		t.Fatal("expected tenant B's read of tenant A's ID to fail")
 	}
@@ -321,7 +321,7 @@ func TestHostORM_Transient_TenantScoping_NoCrossTenantCollision(t *testing.T) {
 	}
 
 	// Tenant B can independently create the *same* ID with its own data.
-	if env := callORMHost(t, ctx, writeInstB, "call_create", ormCreateInput{
+	if env := callORMHost(t, ctx, writeInstB, "call_create", ORMCreateInput{
 		Model: "testmodule.wizard_item", Record: map[string]any{"id": id, "name": "Tenant B's data"},
 	}, nil); !env.OK {
 		t.Fatalf("tenant B create failed: %+v", env.Error)
@@ -330,9 +330,9 @@ func TestHostORM_Transient_TenantScoping_NoCrossTenantCollision(t *testing.T) {
 		_ = cacheClient.Delete(context.Background(), transientKey(tenantB, "testmodule.wizard_item", id))
 	})
 
-	var readA ormReadOutput
+	var readA ORMReadOutput
 	readInstA := newHostORMCaller(t, ctx, rt, mcA)
-	if env := callORMHost(t, ctx, readInstA, "call_read", ormReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, &readA); !env.OK {
+	if env := callORMHost(t, ctx, readInstA, "call_read", ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, &readA); !env.OK {
 		t.Fatalf("tenant A read failed: %+v", env.Error)
 	}
 	if readA.Records[0]["name"] != "Tenant A's data" {
