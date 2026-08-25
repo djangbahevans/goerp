@@ -12,6 +12,7 @@ type ModelDeclaration struct {
 	EnabledOps          []Op         `msgpack:"enabled_ops,omitempty"`
 	Backend             ModelBackend `msgpack:"backend,omitempty"`
 	TransientTTLSeconds int          `msgpack:"transient_ttl_seconds,omitempty"`
+	RoutePrefixOverride string       `msgpack:"route_prefix,omitempty"`
 }
 
 // ModelBackend selects what storage backend a model is read/written
@@ -102,6 +103,16 @@ func (d *ModelDeclaration) Index(name string, def IndexDef) *ModelDeclaration {
 // declaration.
 func (d *ModelDeclaration) EnableOps(ops ...Op) *ModelDeclaration {
 	d.EnabledOps = append(d.EnabledOps, ops...)
+	return d
+}
+
+// RoutePrefix overrides the derived plural-segment path for this model's
+// EnableOps-registered routes — the automatic derivation pluralizes
+// LabelPlural (or the model name if LabelPlural isn't set); use this
+// when that derivation is wrong (an irregular plural, or a path that
+// collides with an existing hand-written prefix).
+func (d *ModelDeclaration) RoutePrefix(path string) *ModelDeclaration {
+	d.RoutePrefixOverride = path
 	return d
 }
 

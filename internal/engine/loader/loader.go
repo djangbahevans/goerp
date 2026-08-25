@@ -4,9 +4,12 @@
 // no-argument export calls a module makes at load time
 // (engine-internals.md §2, Stage 3 steps 15-17c-bis). Everything after
 // that — schema sync, instance warming, cross-module event-cycle
-// detection, EnableOps-derived route/view merging — belongs to later
-// stages and other tickets; this package only produces the
-// LoadedModule those stages consume.
+// detection, EnableOps-derived view merging — belongs to later stages
+// and other tickets; this package only produces the LoadedModule those
+// stages consume. LoadAll does register EnableOps-derived CRUD routes
+// (route.RegisterModelRoutes) alongside each module's explicit routes,
+// since route registration is part of this package's existing route.New
+// pass, not a separate stage.
 package loader
 
 import (
@@ -175,6 +178,13 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 			explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
 			if err := route.RegisterModuleRoutes(table, src.Name, m.Manifest.Type, explicit); err != nil {
 				m.Fail(err.Error())
+			} else if suppressed, err := route.RegisterModelRoutes(table, src.Name, m.Manifest.Type, m.ModelDecls); err != nil {
+				m.Fail(err.Error())
+			} else {
+				for _, s := range suppressed {
+					log.Warn().Str("module", src.Name).Str("model", s.Model).Str("op", s.Op).
+						Msg("EnableOps: explicit route already registered, auto-derived route suppressed")
+				}
 			}
 		}
 		if m.Status != module.StatusFailed {
