@@ -6,6 +6,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
+	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -57,6 +58,12 @@ type ModuleSnapshot struct {
 	// computed field's compute function regardless of which module owns
 	// it — always a fresh instance, never the currently-executing one.
 	ComputeTargets map[string]ComputeTarget
+
+	// DataAuditRegistry is the audited-tables reverse lookup
+	// (internal/engine/dataaudit, manifest-spec.md §19 "Audited Tables")
+	// host.orm's write path consults to find whether a just-created/
+	// written/unlinked model's table needs an audit_log row.
+	DataAuditRegistry *dataaudit.Registry
 }
 
 type ModuleContext struct {
@@ -122,6 +129,12 @@ func (mc *ModuleContext) ComputedIndex() *computed.Index {
 // effect for this request.
 func (mc *ModuleContext) ComputeTargets() map[string]ComputeTarget {
 	return mc.snapshot.ComputeTargets
+}
+
+// DataAuditRegistry returns the audited-tables reverse lookup in effect
+// for this request.
+func (mc *ModuleContext) DataAuditRegistry() *dataaudit.Registry {
+	return mc.snapshot.DataAuditRegistry
 }
 
 // RollbackAll rolls back every transaction still open in this context and

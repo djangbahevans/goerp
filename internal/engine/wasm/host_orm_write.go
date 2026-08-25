@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -34,10 +35,11 @@ import (
 // orm.RegisterConstraint hooks (goerp#378, runConstraintHook —
 // host_orm_constraint.go), which run after recomputeAfterWrite so a hook
 // sees the fully-recomputed row, and before event emission so a
-// rejection aborts the whole transaction. Audit logging (goerp#363,
-// tracked separately — no audited_tables trigger mechanism exists
-// anywhere in the engine despite this ticket's own original text
-// assuming one did) is explicitly out of scope for this file.
+// rejection aborts the whole transaction. Also writes one audit_log row
+// per create/write/unlink on a module's own audited_tables[] (goerp#363,
+// writeAuditLogEntry) — after recomputeAfterWrite/runConstraintHook so
+// the row reflects the fully committed values, before event emission,
+// in the same transaction.
 //
 // create_batch/first_or_create/write_many/write_where are not supported
 // for Transient-backed models (a Redis-backed key has no domain-query or
@@ -216,6 +218,17 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMCreateOutput{}, hostErr
 	}
 
+	operation := "INSERT"
+	if !inserted {
+		// OnConflict update path: old_data isn't captured here (would
+		// need a pre-conflict fetch inside createOneRecordTx) — audited
+		// as an UPDATE with old_data left NULL.
+		operation = "UPDATE"
+	}
+	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, operation, nil, row); hostErr != nil {
+		return ORMCreateOutput{}, hostErr
+	}
+
 	eventName := "orm.record.created"
 	if !inserted {
 		eventName = "orm.record.updated"
@@ -320,6 +333,15 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			return ORMCreateBatchOutput{}, hostErr
 		}
 		if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+		operation := "INSERT"
+		if !inserted {
+			// See ORMCreate's own comment: OnConflict update path has no
+			// captured old_data.
+			operation = "UPDATE"
+		}
+		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, operation, nil, row); hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
 		all = append(all, row)
@@ -455,6 +477,9 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
+	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "INSERT", nil, row); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
 
 	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, row); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
@@ -539,6 +564,11 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, hostErr
 	}
 
+	oldData, hostErr := fetchRowForAuditBeforeWrite(ctx, tx, modCtx, input.Model, md, pkCol, input.ID)
+	if hostErr != nil {
+		return ORMWriteOutput{}, hostErr
+	}
+
 	updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, input.ID, record, input.ExpectedEtag)
 	if hostErr != nil {
 		return ORMWriteOutput{}, hostErr
@@ -551,6 +581,9 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, hostErr
 	}
 	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "write", updated); hostErr != nil {
+		return ORMWriteOutput{}, hostErr
+	}
+	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "UPDATE", oldData, updated); hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
 
@@ -838,6 +871,9 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	}
 
 	if hostErr := recomputeParentsAfterChildUnlink(ctx, tx, r, modCtx, input.Model, existing); hostErr != nil {
+		return ORMUnlinkOutput{}, hostErr
+	}
+	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "DELETE", existing, nil); hostErr != nil {
 		return ORMUnlinkOutput{}, hostErr
 	}
 
@@ -1138,6 +1174,10 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 	changedFields := changedFieldNames(record)
 	affected := make([]string, 0, len(ids))
 	for _, id := range ids {
+		oldData, hostErr := fetchRowForAuditBeforeWrite(ctx, tx, modCtx, qualifiedModel, md, pkCol, id)
+		if hostErr != nil {
+			return ExecResult{}, hostErr
+		}
 		updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, id, record, "")
 		if hostErr != nil {
 			return ExecResult{}, hostErr
@@ -1149,6 +1189,9 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 			return ExecResult{}, hostErr
 		}
 		if hostErr := runConstraintHook(ctx, r, modCtx, qualifiedModel, "write", updated); hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "UPDATE", oldData, updated); hostErr != nil {
 			return ExecResult{}, hostErr
 		}
 		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", qualifiedModel, updated); err != nil {
@@ -1292,6 +1335,107 @@ func recomputeParentsAfterChildUnlink(ctx context.Context, tx *sql.Tx, r *Runtim
 		}
 	}
 	return nil
+}
+
+// auditLogTableName is the engine-owned table CreateEngineTables
+// provisions per tenant (internal/engine/tenant/provision/activities.go,
+// goerp#363) — never a declared model, so it's a fixed name rather than
+// something resolveModel ever sees.
+const auditLogTableName = "audit_log"
+
+// writeAuditLogEntry inserts one audit_log row if qualifiedModel is
+// declared in its owning module's own audited_tables[] (manifest-spec.md
+// §19 "Audited Tables"); a no-op otherwise, and also a no-op if modCtx
+// carries no DataAuditRegistry at all (mirrors recomputeAfterWrite's own
+// nil-ComputedIndex guard — a test fixture that never wires one). This
+// only ever covers writes that go through host.orm: the only write path
+// any module has today, since host.db exposes no raw query/exec to WASM
+// modules, so "every INSERT/UPDATE/DELETE" is fully satisfied here, not
+// a partial mechanism. oldData/newData pass as nil for create's/delete's
+// absent half respectively, stored as SQL NULL. Runs inside tx, so a
+// later failure in the same request's write rolls the audit entry back
+// too — no lost or orphaned audit entries on partial failure.
+func writeAuditLogEntry(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, operation string, oldData, newData map[string]any) *abi.HostError {
+	reg := modCtx.DataAuditRegistry()
+	if reg == nil {
+		return nil
+	}
+	excludeCols, audited := reg.Lookup(qualifiedModel)
+	if !audited {
+		return nil
+	}
+
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return nil
+	}
+	recordID := oldData[pkCol]
+	if newData != nil {
+		recordID = newData[pkCol]
+	}
+
+	oldJSON, err := auditJSON(oldData, excludeCols)
+	if err != nil {
+		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	newJSON, err := auditJSON(newData, excludeCols)
+	if err != nil {
+		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	sqlStr := fmt.Sprintf(`INSERT INTO %s (table_name, record_id, operation, old_data, new_data, changed_by, request_id, trace_id)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid, $7, $8)`, quoteIdentORM(auditLogTableName))
+	if _, err := tx.ExecContext(ctx, sqlStr, tableNameForORM(md), recordID, operation, oldJSON, newJSON, modCtx.UserID, modCtx.RequestID, modCtx.TraceID); err != nil {
+		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	return nil
+}
+
+// fetchRowForAuditBeforeWrite fetches qualifiedModel's row by pkValue
+// before an UPDATE runs, so writeAuditLogEntry has a real old_data
+// snapshot to record — but only when the table is actually audited, so
+// the common non-audited case pays no extra round trip. Returns a nil
+// map (not an error) when the table isn't audited, modCtx carries no
+// DataAuditRegistry at all, or the row simply doesn't exist (ID/etag
+// mismatch) — that last case is deliberately swallowed rather than
+// surfaced here, since the caller's own subsequent writeOneRecordTx
+// already produces the correct, more specific orm.not_found vs.
+// orm.etag_mismatch diagnosis (diagnoseZeroRowWrite) and this helper
+// must not shadow that with a generic error first.
+func fetchRowForAuditBeforeWrite(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, pkCol, pkValue string) (map[string]any, *abi.HostError) {
+	reg := modCtx.DataAuditRegistry()
+	if reg == nil {
+		return nil, nil
+	}
+	if _, audited := reg.Lookup(qualifiedModel); !audited {
+		return nil, nil
+	}
+	row, hostErr := fetchRowByPK(ctx, tx, md, pkCol, pkValue)
+	if hostErr != nil {
+		if hostErr.Code == abi.ErrCodeNotFound {
+			return nil, nil
+		}
+		return nil, hostErr
+	}
+	return row, nil
+}
+
+// auditJSON filters excludeCols out of data and marshals the rest as
+// JSONB. A nil data map (create's absent old_data, delete's absent
+// new_data) returns a real Go nil so the column stores SQL NULL, not
+// json.Marshal(nil)'s literal JSON "null".
+func auditJSON(data map[string]any, excludeCols map[string]bool) (any, error) {
+	if data == nil {
+		return nil, nil
+	}
+	filtered := make(map[string]any, len(data))
+	for k, v := range data {
+		if excludeCols[k] {
+			continue
+		}
+		filtered[k] = v
+	}
+	return json.Marshal(filtered)
 }
 
 // fkReferencingIDs returns every depMD row's primary key where its fkCol

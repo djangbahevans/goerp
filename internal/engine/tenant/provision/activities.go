@@ -126,13 +126,38 @@ CREATE TABLE IF NOT EXISTS %s.sequences (
 )
 `
 
+// createAuditLogTable mirrors multitenancy-internals.md's audit_log
+// schema, minus two pieces of deliberately deferred hardening: no
+// PARTITION BY RANGE (changed_at) — table partitioning for
+// unbounded-growth engine tables is its own tracked ticket (goerp#194)
+// covering every such table generically, not something to half-build
+// here — and no REVOKE SELECT ... FROM app_user, since no
+// schema_sync_user/app_user Postgres role split exists anywhere in this
+// codebase yet (see this file's own schemaSyncPool doc comment above).
+const createAuditLogTable = `
+CREATE TABLE IF NOT EXISTS %s.audit_log (
+    id          UUID PRIMARY KEY DEFAULT uuidv7(),
+    table_name  TEXT NOT NULL,
+    record_id   UUID NOT NULL,
+    operation   TEXT NOT NULL CHECK (operation IN ('INSERT','UPDATE','DELETE')),
+    old_data    JSONB,
+    new_data    JSONB,
+    changed_by  UUID,
+    changed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    request_id  TEXT,
+    trace_id    TEXT
+)
+`
+
 // CreateEngineTables creates the engine-owned tables a fresh tenant needs
 // before module schema sync and config seeding can run: roles/
 // role_permissions/user_roles (role.Store.Bootstrap), tenant_invitations
 // (invite.Store.Bootstrap — requires roles to exist first, per its own
 // foreign key), module_config (this ticket's own SeedTenantConfig step),
-// and sequences (backing store for Sequence-kind fields' per-tenant
-// counters, keyed by (model, field, period_key)).
+// sequences (backing store for Sequence-kind fields' per-tenant
+// counters, keyed by (model, field, period_key)), and audit_log
+// (goerp#363 — host.orm's write path records one row here per
+// INSERT/UPDATE/DELETE on a module's own audited_tables[]).
 // multitenancy-internals.md §6 step 3 lists several further
 // engine-owned tables (event_log, files, notifications,
 // notification_preferences, saved_filters, record_shares,
@@ -162,6 +187,11 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 	seqQuery := fmt.Sprintf(createSequencesTable, tenantschema.Name(slug))
 	if _, err := a.schemaSyncPool.ExecContext(ctx, seqQuery); err != nil {
 		return fmt.Errorf("create sequences table: %w", err)
+	}
+
+	auditQuery := fmt.Sprintf(createAuditLogTable, tenantschema.Name(slug))
+	if _, err := a.schemaSyncPool.ExecContext(ctx, auditQuery); err != nil {
+		return fmt.Errorf("create audit_log table: %w", err)
 	}
 
 	return nil
