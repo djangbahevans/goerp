@@ -12,6 +12,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/google/uuid"
@@ -25,17 +26,18 @@ import (
 // first_or_create/write/write_many/write_where/unlink (goerp#343/#380),
 // Store(true)/.Depends() computed-field recompute (goerp#377) for
 // Table-backed models (recomputeAfterWrite runs inside the same
-// transaction as the triggering create/write, for both same-record and
-// one-hop Many2One dependencies), and orm.RegisterConstraint hooks
-// (goerp#378, runConstraintHook — host_orm_constraint.go), which run
-// after recomputeAfterWrite so a hook sees the fully-recomputed row, and
-// before event emission so a rejection aborts the whole transaction.
-// DynamicLink/.Tree() validation (no such field kinds exist yet),
-// One2Many child-triggered recompute (goerp#388), and audit logging
-// (goerp#363, tracked separately — no audited_tables trigger mechanism
-// exists anywhere in the engine despite this ticket's own original text
-// assuming one did) are all explicitly out of scope for this file — see
-// goerp#379/#383/#388.
+// transaction as the triggering create/write, for same-record, one-hop
+// Many2One, and one-hop One2Many dependencies alike — goerp#388's
+// One2Many case additionally recomputes from ORMUnlink via
+// recomputeParentsAfterChildUnlink, since a child's own deletion is a
+// valid recompute trigger the other two hop kinds never need), and
+// orm.RegisterConstraint hooks (goerp#378, runConstraintHook —
+// host_orm_constraint.go), which run after recomputeAfterWrite so a hook
+// sees the fully-recomputed row, and before event emission so a
+// rejection aborts the whole transaction. Audit logging (goerp#363,
+// tracked separately — no audited_tables trigger mechanism exists
+// anywhere in the engine despite this ticket's own original text
+// assuming one did) is explicitly out of scope for this file.
 //
 // create_batch/first_or_create/write_many/write_where are not supported
 // for Transient-backed models (a Redis-backed key has no domain-query or
@@ -835,6 +837,10 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMUnlinkOutput{}, translateWriteError(err, md)
 	}
 
+	if hostErr := recomputeParentsAfterChildUnlink(ctx, tx, r, modCtx, input.Model, existing); hostErr != nil {
+		return ORMUnlinkOutput{}, hostErr
+	}
+
 	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.deleted", input.Model, map[string]any{"id": deletedID}); err != nil {
 		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
@@ -1186,6 +1192,15 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 			continue
 		}
 
+		if dep.ViaChildFKField != "" {
+			// One2Many hop: row (the child just written) names its one
+			// parent directly via ViaChildFKField — no query needed.
+			if hostErr := recomputeParentViaChild(ctx, tx, r, modCtx, dep, row); hostErr != nil {
+				return hostErr
+			}
+			continue
+		}
+
 		if dep.ViaFKField == "" {
 			// Same-record: the dependent field lives on the row just
 			// written.
@@ -1224,6 +1239,56 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 			if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, depID, dep.Field, value); hostErr != nil {
 				return hostErr
 			}
+		}
+	}
+	return nil
+}
+
+// recomputeParentViaChild resolves and recomputes dep's single parent
+// record directly from row's own inverse-FK column value — the One2Many
+// hop's counterpart to the Many2One-hop branch above, with no query
+// needed since a child row always names its one parent directly
+// (go-sdk-reference.md §22 "One2Many" / "Computed field recomputation").
+// If row's own inverse-FK value changes on write (reparenting to a
+// different parent), only the new parent recomputes here — the old
+// parent's dependents are not recomputed to reflect the child's removal.
+func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, row map[string]any) *abi.HostError {
+	depPK, ok := primaryKeyColumn(dep.ModelDecl)
+	if !ok {
+		return nil
+	}
+	parentID, ok := row[dep.ViaChildFKField]
+	if !ok || parentID == nil {
+		// Child not (yet) linked to any parent — nothing to recompute.
+		return nil
+	}
+
+	depRow, hostErr := fetchRowByPK(ctx, tx, dep.ModelDecl, depPK, parentID)
+	if hostErr != nil {
+		return hostErr
+	}
+	value, hostErr := invokeCompute(ctx, r, modCtx, dep, depRow)
+	if hostErr != nil {
+		return hostErr
+	}
+	return applyComputedValue(ctx, tx, dep.ModelDecl, depPK, parentID, dep.Field, value)
+}
+
+// recomputeParentsAfterChildUnlink recomputes every parent computed field
+// reached through a One2Many relationship when a child row is deleted
+// (go-sdk-reference.md §22 "One2Many" / "Computed field recomputation").
+// existingRow is the child's full pre-delete snapshot. Deliberately uses
+// LookupViaChild rather than Lookup: the child's own same-record and
+// Many2One-hop dependents, if any, are never recomputed here since the
+// row they'd apply to no longer exists.
+func recomputeParentsAfterChildUnlink(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedChildModel string, existingRow map[string]any) *abi.HostError {
+	idx := modCtx.ComputedIndex()
+	if idx == nil {
+		return nil
+	}
+	for _, dep := range idx.LookupViaChild(qualifiedChildModel, changedFieldNames(existingRow)) {
+		if hostErr := recomputeParentViaChild(ctx, tx, r, modCtx, dep, existingRow); hostErr != nil {
+			return hostErr
 		}
 	}
 	return nil
