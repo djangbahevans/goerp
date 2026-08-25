@@ -439,17 +439,43 @@ func TestDispatchORMRoute_VirtualBackend_NotImplemented(t *testing.T) {
 	}
 }
 
-func TestDispatchORMRoute_Preview_NotImplemented(t *testing.T) {
+// TestDispatchORMRoute_Preview_NoComputedFields_ReturnsDraftUnchanged
+// covers Preview's common case (go-sdk-reference.md §22: "No module code
+// is required for the common case") for widget, which declares no
+// Computed fields at all — the response should be the draft passed
+// straight through, with nothing ever written to the widget table.
+// widgetModelDecl's owning module in this fixture also has no live WASM
+// pool (newDispatchORMFixture never sets LoadedModule.Pool), so this
+// doubles as coverage that Preview degrades gracefully with no pool
+// available, rather than requiring one just to discover there's no
+// preview hook to run.
+func TestDispatchORMRoute_Preview_NoComputedFields_ReturnsDraftUnchanged(t *testing.T) {
 	f := newDispatchORMFixture(t)
 	entry := &route.RouteEntry{ModuleName: "testmodule", PathTemplate: "/testmodule/widgets/preview", Manifest: route.RouteManifest{
 		Model: "testmodule.widget", CrudAction: "preview", EngineNative: true, StorageBackend: "table",
 	}}
 
 	w := httptest.NewRecorder()
-	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets/preview", []byte("{}"), entry, nil))
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets/preview", []byte(`{"name":"Draft Widget"}`), entry, nil))
 
-	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["name"] != "Draft Widget" {
+		t.Errorf("name = %v, want %q", body["name"], "Draft Widget")
+	}
+
+	conn := openDispatchORMTestDB(t)
+	var count int
+	if err := conn.QueryRow("SELECT COUNT(*) FROM " + tenantschema.Name(f.slug) + ".widget").Scan(&count); err != nil {
+		t.Fatalf("count widgets: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("widget table has %d rows after preview, want 0 (nothing should ever be persisted)", count)
 	}
 }
 
