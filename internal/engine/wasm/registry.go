@@ -1,8 +1,10 @@
 package wasm
 
 import (
+	"database/sql"
 	"sync"
 
+	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero/api"
 )
 
@@ -45,4 +47,13 @@ func (r *Runtime) InstanceForModule(m api.Module) *ModuleInstance {
 // host.db.begin's usage of it.
 func (r *Runtime) TxLimiter() *TransactionLimiter {
 	return r.txLimiter
+}
+
+// EventInsertClient returns the same never-started river.Client[*sql.Tx]
+// registerHostORM/registerHostEvent already use internally (runtime.go's
+// own doc comment on its construction) — exposed so a caller outside this
+// package (dispatchORMRoute, goerp#346) can pass it straight into
+// ORMCreate/ORMWrite/ORMUnlink without constructing a second client.
+func (r *Runtime) EventInsertClient() *river.Client[*sql.Tx] {
+	return r.eventInsertClient
 }

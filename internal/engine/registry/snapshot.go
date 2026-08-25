@@ -1,12 +1,15 @@
 package registry
 
 import (
+	"strings"
+
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
 type RegistrySnapshot struct {
@@ -52,6 +55,30 @@ func (s *RegistrySnapshot) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
 // EventRegistry returns this snapshot's event registry.
 func (s *RegistrySnapshot) EventRegistry() *event.EventRegistry {
 	return s.eventRegistry
+}
+
+// ModelByName resolves a RouteManifest.Model-shaped "{module}.{resource}"
+// string (route.RegisterModelRoutes's own qualifiedModel convention —
+// moduleName + "." + the model's bare, undotted Name) back to the owning
+// module and its ModelDeclaration. A module that failed to load is never
+// matched, mirroring buildRouteTable's own StatusFailed skip.
+func (s *RegistrySnapshot) ModelByName(qualified string) (moduleName string, mod *module.LoadedModule, md model.ModelDeclaration, ok bool) {
+	moduleName, resource, found := strings.Cut(qualified, ".")
+	if !found {
+		return "", nil, model.ModelDeclaration{}, false
+	}
+
+	mod, exists := s.modules[moduleName]
+	if !exists || mod.Status == module.StatusFailed {
+		return "", nil, model.ModelDeclaration{}, false
+	}
+
+	for _, decl := range mod.ModelDecls {
+		if decl.Name == resource {
+			return moduleName, mod, decl, true
+		}
+	}
+	return "", nil, model.ModelDeclaration{}, false
 }
 
 // Populated by future tickets (backlog #35, #37). Never rebuilt by any
