@@ -22,6 +22,7 @@ type ModuleInstance struct {
 	handleActivity  api.Function
 	handleVirtualOp api.Function
 	handleCompute   api.Function
+	handlePreview   api.Function
 	moduleCtx       *ModuleContext
 	inUse           atomic.Bool
 }
@@ -58,6 +59,7 @@ func newModuleInstance(ctx context.Context, name string, compiled wazero.Compile
 	inst.handleActivity = mod.ExportedFunction("handle_activity")
 	inst.handleVirtualOp = mod.ExportedFunction("handle_virtual_op")
 	inst.handleCompute = mod.ExportedFunction("handle_orm_compute")
+	inst.handlePreview = mod.ExportedFunction("handle_orm_preview")
 
 	if initFn := mod.ExportedFunction("init"); initFn != nil {
 		if _, err := initFn.Call(ctx); err != nil {
@@ -321,6 +323,78 @@ func (inst *ModuleInstance) InvokeHandleComputed(ctx context.Context, payload []
 	}
 
 	results, err := inst.handleCompute.Call(ctx, uint64(reqPtr), uint64(len(payload)))
+	if err != nil {
+		return nil, err
+	}
+
+	raw := results[0]
+	respPtr := uint32(raw >> 32)
+	respLen := uint32(raw)
+
+	view, ok := inst.memory.Read(respPtr, respLen)
+	if !ok {
+		return nil, fmt.Errorf("could not read response at ptr=%d len=%d", respPtr, respLen)
+	}
+
+	data := make([]byte, len(view))
+	copy(data, view)
+
+	if _, err := inst.deallocate.Call(context.Background(), uint64(respPtr), uint64(respLen)); err != nil {
+		log.Warn().Err(err).Msg("could not deallocate response buffer")
+	}
+
+	return data, nil
+}
+
+// HasHandlePreview reports whether this instance's module exports
+// handle_orm_preview at all — a module that never calls
+// orm.RegisterPreviewHook for any model never exports it (the same
+// convention every other optional export in this file follows), so
+// callers check this before invoking rather than treating a missing
+// export as an error: "no hook registered" is the expected common case
+// for Preview (go-sdk-reference.md §22 "Preview action"), not a caller
+// mistake.
+func (inst *ModuleInstance) HasHandlePreview() bool {
+	return inst.handlePreview != nil
+}
+
+// InvokeHandlePreview is InvokeHandleActivity's sync WASM invocation
+// wrapper for a module's handle_orm_preview export — the entry point
+// sdk/go/orm.DispatchPreview exports for a model's registered
+// PreviewHook (go-sdk-reference.md §22 "Preview action"). Callers should
+// check HasHandlePreview first; this still nil-checks defensively, the
+// same way every other Invoke* method here handles a missing export.
+func (inst *ModuleInstance) InvokeHandlePreview(ctx context.Context, payload []byte) ([]byte, error) {
+	if inst.allocate == nil {
+		return nil, fmt.Errorf("module missing allocate export")
+	}
+	if inst.handlePreview == nil {
+		return nil, fmt.Errorf("module missing handle_orm_preview export")
+	}
+	if inst.deallocate == nil {
+		return nil, fmt.Errorf("module missing deallocate export")
+	}
+
+	allocResult, err := inst.allocate.Call(ctx, uint64(len(payload)))
+	if err != nil {
+		return nil, fmt.Errorf("allocate %d bytes: %w", len(payload), err)
+	}
+	if allocResult[0] == 0 {
+		return nil, abi.ErrAllocationFailed
+	}
+	reqPtr := uint32(allocResult[0])
+
+	defer func() {
+		if _, err := inst.deallocate.Call(context.Background(), uint64(reqPtr), uint64(len(payload))); err != nil {
+			log.Warn().Err(err).Msg("could not deallocate request buffer")
+		}
+	}()
+
+	if !inst.memory.Write(reqPtr, payload) {
+		return nil, fmt.Errorf("memory.Write out of bounds at ptr=%d len=%d", reqPtr, len(payload))
+	}
+
+	results, err := inst.handlePreview.Call(ctx, uint64(reqPtr), uint64(len(payload)))
 	if err != nil {
 		return nil, err
 	}

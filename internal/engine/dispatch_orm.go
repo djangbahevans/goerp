@@ -55,11 +55,6 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if entry.Manifest.CrudAction == "preview" {
-		writeRouteError(w, http.StatusNotImplemented, "not_implemented", "Preview is not yet served (goerp#372)")
-		return
-	}
-
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
@@ -97,6 +92,8 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		e.dispatchORMUpdate(ctx, w, r, rr.pathParams, entry, modCtx, insertClient)
 	case "delete":
 		e.dispatchORMDelete(ctx, w, rr.pathParams, entry, modCtx, insertClient)
+	case "preview":
+		e.dispatchORMPreview(ctx, w, r, entry, modCtx)
 	default:
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "unknown crud action: "+entry.Manifest.CrudAction)
 	}
@@ -191,6 +188,30 @@ func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *h
 	}
 
 	writeJSON(w, http.StatusOK, out.Records[0])
+}
+
+// dispatchORMPreview serves the Preview CRUD op (goerp#372) —
+// wasm.ORMPreview recomputes every Store(true)/.Depends() field whose
+// dependencies are present in the draft body, then runs a registered
+// PreviewHook if the model's module has one. Unlike every other
+// CrudAction here, this never persists anything and needs no
+// insertClient — no orm.record.* event is ever emitted for a preview.
+func (e *Engine) dispatchORMPreview(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext) {
+	record, ok := decodeJSONRecord(w, r)
+	if !ok {
+		return
+	}
+
+	out, hostErr := wasm.ORMPreview(ctx, e.wasmRuntime, modCtx, wasm.ORMPreviewInput{
+		Model:  entry.Manifest.Model,
+		Record: record,
+	})
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, out.Record)
 }
 
 func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {

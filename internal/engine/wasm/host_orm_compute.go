@@ -38,32 +38,31 @@ type computeError struct {
 	Message string `msgpack:"message"`
 }
 
-// invokeCompute borrows a fresh instance from dep's owning module's pool
-// and invokes its registered compute function against record, returning
-// the recomputed value. Always borrows a new instance — never the
-// currently-executing one, which can't be reentered mid-call — uniform
-// whether dep.ModuleName is the same module that triggered the call or a
-// different one reached through a Many2One-hop dependency
-// (go-sdk-reference.md §22 "Computed field recomputation").
-func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, record map[string]any) (any, *abi.HostError) {
-	target, ok := modCtx.ComputeTargets()[dep.ModuleName]
+// borrowModuleInstance borrows a fresh instance from moduleName's own
+// pool and builds a nested ModuleContext scoped to that module's own
+// capabilities/models, inheriting the triggering request's identity
+// (tenant/user/trace) and registries from modCtx — so a nested call's own
+// host.orm calls (e.g. a compute function or preview hook looking up
+// related data) resolve exactly as if this were a normal request to that
+// module. Always a new instance — never the currently-executing one,
+// which can't be reentered mid-call — uniform whether moduleName is the
+// module that triggered the call or a different one reached through a
+// Many2One-hop dependency (go-sdk-reference.md §22 "Computed field
+// recomputation"). The returned cleanup func must be deferred by the
+// caller; hostErr is non-nil only when inst/cleanup are both nil.
+func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext, moduleName string) (inst *ModuleInstance, cleanup func(), hostErr *abi.HostError) {
+	target, ok := modCtx.ComputeTargets()[moduleName]
 	if !ok || target.Pool == nil {
-		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "module " + dep.ModuleName + " is not available to compute " + dep.Field}
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "module " + moduleName + " is not available"}
 	}
 
 	inst, err := target.Pool.Borrow(ctx)
 	if err != nil {
-		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
-	defer target.Pool.Return(inst)
 
-	// depCtx carries the triggering request's identity (tenant/user/
-	// trace) into the owning module's own model/capability scope, so a
-	// compute function's own host.orm calls (e.g. looking up related
-	// data) resolve against its own declared models exactly as if this
-	// were a normal request to that module.
 	depCtx := NewModuleContext(
-		modCtx.RequestID, dep.ModuleName, modCtx.UserID, modCtx.ContactID, modCtx.Roles,
+		modCtx.RequestID, moduleName, modCtx.UserID, modCtx.ContactID, modCtx.Roles,
 		modCtx.TenantID, modCtx.TenantSlug, modCtx.TraceID, target.Capabilities, modCtx.txLimiter,
 		ModuleSnapshot{
 			ModelDecls:       target.ModelDecls,
@@ -75,11 +74,24 @@ func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, dep c
 	)
 	inst.SetModuleContext(depCtx)
 	r.RegisterInstance(inst)
-	defer func() {
+
+	return inst, func() {
 		r.UnregisterInstance(inst)
 		depCtx.RollbackAll()
 		inst.SetModuleContext(nil)
-	}()
+		target.Pool.Return(inst)
+	}, nil
+}
+
+// invokeCompute borrows a fresh instance of dep's owning module and
+// invokes its registered compute function against record, returning the
+// recomputed value.
+func invokeCompute(ctx context.Context, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, record map[string]any) (any, *abi.HostError) {
+	inst, cleanup, hostErr := borrowModuleInstance(ctx, r, modCtx, dep.ModuleName)
+	if hostErr != nil {
+		return nil, hostErr
+	}
+	defer cleanup()
 
 	payload, err := msgpack.Marshal(computeRequest{
 		FnName:   dep.ComputeFn,
