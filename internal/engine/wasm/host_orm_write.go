@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,24 +21,55 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// This file holds host.orm's write half — create/write/unlink — the
-// goerp#343 core single-record path. Batch variants (create_batch,
-// first_or_create, write_many, write_where), OnConflictIgnore/
-// OnConflictUpdate, computed-field recompute (Store(true)/.Depends() has
-// no SDK primitive yet), orm.RegisterConstraint/OnDelete hooks (no SDK
-// primitive yet), DynamicLink/​.Tree() validation (no such field kinds
-// exist yet), and audit logging (goerp#363, tracked separately — no
-// audited_tables trigger mechanism exists anywhere in the engine despite
-// this ticket's own original text assuming one did) are all explicitly
-// out of scope for this file.
+// This file holds host.orm's write half — create/create_batch/
+// first_or_create/write/write_many/write_where/unlink (goerp#343/#380).
+// Computed-field recompute (Store(true)/.Depends() has no SDK primitive
+// yet), orm.RegisterConstraint/OnDelete hooks (no SDK primitive yet),
+// DynamicLink/.Tree() validation (no such field kinds exist yet), and
+// audit logging (goerp#363, tracked separately — no audited_tables
+// trigger mechanism exists anywhere in the engine despite this ticket's
+// own original text assuming one did) are all explicitly out of scope for
+// this file — see goerp#381/#382/#383.
+//
+// create_batch/first_or_create/write_many/write_where are not supported
+// for Transient-backed models (a Redis-backed key has no domain-query or
+// multi-row-transaction story the way a Postgres table does) — each
+// returns a descriptive error rather than silently misbehaving.
+
+type OnConflictOption struct {
+	Fields []string `msgpack:"fields"`
+	Policy string   `msgpack:"policy"` // "ignore" | "update"
+}
 
 type ORMCreateInput struct {
-	Model  string         `msgpack:"model"`
-	Record map[string]any `msgpack:"record"`
+	Model      string            `msgpack:"model"`
+	Record     map[string]any    `msgpack:"record"`
+	OnConflict *OnConflictOption `msgpack:"on_conflict,omitempty"`
 }
 
 type ORMCreateOutput struct {
 	Record map[string]any `msgpack:"record"`
+}
+
+type ORMCreateBatchInput struct {
+	Model      string            `msgpack:"model"`
+	Records    []map[string]any  `msgpack:"records"`
+	OnConflict *OnConflictOption `msgpack:"on_conflict,omitempty"`
+}
+
+type ORMCreateBatchOutput struct {
+	Records []map[string]any `msgpack:"records"`
+}
+
+type ORMFirstOrCreateInput struct {
+	Model  string         `msgpack:"model"`
+	Domain string         `msgpack:"domain"`
+	Record map[string]any `msgpack:"record"`
+}
+
+type ORMFirstOrCreateOutput struct {
+	Record  map[string]any `msgpack:"record"`
+	Created bool           `msgpack:"created"`
 }
 
 type ORMWriteInput struct {
@@ -49,6 +81,28 @@ type ORMWriteInput struct {
 
 type ORMWriteOutput struct {
 	Record map[string]any `msgpack:"record"`
+}
+
+type ORMWriteManyInput struct {
+	Model  string         `msgpack:"model"`
+	IDs    []string       `msgpack:"ids"`
+	Record map[string]any `msgpack:"record"`
+}
+
+type ORMWriteWhereInput struct {
+	Model  string         `msgpack:"model"`
+	Domain string         `msgpack:"domain"`
+	Record map[string]any `msgpack:"record"`
+}
+
+// ExecResult is write_many/write_where's return shape — how many rows
+// changed and which ones, without the cost of returning every full record
+// body for a call that could touch many rows. host-abi-reference.md names
+// this type but never defines its fields; nothing else in the repo
+// declares it, so this is the shape it gets.
+type ExecResult struct {
+	Count int      `msgpack:"count"`
+	IDs   []string `msgpack:"ids"`
 }
 
 type ORMUnlinkInput struct {
@@ -86,7 +140,8 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 // ORMCreate is host.orm create's plain-Go core — see ORMSearch's doc
 // comment (host_orm.go) for the shared-entry-point rationale. Branches to
 // transientCreate (host_orm_transient.go) for Transient-backed models
-// internally.
+// internally. The single-row insert itself is createOneRecordTx, shared
+// with ORMCreateBatch/ORMFirstOrCreate below.
 func ORMCreate(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMCreateInput) (ORMCreateOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMCreateOutput{}, abi.CapabilityDenied("db.write")
@@ -118,35 +173,26 @@ func ORMCreate(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.
 		return ORMCreateOutput{}, hostErr
 	}
 
-	cols, args, hostErr := buildAssignment(md, record)
+	row, inserted, hostErr := createOneRecordTx(ctx, tx, md, input.Model, record, input.OnConflict)
 	if hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
-	if len(cols) == 0 {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to insert"}
-	}
-	placeholders := make([]string, len(args))
-	for i := range args {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
-	}
-
-	table := quoteIdentORM(tableNameForORM(md))
-	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
-		table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-
-	rows, err := tx.QueryContext(ctx, insertSQL, args...)
-	if err != nil {
-		return ORMCreateOutput{}, translateWriteError(err, md)
-	}
-	created, err := scanRowsToMaps(rows)
-	if err != nil {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
-	}
-	if len(created) != 1 {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "insert did not return exactly one row"}
+	if row == nil {
+		// OnConflictIgnore skipped this row — nothing was created, so
+		// there's nothing to return and no event to emit. Matches the
+		// doc's own framing: a successful create call looks identical
+		// whether it inserted or hit the conflict target.
+		if err := tx.Commit(); err != nil {
+			return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		}
+		return ORMCreateOutput{}, nil
 	}
 
-	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, created[0]); err != nil {
+	eventName := "orm.record.created"
+	if !inserted {
+		eventName = "orm.record.updated"
+	}
+	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, eventName, input.Model, row); err != nil {
 		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
@@ -154,7 +200,211 @@ func ORMCreate(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.
 		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
-	return ORMCreateOutput{Record: created[0]}, nil
+	return ORMCreateOutput{Record: row}, nil
+}
+
+func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+		inst := r.InstanceForModule(m)
+		modCtx := inst.ModuleContext()
+		allocate := inst.allocate
+
+		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
+		if err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
+		}
+		var input ORMCreateBatchInput
+		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
+		}
+
+		out, hostErr := ORMCreateBatch(ctx, db, insertClient, modCtx, input)
+		if hostErr != nil {
+			return abi.EncodeHostError(ctx, m, allocate, hostErr)
+		}
+		return abi.WriteToModule(ctx, m, allocate, out)
+	}
+}
+
+// ORMCreateBatch inserts every record in input.Records inside one
+// transaction — sequential single-row INSERTs sharing one tx, not a true
+// multi-row VALUES/COPY statement: the doc's "COPY-backed" phrasing is an
+// SDK-level performance aspiration, not a correctness requirement, and
+// sequential-in-one-tx satisfies the real AC ("all-or-nothing, one
+// failure aborts the whole batch") via ordinary rollback while trivially
+// handling records with different field sets, which a single multi-row
+// statement would need a uniform column list for. Emits at most two
+// batched events (not one per record) — orm.record.created listing every
+// genuinely-inserted record, orm.record.updated listing any
+// OnConflictUpdate rows — matching the doc's explicit "batched into one
+// event with all IDs for create_batch, not one event per row".
+func ORMCreateBatch(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMCreateBatchInput) (ORMCreateBatchOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
+		return ORMCreateBatchOutput{}, abi.CapabilityDenied("db.write")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+	if md.Backend == model.BackendTransient {
+		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "create_batch is not supported for Transient-backed models"}
+	}
+	if len(input.Records) == 0 {
+		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "records must not be empty"}
+	}
+
+	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
+	if err != nil {
+		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var all, createdForEvent, updatedForEvent []map[string]any
+	for _, rec := range input.Records {
+		record := make(map[string]any, len(rec))
+		maps.Copy(record, rec)
+
+		if hostErr := validateRequired(md, record, true); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+		if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+
+		row, inserted, hostErr := createOneRecordTx(ctx, tx, md, input.Model, record, input.OnConflict)
+		if hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+		if row == nil {
+			continue // OnConflictIgnore skipped this one
+		}
+		all = append(all, row)
+		if inserted {
+			createdForEvent = append(createdForEvent, row)
+		} else {
+			updatedForEvent = append(updatedForEvent, row)
+		}
+	}
+
+	if len(createdForEvent) > 0 {
+		if err := emitBatchRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, createdForEvent); err != nil {
+			return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		}
+	}
+	if len(updatedForEvent) > 0 {
+		if err := emitBatchRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", input.Model, updatedForEvent); err != nil {
+			return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	}
+
+	return ORMCreateBatchOutput{Records: all}, nil
+}
+
+func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+		inst := r.InstanceForModule(m)
+		modCtx := inst.ModuleContext()
+		allocate := inst.allocate
+
+		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
+		if err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
+		}
+		var input ORMFirstOrCreateInput
+		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
+		}
+
+		out, hostErr := ORMFirstOrCreate(ctx, db, insertClient, modCtx, input)
+		if hostErr != nil {
+			return abi.EncodeHostError(ctx, m, allocate, hostErr)
+		}
+		return abi.WriteToModule(ctx, m, allocate, out)
+	}
+}
+
+// ORMFirstOrCreate searches input.Domain and creates input.Record only on
+// a miss, inside one transaction. Race-safety for concurrent callers
+// racing an *arbitrary* domain (unlike OnConflict's target, a domain
+// isn't necessarily backed by a unique index) uses a transaction-scoped
+// Postgres advisory lock keyed by hash(tenant, model, domain) — the
+// general-condition counterpart to AcquireNext's (internal/engine/orm)
+// keyed INSERT...ON CONFLICT DO UPDATE upsert pattern. The lock only
+// serializes callers racing the identical (tenant, model, domain) triple;
+// it's released automatically at commit/rollback.
+func ORMFirstOrCreate(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMFirstOrCreateInput) (ORMFirstOrCreateOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
+		return ORMFirstOrCreateOutput{}, abi.CapabilityDenied("db.write")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+	if md.Backend == model.BackendTransient {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "first_or_create is not supported for Transient-backed models"}
+	}
+
+	whereFrag, whereArgs, hostErr := compileDomain(input.Domain)
+	if hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
+
+	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
+	if err != nil {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	lockKey := modCtx.TenantSlug + ":" + input.Model + ":" + input.Domain
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+
+	table := quoteIdentORM(tableNameForORM(md))
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1", table, whereFrag), whereArgs...)
+	if err != nil {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	found, err := scanRowsToMaps(rows)
+	if err != nil {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	if len(found) > 0 {
+		if err := tx.Commit(); err != nil {
+			return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		}
+		return ORMFirstOrCreateOutput{Record: found[0], Created: false}, nil
+	}
+
+	record := make(map[string]any, len(input.Record))
+	maps.Copy(record, input.Record)
+	if hostErr := validateRequired(md, record, true); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
+	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
+
+	row, _, hostErr := createOneRecordTx(ctx, tx, md, input.Model, record, nil)
+	if hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
+
+	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, row); err != nil {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	if err := tx.Commit(); err != nil {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	}
+
+	return ORMFirstOrCreateOutput{Record: row, Created: true}, nil
 }
 
 func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -185,7 +435,8 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 // rotation happens before the Transient/Table branch deliberately — both
 // backends get the same new-etag-on-every-write semantics uniformly.
 // Branches to transientWrite (host_orm_transient.go) for Transient-backed
-// models internally.
+// models internally. The single-row update itself is writeOneRecordTx,
+// shared with ORMWriteMany/ORMWriteWhere below.
 func ORMWrite(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMWriteInput) (ORMWriteOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMWriteOutput{}, abi.CapabilityDenied("db.write")
@@ -222,45 +473,12 @@ func ORMWrite(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.T
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	sets, args, hostErr := buildAssignment(md, record)
+	updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, input.ID, record, input.ExpectedEtag)
 	if hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
-	if len(sets) == 0 {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to update"}
-	}
 
-	table := quoteIdentORM(tableNameForORM(md))
-	pkColQuoted := quoteIdentORM(pkCol)
-	setClauses := make([]string, len(sets))
-	for i, col := range sets {
-		setClauses[i] = col + " = $" + fmt.Sprint(i+1)
-	}
-
-	args = append(args, input.ID)
-	whereClause := fmt.Sprintf("%s = $%d", pkColQuoted, len(args))
-	if input.ExpectedEtag != "" && hasField(md, "etag") {
-		args = append(args, input.ExpectedEtag)
-		whereClause += fmt.Sprintf(" AND %s = $%d", quoteIdentORM("etag"), len(args))
-	}
-
-	updateSQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s RETURNING *",
-		table, strings.Join(setClauses, ", "), whereClause)
-
-	rows, err := tx.QueryContext(ctx, updateSQL, args...)
-	if err != nil {
-		return ORMWriteOutput{}, translateWriteError(err, md)
-	}
-	updated, err := scanRowsToMaps(rows)
-	if err != nil {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
-	}
-
-	if len(updated) == 0 {
-		return ORMWriteOutput{}, diagnoseZeroRowWrite(ctx, tx, table, pkColQuoted, input.ID, input.ExpectedEtag)
-	}
-
-	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", input.Model, updated[0]); err != nil {
+	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", input.Model, updated); err != nil {
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
@@ -268,7 +486,181 @@ func ORMWrite(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.T
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
-	return ORMWriteOutput{Record: updated[0]}, nil
+	return ORMWriteOutput{Record: updated}, nil
+}
+
+func makeORMWriteMany(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+		inst := r.InstanceForModule(m)
+		modCtx := inst.ModuleContext()
+		allocate := inst.allocate
+
+		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
+		if err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
+		}
+		var input ORMWriteManyInput
+		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
+		}
+
+		out, hostErr := ORMWriteMany(ctx, db, insertClient, modCtx, input)
+		if hostErr != nil {
+			return abi.EncodeHostError(ctx, m, allocate, hostErr)
+		}
+		return abi.WriteToModule(ctx, m, allocate, out)
+	}
+}
+
+// ORMWriteMany applies the same vals to every ID in one transaction, no
+// etag check (bulk operations don't have a single "the" etag to check
+// against). A missing ID or a validation failure aborts the whole
+// transaction — matches the AC's "a single record's validation failure
+// aborts the whole batch" and avoids silently skipping an ID a caller
+// explicitly asked to update. One orm.record.updated event per affected
+// record (not batched) — the doc's own explicit distinction from
+// create_batch's batching.
+func ORMWriteMany(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMWriteManyInput) (ExecResult, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
+		return ExecResult{}, abi.CapabilityDenied("db.write")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+	if md.Backend == model.BackendTransient {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "write_many is not supported for Transient-backed models"}
+	}
+	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
+		return ExecResult{}, hostErr
+	}
+
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+	}
+
+	record := make(map[string]any, len(input.Record)+1)
+	maps.Copy(record, input.Record)
+	if hasField(md, "etag") {
+		record["etag"] = uuid.Must(uuid.NewV7()).String()
+	}
+
+	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
+	if err != nil {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, hostErr := writeManyIDsTx(ctx, tx, insertClient, modCtx, md, pkCol, input.Model, input.IDs, record)
+	if hostErr != nil {
+		return ExecResult{}, hostErr
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	}
+
+	return result, nil
+}
+
+func makeORMWriteWhere(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+		inst := r.InstanceForModule(m)
+		modCtx := inst.ModuleContext()
+		allocate := inst.allocate
+
+		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
+		if err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
+		}
+		var input ORMWriteWhereInput
+		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
+			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
+		}
+
+		out, hostErr := ORMWriteWhere(ctx, db, insertClient, modCtx, input)
+		if hostErr != nil {
+			return abi.EncodeHostError(ctx, m, allocate, hostErr)
+		}
+		return abi.WriteToModule(ctx, m, allocate, out)
+	}
+}
+
+// ORMWriteWhere resolves matching IDs server-side (compileDomain, the
+// same domain-to-SQL compiler the read pipeline already uses — never
+// string-interpolating the caller's domain) and applies input.Record to
+// each inside one transaction, sharing writeManyIDsTx with ORMWriteMany.
+// A domain matching zero rows is a legitimate, non-error result
+// (ExecResult{Count: 0}) — unlike single write-by-ID, a bulk "where" that
+// happens to match nothing isn't exceptional.
+func ORMWriteWhere(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMWriteWhereInput) (ExecResult, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
+		return ExecResult{}, abi.CapabilityDenied("db.write")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+	if md.Backend == model.BackendTransient {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "write_where is not supported for Transient-backed models"}
+	}
+	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
+		return ExecResult{}, hostErr
+	}
+
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+	}
+
+	whereFrag, whereArgs, hostErr := compileDomain(input.Domain)
+	if hostErr != nil {
+		return ExecResult{}, hostErr
+	}
+
+	record := make(map[string]any, len(input.Record)+1)
+	maps.Copy(record, input.Record)
+	if hasField(md, "etag") {
+		record["etag"] = uuid.Must(uuid.NewV7()).String()
+	}
+
+	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
+	if err != nil {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	table := quoteIdentORM(tableNameForORM(md))
+	pkColQuoted := quoteIdentORM(pkCol)
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s", pkColQuoted, table, whereFrag), whereArgs...)
+	if err != nil {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	result, hostErr := writeManyIDsTx(ctx, tx, insertClient, modCtx, md, pkCol, input.Model, ids, record)
+	if hostErr != nil {
+		return ExecResult{}, hostErr
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	}
+
+	return result, nil
 }
 
 func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -460,6 +852,179 @@ func buildAssignment(md model.ModelDeclaration, record map[string]any) (cols []s
 	return cols, args, nil
 }
 
+// createOneRecordTx inserts one row on tx — the shared core of
+// ORMCreate/ORMCreateBatch/ORMFirstOrCreate. Caller is responsible for
+// validateRequired/acquireSequenceFields beforehand and event emission
+// afterward (the three callers emit differently: single, per-record, or
+// batched). When onConflict is set, its target is validated against a
+// real declared unique index (primaryKeyColumn or an IsUnique md.Indexes
+// entry) before building the INSERT — an unmatched target is
+// orm.conflict_target_invalid, never a silent full-table-scan fallback.
+//
+// RETURNING includes "(xmax = 0) AS __inserted" — the standard Postgres
+// idiom for "this row was inserted by this command, not updated via the
+// ON CONFLICT DO UPDATE arm" (xmax is 0 only for a row this exact command
+// just inserted). inserted tells the caller which event type to emit for
+// this row. An OnConflictIgnore hit returns (nil, false, nil) — a
+// skipped conflict is not an error, just nothing to report.
+func createOneRecordTx(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption) (map[string]any, bool, *abi.HostError) {
+	cols, args, hostErr := buildAssignment(md, record)
+	if hostErr != nil {
+		return nil, false, hostErr
+	}
+	if len(cols) == 0 {
+		return nil, false, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to insert"}
+	}
+	placeholders := make([]string, len(args))
+	for i := range args {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	table := quoteIdentORM(tableNameForORM(md))
+	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+		table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
+
+	if onConflict != nil {
+		targetCols, hostErr := validateOnConflictTarget(md, qualifiedModel, onConflict.Fields)
+		if hostErr != nil {
+			return nil, false, hostErr
+		}
+		quotedTarget := make([]string, len(targetCols))
+		for i, c := range targetCols {
+			quotedTarget[i] = quoteIdentORM(c)
+		}
+		switch onConflict.Policy {
+		case "ignore":
+			insertSQL += fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", strings.Join(quotedTarget, ", "))
+		case "update":
+			setClauses := make([]string, len(cols))
+			for i, c := range cols {
+				setClauses[i] = fmt.Sprintf("%s = EXCLUDED.%s", c, c)
+			}
+			insertSQL += fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", strings.Join(quotedTarget, ", "), strings.Join(setClauses, ", "))
+		default:
+			return nil, false, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "on_conflict.policy must be \"ignore\" or \"update\", got " + onConflict.Policy}
+		}
+	}
+
+	insertSQL += " RETURNING *, (xmax = 0) AS __inserted"
+
+	rows, err := tx.QueryContext(ctx, insertSQL, args...)
+	if err != nil {
+		return nil, false, translateWriteError(err, md)
+	}
+	created, err := scanRowsToMaps(rows)
+	if err != nil {
+		return nil, false, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	if len(created) == 0 {
+		return nil, false, nil
+	}
+	if len(created) != 1 {
+		return nil, false, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "insert did not return exactly one row"}
+	}
+
+	row := created[0]
+	inserted, _ := row["__inserted"].(bool)
+	delete(row, "__inserted")
+
+	return row, inserted, nil
+}
+
+// validateOnConflictTarget resolves fields against a real declared unique
+// index — the model's single-column primary key, or a md.Indexes entry
+// with Def.IsUnique whose column set matches exactly (order-independent).
+// No match is orm.conflict_target_invalid rather than a silent
+// full-table-scan fallback for conflict detection.
+func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, fields []string) ([]string, *abi.HostError) {
+	if len(fields) == 0 {
+		return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: "on_conflict.fields must not be empty"}
+	}
+	sorted := slices.Clone(fields)
+	slices.Sort(sorted)
+
+	if pkCol, ok := primaryKeyColumn(md); ok && len(sorted) == 1 && sorted[0] == pkCol {
+		return fields, nil
+	}
+	for _, idx := range md.Indexes {
+		if !idx.Def.IsUnique {
+			continue
+		}
+		cols := slices.Clone(idx.Def.Columns)
+		slices.Sort(cols)
+		if slices.Equal(cols, sorted) {
+			return fields, nil
+		}
+	}
+	return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: "on_conflict.fields " + strings.Join(fields, ", ") + " does not match any declared unique index on " + qualifiedModel}
+}
+
+// writeOneRecordTx updates the row identified by id on tx — the shared
+// core of ORMWrite/ORMWriteMany/ORMWriteWhere. expectedEtag == "" skips
+// the etag-scoped WHERE clause entirely (the bulk callers' "no etag
+// check" semantics); a non-empty expectedEtag adds it, matching single
+// write's optimistic-lock behavior.
+func writeOneRecordTx(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, id string, record map[string]any, expectedEtag string) (map[string]any, *abi.HostError) {
+	sets, args, hostErr := buildAssignment(md, record)
+	if hostErr != nil {
+		return nil, hostErr
+	}
+	if len(sets) == 0 {
+		return nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to update"}
+	}
+
+	table := quoteIdentORM(tableNameForORM(md))
+	pkColQuoted := quoteIdentORM(pkCol)
+	setClauses := make([]string, len(sets))
+	for i, col := range sets {
+		setClauses[i] = col + " = $" + fmt.Sprint(i+1)
+	}
+
+	args = append(args, id)
+	whereClause := fmt.Sprintf("%s = $%d", pkColQuoted, len(args))
+	if expectedEtag != "" && hasField(md, "etag") {
+		args = append(args, expectedEtag)
+		whereClause += fmt.Sprintf(" AND %s = $%d", quoteIdentORM("etag"), len(args))
+	}
+
+	updateSQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s RETURNING *",
+		table, strings.Join(setClauses, ", "), whereClause)
+
+	rows, err := tx.QueryContext(ctx, updateSQL, args...)
+	if err != nil {
+		return nil, translateWriteError(err, md)
+	}
+	updated, err := scanRowsToMaps(rows)
+	if err != nil {
+		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	if len(updated) == 0 {
+		return nil, diagnoseZeroRowWrite(ctx, tx, table, pkColQuoted, id, expectedEtag)
+	}
+	return updated[0], nil
+}
+
+// writeManyIDsTx applies record to every id on tx, emitting one
+// orm.record.updated event per affected record (not batched) — shared by
+// ORMWriteMany (caller-supplied IDs) and ORMWriteWhere (IDs resolved from
+// a domain first). A missing ID or validation failure aborts the whole
+// transaction, matching the AC's all-or-nothing requirement.
+func writeManyIDsTx(ctx context.Context, tx *sql.Tx, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (ExecResult, *abi.HostError) {
+	affected := make([]string, 0, len(ids))
+	for _, id := range ids {
+		updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, id, record, "")
+		if hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", qualifiedModel, updated); err != nil {
+			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		}
+		affected = append(affected, id)
+	}
+	return ExecResult{Count: len(affected), IDs: affected}, nil
+}
+
 // translateWriteError maps a Postgres write failure to the structured
 // orm.* error the caller should see, falling back to a plain
 // orm.unavailable for anything it doesn't recognize.
@@ -513,6 +1078,20 @@ func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, i
 // write is already its own distinct transaction.
 func emitRecordEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName, modelName string, record map[string]any) error {
 	payload, err := msgpack.Marshal(map[string]any{"model": modelName, "record": record})
+	if err != nil {
+		return err
+	}
+	eventID := uuid.Must(uuid.NewV7())
+	return insertEventDeliveryTx(ctx, insertClient, tx, eventID, eventName, 1,
+		modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0, nil)
+}
+
+// emitBatchRecordEvent is emitRecordEvent's plural form for
+// ORMCreateBatch — one event listing every record in records, matching
+// the doc's "batched into one event with all IDs for create_batch, not
+// one event per row".
+func emitBatchRecordEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName, modelName string, records []map[string]any) error {
+	payload, err := msgpack.Marshal(map[string]any{"model": modelName, "records": records})
 	if err != nil {
 		return err
 	}
