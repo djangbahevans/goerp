@@ -23,16 +23,19 @@ import (
 
 // This file holds host.orm's write half — create/create_batch/
 // first_or_create/write/write_many/write_where/unlink (goerp#343/#380),
-// plus Store(true)/.Depends() computed-field recompute (goerp#377) for
-// Table-backed models: recomputeAfterWrite runs inside the same
+// Store(true)/.Depends() computed-field recompute (goerp#377) for
+// Table-backed models (recomputeAfterWrite runs inside the same
 // transaction as the triggering create/write, for both same-record and
-// one-hop Many2One dependencies. orm.RegisterConstraint/OnDelete hooks
-// (no SDK primitive yet), DynamicLink/.Tree() validation (no such field
-// kinds exist yet), One2Many child-triggered recompute (goerp#388), and
-// audit logging (goerp#363, tracked separately — no audited_tables
-// trigger mechanism exists anywhere in the engine despite this ticket's
-// own original text assuming one did) are all explicitly out of scope for
-// this file — see goerp#381/#382/#383/#388.
+// one-hop Many2One dependencies), and orm.RegisterConstraint hooks
+// (goerp#378, runConstraintHook — host_orm_constraint.go), which run
+// after recomputeAfterWrite so a hook sees the fully-recomputed row, and
+// before event emission so a rejection aborts the whole transaction.
+// DynamicLink/.Tree() validation (no such field kinds exist yet),
+// One2Many child-triggered recompute (goerp#388), and audit logging
+// (goerp#363, tracked separately — no audited_tables trigger mechanism
+// exists anywhere in the engine despite this ticket's own original text
+// assuming one did) are all explicitly out of scope for this file — see
+// goerp#379/#383/#388.
 //
 // create_batch/first_or_create/write_many/write_where are not supported
 // for Transient-backed models (a Redis-backed key has no domain-query or
@@ -198,6 +201,9 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
+	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
+		return ORMCreateOutput{}, hostErr
+	}
 
 	eventName := "orm.record.created"
 	if !inserted {
@@ -291,6 +297,9 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			continue // OnConflictIgnore skipped this one
 		}
 		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+		if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
 		all = append(all, row)
@@ -414,6 +423,9 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
+	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
 
 	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, row); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
@@ -497,6 +509,9 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 	}
 
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(input.Record), updated); hostErr != nil {
+		return ORMWriteOutput{}, hostErr
+	}
+	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "write", updated); hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
 
@@ -700,7 +715,7 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		out, hostErr := ORMUnlink(ctx, db, insertClient, cacheClient, modCtx, input)
+		out, hostErr := ORMUnlink(ctx, r, db, insertClient, cacheClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -711,8 +726,13 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 // ORMUnlink is host.orm unlink's plain-Go core — see ORMSearch's doc
 // comment (host_orm.go) for the shared-entry-point rationale. Branches to
 // transientUnlink (host_orm_transient.go) for Transient-backed models
-// internally.
-func ORMUnlink(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMUnlinkInput) (ORMUnlinkOutput, *abi.HostError) {
+// internally. Fetches the row before deleting it (fetchRowByPK,
+// goerp#377) so the OnDelete constraint hook (goerp#378) can run against
+// it — and, per go-sdk-reference.md §22, before either the FK check or
+// the delete SQL itself, unlike OnCreate/OnWrite's after-the-write
+// placement (see this file's own package doc comment for why those two
+// differ).
+func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMUnlinkInput) (ORMUnlinkOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMUnlinkOutput{}, abi.CapabilityDenied("db.write")
 	}
@@ -739,6 +759,14 @@ func ORMUnlink(ctx context.Context, db *sql.DB, insertClient *river.Client[*sql.
 
 	table := quoteIdentORM(tableNameForORM(md))
 	pkColQuoted := quoteIdentORM(pkCol)
+
+	existing, hostErr := fetchRowByPK(ctx, tx, md, pkCol, input.ID)
+	if hostErr != nil {
+		return ORMUnlinkOutput{}, hostErr
+	}
+	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "delete", existing); hostErr != nil {
+		return ORMUnlinkOutput{}, hostErr
+	}
 
 	var deletedID string
 	if hasField(md, "deleted_at") {
@@ -1048,6 +1076,9 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 			return ExecResult{}, hostErr
 		}
 		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, qualifiedModel, md, changedFields, updated); hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if hostErr := runConstraintHook(ctx, r, modCtx, qualifiedModel, "write", updated); hostErr != nil {
 			return ExecResult{}, hostErr
 		}
 		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", qualifiedModel, updated); err != nil {

@@ -265,7 +265,7 @@ func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, p
 		return
 	}
 
-	_, hostErr := wasm.ORMUnlink(ctx, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMUnlinkInput{
+	_, hostErr := wasm.ORMUnlink(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMUnlinkInput{
 		Model: entry.Manifest.Model,
 		ID:    id,
 	})
