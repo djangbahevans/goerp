@@ -36,6 +36,17 @@ type Dependent struct {
 	// the caller resolves ViaFKField's value on each of ModelDecl's own
 	// rows to find which specific records need recomputing.
 	ViaFKField string
+
+	// ViaChildFKField is "" unless this dependency was declared through a
+	// One2Many field on ModelDecl (go-sdk-reference.md §22 "One2Many" /
+	// "Computed field recomputation"). It names the Many2One field on the
+	// *child* model (the One2Many field's own InverseField) that points
+	// back at ModelDecl — the mirror image of ViaFKField: instead of a
+	// WHERE query against many candidate rows, the caller reads
+	// ViaChildFKField's value directly off the child row that was just
+	// created/written/unlinked, since a child names its one parent
+	// directly.
+	ViaChildFKField string
 }
 
 // dependentKey identifies a computed field uniquely enough to de-dupe
@@ -59,23 +70,30 @@ type Index struct {
 	// at) -> changed field name on that related model -> dependents
 	// elsewhere whose Many2One field points here.
 	viaHop map[string]map[string][]Dependent
+
+	// viaChild: "module.model" (the CHILD model a One2Many field names)
+	// -> changed field name on that child model -> dependents on the
+	// parent that declared the One2Many field.
+	viaChild map[string]map[string][]Dependent
 }
 
 func New() *Index {
 	return &Index{
 		sameRecord: make(map[string]map[string][]Dependent),
 		viaHop:     make(map[string]map[string][]Dependent),
+		viaChild:   make(map[string]map[string][]Dependent),
 	}
 }
 
 // Register indexes every Computed field declared across decls (all owned
 // by moduleName) against the DependsOn paths it names. A DependsOn entry
-// that doesn't resolve — no dot and the named field doesn't exist, or a
+// that doesn't resolve — no dot and the named field doesn't exist, a
 // dotted path whose relField+"_id" isn't a declared Many2One field on the
-// same model — is silently skipped rather than erroring: this package has
-// no load-time validation authority (that belongs to internal/engine/loader,
-// a separate concern), and a malformed declaration should recompute
-// nothing rather than panic.
+// same model, and relField itself isn't a declared One2Many field on the
+// same model either — is silently skipped rather than erroring: this
+// package has no load-time validation authority (that belongs to
+// internal/engine/loader, a separate concern), and a malformed
+// declaration should recompute nothing rather than panic.
 func (idx *Index) Register(moduleName string, decls []model.ModelDeclaration) {
 	for _, decl := range decls {
 		qualifiedModel := moduleName + "." + decl.Name
@@ -98,11 +116,13 @@ func (idx *Index) Register(moduleName string, decls []model.ModelDeclaration) {
 					continue
 				}
 
-				fkField, ok := many2OneField(decl, relField+"_id")
-				if !ok {
+				if fkField, ok := many2OneField(decl, relField+"_id"); ok {
+					idx.addViaHop(fkField.Def.RelatedModel, remoteField, withViaFK(dep, fkField.Name))
 					continue
 				}
-				idx.addViaHop(fkField.Def.RelatedModel, remoteField, withViaFK(dep, fkField.Name))
+				if o2mField, ok := one2ManyField(decl, relField); ok {
+					idx.addViaChild(o2mField.Def.RelatedModel, remoteField, withViaChildFK(dep, o2mField.Def.InverseField))
+				}
 			}
 		}
 	}
@@ -122,8 +142,20 @@ func (idx *Index) addViaHop(relatedModel, field string, dep Dependent) {
 	idx.viaHop[relatedModel][field] = append(idx.viaHop[relatedModel][field], dep)
 }
 
+func (idx *Index) addViaChild(childModel, field string, dep Dependent) {
+	if idx.viaChild[childModel] == nil {
+		idx.viaChild[childModel] = make(map[string][]Dependent)
+	}
+	idx.viaChild[childModel][field] = append(idx.viaChild[childModel][field], dep)
+}
+
 func withViaFK(dep Dependent, fkField string) Dependent {
 	dep.ViaFKField = fkField
+	return dep
+}
+
+func withViaChildFK(dep Dependent, inverseField string) Dependent {
+	dep.ViaChildFKField = inverseField
 	return dep
 }
 
@@ -137,11 +169,25 @@ func many2OneField(decl model.ModelDeclaration, fieldName string) (model.NamedFi
 	return model.NamedField{}, false
 }
 
+// one2ManyField finds a declared One2Many field named fieldName on decl.
+func one2ManyField(decl model.ModelDeclaration, fieldName string) (model.NamedField, bool) {
+	for _, f := range decl.Fields {
+		if f.Name == fieldName && f.Def.Kind == model.KindOne2Many {
+			return f, true
+		}
+	}
+	return model.NamedField{}, false
+}
+
 // Lookup returns every computed field that depends on any field in
-// changedFields on qualifiedModel — both same-record dependents and
-// dependents reached through a Many2One hop pointing at qualifiedModel —
-// de-duplicated so a field depending on more than one changed field
-// appears once.
+// changedFields on qualifiedModel — same-record dependents, dependents
+// reached through a Many2One hop pointing at qualifiedModel, and
+// dependents reached through a One2Many hop naming qualifiedModel as the
+// child — de-duplicated so a field depending on more than one changed
+// field appears once. Callers where the written row no longer exists
+// (host.orm's unlink path) must use LookupViaChild instead: same-record
+// and Many2One-hop dependents both assume qualifiedModel's own row is
+// still there to read or update.
 func (idx *Index) Lookup(qualifiedModel string, changedFields []string) []Dependent {
 	seen := make(map[dependentKey]bool)
 	var out []Dependent
@@ -161,6 +207,33 @@ func (idx *Index) Lookup(qualifiedModel string, changedFields []string) []Depend
 		}
 		for _, dep := range idx.viaHop[qualifiedModel][field] {
 			add(dep)
+		}
+		for _, dep := range idx.viaChild[qualifiedModel][field] {
+			add(dep)
+		}
+	}
+
+	return out
+}
+
+// LookupViaChild returns only the One2Many-hop dependents reached from a
+// child row's changedFields on qualifiedChildModel — the delete-safe
+// subset of Lookup's results, for host.orm's unlink path (the child row
+// being processed no longer exists by the time recompute runs, so
+// same-record and Many2One-hop dependents, which assume it does, are
+// deliberately excluded here).
+func (idx *Index) LookupViaChild(qualifiedChildModel string, changedFields []string) []Dependent {
+	seen := make(map[dependentKey]bool)
+	var out []Dependent
+
+	for _, field := range changedFields {
+		for _, dep := range idx.viaChild[qualifiedChildModel][field] {
+			key := dependentKey{model: dep.ModuleName + "." + dep.ModelDecl.Name, field: dep.Field}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, dep)
 		}
 	}
 

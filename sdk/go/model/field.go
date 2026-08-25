@@ -186,5 +186,8 @@ func (f FieldDef) Store(stored bool) FieldDef { f.IsStored = stored; return f }
 
 // Depends names the fields this Computed field's value depends on —
 // either a bare field name on the same record, or "relField.remoteField"
-// through a Many2One field named relField+"_id" on the same model.
+// through either a Many2One field named relField+"_id" on the same model
+// (remoteField names a field on the Many2One's target model) or a
+// One2Many field named relField on the same model (remoteField names a
+// field on the One2Many's child model).
 func (f FieldDef) Depends(paths ...string) FieldDef { f.DependsOn = paths; return f }
