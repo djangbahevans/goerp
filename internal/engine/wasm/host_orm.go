@@ -39,7 +39,11 @@ func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql
 		NewFunctionBuilder().WithFunc(makeORMSearchRead(r, db)).Export("search_read").
 		NewFunctionBuilder().WithFunc(makeORMRead(r, db, cacheClient)).Export("read").
 		NewFunctionBuilder().WithFunc(makeORMCreate(r, db, insertClient, cacheClient)).Export("create").
+		NewFunctionBuilder().WithFunc(makeORMCreateBatch(r, db, insertClient)).Export("create_batch").
+		NewFunctionBuilder().WithFunc(makeORMFirstOrCreate(r, db, insertClient)).Export("first_or_create").
 		NewFunctionBuilder().WithFunc(makeORMWrite(r, db, insertClient, cacheClient)).Export("write").
+		NewFunctionBuilder().WithFunc(makeORMWriteMany(r, db, insertClient)).Export("write_many").
+		NewFunctionBuilder().WithFunc(makeORMWriteWhere(r, db, insertClient)).Export("write_where").
 		NewFunctionBuilder().WithFunc(makeORMUnlink(r, db, insertClient, cacheClient)).Export("unlink").
 		Instantiate(ctx)
 	return err

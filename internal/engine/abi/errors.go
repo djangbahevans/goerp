@@ -53,10 +53,11 @@ const (
 // host.orm write error codes (host-abi-reference.md §5a "host.orm.create"/
 // "host.orm.write"/"host.orm.unlink").
 const (
-	ErrCodeValidationFailed    = "orm.validation_failed"
-	ErrCodeUniqueViolation     = "orm.unique_violation"
-	ErrCodeEtagMismatch        = "orm.etag_mismatch"
-	ErrCodeForeignKeyViolation = "orm.foreign_key_violation"
+	ErrCodeValidationFailed      = "orm.validation_failed"
+	ErrCodeUniqueViolation       = "orm.unique_violation"
+	ErrCodeEtagMismatch          = "orm.etag_mismatch"
+	ErrCodeForeignKeyViolation   = "orm.foreign_key_violation"
+	ErrCodeConflictTargetInvalid = "orm.conflict_target_invalid"
 )
 
 // Transient-model error codes (go-sdk-reference.md §22 "Transient models").

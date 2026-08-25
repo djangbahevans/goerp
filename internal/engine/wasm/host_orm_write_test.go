@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,10 +12,14 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// hostORMWriteCallerModule exports call_create/call_write/call_unlink,
-// the same buildHostCallerModule forwarding-wrapper convention
-// hostORMCallerModule (host_orm_test.go) uses for the read half.
-var hostORMWriteCallerModule = buildHostCallerModule("host.orm", []string{"create", "write", "unlink"})
+// hostORMWriteCallerModule exports call_create/call_create_batch/
+// call_first_or_create/call_write/call_write_many/call_write_where/
+// call_unlink, the same buildHostCallerModule forwarding-wrapper
+// convention hostORMCallerModule (host_orm_test.go) uses for the read
+// half.
+var hostORMWriteCallerModule = buildHostCallerModule("host.orm", []string{
+	"create", "create_batch", "first_or_create", "write", "write_many", "write_where", "unlink",
+})
 
 func newHostORMWriteCaller(t *testing.T, ctx context.Context, r *Runtime, mc *ModuleContext) *ModuleInstance {
 	t.Helper()
@@ -453,5 +458,530 @@ func TestHostORM_Unlink_ForeignKeyViolation(t *testing.T) {
 	}
 	if env.Error.Code != abi.ErrCodeForeignKeyViolation {
 		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeForeignKeyViolation)
+	}
+}
+
+// --- goerp#380: create_batch, first_or_create, write_many, write_where, OnConflict* ---
+
+func TestHostORM_CreateBatch_AllOrNothing_OneFailureAbortsWholeBatch(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormcreatebatchabort%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	env := callORMHost(t, ctx, inst, "call_create_batch", ORMCreateBatchInput{
+		Model: "testmodule.item",
+		Records: []map[string]any{
+			{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+			{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001"}, // missing required "name"
+		},
+	}, nil)
+	if env.OK {
+		t.Fatal("expected a missing-required-field record to fail the whole batch")
+	}
+	if env.Error.Code != abi.ErrCodeValidationFailed {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeValidationFailed)
+	}
+
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("row count = %d, want 0 (the first record's insert should have rolled back too)", count)
+	}
+}
+
+func TestHostORM_CreateBatch_Succeeds_EmitsOneBatchedEvent(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormcreatebatchok%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	var out ORMCreateBatchOutput
+	env := callORMHost(t, ctx, inst, "call_create_batch", ORMCreateBatchInput{
+		Model: "testmodule.item",
+		Records: []map[string]any{
+			{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+			{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B"},
+		},
+	}, &out)
+	if !env.OK {
+		t.Fatalf("create_batch failed: %+v", env.Error)
+	}
+	if len(out.Records) != 2 {
+		t.Fatalf("len(Records) = %d, want 2", len(out.Records))
+	}
+
+	// One batched event, not one per record.
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+		t.Errorf("orm.record.created jobs = %d, want 1 (batched)", got)
+	}
+}
+
+func TestHostORM_Create_OnConflictIgnore_NoErrorNoEvent(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormconflictignore%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	first := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
+		"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "DUP",
+	}}
+	if env := callORMHost(t, ctx, inst, "call_create", first, nil); !env.OK {
+		t.Fatalf("first create failed: %+v", env.Error)
+	}
+
+	second := ORMCreateInput{
+		Model:      "testmodule.item",
+		Record:     map[string]any{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B", "code": "DUP"},
+		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "ignore"},
+	}
+	var out ORMCreateOutput
+	env := callORMHost(t, ctx, inst, "call_create", second, &out)
+	if !env.OK {
+		t.Fatalf("OnConflictIgnore create should not fail: %+v", env.Error)
+	}
+	if out.Record != nil {
+		t.Errorf("Record = %+v, want nil (nothing was created)", out.Record)
+	}
+
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE code = 'DUP'`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count = %d, want 1 (the conflicting insert should have been skipped, not applied)", count)
+	}
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+		t.Errorf("orm.record.created jobs = %d, want 1 (only the first create, none for the ignored conflict)", got)
+	}
+}
+
+func TestHostORM_Create_OnConflictUpdate_EmitsUpdatedNotCreated(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormconflictupdate%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	first := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
+		"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "DUP2",
+	}}
+	if env := callORMHost(t, ctx, inst, "call_create", first, nil); !env.OK {
+		t.Fatalf("first create failed: %+v", env.Error)
+	}
+
+	second := ORMCreateInput{
+		Model:      "testmodule.item",
+		Record:     map[string]any{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B updated", "code": "DUP2"},
+		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "update"},
+	}
+	var out ORMCreateOutput
+	env := callORMHost(t, ctx, inst, "call_create", second, &out)
+	if !env.OK {
+		t.Fatalf("OnConflictUpdate create failed: %+v", env.Error)
+	}
+	if out.Record["name"] != "B updated" {
+		t.Errorf("Record[name] = %v, want %q", out.Record["name"], "B updated")
+	}
+
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE code = 'DUP2'`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count = %d, want 1 (the conflicting row was updated in place, not duplicated)", count)
+	}
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+		t.Errorf("orm.record.created jobs = %d, want 1 (only the first, real create)", got)
+	}
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", slug); got != 1 {
+		t.Errorf("orm.record.updated jobs = %d, want 1 (the OnConflictUpdate row, not orm.record.created)", got)
+	}
+}
+
+func TestHostORM_Create_OnConflict_InvalidTarget_ConflictTargetInvalid(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormconflicttarget%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+		Model:      "testmodule.item",
+		Record:     map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+		OnConflict: &OnConflictOption{Fields: []string{"name"}, Policy: "ignore"}, // "name" has no unique index
+	}, nil)
+	if env.OK {
+		t.Fatal("expected a conflict target with no matching unique index to fail")
+	}
+	if env.Error.Code != abi.ErrCodeConflictTargetInvalid {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeConflictTargetInvalid)
+	}
+}
+
+func TestHostORM_FirstOrCreate_ExistingRecord_CreatedFalse(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormfochit%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "FOC-1"},
+	}, nil); !env.OK {
+		t.Fatalf("create failed: %+v", env.Error)
+	}
+
+	var out ORMFirstOrCreateOutput
+	env := callORMHost(t, ctx, inst, "call_first_or_create", ORMFirstOrCreateInput{
+		Model:  "testmodule.item",
+		Domain: "record.code = 'FOC-1'",
+		Record: map[string]any{"id": "99999999-9999-9999-9999-999999999999", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "should not be created", "code": "FOC-1"},
+	}, &out)
+	if !env.OK {
+		t.Fatalf("first_or_create failed: %+v", env.Error)
+	}
+	if out.Created {
+		t.Error("Created = true, want false (record already existed)")
+	}
+	if out.Record["id"] != id {
+		t.Errorf("Record[id] = %v, want %v (the existing record)", out.Record["id"], id)
+	}
+
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE code = 'FOC-1'`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count = %d, want 1 (no duplicate created)", count)
+	}
+}
+
+func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormfocmiss%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	var out ORMFirstOrCreateOutput
+	env := callORMHost(t, ctx, inst, "call_first_or_create", ORMFirstOrCreateInput{
+		Model:  "testmodule.item",
+		Domain: "record.code = 'FOC-2'",
+		Record: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New", "code": "FOC-2"},
+	}, &out)
+	if !env.OK {
+		t.Fatalf("first_or_create failed: %+v", env.Error)
+	}
+	if !out.Created {
+		t.Error("Created = false, want true (no matching record existed)")
+	}
+
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+		t.Errorf("orm.record.created jobs = %d, want 1", got)
+	}
+}
+
+// TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
+// drives two goroutines through ORMFirstOrCreate directly (bypassing the
+// WASM instance layer — a single ModuleInstance isn't safe for concurrent
+// calls, but the advisory lock this test is actually verifying is a
+// Postgres-level primitive, keyed the same way regardless of which Go
+// call reaches it) racing the identical (tenant, model, domain) triple.
+// Exactly one should observe Created=true.
+func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormfocrace%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	insertClient := newHostDBTestRuntime(t, primaryDB, 10).EventInsertClient()
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+
+	const n = 8
+	var wg sync.WaitGroup
+	results := make([]ORMFirstOrCreateOutput, n)
+	errs := make([]*abi.HostError, n)
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			out, hostErr := ORMFirstOrCreate(ctx, primaryDB, insertClient, mc, ORMFirstOrCreateInput{
+				Model:  "testmodule.item",
+				Domain: "record.code = 'FOC-RACE'",
+				Record: map[string]any{
+					"id": fmt.Sprintf("%08d-0000-0000-0000-000000000000", i), "tenant_id": "00000000-0000-0000-0000-000000000001",
+					"name": "Race", "code": "FOC-RACE",
+				},
+			})
+			results[i] = out
+			errs[i] = hostErr
+		}(i)
+	}
+	wg.Wait()
+
+	createdCount := 0
+	for i := range n {
+		if errs[i] != nil {
+			t.Fatalf("call %d failed: %+v", i, errs[i])
+		}
+		if results[i].Created {
+			createdCount++
+		}
+	}
+	if createdCount != 1 {
+		t.Errorf("createdCount = %d, want exactly 1 across %d concurrent callers racing the same domain", createdCount, n)
+	}
+
+	var rowCount int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE code = 'FOC-RACE'`).Scan(&rowCount); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if rowCount != 1 {
+		t.Errorf("row count = %d, want 1 (no duplicates)", rowCount)
+	}
+}
+
+func TestHostORM_WriteMany_UpdatesAllInOneTransaction(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormwritemanyok%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	ids := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
+	for i, id := range ids {
+		if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+			Model:  "testmodule.item",
+			Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Item %d", i)},
+		}, nil); !env.OK {
+			t.Fatalf("create %d failed: %+v", i, env.Error)
+		}
+	}
+
+	var out ExecResult
+	env := callORMHost(t, ctx, inst, "call_write_many", ORMWriteManyInput{
+		Model: "testmodule.item", IDs: ids, Record: map[string]any{"name": "Bulk renamed"},
+	}, &out)
+	if !env.OK {
+		t.Fatalf("write_many failed: %+v", env.Error)
+	}
+	if out.Count != 2 {
+		t.Errorf("Count = %d, want 2", out.Count)
+	}
+
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE name = 'Bulk renamed'`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("renamed row count = %d, want 2", count)
+	}
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", slug); got != 2 {
+		t.Errorf("orm.record.updated jobs = %d, want 2 (one per affected record, not batched)", got)
+	}
+}
+
+func TestHostORM_WriteMany_MissingID_AbortsWholeBatch(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormwritemanyabort%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+	}, nil); !env.OK {
+		t.Fatalf("create failed: %+v", env.Error)
+	}
+
+	env := callORMHost(t, ctx, inst, "call_write_many", ORMWriteManyInput{
+		Model: "testmodule.item", IDs: []string{id, "99999999-9999-9999-9999-999999999999"}, Record: map[string]any{"name": "Renamed"},
+	}, nil)
+	if env.OK {
+		t.Fatal("expected a missing ID to fail the whole batch")
+	}
+	if env.Error.Code != abi.ErrCodeNotFound {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeNotFound)
+	}
+
+	var name string
+	if err := primaryDB.QueryRow(`SELECT name FROM tenant_`+slug+`.item WHERE id = $1`, id).Scan(&name); err != nil {
+		t.Fatalf("query row: %v", err)
+	}
+	if name != "A" {
+		t.Errorf("name = %q, want %q (the first ID's update should have rolled back too)", name, "A")
+	}
+}
+
+func TestHostORM_WriteWhere_UpdatesMatchingRows(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormwritewhereok%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	// "code" carries a unique index, so each row (matching or not) needs
+	// its own distinct value — the domain below matches by IN(...) over
+	// two of the three codes rather than a shared value.
+	matching := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
+	matchingCodes := []string{"WHERE-1", "WHERE-2"}
+	for i, id := range matching {
+		if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+			Model:  "testmodule.item",
+			Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Match %d", i), "code": matchingCodes[i]},
+		}, nil); !env.OK {
+			t.Fatalf("create matching %d failed: %+v", i, env.Error)
+		}
+	}
+	nonMatchingID := "33333333-3333-3333-3333-333333333333"
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": nonMatchingID, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "No match", "code": "WHERE-OTHER"},
+	}, nil); !env.OK {
+		t.Fatalf("create non-matching failed: %+v", env.Error)
+	}
+
+	var out ExecResult
+	env := callORMHost(t, ctx, inst, "call_write_where", ORMWriteWhereInput{
+		Model: "testmodule.item", Domain: "record.code IN ('WHERE-1', 'WHERE-2')", Record: map[string]any{"name": "Bulk via domain"},
+	}, &out)
+	if !env.OK {
+		t.Fatalf("write_where failed: %+v", env.Error)
+	}
+	if out.Count != 2 {
+		t.Errorf("Count = %d, want 2", out.Count)
+	}
+
+	var nonMatchName string
+	if err := primaryDB.QueryRow(`SELECT name FROM tenant_`+slug+`.item WHERE id = $1`, nonMatchingID).Scan(&nonMatchName); err != nil {
+		t.Fatalf("query row: %v", err)
+	}
+	if nonMatchName != "No match" {
+		t.Errorf("non-matching row's name = %q, want unchanged %q", nonMatchName, "No match")
+	}
+}
+
+func TestHostORM_WriteWhere_MalformedDomain_DomainInvalid(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormwritewherebad%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	env := callORMHost(t, ctx, inst, "call_write_where", ORMWriteWhereInput{
+		Model: "testmodule.item", Domain: "record.code == ???", Record: map[string]any{"name": "X"},
+	}, nil)
+	if env.OK {
+		t.Fatal("expected a malformed domain to fail")
+	}
+	if env.Error.Code != abi.ErrCodeDomainInvalid {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeDomainInvalid)
+	}
+}
+
+func TestHostORM_WriteWhere_ValueWithSingleQuote_SafelyEscaped(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormwritewhereinj%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "O'Brien", "code": "INJ-1"},
+	}, nil); !env.OK {
+		t.Fatalf("create failed: %+v", env.Error)
+	}
+
+	var out ExecResult
+	env := callORMHost(t, ctx, inst, "call_write_where", ORMWriteWhereInput{
+		Model: "testmodule.item", Domain: "record.name = 'O''Brien'", Record: map[string]any{"name": "Renamed"},
+	}, &out)
+	if !env.OK {
+		t.Fatalf("write_where with an escaped literal failed: %+v", env.Error)
+	}
+	if out.Count != 1 {
+		t.Errorf("Count = %d, want 1", out.Count)
+	}
+
+	var stillExists int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item`).Scan(&stillExists); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if stillExists != 1 {
+		t.Errorf("row count = %d, want 1 (the table itself, not dropped or otherwise disturbed)", stillExists)
 	}
 }
