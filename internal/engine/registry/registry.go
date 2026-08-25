@@ -111,13 +111,13 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 func registerBuiltinRoutes(table *route.RouteTable) {
 	for _, path := range []string{"/_health", "/_ready"} {
 		table.Register("GET", path, &route.RouteEntry{
-			Manifest:     route.RouteManifest{EngineNative: true},
+			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 			PathTemplate: path,
 		})
 	}
 	for _, path := range []string{"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify", "/admin/users/{id}/mfa/reset"} {
 		table.Register("POST", path, &route.RouteEntry{
-			Manifest:     route.RouteManifest{EngineNative: true},
+			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 			PathTemplate: path,
 		})
 	}

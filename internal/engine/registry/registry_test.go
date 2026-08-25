@@ -335,6 +335,9 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 		if !entry.Manifest.EngineNative {
 			t.Errorf("Lookup(GET, %q).Manifest.EngineNative = false, want true", path)
 		}
+		if !entry.Manifest.EngineBuiltin {
+			t.Errorf("Lookup(GET, %q).Manifest.EngineBuiltin = false, want true", path)
+		}
 	}
 
 	entry, _, result, _ := table.Lookup("POST", "/auth/login")
@@ -343,6 +346,9 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	}
 	if !entry.Manifest.EngineNative {
 		t.Error("Lookup(POST, /auth/login).Manifest.EngineNative = false, want true")
+	}
+	if !entry.Manifest.EngineBuiltin {
+		t.Error("Lookup(POST, /auth/login).Manifest.EngineBuiltin = false, want true")
 	}
 }
 

@@ -17,7 +17,7 @@ func withTenantContext(ctx context.Context, tc *tenantresolve.TenantContext) con
 }
 
 // tenantFromContext returns the TenantContext tenantResolutionMiddleware
-// resolved for this request, or nil for an EngineNative route (that
+// resolved for this request, or nil for an EngineBuiltin route (that
 // middleware's own no-op case, documented on it) or a request that
 // hasn't reached that middleware yet.
 func tenantFromContext(ctx context.Context) *tenantresolve.TenantContext {
@@ -32,7 +32,7 @@ func withAuthContext(ctx context.Context, ac *authcheck.AuthContext) context.Con
 }
 
 // authFromContext returns the AuthContext authMiddleware populated for
-// this request, or nil for an EngineNative route (that middleware's own
+// this request, or nil for an EngineBuiltin route (that middleware's own
 // no-op case) or a request that hasn't reached that middleware yet.
 func authFromContext(ctx context.Context) *authcheck.AuthContext {
 	ac, _ := ctx.Value(authContextKey{}).(*authcheck.AuthContext)
@@ -41,7 +41,7 @@ func authFromContext(ctx context.Context) *authcheck.AuthContext {
 
 // tenantResolutionMiddleware implements auth-internals.md §9 step 5's
 // Class A path — Host-header tenant resolution — for every module route.
-// Engine-builtin routes (EngineNative) are a deliberate no-op here: each
+// Engine-builtin routes (EngineBuiltin) are a deliberate no-op here: each
 // one already resolves its own tenant directly inside its own handler
 // (the "Class-A-direct-primitives" pattern established across the MFA
 // cluster of tickets, adopted because this middleware didn't exist yet
@@ -51,11 +51,17 @@ func authFromContext(ctx context.Context) *authcheck.AuthContext {
 // those existing handlers needs to change now that this middleware
 // exists; the doc comments on mfareverify/mfareset/loginflow/mfaverify
 // already say as much.
+//
+// EngineBuiltin is distinct from RouteManifest.EngineNative (which marks
+// a route dispatched without a WASM instance, e.g. an EnableOps-derived
+// CRUD route) — an EnableOps route still needs tenant resolution like
+// any other module route, see EngineNative's own doc comment
+// (route/manifest.go).
 func tenantResolutionMiddleware(resolver *tenantresolve.Resolver) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rr := routeResolutionFromContext(r.Context())
-			if rr == nil || rr.entry.Manifest.EngineNative {
+			if rr == nil || rr.entry.Manifest.EngineBuiltin {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -93,7 +99,7 @@ func tenantResolutionMiddleware(resolver *tenantresolve.Resolver) func(http.Hand
 // The mfa_token third branch (Checker.AuthenticateMFAToken) is
 // deliberately not wired into this middleware: auth-internals.md §9's own
 // "Route classes" section scopes that branch to /auth/mfa/verify only,
-// and that route is EngineNative — handled entirely by its own handler,
+// and that route is EngineBuiltin — handled entirely by its own handler,
 // which already extracts and verifies the mfa_token itself from the POST
 // body (predating this middleware). Teeing every module route's request
 // body here on the chance it contains an mfa_token would cost every
@@ -104,13 +110,13 @@ func tenantResolutionMiddleware(resolver *tenantresolve.Resolver) func(http.Hand
 // exists), consistent with goerp#224's own scope note that nothing built
 // the direct-primitives way needs unwinding when this middleware landed.
 //
-// A deliberate no-op for EngineNative routes, same reasoning as
+// A deliberate no-op for EngineBuiltin routes, same reasoning as
 // tenantResolutionMiddleware.
 func authMiddleware(checker *authcheck.Checker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rr := routeResolutionFromContext(r.Context())
-			if rr == nil || rr.entry.Manifest.EngineNative {
+			if rr == nil || rr.entry.Manifest.EngineBuiltin {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -154,15 +160,15 @@ func authenticateErrorResponse(err error) (int, string) {
 // — MFA assurance (AMR, MFAVerifiedAt) is a session concept neither of
 // those carries, and an Anonymous request to a route requiring auth is
 // routeAuthMiddleware's rejection to make, not this step's. A deliberate
-// no-op for EngineNative routes, same reasoning as
+// no-op for EngineBuiltin routes, same reasoning as
 // tenantResolutionMiddleware — /auth/mfa/verify, /auth/mfa/reverify, and
 // /auth/mfa/enroll* are exempt from this check per auth-internals.md §8
-// precisely because they're EngineNative and never reach here.
+// precisely because they're EngineBuiltin and never reach here.
 func mfaEnforcementMiddleware(checker *authcheck.Checker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rr := routeResolutionFromContext(r.Context())
-			if rr == nil || rr.entry.Manifest.EngineNative {
+			if rr == nil || rr.entry.Manifest.EngineBuiltin {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -201,13 +207,13 @@ func mfaEnforcementMiddleware(checker *authcheck.Checker) func(http.Handler) htt
 // same as Anonymous for every other route, since only IsAuthenticated
 // gates them") — not applicable in practice today since no module route
 // authenticates via AuthenticateMFAToken (see authMiddleware), but kept
-// correct for when one does. A deliberate no-op for EngineNative routes,
+// correct for when one does. A deliberate no-op for EngineBuiltin routes,
 // same reasoning as tenantResolutionMiddleware.
 func routeAuthMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rr := routeResolutionFromContext(r.Context())
-			if rr == nil || rr.entry.Manifest.EngineNative {
+			if rr == nil || rr.entry.Manifest.EngineBuiltin {
 				next.ServeHTTP(w, r)
 				return
 			}

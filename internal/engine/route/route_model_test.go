@@ -34,6 +34,15 @@ func TestRegisterModelRoutes_DerivesOnlyEnabledOps(t *testing.T) {
 		if !entry.Manifest.EngineNative {
 			t.Fatalf("%s %s: EngineNative = false, want true", tc.method, tc.path)
 		}
+		if entry.Manifest.EngineBuiltin {
+			// goerp#369: EngineNative marks dispatch-routing (this route
+			// dispatches through dispatchORMRoute, not WASM) — it must
+			// never imply EngineBuiltin (tenant/auth middleware bypass),
+			// which is reserved for the fixed set of engine infra routes
+			// registerBuiltinRoutes registers. An EnableOps-derived route
+			// still needs full tenant/auth/permission enforcement.
+			t.Fatalf("%s %s: EngineBuiltin = true, want false — an EnableOps route must not bypass tenant/auth middleware", tc.method, tc.path)
+		}
 		if entry.Manifest.StorageBackend != "table" {
 			t.Fatalf("%s %s: StorageBackend = %q, want %q", tc.method, tc.path, entry.Manifest.StorageBackend, "table")
 		}
