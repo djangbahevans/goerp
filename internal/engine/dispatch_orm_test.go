@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -24,6 +25,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // dispatchORMTestPostgresDSN points directly at the compose.dev.yml
@@ -38,6 +40,28 @@ func openDispatchORMTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
+}
+
+// ensureRiverJobMigrated applies River's own schema migrations
+// (jobqueue.Migrate, idempotent and advisory-locked) against the test
+// Postgres instance — ORMCreate/Write/Unlink insert into river_job
+// transactionally via the event insert client (host_orm_write.go's
+// emitRecordEvent), and nothing guarantees some other package's test has
+// already migrated it first; relying on that incidental ordering is
+// exactly the kind of flake CI catches (test file execution order within
+// a package is filename-alphabetical, and dispatch_orm_test.go sorts
+// before whatever file's test happens to construct a full Engine).
+func ensureRiverJobMigrated(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dispatchORMTestPostgresDSN)
+	if err != nil {
+		t.Fatalf("pgxpool.New: %v", err)
+	}
+	defer pool.Close()
+	if err := jobqueue.Migrate(ctx, pool); err != nil {
+		t.Fatalf("jobqueue.Migrate: %v", err)
+	}
 }
 
 func widgetModelDecl() model.ModelDeclaration {
@@ -98,6 +122,7 @@ type dispatchORMFixture struct {
 func newDispatchORMFixture(t *testing.T) *dispatchORMFixture {
 	t.Helper()
 	conn := openDispatchORMTestDB(t)
+	ensureRiverJobMigrated(t)
 	slug := fmt.Sprintf("dispatchormtest%d", time.Now().UnixNano())
 	createFixtureWidgetsSchema(t, conn, slug)
 
