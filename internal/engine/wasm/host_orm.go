@@ -466,12 +466,19 @@ func compileDomain(src string) (string, []any, *abi.HostError) {
 
 // readableColumns validates the caller's requested field list against the
 // model's declared fields (orm.field_unknown for anything not declared)
-// and, when empty, defaults to every declared field.
+// and, when empty, defaults to every declared field. A One2Many field has
+// no backing column (go-sdk-reference.md §22 "One2Many" — its data lives
+// on the child model's own Many2One column, served via a separate
+// sub-resource route), so it's excluded from the default list and
+// rejected if explicitly requested.
 func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested []string) ([]string, *abi.HostError) {
-	declared := make(map[string]bool, len(md.Fields))
+	declared := make(map[string]model.FieldDef, len(md.Fields))
 	all := make([]string, 0, len(md.Fields))
 	for _, f := range md.Fields {
-		declared[f.Name] = true
+		declared[f.Name] = f.Def
+		if f.Def.Kind == model.KindOne2Many {
+			continue
+		}
 		all = append(all, f.Name)
 	}
 
@@ -479,8 +486,12 @@ func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested
 		return all, nil
 	}
 	for _, f := range requested {
-		if !declared[f] {
+		def, ok := declared[f]
+		if !ok {
 			return nil, &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + f + " is not declared on " + qualifiedModel}
+		}
+		if def.Kind == model.KindOne2Many {
+			return nil, &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + f + " is a One2Many relation and cannot be selected directly"}
 		}
 	}
 	return requested, nil

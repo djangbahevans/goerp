@@ -21,6 +21,7 @@ const (
 	KindMany2One
 	KindSequence
 	KindDynamicLink
+	KindOne2Many
 )
 
 // OnDeleteBehaviour is a Many2One field's FOREIGN KEY ON DELETE action.
@@ -65,6 +66,13 @@ type FieldDef struct {
 	// "DynamicLink". ReferenceTypeField names the sibling Selection field
 	// whose value picks this record's target model per row.
 	ReferenceTypeField string `msgpack:"reference_type_field,omitempty"`
+
+	// One2Many (KindOne2Many only) — go-sdk-reference.md §22 "One2Many".
+	// RelatedModel (shared with Many2One above) names the child model;
+	// InverseField names the Many2One field on that child model that
+	// points back at the declaring model. No backing column: the data
+	// lives entirely on the child's own Many2One column.
+	InverseField string `msgpack:"inverse_field,omitempty"`
 
 	// Computed field recomputation (go-sdk-reference.md §22 "Computed
 	// field recomputation")
@@ -125,6 +133,15 @@ func Sequence(format string) FieldDef {
 // per row.
 func DynamicLink(referenceTypeField string) FieldDef {
 	return FieldDef{Kind: KindDynamicLink, ReferenceTypeField: referenceTypeField}
+}
+
+// One2Many declares the inverse side of a Many2One relation — a virtual
+// field with no backing column. relatedModel names the child model
+// (module-qualified); inverseField names the Many2One field on that
+// child model that points back at this model — see
+// go-sdk-reference.md §22 "One2Many".
+func One2Many(relatedModel, inverseField string) FieldDef {
+	return FieldDef{Kind: KindOne2Many, RelatedModel: relatedModel, InverseField: inverseField}
 }
 
 func (f FieldDef) Required() FieldDef           { f.IsRequired = true; return f }

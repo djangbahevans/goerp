@@ -28,7 +28,9 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 	}
 
 	tables := make(map[string]*schema.Table, len(modelDecls))
+	declsByName := make(map[string]model.ModelDeclaration, len(modelDecls))
 	for _, md := range modelDecls {
+		declsByName[md.Name] = md
 		if md.Backend != "" {
 			// A non-default backend (currently only Virtual) has no
 			// table for schema sync to create or manage.
@@ -45,30 +47,74 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 	// Foreign keys are added in a second pass, once every table in this
 	// module exists, so a Many2One field can target a model declared
 	// later in modelDecls (or itself, for a self-referencing relation)
-	// without ordering constraints.
+	// without ordering constraints. One2Many validation runs in the same
+	// pass for the same reason — its target model may be declared later.
 	for _, md := range modelDecls {
 		for _, f := range md.Fields {
-			if f.Def.Kind != model.KindMany2One {
-				continue
-			}
-			if f.Def.IsTree {
-				// .Tree() is a modifier on a self-referential Many2One —
-				// go-sdk-reference.md §22 "Tree": "requires relatedModel
-				// to be the model's own name." No FK is skipped for
-				// this: Tree fields still get the ordinary Many2One FK
-				// below, this only rejects a .Tree() field that isn't
-				// actually self-referential.
-				if f.Def.RelatedModel != moduleName+"."+md.Name {
-					return nil, fmt.Errorf("model %s: field %s: .Tree() requires related_model %q to be the declaring model's own name %q", md.Name, f.Name, f.Def.RelatedModel, moduleName+"."+md.Name)
+			switch f.Def.Kind {
+			case model.KindMany2One:
+				if f.Def.IsTree {
+					// .Tree() is a modifier on a self-referential Many2One —
+					// go-sdk-reference.md §22 "Tree": "requires relatedModel
+					// to be the model's own name." No FK is skipped for
+					// this: Tree fields still get the ordinary Many2One FK
+					// below, this only rejects a .Tree() field that isn't
+					// actually self-referential.
+					if f.Def.RelatedModel != moduleName+"."+md.Name {
+						return nil, fmt.Errorf("model %s: field %s: .Tree() requires related_model %q to be the declaring model's own name %q", md.Name, f.Name, f.Def.RelatedModel, moduleName+"."+md.Name)
+					}
 				}
-			}
-			if err := addForeignKey(tables[md.Name], f, moduleName, modelDecls, tables); err != nil {
-				return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
+				if err := addForeignKey(tables[md.Name], f, moduleName, modelDecls, tables); err != nil {
+					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
+				}
+			case model.KindOne2Many:
+				if err := validateOne2Many(md, f, moduleName, declsByName); err != nil {
+					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
+				}
 			}
 		}
 	}
 
 	return s, nil
+}
+
+// validateOne2Many checks that a One2Many field's declared inverse field
+// actually exists on the related model, is itself a Many2One, and points
+// back at the declaring model — go-sdk-reference.md §22 "One2Many". No FK
+// or column is emitted: the data lives entirely on the child's own
+// Many2One column.
+func validateOne2Many(md model.ModelDeclaration, f model.NamedField, moduleName string, declsByName map[string]model.ModelDeclaration) error {
+	prefix := moduleName + "."
+	if !strings.HasPrefix(f.Def.RelatedModel, prefix) {
+		return fmt.Errorf("related_model %q must be module-qualified as %q (cross-module One2Many relations aren't resolvable yet)", f.Def.RelatedModel, prefix+"...")
+	}
+	targetModelName := strings.TrimPrefix(f.Def.RelatedModel, prefix)
+	targetMD, ok := declsByName[targetModelName]
+	if !ok {
+		return fmt.Errorf("related_model %q is not one of this module's own declared models", f.Def.RelatedModel)
+	}
+
+	var inverse model.NamedField
+	var found bool
+	for _, tf := range targetMD.Fields {
+		if tf.Name == f.Def.InverseField {
+			inverse = tf
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("inverse field %q not found on related_model %q", f.Def.InverseField, f.Def.RelatedModel)
+	}
+	if inverse.Def.Kind != model.KindMany2One {
+		return fmt.Errorf("inverse field %q on related_model %q is not a Many2One", f.Def.InverseField, f.Def.RelatedModel)
+	}
+	declaringModel := moduleName + "." + md.Name
+	if inverse.Def.RelatedModel != declaringModel {
+		return fmt.Errorf("inverse field %q on related_model %q does not point back at %q", f.Def.InverseField, f.Def.RelatedModel, declaringModel)
+	}
+
+	return nil
 }
 
 func addForeignKey(t *schema.Table, f model.NamedField, moduleName string, modelDecls []model.ModelDeclaration, tables map[string]*schema.Table) error {
@@ -138,6 +184,12 @@ func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumTy
 	var pk []*schema.Column
 	var primaryField string
 	for _, f := range md.Fields {
+		if f.Def.Kind == model.KindOne2Many {
+			// go-sdk-reference.md §22 "One2Many": inverseField is pure
+			// metadata pointing at the child's own existing Many2One
+			// column — no backing column on this table.
+			continue
+		}
 		col, err := toAtlasColumn(f.Name, f.Def, enumTypes)
 		if err != nil {
 			return nil, fmt.Errorf("field %s: %w", f.Name, err)
