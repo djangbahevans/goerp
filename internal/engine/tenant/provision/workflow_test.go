@@ -205,6 +205,17 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		t.Error("expected the sequences table to have been created by CreateEngineTables")
 	}
 
+	var auditLogExists bool
+	if err := env.conn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'audit_log')",
+		"tenant_"+slug,
+	).Scan(&auditLogExists); err != nil {
+		t.Fatalf("check audit_log table: %v", err)
+	}
+	if !auditLogExists {
+		t.Error("expected the audit_log table to have been created by CreateEngineTables")
+	}
+
 	var configValue []byte
 	err = env.conn.QueryRow(
 		`SELECT value FROM ` + tenantschema.Name(slug) + `.module_config WHERE module_name = 'widgets' AND key = 'currency'`,

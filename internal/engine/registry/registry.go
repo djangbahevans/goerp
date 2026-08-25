@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/djangbahevans/goerp/internal/engine/computed"
+	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
@@ -48,6 +49,7 @@ func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*Regis
 		fieldSecRegistry: buildFieldSecRegistry(modules),
 		jobRegistry:      jobRegistry,
 		computedIndex:    buildComputedIndex(modules),
+		dataAuditReg:     buildDataAuditRegistry(modules),
 	}
 	if old != nil {
 		newSnap.cronRegistry = old.cronRegistry
@@ -84,6 +86,17 @@ func buildComputedIndex(modules map[string]*module.LoadedModule) *computed.Index
 		idx.Register(name, m.ModelDecls)
 	}
 	return idx
+}
+
+func buildDataAuditRegistry(modules map[string]*module.LoadedModule) *dataaudit.Registry {
+	reg := dataaudit.New()
+	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		reg.Register(name, m.Manifest.AuditedTables, m.ModelDecls)
+	}
+	return reg
 }
 
 func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable, error) {

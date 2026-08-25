@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/computed"
+	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
@@ -24,6 +25,7 @@ type RegistrySnapshot struct {
 	cronRegistry     *CronRegistry
 	schemaRegistry   *SchemaRegistry
 	computedIndex    *computed.Index
+	dataAuditReg     *dataaudit.Registry
 }
 
 // Modules returns this snapshot's backing map, successful and
@@ -65,6 +67,14 @@ func (s *RegistrySnapshot) EventRegistry() *event.EventRegistry {
 // fields elsewhere need to recompute when a given model's field changes.
 func (s *RegistrySnapshot) ComputedIndex() *computed.Index {
 	return s.computedIndex
+}
+
+// DataAuditRegistry returns this snapshot's audited-tables reverse lookup
+// (manifest-spec.md §19 "Audited Tables") — which qualified models
+// host.orm's write path must record an audit_log row for, and which
+// columns to exclude from the JSONB old/new-value snapshots.
+func (s *RegistrySnapshot) DataAuditRegistry() *dataaudit.Registry {
+	return s.dataAuditReg
 }
 
 // ModelByName resolves a RouteManifest.Model-shaped "{module}.{resource}"
