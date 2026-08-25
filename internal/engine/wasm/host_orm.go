@@ -89,10 +89,6 @@ func makeORMSearch(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Modul
 		modCtx := inst.ModuleContext()
 		allocate := inst.allocate
 
-		if !modCtx.Capabilities().Has(abi.CapDBRead) {
-			return abi.EncodeHostError(ctx, m, allocate, abi.CapabilityDenied("db.read"))
-		}
-
 		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
@@ -102,60 +98,78 @@ func makeORMSearch(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Modul
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		md, ok := resolveModel(modCtx, input.Model)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
-		}
-		if md.Backend == model.BackendTransient {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"})
-		}
-
-		whereFrag, args, hostErr := compileDomain(input.Domain)
+		out, hostErr := ORMSearch(ctx, db, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
-
-		pkCol, ok := primaryKeyColumn(md)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"})
-		}
-
-		tx, err := beginTenantScopedRead(ctx, db, modCtx)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-		defer func() { _ = tx.Rollback() }()
-
-		table := quoteIdentORM(tableNameForORM(md))
-		pkColQuoted := quoteIdentORM(pkCol)
-
-		var count int64
-		countSQL := fmt.Sprintf("SELECT count(*) FROM %s WHERE %s", table, whereFrag)
-		if err := tx.QueryRowContext(ctx, countSQL, args...).Scan(&count); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-
-		listSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s%s", pkColQuoted, table, whereFrag, orderLimitOffsetClause(input.Order, input.Limit, input.Offset))
-		rows, err := tx.QueryContext(ctx, listSQL, args...)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-		defer rows.Close()
-
-		var ids []string
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-			}
-			ids = append(ids, id)
-		}
-		if err := rows.Err(); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-
-		return abi.WriteToModule(ctx, m, allocate, ormSearchOutput{IDs: ids, Count: count})
+		return abi.WriteToModule(ctx, m, allocate, out)
 	}
+}
+
+// ORMSearch is host.orm search's plain-Go core, callable without a WASM
+// instance in the loop — the shared entry point for both the WASM
+// closure above and dispatchORMRoute (goerp#346, HTTP-served EnableOps
+// routes). Enforces db.read the same way regardless of caller, since
+// modCtx.Capabilities() reflects the calling module's own declared
+// capabilities, not the transport that reached it.
+func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ormSearchInput) (ormSearchOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBRead) {
+		return ormSearchOutput{}, abi.CapabilityDenied("db.read")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ormSearchOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+	if md.Backend == model.BackendTransient {
+		return ormSearchOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
+	}
+
+	whereFrag, args, hostErr := compileDomain(input.Domain)
+	if hostErr != nil {
+		return ormSearchOutput{}, hostErr
+	}
+
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return ormSearchOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+	}
+
+	tx, err := beginTenantScopedRead(ctx, db, modCtx)
+	if err != nil {
+		return ormSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	table := quoteIdentORM(tableNameForORM(md))
+	pkColQuoted := quoteIdentORM(pkCol)
+
+	var count int64
+	countSQL := fmt.Sprintf("SELECT count(*) FROM %s WHERE %s", table, whereFrag)
+	if err := tx.QueryRowContext(ctx, countSQL, args...).Scan(&count); err != nil {
+		return ormSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	listSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s%s", pkColQuoted, table, whereFrag, orderLimitOffsetClause(input.Order, input.Limit, input.Offset))
+	rows, err := tx.QueryContext(ctx, listSQL, args...)
+	if err != nil {
+		return ormSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return ormSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return ormSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	return ormSearchOutput{IDs: ids, Count: count}, nil
 }
 
 func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -163,10 +177,6 @@ func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.M
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
 		allocate := inst.allocate
-
-		if !modCtx.Capabilities().Has(abi.CapDBRead) {
-			return abi.EncodeHostError(ctx, m, allocate, abi.CapabilityDenied("db.read"))
-		}
 
 		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
 		if err != nil {
@@ -177,86 +187,100 @@ func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.M
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		md, ok := resolveModel(modCtx, input.Model)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
-		}
-		if md.Backend == model.BackendTransient {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"})
-		}
-
-		pkCol, ok := primaryKeyColumn(md)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"})
-		}
-
-		columns, hostErr := readableColumns(input.Model, md, input.Fields)
+		out, hostErr := ORMSearchRead(ctx, db, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
+		return abi.WriteToModule(ctx, m, allocate, out)
+	}
+}
 
-		whereFrag, args, hostErr := compileDomain(input.Domain)
-		if hostErr != nil {
-			return abi.EncodeHostError(ctx, m, allocate, hostErr)
-		}
+// ORMSearchRead is host.orm search_read's plain-Go core — see ORMSearch's
+// doc comment for the shared-entry-point rationale.
+func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ormSearchReadInput) (ormSearchReadOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBRead) {
+		return ormSearchReadOutput{}, abi.CapabilityDenied("db.read")
+	}
 
-		if input.Cursor != "" {
-			args = append(args, input.Cursor)
-			whereFrag = fmt.Sprintf("(%s) AND (%s > $%d)", whereFrag, quoteIdentORM(pkCol), len(args))
-		}
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ormSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+	if md.Backend == model.BackendTransient {
+		return ormSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
+	}
 
-		tx, err := beginTenantScopedRead(ctx, db, modCtx)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-		defer func() { _ = tx.Rollback() }()
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return ormSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+	}
 
-		table := quoteIdentORM(tableNameForORM(md))
-		selectCols := make([]string, len(columns))
-		for i, c := range columns {
-			selectCols[i] = quoteIdentORM(c)
-		}
+	columns, hostErr := readableColumns(input.Model, md, input.Fields)
+	if hostErr != nil {
+		return ormSearchReadOutput{}, hostErr
+	}
 
-		order := input.Order
-		limit := input.Limit
-		if input.Cursor != "" || order == "" {
-			// Cursor-based pagination always walks the primary key in
-			// ascending order — combining an arbitrary caller-supplied
-			// ORDER BY with keyset pagination would need a composite
-			// cursor, which is out of scope here.
-			order = pkCol
-		}
+	whereFrag, args, hostErr := compileDomain(input.Domain)
+	if hostErr != nil {
+		return ormSearchReadOutput{}, hostErr
+	}
 
-		sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s%s",
-			strings.Join(selectCols, ", "), table, whereFrag, orderLimitOffsetClause(order, limit, input.Offset))
-		rows, err := tx.QueryContext(ctx, sqlStr, args...)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-		defer rows.Close()
+	if input.Cursor != "" {
+		args = append(args, input.Cursor)
+		whereFrag = fmt.Sprintf("(%s) AND (%s > $%d)", whereFrag, quoteIdentORM(pkCol), len(args))
+	}
 
-		records, err := scanRowsToMaps(rows)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
+	tx, err := beginTenantScopedRead(ctx, db, modCtx)
+	if err != nil {
+		return ormSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
 
-		applyFieldMasking(modCtx, input.Model, records)
+	table := quoteIdentORM(tableNameForORM(md))
+	selectCols := make([]string, len(columns))
+	for i, c := range columns {
+		selectCols[i] = quoteIdentORM(c)
+	}
 
-		if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
+	order := input.Order
+	limit := input.Limit
+	if input.Cursor != "" || order == "" {
+		// Cursor-based pagination always walks the primary key in
+		// ascending order — combining an arbitrary caller-supplied
+		// ORDER BY with keyset pagination would need a composite
+		// cursor, which is out of scope here.
+		order = pkCol
+	}
 
-		var nextCursor string
-		if input.Cursor != "" || (limit > 0 && len(records) == limit) {
-			if len(records) > 0 {
-				if last, ok := records[len(records)-1][pkCol]; ok {
-					nextCursor = fmt.Sprintf("%v", last)
-				}
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s%s",
+		strings.Join(selectCols, ", "), table, whereFrag, orderLimitOffsetClause(order, limit, input.Offset))
+	rows, err := tx.QueryContext(ctx, sqlStr, args...)
+	if err != nil {
+		return ormSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	records, err := scanRowsToMaps(rows)
+	if err != nil {
+		return ormSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	applyFieldMasking(modCtx, input.Model, records)
+
+	if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
+		return ormSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	var nextCursor string
+	if input.Cursor != "" || (limit > 0 && len(records) == limit) {
+		if len(records) > 0 {
+			if last, ok := records[len(records)-1][pkCol]; ok {
+				nextCursor = fmt.Sprintf("%v", last)
 			}
 		}
-
-		return abi.WriteToModule(ctx, m, allocate, ormSearchReadOutput{Records: records, NextCursor: nextCursor})
 	}
+
+	return ormSearchReadOutput{Records: records, NextCursor: nextCursor}, nil
 }
 
 func makeORMRead(r *Runtime, db *sql.DB, cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -264,10 +288,6 @@ func makeORMRead(r *Runtime, db *sql.DB, cacheClient *cache.Client) func(ctx con
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
 		allocate := inst.allocate
-
-		if !modCtx.Capabilities().Has(abi.CapDBRead) {
-			return abi.EncodeHostError(ctx, m, allocate, abi.CapabilityDenied("db.read"))
-		}
 
 		inputBytes, err := abi.ReadFromModule(m.Memory(), ptr, length)
 		if err != nil {
@@ -278,73 +298,85 @@ func makeORMRead(r *Runtime, db *sql.DB, cacheClient *cache.Client) func(ctx con
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		md, ok := resolveModel(modCtx, input.Model)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"})
-		}
-
-		if md.Backend == model.BackendTransient {
-			out, hostErr := transientRead(ctx, cacheClient, modCtx, input.Model, input.IDs)
-			if hostErr != nil {
-				return abi.EncodeHostError(ctx, m, allocate, hostErr)
-			}
-			return abi.WriteToModule(ctx, m, allocate, out)
-		}
-
-		pkCol, ok := primaryKeyColumn(md)
-		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"})
-		}
-
-		columns, hostErr := readableColumns(input.Model, md, input.Fields)
+		out, hostErr := ORMRead(ctx, db, cacheClient, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
-
-		if len(input.IDs) == 0 {
-			return abi.WriteToModule(ctx, m, allocate, ormReadOutput{Records: []map[string]any{}})
-		}
-
-		tx, err := beginTenantScopedRead(ctx, db, modCtx)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
-		}
-		defer func() { _ = tx.Rollback() }()
-
-		table := quoteIdentORM(tableNameForORM(md))
-		selectCols := make([]string, len(columns))
-		for i, c := range columns {
-			selectCols[i] = quoteIdentORM(c)
-		}
-
-		placeholders := make([]string, len(input.IDs))
-		args := make([]any, len(input.IDs))
-		for i, id := range input.IDs {
-			placeholders[i] = fmt.Sprintf("$%d", i+1)
-			args[i] = id
-		}
-
-		sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s IN (%s)",
-			strings.Join(selectCols, ", "), table, quoteIdentORM(pkCol), strings.Join(placeholders, ", "))
-		rows, err := tx.QueryContext(ctx, sqlStr, args...)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-		defer rows.Close()
-
-		records, err := scanRowsToMaps(rows)
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-
-		applyFieldMasking(modCtx, input.Model, records)
-
-		if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-
-		return abi.WriteToModule(ctx, m, allocate, ormReadOutput{Records: records})
+		return abi.WriteToModule(ctx, m, allocate, out)
 	}
+}
+
+// ORMRead is host.orm read's plain-Go core — see ORMSearch's doc comment
+// for the shared-entry-point rationale. Branches to transientRead
+// (host_orm_transient.go) for Transient-backed models internally, so
+// callers never need to know a model's backend before calling in.
+func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx *ModuleContext, input ormReadInput) (ormReadOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBRead) {
+		return ormReadOutput{}, abi.CapabilityDenied("db.read")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ormReadOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+
+	if md.Backend == model.BackendTransient {
+		return transientRead(ctx, cacheClient, modCtx, input.Model, input.IDs)
+	}
+
+	pkCol, ok := primaryKeyColumn(md)
+	if !ok {
+		return ormReadOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+	}
+
+	columns, hostErr := readableColumns(input.Model, md, input.Fields)
+	if hostErr != nil {
+		return ormReadOutput{}, hostErr
+	}
+
+	if len(input.IDs) == 0 {
+		return ormReadOutput{Records: []map[string]any{}}, nil
+	}
+
+	tx, err := beginTenantScopedRead(ctx, db, modCtx)
+	if err != nil {
+		return ormReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	table := quoteIdentORM(tableNameForORM(md))
+	selectCols := make([]string, len(columns))
+	for i, c := range columns {
+		selectCols[i] = quoteIdentORM(c)
+	}
+
+	placeholders := make([]string, len(input.IDs))
+	args := make([]any, len(input.IDs))
+	for i, id := range input.IDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s IN (%s)",
+		strings.Join(selectCols, ", "), table, quoteIdentORM(pkCol), strings.Join(placeholders, ", "))
+	rows, err := tx.QueryContext(ctx, sqlStr, args...)
+	if err != nil {
+		return ormReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	records, err := scanRowsToMaps(rows)
+	if err != nil {
+		return ormReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	applyFieldMasking(modCtx, input.Model, records)
+
+	if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
+		return ormReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	return ormReadOutput{Records: records}, nil
 }
 
 // resolveModel resolves an ABI-level "{module}.{resource}" model name
