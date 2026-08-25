@@ -17,7 +17,10 @@ import (
 // orderModelDecl declares a same-record computed field: amount_total
 // depends on quantity and unit_price, both present on the same record.
 // Field names match testdata/computedfixture's registered
-// "_compute_amount_total" function exactly.
+// "_compute_amount_total" function exactly. state is unused by the
+// compute-recompute tests but exercised by host_orm_constraint_test.go's
+// OnDelete tests, matching the fixture's registered
+// ("testmodule.order", orm.OnDelete) constraint hook.
 func orderModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
 		Name: "order",
@@ -27,6 +30,7 @@ func orderModelDecl() model.ModelDeclaration {
 			{Name: "quantity", Def: model.Integer()},
 			{Name: "unit_price", Def: model.Integer()},
 			{Name: "amount_total", Def: model.BigInt().Computed("_compute_amount_total").Store(true).Depends("quantity", "unit_price")},
+			{Name: "state", Def: model.Text()},
 		},
 	}
 }
@@ -67,7 +71,8 @@ func createFixtureOrdersTable(t *testing.T, conn *sql.DB, slug string) {
 		tenant_id UUID NOT NULL,
 		quantity INTEGER,
 		unit_price INTEGER,
-		amount_total BIGINT
+		amount_total BIGINT,
+		state TEXT
 	)`); err != nil {
 		t.Fatalf("create order table: %v", err)
 	}

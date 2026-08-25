@@ -1,11 +1,14 @@
 // Command computedfixture is a real Go module compiled to wasip1 WASM for
-// internal/engine/wasm's own InvokeHandleComputed/InvokeHandlePreview
-// tests — it registers real compute functions via the SDK's
-// orm.RegisterComputed and a preview hook via orm.RegisterPreviewHook,
-// exporting handle_orm_compute/handle_orm_preview via
-// orm.DispatchComputed/orm.DispatchPreview, the same way a real module
-// would (go-sdk-reference.md §22 "Computed field recomputation"/"Preview
-// action"), rather than a hand-assembled bytecode stand-in.
+// internal/engine/wasm's own InvokeHandleComputed/InvokeHandlePreview/
+// InvokeHandleConstraint tests — it registers real compute functions via
+// the SDK's orm.RegisterComputed, a preview hook via
+// orm.RegisterPreviewHook, and a constraint hook via
+// orm.RegisterConstraint, exporting handle_orm_compute/handle_orm_preview/
+// handle_orm_constraint via orm.DispatchComputed/orm.DispatchPreview/
+// orm.DispatchConstraint, the same way a real module would
+// (go-sdk-reference.md §22 "Computed field recomputation"/"Preview
+// action"/"Constraint hooks"), rather than a hand-assembled bytecode
+// stand-in.
 //
 // Must be built with:
 //
@@ -27,6 +30,12 @@ func init() {
 	orm.RegisterPreviewHook("testmodule.priced_order", func(ctx orm.PreviewContext, draft map[string]any) map[string]any {
 		draft["price_list_id"] = "list-" + ctx.TenantID
 		return draft
+	})
+	orm.RegisterConstraint("testmodule.order", orm.OnDelete, func(ctx orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {
+		if record["state"] != "draft" {
+			return orm.Reject("state", "only draft orders can be deleted")
+		}
+		return orm.Allow()
 	})
 }
 
@@ -60,6 +69,11 @@ func handleOrmCompute(ptr, length uint32) uint64 {
 //go:wasmexport handle_orm_preview
 func handleOrmPreview(ptr, length uint32) uint64 {
 	return orm.DispatchPreview(ptr, length)
+}
+
+//go:wasmexport handle_orm_constraint
+func handleOrmConstraint(ptr, length uint32) uint64 {
+	return orm.DispatchConstraint(ptr, length)
 }
 
 //go:wasmexport allocate
