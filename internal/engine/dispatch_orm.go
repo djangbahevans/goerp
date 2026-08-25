@@ -136,9 +136,20 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 		}
 	}
 
+	md, ok := resolveModelDecl(modCtx, entry.Manifest.Model)
+	if !ok {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
+		return
+	}
+	domainExpr, hostErr := compileListFilter(q, entry.Manifest.Model, md)
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+
 	out, hostErr := wasm.ORMSearchRead(ctx, e.primaryDB, modCtx, wasm.ORMSearchReadInput{
 		Model:  entry.Manifest.Model,
-		Domain: "true", // unfiltered — filter[...] query params: goerp#374
+		Domain: domainExpr,
 		Fields: fields,
 		Order:  order,
 		Limit:  limit,

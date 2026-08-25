@@ -374,6 +374,57 @@ func TestDispatchORMRoute_List_ReturnsEnvelope(t *testing.T) {
 	}
 }
 
+// TestDispatchORMRoute_List_FilterQueryParamFiltersResults exercises
+// goerp#374's list filter compiler end to end through dispatchORMRoute:
+// ?filter[code]=L-1 (the query string goerp#346's List branch reads)
+// should return only the matching record, not the unfiltered set.
+func TestDispatchORMRoute_List_FilterQueryParamFiltersResults(t *testing.T) {
+	f := newDispatchORMFixture(t)
+
+	ids := []string{"88888888-8888-8888-8888-888888888888", "99999999-9999-9999-9999-999999999999"}
+	for i, code := range []string{"F-1", "F-2"} {
+		body, _ := json.Marshal(map[string]any{"id": ids[i], "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Filtered %d", i), "code": code})
+		w := httptest.NewRecorder()
+		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %d status = %d, want 201; body: %s", i, w.Code, w.Body.String())
+		}
+	}
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodGet, "/testmodule/widgets?filter[code]=F-1", nil, f.entryList, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var envelope struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(envelope.Data) != 1 {
+		t.Fatalf("len(data) = %d, want 1", len(envelope.Data))
+	}
+	if envelope.Data[0]["code"] != "F-1" {
+		t.Errorf("data[0][code] = %v, want F-1", envelope.Data[0]["code"])
+	}
+}
+
+// TestDispatchORMRoute_List_UndeclaredFilterFieldReturns400 proves an
+// unknown filter[...] field is a descriptive error, not a silently-dropped
+// filter (goerp#374's own AC).
+func TestDispatchORMRoute_List_UndeclaredFilterFieldReturns400(t *testing.T) {
+	f := newDispatchORMFixture(t)
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodGet, "/testmodule/widgets?filter[nonexistent]=x", nil, f.entryList, nil))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestDispatchORMRoute_VirtualBackend_NotImplemented(t *testing.T) {
 	f := newDispatchORMFixture(t)
 	entry := &route.RouteEntry{ModuleName: "testmodule", PathTemplate: "/testmodule/widgets", Manifest: route.RouteManifest{
