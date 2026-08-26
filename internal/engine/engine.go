@@ -745,6 +745,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: primaryPool})
 	river.AddWorker(jobWorkers, &tenantoffboard.ImmediateWorker{Activities: offboardActivities, TenantStore: tenantStore})
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
+	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()
@@ -761,6 +762,13 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{Client: jobQueueClient})
+
+	adminapi.RegisterEventsRoutes(adminServer.Router(), adminapi.EventsDeps{
+		ModuleRegistry: moduleRegistry,
+		TenantStore:    tenantStore,
+		Pool:           primaryPool,
+		JobClient:      jobQueueClient,
+	})
 
 	adminapi.RegisterTenantRoutes(adminServer.Router(), adminapi.TenantDeps{
 		Store:          tenantStore,
