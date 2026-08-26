@@ -1,0 +1,19 @@
+{
+  "abi_version": "1",
+  "capabilities": [],
+  "checksum": "sha256:empty",
+  "depends_on": [],
+  "description": "demo module",
+  "display_name": "Demo",
+  "engine": ">=0.1.0",
+  "frontend": {
+    "bundle": true,
+    "bundle_sha256": "sha256:eae90664efd2e7b73cdc1f74c328140de6081d20441ffb89f7edfffcec9210c3"
+  },
+  "name": "demo",
+  "schema": {
+    "owned_models": []
+  },
+  "type": "domain",
+  "version": "0.1.0"
+}
