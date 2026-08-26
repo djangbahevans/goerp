@@ -120,7 +120,7 @@ func runSubscriberWork(t *testing.T, w *SubscriberDeliveryWorker, args jobqueue.
 }
 
 func TestSubscriberWork_ZeroPayloadSucceeds(t *testing.T) {
-	w := newTestSubscriberWorker(t, handleEventEchoModule)
+	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(0))
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
 		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
@@ -131,11 +131,10 @@ func TestSubscriberWork_ZeroPayloadSucceeds(t *testing.T) {
 }
 
 func TestSubscriberWork_RetryableStatusReturnsPlainError(t *testing.T) {
-	w := newTestSubscriberWorker(t, handleEventEchoModule)
+	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(1))
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
 		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
-		Payload: []byte{0}, // length 1 -> status 1 (retryable)
 	})
 	if err == nil {
 		t.Fatal("expected an error for a retryable status")
@@ -146,11 +145,10 @@ func TestSubscriberWork_RetryableStatusReturnsPlainError(t *testing.T) {
 }
 
 func TestSubscriberWork_PermanentStatusReturnsJobCancel(t *testing.T) {
-	w := newTestSubscriberWorker(t, handleEventEchoModule)
+	w := newTestSubscriberWorker(t, buildHandleEventConstStatusModule(2))
 
 	err := runSubscriberWork(t, w, jobqueue.SubscriberDeliveryArgs{
 		EventName: testEventName, ModuleName: testEventModuleName, HandlerName: testHandlerName,
-		Payload: []byte{0, 0}, // length 2 -> status 2 (permanent)
 	})
 	if err == nil {
 		t.Fatal("expected an error for a permanent status")

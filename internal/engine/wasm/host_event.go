@@ -213,6 +213,7 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 		}
 
 		eventID := deriveEventID(reg, modCtx.ModuleName, modCtx.TenantID, input.Name, input.Payload, input.IdempotencyKey)
+		emittedAt := time.Now()
 
 		syncDispatched := false
 		if input.Sync {
@@ -223,7 +224,15 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 					Retry:   true,
 				})
 			}
-			if dispatchErr := dispatchSyncSubscribers(ctx, r.syncEventDispatcher, reg, input.Name, input.Payload, r.syncSubscriberTimeout); dispatchErr != nil {
+			envelope, err := event.Envelope{
+				ID: eventID.String(), Name: input.Name, Version: input.Version,
+				EmitterModule: modCtx.ModuleName, TenantID: modCtx.TenantID, UserID: modCtx.UserID,
+				TraceID: modCtx.TraceID, EmittedAt: emittedAt, Payload: input.Payload,
+			}.Marshal()
+			if err != nil {
+				return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
+			}
+			if dispatchErr := dispatchSyncSubscribers(ctx, r.syncEventDispatcher, reg, input.Name, envelope, r.syncSubscriberTimeout); dispatchErr != nil {
 				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeDispatchFailed, Message: dispatchErr.Error()})
 			}
 			syncDispatched = true
@@ -242,7 +251,7 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 
 		if err := insertEventDelivery(ctx, insertClient, eventID, input.Name, input.Version,
 			modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, input.Payload,
-			time.Duration(input.DelayMs)*time.Millisecond, syncDispatched, uniqueOpts); err != nil {
+			time.Duration(input.DelayMs)*time.Millisecond, emittedAt, syncDispatched, uniqueOpts); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
 		}
 

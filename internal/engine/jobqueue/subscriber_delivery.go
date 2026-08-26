@@ -1,29 +1,29 @@
 package jobqueue
 
-import "github.com/riverqueue/river"
+import (
+	"time"
+
+	"github.com/riverqueue/river"
+)
 
 // SubscriberDeliveryArgs is the River job EventDeliveryWorker inserts once
 // per async subscriber of a dispatched event (engine-internals.md §9
-// "Event delivery worker"/"Subscriber delivery worker"). Deliberately
-// narrower than EventDeliveryArgs — EventVersion, EmitterModule, and
-// UserID exist there but not here, matching the doc's own two
-// construction sites for this shape exactly. No Worker is registered for
-// this kind yet: subscriber *execution* — actually invoking
-// ModuleName/HandlerName's WASM handler — is separate, unfiled work
-// (engine-internals.md §9 "Subscriber delivery worker"), the same way
-// EventDeliveryArgs itself shipped without a worker under goerp#341
-// before EventDeliveryWorker (goerp#16) came along to process it. Until
-// a worker exists, an inserted job sits in the "events" queue and is
-// eventually discarded the same way EventDeliveryArgs jobs were before
-// #16 — a known, temporary, non-fatal state.
+// "Event delivery worker"/"Subscriber delivery worker"), and processed by
+// eventdelivery.SubscriberDeliveryWorker (goerp#129) — invoking
+// ModuleName/HandlerName's WASM handle_event export via a
+// event.Envelope built from these fields.
 type SubscriberDeliveryArgs struct {
-	EventID     string `json:"event_id"`
-	EventName   string `json:"event_name"`
-	ModuleName  string `json:"module_name"`
-	HandlerName string `json:"handler_name"`
-	Payload     []byte `json:"payload"`
-	TenantID    string `json:"tenant_id"`
-	TraceID     string `json:"trace_id"`
+	EventID       string    `json:"event_id"`
+	EventName     string    `json:"event_name"`
+	EventVersion  int       `json:"event_version"`
+	EmitterModule string    `json:"emitter_module"`
+	ModuleName    string    `json:"module_name"`
+	HandlerName   string    `json:"handler_name"`
+	Payload       []byte    `json:"payload"`
+	TenantID      string    `json:"tenant_id"`
+	UserID        string    `json:"user_id,omitempty"`
+	TraceID       string    `json:"trace_id"`
+	EmittedAt     time.Time `json:"emitted_at"`
 }
 
 func (SubscriberDeliveryArgs) Kind() string { return "subscriber_delivery" }

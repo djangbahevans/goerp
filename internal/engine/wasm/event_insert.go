@@ -75,10 +75,10 @@ func insertEventDelivery(
 	emitterModule, tenantID, userID, traceID string,
 	payload []byte,
 	delay time.Duration,
+	emittedAt time.Time,
 	syncDispatched bool,
 	uniqueOpts *river.UniqueOpts,
 ) error {
-	emittedAt := time.Now()
 	opts := &river.InsertOpts{
 		Queue:       jobqueue.QueueEvents,
 		Priority:    1,

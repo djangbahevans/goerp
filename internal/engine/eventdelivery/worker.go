@@ -96,13 +96,17 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 		}
 
 		if _, err := riverClient.Insert(ctx, jobqueue.SubscriberDeliveryArgs{
-			EventID:     args.EventID,
-			EventName:   args.EventName,
-			ModuleName:  sub.ModuleName,
-			HandlerName: sub.HandlerName,
-			Payload:     args.Payload,
-			TenantID:    args.TenantID,
-			TraceID:     args.TraceID,
+			EventID:       args.EventID,
+			EventName:     args.EventName,
+			EventVersion:  args.EventVersion,
+			EmitterModule: args.EmitterModule,
+			ModuleName:    sub.ModuleName,
+			HandlerName:   sub.HandlerName,
+			Payload:       args.Payload,
+			TenantID:      args.TenantID,
+			UserID:        args.UserID,
+			TraceID:       args.TraceID,
+			EmittedAt:     args.EmittedAt,
 		}, insertOpts); err != nil {
 			return fmt.Errorf("enqueue subscriber delivery for %s.%s: %w", sub.ModuleName, sub.HandlerName, err)
 		}

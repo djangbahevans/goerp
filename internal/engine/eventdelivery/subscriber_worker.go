@@ -70,7 +70,16 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 	}
 	defer mod.Pool.Return(inst)
 
-	status, err := inst.InvokeHandleEvent(ctx, args.Payload)
+	envelope, err := event.Envelope{
+		ID: args.EventID, Name: args.EventName, Version: args.EventVersion,
+		EmitterModule: args.EmitterModule, TenantID: args.TenantID, UserID: args.UserID,
+		TraceID: args.TraceID, EmittedAt: args.EmittedAt, Payload: args.Payload,
+	}.Marshal()
+	if err != nil {
+		return fmt.Errorf("marshal event envelope: %w", err)
+	}
+
+	status, err := inst.InvokeHandleEvent(ctx, envelope)
 	if err != nil {
 		return fmt.Errorf("invoke handle_event for %s/%s: %w", args.ModuleName, args.HandlerName, err)
 	}

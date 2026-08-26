@@ -50,7 +50,7 @@ func (e *subscriberOutcomeError) Unwrap() error { return e.Err }
 // remaining ones from running — every outcome is aggregated into one
 // combined error via errors.Join, returned only if at least one
 // subscriber failed.
-func dispatchSyncSubscribers(ctx context.Context, dispatcher SyncEventDispatcher, reg *event.EventRegistry, eventName string, payload []byte, timeout time.Duration) error {
+func dispatchSyncSubscribers(ctx context.Context, dispatcher SyncEventDispatcher, reg *event.EventRegistry, eventName string, envelope []byte, timeout time.Duration) error {
 	var failures []error
 	total := 0
 
@@ -61,7 +61,7 @@ func dispatchSyncSubscribers(ctx context.Context, dispatcher SyncEventDispatcher
 		total++
 
 		subCtx, cancel := context.WithTimeout(ctx, timeout)
-		status, err := dispatcher.DispatchSync(subCtx, sub.ModuleName, sub.HandlerName, payload)
+		status, err := dispatcher.DispatchSync(subCtx, sub.ModuleName, sub.HandlerName, envelope)
 		timedOut := subCtx.Err() == context.DeadlineExceeded
 		cancel()
 
