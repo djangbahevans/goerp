@@ -52,16 +52,10 @@ jobs:
         with:
           version: v2.12
 
-      - name: Start Dev Stack
-        run: docker compose -f compose.dev.yml up -d --wait
-
-      - name: Run Tests
-        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
-
-      - name: Stop Dev Stack
-        if: always()
-        run: docker compose -f compose.dev.yml down -v
-
+      # Build, govulncheck, and the Trivy image scan all run before the
+      # dev-stack test suite below (the ~10+ minute step) so a security or
+      # build failure fails the job quickly instead of only surfacing
+      # after the full test run completes.
       - name: Build Engine Binary
         run: CGO_ENABLED=0 go build -o engine ./cmd/engine
 
@@ -85,6 +79,16 @@ jobs:
           input: /tmp/goerp-engine.tar
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
+
+      - name: Start Dev Stack
+        run: docker compose -f compose.dev.yml up -d --wait
+
+      - name: Run Tests
+        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Stop Dev Stack
+        if: always()
+        run: docker compose -f compose.dev.yml down -v
 
   ci-gate:
     needs: [changes, build-and-test]
