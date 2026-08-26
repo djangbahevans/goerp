@@ -682,3 +682,70 @@ func TestLoadManifestAcceptsValidRetryPolicy(t *testing.T) {
 		t.Fatalf("expected valid retry_policy to be accepted, got %v", err)
 	}
 }
+
+func baseNotificationType() map[string]any {
+	return map[string]any{
+		"name":               "order_confirmed",
+		"label":              "Order Confirmed",
+		"default_channels":   []string{"in_app"},
+		"available_channels": []string{"in_app", "email"},
+	}
+}
+
+func TestLoadManifestAcceptsValidNotificationType(t *testing.T) {
+	fields := minimalManifestFields()
+	fields["notification_types"] = []map[string]any{baseNotificationType()}
+
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if _, err := Load(m); err != nil {
+		t.Fatalf("expected a valid notification_types entry to be accepted, got %v", err)
+	}
+}
+
+func TestLoadManifestRejectsDuplicateNotificationTypeName(t *testing.T) {
+	fields := minimalManifestFields()
+	fields["notification_types"] = []map[string]any{baseNotificationType(), baseNotificationType()}
+
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if _, err := Load(m); err == nil {
+		t.Fatal("expected a duplicate notification_types[].name to be rejected")
+	}
+}
+
+func TestLoadManifestRejectsNotificationTypeMissingInApp(t *testing.T) {
+	fields := minimalManifestFields()
+	nt := baseNotificationType()
+	nt["available_channels"] = []string{"email", "sms"}
+	nt["default_channels"] = []string{"email"}
+	fields["notification_types"] = []map[string]any{nt}
+
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if _, err := Load(m); err == nil {
+		t.Fatal("expected available_channels missing \"in_app\" to be rejected")
+	}
+}
+
+func TestLoadManifestRejectsDefaultChannelsNotSubsetOfAvailable(t *testing.T) {
+	fields := minimalManifestFields()
+	nt := baseNotificationType()
+	nt["available_channels"] = []string{"in_app"}
+	nt["default_channels"] = []string{"in_app", "sms"}
+	fields["notification_types"] = []map[string]any{nt}
+
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if _, err := Load(m); err == nil {
+		t.Fatal("expected a default_channels value absent from available_channels to be rejected")
+	}
+}
