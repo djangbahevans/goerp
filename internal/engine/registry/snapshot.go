@@ -62,6 +62,15 @@ func (s *RegistrySnapshot) EventRegistry() *event.EventRegistry {
 	return s.eventRegistry
 }
 
+// JobRegistry returns this snapshot's job type registry — which module
+// declared a given job_types[].name (goerp#110's jobdispatch.Worker uses
+// this to confirm a dispatched job's declared JobType is actually owned
+// by its declared ModuleName before invoking that module's handle_job
+// export).
+func (s *RegistrySnapshot) JobRegistry() *job.JobRegistry {
+	return s.jobRegistry
+}
+
 // ComputedIndex returns this snapshot's computed-field reverse-dependency
 // index (go-sdk-reference.md §22 "Computed field recomputation") — which
 // fields elsewhere need to recompute when a given model's field changes.
