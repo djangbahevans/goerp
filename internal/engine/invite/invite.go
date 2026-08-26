@@ -269,6 +269,41 @@ func (s *Store) GetLiveByEmail(ctx context.Context, tenantSlug, email string) (*
 	return inv, nil
 }
 
+// ListExpired returns every still-live invitation (accepted_at IS NULL AND
+// revoked_at IS NULL) whose expires_at has already passed, oldest first.
+// Doesn't touch the row — expires_at > NOW() already excludes these from
+// the accept flow (auth-internals.md §3); this is only for a caller that
+// needs to notice the transition, e.g. goerp#163's expiry-audit job.
+func (s *Store) ListExpired(ctx context.Context, tenantSlug string) ([]*Invitation, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`
+		SELECT `+invitationColumns+`
+		FROM %s.tenant_invitations
+		WHERE expires_at < NOW() AND accepted_at IS NULL AND revoked_at IS NULL
+		ORDER BY expires_at
+	`, schema)
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list expired invitations: %w", err)
+	}
+	defer rows.Close()
+
+	var invitations []*Invitation
+	for rows.Next() {
+		inv, err := scanInvitation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan expired invitation: %w", err)
+		}
+		invitations = append(invitations, inv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate expired invitations: %w", err)
+	}
+
+	return invitations, nil
+}
+
 // ResendInvite satisfies adminapi.InviteResender.
 func (s *Store) ResendInvite(ctx context.Context, tenantSlug, email string) error {
 	inv, err := s.GetLiveByEmail(ctx, tenantSlug, email)

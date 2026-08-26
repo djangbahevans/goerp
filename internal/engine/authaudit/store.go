@@ -152,3 +152,24 @@ func (s *Store) Emit(ctx context.Context, tenantSlug, eventName string, payload 
 		Metadata:  metadata,
 	})
 }
+
+// EventExists reports whether a row already exists for eventType whose
+// metadata has metadataKey set to metadataValue — a general-purpose
+// existence check for a caller that needs at-most-once emission for a
+// business event with no other durable checkpoint of its own (e.g.
+// goerp#163's invite-expiry job, keyed on metadata->>'invitation_id',
+// since nothing marks a tenant_invitations row as "already noticed"
+// expired and the job would otherwise re-discover — and re-emit for —
+// the same still-expired, never-accepted-or-revoked invitation on every
+// run). Unindexed JSONB containment query — fine at auth_audit_log's
+// expected event volume, not meant for a high-frequency hot path.
+func (s *Store) EventExists(ctx context.Context, eventType, metadataKey, metadataValue string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS(SELECT 1 FROM system.auth_audit_log WHERE event_type = $1 AND metadata->>$2 = $3)
+	`, eventType, metadataKey, metadataValue).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check existing %s event: %w", eventType, err)
+	}
+	return exists, nil
+}
