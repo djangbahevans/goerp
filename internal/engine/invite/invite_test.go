@@ -373,3 +373,78 @@ func TestInvite_ComposesWithRealUserStore(t *testing.T) {
 	}
 	_ = inv
 }
+
+// backdateExpiry sets an invitation's expires_at directly — Invite always
+// computes its own ~7-day default, so a test needing an already-expired
+// row has to reach past the Store API to create one.
+func backdateExpiry(t *testing.T, conn *sql.DB, slug, invitationID string, expiresAt time.Time) {
+	t.Helper()
+	schema := tenantschema.Name(slug)
+	_, err := conn.ExecContext(context.Background(),
+		fmt.Sprintf("UPDATE %s.tenant_invitations SET expires_at = $1 WHERE id = $2", schema),
+		expiresAt, invitationID)
+	if err != nil {
+		t.Fatalf("backdate expires_at: %v", err)
+	}
+}
+
+func TestListExpired_ReturnsOnlyExpiredLiveInvitations(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	ctx := context.Background()
+
+	expired, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", nil)
+	if err != nil {
+		t.Fatalf("Invite() error: %v", err)
+	}
+	backdateExpiry(t, conn, slug, expired.ID, time.Now().Add(-time.Hour))
+
+	live, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", nil)
+	if err != nil {
+		t.Fatalf("Invite() error: %v", err)
+	}
+
+	accepted, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", nil)
+	if err != nil {
+		t.Fatalf("Invite() error: %v", err)
+	}
+	backdateExpiry(t, conn, slug, accepted.ID, time.Now().Add(-time.Hour))
+	schema := tenantschema.Name(slug)
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("UPDATE %s.tenant_invitations SET accepted_at = NOW() WHERE id = $1", schema), accepted.ID); err != nil {
+		t.Fatalf("mark accepted: %v", err)
+	}
+
+	revoked, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", nil)
+	if err != nil {
+		t.Fatalf("Invite() error: %v", err)
+	}
+	backdateExpiry(t, conn, slug, revoked.ID, time.Now().Add(-time.Hour))
+	if err := store.Revoke(ctx, slug, revoked.ID); err != nil {
+		t.Fatalf("Revoke() error: %v", err)
+	}
+
+	got, err := store.ListExpired(ctx, slug)
+	if err != nil {
+		t.Fatalf("ListExpired() error: %v", err)
+	}
+
+	if len(got) != 1 || got[0].ID != expired.ID {
+		ids := make([]string, len(got))
+		for i, inv := range got {
+			ids[i] = inv.ID
+		}
+		t.Errorf("ListExpired() = %v, want exactly [%s] (live not accepted/revoked = %q, accepted = %q, revoked = %q excluded)",
+			ids, expired.ID, live.ID, accepted.ID, revoked.ID)
+	}
+}
+
+func TestListExpired_NoExpiredInvitationsReturnsEmpty(t *testing.T) {
+	store, _, slug := openTestStore(t)
+
+	got, err := store.ListExpired(context.Background(), slug)
+	if err != nil {
+		t.Fatalf("ListExpired() error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListExpired() = %v, want empty", got)
+	}
+}

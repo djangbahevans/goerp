@@ -128,6 +128,16 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),
+			// Platform-wide (not per-tenant) — a single run fans out across
+			// every active tenant itself (goerp#163), the same shape as the
+			// periodic job above.
+			river.NewPeriodicJob(
+				river.PeriodicInterval(time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return InviteExpiryArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: false},
+			),
 		},
 	})
 	if err != nil {

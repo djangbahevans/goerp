@@ -55,6 +55,11 @@ func createTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug st
 		t.Fatalf("CreateTenant(%q) error: %v", slug, err)
 	}
 	t.Cleanup(func() {
+		// auth_audit_log.tenant_id REFERENCES system.tenants(id) with no
+		// cascade (deliberate — an audit trail must outlive the tenant it
+		// records, auth-internals.md §17) — delete this test's own rows
+		// first or the tenant delete below silently fails on the FK.
+		_, _ = conn.ExecContext(context.Background(), "DELETE FROM system.auth_audit_log WHERE tenant_id = $1", tt.ID)
 		_, _ = conn.ExecContext(context.Background(), "DELETE FROM system.tenants WHERE id = $1", tt.ID)
 	})
 	return tt
@@ -230,5 +235,51 @@ func TestEmit_UnknownTenantSlugFails(t *testing.T) {
 	err := store.Emit(context.Background(), "does-not-exist-"+uniqueSlug(t), "user.invited", nil)
 	if err == nil {
 		t.Fatal("expected an error resolving an unknown tenant slug, got nil")
+	}
+}
+
+func TestEventExists(t *testing.T) {
+	store, tenantStore, conn := openTestStore(t)
+	ctx := context.Background()
+	slug := uniqueSlug(t)
+	createTenant(t, tenantStore, conn, slug)
+	invitationID := uniqueSlug(t)
+
+	exists, err := store.EventExists(ctx, "user.invite_expired", "invitation_id", invitationID)
+	if err != nil {
+		t.Fatalf("EventExists() before emit: error = %v", err)
+	}
+	if exists {
+		t.Fatal("expected EventExists() to be false before the event is emitted")
+	}
+
+	if err := store.Emit(ctx, slug, "user.invite_expired", map[string]any{"invitation_id": invitationID}); err != nil {
+		t.Fatalf("Emit() error: %v", err)
+	}
+
+	exists, err = store.EventExists(ctx, "user.invite_expired", "invitation_id", invitationID)
+	if err != nil {
+		t.Fatalf("EventExists() after emit: error = %v", err)
+	}
+	if !exists {
+		t.Error("expected EventExists() to be true after the event is emitted")
+	}
+
+	// A different metadata key/value, or a different event type, must not
+	// match this row.
+	otherExists, err := store.EventExists(ctx, "user.invite_expired", "invitation_id", uniqueSlug(t))
+	if err != nil {
+		t.Fatalf("EventExists() for a different invitation: error = %v", err)
+	}
+	if otherExists {
+		t.Error("expected EventExists() to be false for a different invitation_id")
+	}
+
+	wrongType, err := store.EventExists(ctx, "user.invite_revoked", "invitation_id", invitationID)
+	if err != nil {
+		t.Fatalf("EventExists() for a different event type: error = %v", err)
+	}
+	if wrongType {
+		t.Error("expected EventExists() to be false for a different event_type")
 	}
 }
