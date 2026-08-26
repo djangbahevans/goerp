@@ -56,3 +56,49 @@ func insertEventDeliveryTx(
 	}, opts)
 	return err
 }
+
+// insertEventDelivery is insertEventDeliveryTx's non-transactional
+// counterpart, for host.event.emit (goerp#129) — the only emit path that
+// can honor events.WithSync(), since a still-open transaction can never
+// wait on an inline synchronous dispatch (event-system.md §8: "An event
+// with synchronous subscribers can only ever be emitted through
+// non-transactional Emit, never EmitTx"). syncDispatched records whether
+// inline dispatch already ran for this emission's async:false
+// subscribers, so eventdelivery.Worker's own fan-out knows which of them
+// still need an async fallback delivery.
+func insertEventDelivery(
+	ctx context.Context,
+	insertClient *river.Client[*sql.Tx],
+	eventID uuid.UUID,
+	name string,
+	version int,
+	emitterModule, tenantID, userID, traceID string,
+	payload []byte,
+	delay time.Duration,
+	emittedAt time.Time,
+	syncDispatched bool,
+	uniqueOpts *river.UniqueOpts,
+) error {
+	opts := &river.InsertOpts{
+		Queue:       jobqueue.QueueEvents,
+		Priority:    1,
+		ScheduledAt: emittedAt.Add(delay),
+	}
+	if uniqueOpts != nil {
+		opts.UniqueOpts = *uniqueOpts
+	}
+
+	_, err := insertClient.Insert(ctx, &jobqueue.EventDeliveryArgs{
+		EventID:        eventID.String(),
+		EventName:      name,
+		EventVersion:   version,
+		EmitterModule:  emitterModule,
+		TenantID:       tenantID,
+		UserID:         userID,
+		TraceID:        traceID,
+		Payload:        payload,
+		EmittedAt:      emittedAt,
+		SyncDispatched: syncDispatched,
+	}, opts)
+	return err
+}

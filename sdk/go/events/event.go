@@ -24,6 +24,17 @@ type Event struct {
 	payload []byte
 }
 
+// NewEvent constructs an Event with its payload set — used by
+// engine.DispatchEvent (goerp#129) to build the value handed to a
+// handler registered via engine.OnEvent, since payload is unexported.
+func NewEvent(id, name string, version int, emitterID, tenantID, userID, traceID string, emittedAt time.Time, payload []byte) *Event {
+	return &Event{
+		ID: id, Name: name, Version: version, EmitterID: emitterID,
+		TenantID: tenantID, UserID: userID, TraceID: traceID, EmittedAt: emittedAt,
+		payload: payload,
+	}
+}
+
 // RawPayload returns the event's undecoded payload bytes.
 func (e *Event) RawPayload() []byte { return e.payload }
 

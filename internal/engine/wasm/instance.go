@@ -498,15 +498,24 @@ func (inst *ModuleInstance) InvokeHandleConstraint(ctx context.Context, payload 
 // handle_event's own contract (manifest-spec.md §26: `(evt_ptr, evt_len)
 // → i32`) returns a bare status code, not a packed response ptr/len the
 // way handle_request does — there is no response payload to read back or
-// deallocate. 0 means success; any other value means failure (a WASM
-// handler returning events.PermanentError/RetryAfter/a plain error all
-// surface here as some non-zero status — which one is the SDK-internal
-// encoding's job to define, not this method's). A trap or context
-// deadline surfaces here as a plain error, undistinguished from either —
+// deallocate. The status is one of three reserved values, letting a
+// dispatcher (eventdelivery.SubscriberDeliveryWorker, and inline sync
+// dispatch, goerp#129) distinguish a handler's returned error from its
+// returned events.PermanentError without a second return channel:
+//
+//	0 = success
+//	1 = ordinary retryable failure (a plain error, or events.RetryAfter —
+//	    RetryAfter's custom delay is not carried over this ABI; retry
+//	    timing for a "1" status always follows the subscription's own
+//	    declared retry_policy backoff)
+//	2 = permanent failure (events.PermanentError) — do not retry
+//
+// Any other non-zero value a misbehaving module returns is treated as 1
+// (retryable) by every caller of this method — failing safe by retrying
+// rather than silently discarding a delivery. A trap or context deadline
+// surfaces here as a plain error, undistinguished from either status —
 // telling them apart is the caller's job, the same ctx.Err() check
-// invokeHandler (engine.go) already applies around InvokeHandleRequest,
-// which the event-dispatch caller (engine-internals.md §9's
-// invokeEventHandler, not yet built) applies the same way around this.
+// invokeHandler (engine.go) already applies around InvokeHandleRequest.
 func (inst *ModuleInstance) InvokeHandleEvent(ctx context.Context, payload []byte) (int32, error) {
 	if inst.allocate == nil {
 		return 0, fmt.Errorf("module missing allocate export")

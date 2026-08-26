@@ -611,3 +611,74 @@ func TestAuditedTableMarshalJSON(t *testing.T) {
 		t.Fatalf("expected %s, got %s", want, out)
 	}
 }
+
+func TestLoadManifestValidatesRetryPolicy(t *testing.T) {
+	baseRetryPolicy := func() map[string]any {
+		return map[string]any{
+			"max_attempts":     5,
+			"backoff":          "exponential",
+			"initial_delay_ms": 1000,
+		}
+	}
+
+	cases := map[string]struct {
+		mutate func(map[string]any)
+	}{
+		"max_attempts too low": {
+			mutate: func(rp map[string]any) { rp["max_attempts"] = 0 },
+		},
+		"max_attempts too high": {
+			mutate: func(rp map[string]any) { rp["max_attempts"] = 26 },
+		},
+		"backoff not in enum": {
+			mutate: func(rp map[string]any) { rp["backoff"] = "fixed" },
+		},
+		"initial_delay_ms below minimum": {
+			mutate: func(rp map[string]any) { rp["initial_delay_ms"] = 50 },
+		},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			rp := baseRetryPolicy()
+			c.mutate(rp)
+
+			fields := minimalManifestFields()
+			fields["subscribes"] = []map[string]any{
+				{"name": "demo.order.created", "async": true, "retry_policy": rp},
+			}
+
+			m, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+			if _, err := Load(m); err == nil {
+				t.Fatalf("expected invalid retry_policy (%s) to be rejected", name)
+			}
+		})
+	}
+}
+
+func TestLoadManifestAcceptsValidRetryPolicy(t *testing.T) {
+	fields := minimalManifestFields()
+	fields["subscribes"] = []map[string]any{
+		{
+			"name":    "demo.order.created",
+			"async":   true,
+			"handler": "handle_order_created",
+			"retry_policy": map[string]any{
+				"max_attempts":     5,
+				"backoff":          "exponential",
+				"initial_delay_ms": 1000,
+			},
+		},
+	}
+
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if _, err := Load(m); err != nil {
+		t.Fatalf("expected valid retry_policy to be accepted, got %v", err)
+	}
+}

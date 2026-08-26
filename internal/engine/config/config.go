@@ -56,6 +56,12 @@ type Config struct {
 	ShutdownTimeout    time.Duration `env:"GOERP_SHUTDOWN_TIMEOUT" envDefault:"30s"`
 	ShutdownDrainDelay time.Duration `env:"GOERP_SHUTDOWN_DRAIN_DELAY" envDefault:"5s"`
 
+	// SyncSubscriberTimeout bounds each async:false event subscriber's
+	// execution during inline synchronous dispatch (events.WithSync(),
+	// goerp#129, event-system.md §8 "Fan-out and timeout") — independent
+	// of and nested inside the emitter's own request timeout.
+	SyncSubscriberTimeout time.Duration `env:"GOERP_SYNC_SUBSCRIBER_TIMEOUT" envDefault:"3s"`
+
 	// Database
 	DBPrimaryDSN                string `env:"GOERP_DB_PRIMARY_DSN,required"`
 	DBReplicaDSN                string `env:"GOERP_DB_REPLICA_DSN"`

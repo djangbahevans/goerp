@@ -244,10 +244,63 @@ func TestWork_AsyncSubscriber_EnqueuesFanOutJob(t *testing.T) {
 	}
 }
 
-func TestWork_SyncSubscriber_NoFanOutJob(t *testing.T) {
+// TestWork_SyncSubscriber_FallsBackToAsyncWhenNotSyncDispatched proves
+// event-system.md §8's documented footgun fallback: an async:false
+// subscriber whose emission never actually dispatched it synchronously
+// (SyncDispatched unset — a plain Emit, or the EmitTx case that rejects
+// WithSync() outright) still needs delivering, just asynchronously
+// instead of being silently dropped.
+func TestWork_SyncSubscriber_FallsBackToAsyncWhenNotSyncDispatched(t *testing.T) {
 	eventName := "sales.order.shipped"
 	w, tenantStore, conn, ctx := newTestWorker(t, eventName, []manifest.EventSubscription{
 		{Name: eventName, Handler: "handle_order_shipped", Async: false},
+	})
+	tt := newTestTenant(t, tenantStore, conn, uniqueSlug(t))
+
+	eventID := uniqueEventID(t, conn)
+	args := jobqueue.EventDeliveryArgs{
+		EventID: eventID, EventName: eventName, EventVersion: 1,
+		EmitterModule: "sales", TenantID: tt.ID, Payload: mustMarshal(t, map[string]any{}),
+		SyncDispatched: false,
+	}
+	if err := w.Work(ctx, &river.Job[jobqueue.EventDeliveryArgs]{JobRow: &rivertype.JobRow{}, Args: args}); err != nil {
+		t.Fatalf("Work: %v", err)
+	}
+
+	if !fanOutJobExists(t, conn, eventID) {
+		t.Error("expected a fallback subscriber_delivery job for a sync-only subscriber not actually dispatched synchronously")
+	}
+}
+
+func TestWork_SyncSubscriber_NoFanOutJobWhenAlreadySyncDispatched(t *testing.T) {
+	eventName := "sales.order.shipped"
+	w, tenantStore, conn, ctx := newTestWorker(t, eventName, []manifest.EventSubscription{
+		{Name: eventName, Handler: "handle_order_shipped", Async: false},
+	})
+	tt := newTestTenant(t, tenantStore, conn, uniqueSlug(t))
+
+	eventID := uniqueEventID(t, conn)
+	args := jobqueue.EventDeliveryArgs{
+		EventID: eventID, EventName: eventName, EventVersion: 1,
+		EmitterModule: "sales", TenantID: tt.ID, Payload: mustMarshal(t, map[string]any{}),
+		SyncDispatched: true,
+	}
+	if err := w.Work(ctx, &river.Job[jobqueue.EventDeliveryArgs]{JobRow: &rivertype.JobRow{}, Args: args}); err != nil {
+		t.Fatalf("Work: %v", err)
+	}
+
+	if fanOutJobExists(t, conn, eventID) {
+		t.Error("expected no subscriber_delivery job for a sync-only subscriber already dispatched inline")
+	}
+}
+
+func TestWork_MaxAttemptsSetFromSubscriberRetryPolicy(t *testing.T) {
+	eventName := "sales.order.confirmed"
+	w, tenantStore, conn, ctx := newTestWorker(t, eventName, []manifest.EventSubscription{
+		{
+			Name: eventName, Handler: "handle_order_confirmed", Async: true,
+			RetryPolicy: &manifest.RetryPolicy{MaxAttempts: 7, Backoff: "linear", InitialDelayMS: 1000},
+		},
 	})
 	tt := newTestTenant(t, tenantStore, conn, uniqueSlug(t))
 
@@ -260,8 +313,12 @@ func TestWork_SyncSubscriber_NoFanOutJob(t *testing.T) {
 		t.Fatalf("Work: %v", err)
 	}
 
-	if fanOutJobExists(t, conn, eventID) {
-		t.Error("expected no subscriber_delivery job for a sync-only subscriber")
+	var maxAttempts int
+	if err := conn.QueryRow(`SELECT max_attempts FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&maxAttempts); err != nil {
+		t.Fatalf("query river_job: %v", err)
+	}
+	if maxAttempts != 7 {
+		t.Errorf("max_attempts = %d, want 7 (from the subscriber's own retry_policy)", maxAttempts)
 	}
 }
 
@@ -325,6 +382,51 @@ func TestWork_RetryIsIdempotent(t *testing.T) {
 	}
 	if fanOutCount != 1 {
 		t.Errorf("expected exactly 1 fan-out job after 2 Work() calls, got %d", fanOutCount)
+	}
+}
+
+// TestWork_RetryAfterSubscriberJobTerminalDoesNotReExecute proves the
+// acceptance criterion behind the ByState fix (jobqueue.
+// UniqueAcrossAllJobStates): a retried EventDeliveryArgs delivery (the
+// same EventID, as if the emitter's own transaction were retried) must
+// not insert a second SubscriberDeliveryArgs job once the first one has
+// already reached a terminal state — River's own "active"-only default
+// ByState would let a second job through here, invoking the subscriber's
+// handler side effects again.
+func TestWork_RetryAfterSubscriberJobTerminalDoesNotReExecute(t *testing.T) {
+	eventName := "sales.order.updated"
+	w, tenantStore, conn, ctx := newTestWorker(t, eventName, []manifest.EventSubscription{
+		{Name: eventName, Handler: "handle_order_updated", Async: true},
+	})
+	slug := uniqueSlug(t)
+	tt := newTestTenant(t, tenantStore, conn, slug)
+
+	eventID := uniqueEventID(t, conn)
+	args := jobqueue.EventDeliveryArgs{
+		EventID: eventID, EventName: eventName, EventVersion: 1,
+		EmitterModule: "sales", TenantID: tt.ID, Payload: mustMarshal(t, map[string]any{}),
+	}
+	if err := w.Work(ctx, &river.Job[jobqueue.EventDeliveryArgs]{JobRow: &rivertype.JobRow{}, Args: args}); err != nil {
+		t.Fatalf("Work (first delivery): %v", err)
+	}
+
+	// Simulate the subscriber_delivery job having already been fully
+	// processed (River's real terminal state after SubscriberDeliveryWorker
+	// succeeds) before the emitter's own retry arrives.
+	if _, err := conn.Exec(`UPDATE river_job SET state = 'completed', finalized_at = now() WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID); err != nil {
+		t.Fatalf("mark subscriber_delivery job completed: %v", err)
+	}
+
+	if err := w.Work(ctx, &river.Job[jobqueue.EventDeliveryArgs]{JobRow: &rivertype.JobRow{}, Args: args}); err != nil {
+		t.Fatalf("Work (retried delivery): %v", err)
+	}
+
+	var count int
+	if err := conn.QueryRow(`SELECT count(*) FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count); err != nil {
+		t.Fatalf("query river_job: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 subscriber_delivery job after a retry past a terminal state, got %d", count)
 	}
 }
 

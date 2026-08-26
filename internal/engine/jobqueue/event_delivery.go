@@ -36,6 +36,18 @@ type EventDeliveryArgs struct {
 	// "ON CONFLICT (id, emitted_at) DO NOTHING" idempotency and insert a
 	// duplicate row instead of deduping.
 	EmittedAt time.Time `json:"emitted_at"`
+	// SyncDispatched is set true only when this emission requested inline
+	// synchronous dispatch (events.WithSync(), goerp#129) and that inline
+	// dispatch actually ran. eventdelivery.Worker's fan-out uses it to
+	// decide, per async:false subscriber, whether to skip it (already
+	// handled inline) or fall it through to an ordinary async insert —
+	// the documented fallback for a plain Emit/EmitTx that never
+	// requested sync dispatch at all (event-system.md §8). Deliberately
+	// excluded from the EventID uniqueness key's discriminating fields:
+	// it describes how this emission was dispatched, not what event it
+	// is, and must never affect whether two emissions of the same event
+	// dedupe against each other.
+	SyncDispatched bool `json:"sync_dispatched,omitempty"`
 }
 
 func (EventDeliveryArgs) Kind() string { return "event_delivery" }

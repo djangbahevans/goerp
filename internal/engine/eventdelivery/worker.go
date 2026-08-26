@@ -24,11 +24,19 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// Worker processes jobqueue.EventDeliveryArgs jobs: for every async
-// subscriber currently registered for the event, enqueue one
-// jobqueue.SubscriberDeliveryArgs fan-out job, then write the immutable
-// event_log audit row. A sync subscriber is never fanned out here — sync
-// dispatch happens inline at emit time, not through this worker.
+// Worker processes jobqueue.EventDeliveryArgs jobs: for every subscriber
+// currently registered for the event that needs async delivery, enqueue
+// one jobqueue.SubscriberDeliveryArgs fan-out job, then write the
+// immutable event_log audit row. An async:true subscriber is always
+// fanned out. An async:false subscriber is fanned out too, UNLESS
+// args.SyncDispatched is set — meaning this emission requested inline
+// synchronous dispatch (events.WithSync()) and that dispatch already ran,
+// so fanning it out here would invoke the same handler a second time.
+// SyncDispatched being unset (a plain Emit, or the EmitTx case that
+// rejects WithSync() outright) is the documented fallback for an
+// async:false subscriber whose emission never actually dispatched it
+// synchronously (event-system.md §8) — it still needs delivering, just
+// asynchronously instead of inline.
 //
 // The fan-out insert and the event_log write are deliberately not
 // wrapped in one shared transaction: the running job's own client
@@ -68,18 +76,38 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 
 	riverClient := river.ClientFromContext[pgx.Tx](ctx)
 	for _, sub := range snap.EventRegistry().Subscribers(args.EventName) {
-		if !sub.Async {
+		if !sub.Async && args.SyncDispatched {
 			continue
 		}
+
+		insertOpts := &river.InsertOpts{
+			// ByState uses jobqueue.UniqueAcrossAllJobStates, not River's
+			// "active"-only default, so a redelivery of the same event
+			// (the same EventID/ModuleName/HandlerName) after the
+			// original subscriber job already completed or was
+			// discarded still dedupes against it instead of invoking the
+			// handler's side effects a second time — the guarantee the
+			// subscription-level idempotency_key_field: "event_id" case
+			// (event-system.md §5) exists to provide.
+			UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: jobqueue.UniqueAcrossAllJobStates},
+		}
+		if sub.RetryPolicy.MaxAttempts > 0 {
+			insertOpts.MaxAttempts = sub.RetryPolicy.MaxAttempts
+		}
+
 		if _, err := riverClient.Insert(ctx, jobqueue.SubscriberDeliveryArgs{
-			EventID:     args.EventID,
-			EventName:   args.EventName,
-			ModuleName:  sub.ModuleName,
-			HandlerName: sub.HandlerName,
-			Payload:     args.Payload,
-			TenantID:    args.TenantID,
-			TraceID:     args.TraceID,
-		}, &river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}}); err != nil {
+			EventID:       args.EventID,
+			EventName:     args.EventName,
+			EventVersion:  args.EventVersion,
+			EmitterModule: args.EmitterModule,
+			ModuleName:    sub.ModuleName,
+			HandlerName:   sub.HandlerName,
+			Payload:       args.Payload,
+			TenantID:      args.TenantID,
+			UserID:        args.UserID,
+			TraceID:       args.TraceID,
+			EmittedAt:     args.EmittedAt,
+		}, insertOpts); err != nil {
 			return fmt.Errorf("enqueue subscriber delivery for %s.%s: %w", sub.ModuleName, sub.HandlerName, err)
 		}
 	}
