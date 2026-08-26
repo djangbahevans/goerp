@@ -746,6 +746,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &tenantoffboard.ImmediateWorker{Activities: offboardActivities, TenantStore: tenantStore})
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
+	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: primaryPool})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()

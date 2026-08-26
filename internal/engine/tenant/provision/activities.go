@@ -127,16 +127,18 @@ CREATE TABLE IF NOT EXISTS %s.sequences (
 `
 
 // createAuditLogTable mirrors multitenancy-internals.md's audit_log
-// schema, minus two pieces of deliberately deferred hardening: no
-// PARTITION BY RANGE (changed_at) — table partitioning for
-// unbounded-growth engine tables is its own tracked ticket (goerp#194)
-// covering every such table generically, not something to half-build
-// here — and no REVOKE SELECT ... FROM app_user, since no
-// schema_sync_user/app_user Postgres role split exists anywhere in this
-// codebase yet (see this file's own schemaSyncPool doc comment above).
+// schema (goerp#194) — PARTITION BY RANGE (changed_at) with a composite
+// (id, changed_at) PK, since Postgres requires the partition key in
+// every unique constraint on a partitioned table, plus a BRIN index on
+// changed_at (efficient for append-only time-series data). No
+// REVOKE SELECT ... FROM app_user, since no schema_sync_user/app_user
+// Postgres role split exists anywhere in this codebase yet (see this
+// file's own schemaSyncPool doc comment above). partman.create_parent is
+// called against this table immediately after creation, in
+// CreateEngineTables below.
 const createAuditLogTable = `
 CREATE TABLE IF NOT EXISTS %s.audit_log (
-    id          UUID PRIMARY KEY DEFAULT uuidv7(),
+    id          UUID NOT NULL DEFAULT uuidv7(),
     table_name  TEXT NOT NULL,
     record_id   UUID NOT NULL,
     operation   TEXT NOT NULL CHECK (operation IN ('INSERT','UPDATE','DELETE')),
@@ -145,30 +147,92 @@ CREATE TABLE IF NOT EXISTS %s.audit_log (
     changed_by  UUID,
     changed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     request_id  TEXT,
-    trace_id    TEXT
-)
+    trace_id    TEXT,
+    PRIMARY KEY (id, changed_at)
+) PARTITION BY RANGE (changed_at)
+`
+
+const createAuditLogTimeIndex = `
+CREATE INDEX IF NOT EXISTS idx_audit_log_time ON %s.audit_log USING BRIN (changed_at)
 `
 
 // createEventLogTable mirrors multitenancy-internals.md's event_log
-// schema, minus the same deferred-partitioning caveat createAuditLogTable
-// already documents (goerp#194 covers it generically) — a single-column
-// id UUID PRIMARY KEY is used instead of the doc's composite
-// (id, emitted_at) key the range-partitioned version needs, which also
-// makes EventDeliveryWorker's own "ON CONFLICT (id) DO NOTHING" a valid
-// conflict target (the doc's own composite-keyed schema would reject an
-// ON CONFLICT naming id alone).
+// schema (goerp#194) — PARTITION BY RANGE (emitted_at) with a composite
+// (id, emitted_at) PK and a BRIN index on emitted_at, both required by
+// the same partition-key constraint createAuditLogTable's doc comment
+// above explains. EventDeliveryWorker's INSERT binds emitted_at itself
+// (rather than relying on the column default) so
+// "ON CONFLICT (id, emitted_at) DO NOTHING" dedups correctly across a
+// job retry — see that package's own doc comment.
 const createEventLogTable = `
 CREATE TABLE IF NOT EXISTS %s.event_log (
-    id             UUID PRIMARY KEY DEFAULT uuidv7(),
+    id             UUID NOT NULL DEFAULT uuidv7(),
     event_name     TEXT NOT NULL,
     event_version  INT NOT NULL DEFAULT 1,
     emitter_module TEXT NOT NULL,
     payload        BYTEA NOT NULL,
     trace_id       TEXT,
     user_id        UUID,
-    emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)
+    emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, emitted_at)
+) PARTITION BY RANGE (emitted_at)
 `
+
+const createEventLogTimeIndex = `
+CREATE INDEX IF NOT EXISTS idx_event_log_time ON %s.event_log USING BRIN (emitted_at)
+`
+
+// partitionInterval and partitionPremake are data-layer.md §2.6's
+// documented values for both event_log and audit_log: monthly range
+// partitions, 3 months created ahead of need.
+const (
+	partitionInterval = "1 month"
+	partitionPremake  = 3
+)
+
+// createParentPartition registers table (already created as
+// PARTITION BY RANGE(controlColumn)) with pg_partman, which creates
+// partitionPremake months of partitions ahead of need and keeps them
+// that way via the platform-wide partman.run_maintenance() periodic job
+// (internal/engine/jobqueue's PartitionMaintenanceWorker). Idempotent:
+// partman.create_parent errors if the table is already a registered
+// parent, so a retried CreateEngineTables call (already idempotent for
+// the CREATE TABLE IF NOT EXISTS statements around this one) would
+// break on a second call — guarded the same way multitenancy-internals.md
+// treats this call: only ever invoked once, immediately after the
+// table's own CREATE TABLE IF NOT EXISTS, both inside CreateEngineTables
+// which Workflow itself only calls once per tenant (a retry of the whole
+// activity is what CREATE TABLE IF NOT EXISTS already protects against;
+// create_parent needs its own guard since it has no IF NOT EXISTS form).
+//
+// slug is the bare, unquoted tenant slug — tenantschema.Name's quoted
+// `"tenant_<slug>"` form is for direct SQL interpolation only.
+// p_parent_table is a plain TEXT argument pg_partman parses itself
+// (splitting on '.' and re-quoting internally), so passing it
+// tenantschema.Name's literal quote characters makes pg_partman look up a
+// schema literally named `"tenant_<slug>"` (quotes included) and fail
+// with "Unable to find given parent table in system catalogs" even
+// though the table demonstrably exists.
+func createParentPartition(ctx context.Context, pool *sql.DB, slug, table, controlColumn string) error {
+	parentTable := "tenant_" + slug + "." + table
+
+	var alreadyRegistered bool
+	checkQuery := "SELECT EXISTS(SELECT 1 FROM partman.part_config WHERE parent_table = $1)"
+	if err := pool.QueryRowContext(ctx, checkQuery, parentTable).Scan(&alreadyRegistered); err != nil {
+		return fmt.Errorf("check partman registration for %s: %w", table, err)
+	}
+	if alreadyRegistered {
+		return nil
+	}
+
+	_, err := pool.ExecContext(ctx,
+		"SELECT partman.create_parent(p_parent_table := $1, p_control := $2, p_interval := $3, p_premake := $4)",
+		parentTable, controlColumn, partitionInterval, partitionPremake)
+	if err != nil {
+		return fmt.Errorf("register %s with pg_partman: %w", table, err)
+	}
+	return nil
+}
 
 // CreateEngineTables creates the engine-owned tables a fresh tenant needs
 // before module schema sync and config seeding can run: roles/
@@ -210,14 +274,30 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 		return fmt.Errorf("create sequences table: %w", err)
 	}
 
-	auditQuery := fmt.Sprintf(createAuditLogTable, tenantschema.Name(slug))
+	schemaName := tenantschema.Name(slug)
+
+	auditQuery := fmt.Sprintf(createAuditLogTable, schemaName)
 	if _, err := a.schemaSyncPool.ExecContext(ctx, auditQuery); err != nil {
 		return fmt.Errorf("create audit_log table: %w", err)
 	}
+	auditIndexQuery := fmt.Sprintf(createAuditLogTimeIndex, schemaName)
+	if _, err := a.schemaSyncPool.ExecContext(ctx, auditIndexQuery); err != nil {
+		return fmt.Errorf("create audit_log time index: %w", err)
+	}
+	if err := createParentPartition(ctx, a.schemaSyncPool, slug, "audit_log", "changed_at"); err != nil {
+		return err
+	}
 
-	eventLogQuery := fmt.Sprintf(createEventLogTable, tenantschema.Name(slug))
+	eventLogQuery := fmt.Sprintf(createEventLogTable, schemaName)
 	if _, err := a.schemaSyncPool.ExecContext(ctx, eventLogQuery); err != nil {
 		return fmt.Errorf("create event_log table: %w", err)
+	}
+	eventLogIndexQuery := fmt.Sprintf(createEventLogTimeIndex, schemaName)
+	if _, err := a.schemaSyncPool.ExecContext(ctx, eventLogIndexQuery); err != nil {
+		return fmt.Errorf("create event_log time index: %w", err)
+	}
+	if err := createParentPartition(ctx, a.schemaSyncPool, slug, "event_log", "emitted_at"); err != nil {
+		return err
 	}
 
 	return nil

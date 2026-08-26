@@ -7,6 +7,7 @@ package jobqueue
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -115,6 +116,19 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 			QueueEvents:   {MaxWorkers: withDefault(cfg.QueueEventsConcurrency, 10)},
 		},
 		Workers: workers,
+		// Platform-wide (not per-tenant), so a single hourly job — not one
+		// per tenant — per goerp#194/data-layer.md §2.6: pg_partman's own
+		// run_maintenance() already iterates every table any tenant schema
+		// has registered with it.
+		PeriodicJobs: []*river.PeriodicJob{
+			river.NewPeriodicJob(
+				river.PeriodicInterval(time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return PartitionMaintenanceArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: false},
+			),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create river client: %w", err)

@@ -33,10 +33,11 @@ func insertEventDeliveryTx(
 	delay time.Duration,
 	uniqueOpts *river.UniqueOpts,
 ) error {
+	emittedAt := time.Now()
 	opts := &river.InsertOpts{
 		Queue:       jobqueue.QueueEvents,
 		Priority:    1,
-		ScheduledAt: time.Now().Add(delay),
+		ScheduledAt: emittedAt.Add(delay),
 	}
 	if uniqueOpts != nil {
 		opts.UniqueOpts = *uniqueOpts
@@ -51,6 +52,7 @@ func insertEventDeliveryTx(
 		UserID:        userID,
 		TraceID:       traceID,
 		Payload:       payload,
+		EmittedAt:     emittedAt,
 	}, opts)
 	return err
 }
