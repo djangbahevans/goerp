@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
@@ -103,29 +103,15 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 			&river.UniqueOpts{
 				// Bounded to 24h, not unbounded, so a legitimately new event
 				// that happens to reuse an idempotency key after a long gap
-				// isn't silently dropped forever. ByState explicitly includes
-				// terminal states — River's default ByState only counts
-				// "active" jobs, which would let a retry arriving after the
-				// original event already finished dispatching insert a
-				// second, duplicate job, defeating the guarantee
-				// idempotency_key exists to provide.
+				// isn't silently dropped forever. ByState uses
+				// jobqueue.UniqueAcrossAllJobStates (not River's own
+				// "active"-only default) so a retry arriving after the
+				// original event already finished dispatching still sees
+				// the prior job and dedupes against it, rather than
+				// inserting a second, duplicate one.
 				ByArgs:   true,
 				ByPeriod: 24 * time.Hour,
-				// Available/Pending/Running/Scheduled are required by
-				// river v0.43.0's own UniqueOpts.validate() — omitting any
-				// of them is a hard insert-time error, not just a missed
-				// dedup case. Retryable/Completed/Discarded are added on
-				// top so a retry arriving after the original event
-				// already finished dispatching (the common case, not an
-				// edge case) still sees the prior job and dedupes against
-				// it, rather than River's default ByState (which only
-				// counts "active" jobs) letting a second one through.
-				ByState: []rivertype.JobState{
-					rivertype.JobStateAvailable, rivertype.JobStatePending,
-					rivertype.JobStateRunning, rivertype.JobStateScheduled,
-					rivertype.JobStateRetryable, rivertype.JobStateCompleted,
-					rivertype.JobStateDiscarded,
-				},
+				ByState:  jobqueue.UniqueAcrossAllJobStates,
 			})
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})

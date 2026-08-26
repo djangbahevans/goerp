@@ -89,6 +89,7 @@ func TestEventRegistry_Register_SubscribersCarryAsyncFlag(t *testing.T) {
 func TestEventRegistry_Register_RetryPolicyParsed(t *testing.T) {
 	r := NewEventRegistry()
 
+	jitter := true
 	r.Register("inventory", manifest.Manifest{
 		Subscribes: []manifest.EventSubscription{
 			{
@@ -101,7 +102,7 @@ func TestEventRegistry_Register_RetryPolicyParsed(t *testing.T) {
 					Backoff:        "exponential",
 					InitialDelayMS: 1000,
 					MaxDelayMS:     300000,
-					Jitter:         true,
+					Jitter:         &jitter,
 				},
 			},
 		},
@@ -143,5 +144,38 @@ func TestEventRegistry_Register_NilRetryPolicyDefaultsToZeroValue(t *testing.T) 
 	}
 	if subs[0].RetryPolicy != (RetryPolicy{}) {
 		t.Errorf("RetryPolicy = %+v, want zero value", subs[0].RetryPolicy)
+	}
+}
+
+func TestEventRegistry_Register_RetryPolicyOmittedFieldsDefault(t *testing.T) {
+	r := NewEventRegistry()
+
+	r.Register("inventory", manifest.Manifest{
+		Subscribes: []manifest.EventSubscription{
+			{
+				Name:    "sale.order.confirmed",
+				Handler: "handle_confirmed",
+				Async:   true,
+				RetryPolicy: &manifest.RetryPolicy{
+					MaxAttempts:    3,
+					Backoff:        "linear",
+					InitialDelayMS: 500,
+					// MaxDelayMS and Jitter both omitted.
+				},
+			},
+		},
+	})
+
+	subs := r.Subscribers("sale.order.confirmed")
+	if len(subs) != 1 {
+		t.Fatalf("got %d subscribers, want 1", len(subs))
+	}
+	got := subs[0].RetryPolicy
+
+	if got.MaxDelay != defaultMaxDelay {
+		t.Errorf("MaxDelay = %v, want manifest-spec.md's documented default %v", got.MaxDelay, defaultMaxDelay)
+	}
+	if !got.Jitter {
+		t.Errorf("Jitter = false, want manifest-spec.md's documented default true when omitted")
 	}
 }

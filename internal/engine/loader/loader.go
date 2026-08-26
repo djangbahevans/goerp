@@ -3,10 +3,14 @@
 // compilation, capability resolution, pool creation, and the three
 // no-argument export calls a module makes at load time
 // (engine-internals.md §2, Stage 3 steps 15-17c-bis). Everything after
-// that — schema sync, instance warming, cross-module event-cycle
-// detection, EnableOps-derived view merging — belongs to later stages
-// and other tickets; this package only produces the LoadedModule those
-// stages consume. LoadAll does register EnableOps-derived CRUD routes
+// that — schema sync, instance warming, EnableOps-derived view merging —
+// belongs to later stages and other tickets; this package only produces
+// the LoadedModule those stages consume. Synchronous-subscription cycle
+// detection (engine-internals.md §2 Stage 3 step 23) lives in
+// registry.ModuleRegistry.Update instead of here, since it needs the
+// full cross-module event graph that package already assembles via
+// buildEventRegistry, not just one batch of freshly-loaded sources.
+// LoadAll does register EnableOps-derived CRUD routes
 // (route.RegisterModelRoutes) alongside each module's explicit routes,
 // since route registration is part of this package's existing route.New
 // pass, not a separate stage.

@@ -22,9 +22,13 @@ type EventSubscription struct {
 	IdempotencyKeyField string
 }
 
+// defaultMaxDelay is manifest-spec.md's documented max_delay_ms default (24h),
+// applied when a subscription's retry_policy omits it.
+const defaultMaxDelay = 24 * time.Hour
+
 type RetryPolicy struct {
 	MaxAttempts  int
-	Backoff      string // "exponential" | "fixed"
+	Backoff      string // "none" | "linear" | "exponential"
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
 	Jitter       bool
@@ -59,12 +63,22 @@ func (r *EventRegistry) Register(moduleName string, m manifest.Manifest) {
 	for _, sub := range m.Subscribes {
 		var retryPolicy RetryPolicy
 		if sub.RetryPolicy != nil {
+			maxDelay := time.Duration(sub.RetryPolicy.MaxDelayMS) * time.Millisecond
+			if sub.RetryPolicy.MaxDelayMS == 0 {
+				maxDelay = defaultMaxDelay
+			}
+
+			jitter := true
+			if sub.RetryPolicy.Jitter != nil {
+				jitter = *sub.RetryPolicy.Jitter
+			}
+
 			retryPolicy = RetryPolicy{
 				MaxAttempts:  sub.RetryPolicy.MaxAttempts,
 				Backoff:      sub.RetryPolicy.Backoff,
 				InitialDelay: time.Duration(sub.RetryPolicy.InitialDelayMS) * time.Millisecond,
-				MaxDelay:     time.Duration(sub.RetryPolicy.MaxDelayMS) * time.Millisecond,
-				Jitter:       sub.RetryPolicy.Jitter,
+				MaxDelay:     maxDelay,
+				Jitter:       jitter,
 			}
 		}
 

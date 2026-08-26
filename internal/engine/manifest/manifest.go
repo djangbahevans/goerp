@@ -71,7 +71,7 @@ type Manifest struct {
 	HTTPAllowlist            []string              `json:"http_allowlist,omitempty"`
 	Wasm                     bool                  `json:"wasm,omitempty"`
 	Emits                    []EventDeclaration    `json:"emits,omitempty" validate:"dive"`
-	Subscribes               []EventSubscription   `json:"subscribes,omitempty"`
+	Subscribes               []EventSubscription   `json:"subscribes,omitempty" validate:"dive"`
 	Permissions              []Permission          `json:"permissions,omitempty"`
 	Policies                 []Policy              `json:"policies,omitempty"`
 	Views                    []View                `json:"views,omitempty"`
@@ -138,11 +138,13 @@ type EventSubscription struct {
 }
 
 type RetryPolicy struct {
-	MaxAttempts    int    `json:"max_attempts"`
-	Backoff        string `json:"backoff"`
-	InitialDelayMS int    `json:"initial_delay_ms"`
+	MaxAttempts    int    `json:"max_attempts" validate:"required,min=1,max=25"`
+	Backoff        string `json:"backoff" validate:"required,oneof=none linear exponential"`
+	InitialDelayMS int    `json:"initial_delay_ms" validate:"required,min=100"`
 	MaxDelayMS     int    `json:"max_delay_ms,omitempty"`
-	Jitter         bool   `json:"jitter,omitempty"`
+	// Jitter is a pointer so an omitted field is distinguishable from an
+	// explicit false — manifest-spec.md's documented default is true.
+	Jitter *bool `json:"jitter,omitempty"`
 }
 
 type Permission struct {

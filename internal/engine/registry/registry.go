@@ -31,6 +31,8 @@ func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*Regis
 
 	old := r.current.Load() // may be nil on the very first call
 
+	validateSyncSubscriptionCycles(modules)
+
 	routeTable, err := buildRouteTable(modules)
 	if err != nil {
 		return nil, fmt.Errorf("build route table: %w", err)
