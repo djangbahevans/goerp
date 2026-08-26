@@ -80,14 +80,15 @@ func newTestTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug s
 		t.Fatalf("create tenant schema: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+tenantschema.Name(slug)+`.event_log (
-		id             UUID PRIMARY KEY DEFAULT uuidv7(),
+		id             UUID NOT NULL DEFAULT uuidv7(),
 		event_name     TEXT NOT NULL,
 		event_version  INT NOT NULL DEFAULT 1,
 		emitter_module TEXT NOT NULL,
 		payload        BYTEA NOT NULL,
 		trace_id       TEXT,
 		user_id        UUID,
-		emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (id, emitted_at)
 	)`); err != nil {
 		t.Fatalf("create event_log table: %v", err)
 	}

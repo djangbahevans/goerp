@@ -1,6 +1,10 @@
 package jobqueue
 
-import "github.com/riverqueue/river"
+import (
+	"time"
+
+	"github.com/riverqueue/river"
+)
 
 // EventDeliveryArgs is the River job host.event.emit_tx inserts
 // transactionally (engine-internals.md §9) — the record of a domain
@@ -23,6 +27,15 @@ type EventDeliveryArgs struct {
 	UserID        string `json:"user_id"`
 	TraceID       string `json:"trace_id"`
 	Payload       []byte `json:"payload"`
+	// EmittedAt is captured once, at the moment the event is
+	// transactionally inserted (insertEventDeliveryTx), and carried
+	// through to eventdelivery.Worker's event_log write. It must stay
+	// stable across a River job retry — event_log's PK is composite
+	// (id, emitted_at) (goerp#194, table partitioned by emitted_at), so a
+	// value recomputed fresh on each retry would defeat the worker's own
+	// "ON CONFLICT (id, emitted_at) DO NOTHING" idempotency and insert a
+	// duplicate row instead of deduping.
+	EmittedAt time.Time `json:"emitted_at"`
 }
 
 func (EventDeliveryArgs) Kind() string { return "event_delivery" }

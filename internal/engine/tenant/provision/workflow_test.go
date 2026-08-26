@@ -227,6 +227,19 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		t.Error("expected the event_log table to have been created by CreateEngineTables")
 	}
 
+	for _, table := range []string{"audit_log", "event_log"} {
+		var registered bool
+		if err := env.conn.QueryRow(
+			"SELECT EXISTS(SELECT 1 FROM partman.part_config WHERE parent_table = $1)",
+			"tenant_"+slug+"."+table,
+		).Scan(&registered); err != nil {
+			t.Fatalf("check pg_partman registration for %s: %v", table, err)
+		}
+		if !registered {
+			t.Errorf("expected %s to be registered with pg_partman by CreateEngineTables", table)
+		}
+	}
+
 	var configValue []byte
 	err = env.conn.QueryRow(
 		`SELECT value FROM ` + tenantschema.Name(slug) + `.module_config WHERE module_name = 'widgets' AND key = 'currency'`,

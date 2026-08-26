@@ -71,7 +71,7 @@ func createFixtureAuditTables(t *testing.T, conn *sql.DB, slug string) {
 		t.Fatalf("create gadget table: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.audit_log (
-		id          UUID PRIMARY KEY DEFAULT uuidv7(),
+		id          UUID NOT NULL DEFAULT uuidv7(),
 		table_name  TEXT NOT NULL,
 		record_id   UUID NOT NULL,
 		operation   TEXT NOT NULL CHECK (operation IN ('INSERT','UPDATE','DELETE')),
@@ -80,7 +80,8 @@ func createFixtureAuditTables(t *testing.T, conn *sql.DB, slug string) {
 		changed_by  UUID,
 		changed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		request_id  TEXT,
-		trace_id    TEXT
+		trace_id    TEXT,
+		PRIMARY KEY (id, changed_at)
 	)`); err != nil {
 		t.Fatalf("create audit_log table: %v", err)
 	}

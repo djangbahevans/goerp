@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:18-alpine
+    build: ./docker/postgres
     environment:
       POSTGRES_USER: goerp
       POSTGRES_PASSWORD: dev

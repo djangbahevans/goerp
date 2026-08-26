@@ -39,7 +39,11 @@ import (
 // both halves are independently idempotent, so a retry after a partial
 // failure is safe: the fan-out insert is UniqueOpts{ByArgs: true}-deduped
 // per (EventID, ModuleName, HandlerName), and the event_log write is
-// ON CONFLICT (id) DO NOTHING.
+// ON CONFLICT (id, emitted_at) DO NOTHING — event_log is partitioned by
+// emitted_at (goerp#194), which requires the partition key in every
+// unique constraint, so args.EmittedAt (captured once at emit time,
+// never recomputed here) is what keeps the conflict target stable across
+// a retry.
 type Worker struct {
 	river.WorkerDefaults[jobqueue.EventDeliveryArgs]
 	ModuleRegistry *registry.ModuleRegistry
@@ -87,12 +91,12 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 
 	query := fmt.Sprintf(`
 		INSERT INTO %s.event_log (id, event_name, event_version, emitter_module, payload, trace_id, user_id, emitted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-		ON CONFLICT (id) DO NOTHING
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (id, emitted_at) DO NOTHING
 	`, tenantschema.Name(t.Slug))
 	if _, err := w.Pool.ExecContext(ctx, query,
 		args.EventID, args.EventName, args.EventVersion, args.EmitterModule, args.Payload,
-		nullIfEmpty(args.TraceID), nullIfEmpty(args.UserID),
+		nullIfEmpty(args.TraceID), nullIfEmpty(args.UserID), args.EmittedAt,
 	); err != nil {
 		return fmt.Errorf("write event_log row: %w", err)
 	}
