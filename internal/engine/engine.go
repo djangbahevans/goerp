@@ -52,6 +52,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
@@ -297,8 +298,19 @@ func New(cfg *config.Config) (*Engine, error) {
 		From:    cfg.SMTPFrom,
 		BaseURL: cfg.AppBaseURL,
 	})
-	// audit stays nil until goerp#16 lands.
-	inviteStore := invite.NewStore(primaryPool, userStore, roleStore, nil, inviteMailer)
+	// authAuditStore satisfies invite.AuditEmitter directly (goerp#400) —
+	// bootstrapped here, after tenantStore, since auth_audit_log.tenant_id
+	// FK-references system.tenants.
+	authAuditStore := authaudit.NewStore(primaryPool, tenantStore)
+	if err := authAuditStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap auth audit log: %w", err)
+	}
+	inviteStore := invite.NewStore(primaryPool, userStore, roleStore, authAuditStore, inviteMailer)
 
 	auditStore := auditlog.NewStore(primaryPool)
 	if err := auditStore.Bootstrap(ctx); err != nil {

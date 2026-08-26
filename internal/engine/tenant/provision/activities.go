@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -182,56 +183,12 @@ const createEventLogTimeIndex = `
 CREATE INDEX IF NOT EXISTS idx_event_log_time ON %s.event_log USING BRIN (emitted_at)
 `
 
-// partitionInterval and partitionPremake are data-layer.md §2.6's
-// documented values for both event_log and audit_log: monthly range
-// partitions, 3 months created ahead of need.
-const (
-	partitionInterval = "1 month"
-	partitionPremake  = 3
-)
-
-// createParentPartition registers table (already created as
-// PARTITION BY RANGE(controlColumn)) with pg_partman, which creates
-// partitionPremake months of partitions ahead of need and keeps them
-// that way via the platform-wide partman.run_maintenance() periodic job
-// (internal/engine/jobqueue's PartitionMaintenanceWorker). Idempotent:
-// partman.create_parent errors if the table is already a registered
-// parent, so a retried CreateEngineTables call (already idempotent for
-// the CREATE TABLE IF NOT EXISTS statements around this one) would
-// break on a second call — guarded the same way multitenancy-internals.md
-// treats this call: only ever invoked once, immediately after the
-// table's own CREATE TABLE IF NOT EXISTS, both inside CreateEngineTables
-// which Workflow itself only calls once per tenant (a retry of the whole
-// activity is what CREATE TABLE IF NOT EXISTS already protects against;
-// create_parent needs its own guard since it has no IF NOT EXISTS form).
-//
-// slug is the bare, unquoted tenant slug — tenantschema.Name's quoted
-// `"tenant_<slug>"` form is for direct SQL interpolation only.
-// p_parent_table is a plain TEXT argument pg_partman parses itself
-// (splitting on '.' and re-quoting internally), so passing it
-// tenantschema.Name's literal quote characters makes pg_partman look up a
-// schema literally named `"tenant_<slug>"` (quotes included) and fail
-// with "Unable to find given parent table in system catalogs" even
-// though the table demonstrably exists.
-func createParentPartition(ctx context.Context, pool *sql.DB, slug, table, controlColumn string) error {
-	parentTable := "tenant_" + slug + "." + table
-
-	var alreadyRegistered bool
-	checkQuery := "SELECT EXISTS(SELECT 1 FROM partman.part_config WHERE parent_table = $1)"
-	if err := pool.QueryRowContext(ctx, checkQuery, parentTable).Scan(&alreadyRegistered); err != nil {
-		return fmt.Errorf("check partman registration for %s: %w", table, err)
-	}
-	if alreadyRegistered {
-		return nil
-	}
-
-	_, err := pool.ExecContext(ctx,
-		"SELECT partman.create_parent(p_parent_table := $1, p_control := $2, p_interval := $3, p_premake := $4)",
-		parentTable, controlColumn, partitionInterval, partitionPremake)
-	if err != nil {
-		return fmt.Errorf("register %s with pg_partman: %w", table, err)
-	}
-	return nil
+// registerTenantPartition wraps db.RegisterPartition for a per-tenant
+// table, building the plain "tenant_<slug>.<table>" name pg_partman's
+// p_parent_table parameter needs (see that function's own doc comment for
+// why the quoted tenantschema.Name form can't be used here — goerp#194).
+func registerTenantPartition(ctx context.Context, pool *sql.DB, slug, table, controlColumn string) error {
+	return db.RegisterPartition(ctx, pool, "tenant_"+slug+"."+table, controlColumn)
 }
 
 // CreateEngineTables creates the engine-owned tables a fresh tenant needs
@@ -284,7 +241,7 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 	if _, err := a.schemaSyncPool.ExecContext(ctx, auditIndexQuery); err != nil {
 		return fmt.Errorf("create audit_log time index: %w", err)
 	}
-	if err := createParentPartition(ctx, a.schemaSyncPool, slug, "audit_log", "changed_at"); err != nil {
+	if err := registerTenantPartition(ctx, a.schemaSyncPool, slug, "audit_log", "changed_at"); err != nil {
 		return err
 	}
 
@@ -296,7 +253,7 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 	if _, err := a.schemaSyncPool.ExecContext(ctx, eventLogIndexQuery); err != nil {
 		return fmt.Errorf("create event_log time index: %w", err)
 	}
-	if err := createParentPartition(ctx, a.schemaSyncPool, slug, "event_log", "emitted_at"); err != nil {
+	if err := registerTenantPartition(ctx, a.schemaSyncPool, slug, "event_log", "emitted_at"); err != nil {
 		return err
 	}
 
