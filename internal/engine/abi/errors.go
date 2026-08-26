@@ -68,10 +68,13 @@ const (
 	ErrCodeTransientNotListable = "orm.transient_not_listable"
 )
 
-// host.event error codes (host-abi-reference.md "host.event.emit_tx").
+// host.event error codes (host-abi-reference.md "host.event.emit_tx"/
+// "host.event.emit").
 const (
-	ErrCodeNoTransaction = "event.no_transaction"
-	ErrCodeUndeclared    = "event.undeclared"
+	ErrCodeNoTransaction  = "event.no_transaction"
+	ErrCodeUndeclared     = "event.undeclared"
+	ErrCodeSyncNotAllowed = "event.sync_not_allowed"
+	ErrCodeDispatchFailed = "event.dispatch_failed"
 )
 
 func CapabilityDenied(capability string) *HostError {

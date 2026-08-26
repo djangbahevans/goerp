@@ -616,6 +616,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, ordered)
 
 	moduleRegistry := &registry.ModuleRegistry{}
+	// Wired before the first Update so a request arriving the instant
+	// modules become ready can already dispatch a "sync": true emission —
+	// SyncDispatcher.DispatchSync itself nil-guards against a not-yet-
+	// populated Snapshot() the same way every other ModuleRegistry-backed
+	// worker does.
+	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry})
 	snap, err := moduleRegistry.Update(loadedModules)
 	if err != nil {
 		closeOnFailure()

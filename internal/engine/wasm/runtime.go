@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
@@ -26,9 +27,23 @@ type Runtime struct {
 	moduleConfig wazero.ModuleConfig
 	modules      map[string]api.Module
 
-	registry          instanceRegistry
-	txLimiter         *TransactionLimiter
-	eventInsertClient *river.Client[*sql.Tx]
+	registry              instanceRegistry
+	txLimiter             *TransactionLimiter
+	eventInsertClient     *river.Client[*sql.Tx]
+	syncEventDispatcher   SyncEventDispatcher
+	syncSubscriberTimeout time.Duration
+}
+
+// SetSyncEventDispatcher wires the resolver host.event.emit's inline
+// synchronous dispatch (goerp#129) uses to invoke another module's
+// handle_event export. Set after New returns, once
+// registry.ModuleRegistry exists (engine.go constructs it after
+// wasm.New, and the wasm package cannot import registry itself — see
+// SyncEventDispatcher's own doc comment) — nil until then, in which case
+// a "sync": true emission fails with a clear error rather than a nil
+// dereference.
+func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
+	r.syncEventDispatcher = d
 }
 
 // New builds the shared wazero runtime and registers the host ABI against
@@ -76,8 +91,9 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	// per-request later (by invokeHandler), but the registry and limiter
 	// themselves must exist now.
 	r := &Runtime{
-		registry:  newInstanceRegistry(),
-		txLimiter: NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
+		registry:              newInstanceRegistry(),
+		txLimiter:             NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
+		syncSubscriberTimeout: cfg.SyncSubscriberTimeout,
 	}
 
 	if err := abi.RegisterAll(ctx, rt); err != nil {

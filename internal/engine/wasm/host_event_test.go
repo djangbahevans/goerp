@@ -14,7 +14,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-var hostEventCallerModule = buildHostCallerModule("host.event", []string{"emit_tx"})
+var hostEventCallerModule = buildHostCallerModule("host.event", []string{"emit_tx", "emit"})
 
 func newHostEventCaller(t *testing.T, ctx context.Context, r *Runtime, mc *ModuleContext) *ModuleInstance {
 	t.Helper()
@@ -280,4 +280,175 @@ func mustMarshalPayload(t *testing.T, v map[string]any) []byte {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	return data
+}
+
+func TestHostEvent_EmitTx_RejectsSync(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
+	mc := newEventTestModuleContext(reg)
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	inst := newHostEventCaller(t, ctx, r, mc)
+
+	txID, tx := beginAndRegisterTx(t, ctx, primaryDB, mc)
+	defer func() { _ = tx.Rollback() }()
+
+	env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{TxID: txID, Name: "sales.order.confirmed", Sync: true})
+	if env.OK {
+		t.Fatal("expected an error rejecting WithSync() on EmitTx")
+	}
+	if env.Error.Code != abi.ErrCodeSyncNotAllowed {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeSyncNotAllowed)
+	}
+}
+
+func TestHostEvent_Emit_InsertsJobWithoutTransaction(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	tenantID := uuid.NewString()
+	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantID, "eventemittest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	inst := newHostEventCaller(t, ctx, r, mc)
+
+	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "1"})})
+	if !env.OK {
+		t.Fatalf("emit failed: %+v", env.Error)
+	}
+
+	if got := countEventDeliveryJobs(t, primaryDB, tenantID); got != 1 {
+		t.Fatalf("job count = %d, want 1", got)
+	}
+}
+
+func TestHostEvent_Emit_UndeclaredEvent(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
+	mc := newEventTestModuleContext(reg)
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	inst := newHostEventCaller(t, ctx, r, mc)
+
+	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.not_declared"})
+	if env.OK {
+		t.Fatal("expected an error for an undeclared event name")
+	}
+	if env.Error.Code != abi.ErrCodeUndeclared {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeUndeclared)
+	}
+}
+
+func TestHostEvent_Emit_CapabilityDenied(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", "eventemitnocaptest", "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{EventRegistry: reg})
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	inst := newHostEventCaller(t, ctx, r, mc)
+
+	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.confirmed"})
+	if env.OK {
+		t.Fatal("expected an error without event.emit capability")
+	}
+	if env.Error.Code != abi.ErrCodeCapabilityDenied {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+	}
+}
+
+// fakeSyncEventDispatcher lets tests control DispatchSync's outcome per
+// (moduleName, handlerName) without a real WASM subscriber module.
+type fakeSyncEventDispatcher struct {
+	results map[string]struct {
+		status int32
+		err    error
+	}
+	calls []string
+}
+
+func (f *fakeSyncEventDispatcher) DispatchSync(ctx context.Context, moduleName, handlerName string, payload []byte) (int32, error) {
+	f.calls = append(f.calls, moduleName+"."+handlerName)
+	if r, ok := f.results[moduleName+"."+handlerName]; ok {
+		return r.status, r.err
+	}
+	return 0, nil
+}
+
+func newSyncTestModuleContext(reg *event.EventRegistry, tenantID string) *ModuleContext {
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantID, "eventsynctest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+}
+
+func newEmitterAndSubscriberRegistry(emitterModule, eventName string, subs ...manifest.EventSubscription) *event.EventRegistry {
+	reg := event.NewEventRegistry()
+	reg.Register(emitterModule, manifest.Manifest{
+		Name:  emitterModule,
+		Emits: []manifest.EventDeclaration{{Name: eventName, Version: 1}},
+	})
+	for i, sub := range subs {
+		reg.Register(fmt.Sprintf("subscriber-%d", i), manifest.Manifest{Subscribes: []manifest.EventSubscription{sub}})
+	}
+	return reg
+}
+
+func TestHostEvent_Emit_Sync_AllSubscribersSucceed(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	tenantID := uuid.NewString()
+	reg := newEmitterAndSubscriberRegistry("testmodule", "sales.order.shipped",
+		manifest.EventSubscription{Name: "sales.order.shipped", Handler: "handle_a", Async: false},
+	)
+	mc := newSyncTestModuleContext(reg, tenantID)
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	dispatcher := &fakeSyncEventDispatcher{}
+	r.SetSyncEventDispatcher(dispatcher)
+	inst := newHostEventCaller(t, ctx, r, mc)
+
+	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.shipped", Sync: true, Payload: mustMarshalPayload(t, map[string]any{})})
+	if !env.OK {
+		t.Fatalf("emit (sync) failed: %+v", env.Error)
+	}
+	if len(dispatcher.calls) != 1 {
+		t.Fatalf("expected exactly 1 sync subscriber dispatched, got %v", dispatcher.calls)
+	}
+	if got := countEventDeliveryJobs(t, primaryDB, tenantID); got != 1 {
+		t.Fatalf("job count = %d, want 1 (still inserted for the audit row/async subscribers)", got)
+	}
+}
+
+func TestHostEvent_Emit_Sync_SubscriberFailureAggregatedAndReturned(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	tenantID := uuid.NewString()
+	reg := newEmitterAndSubscriberRegistry("testmodule", "sales.order.shipped",
+		manifest.EventSubscription{Name: "sales.order.shipped", Handler: "handle_a", Async: false},
+		manifest.EventSubscription{Name: "sales.order.shipped", Handler: "handle_b", Async: false},
+	)
+	mc := newSyncTestModuleContext(reg, tenantID)
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	dispatcher := &fakeSyncEventDispatcher{results: map[string]struct {
+		status int32
+		err    error
+	}{
+		"subscriber-0.handle_a": {status: 1},
+	}}
+	r.SetSyncEventDispatcher(dispatcher)
+	inst := newHostEventCaller(t, ctx, r, mc)
+
+	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.shipped", Sync: true})
+	if env.OK {
+		t.Fatal("expected an aggregated dispatch failure")
+	}
+	if env.Error.Code != abi.ErrCodeDispatchFailed {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeDispatchFailed)
+	}
+	// Both subscribers must still have been attempted — a failing
+	// subscriber must not stop the remaining ones from running.
+	if len(dispatcher.calls) != 2 {
+		t.Fatalf("expected both subscribers dispatched despite one failing, got %v", dispatcher.calls)
+	}
 }
