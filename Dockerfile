@@ -5,8 +5,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/engine ./cmd/engine
 
-FROM alpine:3.22
-RUN apk add --no-cache ca-certificates
+FROM gcr.io/distroless/static:nonroot
 COPY --from=build /out/engine /usr/local/bin/engine
-USER nobody
+USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/engine"]
