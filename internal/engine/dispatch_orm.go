@@ -326,7 +326,7 @@ func ormErrorStatus(code string) int {
 		return http.StatusConflict
 	case abi.ErrCodeValidationFailed, abi.ErrCodeFieldUnknown, abi.ErrCodeDomainInvalid, abi.ErrCodeTransientNotListable:
 		return http.StatusBadRequest
-	case abi.ErrCodeCapabilityDenied:
+	case abi.ErrCodeCapabilityDenied, abi.ErrCodeFieldWriteDenied:
 		return http.StatusForbidden
 	case abi.ErrCodeUnavailable:
 		return http.StatusServiceUnavailable
