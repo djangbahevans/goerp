@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -497,29 +499,39 @@ func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested
 	return requested, nil
 }
 
-// applyFieldMasking applies each field's OnDeniedRead behavior in place.
-// FieldSecurityRegistry.Rule returns a real rule once a module declares
-// .Access() on a field (manifest-spec.md §8a). This doesn't yet evaluate
-// whether the caller's ModuleContext.PermissionSet actually satisfies a
-// rule's ReadPermission against ModuleContext.PermissionRegistry — until
-// that evaluation is wired in, any field with a non-empty ReadPermission
-// is treated as denied rather than silently allowed through an
-// unevaluated check.
+// applyFieldMasking applies each field's OnDeniedRead behavior in place,
+// for every field with a declared read rule the caller's PermissionSet
+// doesn't satisfy (manifest-spec.md §8a, auth-internals.md §12). Applies
+// uniformly to every record passed in — an extension-module field
+// (model.Extend()) gets the same enforcement as a base-model field,
+// since the field list this function iterates comes from the record map
+// itself, not from which module declared the field.
+//
+// Only checks the record's own top-level keys — it does not recurse into
+// a Many2One's expanded {id, display_name} object (expandRelations,
+// host_orm_relations.go) or an engine.Embeds-declared sub-record (not
+// yet implemented). In practice this is a narrow gap: expandRelations
+// only ever selects a target model's primary key and display_name, so a
+// restricted field can't leak through it unless display_name itself
+// carries an unusual .Access() rule — that specific case is unenforced
+// today. Recursive enforcement for both is deferred until engine.Embeds
+// exists and there's a real shape to test against.
 func applyFieldMasking(modCtx *ModuleContext, qualifiedModel string, records []map[string]any) {
 	reg := modCtx.FieldSecRegistry()
 	if reg == nil {
 		return
 	}
+	permReg := modCtx.PermissionRegistry()
 
 	for _, record := range records {
-		for fieldName := range record {
+		for fieldName, value := range record {
 			rule, ok := reg.Rule(qualifiedModel, fieldName)
-			if !ok || rule.ReadPermission == "" {
+			if !ok || rule.ReadPermission == "" || callerHasPermission(modCtx, permReg, rule.ReadPermission) {
 				continue
 			}
 			switch rule.OnDeniedRead {
 			case fieldsec.Mask:
-				record[fieldName] = rule.MaskPattern
+				record[fieldName] = applyMaskPattern(rule.MaskPattern, value)
 			case fieldsec.Nullify:
 				record[fieldName] = nil
 			default: // fieldsec.Omit
@@ -527,6 +539,51 @@ func applyFieldMasking(modCtx *ModuleContext, qualifiedModel string, records []m
 			}
 		}
 	}
+}
+
+// callerHasPermission reports whether modCtx's caller's PermissionSet
+// includes permissionName, resolved against permReg's stable bitfield
+// index. A nil permReg (no registry in this request's snapshot) or an
+// unregistered permission name both fail closed — deny by default,
+// the same posture the "unevaluated check" placeholder this replaces
+// already held.
+func callerHasPermission(modCtx *ModuleContext, permReg *permission.PermissionRegistry, permissionName string) bool {
+	if permReg == nil {
+		return false
+	}
+	idx, ok := permReg.Index(permissionName)
+	if !ok {
+		return false
+	}
+	return modCtx.PermissionSet.Has(idx)
+}
+
+// applyMaskPattern substitutes pattern's {last4}/{first2}/{length}
+// tokens against value's string form (manifest-spec.md §8a "On denied
+// read behaviours"); literal characters elsewhere in pattern (e.g. the
+// "****" in "****{last4}") pass through unchanged. A shorter-than-
+// requested value substitutes its entire string rather than panicking
+// on a slice out of range. A non-string value (numbers, bools, nested
+// records) has no meaningful last4/first2 substring, so the pattern is
+// returned as-is.
+func applyMaskPattern(pattern string, value any) string {
+	s, ok := value.(string)
+	if !ok {
+		return pattern
+	}
+
+	out := strings.ReplaceAll(pattern, "{length}", strconv.Itoa(len(s)))
+	last4 := s
+	if len(s) > 4 {
+		last4 = s[len(s)-4:]
+	}
+	out = strings.ReplaceAll(out, "{last4}", last4)
+	first2 := s
+	if len(s) > 2 {
+		first2 = s[:2]
+	}
+	out = strings.ReplaceAll(out, "{first2}", first2)
+	return out
 }
 
 // beginTenantScopedRead opens a read-only transaction with the same
