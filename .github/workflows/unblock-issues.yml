@@ -92,7 +92,7 @@ jobs:
             local issue_number="$1"
             local option_id="$2"
             local item_id
-            item_id=$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 200 \
+            item_id=$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 1000 \
               | jq -r --arg num "$issue_number" '.items[] | select(.content.number == ($num|tonumber)) | .id')
             if [ -z "$item_id" ]; then
               echo "No project item found for issue #$issue_number, skipping"
