@@ -50,6 +50,10 @@ jobs:
         working-directory: shell
         run: npm run typecheck
 
+      - name: Test
+        working-directory: shell
+        run: npm run test
+
       - name: Build
         working-directory: shell
         run: npm run build

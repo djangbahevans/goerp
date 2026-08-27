@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "npm run dev -w @goerp/shell-app",
     "build": "npm run build -w @goerp/sdk && npm run build -w @goerp/shell-app",
-    "typecheck": "npm run typecheck -w @goerp/sdk && npm run typecheck -w @goerp/shell-app"
+    "typecheck": "npm run typecheck -w @goerp/sdk && npm run typecheck -w @goerp/shell-app",
+    "test": "npm run test -w @goerp/shell-app"
   },
   "devDependencies": {
     "typescript": "7.0.2"
