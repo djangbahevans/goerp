@@ -2,22 +2,12 @@
 
 package engine
 
-import "unsafe"
+import "github.com/djangbahevans/goerp/sdk/go/internal/wasmmem"
 
-func allocate(size uint32) uint32 {
-	buf := make([]byte, size)
-	return uint32(uintptr(unsafe.Pointer(&buf[0])))
-}
+func allocate(size uint32) uint32 { return wasmmem.Allocate(size) }
 
-func deallocate(ptr, size uint32) {
-	_ = unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), size)
-}
+func deallocate(ptr, size uint32) { wasmmem.Deallocate(ptr, size) }
 
-func readMem(ptr, size uint32) []byte {
-	return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), size)
-}
+func readMem(ptr, size uint32) []byte { return wasmmem.ReadMem(ptr, size) }
 
-func writeMem(ptr uint32, data []byte) {
-	dst := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), len(data))
-	copy(dst, data)
-}
+func writeMem(ptr uint32, data []byte) { wasmmem.WriteMem(ptr, data) }
