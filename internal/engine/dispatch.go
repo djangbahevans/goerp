@@ -173,18 +173,19 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 	}
 
 	req := EngineRequest{
-		ID:          requestIDFromContext(ctx),
-		Method:      r.Method,
-		Path:        r.URL.Path,
-		PathParams:  rr.pathParams,
-		QueryParams: query,
-		Headers:     headers,
-		Body:        bodyMap,
-		UserID:      authCtx.UserID,
-		TenantID:    tenantCtx.TenantID,
-		TenantSlug:  tenantCtx.Slug,
-		TraceID:     trace.SpanFromContext(ctx).SpanContext().TraceID().String(),
-		RequestAt:   time.Now(),
+		ID:            requestIDFromContext(ctx),
+		Method:        r.Method,
+		Path:          r.URL.Path,
+		PathParams:    rr.pathParams,
+		QueryParams:   query,
+		Headers:       headers,
+		Body:          bodyMap,
+		UserID:        authCtx.UserID,
+		PermissionSet: authCtx.PermissionSet,
+		TenantID:      tenantCtx.TenantID,
+		TenantSlug:    tenantCtx.Slug,
+		TraceID:       trace.SpanFromContext(ctx).SpanContext().TraceID().String(),
+		RequestAt:     time.Now(),
 	}
 
 	resp, err := e.invokeHandler(ctx, inst, entry.PathTemplate, req, mod)

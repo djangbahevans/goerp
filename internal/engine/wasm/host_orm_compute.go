@@ -62,7 +62,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 	}
 
 	depCtx := NewModuleContext(
-		modCtx.RequestID, moduleName, modCtx.UserID, modCtx.ContactID, modCtx.Roles,
+		modCtx.RequestID, moduleName, modCtx.UserID, modCtx.ContactID, modCtx.Roles, modCtx.PermissionSet,
 		modCtx.TenantID, modCtx.TenantSlug, modCtx.TraceID, target.Capabilities, modCtx.txLimiter,
 		ModuleSnapshot{
 			ModelDecls:       target.ModelDecls,

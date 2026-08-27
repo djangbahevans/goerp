@@ -48,7 +48,7 @@ func newEmitterEventRegistry(moduleName, eventName, idempotencyKeyField string) 
 }
 
 func newEventTestModuleContext(reg *event.EventRegistry) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", "eventtest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", "eventtest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 }
 
 // beginAndRegisterTx opens a real transaction on primaryDB and registers
@@ -84,7 +84,7 @@ func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 
 	tenantID := uuid.NewString()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantID, "eventcommittest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventcommittest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
@@ -163,7 +163,7 @@ func TestHostEvent_EmitTx_CapabilityDenied(t *testing.T) {
 	ctx := context.Background()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", "eventnocaptest", "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{EventRegistry: reg})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", "eventnocaptest", "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
@@ -182,7 +182,7 @@ func TestHostEvent_EmitTx_ExplicitIdempotencyKey_DedupesAcrossCalls(t *testing.T
 
 	tenantID := uuid.NewString()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantID, "eventdeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventdeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
@@ -222,7 +222,7 @@ func TestHostEvent_EmitTx_ManifestIdempotencyKeyField_DedupesFromPayload(t *test
 
 	tenantID := uuid.NewString()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "order_id")
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantID, "eventmanifestdeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventmanifestdeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
@@ -253,7 +253,7 @@ func TestHostEvent_EmitTx_NoIdempotencyKey_NoDedup(t *testing.T) {
 
 	tenantID := uuid.NewString()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantID, "eventnodeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventnodeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
@@ -309,7 +309,7 @@ func TestHostEvent_Emit_InsertsJobWithoutTransaction(t *testing.T) {
 
 	tenantID := uuid.NewString()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantID, "eventemittest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventemittest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
@@ -346,7 +346,7 @@ func TestHostEvent_Emit_CapabilityDenied(t *testing.T) {
 	ctx := context.Background()
 
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", "eventemitnocaptest", "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{EventRegistry: reg})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", "eventemitnocaptest", "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
@@ -378,7 +378,7 @@ func (f *fakeSyncEventDispatcher) DispatchSync(ctx context.Context, moduleName, 
 }
 
 func newSyncTestModuleContext(reg *event.EventRegistry, tenantID string) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantID, "eventsynctest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventsynctest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 }
 
 func newEmitterAndSubscriberRegistry(emitterModule, eventName string, subs ...manifest.EventSubscription) *event.EventRegistry {

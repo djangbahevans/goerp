@@ -76,6 +76,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/poolwarm"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -944,20 +945,23 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 	var eventRegistry *event.EventRegistry
 	var computedIndex *computed.Index
 	var computeTargets map[string]wasm.ComputeTarget
+	var permRegistry *permission.PermissionRegistry
 	if e.moduleRegistry != nil {
 		if snap := e.moduleRegistry.Snapshot(); snap != nil {
 			fieldSecRegistry = snap.FieldSecRegistry()
 			eventRegistry = snap.EventRegistry()
 			computedIndex = snap.ComputedIndex()
 			computeTargets = registry.ComputeTargets(snap)
+			permRegistry = snap.PermissionRegistry()
 		}
 	}
-	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, "", nil, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), wasm.ModuleSnapshot{
-		ModelDecls:       mod.ModelDecls,
-		FieldSecRegistry: fieldSecRegistry,
-		EventRegistry:    eventRegistry,
-		ComputedIndex:    computedIndex,
-		ComputeTargets:   computeTargets,
+	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, "", nil, req.PermissionSet, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), wasm.ModuleSnapshot{
+		ModelDecls:         mod.ModelDecls,
+		FieldSecRegistry:   fieldSecRegistry,
+		EventRegistry:      eventRegistry,
+		ComputedIndex:      computedIndex,
+		ComputeTargets:     computeTargets,
+		PermissionRegistry: permRegistry,
 	})
 }
 

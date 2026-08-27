@@ -78,7 +78,7 @@ func TestORMCreate_One2Many_RejectedAsFieldNotWritable(t *testing.T) {
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	decls := []model.ModelDeclaration{widgetModelDeclWithOne2Many()}
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 
 	_, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMCreateInput{

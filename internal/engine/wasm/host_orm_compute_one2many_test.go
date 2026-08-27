@@ -81,7 +81,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildCreate(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -139,7 +139,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildWrite(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -206,7 +206,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildUnlink(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -268,7 +268,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_ChildWithoutParent_NoOp(t *te
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,

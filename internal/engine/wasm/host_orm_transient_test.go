@@ -55,7 +55,7 @@ func transientItemModelDecl(ttl time.Duration) model.ModelDeclaration {
 }
 
 func newTransientTestModuleContext(tenantSlug string, modelDecls []model.ModelDeclaration) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantSlug, tenantSlug, "trace-1",
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantSlug, tenantSlug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: modelDecls})
 }
 

@@ -151,12 +151,16 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 	}
 	defer mod.Pool.Return(inst)
 
-	moduleCtx := wasm.NewModuleContext(req.WorkflowID, mod.Manifest.Name, req.UserID, "", nil, req.TenantID, t.Slug, req.TraceID, mod.Capabilities, h.deps.TxLimiter, wasm.ModuleSnapshot{
-		ModelDecls:       mod.ModelDecls,
-		FieldSecRegistry: snap.FieldSecRegistry(),
-		EventRegistry:    snap.EventRegistry(),
-		ComputedIndex:    snap.ComputedIndex(),
-		ComputeTargets:   registry.ComputeTargets(snap),
+	// No live AuthContext for a workflow-worker-dispatched activity (bearer
+	// credential auth, not a user session) — permSet stays nil, same as
+	// Roles above.
+	moduleCtx := wasm.NewModuleContext(req.WorkflowID, mod.Manifest.Name, req.UserID, "", nil, nil, req.TenantID, t.Slug, req.TraceID, mod.Capabilities, h.deps.TxLimiter, wasm.ModuleSnapshot{
+		ModelDecls:         mod.ModelDecls,
+		FieldSecRegistry:   snap.FieldSecRegistry(),
+		EventRegistry:      snap.EventRegistry(),
+		ComputedIndex:      snap.ComputedIndex(),
+		ComputeTargets:     registry.ComputeTargets(snap),
+		PermissionRegistry: snap.PermissionRegistry(),
 	})
 	inst.SetModuleContext(moduleCtx)
 	defer func() {
