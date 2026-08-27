@@ -15,6 +15,10 @@ docs/
 /goerp
 /workflow-worker
 
+# goerp module build output.
+modules/*/module.wasm
+modules/*/build/
+
 # OS / editor cruft.
 .DS_Store
 .idea/

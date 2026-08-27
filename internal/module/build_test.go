@@ -133,7 +133,7 @@ func TestBuildFrontendProducesHashedBundleAndManifest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	result, err := BuildFrontend(ctx, dir)
+	result, err := BuildFrontend(ctx, dir, false)
 	if err != nil {
 		t.Fatalf("BuildFrontend: %v", err)
 	}
@@ -183,12 +183,12 @@ func TestBuildFrontendIsIdempotent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	first, err := BuildFrontend(ctx, dir)
+	first, err := BuildFrontend(ctx, dir, false)
 	if err != nil {
 		t.Fatalf("first BuildFrontend: %v", err)
 	}
 
-	second, err := BuildFrontend(ctx, dir)
+	second, err := BuildFrontend(ctx, dir, false)
 	if err != nil {
 		t.Fatalf("second BuildFrontend: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestBuildFrontendNoopWhenNoFrontendBundle(t *testing.T) {
 		t.Fatalf("write manifest.json: %v", err)
 	}
 
-	result, err := BuildFrontend(context.Background(), dir)
+	result, err := BuildFrontend(context.Background(), dir, false)
 	if err != nil {
 		t.Fatalf("BuildFrontend: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestBuildFrontendErrorsOnBuildFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	result, err := BuildFrontend(ctx, dir)
+	result, err := BuildFrontend(ctx, dir, false)
 	if err == nil {
 		t.Fatalf("expected BuildFrontend to fail on a broken entry point, got result %+v", result)
 	}

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,11 +67,32 @@ const fixtureModule: PlaceholderModule = {
 export default fixtureModule;
 `
 
+const buildFixtureGoMod = `module goerp-cli-build-fixture
+
+go 1.26.5
+`
+
+const buildFixtureMainGo = `package main
+
+func main() {}
+`
+
 func writeBuildFixture(t *testing.T, dir string) {
 	t.Helper()
 
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(buildFixtureManifest), 0o644); err != nil {
 		t.Fatalf("write manifest.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(buildFixtureGoMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	cmdModuleDir := filepath.Join(dir, "cmd", "module")
+	if err := os.MkdirAll(cmdModuleDir, 0o755); err != nil {
+		t.Fatalf("mkdir cmd/module: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cmdModuleDir, "main.go"), []byte(buildFixtureMainGo), 0o644); err != nil {
+		t.Fatalf("write cmd/module/main.go: %v", err)
 	}
 
 	frontendDir := filepath.Join(dir, "frontend")
@@ -92,28 +112,8 @@ func writeBuildFixture(t *testing.T, dir string) {
 	}
 }
 
-func TestModuleBuild_NoFrontendBundleIsNoop(t *testing.T) {
-	dir := t.TempDir()
-	manifest := strings.Replace(buildFixtureManifest, `"frontend": {
-    "bundle": true
-  },
-  `, "", 1)
-	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest.json: %v", err)
-	}
-
-	code, stdout, stderr := runCLI(t, "module", "build", dir)
-
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
-	}
-	if !strings.Contains(stdout, "nothing to build") {
-		t.Errorf("stdout = %q, want it to mention there's nothing to build", stdout)
-	}
-}
-
-func TestModuleBuild_MissingArgIsUsageError(t *testing.T) {
-	code, _, stderr := runCLI(t, "module", "build")
+func TestModuleBuild_TooManyArgsIsUsageError(t *testing.T) {
+	code, _, stderr := runCLI(t, "module", "build", "a", "b")
 
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2 (usage error, cli-reference.md §2b)", code)
@@ -139,6 +139,58 @@ func TestModuleBuild_MissingManifestIsNotUsageError(t *testing.T) {
 	}
 }
 
+func TestModuleBuild_NoWasmNoFrontendProducesArchive(t *testing.T) {
+	dir := t.TempDir()
+	writeBuildFixture(t, dir)
+
+	code, stdout, stderr := runCLI(t, "module", "build", dir, "--no-wasm", "--no-frontend")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, ".erp") {
+		t.Errorf("stdout = %q, want it to mention the built .erp archive", stdout)
+	}
+	if !strings.Contains(stdout, "sha256:") {
+		t.Errorf("stdout = %q, want it to mention the archive's sha256", stdout)
+	}
+
+	wantPath := filepath.Join(dir, "build", "fixture-0.1.0.erp")
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Errorf("expected archive at %s: %v", wantPath, err)
+	}
+}
+
+func TestModuleBuild_OutputFlag(t *testing.T) {
+	dir := t.TempDir()
+	writeBuildFixture(t, dir)
+	output := filepath.Join(dir, "custom.erp")
+
+	code, _, stderr := runCLI(t, "module", "build", dir, "--no-wasm", "--no-frontend", "--output", output)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Errorf("expected archive at %s: %v", output, err)
+	}
+}
+
+func TestModuleBuild_OptionalPathArgDefaultsToCwd(t *testing.T) {
+	dir := t.TempDir()
+	writeBuildFixture(t, dir)
+	t.Chdir(dir)
+
+	code, stdout, stderr := runCLI(t, "module", "build", "--no-wasm", "--no-frontend")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, ".erp") {
+		t.Errorf("stdout = %q, want it to mention the built .erp archive", stdout)
+	}
+}
+
 func TestModuleBuild_Success(t *testing.T) {
 	if _, err := exec.LookPath("npm"); err != nil {
 		t.Skip("npm not available")
@@ -153,25 +205,14 @@ func TestModuleBuild_Success(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	if !strings.Contains(stdout, "built ") {
-		t.Errorf("stdout = %q, want it to mention the built bundle", stdout)
+		t.Errorf("stdout = %q, want it to mention the built archive", stdout)
 	}
 	if !strings.Contains(stdout, "sha256:") {
-		t.Errorf("stdout = %q, want it to mention the bundle's sha256", stdout)
+		t.Errorf("stdout = %q, want it to mention the archive's sha256", stdout)
 	}
 
-	manifestData, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
-	if err != nil {
-		t.Fatalf("read manifest.json: %v", err)
-	}
-	var decoded struct {
-		Frontend struct {
-			BundleSHA256 string `json:"bundle_sha256"`
-		} `json:"frontend"`
-	}
-	if err := json.Unmarshal(manifestData, &decoded); err != nil {
-		t.Fatalf("unmarshal manifest.json: %v", err)
-	}
-	if !strings.Contains(stdout, decoded.Frontend.BundleSHA256) {
-		t.Errorf("manifest bundle_sha256 %q not reflected in stdout %q", decoded.Frontend.BundleSHA256, stdout)
+	wantPath := filepath.Join(dir, "build", "fixture-0.1.0.erp")
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Errorf("expected archive at %s: %v", wantPath, err)
 	}
 }
