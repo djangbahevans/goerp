@@ -9,6 +9,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/trace"
@@ -64,6 +65,11 @@ type ModuleSnapshot struct {
 	// host.orm's write path consults to find whether a just-created/
 	// written/unlinked model's table needs an audit_log row.
 	DataAuditRegistry *dataaudit.Registry
+
+	// PermissionRegistry resolves a permission name to its stable
+	// bitfield index, for interpreting a ModuleContext's PermissionSet
+	// (auth-internals.md §13 "Permission evaluation pipeline").
+	PermissionRegistry *permission.PermissionRegistry
 }
 
 type ModuleContext struct {
@@ -72,6 +78,14 @@ type ModuleContext struct {
 	UserID     string
 	ContactID  string
 	Roles      []string
+
+	// PermissionSet is the caller's resolved permission bitfield
+	// (internal/engine/auth/authcheck.AuthContext.PermissionSet),
+	// interpreted against the snapshot's PermissionRegistry — see
+	// auth-internals.md §13. Empty (nil) for a context with no live
+	// caller, e.g. a background workflow activity dispatch.
+	PermissionSet permission.PermissionBitfield
+
 	TenantID   string
 	TenantSlug string
 	TraceID    string
@@ -86,20 +100,21 @@ type ModuleContext struct {
 	snapshot ModuleSnapshot
 }
 
-func NewModuleContext(requestID, moduleName, userID, contactID string, roles []string, tenantID, tenantSlug, traceID string, capabilities abi.CapabilitySet, txLimiter *TransactionLimiter, snapshot ModuleSnapshot) *ModuleContext {
+func NewModuleContext(requestID, moduleName, userID, contactID string, roles []string, permSet permission.PermissionBitfield, tenantID, tenantSlug, traceID string, capabilities abi.CapabilitySet, txLimiter *TransactionLimiter, snapshot ModuleSnapshot) *ModuleContext {
 	return &ModuleContext{
-		RequestID:    requestID,
-		ModuleName:   moduleName,
-		UserID:       userID,
-		ContactID:    contactID,
-		Roles:        roles,
-		TenantID:     tenantID,
-		TenantSlug:   tenantSlug,
-		TraceID:      traceID,
-		transactions: make(map[string]*sql.Tx),
-		capabilities: capabilities,
-		txLimiter:    txLimiter,
-		snapshot:     snapshot,
+		RequestID:     requestID,
+		ModuleName:    moduleName,
+		UserID:        userID,
+		ContactID:     contactID,
+		Roles:         roles,
+		PermissionSet: permSet,
+		TenantID:      tenantID,
+		TenantSlug:    tenantSlug,
+		TraceID:       traceID,
+		transactions:  make(map[string]*sql.Tx),
+		capabilities:  capabilities,
+		txLimiter:     txLimiter,
+		snapshot:      snapshot,
 	}
 }
 
@@ -135,6 +150,12 @@ func (mc *ModuleContext) ComputeTargets() map[string]ComputeTarget {
 // for this request.
 func (mc *ModuleContext) DataAuditRegistry() *dataaudit.Registry {
 	return mc.snapshot.DataAuditRegistry
+}
+
+// PermissionRegistry returns the permission registry in effect for this
+// request, for interpreting PermissionSet's bitfield indices.
+func (mc *ModuleContext) PermissionRegistry() *permission.PermissionRegistry {
+	return mc.snapshot.PermissionRegistry
 }
 
 // RollbackAll rolls back every transaction still open in this context and

@@ -69,11 +69,12 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 
 	traceID := trace.SpanFromContext(r.Context()).SpanContext().TraceID().String()
 	req := EngineRequest{
-		ID:         requestIDFromContext(r.Context()),
-		UserID:     authCtx.UserID,
-		TenantID:   tenantCtx.TenantID,
-		TenantSlug: tenantCtx.Slug,
-		TraceID:    traceID,
+		ID:            requestIDFromContext(r.Context()),
+		UserID:        authCtx.UserID,
+		PermissionSet: authCtx.PermissionSet,
+		TenantID:      tenantCtx.TenantID,
+		TenantSlug:    tenantCtx.Slug,
+		TraceID:       traceID,
 	}
 	modCtx := e.newModuleContext(r.Context(), req, mod)
 	defer modCtx.RollbackAll()

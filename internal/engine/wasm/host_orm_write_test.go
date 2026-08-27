@@ -48,7 +48,7 @@ func newHostORMWriteCaller(t *testing.T, ctx context.Context, r *Runtime, mc *Mo
 // EventDelivery job count isolated from every other test sharing the
 // same primaryDB/river_job table.
 func newORMWriteTestModuleContext(tenantSlug string, modelDecls []model.ModelDeclaration) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, tenantSlug, tenantSlug, "trace-1",
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantSlug, tenantSlug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: modelDecls})
 }
 

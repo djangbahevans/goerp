@@ -15,7 +15,7 @@ import (
 // hooks (unlike compute functions) don't need a ComputedIndex at all —
 // runConstraintHook only ever borrows the calling module's own instance.
 func newConstraintTestModuleContext(slug string, decls []model.ModelDeclaration, target ComputeTarget) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
@@ -154,7 +154,7 @@ func TestORMWrite_ConstraintHook_NoLivePool_Allowed(t *testing.T) {
 	decls := []model.ModelDeclaration{itemModelDecl()}
 	// No ComputeTargets entry at all for "testmodule" — the equivalent of
 	// a module with no live pool.
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 	insertClient := r.EventInsertClient()
 

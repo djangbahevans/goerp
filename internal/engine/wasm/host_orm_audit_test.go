@@ -118,7 +118,7 @@ func queryAuditLogRows(t *testing.T, conn *sql.DB, slug, tableName string) []aud
 }
 
 func newAuditTestModuleContext(tenantSlug string) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "00000000-0000-0000-0000-0000000000aa", "contact-1", []string{"admin"}, tenantSlug, tenantSlug, "trace-1",
+	return NewModuleContext("req-1", "testmodule", "00000000-0000-0000-0000-0000000000aa", "contact-1", []string{"admin"}, nil, tenantSlug, tenantSlug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:        []model.ModelDeclaration{auditWidgetModelDecl(), auditGadgetModelDecl()},
 			DataAuditRegistry: newAuditTestDataAuditRegistry(),

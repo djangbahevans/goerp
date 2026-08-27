@@ -154,7 +154,7 @@ func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -206,7 +206,7 @@ func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -269,7 +269,7 @@ func TestORMWrite_ComputedField_RejectedAsFieldNotWritable(t *testing.T) {
 
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{orderModelDecl()}
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 
 	insertClient := r.EventInsertClient()

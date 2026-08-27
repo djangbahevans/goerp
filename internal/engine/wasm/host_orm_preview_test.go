@@ -66,7 +66,7 @@ func TestORMPreview_DependsOnlyRecompute_NoRowWritten(t *testing.T) {
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{orderModelDecl()}
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
@@ -99,7 +99,7 @@ func TestORMPreview_ComputedDependencyAbsent_LeftUnset(t *testing.T) {
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{orderModelDecl()}
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
@@ -131,7 +131,7 @@ func TestORMPreview_RegisteredHook_RunsAfterDependsRecompute(t *testing.T) {
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{pricedOrderModelDecl()}
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"testmodule": target},

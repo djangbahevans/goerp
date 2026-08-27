@@ -40,7 +40,7 @@ func createFixtureCategoryTable(t *testing.T, conn *sql.DB, slug string) {
 }
 
 func newTreeTestModuleContext(slug string, decls []model.ModelDeclaration) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 }
 
@@ -283,7 +283,7 @@ func TestORMCreate_DynamicLink_NonexistentTarget_Rejected(t *testing.T) {
 
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{commentModelDecl()}
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"salesmod": {ModelDecls: []model.ModelDeclaration{orderTargetModelDecl()}}},
@@ -318,7 +318,7 @@ func TestORMCreate_DynamicLink_ValidCrossModuleTarget_Succeeds(t *testing.T) {
 
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{commentModelDecl()}
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"salesmod": {ModelDecls: []model.ModelDeclaration{orderTargetModelDecl()}}},

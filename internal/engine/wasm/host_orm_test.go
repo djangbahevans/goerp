@@ -53,7 +53,7 @@ func widgetModelDecl() model.ModelDeclaration {
 }
 
 func newORMTestModuleContext(tenantSlug string, modelDecls []model.ModelDeclaration) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", tenantSlug, "trace-1", abi.CapDBRead, nil, ModuleSnapshot{ModelDecls: modelDecls})
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", tenantSlug, "trace-1", abi.CapDBRead, nil, ModuleSnapshot{ModelDecls: modelDecls})
 }
 
 // createFixtureWidgetsTable creates a plain, RLS-free widgets table (no
@@ -242,7 +242,7 @@ func TestHostORM_Search_CapabilityDenied(t *testing.T) {
 	createFixtureWidgetsTable(t, primaryDB, slug, nil)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, "tenant-id-1", slug, "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{widgetModelDecl()}})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", slug, "trace-1", abi.CapabilitySet(0), nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{widgetModelDecl()}})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_search", ORMSearchInput{Model: "testmodule.widget"}, nil)
@@ -544,7 +544,7 @@ func TestHostORM_Search_RespectsRLS(t *testing.T) {
 	r := newHostDBTestRuntime(t, readerDB, 10)
 	// ContactID matches repID — the RLS policy should admit only the row
 	// with salesperson_id = repID, even though no domain filter asks for it.
-	mc := NewModuleContext("req-1", "testmodule", "user-1", repID, []string{"admin"}, "tenant-id-1", slug, "trace-1", abi.CapDBRead, nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{widgetModel}})
+	mc := NewModuleContext("req-1", "testmodule", "user-1", repID, []string{"admin"}, nil, "tenant-id-1", slug, "trace-1", abi.CapDBRead, nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{widgetModel}})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
 	var out ORMSearchOutput
