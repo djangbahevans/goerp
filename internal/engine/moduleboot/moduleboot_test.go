@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,6 +152,24 @@ func TestDiscover_SkipsDirMissingManifestOrWasm(t *testing.T) {
 	}
 }
 
+func TestDiscover_SetsPackagePathForDir(t *testing.T) {
+	root := t.TempDir()
+	writeModuleDir(t, root, "widgets", okModule, nil)
+
+	sources, err := Discover(root)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("Discover() returned %d sources, want 1", len(sources))
+	}
+
+	want := filepath.Join(root, "widgets")
+	if sources[0].PackagePath != want {
+		t.Errorf("PackagePath = %q, want %q", sources[0].PackagePath, want)
+	}
+}
+
 // writeErpPackage builds a real zip .erp file at <root>/<filename> with
 // manifest.json/module.wasm at its root, mirroring manifest-spec.md §2's
 // documented .erp layout and internal/module.Package's real output shape.
@@ -210,6 +229,81 @@ func TestDiscover_ReadsErpPackage(t *testing.T) {
 	}
 	if string(src.WasmBytes) != string(okModule) {
 		t.Error("WasmBytes doesn't match the archived module.wasm bytes")
+	}
+
+	want := filepath.Join(root, "widgets-1.0.0.erp")
+	if src.PackagePath != want {
+		t.Errorf("PackagePath = %q, want %q", src.PackagePath, want)
+	}
+}
+
+// TestDiscover_PackagePathAllowsExtractingOtherMembers is goerp#425's
+// acceptance test: a module's retained PackagePath lets later code
+// re-open its .erp and extract a member Discover itself never looked at
+// (e.g. a future notification template file), proving the path is real
+// and points at the actual archive, not just a plausible-looking string.
+func TestDiscover_PackagePathAllowsExtractingOtherMembers(t *testing.T) {
+	root := t.TempDir()
+
+	f, err := os.Create(filepath.Join(root, "widgets.erp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := zip.NewWriter(f)
+	mustWriteZipEntry(t, w, "manifest.json", manifestJSON(t, "widgets", okModule, nil))
+	mustWriteZipEntry(t, w, "module.wasm", okModule)
+	mustWriteZipEntry(t, w, "notifications/welcome/email.en.html", []byte("<p>hi {{.UserFirstName}}</p>"))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	sources, err := Discover(root)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("Discover() returned %d sources, want 1", len(sources))
+	}
+
+	r, err := zip.OpenReader(sources[0].PackagePath)
+	if err != nil {
+		t.Fatalf("re-open PackagePath as a zip: %v", err)
+	}
+	defer r.Close()
+
+	found := false
+	for _, zf := range r.File {
+		if zf.Name != "notifications/welcome/email.en.html" {
+			continue
+		}
+		found = true
+		rc, err := zf.Open()
+		if err != nil {
+			t.Fatalf("open notification template member: %v", err)
+		}
+		defer rc.Close()
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read notification template member: %v", err)
+		}
+		if string(data) != "<p>hi {{.UserFirstName}}</p>" {
+			t.Errorf("template content = %q, want the original bytes", data)
+		}
+	}
+	if !found {
+		t.Error("notifications/welcome/email.en.html not found when re-opening PackagePath")
+	}
+}
+
+func mustWriteZipEntry(t *testing.T, w *zip.Writer, name string, data []byte) {
+	t.Helper()
+	entry, err := w.Create(name)
+	if err != nil {
+		t.Fatalf("create zip entry %s: %v", name, err)
+	}
+	if _, err := entry.Write(data); err != nil {
+		t.Fatalf("write zip entry %s: %v", name, err)
 	}
 }
 

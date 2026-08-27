@@ -156,6 +156,22 @@ func TestLoadModule_Success(t *testing.T) {
 	}
 }
 
+func TestLoadModule_CopiesPackagePathFromSource(t *testing.T) {
+	rt := newTestRuntime(t)
+	src := Source{
+		Name:          "widgets",
+		ManifestBytes: manifestJSON(t, "widgets", okModule, nil),
+		WasmBytes:     okModule,
+		PackagePath:   "/modules/widgets-1.0.0.erp",
+	}
+
+	m := LoadModule(context.Background(), rt, testPoolCfg(), src)
+
+	if m.PackagePath != "/modules/widgets-1.0.0.erp" {
+		t.Errorf("PackagePath = %q, want %q", m.PackagePath, "/modules/widgets-1.0.0.erp")
+	}
+}
+
 func TestLoadModule_DecodesRealRouteFromGetRoutes(t *testing.T) {
 	rt := newTestRuntime(t)
 	src := Source{
