@@ -2,8 +2,9 @@
 // LoadManifest guards encoding (UTF-8, no comments — JSON syntax rejects
 // those for free — and the 1MB size cap, manifest-spec.md §1), and Manifest
 // is the typed struct every root field (manifest-spec.md §2) decodes into.
-// Loading a manifest out of a real .erp package, as opposed to a loose
-// manifest.json fixture, is out of scope here — see #13.
+// Load only ever decodes raw bytes — extracting those bytes from wherever
+// they live (a loose manifest.json fixture, or a real .erp package) is the
+// caller's job, see internal/engine/moduleboot.Discover.
 package manifest
 
 import (

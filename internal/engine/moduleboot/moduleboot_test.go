@@ -1,6 +1,7 @@
 package moduleboot
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -147,6 +148,113 @@ func TestDiscover_SkipsDirMissingManifestOrWasm(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0].Name != "widgets" {
 		t.Fatalf("Discover() = %+v, want only \"widgets\"", sources)
+	}
+}
+
+// writeErpPackage builds a real zip .erp file at <root>/<filename> with
+// manifest.json/module.wasm at its root, mirroring manifest-spec.md §2's
+// documented .erp layout and internal/module.Package's real output shape.
+// manifestBytes lets callers pass deliberately corrupt content; pass nil
+// to use the standard manifestJSON fixture.
+func writeErpPackage(t *testing.T, root, filename, moduleName string, manifestBytes, wasmBytes []byte) {
+	t.Helper()
+
+	if manifestBytes == nil {
+		manifestBytes = manifestJSON(t, moduleName, wasmBytes, nil)
+	}
+
+	f, err := os.Create(filepath.Join(root, filename))
+	if err != nil {
+		t.Fatalf("create %s: %v", filename, err)
+	}
+	defer f.Close()
+
+	w := zip.NewWriter(f)
+	if entry, err := w.Create("manifest.json"); err != nil {
+		t.Fatalf("create manifest.json entry: %v", err)
+	} else if _, err := entry.Write(manifestBytes); err != nil {
+		t.Fatalf("write manifest.json entry: %v", err)
+	}
+	if wasmBytes != nil {
+		if entry, err := w.Create("module.wasm"); err != nil {
+			t.Fatalf("create module.wasm entry: %v", err)
+		} else if _, err := entry.Write(wasmBytes); err != nil {
+			t.Fatalf("write module.wasm entry: %v", err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close zip writer: %v", err)
+	}
+}
+
+func TestDiscover_ReadsErpPackage(t *testing.T) {
+	root := t.TempDir()
+	writeErpPackage(t, root, "widgets-1.0.0.erp", "widgets", nil, okModule)
+
+	sources, err := Discover(root)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("Discover() returned %d sources, want 1", len(sources))
+	}
+
+	src := sources[0]
+	// Name comes from the manifest's own declared name, not the
+	// versioned archive filename.
+	if src.Name != "widgets" {
+		t.Errorf("Name = %q, want %q", src.Name, "widgets")
+	}
+	if len(src.ManifestBytes) == 0 || len(src.WasmBytes) == 0 {
+		t.Errorf("source %+v has empty bytes", src)
+	}
+	if string(src.WasmBytes) != string(okModule) {
+		t.Error("WasmBytes doesn't match the archived module.wasm bytes")
+	}
+}
+
+func TestDiscover_SkipsErpMissingManifestOrWasm(t *testing.T) {
+	root := t.TempDir()
+	writeErpPackage(t, root, "widgets.erp", "widgets", nil, okModule)
+	writeErpPackage(t, root, "no-wasm.erp", "no-wasm", nil, nil)
+
+	sources, err := Discover(root)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(sources) != 1 || sources[0].Name != "widgets" {
+		t.Fatalf("Discover() = %+v, want only \"widgets\"", sources)
+	}
+}
+
+func TestDiscover_ErpNameFallsBackToFilenameOnCorruptManifest(t *testing.T) {
+	root := t.TempDir()
+	writeErpPackage(t, root, "broken.erp", "", []byte("not valid json"), okModule)
+
+	sources, err := Discover(root)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("Discover() returned %d sources, want 1", len(sources))
+	}
+	if sources[0].Name != "broken" {
+		t.Errorf("Name = %q, want %q (the filename minus .erp)", sources[0].Name, "broken")
+	}
+}
+
+func TestDiscover_IgnoresNonErpFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("not a module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sources, err := Discover(root)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(sources) != 0 {
+		t.Fatalf("Discover() = %+v, want none", sources)
 	}
 }
 
