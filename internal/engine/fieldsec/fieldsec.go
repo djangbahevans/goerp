@@ -62,6 +62,35 @@ func (r *FieldSecurityRegistry) Register(moduleName string, modelDecls []model.M
 }
 
 func fieldSecurityRuleFor(field model.NamedField) (FieldSecurityRule, bool) {
-	// FieldDef carries no security data until SDK backlog #19 lands; always empty for now
-	return FieldSecurityRule{}, false
+	def := field.Def
+	if def.ReadPermission == "" && def.WritePermission == "" {
+		// No .Access() call at all — absence of a rule, not an explicit
+		// allow (manifest-spec.md §8a).
+		return FieldSecurityRule{}, false
+	}
+
+	rule := FieldSecurityRule{
+		ReadPermission:  def.ReadPermission,
+		WritePermission: def.WritePermission,
+	}
+
+	if def.DeniedRead != nil {
+		switch def.DeniedRead.Kind {
+		case model.ReadKindNullify:
+			rule.OnDeniedRead = Nullify
+		case model.ReadKindMask:
+			rule.OnDeniedRead = Mask
+			rule.MaskPattern = def.DeniedRead.Pattern
+		default:
+			rule.OnDeniedRead = Omit
+		}
+	}
+
+	if def.DeniedWrite != nil && *def.DeniedWrite == model.Ignore {
+		rule.OnDeniedWrite = Ignore
+	} else {
+		rule.OnDeniedWrite = Reject
+	}
+
+	return rule, true
 }
