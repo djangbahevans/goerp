@@ -498,15 +498,13 @@ func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested
 }
 
 // applyFieldMasking applies each field's OnDeniedRead behavior in place.
-// FieldSecurityRegistry.Rule never returns a rule today (real .Access()
-// rule population is unfiled backlog work, goerp#264) — this calls the
-// real lookup so enforcement starts automatically once that data exists,
-// the same deliberate-no-op pattern the auth middleware chain uses for
-// routes that don't need it yet. Evaluating whether the caller's roles
-// actually satisfy a rule's ReadPermission needs a role→permission
-// evaluator that doesn't exist on ModuleContext yet either — until that
-// exists, any field with a non-empty ReadPermission is treated as denied
-// rather than silently allowed through an unevaluated check.
+// FieldSecurityRegistry.Rule returns a real rule once a module declares
+// .Access() on a field (manifest-spec.md §8a). This doesn't yet evaluate
+// whether the caller's ModuleContext.PermissionSet actually satisfies a
+// rule's ReadPermission against ModuleContext.PermissionRegistry — until
+// that evaluation is wired in, any field with a non-empty ReadPermission
+// is treated as denied rather than silently allowed through an
+// unevaluated check.
 func applyFieldMasking(modCtx *ModuleContext, qualifiedModel string, records []map[string]any) {
 	reg := modCtx.FieldSecRegistry()
 	if reg == nil {
