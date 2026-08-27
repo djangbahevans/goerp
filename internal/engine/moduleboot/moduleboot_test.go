@@ -488,3 +488,92 @@ func TestLoadCascading_TransitiveDependentIsAlsoSkipped(t *testing.T) {
 		t.Errorf("c.FailureReason = %q, want it to name its direct upstream (b), not the root cause", modules["c"].FailureReason)
 	}
 }
+
+func notificationManifestJSON(t *testing.T, name string, wasmBytes []byte, templates map[string]string) []byte {
+	t.Helper()
+	sum := sha256.Sum256(wasmBytes)
+
+	fields := map[string]any{
+		"name": name, "display_name": name, "type": "domain", "version": "1.0.0",
+		"description": "a test module", "abi_version": "1", "engine": ">=0.5.0 <1.0.0",
+		"depends_on": []string{}, "capabilities": []string{},
+		"schema":   map[string]any{"owned_models": []string{}},
+		"checksum": fmt.Sprintf("sha256:%x", sum),
+		"notification_types": []map[string]any{
+			{
+				"name":               "welcome",
+				"label":              "Welcome",
+				"default_channels":   []string{"in_app"},
+				"available_channels": []string{"in_app"},
+				"templates":          templates,
+			},
+		},
+	}
+	data, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal manifest fixture: %v", err)
+	}
+	return data
+}
+
+func TestLoadCascading_SetsNotifTemplatesOnSuccess(t *testing.T) {
+	rt := newTestRuntime(t)
+	dir := t.TempDir()
+
+	templates := map[string]string{"in_app": "notifications/welcome/in_app.{locale}.json"}
+	if err := os.MkdirAll(filepath.Join(dir, "notifications", "welcome"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notifications", "welcome", "in_app.en.json"), []byte(`{"title":"hi"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sources := []loader.Source{
+		{
+			Name:          "widgets",
+			ManifestBytes: notificationManifestJSON(t, "widgets", okModule, templates),
+			WasmBytes:     okModule,
+			PackagePath:   dir,
+		},
+	}
+
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), sources)
+
+	m, ok := modules["widgets"]
+	if !ok || m.Status == module.StatusFailed {
+		t.Fatalf("widgets = %+v, want a successful load", m)
+	}
+	if m.NotifTemplates == nil {
+		t.Fatal("expected NotifTemplates to be set")
+	}
+	if _, _, ok := m.NotifTemplates.Resolve("welcome", "in_app", "en"); !ok {
+		t.Error("expected Resolve(welcome, in_app, en) to succeed")
+	}
+}
+
+func TestLoadCascading_FailsModuleWhenDeclaredTemplateMissing(t *testing.T) {
+	rt := newTestRuntime(t)
+	dir := t.TempDir()
+	// Declares a template but never writes the file — the "en" variant
+	// never exists in the package.
+	templates := map[string]string{"in_app": "notifications/welcome/in_app.{locale}.json"}
+
+	sources := []loader.Source{
+		{
+			Name:          "widgets",
+			ManifestBytes: notificationManifestJSON(t, "widgets", okModule, templates),
+			WasmBytes:     okModule,
+			PackagePath:   dir,
+		},
+	}
+
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), sources)
+
+	m, ok := modules["widgets"]
+	if !ok || m.Status != module.StatusFailed {
+		t.Fatalf("widgets = %+v, want StatusFailed (declared template file missing)", m)
+	}
+	if !strings.Contains(m.FailureReason, "en") {
+		t.Errorf("FailureReason = %q, want it to mention the missing en variant", m.FailureReason)
+	}
+}
