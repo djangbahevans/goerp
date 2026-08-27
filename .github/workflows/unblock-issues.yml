@@ -80,6 +80,7 @@ jobs:
           fi
 
           OWNER=djangbahevans
+          REPO=goerp
           PROJECT_NUMBER=3
 
           PROJECT_ID=$(gh project view "$PROJECT_NUMBER" --owner "$OWNER" --format json | jq -r '.id')
@@ -92,8 +93,23 @@ jobs:
             local issue_number="$1"
             local option_id="$2"
             local item_id
-            item_id=$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 1000 \
-              | jq -r --arg num "$issue_number" '.items[] | select(.content.number == ($num|tonumber)) | .id')
+            # Looked up directly off the issue rather than by paginating
+            # gh project item-list's full board listing — the latter
+            # silently truncated past a fixed --limit once the board grew
+            # past it, leaving newer issues' Readiness unsynced with no
+            # error (goerp CI incident, 2026-08-27).
+            item_id=$(gh api graphql -f query='
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    projectItems(first: 10) {
+                      nodes { id project { number } }
+                    }
+                  }
+                }
+              }' -f owner="$OWNER" -f repo="$REPO" -F number="$issue_number" \
+              | jq -r --arg proj "$PROJECT_NUMBER" \
+                'try (.data.repository.issue.projectItems.nodes[] | select(.project.number == ($proj|tonumber)) | .id) catch empty')
             if [ -z "$item_id" ]; then
               echo "No project item found for issue #$issue_number, skipping"
               return
