@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
+	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/google/uuid"
@@ -196,7 +197,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMCreateOutput{}, hostErr
 	}
 
-	row, inserted, hostErr := createOneRecordTx(ctx, tx, md, input.Model, record, input.OnConflict)
+	row, inserted, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict)
 	if hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
@@ -322,7 +323,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			return ORMCreateBatchOutput{}, hostErr
 		}
 
-		row, inserted, hostErr := createOneRecordTx(ctx, tx, md, input.Model, record, input.OnConflict)
+		row, inserted, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict)
 		if hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
@@ -466,7 +467,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
 
-	row, _, hostErr := createOneRecordTx(ctx, tx, md, input.Model, record, nil)
+	row, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil)
 	if hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -569,7 +570,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, hostErr
 	}
 
-	updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, input.ID, record, input.ExpectedEtag)
+	updated, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, input.Model, pkCol, input.ID, record, input.ExpectedEtag)
 	if hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
@@ -983,7 +984,16 @@ func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelNam
 // or Store(false) alike — is never directly settable
 // (go-sdk-reference.md §22 "Computed field recomputation"): orm.write's
 // own recomputeAfterWrite is the only path that ever assigns one.
-func buildAssignment(md model.ModelDeclaration, record map[string]any) (cols []string, args []any, hostErr *abi.HostError) {
+//
+// The single chokepoint for write-side field security (manifest-spec.md
+// §8a, auth-internals.md §12 "Write behaviours") — every write path
+// (create, create_batch, first_or_create, write, write_many,
+// write_where) funnels through here via createOneRecordTx/
+// writeOneRecordTx. A field with a WritePermission the caller doesn't
+// satisfy is rejected outright (OnDeniedWrite Reject, the default) or
+// silently absent from cols/args (Ignore) — either way before any SQL
+// runs.
+func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, record map[string]any) (cols []string, args []any, hostErr *abi.HostError) {
 	fields := make(map[string]model.FieldDef, len(md.Fields))
 	for _, f := range md.Fields {
 		fields[f.Name] = f.Def
@@ -995,6 +1005,10 @@ func buildAssignment(md model.ModelDeclaration, record map[string]any) (cols []s
 			fields[f.Name+"_path"] = model.FieldDef{}
 		}
 	}
+
+	fieldSecReg := modCtx.FieldSecRegistry()
+	permReg := modCtx.PermissionRegistry()
+
 	for k, v := range record {
 		def, known := fields[k]
 		if !known {
@@ -1006,6 +1020,16 @@ func buildAssignment(md model.ModelDeclaration, record map[string]any) (cols []s
 		if def.Kind == model.KindOne2Many {
 			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is a One2Many relation and cannot be written directly", Details: map[string]any{"field": k}}
 		}
+
+		if fieldSecReg != nil {
+			if rule, ok := fieldSecReg.Rule(qualifiedModel, k); ok && rule.WritePermission != "" && !callerHasPermission(modCtx, permReg, rule.WritePermission) {
+				if rule.OnDeniedWrite == fieldsec.Ignore {
+					continue
+				}
+				return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldWriteDenied, Message: "field " + k + " requires permission " + rule.WritePermission, Details: map[string]any{"field": k}}
+			}
+		}
+
 		cols = append(cols, quoteIdentORM(k))
 		args = append(args, v)
 	}
@@ -1027,8 +1051,8 @@ func buildAssignment(md model.ModelDeclaration, record map[string]any) (cols []s
 // just inserted). inserted tells the caller which event type to emit for
 // this row. An OnConflictIgnore hit returns (nil, false, nil) — a
 // skipped conflict is not an error, just nothing to report.
-func createOneRecordTx(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption) (map[string]any, bool, *abi.HostError) {
-	cols, args, hostErr := buildAssignment(md, record)
+func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption) (map[string]any, bool, *abi.HostError) {
+	cols, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
 	if hostErr != nil {
 		return nil, false, hostErr
 	}
@@ -1124,8 +1148,8 @@ func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, 
 // the etag-scoped WHERE clause entirely (the bulk callers' "no etag
 // check" semantics); a non-empty expectedEtag adds it, matching single
 // write's optimistic-lock behavior.
-func writeOneRecordTx(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, id string, record map[string]any, expectedEtag string) (map[string]any, *abi.HostError) {
-	sets, args, hostErr := buildAssignment(md, record)
+func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag string) (map[string]any, *abi.HostError) {
+	sets, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
 	if hostErr != nil {
 		return nil, hostErr
 	}
@@ -1178,7 +1202,7 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}
-		updated, hostErr := writeOneRecordTx(ctx, tx, md, pkCol, id, record, "")
+		updated, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, qualifiedModel, pkCol, id, record, "")
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}

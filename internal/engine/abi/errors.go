@@ -59,6 +59,7 @@ const (
 	ErrCodeForeignKeyViolation       = "orm.foreign_key_violation"
 	ErrCodeConflictTargetInvalid     = "orm.conflict_target_invalid"
 	ErrCodeFieldNotWritable          = "orm.field_not_writable"
+	ErrCodeFieldWriteDenied          = "orm.field_write_denied"
 	ErrCodeCycleDetected             = "orm.cycle_detected"
 	ErrCodeDynamicLinkTargetNotFound = "orm.dynamic_link_target_not_found"
 )
