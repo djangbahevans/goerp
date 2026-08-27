@@ -60,11 +60,17 @@ func Do(invoke Invoke, req any, resp any) error {
 	wasmmem.WriteMem(ptr, data)
 
 	packed := invoke(ptr, uint32(len(data)))
+	// The host has read the request by now (invoke already returned) —
+	// free it so wasmmem's live registry doesn't grow unbounded across a
+	// pooled module instance's many host calls over its lifetime.
+	wasmmem.Deallocate(ptr, uint32(len(data)))
+
 	respPtr := uint32(packed >> 32)
 	respLen := uint32(packed)
 	if respPtr == 0 {
 		return &HostError{Code: "abi.allocation_failed", Message: "host call returned a null response pointer"}
 	}
+	defer wasmmem.Deallocate(respPtr, respLen)
 
 	raw := wasmmem.ReadMem(respPtr, respLen)
 	var env envelope
