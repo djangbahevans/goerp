@@ -80,7 +80,12 @@ func Discover(dir string) ([]loader.Source, error) {
 			return nil, fmt.Errorf("read %s/module.wasm: %w", name, err)
 		}
 
-		sources = append(sources, loader.Source{Name: name, ManifestBytes: manifestBytes, WasmBytes: wasmBytes})
+		sources = append(sources, loader.Source{
+			Name:          name,
+			ManifestBytes: manifestBytes,
+			WasmBytes:     wasmBytes,
+			PackagePath:   filepath.Join(dir, name),
+		})
 	}
 
 	return sources, nil
@@ -153,7 +158,12 @@ func readPackageSource(path string) (*loader.Source, error) {
 		name = mf.Name
 	}
 
-	return &loader.Source{Name: name, ManifestBytes: manifestBytes, WasmBytes: wasmBytes}, nil
+	return &loader.Source{
+		Name:          name,
+		ManifestBytes: manifestBytes,
+		WasmBytes:     wasmBytes,
+		PackagePath:   path,
+	}, nil
 }
 
 // Order sorts sources topologically by manifest depends_on, so a module
@@ -229,7 +239,7 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 		mf, err := manifest.Load(src.ManifestBytes)
 		if err == nil {
 			if upstream, blocked := failedDependency(mf.DependsOn, modules); blocked {
-				m := &module.LoadedModule{Manifest: *mf}
+				m := &module.LoadedModule{Manifest: *mf, PackagePath: src.PackagePath}
 				m.FailDependency(upstream)
 				modules[src.Name] = m
 				continue

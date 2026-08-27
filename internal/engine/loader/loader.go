@@ -45,6 +45,10 @@ type Source struct {
 	Name          string
 	ManifestBytes []byte
 	WasmBytes     []byte
+	// PackagePath is the .erp package file or loose module directory src
+	// was read from on disk. Copied onto the returned LoadedModule
+	// unchanged — LoadModule itself never reads it.
+	PackagePath string
 }
 
 // LoadModule validates src's manifest, verifies its WASM binary's
@@ -60,7 +64,7 @@ type Source struct {
 // has no visibility into what other modules have already claimed. See
 // LoadAll for the multi-module loop that does.
 func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, src Source) *module.LoadedModule {
-	m := &module.LoadedModule{Status: module.StatusCompiling}
+	m := &module.LoadedModule{Status: module.StatusCompiling, PackagePath: src.PackagePath}
 
 	mf, err := manifest.Load(src.ManifestBytes)
 	if err != nil {

@@ -18,6 +18,13 @@ type LoadedModule struct {
 	Pool           *wasm.InstancePool
 	Status         ModuleStatus
 	Capabilities   abi.CapabilitySet
+	// PackagePath is where the module was loaded from on disk: a .erp
+	// package file, or a loose module directory. Empty only for a
+	// synthetically-constructed LoadedModule with no real backing path.
+	// Lets later code (e.g. notification template resolution) re-open
+	// the module's package and extract a file the initial load didn't —
+	// see loader.Source.PackagePath, which this is copied from.
+	PackagePath string
 	// FailureReason is set only when Status == StatusFailed. Set it via
 	// Fail or FailDependency rather than assigning directly, so the two
 	// fields can never go out of sync.
