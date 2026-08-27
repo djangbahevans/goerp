@@ -8,6 +8,7 @@ func NewCmd() *cobra.Command {
 		Short: "Manage GoERP modules",
 	}
 
+	cmd.AddCommand(newBuildCmd())
 	cmd.AddCommand(newCreateCmd())
 
 	return cmd
