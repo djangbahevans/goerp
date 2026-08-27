@@ -25,8 +25,10 @@ type FrontendBuildResult struct {
 // manifest declares frontend.bundle: true) and writes the resulting
 // bundle's sha256 into the manifest's frontend.bundle_sha256 field. It
 // returns (nil, nil) when the module declares no frontend bundle, so
-// callers can distinguish "nothing to build" from a build failure.
-func BuildFrontend(ctx context.Context, dir string) (*FrontendBuildResult, error) {
+// callers can distinguish "nothing to build" from a build failure. When
+// debug is true, the build includes source maps (cli-reference.md's
+// module build --debug).
+func BuildFrontend(ctx context.Context, dir string, debug bool) (*FrontendBuildResult, error) {
 	manifestPath := filepath.Join(dir, "manifest.json")
 
 	raw, err := os.ReadFile(manifestPath)
@@ -53,7 +55,11 @@ func BuildFrontend(ctx context.Context, dir string) (*FrontendBuildResult, error
 	if err := runNpm(ctx, frontendDir, "install"); err != nil {
 		return nil, err
 	}
-	if err := runNpm(ctx, frontendDir, "run", "build"); err != nil {
+	buildArgs := []string{"run", "build"}
+	if debug {
+		buildArgs = append(buildArgs, "--", "--sourcemap")
+	}
+	if err := runNpm(ctx, frontendDir, buildArgs...); err != nil {
 		return nil, err
 	}
 
@@ -100,15 +106,25 @@ func BuildFrontend(ctx context.Context, dir string) (*FrontendBuildResult, error
 }
 
 func runNpm(ctx context.Context, dir string, args ...string) error {
-	cmd := exec.CommandContext(ctx, "npm", args...)
+	return runCmd(ctx, dir, nil, "npm", args...)
+}
+
+// runCmd runs name with args in dir, with extraEnv appended to the
+// subprocess's environment, capturing combined stdout+stderr for the
+// error message on failure.
+func runCmd(ctx context.Context, dir string, extraEnv []string, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	if extraEnv != nil {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("run npm %s: %w: %s", strings.Join(args, " "), err, output.String())
+		return fmt.Errorf("run %s %s: %w: %s", name, strings.Join(args, " "), err, output.String())
 	}
 
 	return nil
