@@ -35,6 +35,57 @@ const (
 	Cascade
 )
 
+// ReadBehaviourKind identifies which DeniedReadBehaviour a field declares —
+// see model.Omit, model.Nullify, model.Mask.
+type ReadBehaviourKind int
+
+const (
+	ReadKindOmit ReadBehaviourKind = iota
+	ReadKindNullify
+	ReadKindMask
+)
+
+// DeniedReadBehaviour controls what a caller who lacks a field's read
+// permission sees in the response (go-sdk-reference.md §22 "Access
+// control", auth-internals.md §12 "Read behaviours"). Constructed via
+// model.Omit, model.Nullify, or model.Mask(pattern) — never directly.
+type DeniedReadBehaviour struct {
+	Kind    ReadBehaviourKind `msgpack:"kind"`
+	Pattern string            `msgpack:"pattern,omitempty"` // Mask only: {last4}, {first2}, {length}
+}
+
+var (
+	// Omit removes the field from the response entirely — the client
+	// doesn't know the field exists.
+	Omit = DeniedReadBehaviour{Kind: ReadKindOmit}
+
+	// Nullify keeps the field present in the response with a null value.
+	Nullify = DeniedReadBehaviour{Kind: ReadKindNullify}
+)
+
+// Mask keeps the field present with its value partially replaced per
+// pattern's substitutions ({last4}, {first2}, {length}), e.g.
+// "****{last4}".
+func Mask(pattern string) DeniedReadBehaviour {
+	return DeniedReadBehaviour{Kind: ReadKindMask, Pattern: pattern}
+}
+
+// DeniedWriteBehaviour controls what happens when a create/write request
+// includes a field the caller lacks write permission for
+// (go-sdk-reference.md §22 "Access control", auth-internals.md §12
+// "Write behaviours").
+type DeniedWriteBehaviour int
+
+const (
+	// Reject fails the entire request with 403 field_write_denied,
+	// naming the specific field.
+	Reject DeniedWriteBehaviour = iota
+
+	// Ignore silently strips the field from the request before the
+	// module handler sees it.
+	Ignore
+)
+
 type FieldDef struct {
 	Kind            FieldKind `msgpack:"kind"`
 	Length          int       `msgpack:"length,omitempty"`    // Char(n); 0 = unbounded TEXT
@@ -80,6 +131,17 @@ type FieldDef struct {
 	ComputeFn  string   `msgpack:"compute_fn,omitempty"` // WASM export name the engine dispatches to
 	IsStored   bool     `msgpack:"is_stored,omitempty"`  // Store(true): persisted, recomputed on write. Store(false): computed fresh on read
 	DependsOn  []string `msgpack:"depends_on,omitempty"` // field names, or "relField.remoteField" through a Many2One
+
+	// Field-level access control (go-sdk-reference.md §22 "Access
+	// control", manifest-spec.md §8a, auth-internals.md §12). A field
+	// with no ReadPermission has no read restriction — that's the
+	// absence of a rule, not an explicit allow. DeniedRead/DeniedWrite
+	// are pointers so "not declared" is distinguishable from an explicit
+	// zero-value behaviour (Omit / Reject).
+	ReadPermission  string                `msgpack:"read_permission,omitempty"`
+	WritePermission string                `msgpack:"write_permission,omitempty"`
+	DeniedRead      *DeniedReadBehaviour  `msgpack:"denied_read,omitempty"`
+	DeniedWrite     *DeniedWriteBehaviour `msgpack:"denied_write,omitempty"`
 }
 
 // Char(n) sets VARCHAR(n); called with no argument it's an unbounded TEXT column.
@@ -191,3 +253,45 @@ func (f FieldDef) Store(stored bool) FieldDef { f.IsStored = stored; return f }
 // One2Many field named relField on the same model (remoteField names a
 // field on the One2Many's child model).
 func (f FieldDef) Depends(paths ...string) FieldDef { f.DependsOn = paths; return f }
+
+// AccessOpt configures a field's Access() permission requirements —
+// model.AccessRead(permission), model.AccessWrite(permission).
+type AccessOpt func(*FieldDef)
+
+// AccessRead requires permission to read this field's value.
+func AccessRead(permission string) AccessOpt {
+	return func(f *FieldDef) { f.ReadPermission = permission }
+}
+
+// AccessWrite requires permission to set this field's value via
+// create/write.
+func AccessWrite(permission string) AccessOpt {
+	return func(f *FieldDef) { f.WritePermission = permission }
+}
+
+// Access declares field-level read/write permission requirements —
+// go-sdk-reference.md §22 "Access control". Pair with OnDeniedRead/
+// OnDeniedWrite to say what happens when the caller lacks the
+// declared permission.
+func (f FieldDef) Access(opts ...AccessOpt) FieldDef {
+	for _, opt := range opts {
+		opt(&f)
+	}
+	return f
+}
+
+// OnDeniedRead sets the behaviour applied when the caller lacks this
+// field's read permission: model.Omit, model.Nullify, or
+// model.Mask(pattern).
+func (f FieldDef) OnDeniedRead(b DeniedReadBehaviour) FieldDef {
+	f.DeniedRead = &b
+	return f
+}
+
+// OnDeniedWrite sets the behaviour applied when a create/write request
+// includes this field and the caller lacks its write permission:
+// model.Reject or model.Ignore.
+func (f FieldDef) OnDeniedWrite(b DeniedWriteBehaviour) FieldDef {
+	f.DeniedWrite = &b
+	return f
+}
