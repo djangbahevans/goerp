@@ -143,6 +143,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		return nil, fmt.Errorf("register host.storage: %w", err)
 	}
 
+	if err := registerHostAuthz(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.authz: %w", err)
+	}
+
 	stdout := log.With().Str("component", "wasm").Str("stream", "stdout").Logger()
 	stderr := log.With().Str("component", "wasm").Str("stream", "stderr").Logger()
 
