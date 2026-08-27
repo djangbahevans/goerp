@@ -8,7 +8,7 @@
   "engine": ">=0.1.0",
   "frontend": {
     "bundle": true,
-    "bundle_sha256": "sha256:eae90664efd2e7b73cdc1f74c328140de6081d20441ffb89f7edfffcec9210c3"
+    "bundle_sha256": "sha256:cebf6592854ce43bc5481b879fec093fdc8113f0a807829e0e1a6210e8370041"
   },
   "name": "demo",
   "schema": {
