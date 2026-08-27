@@ -1,0 +1,14 @@
+{
+  "name": "@goerp/module-demo-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vite": "^8.2.2"
+  }
+}
