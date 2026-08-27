@@ -4,13 +4,16 @@
 // dependency-cascade failure, and produce the map loader.LoadAll would —
 // ready for registry.ModuleRegistry.Update.
 //
-// Packed .erp archives and GOERP_DEV's directory-watch/hot-reload mode are
-// out of scope; Discover only ever runs once, at startup.
+// GOERP_DEV's directory-watch/hot-reload mode is out of scope; Discover
+// only ever runs once, at startup.
 package moduleboot
 
 import (
+	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,11 +27,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Discover reads dir for module subdirectories, each containing
-// manifest.json and module.wasm (goerp module build/create's own output
-// layout). A subdirectory missing either file is skipped with a warning
-// rather than failing the whole pass. A dir that doesn't exist yet is not
-// an error — it returns a nil slice, same as an empty one.
+// Discover reads dir for module sources: either subdirectories containing
+// manifest.json and module.wasm (goerp module create's loose output
+// layout), or *.erp packages (goerp module build's real packaged output —
+// a zip archive with the same two files at its root, manifest-spec.md
+// §2). An entry missing either file is skipped with a warning rather than
+// failing the whole pass. A dir that doesn't exist yet is not an error —
+// it returns a nil slice, same as an empty one.
 func Discover(dir string) ([]loader.Source, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -40,10 +45,22 @@ func Discover(dir string) ([]loader.Source, error) {
 
 	var sources []loader.Source
 	for _, entry := range entries {
+		name := entry.Name()
+
 		if !entry.IsDir() {
+			if !strings.HasSuffix(name, ".erp") {
+				continue
+			}
+
+			src, err := readPackageSource(filepath.Join(dir, name))
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", name, err)
+			}
+			if src != nil {
+				sources = append(sources, *src)
+			}
 			continue
 		}
-		name := entry.Name()
 
 		manifestBytes, err := os.ReadFile(filepath.Join(dir, name, "manifest.json"))
 		if err != nil {
@@ -67,6 +84,76 @@ func Discover(dir string) ([]loader.Source, error) {
 	}
 
 	return sources, nil
+}
+
+var errZipMemberNotFound = errors.New("member not found")
+
+// readZipMember returns the bytes of the first file in r named name, or
+// errZipMemberNotFound if none matches. Only ever called with fixed
+// literal names (manifest.json, module.wasm) — never an archive-supplied
+// path — so zip-slip-style traversal isn't a concern here.
+func readZipMember(r *zip.Reader, name string) ([]byte, error) {
+	for _, f := range r.File {
+		if f.Name != name {
+			continue
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return nil, fmt.Errorf("open %s: %w", name, err)
+		}
+		defer rc.Close()
+
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		return data, nil
+	}
+
+	return nil, errZipMemberNotFound
+}
+
+// readPackageSource extracts manifest.json and module.wasm from the .erp
+// zip package at path. It returns (nil, nil), not an error, when either
+// member is missing — Discover treats that the same as a loose directory
+// missing one of the two files: skip with a warning. Source.Name is the
+// module's own declared name (manifest.json's "name" field), not the
+// archive's own versioned filename (e.g. demo-0.1.0.erp) — falling back
+// to the filename only if the manifest fails to parse, so a corrupt
+// manifest still surfaces a nameable LoadModule failure downstream rather
+// than an empty identifier.
+func readPackageSource(path string) (*loader.Source, error) {
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		return nil, fmt.Errorf("open package: %w", err)
+	}
+	defer r.Close()
+
+	manifestBytes, err := readZipMember(&r.Reader, "manifest.json")
+	if err != nil {
+		if errors.Is(err, errZipMemberNotFound) {
+			log.Warn().Str("package", filepath.Base(path)).Msg("missing manifest.json, skipping")
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	wasmBytes, err := readZipMember(&r.Reader, "module.wasm")
+	if err != nil {
+		if errors.Is(err, errZipMemberNotFound) {
+			log.Warn().Str("package", filepath.Base(path)).Msg("missing module.wasm, skipping")
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	name := strings.TrimSuffix(filepath.Base(path), ".erp")
+	if mf, err := manifest.Load(manifestBytes); err == nil {
+		name = mf.Name
+	}
+
+	return &loader.Source{Name: name, ManifestBytes: manifestBytes, WasmBytes: wasmBytes}, nil
 }
 
 // Order sorts sources topologically by manifest depends_on, so a module
