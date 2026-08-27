@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
@@ -251,6 +252,14 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 			explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
 			if err := route.RegisterModuleRoutes(table, src.Name, m.Manifest.Type, explicit); err != nil {
 				m.Fail(err.Error())
+			}
+		}
+		if m.Status != module.StatusFailed && len(m.Manifest.NotificationTypes) > 0 {
+			nt, err := notiftemplate.Load(m.Manifest.NotificationTypes, m.PackagePath)
+			if err != nil {
+				m.Fail(err.Error())
+			} else {
+				m.NotifTemplates = nt
 			}
 		}
 		modules[src.Name] = m

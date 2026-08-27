@@ -9,6 +9,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -84,6 +85,20 @@ func (s *RegistrySnapshot) ComputedIndex() *computed.Index {
 // columns to exclude from the JSONB old/new-value snapshots.
 func (s *RegistrySnapshot) DataAuditRegistry() *dataaudit.Registry {
 	return s.dataAuditReg
+}
+
+// NotifTemplate resolves moduleName's notificationType/channel template
+// for userLocale (notiftemplate.ModuleTemplates.Resolve's 3-step
+// fallback), returning ok=false if the module doesn't exist, failed to
+// load, declares no matching template, or none of the fallback locales
+// match — the same "logged here, caller decides whether to skip" contract
+// Resolve itself has.
+func (s *RegistrySnapshot) NotifTemplate(moduleName, notificationType, channel, userLocale string) (locale string, tmpl *notiftemplate.Template, ok bool) {
+	mod, exists := s.modules[moduleName]
+	if !exists || mod.Status == module.StatusFailed {
+		return "", nil, false
+	}
+	return mod.NotifTemplates.Resolve(notificationType, channel, userLocale)
 }
 
 // ModelByName resolves a RouteManifest.Model-shaped "{module}.{resource}"

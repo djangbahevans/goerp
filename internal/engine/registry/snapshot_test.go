@@ -1,10 +1,13 @@
 package registry
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -98,5 +101,75 @@ func TestRegistrySnapshot_ModelByName_UnqualifiedNameRejected(t *testing.T) {
 
 	if _, _, _, ok := snap.ModelByName("widget"); ok {
 		t.Fatal("ModelByName with no \".\" separator: ok = true, want false")
+	}
+}
+
+func TestRegistrySnapshot_NotifTemplate_ResolvesThroughLoadedModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "notifications", "welcome"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notifications", "welcome", "in_app.en.json"), []byte(`{"title":"hi"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	nt, err := notiftemplate.Load([]manifest.NotificationType{
+		{Name: "welcome", Templates: map[string]string{"in_app": "notifications/welcome/in_app.{locale}.json"}},
+	}, dir)
+	if err != nil {
+		t.Fatalf("notiftemplate.Load: %v", err)
+	}
+
+	r := &ModuleRegistry{}
+	snap, err := r.Update(map[string]*module.LoadedModule{
+		"testmodule": {Status: module.StatusReady, Manifest: manifest.Manifest{Type: "standard"}, NotifTemplates: nt},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	locale, _, ok := snap.NotifTemplate("testmodule", "welcome", "in_app", "en")
+	if !ok || locale != "en" {
+		t.Fatalf("NotifTemplate(testmodule, welcome, in_app, en) = (%q, %v), want (\"en\", true)", locale, ok)
+	}
+}
+
+func TestRegistrySnapshot_NotifTemplate_UnknownModule(t *testing.T) {
+	r := &ModuleRegistry{}
+	snap, err := r.Update(map[string]*module.LoadedModule{})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if _, _, ok := snap.NotifTemplate("nope", "welcome", "in_app", "en"); ok {
+		t.Fatal("NotifTemplate for an unregistered module: ok = true, want false")
+	}
+}
+
+func TestRegistrySnapshot_NotifTemplate_SkipsFailedModule(t *testing.T) {
+	r := &ModuleRegistry{}
+	snap, err := r.Update(map[string]*module.LoadedModule{
+		"testmodule": {Status: module.StatusFailed, Manifest: manifest.Manifest{Type: "standard"}},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if _, _, ok := snap.NotifTemplate("testmodule", "welcome", "in_app", "en"); ok {
+		t.Fatal("NotifTemplate for a StatusFailed module: ok = true, want false")
+	}
+}
+
+func TestRegistrySnapshot_NotifTemplate_NilWhenModuleDeclaresNone(t *testing.T) {
+	r := &ModuleRegistry{}
+	snap, err := r.Update(map[string]*module.LoadedModule{
+		"testmodule": {Status: module.StatusReady, Manifest: manifest.Manifest{Type: "standard"}},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if _, _, ok := snap.NotifTemplate("testmodule", "welcome", "in_app", "en"); ok {
+		t.Fatal("NotifTemplate for a module with nil NotifTemplates: ok = true, want false")
 	}
 }

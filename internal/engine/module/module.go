@@ -6,6 +6,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -37,6 +38,10 @@ type LoadedModule struct {
 	ModelDecls     []model.ModelDeclaration
 	TypeDecls      []model.TypeDeclaration
 	DataMigrations []model.DataMigration
+	// NotifTemplates holds this module's resolved notification templates
+	// (notiftemplate.Load, called from moduleboot.LoadCascading), nil if
+	// the manifest declares no notification_types.
+	NotifTemplates *notiftemplate.ModuleTemplates
 }
 
 // Fail marks the module as failed for its own load; compile error, invalid
