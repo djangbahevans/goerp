@@ -7,6 +7,12 @@
 -- so a fresh dev/CI database has it without a manual step.
 CREATE EXTENSION IF NOT EXISTS ltree;
 
+-- pg_trgm backs host.search.query's trigram similarity search
+-- (data-layer.md §5.4) — the initial-build host.search.query backend,
+-- Postgres trigram similarity, needs the similarity()/% operators this
+-- extension provides.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- pg_partman (goerp#194, data-layer.md §2.6) manages the monthly range
 -- partitions on event_log/audit_log — partman.create_parent registers
 -- each table at tenant provisioning, and a platform-wide River periodic

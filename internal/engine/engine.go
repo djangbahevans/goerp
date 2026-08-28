@@ -83,6 +83,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/search"
+	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/systemworker"
@@ -952,6 +953,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 	var computedIndex *computed.Index
 	var computeTargets map[string]wasm.ComputeTarget
 	var permRegistry *permission.PermissionRegistry
+	var searchIndexRegistry *searchindex.Registry
 	if e.moduleRegistry != nil {
 		if snap := e.moduleRegistry.Snapshot(); snap != nil {
 			fieldSecRegistry = snap.FieldSecRegistry()
@@ -959,15 +961,17 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 			computedIndex = snap.ComputedIndex()
 			computeTargets = registry.ComputeTargets(snap)
 			permRegistry = snap.PermissionRegistry()
+			searchIndexRegistry = snap.SearchIndexRegistry()
 		}
 	}
 	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, "", nil, req.PermissionSet, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), wasm.ModuleSnapshot{
-		ModelDecls:         mod.ModelDecls,
-		FieldSecRegistry:   fieldSecRegistry,
-		EventRegistry:      eventRegistry,
-		ComputedIndex:      computedIndex,
-		ComputeTargets:     computeTargets,
-		PermissionRegistry: permRegistry,
+		ModelDecls:          mod.ModelDecls,
+		FieldSecRegistry:    fieldSecRegistry,
+		EventRegistry:       eventRegistry,
+		ComputedIndex:       computedIndex,
+		ComputeTargets:      computeTargets,
+		PermissionRegistry:  permRegistry,
+		SearchIndexRegistry: searchIndexRegistry,
 	})
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/rs/zerolog/log"
 )
 
@@ -49,6 +50,7 @@ func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*Regis
 		eventRegistry:    buildEventRegistry(modules),
 		permRegistry:     buildPermissionRegistry(modules),
 		fieldSecRegistry: buildFieldSecRegistry(modules),
+		searchIndexReg:   buildSearchIndexRegistry(modules),
 		jobRegistry:      jobRegistry,
 		computedIndex:    buildComputedIndex(modules),
 		dataAuditReg:     buildDataAuditRegistry(modules),
@@ -75,6 +77,17 @@ func buildFieldSecRegistry(modules map[string]*module.LoadedModule) *fieldsec.Fi
 			continue
 		}
 		reg.Register(name, m.ModelDecls)
+	}
+	return reg
+}
+
+func buildSearchIndexRegistry(modules map[string]*module.LoadedModule) *searchindex.Registry {
+	reg := searchindex.New()
+	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		reg.Register(name, m.Manifest.SearchIndexes)
 	}
 	return reg
 }

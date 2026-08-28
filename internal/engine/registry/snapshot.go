@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -22,6 +23,7 @@ type RegistrySnapshot struct {
 	eventRegistry    *event.EventRegistry
 	permRegistry     *permission.PermissionRegistry
 	fieldSecRegistry *fieldsec.FieldSecurityRegistry
+	searchIndexReg   *searchindex.Registry
 	jobRegistry      *job.JobRegistry
 	cronRegistry     *CronRegistry
 	schemaRegistry   *SchemaRegistry
@@ -56,6 +58,12 @@ func (s *RegistrySnapshot) PermissionRegistry() *permission.PermissionRegistry {
 // than never (see buildFieldSecRegistry).
 func (s *RegistrySnapshot) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
 	return s.fieldSecRegistry
+}
+
+// SearchIndexRegistry returns this snapshot's search-index lookup — every
+// loaded module's declared search_indexes[], keyed by "{module}.{name}".
+func (s *RegistrySnapshot) SearchIndexRegistry() *searchindex.Registry {
+	return s.searchIndexReg
 }
 
 // EventRegistry returns this snapshot's event registry.

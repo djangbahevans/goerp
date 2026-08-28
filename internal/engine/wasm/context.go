@@ -10,6 +10,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
+	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/trace"
@@ -70,6 +71,11 @@ type ModuleSnapshot struct {
 	// bitfield index, for interpreting a ModuleContext's PermissionSet
 	// (auth-internals.md §13 "Permission evaluation pipeline").
 	PermissionRegistry *permission.PermissionRegistry
+
+	// SearchIndexRegistry resolves a calling module's own bare
+	// search.Query index name to its declared manifest.SearchIndex
+	// (host.search.query, host-abi-reference.md §12).
+	SearchIndexRegistry *searchindex.Registry
 }
 
 type ModuleContext struct {
@@ -127,6 +133,12 @@ func (mc *ModuleContext) ModelDecls() []model.ModelDeclaration {
 // request.
 func (mc *ModuleContext) FieldSecRegistry() *fieldsec.FieldSecurityRegistry {
 	return mc.snapshot.FieldSecRegistry
+}
+
+// SearchIndexRegistry returns the search-index registry in effect for
+// this request.
+func (mc *ModuleContext) SearchIndexRegistry() *searchindex.Registry {
+	return mc.snapshot.SearchIndexRegistry
 }
 
 // EventRegistry returns the event registry in effect for this request.
