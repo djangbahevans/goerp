@@ -78,6 +78,11 @@ const (
 	ErrCodeDispatchFailed = "event.dispatch_failed"
 )
 
+// host.search error codes (host-abi-reference.md §12 "host.search.query").
+const (
+	ErrCodeIndexNotFound = "search.index_not_found"
+)
+
 func CapabilityDenied(capability string) *HostError {
 	return &HostError{
 		Code:    ErrCodeCapabilityDenied,
