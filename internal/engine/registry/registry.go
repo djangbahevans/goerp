@@ -126,16 +126,24 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 
 // registerBuiltinRoutes registers the engine's own built-in routes into
 // table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
-// /auth/mfa/reverify, and /admin/users/{id}/mfa/reset resolve through the
-// exact same RouteTable.Lookup module routes do — no second router. Safe
-// against collision by construction: RegisterModuleRoutes already
-// rejects any module route whose top path segment starts with "_", or is
-// exactly "auth" or "admin", as a reserved engine namespace.
+// /auth/mfa/reverify, /admin/users/{id}/mfa/reset, and
+// /_meta/permissions resolve through the exact same RouteTable.Lookup
+// module routes do — no second router. Safe against collision by
+// construction: RegisterModuleRoutes already rejects any module route
+// whose top path segment starts with "_", or is exactly "auth" or
+// "admin", as a reserved engine namespace.
 //
 // /admin/users/{id}/mfa/reset is a tenant-facing route despite its
 // "/admin/" prefix — see internal/engine/auth/mfareset's own package doc
 // for why that prefix doesn't mean it belongs to the separate
 // internal/engine/adminapi operator surface.
+//
+// /_meta/permissions is deliberately not EngineBuiltin, unlike every
+// other route registered here — auth-internals.md §9 classifies it Class
+// A (the default for "every other route"), so it needs the standard
+// tenant/auth/permission middleware chain to populate authFromContext/
+// tenantFromContext for it, rather than resolving its own identity the
+// way the true bootstrap/anonymous routes above do.
 func registerBuiltinRoutes(table *route.RouteTable) {
 	for _, path := range []string{"/_health", "/_ready"} {
 		table.Register("GET", path, &route.RouteEntry{
@@ -149,6 +157,10 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: path,
 		})
 	}
+	table.Register("GET", "/_meta/permissions", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/permissions",
+	})
 }
 
 func buildEventRegistry(modules map[string]*module.LoadedModule) *event.EventRegistry {

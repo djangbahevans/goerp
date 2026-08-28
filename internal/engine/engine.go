@@ -848,6 +848,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		tracerProvider:    tracerProvider,
 	}
 
+	// GET /_meta/permissions (goerp#417) is added here rather than to the
+	// builtinRoutes literal above for the same reason dispatchORMRoute
+	// couldn't be referenced there: dispatchPermissionsRoute is an
+	// *Engine method, which doesn't exist until the literal above runs.
+	builtinRoutes["GET /_meta/permissions"] = http.HandlerFunc(e.dispatchPermissionsRoute)
+
 	// buildChain needs e (dispatchORMRoute/invokeHandler are *Engine
 	// methods), which doesn't exist until the literal above — this call
 	// used to sit right after builtinRoutes/defaultRateLimit were built,

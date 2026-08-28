@@ -79,12 +79,14 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		defer cancel()
 		r = r.WithContext(ctx)
 
-		// EngineBuiltin (goerp#369), not EngineNative: the 6 hardcoded
-		// infra routes set both, but EnableOps CRUD routes (goerp#366)
-		// also set EngineNative (a pure "don't borrow WASM" signal) without
-		// being builtin — EngineBuiltin is the field that actually names
-		// "this route lives in the builtins map."
-		if rr.entry.Manifest.EngineBuiltin {
+		// EngineBuiltin (goerp#369) routes always live in the builtins
+		// map. So does a module-less EngineNative route (goerp#417) —
+		// e.g. GET /_meta/permissions, which has no owning module to
+		// look up below and would otherwise 503 as module_unavailable.
+		// EnableOps CRUD routes (goerp#366) are also EngineNative but do
+		// have a ModuleName, so they fall through to the module lookup
+		// and dispatchORMRoute branch below as before.
+		if rr.entry.Manifest.EngineBuiltin || rr.entry.ModuleName == "" {
 			if h, ok := builtins[r.Method+" "+rr.entry.PathTemplate]; ok {
 				r = r.WithContext(route.WithParams(r.Context(), rr.pathParams))
 				h.ServeHTTP(w, r)
