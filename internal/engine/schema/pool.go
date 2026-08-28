@@ -62,6 +62,18 @@ func NewPool(pool *sql.DB, lockAcquireTimeout time.Duration) *SchemaSyncPool {
 	return &SchemaSyncPool{primary: pool, lockAcquireTimeout: lockAcquireTimeout}
 }
 
+// Raw returns the underlying connection pool — connected as
+// schema_sync_user, which has BYPASSRLS (multitenancy-internals.md §5a:
+// "DDL and bulk data migrations need unfiltered access to every row
+// regardless of any tenant's ABAC policies"). goerp tenant export
+// (goerp#156) is the one other caller with that same requirement: a bulk
+// administrative dump, not a request served on behalf of a specific end
+// user, so it must not go through the RLS-constrained primary pool
+// host.orm reads use.
+func (p *SchemaSyncPool) Raw() *sql.DB {
+	return p.primary
+}
+
 // Bootstrap creates system.module_schema_versions if it doesn't already
 // exist. Concurrent-safe against other processes calling Bootstrap at the
 // same time (goerp#171) via db.WithAdvisoryLock.

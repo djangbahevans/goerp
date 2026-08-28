@@ -84,13 +84,25 @@ func newJobView(row *rivertype.JobRow) jobView {
 // to pay the encoding cost for on every row: Errors doubles as a basic,
 // no-new-infrastructure --logs (River already tracks one AttemptError per
 // failed attempt; there is no separate job-logging subsystem to draw on).
+// Output surfaces whatever a Worker recorded via river.RecordOutput
+// (stored under Metadata[rivertype.MetadataKeyOutput]) — e.g. goerp
+// tenant export's download URL/checksum/decryption key, which has
+// nowhere else to be returned to a polling CLI once the job is async.
 type jobDetailView struct {
 	jobView
 	Errors []rivertype.AttemptError `json:"errors"`
+	Output json.RawMessage          `json:"output,omitempty"`
 }
 
 func newJobDetailView(row *rivertype.JobRow) jobDetailView {
-	return jobDetailView{jobView: newJobView(row), Errors: row.Errors}
+	view := jobDetailView{jobView: newJobView(row), Errors: row.Errors}
+	if len(row.Metadata) > 0 {
+		var metadata map[string]json.RawMessage
+		if err := json.Unmarshal(row.Metadata, &metadata); err == nil {
+			view.Output = metadata[rivertype.MetadataKeyOutput]
+		}
+	}
+	return view
 }
 
 func (h *jobsHandlers) list(w http.ResponseWriter, r *http.Request) {

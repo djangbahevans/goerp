@@ -55,6 +55,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -90,6 +91,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/telemetry"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenant/export"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/offboard"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/provision"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -210,6 +212,19 @@ func New(cfg *config.Config) (*Engine, error) {
 			_ = replicaPool.Close()
 		}
 		return nil, fmt.Errorf("bootstrap billing schema: %w", err)
+	}
+
+	// checkpointStore backs goerp tenant export/import's per-module
+	// resumability (goerp#265, goerp#156) — not tenant-scoped data, so no
+	// FK-ordering constraint against tenantStore the way billingStore has.
+	checkpointStore := checkpoint.NewStore(primaryPool)
+	if err := checkpointStore.Bootstrap(ctx); err != nil {
+		_ = primaryPool.Close()
+		_ = schemaPool.Close()
+		if replicaPool != nil {
+			_ = replicaPool.Close()
+		}
+		return nil, fmt.Errorf("bootstrap checkpoint schema: %w", err)
 	}
 
 	userStore := user.NewStore(primaryPool)
@@ -765,6 +780,13 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
 	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: primaryPool})
 	river.AddWorker(jobWorkers, &tenantoffboard.ImmediateWorker{Activities: offboardActivities, TenantStore: tenantStore})
+	river.AddWorker(jobWorkers, &tenantexport.Worker{
+		TenantStore:    tenantStore,
+		Registry:       moduleRegistry,
+		RawDB:          syncPool.Raw(),
+		Checkpoints:    checkpointStore,
+		StorageBackend: storageBackend,
+	})
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry})
@@ -806,12 +828,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		Inviter:        inviteStore,
 		Provisioner:    tenantprovision.NewProvisioner(temporalClient, systemworker.TaskQueue),
 		Offboarder:     tenantoffboard.NewOffboarder(tenantStore, temporalClient, systemworker.TaskQueue, jobQueueClient, jobqueue.QueueAdmin),
-		// Exporter, Importer stay nil until goerp#156/#157 land — both
-		// blocked on unfiled prerequisites (see tenantoffboard's package
-		// doc comment for #156's). The handlers report
-		// StatusNotImplemented for those routes rather than the wiring
-		// needing a placeholder implementation here. inviteStore's own
-		// audit seam is nil until goerp#16 lands, same nil-safe pattern.
+		Exporter:       tenantexport.NewExporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin),
+		// Importer stays nil until goerp#157 lands — that ticket's own
+		// scope note. The handler reports StatusNotImplemented for that
+		// route rather than the wiring needing a placeholder
+		// implementation here. inviteStore's own audit seam is nil until
+		// goerp#16 lands, same nil-safe pattern.
 	})
 
 	adminapi.RegisterConfigRoutes(adminServer.Router(), adminapi.ConfigDeps{
