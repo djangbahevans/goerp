@@ -370,6 +370,64 @@ func TestLoadEntitlements_ExpiredOverrideIsIgnored(t *testing.T) {
 	}
 }
 
+func TestLoadEntitlements_ExplicitTenantDisableOverridesPlanEntitlement(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Module Disable")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "module.hr", "true")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	if err := billingStore.SetModuleEnabledForTenant(context.Background(), created.ID, "hr", false, nil); err != nil {
+		t.Fatalf("SetModuleEnabledForTenant() error: %v", err)
+	}
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if ents.ModuleEnabled("hr") {
+		t.Error("ModuleEnabled(\"hr\") = true, want false — explicit tenant disable should override plan entitlement")
+	}
+}
+
+func TestLoadEntitlements_ExplicitTenantDisableOverridesEntitlementOverride(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Module Disable Beats Override")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "module.hr", "false")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	// An enterprise-deal override that grants the module...
+	if err := billingStore.UpsertEntitlementOverride(context.Background(), created.ID, "module.hr", "true", nil, nil, nil); err != nil {
+		t.Fatalf("UpsertEntitlementOverride() error: %v", err)
+	}
+	// ...still loses to the tenant's own explicit disable.
+	if err := billingStore.SetModuleEnabledForTenant(context.Background(), created.ID, "hr", false, nil); err != nil {
+		t.Fatalf("SetModuleEnabledForTenant() error: %v", err)
+	}
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if ents.ModuleEnabled("hr") {
+		t.Error("ModuleEnabled(\"hr\") = true, want false — explicit tenant disable should beat even an entitlement override")
+	}
+}
+
+func TestLoadEntitlements_NoTenantModuleSettingsRowLeavesPlanEntitlementUnaffected(t *testing.T) {
+	resolver, store, conn, _, billingStore := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "No Disable Row")
+	plan := createPlanWithEntitlement(t, billingStore, conn, "module.sales", "true")
+	subscribeTenant(t, billingStore, created.ID, plan.ID)
+
+	ents, err := resolver.LoadEntitlements(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+	if !ents.ModuleEnabled("sales") {
+		t.Error("ModuleEnabled(\"sales\") = false, want true — no tenant_module_settings row means unaffected by explicit disable")
+	}
+}
+
 func TestLoadEntitlements_CachesResult(t *testing.T) {
 	resolver, store, conn, _, billingStore := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Cached Entitlements")

@@ -81,10 +81,10 @@ func (e *testEnv) createTenant(t *testing.T) *tenant.Tenant {
 	return tt
 }
 
-func TestBootstrap_CreatesAllFourTables(t *testing.T) {
+func TestBootstrap_CreatesAllFiveTables(t *testing.T) {
 	env := openTestStore(t)
 
-	for _, table := range []string{"plans", "plan_entitlements", "tenant_subscriptions", "tenant_entitlement_overrides"} {
+	for _, table := range []string{"plans", "plan_entitlements", "tenant_subscriptions", "tenant_entitlement_overrides", "tenant_module_settings"} {
 		var exists bool
 		err := env.conn.QueryRowContext(context.Background(), `
 			SELECT EXISTS (
@@ -345,5 +345,47 @@ func TestPlanEntitlementsForTenant_OnlyReturnsActiveOrTrialingSubscriptions(t *t
 	}
 	if ents[0].Feature != "module.sales" {
 		t.Errorf("Feature = %q, want %q (from the trialing subscription's plan, not the cancelled one)", ents[0].Feature, "module.sales")
+	}
+}
+
+func TestSetModuleEnabledForTenant_InsertsThenUpdatesOnConflict(t *testing.T) {
+	env := openTestStore(t)
+	ctx := context.Background()
+	tt := env.createTenant(t)
+
+	disabledBy := "11111111-1111-1111-1111-111111111111"
+	if err := env.store.SetModuleEnabledForTenant(ctx, tt.ID, "hr", false, &disabledBy); err != nil {
+		t.Fatalf("first SetModuleEnabledForTenant() error: %v", err)
+	}
+	disabled, err := env.store.DisabledModulesForTenant(ctx, tt.ID)
+	if err != nil {
+		t.Fatalf("DisabledModulesForTenant() error: %v", err)
+	}
+	if len(disabled) != 1 || disabled[0] != "hr" {
+		t.Fatalf("DisabledModulesForTenant() = %v, want [hr]", disabled)
+	}
+
+	if err := env.store.SetModuleEnabledForTenant(ctx, tt.ID, "hr", true, nil); err != nil {
+		t.Fatalf("second SetModuleEnabledForTenant() error: %v", err)
+	}
+	disabled, err = env.store.DisabledModulesForTenant(ctx, tt.ID)
+	if err != nil {
+		t.Fatalf("DisabledModulesForTenant() after re-enable error: %v", err)
+	}
+	if len(disabled) != 0 {
+		t.Fatalf("DisabledModulesForTenant() after re-enable = %v, want []", disabled)
+	}
+}
+
+func TestDisabledModulesForTenant_ModuleWithNoRowIsNotDisabled(t *testing.T) {
+	env := openTestStore(t)
+	tt := env.createTenant(t)
+
+	disabled, err := env.store.DisabledModulesForTenant(context.Background(), tt.ID)
+	if err != nil {
+		t.Fatalf("DisabledModulesForTenant() error: %v", err)
+	}
+	if len(disabled) != 0 {
+		t.Fatalf("DisabledModulesForTenant() = %v, want [] for a tenant with no tenant_module_settings rows", disabled)
 	}
 }
