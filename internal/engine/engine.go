@@ -832,8 +832,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		// Importer stays nil until goerp#157 lands — that ticket's own
 		// scope note. The handler reports StatusNotImplemented for that
 		// route rather than the wiring needing a placeholder
-		// implementation here. inviteStore's own audit seam is nil until
-		// goerp#16 lands, same nil-safe pattern.
+		// implementation here.
 	})
 
 	adminapi.RegisterConfigRoutes(adminServer.Router(), adminapi.ConfigDeps{
