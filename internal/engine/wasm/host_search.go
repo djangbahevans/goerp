@@ -166,6 +166,14 @@ func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input S
 		delete(hit, searchScoreAlias)
 	}
 
+	// applyFieldMasking (host_orm.go) is the same read-side field-security
+	// enforcement host.orm.read/search_read apply — auth-internals.md
+	// "Field security and search" requires it apply "regardless of
+	// backend," so search hits get it too, keyed by the index's declared
+	// Resource ("{module}.{resource}", manifest-spec.md §13) rather than
+	// input.Index (the bare index name, a different namespace).
+	applyFieldMasking(modCtx, idx.Resource, hits)
+
 	return SearchQueryOutput{Hits: hits, TotalHits: totalHits}, nil
 }
 
