@@ -15,6 +15,7 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(newSuspendCmd())
 	cmd.AddCommand(newUnsuspendCmd())
 	cmd.AddCommand(newOffboardCmd())
+	cmd.AddCommand(newExportCmd())
 
 	return cmd
 }
