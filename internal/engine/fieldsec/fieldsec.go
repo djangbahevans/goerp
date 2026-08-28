@@ -1,6 +1,8 @@
 package fieldsec
 
 import (
+	"maps"
+
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -39,6 +41,20 @@ func (r *FieldSecurityRegistry) Rule(modelName, fieldName string) (FieldSecurity
 	}
 
 	return FieldSecurityRule{}, false
+}
+
+// AllRules returns every declared rule, keyed by model name then field
+// name — a defensive copy, safe for a caller (GET /_meta/permissions'
+// field_access map) to range over without risking a data race against a
+// concurrent Register call.
+func (r *FieldSecurityRegistry) AllRules() map[string]map[string]FieldSecurityRule {
+	out := make(map[string]map[string]FieldSecurityRule, len(r.rules))
+	for modelName, fields := range r.rules {
+		fieldsCopy := make(map[string]FieldSecurityRule, len(fields))
+		maps.Copy(fieldsCopy, fields)
+		out[modelName] = fieldsCopy
+	}
+	return out
 }
 
 func New() *FieldSecurityRegistry {

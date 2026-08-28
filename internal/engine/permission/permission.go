@@ -1,6 +1,10 @@
 package permission
 
-import "github.com/djangbahevans/goerp/internal/engine/manifest"
+import (
+	"sort"
+
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
+)
 
 // PermissionRegistry assigns each declared permission a stable bitfield
 // index at module load time. Indices are never reused after a module
@@ -54,4 +58,18 @@ func (r *PermissionRegistry) Index(permission string) (int, bool) {
 // time it was registered.
 func (r *PermissionRegistry) ModulePermissions(moduleName string) []manifest.Permission {
 	return r.modulePerms[moduleName]
+}
+
+// Names returns every registered permission name, sorted — GET
+// /_meta/permissions' full-catalog listing (each name then checked
+// against the caller's own PermissionBitfield via Index/Has) needs to
+// enumerate every name; Index alone only supports a single name→index
+// lookup.
+func (r *PermissionRegistry) Names() []string {
+	names := make([]string, 0, len(r.indices))
+	for name := range r.indices {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
