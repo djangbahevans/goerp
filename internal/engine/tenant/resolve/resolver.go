@@ -132,13 +132,15 @@ func (r *Resolver) ResolveByHost(ctx context.Context, host string) (*TenantConte
 }
 
 // LoadEntitlements resolves tenantID's current entitlements — its plan's
-// entitlements plus any active per-tenant overrides, overrides winning for
-// a feature key both define — cached in Redis for entitlementCacheTTL.
-// multitenancy-internals.md §4's loadEntitlements. Any Redis error or
-// decode failure on the cache read falls through to a live query, same
-// fail-open convention tenantByDomain uses; a billing.Store query failure
-// is a real error, not something to paper over with an empty
-// EntitlementSet.
+// entitlements plus any active per-tenant overrides (overrides winning
+// for a feature key both define), with any module the tenant has
+// explicitly disabled (multitenancy-internals.md §8 "Explicit per-tenant
+// module disable") forced off last, overriding even an override — cached
+// in Redis for entitlementCacheTTL. multitenancy-internals.md §4's
+// loadEntitlements. Any Redis error or decode failure on the cache read
+// falls through to a live query, same fail-open convention tenantByDomain
+// uses; a billing.Store query failure is a real error, not something to
+// paper over with an empty EntitlementSet.
 func (r *Resolver) LoadEntitlements(ctx context.Context, tenantID string) (EntitlementSet, error) {
 	cacheKey := entitlementCacheKeyPrefix + tenantID
 	if cached, found, err := r.cache.Get(ctx, cacheKey); err == nil && found {
@@ -156,8 +158,15 @@ func (r *Resolver) LoadEntitlements(ctx context.Context, tenantID string) (Entit
 	if err != nil {
 		return EntitlementSet{}, fmt.Errorf("load entitlement overrides: %w", err)
 	}
+	disabledModules, err := r.billing.DisabledModulesForTenant(ctx, tenantID)
+	if err != nil {
+		return EntitlementSet{}, fmt.Errorf("load disabled modules: %w", err)
+	}
 
 	ents := buildEntitlementSet(planEnts, overrides)
+	for _, name := range disabledModules {
+		ents.Features["module."+name] = false
+	}
 	r.setEntitlementCache(ctx, cacheKey, ents)
 	return ents, nil
 }

@@ -69,6 +69,24 @@ CREATE TABLE IF NOT EXISTS system.tenant_entitlement_overrides (
 )
 `
 
+// createTenantModuleSettingsTable matches multitenancy-internals.md §8's
+// definition, except disabled_by carries no REFERENCES system.users(id)
+// FK — same deviation tenant_entitlement_overrides.granted_by already
+// makes above, and for the same reason: Bootstrap runs before
+// user.Store.Bootstrap (engine.go), so system.users doesn't exist yet on
+// a fresh database when this table is created.
+const createTenantModuleSettingsTable = `
+CREATE TABLE IF NOT EXISTS system.tenant_module_settings (
+    tenant_id           UUID    NOT NULL REFERENCES system.tenants(id) ON DELETE CASCADE,
+    module_name         TEXT    NOT NULL,
+    enabled             BOOLEAN NOT NULL DEFAULT TRUE,
+    disabled_at         TIMESTAMPTZ,
+    disabled_by         UUID,
+    provider_category   TEXT,
+    PRIMARY KEY (tenant_id, module_name)
+)
+`
+
 type Store struct {
 	db *sql.DB
 }
@@ -78,10 +96,11 @@ func NewStore(db *sql.DB) *Store {
 }
 
 // Bootstrap creates system.plans, system.plan_entitlements,
-// system.tenant_subscriptions, and system.tenant_entitlement_overrides if
-// they don't already exist, in FK-safe order. Idempotent and
-// concurrent-safe against other processes calling Bootstrap at the same
-// time, same convention tenant.Store.Bootstrap uses (goerp#171).
+// system.tenant_subscriptions, system.tenant_entitlement_overrides, and
+// system.tenant_module_settings if they don't already exist, in FK-safe
+// order. Idempotent and concurrent-safe against other processes calling
+// Bootstrap at the same time, same convention tenant.Store.Bootstrap uses
+// (goerp#171).
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("billing.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -99,6 +118,9 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createTenantEntitlementOverridesTable); err != nil {
 			return fmt.Errorf("create tenant_entitlement_overrides table: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createTenantModuleSettingsTable); err != nil {
+			return fmt.Errorf("create tenant_module_settings table: %w", err)
 		}
 		return nil
 	})
@@ -228,4 +250,59 @@ func (s *Store) ActiveOverridesForTenant(ctx context.Context, tenantID string) (
 		return nil, fmt.Errorf("iterate active overrides: %w", err)
 	}
 	return overrides, nil
+}
+
+// SetModuleEnabledForTenant upserts tenantID's tenant_module_settings row
+// for moduleName. disabledBy is nil when enabling (re-enabling a
+// previously disabled module leaves disabled_at/disabled_by from the last
+// disable in place — multitenancy-internals.md §8 doesn't specify
+// clearing them, and they're only ever read while enabled is false).
+func (s *Store) SetModuleEnabledForTenant(ctx context.Context, tenantID, moduleName string, enabled bool, disabledBy *string) error {
+	var disabledAt *time.Time
+	if !enabled {
+		now := time.Now().UTC()
+		disabledAt = &now
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, disabled_at, disabled_by)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (tenant_id, module_name) DO UPDATE SET
+			enabled = EXCLUDED.enabled,
+			disabled_at = EXCLUDED.disabled_at,
+			disabled_by = EXCLUDED.disabled_by
+	`, tenantID, moduleName, enabled, disabledAt, disabledBy)
+	if err != nil {
+		return fmt.Errorf("upsert tenant module setting: %w", err)
+	}
+	return nil
+}
+
+// DisabledModulesForTenant returns the names of every module tenantID has
+// explicitly disabled (enabled = false). A module absent from
+// system.tenant_module_settings entirely is not disabled — the table only
+// ever needs a row for a tenant's actual overrides, per
+// multitenancy-internals.md §8.
+func (s *Store) DisabledModulesForTenant(ctx context.Context, tenantID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT module_name
+		FROM system.tenant_module_settings
+		WHERE tenant_id = $1 AND enabled = FALSE
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("query disabled modules for tenant: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan disabled module name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate disabled modules: %w", err)
+	}
+	return names, nil
 }
