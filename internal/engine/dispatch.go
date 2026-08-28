@@ -94,6 +94,27 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 			}
 		}
 
+		// Entitlement-based dispatch gating (multitenancy-internals.md §8
+		// "Entitlement-based disabling", goerp#441) — a single in-memory
+		// map lookup against the EntitlementSet already loaded once at
+		// tenant resolution, no extra query. Checked before the module
+		// lookup below so an un-entitled tenant always sees the same 403
+		// regardless of the module's own load state, rather than a
+		// different error (503 module_unavailable) leaking that the
+		// module exists but merely isn't ready yet. tenantCtx is nil only
+		// when this handler is invoked directly, bypassing the real
+		// middleware chain (tenantResolutionMiddleware always runs first
+		// for any non-EngineBuiltin route, goerp#369) — skip the check
+		// rather than invent a new failure mode for that test-only case;
+		// downstream dispatch already has its own nil-tenantCtx guard.
+		if tenantCtx := tenantFromContext(ctx); rr.entry.ModuleName != "" && tenantCtx != nil && !tenantCtx.Entitlements.ModuleEnabled(rr.entry.ModuleName) {
+			writeRouteErrorDetails(w, http.StatusForbidden, "billing.module_not_available", "module is not available on the current plan", map[string]any{
+				"module":      rr.entry.ModuleName,
+				"upgrade_url": "/settings/billing/upgrade",
+			})
+			return
+		}
+
 		mod, ok := rr.snap.Modules()[rr.entry.ModuleName]
 		if !ok || mod.Status != module.StatusReady {
 			writeRouteError(w, http.StatusServiceUnavailable, "module_unavailable", "module is not ready")
@@ -295,14 +316,22 @@ type routeErrorEnvelope struct {
 }
 
 type routeErrorBody struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 func writeRouteError(w http.ResponseWriter, status int, code, message string) {
+	writeRouteErrorDetails(w, status, code, message, nil)
+}
+
+// writeRouteErrorDetails is writeRouteError plus an optional details
+// object — e.g. billing.module_not_available's "module"/"upgrade_url"
+// fields (multitenancy-internals.md §8).
+func writeRouteErrorDetails(w http.ResponseWriter, status int, code, message string, details map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(routeErrorEnvelope{Error: routeErrorBody{Code: code, Message: message}}); err != nil {
+	if err := json.NewEncoder(w).Encode(routeErrorEnvelope{Error: routeErrorBody{Code: code, Message: message, Details: details}}); err != nil {
 		log.Error().Err(err).Msg("dispatch: encode error response")
 	}
 }

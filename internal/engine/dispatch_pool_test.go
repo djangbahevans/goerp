@@ -78,7 +78,11 @@ func TestDispatchHandler_WASMPoolExhaustedReturns503PoolExhausted(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodGet, "/widgets/items", nil)
 	ctx := withRouteResolution(req.Context(), rr)
-	ctx = withTenantContext(ctx, &tenantresolve.TenantContext{TenantID: "t1", Slug: "acme"})
+	ctx = withTenantContext(ctx, &tenantresolve.TenantContext{
+		TenantID:     "t1",
+		Slug:         "acme",
+		Entitlements: tenantresolve.EntitlementSet{Features: map[string]bool{"module.widgets": true}},
+	})
 	ctx = withAuthContext(ctx, &authcheck.AuthContext{IsAuthenticated: true, UserID: "u1"})
 	req = req.WithContext(ctx)
 
