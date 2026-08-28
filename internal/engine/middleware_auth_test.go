@@ -141,6 +141,22 @@ func newChainFixture(t *testing.T) *chainFixture {
 		t.Fatalf("activate fixture tenant: %v", err)
 	}
 
+	// Entitles the fixture tenant to the "widgets" module — goerp#441's
+	// dispatch-gating check would otherwise 403 billing.module_not_available
+	// before any of this file's own module-dispatch tests reach the
+	// module_unavailable/auth/permission behavior they're actually testing.
+	plan, err := billingStore.CreatePlan(ctx, "plan-"+slug, "Chain Test Plan", nil, nil)
+	if err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+	if err := billingStore.UpsertPlanEntitlement(ctx, plan.ID, "module.widgets", "true"); err != nil {
+		t.Fatalf("UpsertPlanEntitlement() error: %v", err)
+	}
+	now := time.Now()
+	if _, err := billingStore.CreateSubscription(ctx, tt.ID, plan.ID, now, now.Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSubscription() error: %v", err)
+	}
+
 	domain := slug + ".example.com"
 	if _, err := conn.Exec(`INSERT INTO system.tenant_domains (tenant_id, domain, type) VALUES ($1, $2, 'subdomain')`, tt.ID, domain); err != nil {
 		t.Fatalf("insert tenant domain: %v", err)

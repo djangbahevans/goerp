@@ -147,9 +147,18 @@ func TestDispatchPermissionsRoute_FullRoundTrip(t *testing.T) {
 func TestDispatchPermissionsRoute_ModuleNotEntitledIsExcluded(t *testing.T) {
 	f := newChainFixture(t)
 	reregisterWidgetsWithFieldSecurity(t, f)
-	// Deliberately no grantModuleEntitlement call — the tenant has no
-	// subscription at all, so EntitlementSet.ModuleEnabled("widgets") is
-	// false.
+	// A second StatusReady module the fixture tenant is never entitled to
+	// (newChainFixture only grants "module.widgets") — "widgets" itself
+	// can't be used for this assertion since goerp#441's dispatch gating
+	// needs newChainFixture's tenant entitled to it for this file's other
+	// module-dispatch tests to reach past a 403.
+	loadedModules := map[string]*module.LoadedModule{
+		"widgets":    f.reg.Snapshot().Modules()["widgets"],
+		"unentitled": {Status: module.StatusReady, Manifest: manifest.Manifest{Type: "standard"}},
+	}
+	if _, err := f.reg.Update(loadedModules); err != nil {
+		t.Fatalf("registry Update() error: %v", err)
+	}
 
 	token := f.issueToken(t)
 	h := f.metaChain()
@@ -168,8 +177,11 @@ func TestDispatchPermissionsRoute_ModuleNotEntitledIsExcluded(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if slices.Contains(resp.ModulesEnabled, "widgets") {
-		t.Errorf("modules_enabled = %v, want NOT to contain un-entitled module %q", resp.ModulesEnabled, "widgets")
+	if slices.Contains(resp.ModulesEnabled, "unentitled") {
+		t.Errorf("modules_enabled = %v, want NOT to contain un-entitled module %q", resp.ModulesEnabled, "unentitled")
+	}
+	if !slices.Contains(resp.ModulesEnabled, "widgets") {
+		t.Errorf("modules_enabled = %v, want to still contain entitled module %q", resp.ModulesEnabled, "widgets")
 	}
 }
 

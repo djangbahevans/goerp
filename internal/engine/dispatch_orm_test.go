@@ -190,7 +190,11 @@ func (f *dispatchORMFixture) request(method, target string, body []byte, entry *
 		entry:      entry,
 		pathParams: pathParams,
 	})
-	ctx = withTenantContext(ctx, &tenantresolve.TenantContext{TenantID: f.tenantID, Slug: f.slug})
+	ctx = withTenantContext(ctx, &tenantresolve.TenantContext{
+		TenantID:     f.tenantID,
+		Slug:         f.slug,
+		Entitlements: tenantresolve.EntitlementSet{Features: map[string]bool{"module.testmodule": true}},
+	})
 	ctx = withAuthContext(ctx, &authcheck.AuthContext{IsAuthenticated: true, UserID: "00000000-0000-0000-0000-0000000000aa"})
 	return r.WithContext(ctx)
 }
