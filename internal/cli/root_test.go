@@ -12,12 +12,25 @@ import (
 // arguments), capturing whatever it writes to os.Stdout/os.Stderr.
 func runCLI(t *testing.T, args ...string) (exitCode int, stdout, stderr string) {
 	t.Helper()
+	return runCLIWithStdin(t, "", args...)
+}
+
+// runCLIWithStdin is runCLI plus stdin injection — `schema sync`'s
+// broad-target confirmation prompt (the CLI's only interactive read) is
+// otherwise untestable, since Execute() always reads from the process's
+// real os.Stdin.
+func runCLIWithStdin(t *testing.T, stdin string, args ...string) (exitCode int, stdout, stderr string) {
+	t.Helper()
 
 	origArgs := os.Args
 	os.Args = append([]string{"goerp"}, args...)
 	t.Cleanup(func() { os.Args = origArgs })
 
-	origStdout, origStderr := os.Stdout, os.Stderr
+	origStdin, origStdout, origStderr := os.Stdin, os.Stdout, os.Stderr
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdin pipe: %v", err)
+	}
 	outR, outW, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("create stdout pipe: %v", err)
@@ -26,13 +39,19 @@ func runCLI(t *testing.T, args ...string) (exitCode int, stdout, stderr string) 
 	if err != nil {
 		t.Fatalf("create stderr pipe: %v", err)
 	}
-	os.Stdout, os.Stderr = outW, errW
+	os.Stdin, os.Stdout, os.Stderr = inR, outW, errW
+
+	go func() {
+		_, _ = inW.WriteString(stdin)
+		_ = inW.Close()
+	}()
 
 	exitCode = Execute()
 
+	_ = inR.Close()
 	_ = outW.Close()
 	_ = errW.Close()
-	os.Stdout, os.Stderr = origStdout, origStderr
+	os.Stdin, os.Stdout, os.Stderr = origStdin, origStdout, origStderr
 
 	var outBuf, errBuf bytes.Buffer
 	_, _ = io.Copy(&outBuf, outR)

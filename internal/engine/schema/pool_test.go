@@ -114,6 +114,57 @@ func TestStatusForTenant_ReturnsRowsOrderedByModuleName(t *testing.T) {
 	}
 }
 
+func TestStatusFiltered_IncludesDataMigrationFields(t *testing.T) {
+	_, pool := openTestPool(t, 5*time.Second)
+
+	const tenantID = "77777777-7777-7777-7777-777777777777"
+
+	cleanup, err := db.New(localSchemaSyncDSN)
+	if err != nil {
+		t.Fatalf("db.New() for cleanup connection: %v", err)
+	}
+	defer func() { _ = cleanup.Close() }()
+	if _, err := cleanup.Exec("DELETE FROM system.module_schema_versions WHERE tenant_id = $1", tenantID); err != nil {
+		t.Fatalf("reset module_schema_versions: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = cleanup.Exec("DELETE FROM system.module_schema_versions WHERE tenant_id = $1", tenantID)
+	})
+	if _, err := cleanup.Exec(`
+		INSERT INTO system.tenants (id, slug, name, plan, status, region, created_at)
+		VALUES ($1, 'datamigfiltered', 'Data Migration Filtered', 'pro', 'active', 'default', NOW())
+		ON CONFLICT (id) DO NOTHING
+	`, tenantID); err != nil {
+		t.Fatalf("insert fixture tenant: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = cleanup.Exec("DELETE FROM system.tenants WHERE id = $1", tenantID)
+	})
+
+	if _, err := cleanup.ExecContext(context.Background(),
+		`INSERT INTO system.module_schema_versions
+		 (tenant_id, module_name, current_version, schema_sync_status, schema_synced_at, data_migration_version, data_migration_status)
+		 VALUES ($1, 'sales', '1.3.0', 'ok', NOW(), '1.3.0', 'running')`,
+		tenantID,
+	); err != nil {
+		t.Fatalf("insert fixture row: %v", err)
+	}
+
+	got, err := pool.StatusFiltered(context.Background(), "datamigfiltered", "", "")
+	if err != nil {
+		t.Fatalf("StatusFiltered() error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].DataMigrationVersion != "1.3.0" {
+		t.Errorf("DataMigrationVersion = %q, want %q", got[0].DataMigrationVersion, "1.3.0")
+	}
+	if got[0].DataMigrationStatus != "running" {
+		t.Errorf("DataMigrationStatus = %q, want %q", got[0].DataMigrationStatus, "running")
+	}
+}
+
 func TestStatusForTenant_NoRowsReturnsEmpty(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 

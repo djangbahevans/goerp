@@ -185,11 +185,13 @@ func (p *SchemaSyncPool) StatusForTenant(ctx context.Context, tenantID string) (
 // owning tenant's slug — the cross-tenant shape `GET /admin/schema/status`
 // (goerp#292) reports, unlike StatusForTenant's single-tenant one.
 type TenantModuleStatus struct {
-	TenantSlug     string     `json:"tenant"`
-	ModuleName     string     `json:"module_name"`
-	CurrentVersion string     `json:"current_version"`
-	Status         string     `json:"status"` // "ok" | "failed" | "in_progress"
-	SyncedAt       *time.Time `json:"synced_at,omitempty"`
+	TenantSlug           string     `json:"tenant"`
+	ModuleName           string     `json:"module_name"`
+	CurrentVersion       string     `json:"current_version"`
+	Status               string     `json:"status"` // "ok" | "failed" | "in_progress"
+	SyncedAt             *time.Time `json:"synced_at,omitempty"`
+	DataMigrationVersion string     `json:"data_migration_version,omitempty"`
+	DataMigrationStatus  string     `json:"data_migration_status,omitempty"` // "ok" | "running" | "failed" | ""
 }
 
 // StatusFiltered returns every module_schema_versions row joined to its
@@ -202,7 +204,8 @@ type TenantModuleStatus struct {
 // Admin.Status).
 func (p *SchemaSyncPool) StatusFiltered(ctx context.Context, tenantSlug, moduleName, status string) ([]TenantModuleStatus, error) {
 	rows, err := p.primary.QueryContext(ctx, `
-		SELECT t.slug, v.module_name, v.current_version, v.schema_sync_status, v.schema_synced_at
+		SELECT t.slug, v.module_name, v.current_version, v.schema_sync_status, v.schema_synced_at,
+		       v.data_migration_version, v.data_migration_status
 		FROM system.module_schema_versions v
 		JOIN system.tenants t ON t.id = v.tenant_id
 		WHERE ($1 = '' OR t.slug = $1)
@@ -219,12 +222,16 @@ func (p *SchemaSyncPool) StatusFiltered(ctx context.Context, tenantSlug, moduleN
 	for rows.Next() {
 		var s TenantModuleStatus
 		var syncedAt sql.NullTime
-		if err := rows.Scan(&s.TenantSlug, &s.ModuleName, &s.CurrentVersion, &s.Status, &syncedAt); err != nil {
+		var dataMigrationVersion, dataMigrationStatus sql.NullString
+		if err := rows.Scan(&s.TenantSlug, &s.ModuleName, &s.CurrentVersion, &s.Status, &syncedAt,
+			&dataMigrationVersion, &dataMigrationStatus); err != nil {
 			return nil, fmt.Errorf("scan schema sync status: %w", err)
 		}
 		if syncedAt.Valid {
 			s.SyncedAt = &syncedAt.Time
 		}
+		s.DataMigrationVersion = dataMigrationVersion.String
+		s.DataMigrationStatus = dataMigrationStatus.String
 		statuses = append(statuses, s)
 	}
 	if err := rows.Err(); err != nil {
