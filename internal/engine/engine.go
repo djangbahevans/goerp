@@ -795,6 +795,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Checkpoints:    checkpointStore,
 		StorageBackend: storageBackend,
 		Provision:      provisionActivities,
+		Keys:           rowKeySet,
 	})
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
@@ -838,7 +839,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Provisioner:    tenantprovision.NewProvisioner(temporalClient, systemworker.TaskQueue),
 		Offboarder:     tenantoffboard.NewOffboarder(tenantStore, temporalClient, systemworker.TaskQueue, jobQueueClient, jobqueue.QueueAdmin),
 		Exporter:       tenantexport.NewExporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin),
-		Importer:       tenantimport.NewImporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin),
+		Importer:       tenantimport.NewImporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin, rowKeySet),
 		Storage:        storageBackend,
 	})
 

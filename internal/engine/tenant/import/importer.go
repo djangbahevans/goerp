@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -18,10 +19,15 @@ type Importer struct {
 	jobClient   *river.Client[pgx.Tx]
 	// jobQueue mirrors tenantexport.Exporter's own field of the same name.
 	jobQueue string
+	// keys encrypts decryptionKey before it's persisted in the job's Args —
+	// goerp#450, since River persists job args as-is in river_job.args for
+	// the life of the job row, and the archive's own decryption key has no
+	// business sitting there in plaintext.
+	keys *rowcrypt.RowKeySet
 }
 
-func NewImporter(tenantStore *tenant.Store, jobClient *river.Client[pgx.Tx], jobQueue string) *Importer {
-	return &Importer{tenantStore: tenantStore, jobClient: jobClient, jobQueue: jobQueue}
+func NewImporter(tenantStore *tenant.Store, jobClient *river.Client[pgx.Tx], jobQueue string, keys *rowcrypt.RowKeySet) *Importer {
+	return &Importer{tenantStore: tenantStore, jobClient: jobClient, jobQueue: jobQueue, keys: keys}
 }
 
 // jobIDPrefix/encodeJobID mirror adminapi's own and tenantexport's —
@@ -47,10 +53,15 @@ func (im *Importer) StartImport(ctx context.Context, newSlug, inputRef, decrypti
 		return "", fmt.Errorf("look up tenant %q: %w", newSlug, err)
 	}
 
+	encryptedKey, err := im.keys.Encrypt([]byte(decryptionKey))
+	if err != nil {
+		return "", fmt.Errorf("encrypt decryption key for storage: %w", err)
+	}
+
 	insertResult, err := im.jobClient.Insert(ctx, Args{
 		NewSlug:       newSlug,
 		InputRef:      inputRef,
-		DecryptionKey: decryptionKey,
+		DecryptionKey: string(encryptedKey),
 	}, &river.InsertOpts{Queue: im.jobQueue})
 	if err != nil {
 		return "", fmt.Errorf("enqueue import job: %w", err)

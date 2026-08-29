@@ -12,9 +12,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	enginemanifest "github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -25,6 +27,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -61,6 +64,21 @@ type importTestFixture struct {
 	conn    *sql.DB
 	storage storage.Backend
 	reg     *registry.ModuleRegistry
+	keys    *rowcrypt.RowKeySet
+}
+
+// testRowKeySet builds a RowKeySet directly, without rowcrypt.Store's own
+// Postgres/secrets.Backend-backed bootstrap — Encrypt/Decrypt only ever
+// touch ks.Active.Key, so a random in-memory key is enough for these
+// tests, same as tenantexport's own tests don't stand up a real key
+// management flow just to exercise AES-256-GCM round-tripping.
+func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("generate row encryption key: %v", err)
+	}
+	return &rowcrypt.RowKeySet{Active: rowcrypt.RowKey{KeyID: uuid.NewString(), Key: key}}
 }
 
 func newImportTestFixture(t *testing.T) *importTestFixture {
@@ -102,6 +120,8 @@ func newImportTestFixture(t *testing.T) *importTestFixture {
 		t.Fatalf(`storage.New("local") error: %v`, err)
 	}
 
+	keys := testRowKeySet(t)
+
 	return &importTestFixture{
 		worker: &Worker{
 			TenantStore:    tenantStore,
@@ -110,10 +130,12 @@ func newImportTestFixture(t *testing.T) *importTestFixture {
 			Checkpoints:    checkpointStore,
 			StorageBackend: backend,
 			Provision:      provisionActivities,
+			Keys:           keys,
 		},
 		conn:    conn,
 		storage: backend,
 		reg:     reg,
+		keys:    keys,
 	}
 }
 
@@ -181,6 +203,18 @@ func encryptTestArchive(t *testing.T, man manifest, moduleData map[string][]byte
 	return sealed, base64.RawURLEncoding.EncodeToString(key)
 }
 
+// encryptedArgsKey mirrors what Importer.StartImport does to a caller-
+// supplied decryption key before it ever reaches Args — Worker.run
+// decrypts it back via the same RowKeySet before calling decryptArchive.
+func encryptedArgsKey(t *testing.T, keys *rowcrypt.RowKeySet, keyB64 string) string {
+	t.Helper()
+	encrypted, err := keys.Encrypt([]byte(keyB64))
+	if err != nil {
+		t.Fatalf("encrypt test decryption key: %v", err)
+	}
+	return string(encrypted)
+}
+
 func jsonlLine(t *testing.T, rec exportRecord) []byte {
 	t.Helper()
 	data, err := json.Marshal(rec)
@@ -218,7 +252,7 @@ func TestWorkerRun_ImportsArchiveIntoNewTenant(t *testing.T) {
 		_, _ = f.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
 	})
 
-	result, err := f.worker.run(ctx, testJob(jobID, Args{NewSlug: slug, InputRef: inputRef, DecryptionKey: keyB64}))
+	result, err := f.worker.run(ctx, testJob(jobID, Args{NewSlug: slug, InputRef: inputRef, DecryptionKey: encryptedArgsKey(t, f.keys, keyB64)}))
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
 	}
@@ -273,7 +307,7 @@ func TestWorkerRun_RejectsModuleVersionMismatch(t *testing.T) {
 		_, _ = f.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
 	})
 
-	_, err := f.worker.run(ctx, testJob(jobID, Args{NewSlug: slug, InputRef: inputRef, DecryptionKey: keyB64}))
+	_, err := f.worker.run(ctx, testJob(jobID, Args{NewSlug: slug, InputRef: inputRef, DecryptionKey: encryptedArgsKey(t, f.keys, keyB64)}))
 	if err == nil {
 		t.Fatal("run() error = nil, want a version-mismatch error")
 	}
@@ -316,12 +350,41 @@ func TestWorkerRun_FinalAttemptFailureReleasesSlugReservation(t *testing.T) {
 		_, _ = f.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
 	})
 
-	_, err := f.worker.run(ctx, testFinalAttemptJob(jobID, Args{NewSlug: slug, InputRef: inputRef, DecryptionKey: keyB64}))
+	_, err := f.worker.run(ctx, testFinalAttemptJob(jobID, Args{NewSlug: slug, InputRef: inputRef, DecryptionKey: encryptedArgsKey(t, f.keys, keyB64)}))
 	if err == nil {
 		t.Fatal("run() error = nil, want a load-module error")
 	}
 
 	if _, getErr := f.worker.TenantStore.GetBySlug(ctx, slug); !errors.Is(getErr, tenant.ErrTenantNotFound) {
 		t.Errorf("GetBySlug() error = %v, want ErrTenantNotFound — slug reservation should have been released", getErr)
+	}
+}
+
+// TestWorkerRun_ArgsDecryptionKeyIsRowcryptCiphertextNotPlaintext confirms
+// what Args itself (persisted verbatim in river_job.args) actually
+// contains: goerp#450's whole point is that it must never be the archive's
+// plaintext AES key.
+func TestWorkerRun_ArgsDecryptionKeyIsRowcryptCiphertextNotPlaintext(t *testing.T) {
+	f := newImportTestFixture(t)
+
+	plaintextKey := "not-a-real-key-just-a-marker-string"
+	encrypted := encryptedArgsKey(t, f.keys, plaintextKey)
+
+	if encrypted == plaintextKey {
+		t.Fatal("encryptedArgsKey returned the plaintext key unchanged")
+	}
+	if !strings.HasPrefix(encrypted, f.keys.Active.KeyID+":") {
+		t.Errorf("encrypted value = %q, want it to start with the active key id %q", encrypted, f.keys.Active.KeyID+":")
+	}
+	if strings.Contains(encrypted, plaintextKey) {
+		t.Error("encrypted value contains the plaintext key as a substring")
+	}
+
+	roundTripped, err := f.keys.Decrypt([]byte(encrypted))
+	if err != nil {
+		t.Fatalf("Decrypt() error: %v", err)
+	}
+	if string(roundTripped) != plaintextKey {
+		t.Errorf("round-tripped key = %q, want %q", roundTripped, plaintextKey)
 	}
 }
