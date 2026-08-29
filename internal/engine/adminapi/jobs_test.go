@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 )
 
 const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
@@ -198,6 +199,138 @@ func TestJobsShowRoute_ReturnsJobWithErrors(t *testing.T) {
 	}
 	if env.Data.Errors == nil {
 		t.Error("Errors = nil, want an empty (but present) slice for a job with no failed attempts")
+	}
+}
+
+// outputTestArgs/outputTestWorker are a minimal job kind that records
+// Output via river.RecordOutput — ProbeWorker (newTestJobsClient's only
+// registered worker) never does, so OutputDecryptor's own test needs its
+// own client with this worker registered too.
+type outputTestArgs struct {
+	Marker string
+}
+
+func (outputTestArgs) Kind() string { return "adminapi_test.output" }
+
+type outputTestResult struct {
+	Marker string `json:"marker"`
+}
+
+type outputTestWorker struct {
+	river.WorkerDefaults[outputTestArgs]
+}
+
+func (w *outputTestWorker) Work(ctx context.Context, job *river.Job[outputTestArgs]) error {
+	return river.RecordOutput(ctx, outputTestResult{Marker: job.Args.Marker})
+}
+
+func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
+	t.Helper()
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, jobsTestDSN)
+	if err != nil {
+		t.Fatalf("pgxpool.New: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("dev Postgres unreachable at %s (start compose.dev.yml): %v", jobsTestDSN, err)
+	}
+	t.Cleanup(pool.Close)
+
+	if err := jobqueue.Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	cfg := &config.Config{
+		QueueCriticalConcurrency: 1, QueueDefaultConcurrency: 1,
+		QueueBulkConcurrency: 1, QueueSearchConcurrency: 1, QueueEmailConcurrency: 1,
+	}
+	workers := river.NewWorkers()
+	river.AddWorker(workers, &outputTestWorker{})
+
+	client, err := jobqueue.New(pool, cfg, workers)
+	if err != nil {
+		t.Fatalf("jobqueue.New: %v", err)
+	}
+	if err := client.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = client.Stop(stopCtx)
+	})
+
+	return client
+}
+
+// waitForJobCompleted polls JobGet until the job reaches rivertype.JobStateCompleted.
+func waitForJobCompleted(t *testing.T, client *river.Client[pgx.Tx], jobID int64) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		row, err := client.JobGet(context.Background(), jobID)
+		if err != nil {
+			t.Fatalf("JobGet: %v", err)
+		}
+		if row.State == rivertype.JobStateCompleted {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %d did not complete in time (state=%s)", jobID, row.State)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestJobsShowRoute_AppliesOutputDecryptor(t *testing.T) {
+	client := newTestJobsClientWithOutputWorker(t)
+
+	insertResult, err := client.Insert(context.Background(), outputTestArgs{Marker: "encrypted-marker"}, &river.InsertOpts{Queue: jobqueue.QueueDefault})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	jobID := insertResult.Job.ID
+	waitForJobCompleted(t, client, jobID)
+
+	mux := http.NewServeMux()
+	var gotKind string
+	RegisterJobsRoutes(mux, JobsDeps{
+		Client: client,
+		OutputDecryptor: func(kind string, output json.RawMessage) (json.RawMessage, error) {
+			gotKind = kind
+			var result outputTestResult
+			if err := json.Unmarshal(output, &result); err != nil {
+				return nil, err
+			}
+			result.Marker = "decrypted:" + result.Marker
+			return json.Marshal(result)
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/jobs/"+encodeJobID(jobID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if gotKind != "adminapi_test.output" {
+		t.Errorf("OutputDecryptor called with kind = %q, want %q", gotKind, "adminapi_test.output")
+	}
+
+	var env struct {
+		Data jobDetailView `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var result outputTestResult
+	if err := json.Unmarshal(env.Data.Output, &result); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if result.Marker != "decrypted:encrypted-marker" {
+		t.Errorf("Output.marker = %q, want %q (OutputDecryptor should have transformed it)", result.Marker, "decrypted:encrypted-marker")
 	}
 }
 

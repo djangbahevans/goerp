@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -49,9 +50,16 @@ type Worker struct {
 	// which has BYPASSRLS — export needs unfiltered access to every row
 	// in the tenant's schema, not the RLS-constrained view host.orm's
 	// primary pool enforces for a live caller.
-	RawDB           *sql.DB
-	Checkpoints     *checkpoint.Store
-	StorageBackend  storage.Backend
+	RawDB          *sql.DB
+	Checkpoints    *checkpoint.Store
+	StorageBackend storage.Backend
+	// Keys encrypts Result.DecryptionKey before it's recorded via
+	// river.RecordOutput (goerp#453) — river_job persists Output as-is for
+	// the life of the job row, so the archive's one-time decryption key
+	// doesn't sit there in plaintext. adminapi/jobs.go's OutputDecryptor
+	// hook (wired to DecryptOutput in this package) decrypts it back
+	// transparently for a legitimate, already-admin-authenticated poller.
+	Keys            *rowcrypt.RowKeySet
 	LeaseStaleAfter time.Duration
 }
 
@@ -176,10 +184,15 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 	// archive (cli-reference.md §5's 7-day auto-delete) rather than being
 	// cleaned up by the worker itself.
 
+	encryptedKey, err := w.Keys.Encrypt([]byte(decryptionKey))
+	if err != nil {
+		return Result{}, fmt.Errorf("encrypt decryption key for storage: %w", err)
+	}
+
 	return Result{
 		DownloadURL:   downloadURL,
 		Checksum:      checksum,
-		DecryptionKey: decryptionKey,
+		DecryptionKey: string(encryptedKey),
 	}, nil
 }
 
