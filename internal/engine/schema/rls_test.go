@@ -64,7 +64,7 @@ func TestSyncRLSPolicies_OwnOnlyPolicy_FiltersRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, modelDecls, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 

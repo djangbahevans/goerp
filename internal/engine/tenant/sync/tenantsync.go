@@ -53,49 +53,56 @@ func SyncAll(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 }
 
 func syncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenants []tenant.Tenant, mod *module.LoadedModule, concurrency int) {
+	fanOut(tenants, concurrency, func(t tenant.Tenant) {
+		if err := SyncOne(ctx, pool, diffEngine, t, mod, nil); err != nil {
+			log.Error().Err(err).
+				Str("tenant", t.Slug).
+				Str("module", mod.Manifest.Name).
+				Msg("schema sync failed")
+		}
+	})
+}
+
+// fanOut runs fn for each item in items with at most concurrency running
+// at once (DefaultConcurrency if <= 0), waiting for all to finish before
+// returning — the shared bounded semaphore+WaitGroup shape behind
+// syncModule, Admin.Status's pending-filter sweep, and SyncWorker.run,
+// each fanning a "one unit of work, many items" shape across
+// (tenant, module) pairs. fn is responsible for its own synchronization
+// if it accumulates results into shared state.
+func fanOut[T any](items []T, concurrency int, fn func(T)) {
+	if concurrency <= 0 {
+		concurrency = DefaultConcurrency
+	}
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
-	for _, t := range tenants {
+	for _, item := range items {
 		wg.Add(1)
-		go func(t tenant.Tenant) {
+		go func(item T) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-
-			if err := SyncOne(ctx, pool, diffEngine, t, mod); err != nil {
-				log.Error().Err(err).
-					Str("tenant", t.Slug).
-					Str("module", mod.Manifest.Name).
-					Msg("schema sync failed")
-			}
-		}(t)
+			fn(item)
+		}(item)
 	}
 
 	wg.Wait()
 }
 
 // SyncOne runs schema sync for a single (tenant, module) pair — the same
-// logic SyncAll fans out across every active tenant, exported for a
-// caller with exactly one tenant already in hand and no need to go
+// logic SyncAll fans out across every active tenant, callable directly by
+// a caller with exactly one tenant already in hand and no need to go
 // through ActiveTenants (e.g. goerp#149's provisioning workflow, syncing
 // a tenant that's still StatusProvisioning and therefore not yet
-// "active" — ActiveTenants wouldn't return it at all).
-func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule) error {
-	return syncOne(ctx, pool, diffEngine, t, mod, nil)
-}
-
-// SyncOneAccepted behaves like SyncOne, but additionally applies any
-// blocked change whose schema.ChangeHash appears in accepted — goerp#292's
+// "active" — ActiveTenants wouldn't return it at all). accepted applies
+// any blocked change whose schema.ChangeHash it contains — goerp#292's
 // `schema accept`-triggered one-time resync, the only caller that ever
-// passes a non-empty map. Once applied, a change stops appearing in a
+// passes a non-empty map; nil (every other caller) applies only the safe/
+// automatic class of change. Once applied, a change stops appearing in a
 // later Diff at all (the live schema now matches), so accepted hashes
 // never need to be "consumed" or expire on their own.
-func SyncOneAccepted(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
-	return syncOne(ctx, pool, diffEngine, t, mod, accepted)
-}
-
-func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
+func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
 	sess, err := pool.BeginSync(ctx, t.ID, t.Slug, mod.Manifest.Name, &mod.Manifest)
 	if err != nil {
 		return fmt.Errorf("begin sync session: %w", err)
@@ -113,7 +120,7 @@ func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 	if err != nil {
 		return fmt.Errorf("check sync need: %w", err)
 	}
-	if !needsSync && accepted == nil {
+	if !needsSync && len(accepted) == 0 {
 		return nil
 	}
 

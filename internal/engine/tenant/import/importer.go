@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -28,15 +28,6 @@ type Importer struct {
 
 func NewImporter(tenantStore *tenant.Store, jobClient *river.Client[pgx.Tx], jobQueue string, keys *rowcrypt.RowKeySet) *Importer {
 	return &Importer{tenantStore: tenantStore, jobClient: jobClient, jobQueue: jobQueue, keys: keys}
-}
-
-// jobIDPrefix/encodeJobID mirror adminapi's own and tenantexport's —
-// duplicated rather than exported across a package boundary for this one
-// small helper, same call those packages already made.
-const jobIDPrefix = "job_"
-
-func encodeJobID(id int64) string {
-	return jobIDPrefix + strconv.FormatInt(id, 10)
 }
 
 // StartImport rejects a newSlug already in use up front — a fast usage
@@ -66,5 +57,5 @@ func (im *Importer) StartImport(ctx context.Context, newSlug, inputRef, decrypti
 	if err != nil {
 		return "", fmt.Errorf("enqueue import job: %w", err)
 	}
-	return encodeJobID(insertResult.Job.ID), nil
+	return jobqueue.EncodeJobID(insertResult.Job.ID), nil
 }

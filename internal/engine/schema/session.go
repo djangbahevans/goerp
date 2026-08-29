@@ -29,8 +29,9 @@ type SchemaSyncSession struct {
 }
 
 // execQuerier is ariga.io/atlas/sql/schema.ExecQuerier's method set,
-// declared locally so this package's own callers (diff.go) don't need to
-// import atlas just to pick between s.conn and s.readTx — both already
+// declared locally so this package's own callers (diff.go, apply.go's
+// execWithRetry) don't need to import atlas just to pick between s.conn
+// and s.readTx, or between *sql.Conn and *sql.Tx — all of which already
 // satisfy it structurally.
 type execQuerier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -49,8 +50,12 @@ func (s *SchemaSyncSession) execQuerier() execQuerier {
 // instead has a readTx to close out first).
 func (s *SchemaSyncSession) Close(ctx context.Context) error {
 	if s.readTx != nil {
-		_ = s.readTx.Commit() // read-only; commit vs. rollback is equivalent
-		return s.conn.Close()
+		commitErr := s.readTx.Commit() // read-only; commit vs. rollback is equivalent
+		closeErr := s.conn.Close()
+		if commitErr != nil {
+			return commitErr
+		}
+		return closeErr
 	}
 	lockA, lockB := advisoryLockKeys(s.tenantSlug, s.moduleName)
 	_, unlockErr := s.conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1, $2)", lockA, lockB)

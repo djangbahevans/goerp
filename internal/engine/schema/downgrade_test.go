@@ -56,7 +56,7 @@ func TestCheckDowngrade_SupersetSafe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, []model.ModelDeclaration{wide}, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, []model.ModelDeclaration{wide}, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestCheckDowngrade_BlockedNotNullColumnWithNoDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, []model.ModelDeclaration{base}, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, []model.ModelDeclaration{base}, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestCheckDowngrade_BlockedMissingColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, []model.ModelDeclaration{live}, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, []model.ModelDeclaration{live}, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 

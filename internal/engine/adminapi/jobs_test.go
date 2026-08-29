@@ -71,28 +71,6 @@ func insertTestJob(t *testing.T, client *river.Client[pgx.Tx], opts *river.Inser
 	return row.Job.ID
 }
 
-func TestEncodeDecodeJobID_RoundTrips(t *testing.T) {
-	id, err := decodeJobID(encodeJobID(42))
-	if err != nil {
-		t.Fatalf("decodeJobID: %v", err)
-	}
-	if id != 42 {
-		t.Errorf("id = %d, want 42", id)
-	}
-}
-
-func TestDecodeJobID_RejectsMissingPrefix(t *testing.T) {
-	if _, err := decodeJobID("42"); err == nil {
-		t.Fatal("expected an error for a job id missing the job_ prefix")
-	}
-}
-
-func TestDecodeJobID_RejectsNonNumeric(t *testing.T) {
-	if _, err := decodeJobID("job_abc"); err == nil {
-		t.Fatal("expected an error for a non-numeric job id")
-	}
-}
-
 func TestJobsListRoute_ReturnsInsertedJob(t *testing.T) {
 	client := newTestJobsClient(t)
 	jobID := insertTestJob(t, client, &river.InsertOpts{Queue: jobqueue.QueueDefault})
@@ -115,7 +93,7 @@ func TestJobsListRoute_ReturnsInsertedJob(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	wantID := encodeJobID(jobID)
+	wantID := jobqueue.EncodeJobID(jobID)
 	for _, j := range env.Data {
 		if j.ID == wantID {
 			return
@@ -150,7 +128,7 @@ func TestJobsListRoute_SinceExcludesOlderJobs(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	wantID := encodeJobID(jobID)
+	wantID := jobqueue.EncodeJobID(jobID)
 	for _, j := range env.Data {
 		if j.ID == wantID {
 			t.Errorf("job %s found with since=-24h (i.e. a future cutoff), want it excluded", wantID)
@@ -180,7 +158,7 @@ func TestJobsShowRoute_ReturnsJobWithErrors(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterJobsRoutes(mux, JobsDeps{Client: client})
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/jobs/"+encodeJobID(jobID), nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/jobs/"+jobqueue.EncodeJobID(jobID), nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -194,8 +172,8 @@ func TestJobsShowRoute_ReturnsJobWithErrors(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if env.Data.ID != encodeJobID(jobID) {
-		t.Errorf("ID = %q, want %q", env.Data.ID, encodeJobID(jobID))
+	if env.Data.ID != jobqueue.EncodeJobID(jobID) {
+		t.Errorf("ID = %q, want %q", env.Data.ID, jobqueue.EncodeJobID(jobID))
 	}
 	if env.Data.Errors == nil {
 		t.Error("Errors = nil, want an empty (but present) slice for a job with no failed attempts")
@@ -308,7 +286,7 @@ func TestJobsShowRoute_AppliesOutputDecryptor(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/jobs/"+encodeJobID(jobID), nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/jobs/"+jobqueue.EncodeJobID(jobID), nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -376,7 +354,7 @@ func TestJobsCancelRoute_CancelsJob(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterJobsRoutes(mux, JobsDeps{Client: client})
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/jobs/"+encodeJobID(jobID)+"/cancel", strings.NewReader(`{"reason":"test"}`))
+	req := httptest.NewRequest(http.MethodPost, "/admin/jobs/"+jobqueue.EncodeJobID(jobID)+"/cancel", strings.NewReader(`{"reason":"test"}`))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -405,7 +383,7 @@ func TestJobsRetryRoute_RetriesJob(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterJobsRoutes(mux, JobsDeps{Client: client})
 
-	req := httptest.NewRequest(http.MethodPost, "/admin/jobs/"+encodeJobID(jobID)+"/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/jobs/"+jobqueue.EncodeJobID(jobID)+"/retry", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

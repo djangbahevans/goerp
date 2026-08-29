@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -71,6 +72,13 @@ func (w *SyncWorker) Work(ctx context.Context, job *river.Job[SyncArgs]) error {
 	return nil
 }
 
+// syncPair is one (tenant, module) unit of work within a SyncArgs job —
+// run's own fanOut item type.
+type syncPair struct {
+	tenant tenant.Tenant
+	mod    *module.LoadedModule
+}
+
 func (w *SyncWorker) run(ctx context.Context, a SyncArgs) (SyncResult, error) {
 	tenants, err := w.resolveTenants(ctx, a.TenantSlug)
 	if err != nil {
@@ -82,17 +90,46 @@ func (w *SyncWorker) run(ctx context.Context, a SyncArgs) (SyncResult, error) {
 		return SyncResult{}, err
 	}
 
-	var result SyncResult
+	pairs := make([]syncPair, 0, len(tenants)*len(mods))
 	for _, t := range tenants {
 		for _, mod := range mods {
-			if err := SyncOne(ctx, w.Pool, w.DiffEngine, t, mod); err != nil {
-				result.Failed = append(result.Failed, SyncPairResult{Tenant: t.Slug, Module: mod.Manifest.Name, Error: err.Error()})
-				continue
-			}
-			result.Synced = append(result.Synced, SyncPairResult{Tenant: t.Slug, Module: mod.Manifest.Name})
+			pairs = append(pairs, syncPair{tenant: t, mod: mod})
 		}
 	}
+
+	var result SyncResult
+	var mu sync.Mutex
+	fanOut(pairs, DefaultConcurrency, func(p syncPair) {
+		pairResult := SyncPairResult{Tenant: p.tenant.Slug, Module: p.mod.Manifest.Name}
+		if err := SyncOne(ctx, w.Pool, w.DiffEngine, p.tenant, p.mod, nil); err != nil {
+			pairResult.Error = err.Error()
+			mu.Lock()
+			result.Failed = append(result.Failed, pairResult)
+			mu.Unlock()
+			return
+		}
+		mu.Lock()
+		result.Synced = append(result.Synced, pairResult)
+		mu.Unlock()
+	})
+
+	// Concurrent completion order is arbitrary — sort both slices by
+	// (tenant, module) so a broad sync's result doesn't reshuffle between
+	// otherwise-identical calls, matching Admin.Status's own pending-sweep
+	// convention for the identical concurrency-vs-determinism tension.
+	sortPairResults(result.Synced)
+	sortPairResults(result.Failed)
+
 	return result, nil
+}
+
+func sortPairResults(results []SyncPairResult) {
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Tenant != results[j].Tenant {
+			return results[i].Tenant < results[j].Tenant
+		}
+		return results[i].Module < results[j].Module
+	})
 }
 
 func (w *SyncWorker) resolveTenants(ctx context.Context, slug string) ([]tenant.Tenant, error) {
@@ -117,9 +154,9 @@ func (w *SyncWorker) resolveModules(name string) ([]*module.LoadedModule, error)
 	}
 
 	if name != "" {
-		mod, ok := snap.Modules()[name]
-		if !ok {
-			return nil, fmt.Errorf("module %q not loaded", name)
+		mod, err := resolveModule(snap, name)
+		if err != nil {
+			return nil, err
 		}
 		return []*module.LoadedModule{mod}, nil
 	}
@@ -154,9 +191,9 @@ func (AcceptResyncArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: jobqueue.QueueAdmin}
 }
 
-// AcceptResyncWorker re-syncs one (tenant, module) pair via
-// SyncOneAccepted, loading whatever hashes SchemaSyncPool.AcceptedHashes
-// returns for it — the accept handler already wrote the acceptance
+// AcceptResyncWorker re-syncs one (tenant, module) pair via SyncOne, with
+// whatever hashes SchemaSyncPool.AcceptedHashes returns as its accepted
+// map — the accept handler already wrote the acceptance
 // row(s) this job's own hash lookup will find before enqueuing this job,
 // so there's no need to thread the accepted set through Args itself.
 type AcceptResyncWorker struct {
@@ -171,18 +208,9 @@ type AcceptResyncWorker struct {
 func (w *AcceptResyncWorker) Work(ctx context.Context, job *river.Job[AcceptResyncArgs]) error {
 	a := job.Args
 
-	t, err := w.TenantStore.GetBySlug(ctx, a.TenantSlug)
+	t, mod, err := resolveTenantModule(ctx, w.TenantStore, w.Registry, a.TenantSlug, a.ModuleName)
 	if err != nil {
-		return fmt.Errorf("look up tenant %q: %w", a.TenantSlug, err)
-	}
-
-	snap := w.Registry.Snapshot()
-	if snap == nil {
-		return fmt.Errorf("module registry not ready")
-	}
-	mod, ok := snap.Modules()[a.ModuleName]
-	if !ok {
-		return fmt.Errorf("module %q not loaded", a.ModuleName)
+		return err
 	}
 
 	// Keyed by mod.Manifest.Version — whatever's loaded right now, at
@@ -195,5 +223,5 @@ func (w *AcceptResyncWorker) Work(ctx context.Context, job *river.Job[AcceptResy
 		return fmt.Errorf("load accepted schema diff hashes: %w", err)
 	}
 
-	return SyncOneAccepted(ctx, w.Pool, w.DiffEngine, *t, mod, accepted)
+	return SyncOne(ctx, w.Pool, w.DiffEngine, t, mod, accepted)
 }

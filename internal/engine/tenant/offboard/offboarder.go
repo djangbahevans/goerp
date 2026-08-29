@@ -3,10 +3,10 @@ package tenantoffboard
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/jackc/pgx/v5"
@@ -51,18 +51,6 @@ func WorkflowID(slug string) string {
 	return "offboard-tenant-" + slug
 }
 
-// jobIDPrefix mirrors adminapi's own jobIDPrefix/encodeJobID (internal/
-// engine/adminapi/jobs.go) — River's real int64 job ID prefixed with
-// "job_", the wire format cli-reference.md's "IDs are strings" convention
-// expects. Duplicated rather than exported from adminapi: it's exactly
-// this one-line prefix-around-a-sequence-value, per that file's own doc
-// comment, not worth a cross-package dependency to reuse.
-const jobIDPrefix = "job_"
-
-func encodeJobID(id int64) string {
-	return jobIDPrefix + strconv.FormatInt(id, 10)
-}
-
 // StartOffboard starts either OffboardTenantWorkflow (the default,
 // grace-period path) or an OffboardImmediateArgs River job (immediate:
 // true), matching the two shapes adminapi.OffboardResult documents.
@@ -80,7 +68,7 @@ func (o *Offboarder) StartOffboard(ctx context.Context, tenantSlug string, grace
 		if err != nil {
 			return adminapi.OffboardResult{}, fmt.Errorf("enqueue immediate offboard job: %w", err)
 		}
-		return adminapi.OffboardResult{Status: "accepted", JobID: encodeJobID(insertResult.Job.ID)}, nil
+		return adminapi.OffboardResult{Status: "accepted", JobID: jobqueue.EncodeJobID(insertResult.Job.ID)}, nil
 	}
 
 	// o.temporal is warn-only constructed in Engine.New (Temporal

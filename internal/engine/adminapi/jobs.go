@@ -2,12 +2,11 @@ package adminapi
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -39,29 +38,6 @@ type jobsHandlers struct {
 	deps JobsDeps
 }
 
-// jobIDPrefix and encodeJobID/decodeJobID are the only place River's real,
-// internal int64 job ID is translated to and from the wire format —
-// job_<int>, a string per cli-reference.md's "IDs are strings" convention,
-// but not a synthetic ULID: there's no mapping table or generation step,
-// just a prefix around River's own sequence value.
-const jobIDPrefix = "job_"
-
-func encodeJobID(id int64) string {
-	return jobIDPrefix + strconv.FormatInt(id, 10)
-}
-
-func decodeJobID(s string) (int64, error) {
-	n, ok := strings.CutPrefix(s, jobIDPrefix)
-	if !ok {
-		return 0, fmt.Errorf("job id %q missing %q prefix", s, jobIDPrefix)
-	}
-	id, err := strconv.ParseInt(n, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("job id %q is not numeric: %w", s, err)
-	}
-	return id, nil
-}
-
 type jobView struct {
 	ID          string             `json:"id"`
 	Kind        string             `json:"kind"`
@@ -77,7 +53,7 @@ type jobView struct {
 
 func newJobView(row *rivertype.JobRow) jobView {
 	return jobView{
-		ID:          encodeJobID(row.ID),
+		ID:          jobqueue.EncodeJobID(row.ID),
 		Kind:        row.Kind,
 		Queue:       row.Queue,
 		State:       row.State,
@@ -178,7 +154,7 @@ func (h *jobsHandlers) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *jobsHandlers) show(w http.ResponseWriter, r *http.Request) {
-	id, err := decodeJobID(r.PathValue("id"))
+	id, err := jobqueue.DecodeJobID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -204,7 +180,7 @@ func (h *jobsHandlers) show(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *jobsHandlers) retry(w http.ResponseWriter, r *http.Request) {
-	id, err := decodeJobID(r.PathValue("id"))
+	id, err := jobqueue.DecodeJobID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -224,7 +200,7 @@ type cancelJobRequest struct {
 }
 
 func (h *jobsHandlers) cancel(w http.ResponseWriter, r *http.Request) {
-	id, err := decodeJobID(r.PathValue("id"))
+	id, err := jobqueue.DecodeJobID(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return

@@ -3,8 +3,8 @@ package tenantexport
 import (
 	"context"
 	"fmt"
-	"strconv"
 
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -26,16 +26,6 @@ func NewExporter(tenantStore *tenant.Store, jobClient *river.Client[pgx.Tx], job
 	return &Exporter{tenantStore: tenantStore, jobClient: jobClient, jobQueue: jobQueue}
 }
 
-// jobIDPrefix/encodeJobID mirror adminapi's own (internal/engine/adminapi/jobs.go)
-// and tenantoffboard's (internal/engine/tenant/offboard/offboarder.go) —
-// duplicated rather than exported across a package boundary for this one
-// small helper, same call those two already made.
-const jobIDPrefix = "job_"
-
-func encodeJobID(id int64) string {
-	return jobIDPrefix + strconv.FormatInt(id, 10)
-}
-
 func (e *Exporter) StartExport(ctx context.Context, tenantSlug string, include, exclude []string) (jobID string, err error) {
 	t, err := e.tenantStore.GetBySlug(ctx, tenantSlug)
 	if err != nil {
@@ -51,5 +41,5 @@ func (e *Exporter) StartExport(ctx context.Context, tenantSlug string, include, 
 	if err != nil {
 		return "", fmt.Errorf("enqueue export job: %w", err)
 	}
-	return encodeJobID(insertResult.Job.ID), nil
+	return jobqueue.EncodeJobID(insertResult.Job.ID), nil
 }

@@ -21,6 +21,21 @@ type ModuleSyncStatus struct {
 	SyncedAt       *time.Time `json:"synced_at,omitempty"`
 }
 
+// nullTimeToPtr converts a scanned nullable timestamp into the *time.Time
+// shape ModuleSyncStatus/TenantModuleStatus's own SyncedAt field uses —
+// StatusForTenant's and StatusFiltered's row-scan loops both do this
+// conversion independently; their two SELECTs otherwise scan structurally
+// different column sets (StatusFiltered's own tenant-identity and
+// data-migration columns have no StatusForTenant equivalent), so this
+// conversion is the piece actually shared between them, not the scan
+// itself.
+func nullTimeToPtr(nt sql.NullTime) *time.Time {
+	if !nt.Valid {
+		return nil
+	}
+	return &nt.Time
+}
+
 const createModuleSchemaVersionsTable = `
 CREATE TABLE IF NOT EXISTS system.module_schema_versions (
     tenant_id               UUID        NOT NULL,
@@ -169,9 +184,7 @@ func (p *SchemaSyncPool) StatusForTenant(ctx context.Context, tenantID string) (
 		if err := rows.Scan(&s.ModuleName, &s.CurrentVersion, &s.Status, &syncedAt); err != nil {
 			return nil, fmt.Errorf("scan module sync status: %w", err)
 		}
-		if syncedAt.Valid {
-			s.SyncedAt = &syncedAt.Time
-		}
+		s.SyncedAt = nullTimeToPtr(syncedAt)
 		statuses = append(statuses, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -185,6 +198,12 @@ func (p *SchemaSyncPool) StatusForTenant(ctx context.Context, tenantID string) (
 // owning tenant's slug — the cross-tenant shape `GET /admin/schema/status`
 // (goerp#292) reports, unlike StatusForTenant's single-tenant one.
 type TenantModuleStatus struct {
+	// TenantID is not part of GET /admin/schema/status's documented
+	// response shape (json:"-") — it's carried through purely so
+	// tenantsync.Admin.Status's filter=pending sweep can diff a candidate
+	// row without a second per-row tenantStore.GetBySlug lookup, since
+	// this query already joins system.tenants for the slug.
+	TenantID             string     `json:"-"`
 	TenantSlug           string     `json:"tenant"`
 	ModuleName           string     `json:"module_name"`
 	CurrentVersion       string     `json:"current_version"`
@@ -204,7 +223,7 @@ type TenantModuleStatus struct {
 // Admin.Status).
 func (p *SchemaSyncPool) StatusFiltered(ctx context.Context, tenantSlug, moduleName, status string) ([]TenantModuleStatus, error) {
 	rows, err := p.primary.QueryContext(ctx, `
-		SELECT t.slug, v.module_name, v.current_version, v.schema_sync_status, v.schema_synced_at,
+		SELECT t.id, t.slug, v.module_name, v.current_version, v.schema_sync_status, v.schema_synced_at,
 		       v.data_migration_version, v.data_migration_status
 		FROM system.module_schema_versions v
 		JOIN system.tenants t ON t.id = v.tenant_id
@@ -223,13 +242,11 @@ func (p *SchemaSyncPool) StatusFiltered(ctx context.Context, tenantSlug, moduleN
 		var s TenantModuleStatus
 		var syncedAt sql.NullTime
 		var dataMigrationVersion, dataMigrationStatus sql.NullString
-		if err := rows.Scan(&s.TenantSlug, &s.ModuleName, &s.CurrentVersion, &s.Status, &syncedAt,
+		if err := rows.Scan(&s.TenantID, &s.TenantSlug, &s.ModuleName, &s.CurrentVersion, &s.Status, &syncedAt,
 			&dataMigrationVersion, &dataMigrationStatus); err != nil {
 			return nil, fmt.Errorf("scan schema sync status: %w", err)
 		}
-		if syncedAt.Valid {
-			s.SyncedAt = &syncedAt.Time
-		}
+		s.SyncedAt = nullTimeToPtr(syncedAt)
 		s.DataMigrationVersion = dataMigrationVersion.String
 		s.DataMigrationStatus = dataMigrationStatus.String
 		statuses = append(statuses, s)
