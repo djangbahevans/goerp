@@ -787,6 +787,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		RawDB:          syncPool.Raw(),
 		Checkpoints:    checkpointStore,
 		StorageBackend: storageBackend,
+		Keys:           rowKeySet,
 	})
 	river.AddWorker(jobWorkers, &tenantimport.Worker{
 		TenantStore:    tenantStore,
@@ -818,7 +819,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("enqueue pending constraint validations: %w", err)
 	}
 
-	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{Client: jobQueueClient})
+	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{
+		Client: jobQueueClient,
+		OutputDecryptor: func(kind string, output json.RawMessage) (json.RawMessage, error) {
+			return tenantexport.DecryptOutput(rowKeySet, kind, output)
+		},
+	})
 
 	adminapi.RegisterEventsRoutes(adminServer.Router(), adminapi.EventsDeps{
 		ModuleRegistry: moduleRegistry,

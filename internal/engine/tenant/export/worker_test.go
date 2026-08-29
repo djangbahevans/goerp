@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	crand "crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	enginemanifest "github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -22,6 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -57,6 +60,20 @@ type exportTestFixture struct {
 	worker     *Worker
 	tenantID   string
 	tenantSlug string
+	keys       *rowcrypt.RowKeySet
+}
+
+// testRowKeySet builds a RowKeySet directly, without rowcrypt.Store's own
+// Postgres/secrets.Backend-backed bootstrap — Encrypt/Decrypt only ever
+// touch ks.Active.Key, so a random in-memory key is enough for these
+// tests, same as tenantimport's own worker_test.go.
+func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := crand.Read(key); err != nil {
+		t.Fatalf("generate row encryption key: %v", err)
+	}
+	return &rowcrypt.RowKeySet{Active: rowcrypt.RowKey{KeyID: uuid.NewString(), Key: key}}
 }
 
 func newExportTestFixture(t *testing.T) *exportTestFixture {
@@ -116,6 +133,8 @@ func newExportTestFixture(t *testing.T) *exportTestFixture {
 		t.Fatalf(`storage.New("local") error: %v`, err)
 	}
 
+	keys := testRowKeySet(t)
+
 	return &exportTestFixture{
 		worker: &Worker{
 			TenantStore:    tenantStore,
@@ -123,9 +142,11 @@ func newExportTestFixture(t *testing.T) *exportTestFixture {
 			RawDB:          conn,
 			Checkpoints:    checkpointStore,
 			StorageBackend: backend,
+			Keys:           keys,
 		},
 		tenantID:   tt.ID,
 		tenantSlug: tt.Slug,
+		keys:       keys,
 	}
 }
 
@@ -191,7 +212,16 @@ func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing
 		t.Errorf("checksum mismatch: got %q, want %q", got, result.Checksum)
 	}
 
-	plaintext := decryptArchive(t, ciphertext, result.DecryptionKey)
+	// result.DecryptionKey is rowcrypt ciphertext, not the raw archive key
+	// (goerp#453) — DecryptOutput is what a real poller's admin API layer
+	// runs before ever handing this back to the CLI; verify the archive
+	// itself decrypts once that same step is applied here.
+	archiveKeyB64, err := f.keys.Decrypt([]byte(result.DecryptionKey))
+	if err != nil {
+		t.Fatalf("Decrypt() error: %v", err)
+	}
+
+	plaintext := decryptArchive(t, ciphertext, string(archiveKeyB64))
 
 	zr, err := zip.NewReader(bytes.NewReader(plaintext), int64(len(plaintext)))
 	if err != nil {

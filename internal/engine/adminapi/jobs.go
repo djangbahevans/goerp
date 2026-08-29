@@ -15,6 +15,16 @@ import (
 
 type JobsDeps struct {
 	Client *river.Client[pgx.Tx]
+	// OutputDecryptor optionally transforms a completed job's raw Output
+	// before show returns it to a poller — e.g. tenant.export's Result
+	// carries its one-time archive decryption key rowcrypt-encrypted at
+	// rest (goerp#453), and this is where it's decrypted back for the
+	// legitimate, already-admin-authenticated caller polling for it. Kept
+	// generic (dispatches on kind itself) rather than jobs.go knowing
+	// about any specific job kind's Result shape. A nil OutputDecryptor
+	// (or one that returns output unchanged for a kind it doesn't
+	// recognize) leaves Output exactly as recorded.
+	OutputDecryptor func(kind string, output json.RawMessage) (json.RawMessage, error)
 }
 
 func RegisterJobsRoutes(mux *http.ServeMux, deps JobsDeps) {
@@ -180,7 +190,17 @@ func (h *jobsHandlers) show(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeData(w, http.StatusOK, newJobDetailView(row))
+	view := newJobDetailView(row)
+	if h.deps.OutputDecryptor != nil && len(view.Output) > 0 {
+		decrypted, err := h.deps.OutputDecryptor(row.Kind, view.Output)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
+		view.Output = decrypted
+	}
+
+	writeData(w, http.StatusOK, view)
 }
 
 func (h *jobsHandlers) retry(w http.ResponseWriter, r *http.Request) {

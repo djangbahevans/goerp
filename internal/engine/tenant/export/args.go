@@ -31,6 +31,10 @@ func (Args) InsertOpts() river.InsertOpts {
 // Result is what Worker.Work records via river.RecordOutput
 // (adminapi/jobs.go's jobDetailView.Output surfaces it back to a polling
 // CLI) — the only place the one-time decryption key is ever returned.
+// DecryptionKey is rowcrypt-encrypted before Worker.run returns Result
+// (goerp#453) — river_job persists Output as-is for the life of the job
+// row, so the archive's own decryption key never sits there in plaintext.
+// DecryptOutput reverses this transparently for adminapi/jobs.go's poller.
 type Result struct {
 	DownloadURL   string `json:"download_url"`
 	Checksum      string `json:"checksum_sha256"`
