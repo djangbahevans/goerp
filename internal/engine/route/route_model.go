@@ -128,13 +128,21 @@ func pluralPathSegment(md model.ModelDeclaration) string {
 
 	label := md.LabelPlural
 	if label == "" {
-		label = md.Name
-		if i := strings.LastIndex(label, "."); i >= 0 {
-			label = label[i+1:]
-		}
+		label = bareNameSegment(md.Name)
 	}
 
 	return inflect.Parameterize(inflect.Pluralize(label))
+}
+
+// bareNameSegment returns the last dot-separated segment of a model
+// name — the fallback used whenever a human-facing label derived from
+// the model's own name isn't set (pluralPathSegment's LabelPlural
+// fallback above; route_view.go's displayLabel).
+func bareNameSegment(name string) string {
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		return name[i+1:]
+	}
+	return name
 }
 
 // storageBackendString maps model.ModelBackend's zero-value-is-the-

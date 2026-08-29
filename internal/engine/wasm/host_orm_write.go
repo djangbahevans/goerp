@@ -1017,6 +1017,9 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 		if def.IsComputed {
 			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is computed and cannot be written directly", Details: map[string]any{"field": k}}
 		}
+		if def.IsReadonly {
+			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is readonly and cannot be written directly", Details: map[string]any{"field": k}}
+		}
 		if def.Kind == model.KindOne2Many {
 			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is a One2Many relation and cannot be written directly", Details: map[string]any{"field": k}}
 		}
