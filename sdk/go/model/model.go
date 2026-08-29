@@ -3,16 +3,18 @@ package model
 import "time"
 
 type ModelDeclaration struct {
-	Name                string       `msgpack:"name"`
-	Table               string       `msgpack:"table,omitempty"`
-	Label               string       `msgpack:"label,omitempty"`
-	LabelPlural         string       `msgpack:"label_plural,omitempty"`
-	Fields              []NamedField `msgpack:"fields"`
-	Indexes             []NamedIndex `msgpack:"indexes,omitempty"`
-	EnabledOps          []Op         `msgpack:"enabled_ops,omitempty"`
-	Backend             ModelBackend `msgpack:"backend,omitempty"`
-	TransientTTLSeconds int          `msgpack:"transient_ttl_seconds,omitempty"`
-	RoutePrefixOverride string       `msgpack:"route_prefix,omitempty"`
+	Name                string          `msgpack:"name"`
+	Table               string          `msgpack:"table,omitempty"`
+	Label               string          `msgpack:"label,omitempty"`
+	LabelPlural         string          `msgpack:"label_plural,omitempty"`
+	Fields              []NamedField    `msgpack:"fields"`
+	Indexes             []NamedIndex    `msgpack:"indexes,omitempty"`
+	EnabledOps          []Op            `msgpack:"enabled_ops,omitempty"`
+	EnabledViews        []ViewType      `msgpack:"enabled_views,omitempty"`
+	NavDecl             *NavDeclaration `msgpack:"nav,omitempty"`
+	Backend             ModelBackend    `msgpack:"backend,omitempty"`
+	TransientTTLSeconds int             `msgpack:"transient_ttl_seconds,omitempty"`
+	RoutePrefixOverride string          `msgpack:"route_prefix,omitempty"`
 }
 
 // ModelBackend selects what storage backend a model is read/written
@@ -103,6 +105,22 @@ func (d *ModelDeclaration) Index(name string, def IndexDef) *ModelDeclaration {
 // declaration.
 func (d *ModelDeclaration) EnableOps(ops ...Op) *ModelDeclaration {
 	d.EnabledOps = append(d.EnabledOps, ops...)
+	return d
+}
+
+// EnableViews allowlists which of the two synthesizable view kinds this
+// model gets for free (go-sdk-reference.md §22). Validated against
+// EnableOps by internal/engine/route.SynthesizeViews, not here.
+func (d *ModelDeclaration) EnableViews(views ...ViewType) *ModelDeclaration {
+	d.EnabledViews = append(d.EnabledViews, views...)
+	return d
+}
+
+// Nav registers a NavItem for this model's synthesized list view
+// (go-sdk-reference.md §22). Requires EnableViews(ListView) — validated
+// by internal/engine/route.SynthesizeViews, not here.
+func (d *ModelDeclaration) Nav(group, label string, order int) *ModelDeclaration {
+	d.NavDecl = &NavDeclaration{Group: group, Label: label, Order: order}
 	return d
 }
 

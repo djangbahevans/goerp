@@ -94,6 +94,7 @@ type FieldDef struct {
 	SelectionValues []string  `msgpack:"selection_values,omitempty"`
 	EnumType        string    `msgpack:"enum_type,omitempty"`
 	IsRequired      bool      `msgpack:"required,omitempty"`
+	IsReadonly      bool      `msgpack:"readonly,omitempty"` // cannot be set on create/update via ORM
 	IsPrimaryKey    bool      `msgpack:"primary_key,omitempty"`
 	IsPrimary       bool      `msgpack:"primary,omitempty"` // the model's display/label field, distinct from IsPrimaryKey
 	DefaultExpr     *string   `msgpack:"default_expr,omitempty"`
@@ -207,6 +208,7 @@ func One2Many(relatedModel, inverseField string) FieldDef {
 }
 
 func (f FieldDef) Required() FieldDef           { f.IsRequired = true; return f }
+func (f FieldDef) Readonly() FieldDef           { f.IsReadonly = true; return f }
 func (f FieldDef) PrimaryKey() FieldDef         { f.IsPrimaryKey = true; return f }
 func (f FieldDef) Default(expr string) FieldDef { f.DefaultExpr = &expr; return f }
 

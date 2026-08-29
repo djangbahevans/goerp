@@ -76,6 +76,36 @@ func hardDeleteItemModelDecl() model.ModelDeclaration {
 	}
 }
 
+// readonlyFieldModelDecl has one Readonly() field (internal_ref) —
+// buildAssignment must reject any caller-supplied value for it, the same
+// as a Computed field.
+func readonlyFieldModelDecl() model.ModelDeclaration {
+	return model.ModelDeclaration{
+		Name: "locked_item",
+		Fields: []model.NamedField{
+			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+			{Name: "tenant_id", Def: model.UUID().Required()},
+			{Name: "name", Def: model.Text().Required()},
+			{Name: "internal_ref", Def: model.Text().Readonly()},
+		},
+	}
+}
+
+func createFixtureLockedItemsTable(t *testing.T, conn *sql.DB, slug string) {
+	t.Helper()
+	ctx := context.Background()
+	schemaName := "tenant_" + slug
+
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.locked_item (
+		id UUID PRIMARY KEY,
+		tenant_id UUID NOT NULL,
+		name TEXT NOT NULL,
+		internal_ref TEXT
+	)`); err != nil {
+		t.Fatalf("create locked_item table: %v", err)
+	}
+}
+
 func createFixtureItemsTable(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
 	ctx := context.Background()
@@ -196,6 +226,74 @@ func TestHostORM_Create_MissingRequiredField_ValidationFailed(t *testing.T) {
 	}
 	if env.Error.Details["field"] != "name" {
 		t.Errorf("Error.Details[field] = %v, want name", env.Error.Details["field"])
+	}
+}
+
+func TestHostORM_Create_ReadonlyField_FieldNotWritable(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormcreatereadonlytest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureLockedItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{readonlyFieldModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+		Model: "testmodule.locked_item",
+		Record: map[string]any{
+			"id":           "11111111-1111-1111-1111-111111111111",
+			"tenant_id":    "00000000-0000-0000-0000-000000000001",
+			"name":         "Widget",
+			"internal_ref": "should not be settable",
+		},
+	}, nil)
+	if env.OK {
+		t.Fatal("expected create to fail: internal_ref is a readonly field")
+	}
+	if env.Error.Code != abi.ErrCodeFieldNotWritable {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeFieldNotWritable)
+	}
+	if env.Error.Details["field"] != "internal_ref" {
+		t.Errorf("Error.Details[field] = %v, want internal_ref", env.Error.Details["field"])
+	}
+}
+
+func TestHostORM_Write_ReadonlyField_FieldNotWritable(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormwritereadonlytest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureLockedItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{readonlyFieldModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+		Model:  "testmodule.locked_item",
+		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget"},
+	}, nil); !env.OK {
+		t.Fatalf("create failed: %+v", env.Error)
+	}
+
+	env := callORMHost(t, ctx, inst, "call_write", ORMWriteInput{
+		Model:  "testmodule.locked_item",
+		ID:     id,
+		Record: map[string]any{"internal_ref": "should not be settable"},
+	}, nil)
+	if env.OK {
+		t.Fatal("expected write to fail: internal_ref is a readonly field")
+	}
+	if env.Error.Code != abi.ErrCodeFieldNotWritable {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeFieldNotWritable)
+	}
+	if env.Error.Details["field"] != "internal_ref" {
+		t.Errorf("Error.Details[field] = %v, want internal_ref", env.Error.Details["field"])
 	}
 }
 
