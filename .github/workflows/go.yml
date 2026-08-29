@@ -12,10 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       go: ${{ steps.filter.outputs.go }}
+      engine: ${{ steps.filter.outputs.engine }}
+      cli: ${{ steps.filter.outputs.cli }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      # internal/module is imported by both internal/cli/module (module
+      # scaffold/build/package commands) and internal/engine/moduleboot's
+      # e2e test, so a change there must trigger both lanes — same
+      # reasoning as go.mod/go.sum, which either binary's dependency graph
+      # can be affected by.
       - name: Detect Relevant Changes
         id: filter
         uses: dorny/paths-filter@v4
@@ -28,12 +35,33 @@ jobs:
               - "Dockerfile"
               - "compose.dev.yml"
               - ".github/workflows/go.yml"
+            engine:
+              - "internal/engine/**"
+              - "internal/module/**"
+              - "sdk/go/**"
+              - "cmd/engine/**"
+              - "go.mod"
+              - "go.sum"
+              - "Dockerfile"
+              - "compose.dev.yml"
+              - ".github/workflows/go.yml"
+            cli:
+              - "internal/cli/**"
+              - "internal/module/**"
+              - "internal/gateway/**"
+              - "cmd/goerp/**"
+              - "cmd/admin-gateway/**"
+              - "go.mod"
+              - "go.sum"
+              - ".github/workflows/go.yml"
 
-  build-and-test:
+  # Lint, a full-repo build check, and govulncheck are all cheap and need
+  # no dev stack — run once whenever either lane would run, rather than
+  # duplicating them in both build-and-test jobs below.
+  lint-and-vulncheck:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -52,10 +80,34 @@ jobs:
         with:
           version: v2.12
 
-      # Build, govulncheck, and the Trivy image scan all run before the
-      # dev-stack test suite below (the ~10+ minute step) so a security or
-      # build failure fails the job quickly instead of only surfacing
-      # after the full test run completes.
+      - name: Build Everything
+        run: go build ./...
+
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  # internal/engine/**, internal/module/**, sdk/go/**, cmd/engine/** —
+  # the engine binary and everything it imports. Needs the full
+  # compose.dev.yml stack (Postgres/Redis/Meilisearch/SeaweedFS) and is
+  # the slow lane; a PR that only touches CLI code never pays this cost.
+  engine-build-test:
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: true
+
+      - name: Verify Dependencies
+        run: go mod download && go mod verify
+
       - name: Build Engine Binary
         run: CGO_ENABLED=0 go build -o engine ./cmd/engine
 
@@ -70,9 +122,6 @@ jobs:
           tags: goerp-engine:${{ github.sha }}
           outputs: type=docker,dest=/tmp/goerp-engine.tar
 
-      - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-
       - name: Scan Image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -83,21 +132,66 @@ jobs:
       - name: Start Dev Stack
         run: docker compose -f compose.dev.yml up -d --wait
 
-      - name: Run Tests
-        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+      - name: Run Engine Tests
+        run: go test -v -race -coverprofile=coverage-engine.txt -covermode=atomic ./internal/engine/... ./internal/module/... ./sdk/... ./cmd/engine/...
 
       - name: Stop Dev Stack
         if: always()
         run: docker compose -f compose.dev.yml down -v
 
+  # internal/cli/**, internal/gateway/**, internal/module/**,
+  # cmd/goerp/**, cmd/admin-gateway/** — the goerp CLI and admin-gateway
+  # binaries. Neither imports internal/engine (confirmed: no
+  # "internal/engine" import anywhere under internal/cli or
+  # internal/gateway) and neither package's tests touch Postgres — every
+  # admin API interaction is httptest-mocked — so this lane needs no dev
+  # stack at all.
+  cli-build-test:
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: true
+
+      - name: Verify Dependencies
+        run: go mod download && go mod verify
+
+      - name: Build CLI Binaries
+        run: |
+          CGO_ENABLED=0 go build -o goerp ./cmd/goerp
+          CGO_ENABLED=0 go build -o admin-gateway ./cmd/admin-gateway
+
+      - name: Run CLI Tests
+        run: go test -v -race -coverprofile=coverage-cli.txt -covermode=atomic ./internal/cli/... ./internal/gateway/... ./internal/module/... ./cmd/goerp/... ./cmd/admin-gateway/...
+
   ci-gate:
-    needs: [changes, build-and-test]
+    needs: [changes, lint-and-vulncheck, engine-build-test, cli-build-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require build-and-test to have passed when it ran
+      - name: Require every lane that ran to have passed
         run: |
-          if [ "${{ needs.changes.outputs.go }}" = "true" ] && [ "${{ needs.build-and-test.result }}" != "success" ]; then
-            echo "build-and-test did not succeed (result: ${{ needs.build-and-test.result }})"
-            exit 1
+          fail=0
+
+          if [ "${{ needs.changes.outputs.go }}" = "true" ] && [ "${{ needs.lint-and-vulncheck.result }}" != "success" ]; then
+            echo "lint-and-vulncheck did not succeed (result: ${{ needs.lint-and-vulncheck.result }})"
+            fail=1
           fi
+          if [ "${{ needs.changes.outputs.engine }}" = "true" ] && [ "${{ needs.engine-build-test.result }}" != "success" ]; then
+            echo "engine-build-test did not succeed (result: ${{ needs.engine-build-test.result }})"
+            fail=1
+          fi
+          if [ "${{ needs.changes.outputs.cli }}" = "true" ] && [ "${{ needs.cli-build-test.result }}" != "success" ]; then
+            echo "cli-build-test did not succeed (result: ${{ needs.cli-build-test.result }})"
+            fail=1
+          fi
+
+          exit $fail
