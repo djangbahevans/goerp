@@ -23,9 +23,11 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
+	"github.com/google/uuid"
 )
 
 type TenantDeps struct {
@@ -40,7 +42,11 @@ type TenantDeps struct {
 	Inviter        InviteResender
 	Exporter       TenantExporter
 	Importer       TenantImporter
-	Offboarder     Offboarder
+	// Storage backs the import-archive upload endpoint only — Exporter's
+	// own storage writes happen inside tenantexport.Worker, not through
+	// this handler package.
+	Storage    storage.Backend
+	Offboarder Offboarder
 }
 
 func RegisterTenantRoutes(mux *http.ServeMux, deps TenantDeps) {
@@ -52,6 +58,7 @@ func RegisterTenantRoutes(mux *http.ServeMux, deps TenantDeps) {
 	mux.HandleFunc("POST /admin/tenants/{slug}/unsuspend", h.unsuspend)
 	mux.HandleFunc("POST /admin/tenants/{slug}/resend-invite", h.resendInvite)
 	mux.HandleFunc("POST /admin/tenants/{slug}/export", h.export)
+	mux.HandleFunc("POST /admin/tenants/import/upload", h.uploadImportArchive)
 	mux.HandleFunc("POST /admin/tenants/import", h.importTenant)
 	mux.HandleFunc("POST /admin/tenants/{slug}/offboard", h.offboard)
 	mux.HandleFunc("POST /admin/tenants/{slug}/offboard/cancel", h.offboardCancel)
@@ -447,6 +454,49 @@ func (h *tenantHandlers) export(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusAccepted, struct {
 		JobID string `json:"job_id"`
 	}{JobID: jobID})
+}
+
+// maxImportUploadMemory bounds how much of a multipart upload
+// ParseMultipartForm buffers in memory before spilling the rest to a temp
+// file — the archive itself can be arbitrarily large (a full tenant
+// export), so this is a parsing buffer size, not an upload size cap; any
+// hard request-size limit is separate middleware wrapping this handler
+// (see this file's own package doc comment on envelope.go's writeData/
+// writeError split from request-size/concurrency concerns).
+const maxImportUploadMemory = 32 << 20 // 32 MiB
+
+// uploadImportArchive stores the still-encrypted archive bytes a `tenant
+// import` CLI invocation streams from the operator's local disk, under a
+// fresh, unguessable object-storage key — there is no tenant yet for the
+// key to be scoped to (unlike tenantexport's own exports/{tenantID}/...
+// prefix), since the whole point of this step is producing the inputRef
+// StartImport's caller passes to POST /admin/tenants/import next.
+func (h *tenantHandlers) uploadImportArchive(w http.ResponseWriter, r *http.Request) {
+	if h.deps.Storage == nil {
+		writeNotImplemented(w, "goerp#157")
+		return
+	}
+
+	if err := r.ParseMultipartForm(maxImportUploadMemory); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "malformed multipart upload: "+err.Error())
+		return
+	}
+	file, _, err := r.FormFile("archive")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", `archive file is required (multipart field "archive")`)
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	key := "imports/" + uuid.NewString() + "/archive.zip.enc"
+	if _, err := h.deps.Storage.Upload(r.Context(), key, file, storage.UploadOptions{ContentType: "application/octet-stream"}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+
+	writeData(w, http.StatusCreated, struct {
+		InputRef string `json:"input_ref"`
+	}{InputRef: key})
 }
 
 func (h *tenantHandlers) importTenant(w http.ResponseWriter, r *http.Request) {

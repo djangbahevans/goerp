@@ -92,6 +92,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/export"
+	"github.com/djangbahevans/goerp/internal/engine/tenant/import"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/offboard"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/provision"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -787,6 +788,14 @@ func New(cfg *config.Config) (*Engine, error) {
 		Checkpoints:    checkpointStore,
 		StorageBackend: storageBackend,
 	})
+	river.AddWorker(jobWorkers, &tenantimport.Worker{
+		TenantStore:    tenantStore,
+		Registry:       moduleRegistry,
+		RawDB:          syncPool.Raw(),
+		Checkpoints:    checkpointStore,
+		StorageBackend: storageBackend,
+		Provision:      provisionActivities,
+	})
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry})
@@ -829,10 +838,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		Provisioner:    tenantprovision.NewProvisioner(temporalClient, systemworker.TaskQueue),
 		Offboarder:     tenantoffboard.NewOffboarder(tenantStore, temporalClient, systemworker.TaskQueue, jobQueueClient, jobqueue.QueueAdmin),
 		Exporter:       tenantexport.NewExporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin),
-		// Importer stays nil until goerp#157 lands — that ticket's own
-		// scope note. The handler reports StatusNotImplemented for that
-		// route rather than the wiring needing a placeholder
-		// implementation here.
+		Importer:       tenantimport.NewImporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin),
+		Storage:        storageBackend,
 	})
 
 	adminapi.RegisterConfigRoutes(adminServer.Router(), adminapi.ConfigDeps{
