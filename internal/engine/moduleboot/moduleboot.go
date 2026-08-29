@@ -250,8 +250,13 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 		m := loader.LoadModule(ctx, rt, poolCfg, src)
 		if m.Status != module.StatusFailed {
 			explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
-			if err := route.RegisterModuleRoutes(table, src.Name, m.Manifest.Type, explicit); err != nil {
+			if suppressed, err := route.RegisterRoutes(table, src.Name, m.Manifest.Type, explicit, m.ModelDecls); err != nil {
 				m.Fail(err.Error())
+			} else {
+				for _, s := range suppressed {
+					log.Warn().Str("module", src.Name).Str("model", s.Model).Str("op", s.Op).
+						Msg("EnableOps: explicit route already registered, auto-derived route suppressed")
+				}
 			}
 		}
 		if m.Status != module.StatusFailed && len(m.Manifest.NotificationTypes) > 0 {

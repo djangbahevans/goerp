@@ -233,3 +233,20 @@ func TestRegisterModuleRoutes_DifferentModulesSameShapeBothSucceed(t *testing.T)
 		t.Fatalf("orders lookup result = %v, want RouteFound", result)
 	}
 }
+
+// Two sources sharing a module name must not silently clobber the table.
+func TestRegisterModuleRoutes_CrossCallCollisionErrorsWithoutOverwriting(t *testing.T) {
+	table := New()
+	if err := RegisterModuleRoutes(table, "widgets", "domain", []ExplicitRoute{{Method: "GET", Path: "/"}}); err != nil {
+		t.Fatalf("first RegisterModuleRoutes: %v", err)
+	}
+
+	err := RegisterModuleRoutes(table, "widgets", "domain", []ExplicitRoute{{Method: "GET", Path: "/"}})
+	if err == nil {
+		t.Fatal("want an error from the second call claiming an already-registered path, got nil")
+	}
+
+	if _, _, result, _ := table.Lookup("GET", "/widgets"); result != RouteFound {
+		t.Fatalf("result = %v, want RouteFound — the first call's registration must still be intact", result)
+	}
+}

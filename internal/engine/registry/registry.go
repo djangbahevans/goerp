@@ -122,10 +122,7 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 			continue
 		}
 		explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
-		if err := route.RegisterModuleRoutes(table, name, m.Manifest.Type, explicit); err != nil {
-			return nil, fmt.Errorf("module %q: %w", name, err)
-		}
-		suppressed, err := route.RegisterModelRoutes(table, name, m.Manifest.Type, m.ModelDecls)
+		suppressed, err := route.RegisterRoutes(table, name, m.Manifest.Type, explicit, m.ModelDecls)
 		if err != nil {
 			return nil, fmt.Errorf("module %q: %w", name, err)
 		}

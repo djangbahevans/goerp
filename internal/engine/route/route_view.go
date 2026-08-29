@@ -38,8 +38,16 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 	}
 
 	// Cloned (including each group's Children) so mergeNavItem's in-place
-	// appends below never alias or corrupt the caller's own slice.
-	mergedNav := cloneNav(navigation)
+	// appends below never alias or corrupt the caller's own slice — skipped
+	// entirely when no model declares .Nav(), the common case, since
+	// mergeNavItem is then never reached.
+	mergedNav := navigation
+	for _, md := range models {
+		if md.NavDecl != nil {
+			mergedNav = cloneNav(navigation)
+			break
+		}
+	}
 
 	var synthesized []manifest.View
 	var suppressed []SuppressedView

@@ -3,17 +3,20 @@
 // compilation, capability resolution, pool creation, and the three
 // no-argument export calls a module makes at load time
 // (engine-internals.md §2, Stage 3 steps 15-17c-bis). Everything after
-// that — schema sync, instance warming, EnableOps-derived view merging —
-// belongs to later stages and other tickets; this package only produces
-// the LoadedModule those stages consume. Synchronous-subscription cycle
-// detection (engine-internals.md §2 Stage 3 step 23) lives in
+// that — schema sync, instance warming — belongs to later stages and
+// other tickets; this package only produces the LoadedModule those
+// stages consume. Synchronous-subscription cycle detection
+// (engine-internals.md §2 Stage 3 step 23) lives in
 // registry.ModuleRegistry.Update instead of here, since it needs the
 // full cross-module event graph that package already assembles via
 // buildEventRegistry, not just one batch of freshly-loaded sources.
-// LoadAll does register EnableOps-derived CRUD routes
-// (route.RegisterModelRoutes) alongside each module's explicit routes,
-// since route registration is part of this package's existing route.New
-// pass, not a separate stage.
+// LoadModule merges EnableViews/Nav candidates into each module's own
+// Manifest.Views/Navigation (route.SynthesizeViews) before returning it
+// — validated against that same module's EnableOps, but not itself an
+// EnableOps merge. LoadAll separately registers EnableOps-derived CRUD
+// routes (route.RegisterModelRoutes) alongside each module's explicit
+// routes across the whole batch, since that needs the shared route table
+// LoadAll already builds.
 package loader
 
 import (
@@ -55,10 +58,13 @@ type Source struct {
 // checksum, compiles it (or loads it from the compilation cache), resolves
 // its declared capabilities, creates its instance pool, and calls
 // get_routes/get_model_declarations/get_data_migrations on a temporary
-// instance, caching each result on the returned LoadedModule. On any
-// failure it returns a LoadedModule with Status StatusFailed and
-// FailureReason set, rather than an error — every module in a load batch
-// gets a LoadedModule, successful or not (module.LoadedModule doc comment).
+// instance, caching each result on the returned LoadedModule. It also
+// merges each model's EnableViews/Nav candidates into the module's own
+// Manifest.Views/Navigation (route.SynthesizeViews) — a failure there
+// fails the load the same as any other step. On any failure it returns a
+// LoadedModule with Status StatusFailed and FailureReason set, rather
+// than an error — every module in a load batch gets a LoadedModule,
+// successful or not (module.LoadedModule doc comment).
 //
 // LoadModule never touches a shared route table itself — a single module
 // has no visibility into what other modules have already claimed. See
@@ -139,6 +145,21 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 
+	synthesizedViews, suppressedViews, nav, err := route.SynthesizeViews(src.Name, mf.Type, models, mf.Views, mf.Navigation)
+	if err != nil {
+		m.Fail(fmt.Sprintf("synthesize views: %v", err))
+		return m
+	}
+	for _, s := range suppressedViews {
+		log.Warn().Str("module", src.Name).Str("model", s.Model).Str("view", s.View).
+			Msg("EnableViews: hand-declared view already registered, auto-derived view suppressed")
+	}
+	// Views is appended to (synthesizedViews excludes anything suppressed by
+	// a collision); nav is already the merged tree SynthesizeViews returns,
+	// so Navigation is replaced outright rather than appended.
+	m.Manifest.Views = append(m.Manifest.Views, synthesizedViews...)
+	m.Manifest.Navigation = nav
+
 	migrations, err := callGetDataMigrations(ctx, tempInst)
 	if err != nil {
 		m.Fail(fmt.Sprintf("get_data_migrations: %v", err))
@@ -184,9 +205,7 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 		m := LoadModule(ctx, rt, poolCfg, src)
 		if m.Status != module.StatusFailed {
 			explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
-			if err := route.RegisterModuleRoutes(table, src.Name, m.Manifest.Type, explicit); err != nil {
-				m.Fail(err.Error())
-			} else if suppressed, err := route.RegisterModelRoutes(table, src.Name, m.Manifest.Type, m.ModelDecls); err != nil {
+			if suppressed, err := route.RegisterRoutes(table, src.Name, m.Manifest.Type, explicit, m.ModelDecls); err != nil {
 				m.Fail(err.Error())
 			} else {
 				for _, s := range suppressed {
