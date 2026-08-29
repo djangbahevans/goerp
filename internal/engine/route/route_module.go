@@ -102,6 +102,11 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 		if scratch.Registered(r.Method, expandedPath) {
 			return fmt.Errorf("route: module %q: duplicate route %s %s", moduleName, r.Method, expandedPath)
 		}
+		// table (unlike scratch) carries routes already committed by
+		// earlier registrations against this same table.
+		if table.Registered(r.Method, expandedPath) {
+			return fmt.Errorf("route: module %q: %s %s already registered", moduleName, r.Method, expandedPath)
+		}
 		entry := &RouteEntry{
 			ModuleName:   moduleName,
 			PathTemplate: expandedPath,

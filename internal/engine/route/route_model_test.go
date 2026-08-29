@@ -212,3 +212,49 @@ func TestRegisterModelRoutes_ConnectorExpansion(t *testing.T) {
 		t.Fatalf("result = %v, want RouteFound", result)
 	}
 }
+
+func TestRegisterRoutes_RegistersExplicitThenModelRoutes(t *testing.T) {
+	table := New()
+	md := model.Define("widget").EnableOps(model.List, model.Create)
+
+	suppressed, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{{Method: "GET", Path: "/{id}"}}, []model.ModelDeclaration{*md})
+	if err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+	if len(suppressed) != 0 {
+		t.Fatalf("suppressed = %v, want none", suppressed)
+	}
+
+	if _, _, result, _ := table.Lookup("GET", "/testmodule/1"); result != RouteFound {
+		t.Fatalf("explicit route: result = %v, want RouteFound", result)
+	}
+	if _, _, result, _ := table.Lookup("POST", "/testmodule/widgets"); result != RouteFound {
+		t.Fatalf("EnableOps-derived route: result = %v, want RouteFound", result)
+	}
+}
+
+func TestRegisterRoutes_ExplicitSuppressesMatchingModelCandidate(t *testing.T) {
+	table := New()
+	md := model.Define("widget").EnableOps(model.List)
+
+	suppressed, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{{Method: "GET", Path: "/widgets"}}, []model.ModelDeclaration{*md})
+	if err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+	if len(suppressed) != 1 || suppressed[0] != (SuppressedRoute{Model: "testmodule.widget", Op: "list"}) {
+		t.Fatalf("suppressed = %v, want exactly [{testmodule.widget list}]", suppressed)
+	}
+}
+
+func TestRegisterRoutes_ExplicitFailureSkipsModelRegistrationEntirely(t *testing.T) {
+	table := New()
+	md := model.Define("widget").EnableOps(model.List)
+
+	_, err := RegisterRoutes(table, "auth", "domain", []ExplicitRoute{{Method: "GET", Path: "/"}}, []model.ModelDeclaration{*md})
+	if err == nil {
+		t.Fatal("RegisterRoutes: want an error from the reserved \"auth\" namespace, got nil")
+	}
+	if _, _, result, _ := table.Lookup("GET", "/auth/widgets"); result == RouteFound {
+		t.Fatal("EnableOps-derived route must not be registered when the explicit-route step already failed")
+	}
+}

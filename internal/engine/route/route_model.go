@@ -171,3 +171,18 @@ func modulePathPrefix(moduleName, moduleType string) string {
 	}
 	return "/" + moduleName
 }
+
+// RegisterRoutes registers one module's explicit routes and its models'
+// EnableOps-derived candidates into table, in the one order this is ever
+// safe to do (RegisterModuleRoutes first, so RegisterModelRoutes has
+// something to suppress against). Every route-table-building call site —
+// loader.LoadAll, moduleboot.LoadCascading, registry.buildRouteTable, and
+// eventually hot reload's pre-flight merge check
+// (engine-internals.md §10's mergeEnableOpsRoutes) — needs this exact
+// pair; a shared entry point is what keeps them from drifting.
+func RegisterRoutes(table *RouteTable, moduleName, moduleType string, explicit []ExplicitRoute, models []model.ModelDeclaration) ([]SuppressedRoute, error) {
+	if err := RegisterModuleRoutes(table, moduleName, moduleType, explicit); err != nil {
+		return nil, err
+	}
+	return RegisterModelRoutes(table, moduleName, moduleType, models)
+}
