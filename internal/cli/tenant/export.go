@@ -21,15 +21,6 @@ type exportStartResponse struct {
 	JobID string `json:"job_id"`
 }
 
-// exportJobDetail is the slice of GET /admin/jobs/{id}'s response this
-// command needs — State to know when to stop polling, Output to decode
-// the export result once it's completed (internal/engine/adminapi/jobs.go's
-// jobDetailView, internal/engine/tenant/export.Result).
-type exportJobDetail struct {
-	State  string          `json:"state"`
-	Output json.RawMessage `json:"output,omitempty"`
-}
-
 // exportResult mirrors tenantexport.Result — the one place the archive's
 // one-time decryption key is ever returned.
 type exportResult struct {
@@ -69,12 +60,7 @@ func newExportCmd() *cobra.Command {
 
 			jsonOut, _ := cmd.Flags().GetBool("json")
 			if err != nil {
-				if jsonOut {
-					if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-						_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
-					}
-				}
-				return err
+				return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 			}
 
 			var started exportStartResponse
@@ -92,7 +78,7 @@ func newExportCmd() *cobra.Command {
 				return nil
 			}
 
-			result, err := waitForExport(cmd, client, started.JobID, waitTimeout)
+			result, err := adminclient.WaitForJob[exportResult](cmd, client, started.JobID, "export", waitTimeout)
 			if err != nil {
 				return err
 			}
@@ -108,51 +94,6 @@ func newExportCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&waitTimeout, "wait-timeout", 30*time.Minute, "How long --wait waits before giving up")
 
 	return cmd
-}
-
-// waitForExport polls GET /admin/jobs/{id} (the same request `jobs show`
-// makes) until the job reaches a terminal River state.
-func waitForExport(cmd *cobra.Command, client *adminclient.Client, jobID string, timeout time.Duration) (exportResult, error) {
-	deadline := time.Now().Add(timeout)
-	path := "/admin/jobs/" + jobID
-
-	for {
-		data, err := client.Get(cmd.Context(), path)
-		if err != nil {
-			return exportResult{}, err
-		}
-
-		var detail exportJobDetail
-		if err := json.Unmarshal(data, &detail); err != nil {
-			return exportResult{}, fmt.Errorf("decode job detail response: %w", err)
-		}
-
-		switch detail.State {
-		case "completed":
-			if len(detail.Output) == 0 {
-				return exportResult{}, fmt.Errorf("export job %s completed with no recorded output", jobID)
-			}
-			var result exportResult
-			if err := json.Unmarshal(detail.Output, &result); err != nil {
-				return exportResult{}, fmt.Errorf("decode export result: %w", err)
-			}
-			return result, nil
-		case "cancelled", "discarded":
-			return exportResult{}, fmt.Errorf("export job %s did not complete (state=%s) — check `goerp jobs show %s --logs`", jobID, detail.State, jobID)
-		}
-
-		if time.Now().After(deadline) {
-			return exportResult{}, fmt.Errorf("export job %s still %q after %s — check `goerp jobs show %s`", jobID, detail.State, timeout, jobID)
-		}
-
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "export job %s still %s...\n", jobID, detail.State)
-
-		select {
-		case <-cmd.Context().Done():
-			return exportResult{}, cmd.Context().Err()
-		case <-time.After(pollInterval):
-		}
-	}
 }
 
 // downloadAndVerifyExport fetches the archive directly from its signed

@@ -14,10 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pollInterval mirrors internal/cli/tenant's own constant — how often
-// --wait polls GET /admin/jobs/{id} while a sync job runs.
-const pollInterval = 2 * time.Second
-
 // parseSchedule mirrors internal/engine/adminapi's own — cli-reference.md
 // §4: "a bare, zone-less timestamp is rejected, not interpreted as local
 // time." Validating here gives a Usage error before any network call, the
@@ -36,11 +32,6 @@ func parseSchedule(s string) error {
 
 type schemaSyncStartResponse struct {
 	JobID string `json:"job_id"`
-}
-
-type schemaSyncJobDetail struct {
-	State  string          `json:"state"`
-	Output json.RawMessage `json:"output,omitempty"`
 }
 
 // schemaSyncResult mirrors tenantsync.SyncResult's JSON shape.
@@ -107,12 +98,7 @@ func newSyncCmd() *cobra.Command {
 				"schedule": schedule,
 			})
 			if err != nil {
-				if jsonOut {
-					if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-						_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
-					}
-				}
-				return err
+				return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 			}
 
 			var started schemaSyncStartResponse
@@ -134,7 +120,7 @@ func newSyncCmd() *cobra.Command {
 				return nil
 			}
 
-			result, err := waitForSchemaSync(cmd, client, started.JobID, timeout)
+			result, err := adminclient.WaitForJob[schemaSyncResult](cmd, client, started.JobID, "schema sync", timeout)
 			if err != nil {
 				return err
 			}
@@ -215,52 +201,6 @@ func confirmBroadSync(cmd *cobra.Command, client *adminclient.Client) (bool, err
 	line, _ := reader.ReadString('\n')
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes", nil
-}
-
-func waitForSchemaSync(cmd *cobra.Command, client *adminclient.Client, jobID string, timeout time.Duration) (schemaSyncResult, error) {
-	deadline := time.Now().Add(timeout)
-	path := "/admin/jobs/" + jobID
-
-	for {
-		data, err := client.Get(cmd.Context(), path)
-		if err != nil {
-			return schemaSyncResult{}, err
-		}
-
-		var detail schemaSyncJobDetail
-		if err := json.Unmarshal(data, &detail); err != nil {
-			return schemaSyncResult{}, fmt.Errorf("decode job detail response: %w", err)
-		}
-
-		switch detail.State {
-		case "completed":
-			if len(detail.Output) == 0 {
-				return schemaSyncResult{}, fmt.Errorf("schema sync job %s completed with no recorded output", jobID)
-			}
-			var result schemaSyncResult
-			if err := json.Unmarshal(detail.Output, &result); err != nil {
-				return schemaSyncResult{}, fmt.Errorf("decode schema sync result: %w", err)
-			}
-			return result, nil
-		case "cancelled", "discarded":
-			return schemaSyncResult{}, fmt.Errorf("schema sync job %s did not complete (state=%s) — check `goerp jobs show %s --logs`", jobID, detail.State, jobID)
-		}
-
-		if time.Now().After(deadline) {
-			return schemaSyncResult{}, &clierr.Error{
-				Code: 124,
-				Err:  fmt.Errorf("schema sync job %s still %q after %s — check `goerp jobs show %s`", jobID, detail.State, timeout, jobID),
-			}
-		}
-
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "schema sync job %s still %s...\n", jobID, detail.State)
-
-		select {
-		case <-cmd.Context().Done():
-			return schemaSyncResult{}, cmd.Context().Err()
-		case <-time.After(pollInterval):
-		}
-	}
 }
 
 func printSchemaSyncResult(cmd *cobra.Command, result schemaSyncResult) {

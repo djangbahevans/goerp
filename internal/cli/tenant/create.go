@@ -17,10 +17,6 @@ type createTenantResponse struct {
 	WorkflowID string `json:"workflow_id"`
 }
 
-// pollInterval is how often --wait polls GET /admin/tenants/{slug} while
-// provisioning is still running.
-const pollInterval = 2 * time.Second
-
 func newCreateCmd() *cobra.Command {
 	var name string
 	var adminEmail string
@@ -58,12 +54,7 @@ func newCreateCmd() *cobra.Command {
 
 			jsonOut, _ := cmd.Flags().GetBool("json")
 			if err != nil {
-				if jsonOut {
-					if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-						_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
-					}
-				}
-				return err
+				return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 			}
 
 			var created createTenantResponse
@@ -106,12 +97,7 @@ func waitForActive(cmd *cobra.Command, client *adminclient.Client, slug string, 
 	for {
 		data, err := client.Get(cmd.Context(), path)
 		if err != nil {
-			if jsonOut {
-				if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-					_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
-				}
-			}
-			return err
+			return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 		}
 
 		var resp tenantStatusResponse
@@ -129,7 +115,10 @@ func waitForActive(cmd *cobra.Command, client *adminclient.Client, slug string, 
 		}
 
 		if time.Now().After(deadline) {
-			return fmt.Errorf("tenant %q still %q after %s — check `goerp tenant status %s`", slug, resp.Status, timeout, slug)
+			return &clierr.Error{
+				Code: 124,
+				Err:  fmt.Errorf("tenant %q still %q after %s — check `goerp tenant status %s`", slug, resp.Status, timeout, slug),
+			}
 		}
 
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "tenant %q still %s...\n", slug, resp.Status)
@@ -137,7 +126,7 @@ func waitForActive(cmd *cobra.Command, client *adminclient.Client, slug string, 
 		select {
 		case <-cmd.Context().Done():
 			return cmd.Context().Err()
-		case <-time.After(pollInterval):
+		case <-time.After(adminclient.PollInterval):
 		}
 	}
 }

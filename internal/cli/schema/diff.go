@@ -62,12 +62,7 @@ func newDiffCmd() *cobra.Command {
 			if all {
 				tenants, err = listAllTenantSlugs(cmd.Context(), client)
 				if err != nil {
-					if jsonOut {
-						if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-							_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
-						}
-					}
-					return err
+					return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 				}
 			}
 
@@ -76,12 +71,7 @@ func newDiffCmd() *cobra.Command {
 			for _, slug := range tenants {
 				data, err := fetchDiff(cmd.Context(), client, module, slug, verbose)
 				if err != nil {
-					if jsonOut {
-						if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-							_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
-						}
-					}
-					return err
+					return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 				}
 
 				if jsonOut {
