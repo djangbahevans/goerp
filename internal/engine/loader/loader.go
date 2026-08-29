@@ -127,6 +127,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 	m.ExplicitRoutes = routes
 
+	if err := validateModuleRoutes(mf, routes); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
 	models, types, err := callGetModelDeclarations(ctx, tempInst)
 	if err != nil {
 		m.Fail(fmt.Sprintf("get_model_declarations: %v", err))
@@ -338,6 +343,24 @@ func callGetDataMigrations(ctx context.Context, inst *wasm.ModuleInstance) ([]mo
 		return nil, fmt.Errorf("unmarshal get_data_migrations response: %w", err)
 	}
 	return migrations, nil
+}
+
+// validateModuleRoutes enforces manifest-spec.md §3's "may register
+// routes" column: of the 8 module types, only domain and connector allow
+// registering routes — l10n, bridge, theme, report_bundle, and
+// automation all forbid it. Detecting a violation needs the actual
+// get_routes() result, not a manifest field alone (there's no manifest
+// routes key to check), which is why this lives in the loader package
+// rather than alongside manifest.validateModuleType's other per-type
+// checks.
+func validateModuleRoutes(mf *manifest.Manifest, routes []engine.RouteDeclaration) error {
+	switch mf.Type {
+	case "l10n", "bridge", "theme", "report_bundle", "automation":
+		if len(routes) > 0 {
+			return fmt.Errorf("type %q must not register routes, got %d", mf.Type, len(routes))
+		}
+	}
+	return nil
 }
 
 // validateVirtualModels enforces the two Virtual-model load-time rules
