@@ -53,8 +53,8 @@ func newTestRegistry(t *testing.T, mod *module.LoadedModule) *registry.ModuleReg
 // newTestJobClient builds a real River client against the same Postgres
 // instance testEnv uses — needed only by tests that call Admin.Accept/
 // StartSync, since those enqueue a real job row. Never started: these
-// tests verify the enqueue and the resync logic (SyncOneAccepted)
-// directly, not the real queue actually picking the job up.
+// tests verify the enqueue and the resync logic (SyncOne with a non-nil
+// accepted map) directly, not the real queue actually picking the job up.
 func newTestJobClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 	ctx := context.Background()
@@ -89,7 +89,7 @@ func TestAdmin_DiffReportsBlockedColumnDropWithHash(t *testing.T) {
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1); err != nil {
+	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -134,7 +134,7 @@ func TestAdmin_AcceptRecordsAcceptanceAndUnblocksResync(t *testing.T) {
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1); err != nil {
+	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -162,10 +162,11 @@ func TestAdmin_AcceptRecordsAcceptanceAndUnblocksResync(t *testing.T) {
 		t.Fatalf("AcceptedHashes() = %v, want exactly one entry", accepted)
 	}
 
-	// SyncOneAccepted is what AcceptResyncWorker.Work calls — verify it
-	// actually drops the column now that its hash is accepted.
-	if err := SyncOneAccepted(context.Background(), env.pool, env.diffEngine, tt, v2, accepted); err != nil {
-		t.Fatalf("SyncOneAccepted() error: %v", err)
+	// SyncOne with a non-nil accepted map is what AcceptResyncWorker.Work
+	// calls — verify it actually drops the column now that its hash is
+	// accepted.
+	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v2, accepted); err != nil {
+		t.Fatalf("SyncOne() error: %v", err)
 	}
 
 	var exists bool
@@ -177,7 +178,7 @@ func TestAdmin_AcceptRecordsAcceptanceAndUnblocksResync(t *testing.T) {
 		t.Fatalf("check column existence: %v", err)
 	}
 	if exists {
-		t.Error("sku column still exists after SyncOneAccepted — accepted blocked change was not applied")
+		t.Error("sku column still exists after SyncOne with the accepted hash — accepted blocked change was not applied")
 	}
 }
 
@@ -187,7 +188,7 @@ func TestAdmin_AcceptWithNothingBlockedErrors(t *testing.T) {
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1); err != nil {
+	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -239,7 +240,7 @@ func TestAdmin_AcceptJobEnqueueFailureReportsAcceptanceIDsAndDoesNotDuplicate(t 
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1); err != nil {
+	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 
@@ -295,7 +296,7 @@ func TestAdmin_StatusPendingFilterFindsBlockedModule(t *testing.T) {
 	tt := env.activeTenant(t, slug)
 
 	v1 := widgetModuleWithSKU(t)
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1); err != nil {
+	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, v1, nil); err != nil {
 		t.Fatalf("initial SyncOne() error: %v", err)
 	}
 

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -37,15 +37,6 @@ func NewAdmin(tenantStore *tenant.Store, reg *registry.ModuleRegistry, pool *sch
 	return &Admin{tenantStore: tenantStore, registry: reg, pool: pool, diffEngine: diffEngine, jobClient: jobClient, jobQueue: jobQueue}
 }
 
-// jobIDPrefix/encodeJobID mirror adminapi's own and tenantexport's —
-// duplicated rather than exported across a package boundary for this one
-// small helper, same call those packages already made.
-const jobIDPrefix = "job_"
-
-func encodeJobID(id int64) string {
-	return jobIDPrefix + strconv.FormatInt(id, 10)
-}
-
 // Status returns GET /admin/schema/status's rows. filter is one of
 // "ok"/"failed"/"in_progress" (matched directly against
 // schema_sync_status), "pending" (module_schema_versions has no stored
@@ -67,51 +58,39 @@ func (a *Admin) Status(ctx context.Context, tenantSlug, moduleName, filter strin
 		return nil, fmt.Errorf("module registry not ready")
 	}
 
-	// Bounded concurrency, same DefaultConcurrency/semaphore shape
-	// syncModule (tenantsync.go) already uses for the identical "one
-	// per-(tenant, module) unit of work, fan out across candidates"
-	// shape — a status sweep across many tenants/modules would otherwise
-	// run every live Diff strictly one at a time. A single pair's
-	// failure is logged and skipped, never aborting the rest of the
-	// sweep — this package's own doc comment states that principle
-	// (tenantsync.go: "never letting one tenant's failure block
-	// another's"), and syncModule already honors it for the identical
-	// per-pair shape.
-	sem := make(chan struct{}, DefaultConcurrency)
-	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var pending []schema.TenantModuleStatus
 
-	for _, s := range candidates {
+	// fanOut gives this the same bounded-concurrency shape syncModule
+	// (tenantsync.go) already uses for the identical "one per-(tenant,
+	// module) unit of work, fan out across candidates" shape — a status
+	// sweep across many tenants/modules would otherwise run every live
+	// Diff strictly one at a time. A single pair's failure is logged and
+	// skipped, never aborting the rest of the sweep — this package's own
+	// doc comment states that principle (tenantsync.go: "never letting
+	// one tenant's failure block another's"), and syncModule already
+	// honors it for the identical per-pair shape.
+	fanOut(candidates, DefaultConcurrency, func(s schema.TenantModuleStatus) {
 		mod, ok := snap.Modules()[s.ModuleName]
 		if !ok {
-			continue
+			return
 		}
 
-		wg.Add(1)
-		go func(s schema.TenantModuleStatus, mod *module.LoadedModule) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			t, err := a.tenantStore.GetBySlug(ctx, s.TenantSlug)
-			if err != nil {
-				log.Error().Err(err).Str("tenant", s.TenantSlug).Str("module", s.ModuleName).Msg("schema status pending check: look up tenant failed")
-				return
-			}
-			_, _, blocked, err := a.diffModule(ctx, *t, mod)
-			if err != nil {
-				log.Error().Err(err).Str("tenant", s.TenantSlug).Str("module", s.ModuleName).Msg("schema status pending check: diff failed")
-				return
-			}
-			if len(blocked) > 0 {
-				mu.Lock()
-				pending = append(pending, s)
-				mu.Unlock()
-			}
-		}(s, mod)
-	}
-	wg.Wait()
+		// s.TenantID comes straight from StatusFiltered's own join
+		// against system.tenants — no second tenantStore.GetBySlug
+		// round trip needed per candidate.
+		t := tenant.Tenant{ID: s.TenantID, Slug: s.TenantSlug}
+		_, _, blocked, err := a.diffModule(ctx, t, mod)
+		if err != nil {
+			log.Error().Err(err).Str("tenant", s.TenantSlug).Str("module", s.ModuleName).Msg("schema status pending check: diff failed")
+			return
+		}
+		if len(blocked) > 0 {
+			mu.Lock()
+			pending = append(pending, s)
+			mu.Unlock()
+		}
+	})
 
 	// Concurrent completion order is arbitrary — resort to match
 	// StatusFiltered's own ORDER BY t.slug, v.module_name so a "pending"
@@ -138,7 +117,7 @@ func (a *Admin) Status(ctx context.Context, tenantSlug, moduleName, filter strin
 // to just Kind/Table/Hash, and verbose keeps the fuller column/type
 // description describeChange already builds.
 func (a *Admin) Diff(ctx context.Context, tenantSlug, moduleName string, verbose bool) (version string, safe, deferred, blocked []schema.ChangeSummary, err error) {
-	t, mod, err := a.resolve(ctx, tenantSlug, moduleName)
+	t, mod, err := resolveTenantModule(ctx, a.tenantStore, a.registry, tenantSlug, moduleName)
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
@@ -199,7 +178,7 @@ func (a *Admin) StartSync(ctx context.Context, tenantSlug, moduleName string, sc
 	if err != nil {
 		return "", fmt.Errorf("enqueue schema sync job: %w", err)
 	}
-	return encodeJobID(insertResult.Job.ID), nil
+	return jobqueue.EncodeJobID(insertResult.Job.ID), nil
 }
 
 // Accept re-diffs tenantSlug/moduleName live, records one
@@ -211,7 +190,7 @@ func (a *Admin) StartSync(ctx context.Context, tenantSlug, moduleName string, sc
 // report that as a usage error rather than silently writing zero rows and
 // still returning a job id.
 func (a *Admin) Accept(ctx context.Context, tenantSlug, moduleName, reason, operator string) (acceptanceIDs []string, jobID string, err error) {
-	t, mod, err := a.resolve(ctx, tenantSlug, moduleName)
+	t, mod, err := resolveTenantModule(ctx, a.tenantStore, a.registry, tenantSlug, moduleName)
 	if err != nil {
 		return nil, "", err
 	}
@@ -256,7 +235,7 @@ func (a *Admin) Accept(ctx context.Context, tenantSlug, moduleName, reason, oper
 		// exist rather than assume nothing was recorded.
 		return acceptanceIDs, "", fmt.Errorf("recorded acceptance(s) %v but failed to enqueue resync job: %w", acceptanceIDs, err)
 	}
-	return acceptanceIDs, encodeJobID(insertResult.Job.ID), nil
+	return acceptanceIDs, jobqueue.EncodeJobID(insertResult.Job.ID), nil
 }
 
 // ErrNothingBlocked is returned by Accept when tenantSlug/moduleName has
@@ -271,19 +250,34 @@ var ErrNothingBlocked = errors.New("no blocked schema change to accept")
 // the identical case.
 var ErrModuleNotLoaded = errors.New("module not loaded")
 
-func (a *Admin) resolve(ctx context.Context, tenantSlug, moduleName string) (tenant.Tenant, *module.LoadedModule, error) {
-	t, err := a.tenantStore.GetBySlug(ctx, tenantSlug)
+// resolveModule finds name in snap's loaded modules, wrapping a miss as
+// ErrModuleNotLoaded — the shared "look up one module, sentinel on miss"
+// primitive resolveTenantModule and SyncWorker.resolveModules both build
+// on.
+func resolveModule(snap *registry.RegistrySnapshot, name string) (*module.LoadedModule, error) {
+	mod, ok := snap.Modules()[name]
+	if !ok {
+		return nil, fmt.Errorf("module %q: %w", name, ErrModuleNotLoaded)
+	}
+	return mod, nil
+}
+
+// resolveTenantModule looks up a tenant by slug and a module by name in
+// one call — the exact (tenant, module) pair Admin's Diff/Accept and
+// AcceptResyncWorker.Work each need before doing anything else.
+func resolveTenantModule(ctx context.Context, tenantStore *tenant.Store, reg *registry.ModuleRegistry, tenantSlug, moduleName string) (tenant.Tenant, *module.LoadedModule, error) {
+	t, err := tenantStore.GetBySlug(ctx, tenantSlug)
 	if err != nil {
 		return tenant.Tenant{}, nil, fmt.Errorf("look up tenant %q: %w", tenantSlug, err)
 	}
 
-	snap := a.registry.Snapshot()
+	snap := reg.Snapshot()
 	if snap == nil {
 		return tenant.Tenant{}, nil, fmt.Errorf("module registry not ready")
 	}
-	mod, ok := snap.Modules()[moduleName]
-	if !ok {
-		return tenant.Tenant{}, nil, fmt.Errorf("module %q: %w", moduleName, ErrModuleNotLoaded)
+	mod, err := resolveModule(snap, moduleName)
+	if err != nil {
+		return tenant.Tenant{}, nil, err
 	}
 
 	return *t, mod, nil

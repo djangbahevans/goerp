@@ -16,23 +16,16 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// Execute applies changes' safe/deferred subset and reports what it
-// skipped — equivalent to ExecuteAccepted with a nil accepted map (no
-// blocked change is ever promoted), which is what every caller other than
-// goerp#292's accept-triggered resync wants.
-func (e *SchemaDiffEngine) Execute(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, changes []schema.Change) ([]schema.Change, error) {
-	blocked, _, err := e.ExecuteAccepted(ctx, sess, modelDecls, changes, nil)
-	return blocked, err
-}
-
-// ExecuteAccepted behaves like Execute, but additionally applies any
-// blocked change whose changeHash appears (true) in accepted — goerp#292's
-// `POST /admin/schema/accept` writes one system.schema_sync_acceptances
-// row per currently-blocked change's hash before triggering a one-time
-// resync; this is what that resync calls so exactly the diff(s) an
-// operator just authorized apply, and nothing else that's still blocked.
+// ExecuteAccepted applies changes' safe/deferred subset and reports what
+// it skipped, additionally applying any blocked change whose changeHash
+// appears (true) in accepted — goerp#292's `POST /admin/schema/accept`
+// writes one system.schema_sync_acceptances row per currently-blocked
+// change's hash before triggering a one-time resync; this is what that
+// resync calls so exactly the diff(s) an operator just authorized apply,
+// and nothing else that's still blocked. Every other caller passes a nil
+// accepted map, applying only the safe/deferred class of change.
 // appliedHashes is every accepted hash that was actually promoted and
-// applied this run — the caller (SyncOneAccepted) uses it to mark those
+// applied this run — the caller (SyncOne) uses it to mark those
 // specific acceptance rows consumed, so a hash can't go on authorizing
 // some unrelated future diff that happens to produce the same
 // changeHash (see createSchemaSyncAcceptancesTable's own doc comment).
@@ -257,15 +250,7 @@ func groupForPlanning(changes []tableChange) []schema.Change {
 	return out
 }
 
-// sqlExecer is satisfied by both *sql.Conn (for non-transactional
-// statements) and *sql.Tx (for the batched transaction above) - the same
-// retry logic applies to a DDL statement regardless of which one is running
-// it.
-type sqlExecer interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}
-
-func (e *SchemaDiffEngine) execWithRetry(ctx context.Context, execer sqlExecer, cmd string) error {
+func (e *SchemaDiffEngine) execWithRetry(ctx context.Context, execer execQuerier, cmd string) error {
 	const maxAttempts = 3
 	backoff := 200 * time.Millisecond
 

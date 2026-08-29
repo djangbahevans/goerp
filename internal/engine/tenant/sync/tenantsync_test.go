@@ -278,7 +278,7 @@ func TestSyncOne_CreatesTable(t *testing.T) {
 
 	mod := loadedModule(t, "widgets_"+slug, widgetModel())
 
-	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, mod); err != nil {
+	if err := SyncOne(context.Background(), env.pool, env.diffEngine, tt, mod, nil); err != nil {
 		t.Fatalf("SyncOne() error: %v", err)
 	}
 

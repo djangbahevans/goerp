@@ -80,6 +80,40 @@ func TestSchemaStatusRoute_PassesQueryParamsAndReturnsData(t *testing.T) {
 	}
 }
 
+func TestSchemaStatusRoute_InvalidFilterReturns400(t *testing.T) {
+	fake := &fakeSchemaStatusReader{}
+	mux := http.NewServeMux()
+	RegisterSchemaRoutes(mux, SchemaDeps{Status: fake})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/schema/status?filter=Pending", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", w.Code, w.Body.String())
+	}
+	if fake.gotFilter != "" {
+		t.Errorf("Status() called with an invalid filter, want the handler to reject it before calling Status")
+	}
+	if !strings.Contains(w.Body.String(), "invalid_request") {
+		t.Errorf("body = %s, want it to carry the invalid_request error code", w.Body.String())
+	}
+}
+
+func TestSchemaStatusRoute_EmptyFilterIsValid(t *testing.T) {
+	fake := &fakeSchemaStatusReader{}
+	mux := http.NewServeMux()
+	RegisterSchemaRoutes(mux, SchemaDeps{Status: fake})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/schema/status", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", w.Code, w.Body.String())
+	}
+}
+
 func TestSchemaDiffRoute_RequiresTenant(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterSchemaRoutes(mux, SchemaDeps{Diff: &fakeSchemaDiffer{}})

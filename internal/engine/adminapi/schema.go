@@ -77,9 +77,27 @@ func writeSchemaResolveError(w http.ResponseWriter, err error) {
 	}
 }
 
+// validSchemaStatusFilters is cli-reference.md §4's documented `schema
+// status --filter` value set — "" (no filter) plus every literal
+// StatusFiltered matches directly ("ok"/"failed"/"in_progress") and the
+// one tenantsync.Admin.Status computes itself ("pending").
+var validSchemaStatusFilters = map[string]bool{
+	"":            true,
+	"ok":          true,
+	"failed":      true,
+	"in_progress": true,
+	"pending":     true,
+}
+
 func (h *schemaHandlers) status(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	statuses, err := h.deps.Status.Status(r.Context(), q.Get("tenant"), q.Get("module"), q.Get("filter"))
+	filter := q.Get("filter")
+	if !validSchemaStatusFilters[filter] {
+		writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("filter must be one of ok, failed, in_progress, pending (got %q)", filter))
+		return
+	}
+
+	statuses, err := h.deps.Status.Status(r.Context(), q.Get("tenant"), q.Get("module"), filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return

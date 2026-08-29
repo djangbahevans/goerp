@@ -76,7 +76,7 @@ func TestExecute_AddCheckDeferredAsNotValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, base, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -96,7 +96,7 @@ func TestExecute_AddCheckDeferredAsNotValid(t *testing.T) {
 		t.Fatalf("second Diff() error: %v", err)
 	}
 
-	blocked, err := engine.Execute(context.Background(), sess, withCheck, changes)
+	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, withCheck, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() with a deferred AddCheck against violating data errored (should have skipped validation via NOT VALID): %v", err)
 	}
@@ -127,7 +127,7 @@ func TestValidateConstraintWorker_SucceedsWhenDataSatisfiesConstraint(t *testing
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, base, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 	if _, err := conn.Exec(
@@ -142,7 +142,7 @@ func TestValidateConstraintWorker_SucceedsWhenDataSatisfiesConstraint(t *testing
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, withCheck, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, withCheck, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -182,7 +182,7 @@ func TestValidateConstraintWorker_RecordsFailureWithoutRetryingOnConstraintViola
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, base, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 	if _, err := conn.Exec(
@@ -197,7 +197,7 @@ func TestValidateConstraintWorker_RecordsFailureWithoutRetryingOnConstraintViola
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, withCheck, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, withCheck, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -237,7 +237,7 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, base, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 	withCheck := []model.ModelDeclaration{widgetModelWithStatusSelection("active", "inactive")}
@@ -245,7 +245,7 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, withCheck, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, withCheck, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 

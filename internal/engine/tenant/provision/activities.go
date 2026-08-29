@@ -298,7 +298,7 @@ func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug,
 	}
 
 	t := tenant.Tenant{ID: tenantID, Slug: tenantSlug}
-	if err := tenantsync.SyncOne(ctx, a.syncPool, a.diffEngine, t, mod); err != nil {
+	if err := tenantsync.SyncOne(ctx, a.syncPool, a.diffEngine, t, mod, nil); err != nil {
 		log.Error().Err(err).Str("tenant", tenantSlug).Str("module", moduleName).Msg("module schema sync failed during provisioning")
 	}
 

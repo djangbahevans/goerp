@@ -131,7 +131,7 @@ func TestDiffAndExecute_RealCompiledModule_EnumFieldRoundTrips(t *testing.T) {
 		t.Fatal("Diff() on an empty schema returned no changes, want at least AddTable + the enum type")
 	}
 
-	blocked, err := engine.Execute(context.Background(), sess, m.ModelDecls, changes)
+	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, m.ModelDecls, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}

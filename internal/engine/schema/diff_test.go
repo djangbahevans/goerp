@@ -114,7 +114,7 @@ func TestDiffAndExecute_CreatesNewTableSafely(t *testing.T) {
 		t.Fatal("Diff() on an empty schema returned no changes, want at least AddTable")
 	}
 
-	blocked, err := engine.Execute(context.Background(), sess, modelDecls, changes)
+	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestExecute_SafeAddColumnApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, base, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestExecute_SafeAddColumnApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	blocked, err := engine.Execute(context.Background(), sess, modelDecls, changes)
+	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestExecute_UnsafeDropColumnBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, base, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, base, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -203,7 +203,7 @@ func TestExecute_UnsafeDropColumnBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	blocked, err := engine.Execute(context.Background(), sess, modelDecls, changes)
+	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestApply_AddIndexUsesConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Diff() error: %v", err)
 	}
-	if _, err := engine.Execute(context.Background(), sess, []model.ModelDeclaration{base}, changes); err != nil {
+	if _, _, err := engine.ExecuteAccepted(context.Background(), sess, []model.ModelDeclaration{base}, changes, nil); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func TestApply_AddIndexUsesConcurrently(t *testing.T) {
 		t.Errorf("concurrentIndexDDL() = %q, want it to contain CONCURRENTLY", cmd)
 	}
 
-	blocked, err := engine.Execute(context.Background(), sess, modelDecls, changes)
+	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestDiffAndExecute_CreatesEnumTypeAndColumnTogether(t *testing.T) {
 		t.Fatal("Diff() on an empty schema returned no changes, want at least AddTable + the enum type")
 	}
 
-	blocked, err := engine.Execute(context.Background(), sess, modelDecls, changes)
+	blocked, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil)
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
