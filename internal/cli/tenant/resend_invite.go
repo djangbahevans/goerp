@@ -36,12 +36,7 @@ func newResendInviteCmd() *cobra.Command {
 
 			jsonOut, _ := cmd.Flags().GetBool("json")
 			if err != nil {
-				if jsonOut {
-					if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-						_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
-					}
-				}
-				return err
+				return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 			}
 
 			if jsonOut {

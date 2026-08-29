@@ -141,15 +141,19 @@ func TestTenantCreate_WaitTimesOut(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
+	// goerp#478: this used to return a plain error (exit 1); a too-small
+	// --wait-timeout would also race the initial POST/GET's own HTTP
+	// client timeout — 50ms is small enough to trigger promptly but large
+	// enough for the in-process httptest calls to reliably complete first.
 	code, _, stderr := runCLI(t, "tenant", "create", "acmecorp",
 		"--admin-email", "admin@acmecorp.com",
-		"--wait-timeout", "1ms",
+		"--wait-timeout", "50ms",
 		"--admin-url", srv.URL,
 		"--admin-token", "testtoken",
 	)
 
-	if code == 0 {
-		t.Fatalf("exit code = 0, want non-zero (should time out)")
+	if code != 124 {
+		t.Fatalf("exit code = %d, want 124 (stderr: %s)", code, stderr)
 	}
 	if !strings.Contains(stderr, "provisioning") {
 		t.Errorf("stderr = %q, want it to mention the tenant is still provisioning", stderr)

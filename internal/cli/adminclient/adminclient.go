@@ -218,3 +218,82 @@ func exitCodeForStatus(status int) int {
 		return 1
 	}
 }
+
+// WithJSONErrorEnvelope prints err's reconstructed {"error":...} envelope
+// to cmd's stdout when jsonOut is set (cli-reference.md §2b: a script
+// reading --json output needs a JSON body on failure too, not just a
+// stderr message), then returns err unchanged so the caller can just
+// `return WithJSONErrorEnvelope(cmd, err, jsonOut)`.
+func WithJSONErrorEnvelope(cmd *cobra.Command, err error, jsonOut bool) error {
+	if jsonOut {
+		if envJSON, ok := ErrorEnvelopeJSON(err); ok {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
+		}
+	}
+	return err
+}
+
+// PollInterval is how often WaitForJob re-polls GET /admin/jobs/{id}
+// while a job is still running.
+const PollInterval = 2 * time.Second
+
+// jobDetail is GET /admin/jobs/{id}'s response body, the slice every
+// WaitForJob caller needs: State to know when to stop polling, Output to
+// decode into the caller's own result type once it's completed.
+type jobDetail struct {
+	State  string          `json:"state"`
+	Output json.RawMessage `json:"output,omitempty"`
+}
+
+// WaitForJob polls GET /admin/jobs/{id} until jobID reaches a terminal
+// River state, then decodes its output into T. label names the kind of
+// job in progress/error messages (e.g. "export", "import", "schema
+// sync"). Returns a *clierr.Error{Code: 124} once timeout elapses —
+// cli-reference.md §2b's documented exit code for a `--timeout`-bounded
+// wait that never reached a terminal state.
+func WaitForJob[T any](cmd *cobra.Command, client *Client, jobID, label string, timeout time.Duration) (T, error) {
+	var zero T
+	deadline := time.Now().Add(timeout)
+	path := "/admin/jobs/" + jobID
+
+	for {
+		data, err := client.Get(cmd.Context(), path)
+		if err != nil {
+			return zero, err
+		}
+
+		var detail jobDetail
+		if err := json.Unmarshal(data, &detail); err != nil {
+			return zero, fmt.Errorf("decode job detail response: %w", err)
+		}
+
+		switch detail.State {
+		case "completed":
+			if len(detail.Output) == 0 {
+				return zero, fmt.Errorf("%s job %s completed with no recorded output", label, jobID)
+			}
+			var result T
+			if err := json.Unmarshal(detail.Output, &result); err != nil {
+				return zero, fmt.Errorf("decode %s result: %w", label, err)
+			}
+			return result, nil
+		case "cancelled", "discarded":
+			return zero, fmt.Errorf("%s job %s did not complete (state=%s) — check `goerp jobs show %s --logs`", label, jobID, detail.State, jobID)
+		}
+
+		if time.Now().After(deadline) {
+			return zero, &clierr.Error{
+				Code: 124,
+				Err:  fmt.Errorf("%s job %s still %q after %s — check `goerp jobs show %s`", label, jobID, detail.State, timeout, jobID),
+			}
+		}
+
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s job %s still %s...\n", label, jobID, detail.State)
+
+		select {
+		case <-cmd.Context().Done():
+			return zero, cmd.Context().Err()
+		case <-time.After(PollInterval):
+		}
+	}
+}

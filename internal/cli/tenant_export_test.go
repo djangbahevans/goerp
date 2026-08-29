@@ -119,6 +119,34 @@ func TestTenantExport_MissingOutputIsUsageError(t *testing.T) {
 	}
 }
 
+func TestTenantExport_WaitTimeoutExitsWith124(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /admin/tenants/acmecorp/export", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"data":{"job_id":"job_10"},"error":null}`))
+	})
+	mux.HandleFunc("GET /admin/jobs/job_10", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"state":"running"},"error":null}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// goerp#478: tenant export/import's wait-timeout path used to return a
+	// plain error (exit 1) instead of cli-reference.md §2b's documented
+	// exit 124 — adminclient.WaitForJob (shared with schema sync, which
+	// already got this right) fixes that for export/import too.
+	code, _, stderr := runCLI(t, "tenant", "export", "acmecorp",
+		"--output", filepath.Join(t.TempDir(), "out.zip"),
+		"--wait-timeout", "50ms",
+		"--admin-url", srv.URL,
+		"--admin-token", "testtoken",
+	)
+
+	if code != 124 {
+		t.Fatalf("exit code = %d, want 124 (stderr: %s)", code, stderr)
+	}
+}
+
 func TestTenantExport_ChecksumMismatchFails(t *testing.T) {
 	var mux *http.ServeMux
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

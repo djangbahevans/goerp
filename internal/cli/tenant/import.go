@@ -45,14 +45,6 @@ type uploadResponse struct {
 	InputRef string `json:"input_ref"`
 }
 
-// importJobDetail mirrors exportJobDetail (export.go) — the same GET
-// /admin/jobs/{id} shape, decoded here for tenantimport.Result instead of
-// tenantexport.Result.
-type importJobDetail struct {
-	State  string          `json:"state"`
-	Output json.RawMessage `json:"output,omitempty"`
-}
-
 // importResult mirrors tenantimport.Result.
 type importResult struct {
 	TenantID        string   `json:"tenant_id"`
@@ -104,7 +96,7 @@ func newImportCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "uploading archive %s...\n", input)
 			uploadData, err := client.UploadFile(cmd.Context(), "/admin/tenants/import/upload", "archive", filepath.Base(input), bytes.NewReader(archiveBytes))
 			if err != nil {
-				return withJSONErrorEnvelope(cmd, err, jsonOut)
+				return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 			}
 			var uploaded uploadResponse
 			if err := json.Unmarshal(uploadData, &uploaded); err != nil {
@@ -118,7 +110,7 @@ func newImportCmd() *cobra.Command {
 				"decryption_key": decryptionKey,
 			})
 			if err != nil {
-				return withJSONErrorEnvelope(cmd, err, jsonOut)
+				return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
 			}
 
 			var started importStartResponse
@@ -136,7 +128,7 @@ func newImportCmd() *cobra.Command {
 				return nil
 			}
 
-			result, err := waitForImport(cmd, client, started.JobID, waitTimeout)
+			result, err := adminclient.WaitForJob[importResult](cmd, client, started.JobID, "import", waitTimeout)
 			if err != nil {
 				return err
 			}
@@ -162,18 +154,6 @@ func newImportCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&waitTimeout, "wait-timeout", 30*time.Minute, "How long --wait waits before giving up")
 
 	return cmd
-}
-
-// withJSONErrorEnvelope mirrors export.go's own inline pattern for
-// printing the reconstructed error envelope under --json before returning
-// the error for exit-code handling.
-func withJSONErrorEnvelope(cmd *cobra.Command, err error, jsonOut bool) error {
-	if jsonOut {
-		if envJSON, ok := adminclient.ErrorEnvelopeJSON(err); ok {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(envJSON))
-		}
-	}
-	return err
 }
 
 // runImportDryRun never calls the admin API — decrypting and parsing the
@@ -255,50 +235,4 @@ func decryptAndParseManifest(ciphertext []byte, keyBase64 string) (importManifes
 		return man, nil
 	}
 	return importManifest{}, fmt.Errorf("archive has no manifest.json")
-}
-
-// waitForImport polls GET /admin/jobs/{id} until the job reaches a
-// terminal River state — mirrors export.go's waitForExport exactly, for
-// tenantimport.Result instead of tenantexport.Result.
-func waitForImport(cmd *cobra.Command, client *adminclient.Client, jobID string, timeout time.Duration) (importResult, error) {
-	deadline := time.Now().Add(timeout)
-	path := "/admin/jobs/" + jobID
-
-	for {
-		data, err := client.Get(cmd.Context(), path)
-		if err != nil {
-			return importResult{}, err
-		}
-
-		var detail importJobDetail
-		if err := json.Unmarshal(data, &detail); err != nil {
-			return importResult{}, fmt.Errorf("decode job detail response: %w", err)
-		}
-
-		switch detail.State {
-		case "completed":
-			if len(detail.Output) == 0 {
-				return importResult{}, fmt.Errorf("import job %s completed with no recorded output", jobID)
-			}
-			var result importResult
-			if err := json.Unmarshal(detail.Output, &result); err != nil {
-				return importResult{}, fmt.Errorf("decode import result: %w", err)
-			}
-			return result, nil
-		case "cancelled", "discarded":
-			return importResult{}, fmt.Errorf("import job %s did not complete (state=%s) — check `goerp jobs show %s --logs`", jobID, detail.State, jobID)
-		}
-
-		if time.Now().After(deadline) {
-			return importResult{}, fmt.Errorf("import job %s still %q after %s — check `goerp jobs show %s`", jobID, detail.State, timeout, jobID)
-		}
-
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "import job %s still %s...\n", jobID, detail.State)
-
-		select {
-		case <-cmd.Context().Done():
-			return importResult{}, cmd.Context().Err()
-		case <-time.After(pollInterval):
-		}
-	}
 }
