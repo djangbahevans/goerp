@@ -798,6 +798,18 @@ func New(cfg *config.Config) (*Engine, error) {
 		Provision:      provisionActivities,
 		Keys:           rowKeySet,
 	})
+	river.AddWorker(jobWorkers, &tenantsync.SyncWorker{
+		TenantStore: tenantStore,
+		Registry:    moduleRegistry,
+		Pool:        syncPool,
+		DiffEngine:  diffEngine,
+	})
+	river.AddWorker(jobWorkers, &tenantsync.AcceptResyncWorker{
+		TenantStore: tenantStore,
+		Registry:    moduleRegistry,
+		Pool:        syncPool,
+		DiffEngine:  diffEngine,
+	})
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry})
@@ -847,6 +859,14 @@ func New(cfg *config.Config) (*Engine, error) {
 		Exporter:       tenantexport.NewExporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin),
 		Importer:       tenantimport.NewImporter(tenantStore, jobQueueClient, jobqueue.QueueAdmin, rowKeySet),
 		Storage:        storageBackend,
+	})
+
+	schemaAdmin := tenantsync.NewAdmin(tenantStore, moduleRegistry, syncPool, diffEngine, jobQueueClient, jobqueue.QueueAdmin)
+	adminapi.RegisterSchemaRoutes(adminServer.Router(), adminapi.SchemaDeps{
+		Status: schemaAdmin,
+		Diff:   schemaAdmin,
+		Sync:   schemaAdmin,
+		Accept: schemaAdmin,
 	})
 
 	adminapi.RegisterConfigRoutes(adminServer.Router(), adminapi.ConfigDeps{

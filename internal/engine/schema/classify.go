@@ -1,6 +1,10 @@
 package schema
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+
 	"ariga.io/atlas/sql/postgres"
 	"ariga.io/atlas/sql/schema"
 )
@@ -120,4 +124,89 @@ func integerRank(t string) int {
 	default:
 		return -1
 	}
+}
+
+// ChangeSummary is one tableChange's exported, JSON-ready shape — what
+// GET /admin/modules/{name}/schema (goerp#292) reports for each pending
+// change, and what POST /admin/schema/accept records Hash values from.
+type ChangeSummary struct {
+	Kind   string `json:"kind"`
+	Table  string `json:"table"`
+	Detail string `json:"detail,omitempty"`
+	// Hash is only set for a blocked change — the identifier
+	// RecordAcceptance stores and ExecuteAccepted later matches against.
+	// A safe/deferred change never needs accepting, so it carries no hash.
+	Hash string `json:"hash,omitempty"`
+}
+
+// describeChange extracts a change's identifying facts by hand rather
+// than formatting the underlying ariga.io/atlas/sql/schema.Change value
+// directly — those types hold pointers (e.g. a *Column back-referencing
+// its *Table) whose default %v/%+v formatting isn't guaranteed stable
+// across two separate Diff calls, which changeHash below needs to be.
+func describeChange(tc tableChange) (kind, table, detail string) {
+	if tc.table != nil {
+		table = tc.table.Name
+	}
+	switch v := tc.change.(type) {
+	case *schema.AddTable:
+		return "add_table", v.T.Name, ""
+	case *schema.DropTable:
+		return "drop_table", v.T.Name, ""
+	case *schema.RenameTable:
+		return "rename_table", v.From.Name, fmt.Sprintf("-> %s", v.To.Name)
+	case *schema.AddIndex:
+		return "add_index", table, v.I.Name
+	case *schema.DropIndex:
+		return "drop_index", table, v.I.Name
+	case *schema.AddCheck:
+		return "add_check", table, v.C.Name
+	case *schema.AddForeignKey:
+		return "add_foreign_key", table, v.F.Symbol
+	case *schema.AddColumn:
+		return "add_column", table, fmt.Sprintf("%s %s", v.C.Name, v.C.Type.Raw)
+	case *schema.ModifyColumn:
+		return "modify_column", table, fmt.Sprintf("%s: %s -> %s", v.To.Name, v.From.Type.Raw, v.To.Type.Raw)
+	case *schema.DropColumn:
+		return "drop_column", table, v.C.Name
+	case *schema.RenameColumn:
+		return "rename_column", table, fmt.Sprintf("%s -> %s", v.From.Name, v.To.Name)
+	default:
+		return fmt.Sprintf("%T", tc.change), table, ""
+	}
+}
+
+// changeHash returns a stable identifier for one blocked change, built
+// from describeChange's hand-extracted fields (see that function's own
+// doc comment for why). POST /admin/schema/accept computes this for
+// every currently-blocked change and records it in
+// system.schema_sync_acceptances; ExecuteAccepted recomputes the same
+// hash for whatever Diff proposes at resync time and applies any blocked
+// change that matches.
+func changeHash(tc tableChange) string {
+	kind, table, detail := describeChange(tc)
+	sum := sha256.Sum256([]byte(kind + "|" + table + "|" + detail))
+	return hex.EncodeToString(sum[:])
+}
+
+func summarizeChanges(tcs []tableChange, includeHash bool) []ChangeSummary {
+	out := make([]ChangeSummary, len(tcs))
+	for i, tc := range tcs {
+		kind, table, detail := describeChange(tc)
+		s := ChangeSummary{Kind: kind, Table: table, Detail: detail}
+		if includeHash {
+			s.Hash = changeHash(tc)
+		}
+		out[i] = s
+	}
+	return out
+}
+
+// Classify splits changes into the same safe/deferred/blocked buckets
+// Execute applies internally, as JSON-ready summaries — goerp#292's
+// GET /admin/modules/{name}/schema calls this (after Diff, never
+// Execute) to report what a sync would do without doing it.
+func (e *SchemaDiffEngine) Classify(changes []schema.Change) (safe, deferred, blocked []ChangeSummary) {
+	s, d, b := e.classifyChanges(changes)
+	return summarizeChanges(s, false), summarizeChanges(d, false), summarizeChanges(b, true)
 }
