@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -51,10 +52,13 @@ type Worker struct {
 	// for the bulk INSERT write path. There is no live caller to enforce
 	// field-security/RLS against: the archive's own rows already went
 	// through export's field-security exclusion.
-	RawDB           *sql.DB
-	Checkpoints     *checkpoint.Store
-	StorageBackend  storage.Backend
-	Provision       *tenantprovision.Activities
+	RawDB          *sql.DB
+	Checkpoints    *checkpoint.Store
+	StorageBackend storage.Backend
+	Provision      *tenantprovision.Activities
+	// Keys decrypts Args.DecryptionKey — Importer.StartImport encrypted it
+	// with the same RowKeySet before this job was ever inserted (goerp#450).
+	Keys            *rowcrypt.RowKeySet
 	LeaseStaleAfter time.Duration
 }
 
@@ -84,7 +88,12 @@ func (w *Worker) run(ctx context.Context, job *river.Job[Args]) (Result, error) 
 		return Result{}, fmt.Errorf("read archive %q: %w", a.InputRef, err)
 	}
 
-	plaintext, err := decryptArchive(ciphertext, a.DecryptionKey)
+	decryptionKey, err := w.Keys.Decrypt([]byte(a.DecryptionKey))
+	if err != nil {
+		return Result{}, fmt.Errorf("decrypt stored decryption key: %w", err)
+	}
+
+	plaintext, err := decryptArchive(ciphertext, string(decryptionKey))
 	if err != nil {
 		return Result{}, err
 	}
