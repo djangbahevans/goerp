@@ -43,6 +43,7 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 
 	var synthesized []manifest.View
 	var suppressed []SuppressedView
+	claimedThisCall := make(map[string]string, len(models)) // view name -> qualified model that claimed it
 
 	for _, md := range models {
 		if len(md.EnabledViews) == 0 && md.NavDecl == nil {
@@ -83,6 +84,25 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 		baseName := strings.ReplaceAll(qualifiedModel, ".", "_")
 		listName := baseName + "_list"
 		formName := baseName + "_form"
+
+		// Two distinct models deriving the same view name (the underscore
+		// substitution isn't injective — "foo.bar" and "foo_bar" both land
+		// on "foo_bar") have no legitimate winner the way a hand-declared
+		// view legitimately overrides a synthesized one, so this is a
+		// load-time error instead — the same category RegisterModelRoutes
+		// applies to two models deriving the same route.
+		if hasListView {
+			if claimant, ok := claimedThisCall[listName]; ok {
+				return nil, nil, nil, fmt.Errorf("route: module %q: models %q and %q both derive view %q from EnableViews", moduleName, claimant, qualifiedModel, listName)
+			}
+			claimedThisCall[listName] = qualifiedModel
+		}
+		if hasFormView {
+			if claimant, ok := claimedThisCall[formName]; ok {
+				return nil, nil, nil, fmt.Errorf("route: module %q: models %q and %q both derive view %q from EnableViews", moduleName, claimant, qualifiedModel, formName)
+			}
+			claimedThisCall[formName] = qualifiedModel
+		}
 
 		// Resolved up front, before building either view, so a suppressed
 		// view's dependents (the list's "New X" action, the nav item) still
