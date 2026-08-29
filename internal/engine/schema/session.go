@@ -15,9 +15,43 @@ type SchemaSyncSession struct {
 	tenantSlug string
 	moduleName string
 	manifest   *manifest.Manifest
+	// readTx is set only for a session BeginRead opened — every read runs
+	// inside this one REPEATABLE READ read-only transaction rather than
+	// directly against conn, so Diff's multiple statements (inspect, then
+	// diff) see one fixed MVCC snapshot instead of READ COMMITTED's
+	// default per-statement snapshot, which could otherwise straddle a
+	// concurrent sync's own non-transactional (CREATE/DROP INDEX
+	// CONCURRENTLY) and transactional DDL and see a half-applied schema.
+	// No pg_advisory_lock is ever taken for this session, so Close has no
+	// lock to release — only readTx to commit (read-only, so COMMIT vs.
+	// ROLLBACK make no difference) and the connection to close.
+	readTx *sql.Tx
 }
 
+// execQuerier is ariga.io/atlas/sql/schema.ExecQuerier's method set,
+// declared locally so this package's own callers (diff.go) don't need to
+// import atlas just to pick between s.conn and s.readTx — both already
+// satisfy it structurally.
+type execQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func (s *SchemaSyncSession) execQuerier() execQuerier {
+	if s.readTx != nil {
+		return s.readTx
+	}
+	return s.conn
+}
+
+// Close releases the session's connection, and its pg_advisory_lock too
+// unless this session came from BeginRead (which never took one, and
+// instead has a readTx to close out first).
 func (s *SchemaSyncSession) Close(ctx context.Context) error {
+	if s.readTx != nil {
+		_ = s.readTx.Commit() // read-only; commit vs. rollback is equivalent
+		return s.conn.Close()
+	}
 	lockA, lockB := advisoryLockKeys(s.tenantSlug, s.moduleName)
 	_, unlockErr := s.conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1, $2)", lockA, lockB)
 	closeErr := s.conn.Close()

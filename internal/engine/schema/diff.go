@@ -27,7 +27,7 @@ func (e *SchemaDiffEngine) Diff(ctx context.Context, sess *SchemaSyncSession, mo
 		return nil, err
 	}
 
-	driver, err := postgres.Open(sess.conn)
+	driver, err := postgres.Open(sess.execQuerier())
 	if err != nil {
 		return nil, err
 	}

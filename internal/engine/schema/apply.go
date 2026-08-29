@@ -16,16 +16,41 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
+// Execute applies changes' safe/deferred subset and reports what it
+// skipped — equivalent to ExecuteAccepted with a nil accepted map (no
+// blocked change is ever promoted), which is what every caller other than
+// goerp#292's accept-triggered resync wants.
 func (e *SchemaDiffEngine) Execute(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, changes []schema.Change) ([]schema.Change, error) {
+	blocked, _, err := e.ExecuteAccepted(ctx, sess, modelDecls, changes, nil)
+	return blocked, err
+}
+
+// ExecuteAccepted behaves like Execute, but additionally applies any
+// blocked change whose changeHash appears (true) in accepted — goerp#292's
+// `POST /admin/schema/accept` writes one system.schema_sync_acceptances
+// row per currently-blocked change's hash before triggering a one-time
+// resync; this is what that resync calls so exactly the diff(s) an
+// operator just authorized apply, and nothing else that's still blocked.
+// appliedHashes is every accepted hash that was actually promoted and
+// applied this run — the caller (SyncOneAccepted) uses it to mark those
+// specific acceptance rows consumed, so a hash can't go on authorizing
+// some unrelated future diff that happens to produce the same
+// changeHash (see createSchemaSyncAcceptancesTable's own doc comment).
+func (e *SchemaDiffEngine) ExecuteAccepted(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, changes []schema.Change, accepted map[string]bool) (blocked []schema.Change, appliedHashes []string, err error) {
 	if len(changes) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	safe, deferred, blockedTC := e.classifyChanges(changes)
 
-	blocked := make([]schema.Change, len(blockedTC))
-	for i, tc := range blockedTC {
-		blocked[i] = tc.change
+	for _, tc := range blockedTC {
+		hash := changeHash(tc)
+		if accepted[hash] {
+			safe = append(safe, tc)
+			appliedHashes = append(appliedHashes, hash)
+			continue
+		}
+		blocked = append(blocked, tc.change)
 		log.Warn().
 			Str("op", fmt.Sprintf("%T", tc.change)).
 			Str("tenant", sess.tenantSlug).
@@ -33,14 +58,30 @@ func (e *SchemaDiffEngine) Execute(ctx context.Context, sess *SchemaSyncSession,
 			Msg("blocked DDL operation skipped — requires explicit data migration handler")
 	}
 
-	if err := e.applyChanges(ctx, sess, modelDecls, safe, deferred); err != nil {
-		return blocked, err
+	if err := e.applyChanges(ctx, sess, modelDecls, safe, deferred, appliedHashes); err != nil {
+		return blocked, nil, err
 	}
 
-	return blocked, nil
+	return blocked, appliedHashes, nil
 }
 
-func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, safe, deferred []tableChange) error {
+// applyChanges applies safe/deferred, then — in the same dbTx the DDL
+// itself commits in — marks every hash in appliedHashes consumed via
+// markAcceptancesConsumed below. Doing both in one transaction closes a
+// real gap a separate, later call outside this transaction would leave
+// open: if that later call ever failed (a transient DB error, the
+// process dying between the two calls), the DDL would already be live
+// and the acceptance row would
+// stay consumed_at = NULL forever — a re-diff afterward never re-proposes
+// an already-applied change, so nothing would ever retry marking it, and
+// the stale row would stay silently exploitable by some unrelated future
+// diff that happens to produce the same changeHash (see
+// createSchemaSyncAcceptancesTable's own doc comment in pool.go). Every
+// blocked change classify.go ever promotes into safe is a table/column
+// alteration, never an index (AddIndex/DropIndex are always already
+// "safe", never blocked) — so appliedHashes being non-empty always
+// implies the tx/dbTx path below runs, never only the nonTx one.
+func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, safe, deferred []tableChange, appliedHashes []string) error {
 	nonTx, tx := splitNonTransactional(safe)
 
 	for _, tc := range nonTx {
@@ -86,11 +127,38 @@ func (e *SchemaDiffEngine) applyChanges(ctx context.Context, sess *SchemaSyncSes
 			_ = dbTx.Rollback()
 			return err
 		}
+		if err := markAcceptancesConsumed(ctx, dbTx, sess.tenantID, sess.moduleName, sess.ModuleVersion(), appliedHashes); err != nil {
+			_ = dbTx.Rollback()
+			return err
+		}
 		if err := dbTx.Commit(); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+// markAcceptancesConsumed sets consumed_at on the not-yet-consumed
+// system.schema_sync_acceptances row matching each hash under
+// moduleVersion, in the same transaction as the DDL that just applied
+// them — see applyChanges' own doc comment for why this can't safely be
+// a separate, later call. The partial unique index backing this table
+// (createSchemaSyncAcceptancesUnconsumedIndex, pool.go) guarantees at
+// most one unconsumed row per (tenant, module, version, hash), so this
+// UPDATE can only ever affect the one row that actually authorized this
+// apply — never an unrelated row from a different version or a
+// duplicate insert.
+func markAcceptancesConsumed(ctx context.Context, dbTx *sql.Tx, tenantID, moduleName, moduleVersion string, hashes []string) error {
+	for _, h := range hashes {
+		if _, err := dbTx.ExecContext(ctx, `
+			UPDATE system.schema_sync_acceptances
+			SET consumed_at = NOW()
+			WHERE tenant_id = $1 AND module_name = $2 AND module_version = $3 AND target_hash = $4 AND consumed_at IS NULL
+		`, tenantID, moduleName, moduleVersion, h); err != nil {
+			return fmt.Errorf("mark schema sync acceptance consumed for hash %s: %w", h, err)
+		}
+	}
 	return nil
 }
 

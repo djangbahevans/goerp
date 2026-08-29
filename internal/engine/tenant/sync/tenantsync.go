@@ -82,6 +82,20 @@ func syncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *sc
 // a tenant that's still StatusProvisioning and therefore not yet
 // "active" — ActiveTenants wouldn't return it at all).
 func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule) error {
+	return syncOne(ctx, pool, diffEngine, t, mod, nil)
+}
+
+// SyncOneAccepted behaves like SyncOne, but additionally applies any
+// blocked change whose schema.ChangeHash appears in accepted — goerp#292's
+// `schema accept`-triggered one-time resync, the only caller that ever
+// passes a non-empty map. Once applied, a change stops appearing in a
+// later Diff at all (the live schema now matches), so accepted hashes
+// never need to be "consumed" or expire on their own.
+func SyncOneAccepted(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
+	return syncOne(ctx, pool, diffEngine, t, mod, accepted)
+}
+
+func syncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, t tenant.Tenant, mod *module.LoadedModule, accepted map[string]bool) error {
 	sess, err := pool.BeginSync(ctx, t.ID, t.Slug, mod.Manifest.Name, &mod.Manifest)
 	if err != nil {
 		return fmt.Errorf("begin sync session: %w", err)
@@ -99,7 +113,7 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 	if err != nil {
 		return fmt.Errorf("check sync need: %w", err)
 	}
-	if !needsSync {
+	if !needsSync && accepted == nil {
 		return nil
 	}
 
@@ -111,7 +125,12 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 		return fmt.Errorf("diff schema: %w", err)
 	}
 
-	if _, err := diffEngine.Execute(ctx, sess, mod.ModelDecls, changes); err != nil {
+	// appliedHashes' own consumption is handled atomically inside
+	// ExecuteAccepted/applyChanges (same transaction as the DDL) — see
+	// apply.go's own doc comment for why that can't safely be a separate,
+	// later call from here.
+	_, _, err = diffEngine.ExecuteAccepted(ctx, sess, mod.ModelDecls, changes, accepted)
+	if err != nil {
 		if recErr := sess.RecordSyncFailure(ctx); recErr != nil {
 			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")
 		}
