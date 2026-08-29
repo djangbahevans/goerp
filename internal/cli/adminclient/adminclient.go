@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -69,6 +70,40 @@ func (c *Client) Get(ctx context.Context, path string) (json.RawMessage, error) 
 
 func (c *Client) Post(ctx context.Context, path string, body any) (json.RawMessage, error) {
 	return c.Do(ctx, http.MethodPost, path, body)
+}
+
+// UploadFile POSTs r's contents as a multipart/form-data field named
+// fieldName to path — `tenant import`'s only use, uploading the local
+// archive file so the admin API can stage it in object storage before
+// StartImport (POST /admin/tenants/import) is called with the returned
+// key. Streamed via an io.Pipe so an arbitrarily large archive is never
+// buffered whole in memory, the same reason downloadAndVerifyExport
+// streams the export path's own archive straight to disk.
+func (c *Client) UploadFile(ctx context.Context, path, fieldName, fileName string, r io.Reader) (json.RawMessage, error) {
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+
+	go func() {
+		part, err := mw.CreateFormFile(fieldName, fileName)
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if _, err := io.Copy(part, r); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		_ = pw.CloseWithError(mw.Close())
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, pr)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	return c.send(req)
 }
 
 type envelope struct {
@@ -137,6 +172,12 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (json.Ra
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	return c.send(req)
+}
+
+// send issues req and decodes the admin API's envelope response — the
+// part Do and UploadFile share once their own request bodies are built.
+func (c *Client) send(req *http.Request) (json.RawMessage, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, &clierr.Error{Code: 1, Err: fmt.Errorf("admin API request failed: %w", err)}

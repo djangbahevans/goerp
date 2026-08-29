@@ -1,9 +1,12 @@
 package adminapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -85,6 +89,137 @@ func TestExportRoute_NoExporterReturnsNotImplemented(t *testing.T) {
 
 	if w.Code != http.StatusNotImplemented {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNotImplemented)
+	}
+}
+
+func TestImportRoute_NoImporterReturnsNotImplemented(t *testing.T) {
+	mux := newTestTenantMux(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/import", strings.NewReader(`{"slug":"acme","input":"x","decryption_key":"y"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotImplemented)
+	}
+}
+
+func TestImportUploadRoute_NoStorageReturnsNotImplemented(t *testing.T) {
+	mux := newTestTenantMux(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/import/upload", strings.NewReader(""))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotImplemented)
+	}
+}
+
+func TestImportUploadRoute_MissingArchiveFieldIsBadRequest(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	store := tenant.NewStore(conn)
+	if err := store.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+
+	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
+	backend, err := storage.New("local")
+	if err != nil {
+		t.Fatalf(`storage.New("local") error: %v`, err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, Storage: backend})
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("not-archive", "x")
+	_ = mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/import/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (body: %s)", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestImportUploadRoute_UploadsArchiveAndReturnsInputRef(t *testing.T) {
+	conn, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	store := tenant.NewStore(conn)
+	if err := store.Bootstrap(context.Background()); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+
+	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
+	backend, err := storage.New("local")
+	if err != nil {
+		t.Fatalf(`storage.New("local") error: %v`, err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, Storage: backend})
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("archive", "archive.zip.enc")
+	if err != nil {
+		t.Fatalf("CreateFormFile() error: %v", err)
+	}
+	if _, err := fw.Write([]byte("encrypted archive bytes")); err != nil {
+		t.Fatalf("write archive field: %v", err)
+	}
+	_ = mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/import/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusCreated, w.Body.String())
+	}
+	env := decodeEnvelope(t, w)
+	if env.Error != nil {
+		t.Fatalf("unexpected error: %+v", env.Error)
+	}
+	dataBytes, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("re-encode data: %v", err)
+	}
+	var resp struct {
+		InputRef string `json:"input_ref"`
+	}
+	if err := json.Unmarshal(dataBytes, &resp); err != nil {
+		t.Fatalf("decode data: %v", err)
+	}
+	if resp.InputRef == "" {
+		t.Fatal("input_ref is empty")
+	}
+
+	rc, _, err := backend.Download(context.Background(), resp.InputRef)
+	if err != nil {
+		t.Fatalf("download uploaded archive: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read uploaded archive: %v", err)
+	}
+	if string(got) != "encrypted archive bytes" {
+		t.Errorf("uploaded content = %q, want %q", got, "encrypted archive bytes")
 	}
 }
 
