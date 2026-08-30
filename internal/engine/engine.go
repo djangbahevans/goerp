@@ -75,6 +75,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
+	"github.com/djangbahevans/goerp/internal/engine/moduleinstall"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -649,9 +650,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	// permcache.RolePermissionMap (auth-internals.md §14 cache layer 3)
 	// has to be rebuilt in lockstep with the permission registry above —
 	// a stale map would resolve role bitfields against index assignments
-	// that no longer match modulePerms. This is registry.Update's only
-	// caller anywhere in the engine, so this is the only place layer 3
-	// ever needs rebuilding too.
+	// that no longer match modulePerms. moduleinstall.Worker is the only
+	// other caller of registry.Update anywhere in the engine, and it
+	// rebuilds this same map itself right after its own Update call, for
+	// the identical reason.
 	rolePermissionMap := permcache.NewRolePermissionMap()
 	if err := rolePermissionMap.RebuildAll(ctx, tenantStore, roleStore, snap.PermissionRegistry()); err != nil {
 		closeOnFailure()
@@ -810,6 +812,17 @@ func New(cfg *config.Config) (*Engine, error) {
 		Pool:        syncPool,
 		DiffEngine:  diffEngine,
 	})
+	river.AddWorker(jobWorkers, &moduleinstall.Worker{
+		Runtime:     runtime,
+		PoolCfg:     poolCfg,
+		Registry:    moduleRegistry,
+		RolePerms:   rolePermissionMap,
+		TenantStore: tenantStore,
+		RoleStore:   roleStore,
+		SyncPool:    syncPool,
+		DiffEngine:  diffEngine,
+		Workers:     workflowWorkers,
+	})
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry})
@@ -867,6 +880,14 @@ func New(cfg *config.Config) (*Engine, error) {
 		Diff:   schemaAdmin,
 		Sync:   schemaAdmin,
 		Accept: schemaAdmin,
+	})
+
+	adminapi.RegisterModuleRoutes(adminServer.Router(), adminapi.ModulesDeps{
+		Install: &moduleinstall.Installer{
+			ModuleDir: cfg.ModuleDir,
+			JobClient: jobQueueClient,
+			JobQueue:  jobqueue.QueueAdmin,
+		},
 	})
 
 	adminapi.RegisterConfigRoutes(adminServer.Router(), adminapi.ConfigDeps{

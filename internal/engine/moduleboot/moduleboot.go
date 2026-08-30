@@ -10,6 +10,7 @@ package moduleboot
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -98,6 +99,17 @@ var errZipMemberNotFound = errors.New("member not found")
 // errZipMemberNotFound if none matches. Only ever called with fixed
 // literal names (manifest.json, module.wasm) — never an archive-supplied
 // path — so zip-slip-style traversal isn't a concern here.
+// maxZipMemberSize bounds how much of a single zip member's decompressed
+// content readZipMember will hold in memory — generous enough for any
+// real manifest.json (manifest.Load's own separate 1MB cap is far
+// smaller) or module.wasm, but a hard ceiling on decompression
+// amplification: readZipMember is reachable from ParsePackage against an
+// untrusted, admin-submitted request body (POST /admin/modules/install),
+// where the raw upload is capped by GOERP_ADMIN_MAX_BODY_BYTES but a
+// small, highly-compressible entry could otherwise still expand to
+// gigabytes during io.ReadAll, before any other validation runs.
+const maxZipMemberSize = 128 << 20 // 128 MiB
+
 func readZipMember(r *zip.Reader, name string) ([]byte, error) {
 	for _, f := range r.File {
 		if f.Name != name {
@@ -110,9 +122,12 @@ func readZipMember(r *zip.Reader, name string) ([]byte, error) {
 		}
 		defer rc.Close()
 
-		data, err := io.ReadAll(rc)
+		data, err := io.ReadAll(io.LimitReader(rc, maxZipMemberSize+1))
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		if len(data) > maxZipMemberSize {
+			return nil, fmt.Errorf("%s exceeds the %d byte decompressed size limit", name, maxZipMemberSize)
 		}
 		return data, nil
 	}
@@ -165,6 +180,57 @@ func readPackageSource(path string) (*loader.Source, error) {
 		WasmBytes:     wasmBytes,
 		PackagePath:   path,
 	}, nil
+}
+
+// ParsePackage extracts manifest.json and module.wasm from an in-memory
+// .erp package (the same zip layout readPackageSource reads from disk),
+// for a caller that receives package bytes directly — e.g. goerp#468's
+// POST /admin/modules/install request body — rather than a file already
+// on disk. Unlike readPackageSource/Discover, which skip a malformed
+// package with a warning (safe for a directory scan that shouldn't abort
+// on one bad entry), a missing manifest.json, missing module.wasm, or
+// unparseable manifest here is a hard error: installing one
+// deliberately-submitted package has no "skip and keep scanning"
+// fallback to defer to. The returned Source's PackagePath is empty — the
+// caller sets it once the bytes are persisted somewhere on disk (e.g. so
+// notiftemplate.Load has a real path to read from). The parsed
+// *manifest.Manifest is returned alongside Source so a caller that needs
+// a field beyond what Source itself carries (e.g. Version, for naming
+// the persisted file) doesn't have to parse ManifestBytes a second time —
+// it's already been parsed once to validate the package in the first
+// place.
+func ParsePackage(data []byte) (*loader.Source, *manifest.Manifest, error) {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, nil, fmt.Errorf("open package: %w", err)
+	}
+
+	manifestBytes, err := readZipMember(r, "manifest.json")
+	if err != nil {
+		if errors.Is(err, errZipMemberNotFound) {
+			return nil, nil, fmt.Errorf("package has no manifest.json")
+		}
+		return nil, nil, err
+	}
+
+	wasmBytes, err := readZipMember(r, "module.wasm")
+	if err != nil {
+		if errors.Is(err, errZipMemberNotFound) {
+			return nil, nil, fmt.Errorf("package has no module.wasm")
+		}
+		return nil, nil, err
+	}
+
+	mf, err := manifest.Load(manifestBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid manifest: %w", err)
+	}
+
+	return &loader.Source{
+		Name:          mf.Name,
+		ManifestBytes: manifestBytes,
+		WasmBytes:     wasmBytes,
+	}, mf, nil
 }
 
 // Order sorts sources topologically by manifest depends_on, so a module
