@@ -266,6 +266,111 @@ func TestSyncAll_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
 	}
 }
 
+// findResult locates id's entry in a []tenant.Tenant or []TenantSyncResult
+// by tenant ID — SyncModule's result also carries whatever other tenants
+// happen to be active in the shared dev database (leftover fixtures from
+// other packages' tests, e.g. schema/pool_test.go's, or concurrent test
+// runs), so assertions below check that the tenants this test created
+// ended up in the expected bucket rather than asserting exact slice
+// contents.
+func findSucceeded(succeeded []tenant.Tenant, id string) bool {
+	for _, t := range succeeded {
+		if t.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func findFailed(failed []TenantSyncResult, id string) *TenantSyncResult {
+	for i, r := range failed {
+		if r.Tenant.ID == id {
+			return &failed[i]
+		}
+	}
+	return nil
+}
+
+func TestSyncModule_CreatesTableAndReturnsSucceeded(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	tt := env.activeTenant(t, slug)
+
+	mod := loadedModule(t, "widgets_"+slug, widgetModel())
+
+	result, err := SyncModule(context.Background(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
+	if err != nil {
+		t.Fatalf("SyncModule() error: %v", err)
+	}
+
+	if !findSucceeded(result.Succeeded, tt.ID) {
+		t.Errorf("Succeeded = %+v, want it to contain tenant %v", result.Succeeded, tt.ID)
+	}
+	if r := findFailed(result.Failed, tt.ID); r != nil {
+		t.Errorf("Failed unexpectedly contains tenant %v: %+v", tt.ID, r)
+	}
+	if !tableExists(t, env.conn, "tenant_"+slug, "widgets") {
+		t.Error("expected the widgets table to have been created")
+	}
+}
+
+func TestSyncModule_OneTenantFailureIsReportedWithoutBlockingAnother(t *testing.T) {
+	env := newTestEnv(t)
+	goodSlug := uniqueSlug(t)
+	goodTenant := env.activeTenant(t, goodSlug)
+
+	badSlug := uniqueSlug(t)
+	badTenant, err := env.tenantStore.CreateTenant(context.Background(), badSlug, "No Schema Tenant")
+	if err != nil {
+		t.Fatalf("CreateTenant(bad) error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.conn.Exec("DELETE FROM system.module_schema_versions WHERE tenant_id = $1", badTenant.ID)
+		_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE id = $1", badTenant.ID)
+	})
+	if _, err := env.conn.Exec("UPDATE system.tenants SET status = 'active' WHERE id = $1", badTenant.ID); err != nil {
+		t.Fatalf("mark bad tenant active: %v", err)
+	}
+	// Deliberately no tenant_{badSlug} schema created — Diff will fail
+	// against it (InspectSchema against a schema that doesn't exist).
+
+	mod := loadedModule(t, "widgets_"+goodSlug+"_"+badSlug, widgetModel())
+
+	result, err := SyncModule(context.Background(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
+	if err != nil {
+		t.Fatalf("SyncModule() error: %v", err)
+	}
+
+	if !findSucceeded(result.Succeeded, goodTenant.ID) {
+		t.Errorf("Succeeded = %+v, want it to contain the good tenant %v", result.Succeeded, goodTenant.ID)
+	}
+	badResult := findFailed(result.Failed, badTenant.ID)
+	if badResult == nil {
+		t.Fatalf("Failed = %+v, want it to contain the bad tenant %v", result.Failed, badTenant.ID)
+	}
+	if badResult.Err == nil {
+		t.Error("expected the bad tenant's result to carry a non-nil Err")
+	}
+	if !tableExists(t, env.conn, "tenant_"+goodSlug, "widgets") {
+		t.Error("expected the good tenant's widgets table to have been created despite the bad tenant's failure")
+	}
+}
+
+func TestSyncModule_UnknownActiveTenantsErrorSurfaces(t *testing.T) {
+	env := newTestEnv(t)
+	// Close the connection so ActiveTenants itself fails, exercising the
+	// one error path SyncModule actually returns (as opposed to a
+	// per-tenant sync failure, which is reported via SyncModuleResult
+	// instead).
+	_ = env.conn.Close()
+
+	mod := loadedModule(t, "irrelevant", widgetModel())
+	_, err := SyncModule(context.Background(), env.pool, env.diffEngine, env.tenantStore, mod, 0)
+	if err == nil {
+		t.Fatal("expected an error when active tenants can't be enumerated")
+	}
+}
+
 // TestSyncOne_CreatesTable guards SyncOne directly against a tenant
 // SyncAll/ActiveTenants would never see — goerp#149's provisioning
 // workflow needs it for exactly this: a tenant still StatusProvisioning,

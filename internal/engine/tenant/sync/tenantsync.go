@@ -12,6 +12,7 @@ package tenantsync
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -46,21 +47,78 @@ func SyncAll(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 		if mod.Status == module.StatusFailed {
 			continue
 		}
-		syncModule(ctx, pool, diffEngine, tenants, mod, concurrency)
+		syncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency)
 	}
 
 	return nil
 }
 
-func syncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenants []tenant.Tenant, mod *module.LoadedModule, concurrency int) {
+// TenantSyncResult is one tenant's outcome from SyncModule — its Err is
+// nil on success.
+type TenantSyncResult struct {
+	Tenant tenant.Tenant
+	Err    error
+}
+
+// SyncModuleResult aggregates SyncModule's per-tenant outcomes, so a
+// caller that needs to know which specific tenants failed (and why) — not
+// just whether any did — has that without re-deriving it from logs.
+type SyncModuleResult struct {
+	Succeeded []tenant.Tenant
+	Failed    []TenantSyncResult
+}
+
+// SyncModule enumerates active tenants from tenantStore and syncs mod
+// against every one of them, bounded to concurrency concurrent syncs
+// (DefaultConcurrency if <= 0) — the same fan-out SyncAll uses internally
+// for its whole-batch startup sweep, but scoped to one module and
+// returning a SyncModuleResult instead of only logging. A failing
+// tenant's sync is still logged (as SyncAll's is) and never stops or
+// delays another tenant's sync; the difference is purely that the
+// per-tenant outcome is also handed back to the caller, for a caller like
+// module install/upgrade orchestration that must not mark a module READY
+// until it knows exactly which tenants are actually synced.
+func SyncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenantStore *tenant.Store, mod *module.LoadedModule, concurrency int) (SyncModuleResult, error) {
+	tenants, err := tenantStore.ActiveTenants(ctx)
+	if err != nil {
+		return SyncModuleResult{}, fmt.Errorf("enumerate active tenants: %w", err)
+	}
+
+	return syncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency), nil
+}
+
+func syncModuleTenants(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenants []tenant.Tenant, mod *module.LoadedModule, concurrency int) SyncModuleResult {
+	var mu sync.Mutex
+	var result SyncModuleResult
+
 	fanOut(tenants, concurrency, func(t tenant.Tenant) {
-		if err := SyncOne(ctx, pool, diffEngine, t, mod, nil); err != nil {
+		err := SyncOne(ctx, pool, diffEngine, t, mod, nil)
+
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
 			log.Error().Err(err).
 				Str("tenant", t.Slug).
 				Str("module", mod.Manifest.Name).
 				Msg("schema sync failed")
+			result.Failed = append(result.Failed, TenantSyncResult{Tenant: t, Err: err})
+			return
 		}
+		result.Succeeded = append(result.Succeeded, t)
 	})
+
+	// Concurrent completion order is arbitrary — sort both slices by tenant
+	// slug so an otherwise-identical SyncModule call doesn't reshuffle its
+	// result between runs, matching SyncWorker.run's identical
+	// concurrency-vs-determinism handling for SyncResult (job.go).
+	sort.Slice(result.Succeeded, func(i, j int) bool {
+		return result.Succeeded[i].Slug < result.Succeeded[j].Slug
+	})
+	sort.Slice(result.Failed, func(i, j int) bool {
+		return result.Failed[i].Tenant.Slug < result.Failed[j].Tenant.Slug
+	})
+
+	return result
 }
 
 // fanOut runs fn for each item in items with at most concurrency running
