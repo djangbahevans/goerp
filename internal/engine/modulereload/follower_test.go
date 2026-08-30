@@ -3,7 +3,6 @@ package modulereload
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -22,21 +21,16 @@ import (
 // storage.Backend value a test's own Leader already published to — a real
 // follower and the leader that published to it always share the one
 // object-storage backend the whole cluster points at), with a fresh,
-// empty registry unless preloaded overrides it. A distinct
-// *registry.ModuleRegistry from any Leader in the same test simulates a
-// separate instance: the only thing a follower and the leader that
-// triggered it share in real deployment is object storage, the
-// announcement payload, and (through TenantStore/RoleStore) the same
-// Postgres — never an in-memory registry.
-func newFollower(t *testing.T, env *testEnv, backend storage.Backend, preloaded map[string]*module.LoadedModule) (*Follower, *registry.ModuleRegistry) {
+// empty registry. A distinct *registry.ModuleRegistry from any Leader in
+// the same test simulates a separate instance: the only thing a follower
+// and the leader that triggered it share in real deployment is object
+// storage, the announcement payload, and (through TenantStore/RoleStore)
+// the same Postgres — never an in-memory registry.
+func newFollower(t *testing.T, env *testEnv, backend storage.Backend) (*Follower, *registry.ModuleRegistry) {
 	t.Helper()
 
 	reg := &registry.ModuleRegistry{}
-	if preloaded != nil {
-		_, _ = reg.Update(preloaded)
-	} else {
-		_, _ = reg.Update(map[string]*module.LoadedModule{})
-	}
+	_, _ = reg.Update(map[string]*module.LoadedModule{})
 
 	t.Cleanup(func() {
 		snap := reg.Snapshot()
@@ -75,7 +69,7 @@ func TestFollower_Run_AdoptsLeaderPublishedModule(t *testing.T) {
 	}
 	leaderMod := leaderReg.Snapshot().Modules()[name]
 
-	f, followerReg := newFollower(t, env, l.Storage, nil)
+	f, followerReg := newFollower(t, env, l.Storage)
 	if err := f.Run(context.Background(), name, mf.Version, mf.Checksum); err != nil {
 		t.Fatalf("follower Run() error: %v", err)
 	}
@@ -108,7 +102,7 @@ func TestFollower_Run_AdoptsLeaderPublishedModule(t *testing.T) {
 func TestFollower_Run_NilStorageFailsCleanly(t *testing.T) {
 	env := newTestEnv(t)
 
-	f, _ := newFollower(t, env, nil, nil)
+	f, _ := newFollower(t, env, nil)
 
 	err := f.Run(context.Background(), "widgets_anything", "1.0.0", "sha256:doesnotmatter")
 	if err == nil {
@@ -127,7 +121,7 @@ func TestFollower_Run_NilStorageFailsCleanly(t *testing.T) {
 func TestFollower_Run_ChecksumMismatchAbortsBeforePublish(t *testing.T) {
 	env := newTestEnv(t)
 
-	f, reg := newFollower(t, env, nil, nil)
+	f, reg := newFollower(t, env, nil)
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
 	backend, err := storage.New("local")
 	if err != nil {
@@ -136,32 +130,20 @@ func TestFollower_Run_ChecksumMismatchAbortsBeforePublish(t *testing.T) {
 	f.Storage = backend
 
 	name := "widgets_" + uniqueSlug(t)
-	wasmBytes := compileFixture(t, "")
-	// A checksum that doesn't match wasmBytes — simulating a corrupted or
-	// tampered download.
-	mf := map[string]any{
-		"name":         name,
-		"display_name": name,
-		"type":         "domain",
-		"version":      "1.0.0",
-		"description":  "a hot reload follower test module",
-		"abi_version":  "1",
-		"engine":       ">=0.5.0 <1.0.0",
-		"depends_on":   []string{},
-		"capabilities": []string{"db.read", "db.write"},
-		"schema":       map[string]any{"owned_models": []string{"widgets.widget"}},
-		"checksum":     "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-	}
-	manifestBytes, err := json.Marshal(mf)
-	if err != nil {
-		t.Fatalf("marshal manifest: %v", err)
-	}
+	// A checksum that doesn't match the wasm bytes — simulating a
+	// corrupted or tampered download. buildSource's own extra parameter
+	// exists precisely to override one field like this while keeping the
+	// rest of the manifest in sync with the schema every other test in
+	// this package already builds against.
+	src, _ := buildSource(t, name, "1.0.0", compileFixture(t, ""), map[string]any{
+		"checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+	})
 
 	objectKey := "corrupt-" + name
-	if _, err := backend.Upload(context.Background(), objectKey, bytes.NewReader(wasmBytes), storage.UploadOptions{ContentType: "application/wasm"}); err != nil {
+	if _, err := backend.Upload(context.Background(), objectKey, bytes.NewReader(src.WasmBytes), storage.UploadOptions{ContentType: "application/wasm"}); err != nil {
 		t.Fatalf("upload binary: %v", err)
 	}
-	if _, err := backend.Upload(context.Background(), objectKey+".manifest.json", bytes.NewReader(manifestBytes), storage.UploadOptions{ContentType: "application/json"}); err != nil {
+	if _, err := backend.Upload(context.Background(), objectKey+".manifest.json", bytes.NewReader(src.ManifestBytes), storage.UploadOptions{ContentType: "application/json"}); err != nil {
 		t.Fatalf("upload manifest: %v", err)
 	}
 
@@ -185,7 +167,7 @@ func TestFollower_Run_ChecksumMismatchAbortsBeforePublish(t *testing.T) {
 func TestFollower_Run_ReservationReleasedOnFailure(t *testing.T) {
 	env := newTestEnv(t)
 
-	f, reg := newFollower(t, env, nil, nil)
+	f, reg := newFollower(t, env, nil)
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
 	backend, err := storage.New("local")
 	if err != nil {
@@ -216,7 +198,7 @@ func TestFollower_Run_UpgradeDrainsOldPoolWithoutMutatingStatus(t *testing.T) {
 
 	name := "widgets_" + slug
 	l, _ := newLeader(t, env, nil)
-	f, followerReg := newFollower(t, env, l.Storage, nil)
+	f, followerReg := newFollower(t, env, l.Storage)
 
 	src1, mf1 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
 	if err := l.Run(context.Background(), name, src1, mf1); err != nil {
@@ -275,7 +257,7 @@ func TestFollower_Run_ConcurrentSameModuleFollows_OneSucceedsOneRejected(t *test
 		t.Fatalf("leader Run() error: %v", err)
 	}
 
-	f, followerReg := newFollower(t, env, l.Storage, nil)
+	f, followerReg := newFollower(t, env, l.Storage)
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)

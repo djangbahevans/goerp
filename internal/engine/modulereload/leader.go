@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"sync"
 	"time"
 
@@ -86,7 +85,7 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		return fmt.Errorf("object storage unavailable")
 	}
 
-	release, err := l.reserve(moduleName)
+	release, err := reserveModule(l.Registry, moduleName)
 	if err != nil {
 		return err
 	}
@@ -132,7 +131,7 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		return fmt.Errorf("publish manifest to object storage: %w", err)
 	}
 
-	oldMod := l.currentModules()[moduleName]
+	oldMod := currentModules(l.Registry)[moduleName]
 
 	tenants, err := l.TenantStore.ActiveTenants(ctx)
 	if err != nil {
@@ -181,7 +180,7 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	// overlap (matches moduleinstall.Worker.run's identical ordering).
 	releaseOnce()
 
-	committed, publishErr := l.publish(ctx, mod)
+	committed, publishErr := publishModule(ctx, l.Registry, l.RolePerms, l.TenantStore, l.RoleStore, mod)
 	published = committed // even a failed publish may have already committed mod to the registry (see publish's own doc comment) — never close a pool the registry now points to
 	if !committed {
 		return publishErr
@@ -316,71 +315,4 @@ func (l *Leader) checkTenantDowngrade(ctx context.Context, t tenant.Tenant, curr
 		return false, nil, fmt.Errorf("downgrade pre-check: %w", err)
 	}
 	return status == schema.DowngradeStatusBlocked, incompatibilities, nil
-}
-
-func (l *Leader) currentModules() map[string]*module.LoadedModule {
-	snap := l.Registry.Snapshot()
-	if snap == nil {
-		return nil
-	}
-	return snap.Modules()
-}
-
-// reserve claims name for a reload in progress via the registry's own
-// shared Reserve, so a second concurrent local trigger for the same
-// module — or a concurrent install of it (moduleinstall.Worker shares this
-// exact same call, against this exact same *registry.ModuleRegistry) —
-// fails immediately instead of running its own compile/downgrade-check/
-// sync only to publish second. See errReloadInProgress's own doc comment
-// for why this is purely advisory.
-func (l *Leader) reserve(name string) (release func(), err error) {
-	release, err = l.Registry.Reserve(name)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %q", errReloadInProgress, name)
-	}
-	return release, nil
-}
-
-// publish merges mod into the registry's current module map and rebuilds
-// the permission cache that has to stay in lockstep with it — identical
-// shape to moduleinstall.Worker.publish, just never rejecting an "already
-// loaded" name the way that one does, since replacing an already-loaded
-// module's entry is the entire point of a reload. Holds Registry.Lock
-// across both UpdateWithLocked and RebuildAll, the same reason
-// Worker.publish does (see its own doc comment): moduleinstall.Worker.publish
-// holds this exact same shared lock, so an install and a reload publishing
-// concurrently can't have their two RebuildAll calls interleave and let
-// whichever's slower DB queries finish last silently overwrite the other's
-// more current permission cache, regardless of which one actually
-// published last.
-//
-// committed reports whether Registry.UpdateWithLocked itself succeeded,
-// independent of err: a RebuildAll failure after a successful UpdateWithLocked
-// still returns committed=true, because mod is already live and reachable
-// through the registry snapshot at that point — Run's own cleanup defer
-// must not close mod's pool out from under a module the registry now
-// routes traffic to, even though this call is still reporting an error (a
-// stale permission cache, real but a lesser problem than closing a live
-// module's pool).
-func (l *Leader) publish(ctx context.Context, mod *module.LoadedModule) (committed bool, err error) {
-	l.Registry.Lock()
-	defer l.Registry.Unlock()
-
-	newSnap, err := l.Registry.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
-		merged := maps.Clone(current)
-		if merged == nil {
-			merged = make(map[string]*module.LoadedModule, 1)
-		}
-		merged[mod.Manifest.Name] = mod
-		return merged, nil
-	})
-	if err != nil {
-		return false, fmt.Errorf("publish module registry: %w", err)
-	}
-
-	if err := l.RolePerms.RebuildAll(ctx, l.TenantStore, l.RoleStore, newSnap.PermissionRegistry()); err != nil {
-		return true, fmt.Errorf("rebuild role permission map: %w", err)
-	}
-
-	return true, nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"maps"
 	"sync"
 	"time"
 
@@ -57,20 +56,16 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		return fmt.Errorf("object storage unavailable")
 	}
 
-	release, err := f.reserve(moduleName)
+	release, err := reserveModule(f.Registry, moduleName)
 	if err != nil {
 		return err
 	}
 	releaseOnce := sync.OnceFunc(release)
 	defer releaseOnce()
 
-	wasmBytes, err := f.download(ctx, objectKey)
+	wasmBytes, manifestBytes, err := f.downloadBoth(ctx, objectKey)
 	if err != nil {
-		return fmt.Errorf("download published binary: %w", err)
-	}
-	manifestBytes, err := f.download(ctx, objectKey+".manifest.json")
-	if err != nil {
-		return fmt.Errorf("download published manifest: %w", err)
+		return err
 	}
 
 	// loader.LoadModule re-verifies the checksum against manifestBytes'
@@ -102,21 +97,33 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		}
 	}()
 
-	oldMod := f.currentModules()[moduleName]
+	// objectKey is content-addressed (Leader.Run's own objectKey :=
+	// m.Checksum), not version-addressed: a metadata-only republish with
+	// byte-identical wasm overwrites the manifest at this exact key in
+	// place. A follower still processing an older, delayed announcement
+	// for this same objectKey could otherwise silently adopt whatever
+	// version is live at that key right now instead of the one it was
+	// actually told to adopt — checked here, before publish, so a stale
+	// announcement fails loudly instead of mis-registering a version.
+	if mod.Manifest.Version != version {
+		return fmt.Errorf("downloaded manifest version %q does not match announced version %q for object %q", mod.Manifest.Version, version, objectKey)
+	}
+
+	oldMod := currentModules(f.Registry)[moduleName]
 	mod.Status = module.StatusReady
 
 	// The reservation's job is done; release it before publish acquires
 	// its own narrower lock, matching Leader.Run's identical ordering.
 	releaseOnce()
 
-	committed, publishErr := f.publish(ctx, mod)
+	committed, publishErr := publishModule(ctx, f.Registry, f.RolePerms, f.TenantStore, f.RoleStore, mod)
 	published = committed
 	if !committed {
 		return publishErr
 	}
 	if publishErr != nil {
 		// mod is live and reachable through the registry snapshot despite
-		// publishErr — see Leader.publish's own doc comment for why
+		// publishErr — see publishModule's own doc comment for why
 		// everything below still runs regardless.
 		log.Error().Err(publishErr).Str("module", moduleName).
 			Msg("hot reload (follower): module published but permission cache rebuild failed")
@@ -148,68 +155,59 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 	return nil
 }
 
-// download reads key fully into memory from f.Storage — both the
-// leader-published binary and its sibling manifest are small enough
-// (manifest.Load itself caps a manifest at 1MB) that streaming isn't
-// worth the complexity loader.Source's own []byte fields would need
-// undone anyway.
+// downloadBoth fetches the wasm binary and its sibling manifest
+// concurrently — neither depends on the other's result, and both are only
+// consumed together afterward at loader.LoadModule, so fetching them
+// serially would pay a second full object-storage round trip for no
+// reason, needlessly extending how long Run's own registry reservation
+// stays held.
+func (f *Follower) downloadBoth(ctx context.Context, objectKey string) (wasmBytes, manifestBytes []byte, err error) {
+	var wg sync.WaitGroup
+	var wasmErr, manifestErr error
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		wasmBytes, wasmErr = f.download(ctx, objectKey)
+	}()
+	go func() {
+		defer wg.Done()
+		manifestBytes, manifestErr = f.download(ctx, objectKey+".manifest.json")
+	}()
+	wg.Wait()
+
+	if wasmErr != nil {
+		return nil, nil, fmt.Errorf("download published binary: %w", wasmErr)
+	}
+	if manifestErr != nil {
+		return nil, nil, fmt.Errorf("download published manifest: %w", manifestErr)
+	}
+	return wasmBytes, manifestBytes, nil
+}
+
+// download reads key fully into memory from f.Storage, bounded by the
+// size the backend itself already reports (e.g. Content-Length) rather
+// than an unbounded io.ReadAll — hot reload fans this call out to every
+// follower instance in the cluster at once off one announcement, so an
+// unexpectedly large or corrupted object at key would otherwise get
+// buffered fully in memory on every follower simultaneously. The
+// LimitReader cap is size+1, not size: reading one byte past the
+// backend's own reported length is how a stream that's actually longer
+// than what the backend claimed gets caught below, instead of silently
+// truncating it to a technically-valid-looking result.
 func (f *Follower) download(ctx context.Context, key string) ([]byte, error) {
-	rc, _, err := f.Storage.Download(ctx, key)
+	rc, size, err := f.Storage.Download(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
-	return io.ReadAll(rc)
-}
 
-func (f *Follower) currentModules() map[string]*module.LoadedModule {
-	snap := f.Registry.Snapshot()
-	if snap == nil {
-		return nil
-	}
-	return snap.Modules()
-}
-
-// reserve claims name for a follower run in progress via the registry's
-// own shared Reserve — the same cross-writer-kind reservation
-// moduleinstall.Worker and Leader already go through, so a follower
-// attempt can't race a concurrent leader/install/follower run for the
-// same module name on this instance. See errReloadInProgress's own doc
-// comment (leader.go) for why this is purely advisory.
-func (f *Follower) reserve(name string) (release func(), err error) {
-	release, err = f.Registry.Reserve(name)
+	data, err := io.ReadAll(io.LimitReader(rc, size+1))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %q", errReloadInProgress, name)
+		return nil, err
 	}
-	return release, nil
-}
-
-// publish merges mod into the registry's current module map and rebuilds
-// the permission cache that has to stay in lockstep with it — identical
-// shape and identical locking rationale to Leader.publish (see its own
-// doc comment): the two share the same *registry.ModuleRegistry lock, so
-// a leader publishing one module and a follower publishing another can't
-// have their RebuildAll calls interleave and silently overwrite one
-// another's more current permission cache.
-func (f *Follower) publish(ctx context.Context, mod *module.LoadedModule) (committed bool, err error) {
-	f.Registry.Lock()
-	defer f.Registry.Unlock()
-
-	newSnap, err := f.Registry.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
-		merged := maps.Clone(current)
-		if merged == nil {
-			merged = make(map[string]*module.LoadedModule, 1)
-		}
-		merged[mod.Manifest.Name] = mod
-		return merged, nil
-	})
-	if err != nil {
-		return false, fmt.Errorf("publish module registry: %w", err)
+	if int64(len(data)) != size {
+		return nil, fmt.Errorf("read %d bytes, storage backend reported %d", len(data), size)
 	}
-
-	if err := f.RolePerms.RebuildAll(ctx, f.TenantStore, f.RoleStore, newSnap.PermissionRegistry()); err != nil {
-		return true, fmt.Errorf("rebuild role permission map: %w", err)
-	}
-
-	return true, nil
+	return data, nil
 }
