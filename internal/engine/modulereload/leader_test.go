@@ -33,6 +33,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/google/uuid"
 )
 
 // localPostgresDSN matches internal/engine/moduleinstall's own test
@@ -198,9 +199,19 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	return *tt
 }
 
+// uniqueSlug is a UUID-derived slug, not a raw time.Now().UnixNano() one —
+// this package's own tests and internal/engine/moduleinstall's run as
+// separate concurrent processes against the same shared dev Postgres
+// (review-goerp's own documented convention), and a nanosecond timestamp
+// can collide across processes under heavy scheduling contention. Only the
+// first 12 hex characters — see moduleinstall's own uniqueSlug for why
+// (some callers there concatenate two slugs into one manifest Name, capped
+// at 64 characters) — this package doesn't need that budget itself, but
+// matching the same short form keeps the two packages' test output
+// directly comparable.
 func uniqueSlug(t *testing.T) string {
 	t.Helper()
-	return fmt.Sprintf("s%d", time.Now().UnixNano())
+	return "s" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 }
 
 func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
@@ -253,6 +264,29 @@ func newLeader(t *testing.T, env *testEnv, preloaded map[string]*module.LoadedMo
 		t.Fatalf("cache.New: %v", err)
 	}
 	t.Cleanup(func() { _ = cacheClient.Close() })
+
+	// Drains and closes every module still live in reg at test end, before
+	// newTestEnv's own t.Cleanup closes the shared env.rt (t.Cleanup runs
+	// LIFO, and every test calls newTestEnv before newLeader, so this
+	// always fires first). A test that calls Run more than once — most of
+	// this file's own sequential-reload tests — otherwise leaves the final
+	// reload's own pool live and un-drained: its replenishLoop goroutine
+	// can still be mid-InstantiateModule when env.rt.Close() runs, a real
+	// data race under -race (caught reproducing goerp#467's own CI
+	// failure). Run's own async drain of a *superseded* pool (the one a
+	// later reload replaced) is a separate, harder-to-observe race this
+	// doesn't close — see the old-pool assertions below for how those
+	// tests wait for it instead.
+	t.Cleanup(func() {
+		snap := reg.Snapshot()
+		if snap == nil {
+			return
+		}
+		for _, m := range snap.Modules() {
+			m.Pool.DrainAndClose(context.Background(), 5*time.Second)
+			_ = m.CompiledModule.Close(context.Background())
+		}
+	})
 
 	return &Leader{
 		Runtime:     env.rt,
@@ -354,7 +388,15 @@ func TestLeader_Run_UpgradeSyncsNewColumnAndDrainsOldPool(t *testing.T) {
 
 	// The old pool is drained asynchronously (Run's own doc comment) — poll
 	// briefly for Borrow to start reporting ErrPoolDraining rather than
-	// asserting immediately.
+	// asserting immediately. draining is set synchronously at the very top
+	// of DrainAndClose, before any of its own work — Borrow reporting it
+	// only proves that goroutine has started, not that its (fast, in-memory
+	// only) close work has finished, so the short grace sleep afterward
+	// gives it room to actually finish before this test function returns
+	// and env.rt.Close() (via newTestEnv's own t.Cleanup) runs — same class
+	// of race newLeader's own cleanup closes for the *final* pool, just
+	// with no exported "fully closed" signal to poll for this superseded
+	// one instead.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		_, err := oldMod.Pool.Borrow(context.Background())
@@ -366,6 +408,7 @@ func TestLeader_Run_UpgradeSyncsNewColumnAndDrainsOldPool(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	time.Sleep(250 * time.Millisecond)
 }
 
 func TestLeader_Run_DowngradeWithIncompatibleColumnBlocked(t *testing.T) {

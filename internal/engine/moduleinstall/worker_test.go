@@ -29,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/google/uuid"
 )
 
 // localPostgresDSN matches internal/engine/tenant/sync's own test
@@ -206,9 +207,20 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	return *tt
 }
 
+// uniqueSlug is a UUID-derived slug, not a raw time.Now().UnixNano() one —
+// this package's own tests and internal/engine/modulereload's run as
+// separate concurrent processes against the same shared dev Postgres
+// (review-goerp's own documented convention), and a nanosecond timestamp
+// has a real, if narrow, chance of colliding across processes under heavy
+// scheduling contention. Only the first 12 hex characters (48 bits —
+// collision probability is low enough to treat as never, even across many
+// concurrent processes' worth of slugs): some callers build a module name
+// out of two concatenated slugs (module + tenant), and manifest.Manifest's
+// own Name validation caps at 64 characters — a full UUID would blow that
+// budget.
 func uniqueSlug(t *testing.T) string {
 	t.Helper()
-	return fmt.Sprintf("s%d", time.Now().UnixNano())
+	return "s" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 }
 
 func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
@@ -226,13 +238,41 @@ func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
 
 // newWorker builds a Worker wired against env, with a fresh, empty
 // registry unless preloaded overrides it.
-func newWorker(env *testEnv, preloaded map[string]*module.LoadedModule) (*Worker, *registry.ModuleRegistry) {
+func newWorker(t *testing.T, env *testEnv, preloaded map[string]*module.LoadedModule) (*Worker, *registry.ModuleRegistry) {
+	t.Helper()
+
 	reg := &registry.ModuleRegistry{}
 	if preloaded != nil {
 		_, _ = reg.Update(preloaded)
 	} else {
 		_, _ = reg.Update(map[string]*module.LoadedModule{})
 	}
+
+	// Drains and closes every module still live in reg at test end, before
+	// newTestEnv's own t.Cleanup closes the shared env.rt (t.Cleanup runs
+	// LIFO, and every test calls newTestEnv before newWorker, so this
+	// always fires first). A test that installs more than one module —
+	// several of this file's own tests, including the concurrent-install
+	// ones — otherwise leaves at least one live pool un-drained: its
+	// replenishLoop goroutine can still be mid-InstantiateModule when
+	// env.rt.Close() runs, a real data race under -race (caught
+	// reproducing goerp#467's own CI failure, on
+	// TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync).
+	t.Cleanup(func() {
+		snap := reg.Snapshot()
+		if snap == nil {
+			return
+		}
+		for _, m := range snap.Modules() {
+			if m.Pool == nil {
+				continue
+			}
+			m.Pool.DrainAndClose(context.Background(), 5*time.Second)
+			if m.CompiledModule != nil {
+				_ = m.CompiledModule.Close(context.Background())
+			}
+		}
+	})
 
 	return &Worker{
 		Runtime:     env.rt,
@@ -266,7 +306,7 @@ func TestWorker_Run_FreshInstallSucceeds(t *testing.T) {
 	pkg := buildPackage(t, name, wasmBytes, nil)
 	path := writeTempPackage(t, pkg)
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 	result, err := w.run(context.Background(), Args{PackagePath: path})
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
@@ -320,7 +360,7 @@ func TestWorker_Run_AlreadyLoadedModuleRejected(t *testing.T) {
 		Status:   module.StatusReady,
 		Manifest: manifest.Manifest{Name: name, Version: "0.9.0"},
 	}
-	w, _ := newWorker(env, map[string]*module.LoadedModule{name: existing})
+	w, _ := newWorker(t, env, map[string]*module.LoadedModule{name: existing})
 
 	wasmBytes := compileFixture(t)
 	pkg := buildPackage(t, name, wasmBytes, nil)
@@ -359,7 +399,7 @@ func TestWorker_Run_PartialTenantFailureStillReachesReady(t *testing.T) {
 	pkg := buildPackage(t, name, wasmBytes, nil)
 	path := writeTempPackage(t, pkg)
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 	result, err := w.run(context.Background(), Args{PackagePath: path})
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
@@ -412,7 +452,7 @@ func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), nil))
 	pathB := writeTempPackage(t, buildPackage(t, nameB, compileFixtureVariant(t, "b_"+slug), nil))
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -465,7 +505,7 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 	baselineName := "widgets_baseline_" + slug
 	baselinePath := writeTempPackage(t, buildPackage(t, baselineName, compileFixtureVariant(t, "baseline_"+slug), nil))
 
-	w, _ := newWorker(env, nil)
+	w, _ := newWorker(t, env, nil)
 
 	baselineStart := time.Now()
 	if _, err := w.run(context.Background(), Args{PackagePath: baselinePath}); err != nil {
@@ -535,7 +575,7 @@ func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing
 	path1 := writeTempPackage(t, buildPackage(t, name, wasmBytes, nil))
 	path2 := writeTempPackage(t, buildPackage(t, name, wasmBytes, nil))
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
@@ -603,7 +643,7 @@ func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) 
 	})
 	path := writeTempPackage(t, pkg)
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 	_, err := w.run(context.Background(), Args{PackagePath: path})
 	if err == nil {
 		t.Fatal("expected an error from an unresolvable event subscription")
@@ -641,7 +681,7 @@ func TestWorker_Run_AlreadyLoadedRejection_DoesNotRemovePackageFile(t *testing.T
 		Status:   module.StatusReady,
 		Manifest: manifest.Manifest{Name: name, Version: "0.9.0"},
 	}
-	w, _ := newWorker(env, map[string]*module.LoadedModule{name: existing})
+	w, _ := newWorker(t, env, map[string]*module.LoadedModule{name: existing})
 
 	wasmBytes := compileFixture(t)
 	pkg := buildPackage(t, name, wasmBytes, nil)
@@ -667,7 +707,7 @@ func TestWorker_Run_AlreadyLoadedRejection_DoesNotRemovePackageFile(t *testing.T
 // snapshot now actually points to.
 func TestWorker_Publish_RegistryUpdateSucceedsDespiteRebuildAllFailure(t *testing.T) {
 	env := newTestEnv(t)
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 
 	// Closing the connection makes RolePerms.RebuildAll's own
 	// ActiveTenants call fail without touching Registry.Update at all —
@@ -707,7 +747,7 @@ func TestWorker_Run_InstallInProgressRejection_RemovesPackageFile(t *testing.T) 
 	slug := uniqueSlug(t)
 
 	name := "widgets_" + slug
-	w, _ := newWorker(env, nil)
+	w, _ := newWorker(t, env, nil)
 
 	release, err := w.reserve(name)
 	if err != nil {
