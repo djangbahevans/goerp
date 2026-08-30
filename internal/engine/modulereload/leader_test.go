@@ -295,6 +295,33 @@ func TestLeader_Run_FreshReloadSucceeds(t *testing.T) {
 	}
 }
 
+// TestLeader_Run_NilStorageFailsCleanly guards against the recurring
+// nil-panic pattern this codebase has already hit three times for other
+// warn-only-constructed dependencies (replica Postgres, Meilisearch,
+// object storage — engine-internals.md §2): Storage is the same possibly-
+// nil storage.Backend Engine.New leaves nil after a warn-only object
+// storage connect failure, so Run must fail with a clear error rather than
+// a nil-pointer panic when it's unset.
+func TestLeader_Run_NilStorageFailsCleanly(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	env.activeTenant(t, slug)
+
+	name := "widgets_" + slug
+	src, mf := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
+
+	l, _ := newLeader(t, env, nil)
+	l.Storage = nil
+
+	err := l.Run(context.Background(), name, src, mf)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if err.Error() != "object storage unavailable" {
+		t.Errorf("error = %q, want %q", err.Error(), "object storage unavailable")
+	}
+}
+
 func TestLeader_Run_UpgradeSyncsNewColumnAndDrainsOldPool(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)

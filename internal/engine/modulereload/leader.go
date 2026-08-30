@@ -94,6 +94,19 @@ type Leader struct {
 // trigger sources on this same instance racing for the same module (e.g.
 // two different versions of it) at once.
 func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, m manifest.Manifest) error {
+	// Object storage is warn-only at Engine startup (engine-internals.md
+	// §2) — a connectivity failure there logs and continues rather than
+	// failing New, so l.Storage (the same possibly-nil storage.Backend)
+	// can reach here nil even on an otherwise healthy engine. Checked
+	// before reserve/LoadModule, the same way workflowworker.spawn checks
+	// its own storage dependency, so a reload with no object storage fails
+	// fast with a clear error instead of a nil-pointer panic partway
+	// through — and never wastes a compile/downgrade-check/sync run on
+	// something object storage's own absence dooms regardless.
+	if l.Storage == nil {
+		return fmt.Errorf("object storage unavailable")
+	}
+
 	release, err := l.reserve(moduleName)
 	if err != nil {
 		return err
