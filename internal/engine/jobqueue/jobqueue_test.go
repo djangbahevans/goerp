@@ -131,13 +131,23 @@ func testConfig() *config.Config {
 	}
 }
 
+// startedClient uses NewIsolated, not New: this package's own tests and
+// every other package's River-backed tests (adminapi, tenant/sync, ...)
+// run as separate concurrent processes against the same shared dev
+// Postgres, all registering New's fixed, package-level queue names
+// (QueueDefault, QueueBulk, ...) — with no per-process scoping beyond
+// that, any one of them can poll and claim a job another one enqueued.
+// waitForCompletion's own polling-by-ID doesn't save this: a wrong
+// client's Workers doesn't know the claimed job's kind, logs "Unhandled
+// job kind", and leaves it permanently retryable, not completed. See
+// NewIsolated's own doc comment.
 func startedClient(t *testing.T, workers *river.Workers) *river.Client[pgx.Tx] {
 	t.Helper()
 	pool := testPool(t)
 
-	client, err := New(pool, testConfig(), workers)
+	client, err := NewIsolated(context.Background(), t, pool, testConfig(), workers)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("NewIsolated: %v", err)
 	}
 
 	ctx := context.Background()
