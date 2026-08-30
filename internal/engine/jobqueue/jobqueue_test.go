@@ -1,4 +1,4 @@
-package jobqueue
+package jobqueue_test
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue/jobqueuetest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -54,7 +56,7 @@ func TestMigrate_ConcurrentCallersDoNotRace(t *testing.T) {
 	errs := make(chan error, callers)
 	for range callers {
 		wg.Go(func() {
-			errs <- Migrate(ctx, pool)
+			errs <- jobqueue.Migrate(ctx, pool)
 		})
 	}
 	wg.Wait()
@@ -62,7 +64,7 @@ func TestMigrate_ConcurrentCallersDoNotRace(t *testing.T) {
 
 	for err := range errs {
 		if err != nil {
-			t.Errorf("concurrent Migrate() error: %v", err)
+			t.Errorf("concurrent jobqueue.Migrate() error: %v", err)
 		}
 	}
 }
@@ -96,8 +98,8 @@ func TestMigrate_SingleConnectionPoolDoesNotDeadlock(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	if err := Migrate(ctx, pool); err != nil {
-		t.Fatalf("Migrate() with a single-connection pool: %v", err)
+	if err := jobqueue.Migrate(ctx, pool); err != nil {
+		t.Fatalf("jobqueue.Migrate() with a single-connection pool: %v", err)
 	}
 }
 
@@ -114,7 +116,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 
-	if err := Migrate(ctx, pool); err != nil {
+	if err := jobqueue.Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
@@ -131,23 +133,23 @@ func testConfig() *config.Config {
 	}
 }
 
-// startedClient uses NewIsolated, not New: this package's own tests and
-// every other package's River-backed tests (adminapi, tenant/sync, ...)
-// run as separate concurrent processes against the same shared dev
+// startedClient uses jobqueuetest.New, not New: this package's own tests
+// and every other package's River-backed tests (adminapi, tenant/sync,
+// ...) run as separate concurrent processes against the same shared dev
 // Postgres, all registering New's fixed, package-level queue names
-// (QueueDefault, QueueBulk, ...) — with no per-process scoping beyond
+// (jobqueue.QueueDefault, jobqueue.QueueBulk, ...) — with no per-process scoping beyond
 // that, any one of them can poll and claim a job another one enqueued.
 // waitForCompletion's own polling-by-ID doesn't save this: a wrong
 // client's Workers doesn't know the claimed job's kind, logs "Unhandled
 // job kind", and leaves it permanently retryable, not completed. See
-// NewIsolated's own doc comment.
+// jobqueuetest.New's own doc comment.
 func startedClient(t *testing.T, workers *river.Workers) *river.Client[pgx.Tx] {
 	t.Helper()
 	pool := testPool(t)
 
-	client, err := NewIsolated(context.Background(), t, pool, testConfig(), workers)
+	client, err := jobqueuetest.New(context.Background(), t, pool, testConfig(), workers)
 	if err != nil {
-		t.Fatalf("NewIsolated: %v", err)
+		t.Fatalf("jobqueuetest.New: %v", err)
 	}
 
 	ctx := context.Background()
@@ -190,13 +192,13 @@ func waitForCompletion(t *testing.T, client *river.Client[pgx.Tx], jobID int64, 
 
 func TestProbeJob_DispatchableEndToEnd(t *testing.T) {
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &ProbeWorker{})
+	river.AddWorker(workers, &jobqueue.ProbeWorker{})
 	client := startedClient(t, workers)
 
-	row, err := client.Insert(context.Background(), ProbeArgs{
+	row, err := client.Insert(context.Background(), jobqueue.ProbeArgs{
 		IdempotencyKey: newIdempotencyKey(t),
 		Message:        "hello from a test",
-	}, &river.InsertOpts{Queue: QueueDefault})
+	}, &river.InsertOpts{Queue: jobqueue.QueueDefault})
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -206,12 +208,12 @@ func TestProbeJob_DispatchableEndToEnd(t *testing.T) {
 
 func TestNew_RoutesAllFiveQueues(t *testing.T) {
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &ProbeWorker{})
+	river.AddWorker(workers, &jobqueue.ProbeWorker{})
 	client := startedClient(t, workers)
 
 	ctx := context.Background()
-	for _, queue := range []string{QueueCritical, QueueDefault, QueueBulk, QueueSearch, QueueEmail} {
-		row, err := client.Insert(ctx, ProbeArgs{
+	for _, queue := range []string{jobqueue.QueueCritical, jobqueue.QueueDefault, jobqueue.QueueBulk, jobqueue.QueueSearch, jobqueue.QueueEmail} {
+		row, err := client.Insert(ctx, jobqueue.ProbeArgs{
 			IdempotencyKey: newIdempotencyKey(t),
 			Message:        "queue routing check",
 		}, &river.InsertOpts{Queue: queue})
@@ -224,13 +226,13 @@ func TestNew_RoutesAllFiveQueues(t *testing.T) {
 
 func TestProbeJob_DuplicateIdempotencyKeyIsNoOp(t *testing.T) {
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &ProbeWorker{})
+	river.AddWorker(workers, &jobqueue.ProbeWorker{})
 	client := startedClient(t, workers)
 
 	key := newIdempotencyKey(t)
-	args := ProbeArgs{IdempotencyKey: key, Message: "first"}
+	args := jobqueue.ProbeArgs{IdempotencyKey: key, Message: "first"}
 
-	first, err := client.Insert(context.Background(), args, &river.InsertOpts{Queue: QueueBulk})
+	first, err := client.Insert(context.Background(), args, &river.InsertOpts{Queue: jobqueue.QueueBulk})
 	if err != nil {
 		t.Fatalf("first Insert: %v", err)
 	}
@@ -238,7 +240,7 @@ func TestProbeJob_DuplicateIdempotencyKeyIsNoOp(t *testing.T) {
 		t.Fatal("first insert unexpectedly reported as a duplicate")
 	}
 
-	second, err := client.Insert(context.Background(), ProbeArgs{IdempotencyKey: key, Message: "second"}, &river.InsertOpts{Queue: QueueBulk})
+	second, err := client.Insert(context.Background(), jobqueue.ProbeArgs{IdempotencyKey: key, Message: "second"}, &river.InsertOpts{Queue: jobqueue.QueueBulk})
 	if err != nil {
 		t.Fatalf("second Insert: %v", err)
 	}
@@ -255,13 +257,13 @@ func TestProbeJob_DuplicateIdempotencyKeyIsNoOp(t *testing.T) {
 // concurrencyWorker blocks until release is closed, and records how many
 // concurrent Work calls were in flight at once.
 type concurrencyWorker struct {
-	river.WorkerDefaults[ProbeArgs]
+	river.WorkerDefaults[jobqueue.ProbeArgs]
 	inFlight atomic.Int32
 	maxSeen  atomic.Int32
 	release  chan struct{}
 }
 
-func (w *concurrencyWorker) Work(ctx context.Context, job *river.Job[ProbeArgs]) error {
+func (w *concurrencyWorker) Work(ctx context.Context, job *river.Job[jobqueue.ProbeArgs]) error {
 	n := w.inFlight.Add(1)
 	defer w.inFlight.Add(-1)
 
@@ -286,7 +288,7 @@ func TestQueue_EnforcesPerQueueConcurrencyLimit(t *testing.T) {
 	cfg := testConfig()
 	cfg.QueueBulkConcurrency = 2 // deliberately small and distinct from the job count below
 
-	client, err := New(pool, cfg, workers)
+	client, err := jobqueue.New(pool, cfg, workers)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -303,10 +305,10 @@ func TestQueue_EnforcesPerQueueConcurrencyLimit(t *testing.T) {
 	const jobCount = 5
 	jobIDs := make([]int64, jobCount)
 	for i := range jobCount {
-		row, err := client.Insert(ctx, ProbeArgs{
+		row, err := client.Insert(ctx, jobqueue.ProbeArgs{
 			IdempotencyKey: newIdempotencyKey(t),
 			Message:        fmt.Sprintf("job %d", i),
-		}, &river.InsertOpts{Queue: QueueBulk})
+		}, &river.InsertOpts{Queue: jobqueue.QueueBulk})
 		if err != nil {
 			t.Fatalf("Insert %d: %v", i, err)
 		}

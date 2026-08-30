@@ -130,6 +130,41 @@ func loadedModule(t *testing.T, name string, decls ...model.ModelDeclaration) *m
 	}
 }
 
+// moduleSyncRecorded reports whether system.module_schema_versions has a
+// row for (tenantID, moduleName) — keyed narrowly enough on this test's
+// own uniquely-named module that, unlike tableExists, it can't be tripped
+// by an unrelated concurrent test's own sync.
+func moduleSyncRecorded(t *testing.T, conn *sql.DB, tenantID, moduleName string) bool {
+	t.Helper()
+	var exists bool
+	err := conn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2)",
+		tenantID, moduleName,
+	).Scan(&exists)
+	if err != nil {
+		t.Fatalf("moduleSyncRecorded query: %v", err)
+	}
+	return exists
+}
+
+// moduleSyncedAt returns the schema_synced_at column of the
+// system.module_schema_versions row for (tenantID, moduleName), which
+// RecordSyncSuccess only touches on an actual sync — see session.go's own
+// NeedsSync/RecordSyncSuccess doc comments. Fails the test if no such row
+// exists yet.
+func moduleSyncedAt(t *testing.T, conn *sql.DB, tenantID, moduleName string) time.Time {
+	t.Helper()
+	var syncedAt time.Time
+	err := conn.QueryRow(
+		"SELECT schema_synced_at FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2",
+		tenantID, moduleName,
+	).Scan(&syncedAt)
+	if err != nil {
+		t.Fatalf("moduleSyncedAt query: %v", err)
+	}
+	return syncedAt
+}
+
 func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
 	t.Helper()
 	var exists bool
@@ -177,7 +212,7 @@ func TestSyncAll_CreatesTableAndRecordsSuccess(t *testing.T) {
 func TestSyncAll_SkipsAlreadySyncedVersion(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
-	env.activeTenant(t, slug)
+	tt := env.activeTenant(t, slug)
 
 	mod := loadedModule(t, "widgets_"+slug, widgetModel())
 
@@ -187,10 +222,19 @@ func TestSyncAll_SkipsAlreadySyncedVersion(t *testing.T) {
 	if !tableExists(t, env.conn, "tenant_"+slug, "widgets") {
 		t.Fatal("expected the widgets table to exist after the first sync")
 	}
+	firstSyncedAt := moduleSyncedAt(t, env.conn, tt.ID, mod.Manifest.Name)
 
 	// Drop the table Diff would otherwise recreate, then sync again at the
-	// same version — if the skip check didn't work, the table would come
-	// back; since it's skipped, it stays dropped.
+	// same version — if the skip check didn't work, RecordSyncSuccess
+	// would bump schema_synced_at again; since it's skipped, NeedsSync
+	// returns early and never touches the row (see session.go's own
+	// NeedsSync/RecordSyncSuccess). Checked against schema_synced_at
+	// rather than the table's own existence: this row is keyed
+	// (tenant_id, module_name) on this test's own uniquely-named module,
+	// so unlike a bare table-existence check it can't be tripped by an
+	// unrelated, concurrently running test's own correctly-behaving sync
+	// recreating a same-named "widgets" table in this tenant's schema via
+	// ActiveTenants()'s global enumeration.
 	if _, err := env.conn.Exec(`DROP TABLE ` + quoteIdent("tenant_"+slug) + `.widgets`); err != nil {
 		t.Fatalf("drop widgets table: %v", err)
 	}
@@ -199,15 +243,15 @@ func TestSyncAll_SkipsAlreadySyncedVersion(t *testing.T) {
 		t.Fatalf("second SyncAll() error: %v", err)
 	}
 
-	if tableExists(t, env.conn, "tenant_"+slug, "widgets") {
-		t.Error("expected sync to have been skipped (table should still be dropped), but it was recreated")
+	if secondSyncedAt := moduleSyncedAt(t, env.conn, tt.ID, mod.Manifest.Name); !secondSyncedAt.Equal(firstSyncedAt) {
+		t.Errorf("schema_synced_at changed from %v to %v; expected the second sync to be skipped", firstSyncedAt, secondSyncedAt)
 	}
 }
 
 func TestSyncAll_SkipsFailedModules(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
-	env.activeTenant(t, slug)
+	tt := env.activeTenant(t, slug)
 
 	mod := loadedModule(t, "widgets_"+slug, widgetModel())
 	mod.Fail("compile error")
@@ -216,8 +260,15 @@ func TestSyncAll_SkipsFailedModules(t *testing.T) {
 		t.Fatalf("SyncAll() error: %v", err)
 	}
 
-	if tableExists(t, env.conn, "tenant_"+slug, "widgets") {
-		t.Error("expected no table to be created for a StatusFailed module")
+	// A StatusFailed module is skipped by SyncAll's own loop before a
+	// sync session is ever begun for it, so no system.module_schema_versions
+	// row should exist for (tenant, module) at all. Checked that way
+	// instead of via bare table existence — see
+	// TestSyncAll_SkipsAlreadySyncedVersion's own comment for why a
+	// same-named table created by an unrelated concurrent test's sync
+	// would otherwise make this assertion flaky.
+	if moduleSyncRecorded(t, env.conn, tt.ID, mod.Manifest.Name) {
+		t.Error("expected no module_schema_versions row for a StatusFailed module")
 	}
 }
 
