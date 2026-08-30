@@ -20,12 +20,29 @@ import (
 // source produces content-distinct WASM binaries — needed by any test
 // that must avoid two "different" test modules sharing one entry in
 // wasm.Runtime's content-addressed compilation cache (see
-// Runtime.CompileModule's own doc comment).
+// Runtime.CompileModule's own doc comment). It also qualifies the owned
+// model's own name below: two concurrently-installing "modules" built
+// from this same fixture source are still two real, distinct Go
+// packages/manifests as far as the engine is concerned, but if both left
+// the model name as the literal "widgets.widget" they'd collide on the
+// exact same physical table name in a shared tenant schema — a
+// same-tenant, concurrent-CREATE-TABLE race no properly-namespaced real
+// module would ever hit, since real modules don't share model names.
+// Leaving the model name unqualified when variant is empty keeps every
+// test that doesn't care about this collision (most of them) asserting
+// against the same "widgets_widget" table name it always has.
 var variant string
+
+func modelName() string {
+	if variant == "" {
+		return "widgets.widget"
+	}
+	return "widgets_" + variant + ".widget"
+}
 
 var schema = model.Schema{
 	Models: []*model.ModelDeclaration{
-		model.Define("widgets.widget", model.Label("Widget"+variant), model.LabelPlural("Widgets")).
+		model.Define(modelName(), model.Label("Widget"+variant), model.LabelPlural("Widgets")).
 			WithStandardFields().
 			Field("name", model.Text().Required()),
 	},

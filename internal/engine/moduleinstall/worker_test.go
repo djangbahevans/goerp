@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -389,22 +390,27 @@ func TestWorker_Run_PartialTenantFailureStillReachesReady(t *testing.T) {
 // replaces the entire module map on every call, so a naive
 // read-snapshot/merge/Update sequence run by two installs at once can
 // have the second overwrite the first's addition with a map built from a
-// stale snapshot. run holds mu for its entire body now (not just the
-// publish step), so this no longer depends on winning a narrow timing
-// window to prove — two different modules installed concurrently must
-// both still land in the registry by construction of the serialization,
-// and a regression that narrows the lock's scope back down would show up
-// here as a flake.
+// stale snapshot. mu now guards only publish's own merge/Update/RebuildAll
+// sequence (goerp#487), not run's entire body, so this no longer proves
+// its point by construction of a full serialization — but publish's own
+// mu-guarded recheck still has to make exactly this true: two different
+// modules installed concurrently must both still land in the registry, and
+// a regression that lets one silently overwrite the other's entry would
+// show up here as a lost update.
 func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
 	env.activeTenant(t, slug)
 
-	wasmBytes := compileFixture(t)
+	// Distinct variants (see compileFixtureVariant's own doc comment) so
+	// the two modules don't own the identical model/table name — both
+	// installing into the one tenant above at the same time, they'd
+	// otherwise race each other's CREATE TABLE for the same physical
+	// table and could hit a genuine, unrelated Postgres error.
 	nameA := "widgets_a_" + slug
 	nameB := "widgets_b_" + slug
-	pathA := writeTempPackage(t, buildPackage(t, nameA, wasmBytes, nil))
-	pathB := writeTempPackage(t, buildPackage(t, nameB, wasmBytes, nil))
+	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), nil))
+	pathB := writeTempPackage(t, buildPackage(t, nameB, compileFixtureVariant(t, "b_"+slug), nil))
 
 	w, reg := newWorker(env, nil)
 
@@ -509,12 +515,13 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 // the same new module name could both pass the check, both fully load and
 // sync independently, and whichever published second would silently
 // discard the other's already-live module — leaking its pool, since
-// nothing else ever reaches an unpublished LoadedModule to close it. With
-// mu held for run's entire body, the
-// second call now blocks until the first either publishes or fails, then
-// deterministically sees the module already loaded (if the first
-// succeeded) — never reaching LoadModule for itself, so there is nothing
-// of its own left to leak.
+// nothing else ever reaches an unpublished LoadedModule to close it. The
+// loser can be rejected at either of two points: reserve's fast-fail
+// (errInstallInProgress, if it loses the race to claim the name before
+// starting its own compile/sync), or publish's own recheck
+// (errAlreadyLoaded, if it already finished its own compile/sync before
+// losing there) — either way, exactly one install succeeds and the loser
+// never leaks a pool.
 func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
@@ -548,14 +555,14 @@ func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing
 		switch {
 		case err == nil:
 			succeeded++
-		case strings.Contains(err.Error(), "already loaded"):
+		case errors.Is(err, errAlreadyLoaded), errors.Is(err, errInstallInProgress):
 			rejected++
 		default:
 			t.Errorf("unexpected error: %v", err)
 		}
 	}
 	if succeeded != 1 || rejected != 1 {
-		t.Errorf("results = %v, want exactly one success and one \"already loaded\" rejection", results)
+		t.Errorf("results = %v, want exactly one success and one rejection (errAlreadyLoaded or errInstallInProgress)", results)
 	}
 
 	snap := reg.Snapshot()
@@ -682,5 +689,48 @@ func TestWorker_Publish_RegistryUpdateSucceedsDespiteRebuildAllFailure(t *testin
 	snap := reg.Snapshot()
 	if _, ok := snap.Modules()[m.Manifest.Name]; !ok {
 		t.Error("module missing from registry despite committed=true")
+	}
+}
+
+// TestWorker_Run_InstallInProgressRejection_RemovesPackageFile guards the
+// distinction run's cleanup defer draws between its two "already
+// unavailable" rejections: errAlreadyLoaded (this exact name/version may
+// be the currently-loaded module's own backing file — never removed) and
+// errInstallInProgress (this name was never actually loaded; the losing
+// install's package file backs nothing and must still be removed, or it
+// leaks in ModuleDir exactly like any other permanent failure would).
+// Reserves the name directly rather than racing two goroutines, so the
+// "in progress" branch is hit deterministically instead of depending on
+// which goroutine's reserve() call happens to run first.
+func TestWorker_Run_InstallInProgressRejection_RemovesPackageFile(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+
+	name := "widgets_" + slug
+	w, _ := newWorker(env, nil)
+
+	release, err := w.reserve(name)
+	if err != nil {
+		t.Fatalf("reserve() error: %v", err)
+	}
+	t.Cleanup(release)
+
+	wasmBytes := compileFixture(t)
+	pkg := buildPackage(t, name, wasmBytes, nil)
+	path := writeTempPackage(t, pkg)
+
+	_, err = w.run(context.Background(), Args{PackagePath: path})
+	if err == nil {
+		t.Fatal("expected an error installing a name that's already reserved")
+	}
+	if !errors.Is(err, errInstallInProgress) {
+		t.Errorf("error = %v, want errInstallInProgress", err)
+	}
+	if errors.Is(err, errAlreadyLoaded) {
+		t.Errorf("error = %v, should not also be errAlreadyLoaded", err)
+	}
+
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Errorf("expected the persisted package at %q to be removed, stat error = %v", path, statErr)
 	}
 }

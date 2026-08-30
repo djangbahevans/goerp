@@ -32,6 +32,20 @@ import (
 // package file for the latter (see run's own comment on why).
 var errAlreadyLoaded = errors.New("module already loaded")
 
+// errInstallInProgress is reserve's fast-fail rejection when another
+// install of the same name is already running — unlike errAlreadyLoaded,
+// this name was never actually loaded, so the loser's package file is not
+// anyone's backing file and run's cleanup must still remove it.
+var errInstallInProgress = errors.New("another install of this module is already in progress")
+
+// alreadyLoadedErr builds the errAlreadyLoaded rejection reserve and
+// publish both return for the identical condition (a live, non-failed
+// module already occupying name), so the message can't drift between the
+// two call sites.
+func alreadyLoadedErr(name string, existing *module.LoadedModule) error {
+	return fmt.Errorf("%w: %q (version %s) — installing a new version requires the upgrade path, not yet available (goerp#467)", errAlreadyLoaded, name, existing.Manifest.Version)
+}
+
 // Worker runs Args: loads the persisted package via loader.LoadModule
 // (the same compile/capabilities/pool/get_routes/get_model_declarations/
 // EnableViews path engine startup uses for every other module), syncs it
@@ -100,17 +114,19 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 // run is Work's plain-Go core, callable without a real River execution
 // context — same split every other worker in this codebase documents.
 func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
-	// Every failure below except "already loaded" means a.PackagePath is
+	// Every failure below except errAlreadyLoaded means a.PackagePath is
 	// not — and never was — backing any successfully-loaded module, so
 	// it's always safe to remove: leaving it behind would have Installer.
 	// StartInstall's own doc comment broken by a later moduleboot.Discover
 	// picking the same broken file back up on every future engine
-	// restart, repeating the identical failure forever. "Already loaded"
+	// restart, repeating the identical failure forever. errAlreadyLoaded
 	// is excluded because that path is written under a deterministic
 	// "{name}-{version}.erp" name — if the rejection is a second install
 	// of the exact name/version that's already live, this file may well
 	// be the one currently-loaded module's own backing file, which a
-	// later Discover still needs to find.
+	// later Discover still needs to find. errInstallInProgress (reserve's
+	// other rejection) is deliberately not excluded here: that name was
+	// never actually loaded, so this file is always safe to remove.
 	defer func() {
 		if err != nil && !errors.Is(err, errAlreadyLoaded) {
 			if rmErr := os.Remove(a.PackagePath); rmErr != nil && !os.IsNotExist(rmErr) {
@@ -142,8 +158,6 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	releaseOnce := sync.OnceFunc(release)
 	defer releaseOnce()
 
-	existingModules := w.currentModules()
-
 	m := loader.LoadModule(ctx, w.Runtime, w.PoolCfg, *src)
 	if m.Status == module.StatusFailed {
 		return Result{}, fmt.Errorf("load module: %s", m.FailureReason)
@@ -164,19 +178,31 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 		}
 	}()
 
-	// Checked here, before any tenant is touched, rather than as part of
-	// publish alongside the registry merge: a module that fails this
-	// can't be allowed to run schema sync at all — every other order lets
-	// real DDL land in every active tenant for a module that's about to
-	// be rejected anyway, with no way to undo it once applied (schema
-	// sync is additive-only by design). Checking only m's own
-	// Subscribes against the existing modules' Emits — rather than
-	// reusing loader.ValidateEventSubscriptions across a merged map — also
-	// avoids mutating any *module.LoadedModule already reachable from the
-	// live registry snapshot: existingModules holds the exact pointers
-	// RegistrySnapshot.Modules() (documented read-only) currently serves
+	// Snapshotted here, right before the check that uses it — not earlier,
+	// alongside reserve above — to keep this as close to current as
+	// possible: LoadModule's compile is the slow phase, and with mu no
+	// longer held across it (goerp#487), another install can publish
+	// during that window. existingModules can therefore still be one
+	// publish stale by the time it's read (a residual, narrow race — not
+	// fully eliminated, since fully eliminating it would mean re-locking
+	// around this check and giving back the concurrency goerp#487 exists
+	// for): a module rejected here because its subscription's owning
+	// module published concurrently, just after this snapshot, would
+	// succeed on a plain retry. Checked here, before any tenant is
+	// touched, rather than as part of publish alongside the registry
+	// merge, regardless: a module that fails this can't be allowed to run
+	// schema sync at all — every other order lets real DDL land in every
+	// active tenant for a module that's about to be rejected anyway, with
+	// no way to undo it once applied (schema sync is additive-only by
+	// design). Checking only m's own Subscribes against the existing
+	// modules' Emits — rather than reusing loader.ValidateEventSubscriptions
+	// across a merged map — also avoids mutating any *module.LoadedModule
+	// already reachable from the live registry snapshot: existingModules
+	// holds the exact pointers RegistrySnapshot.Modules() (documented
+	// read-only) currently serves
 	// to concurrent requests, and this check never writes to any of them,
 	// only reads.
+	existingModules := w.currentModules()
 	if err := validateNewModuleSubscriptions(m, existingModules); err != nil {
 		m.Fail(err.Error())
 		return Result{}, fmt.Errorf("validate event subscriptions: %w", err)
@@ -298,10 +324,10 @@ func (w *Worker) reserve(name string) (release func(), err error) {
 	defer w.reserveMu.Unlock()
 
 	if existing, ok := w.currentModules()[name]; ok && existing.Status != module.StatusFailed {
-		return nil, fmt.Errorf("%w: %q (version %s) — installing a new version requires the upgrade path, not yet available (goerp#467)", errAlreadyLoaded, name, existing.Manifest.Version)
+		return nil, alreadyLoadedErr(name, existing)
 	}
 	if _, ok := w.installing[name]; ok {
-		return nil, fmt.Errorf("%w: %q — another install of this module is already in progress", errAlreadyLoaded, name)
+		return nil, fmt.Errorf("%w: %q", errInstallInProgress, name)
 	}
 	if w.installing == nil {
 		w.installing = make(map[string]struct{})
@@ -341,7 +367,7 @@ func (w *Worker) publish(ctx context.Context, m *module.LoadedModule) (committed
 	defer w.mu.Unlock()
 
 	if existing, ok := w.currentModules()[m.Manifest.Name]; ok && existing.Status != module.StatusFailed {
-		return false, fmt.Errorf("%w: %q (version %s) — installing a new version requires the upgrade path, not yet available (goerp#467)", errAlreadyLoaded, m.Manifest.Name, existing.Manifest.Version)
+		return false, alreadyLoadedErr(m.Manifest.Name, existing)
 	}
 
 	merged := maps.Clone(w.currentModules())
