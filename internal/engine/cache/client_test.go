@@ -701,6 +701,192 @@ func TestCompareAndSetHash_TTLExpiresKey(t *testing.T) {
 	}
 }
 
+func TestDeleteIfEqual_DeletesWhenValueMatches(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+	if err := c.SetWithTTL(ctx, key, "owner-a", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL() error: %v", err)
+	}
+
+	deleted, err := c.DeleteIfEqual(ctx, key, "owner-a")
+	if err != nil {
+		t.Fatalf("DeleteIfEqual() error: %v", err)
+	}
+	if !deleted {
+		t.Error("DeleteIfEqual() deleted = false for a matching value, want true")
+	}
+
+	exists, err := c.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Exists() error: %v", err)
+	}
+	if exists {
+		t.Error("Exists() = true after DeleteIfEqual matched, want false")
+	}
+}
+
+// TestDeleteIfEqual_DoesNotDeleteADifferentOwnersValue is the exact bug
+// internal/engine/hotreload's own lock release needs this method to
+// avoid: an unconditional Delete by key name alone would tear down
+// whatever currently holds that key, including a different owner's value
+// written after this caller's own TTL already expired.
+func TestDeleteIfEqual_DoesNotDeleteADifferentOwnersValue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+	if err := c.SetWithTTL(ctx, key, "owner-b", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL() error: %v", err)
+	}
+
+	deleted, err := c.DeleteIfEqual(ctx, key, "owner-a")
+	if err != nil {
+		t.Fatalf("DeleteIfEqual() error: %v", err)
+	}
+	if deleted {
+		t.Error("DeleteIfEqual() deleted = true for a mismatched value, want false")
+	}
+
+	value, found, err := c.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if !found || value != "owner-b" {
+		t.Errorf("value = %q (found=%v) after a mismatched DeleteIfEqual, want unchanged %q", value, found, "owner-b")
+	}
+}
+
+func TestDeleteIfEqual_MissingKeyIsNotAnError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	deleted, err := c.DeleteIfEqual(ctx, "cache-test:"+t.Name(), "anything")
+	if err != nil {
+		t.Errorf("DeleteIfEqual() on a missing key: error = %v, want nil", err)
+	}
+	if deleted {
+		t.Error("DeleteIfEqual() deleted = true for a missing key, want false")
+	}
+}
+
+func TestPSubscribe_ReceivesMatchingPublish(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	sub, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = sub.Close() })
+
+	pub, err := New(ctx, localRedisConfig())
+	if err != nil {
+		t.Fatalf("New() (publisher) error: %v", err)
+	}
+	t.Cleanup(func() { _ = pub.Close() })
+
+	pattern := "cache-test:" + t.Name() + ":*"
+	channel := "cache-test:" + t.Name() + ":mod-a"
+
+	msgs, closeFn := sub.PSubscribe(ctx, pattern)
+	t.Cleanup(func() { _ = closeFn() })
+
+	// go-redis's PSubscribe confirms the subscription with the Redis
+	// server asynchronously — publishing immediately risks the message
+	// arriving before the SUBSCRIBE has actually taken effect server-side.
+	// A short wait (rather than a fixed sleep-before-every-pubsub-test
+	// convention elsewhere in this file) is only needed on this one path.
+	time.Sleep(100 * time.Millisecond)
+
+	if err := pub.Publish(ctx, channel, "hello"); err != nil {
+		t.Fatalf("Publish() error: %v", err)
+	}
+
+	select {
+	case msg := <-msgs:
+		if msg.Channel != channel || msg.Payload != "hello" {
+			t.Errorf("received %+v, want Channel=%q Payload=%q", msg, channel, "hello")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the published message")
+	}
+}
+
+func TestPSubscribe_ClosingStopsDelivery(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	sub, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = sub.Close() })
+
+	pub, err := New(ctx, localRedisConfig())
+	if err != nil {
+		t.Fatalf("New() (publisher) error: %v", err)
+	}
+	t.Cleanup(func() { _ = pub.Close() })
+
+	pattern := "cache-test:" + t.Name() + ":*"
+
+	msgs, closeFn := sub.PSubscribe(ctx, pattern)
+	if err := closeFn(); err != nil {
+		t.Fatalf("closeFn() error: %v", err)
+	}
+
+	select {
+	case _, open := <-msgs:
+		if open {
+			t.Error("expected the messages channel to close after closeFn, got a value instead")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the messages channel to close after closeFn")
+	}
+}
+
+// TestPSubscribe_ContextCancelStopsDeliveryWithoutCloseFn guards a real
+// deadlock: the reader goroutine backing PSubscribe's returned channel
+// must notice ctx cancellation even while idle, waiting for a message —
+// not only while blocked trying to send one. A version that checked
+// ctx.Done() solely in the send case looked correct (closeFn() alone
+// always worked, per TestPSubscribe_ClosingStopsDelivery above) but hung
+// forever here: nothing ever sends on the pattern below, so cancelling
+// ctx is the only signal available, and internal/engine/hotreload's own
+// Coordinator.Stop relies on exactly this — it cancels its context and
+// never calls closeFn directly.
+func TestPSubscribe_ContextCancelStopsDeliveryWithoutCloseFn(t *testing.T) {
+	c, err := New(context.Background(), localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	msgs, _ := c.PSubscribe(ctx, "cache-test:"+t.Name()+":*")
+
+	cancel()
+
+	select {
+	case _, open := <-msgs:
+		if open {
+			t.Error("expected the messages channel to close after ctx cancellation, got a value instead")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the messages channel to close after ctx cancellation — the reader goroutine deadlocked")
+	}
+}
+
 func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

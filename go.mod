@@ -8,6 +8,7 @@ require (
 	github.com/alexedwards/argon2id v1.0.0
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/descope/virtualwebauthn v1.0.5
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-openapi/inflect v0.19.0
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
@@ -39,6 +40,7 @@ require (
 	go.temporal.io/api v1.63.4
 	go.temporal.io/sdk v1.48.0
 	golang.org/x/crypto v0.54.0
+	golang.org/x/mod v0.40.0
 	google.golang.org/grpc v1.83.0
 )
 

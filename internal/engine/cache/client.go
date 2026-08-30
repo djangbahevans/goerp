@@ -131,6 +131,94 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// deleteIfEqualScript deletes key only if its current value is still
+// expectedValue — the GET-then-DEL sequence a lock owner needs has to be
+// one atomic EVAL, not two round trips: a Go-side "GET, compare, DEL"
+// would let key expire and be re-claimed by a different owner in the gap
+// between the GET and the DEL, deleting that new owner's lock instead of
+// (correctly) finding nothing left to delete.
+const deleteIfEqualScript = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+`
+
+// DeleteIfEqual removes key only if its current value is still
+// expectedValue, reporting whether it did. This is what a lock holder
+// (e.g. hotreload.Coordinator's SET NX leader-election lock) must use to
+// release its own lock — an unconditional Delete would delete whatever
+// currently holds that key, including a different instance's lock that
+// legitimately re-acquired it after this holder's own TTL already
+// expired (e.g. a leader run that outlives its own lock's TTL).
+func (c *Client) DeleteIfEqual(ctx context.Context, key, expectedValue string) (deleted bool, err error) {
+	res, err := c.rdb.Eval(ctx, deleteIfEqualScript, []string{key}, expectedValue).Result()
+	if err != nil {
+		return false, fmt.Errorf("delete-if-equal %q: %w", key, err)
+	}
+	n, _ := res.(int64)
+	return n > 0, nil
+}
+
+// Publish sends payload on channel. Redis pub/sub delivers only to
+// subscribers connected at publish time (no queueing, no delivery
+// guarantee) — callers that need at-least-once delivery must layer their
+// own retry/reconciliation on top, the same way internal/engine/hotreload
+// treats a missed announcement as a follower-side timeout rather than a
+// delivery failure to recover from here.
+func (c *Client) Publish(ctx context.Context, channel, payload string) error {
+	if err := c.rdb.Publish(ctx, channel, payload).Err(); err != nil {
+		return fmt.Errorf("publish to %q: %w", channel, err)
+	}
+	return nil
+}
+
+// Message is one pub/sub delivery from PSubscribe.
+type Message struct {
+	Channel string
+	Payload string
+}
+
+// PSubscribe subscribes to every channel matching pattern (Redis PSUBSCRIBE
+// glob syntax) and returns a channel of deliveries plus a close func to
+// stop the subscription and release its underlying connection. Returning
+// plain Message values here, rather than go-redis's own *redis.PubSub/
+// *redis.Message, keeps that dependency out of every caller's own
+// package — the same reasoning every other method on Client already
+// follows (e.g. SetNXWithTTL returning a bool, not a *redis.BoolCmd).
+func (c *Client) PSubscribe(ctx context.Context, pattern string) (msgs <-chan Message, closeFn func() error) {
+	pubsub := c.rdb.PSubscribe(ctx, pattern)
+	in := pubsub.Channel()
+
+	out := make(chan Message)
+	go func() {
+		defer close(out)
+		// ctx.Done() is checked in both select statements below, not just
+		// the second — go-redis's own Channel() only closes once Close()
+		// is called, so waiting on ctx.Done() solely inside the send case
+		// would never unblock this goroutine while idle (no messages
+		// arriving) after the context is cancelled, leaving out — and so
+		// any caller ranging over it — blocked forever.
+		for {
+			select {
+			case msg, ok := <-in:
+				if !ok {
+					return
+				}
+				select {
+				case out <- Message{Channel: msg.Channel, Payload: msg.Payload}:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return out, pubsub.Close
+}
+
 // slidingWindowScript implements a genuine sliding-window log (a Redis
 // sorted set of per-request timestamps), not a fixed-window counter:
 // IncrWithTTL's fixed-window approach lets a burst of 2x limit through

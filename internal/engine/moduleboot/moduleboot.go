@@ -4,8 +4,9 @@
 // dependency-cascade failure, and produce the map loader.LoadAll would —
 // ready for registry.ModuleRegistry.Update.
 //
-// GOERP_DEV's directory-watch/hot-reload mode is out of scope; Discover
-// only ever runs once, at startup.
+// Discover itself only ever runs once, at startup — DiscoverOne is the
+// single-path entry point internal/engine/hotreload reuses at runtime,
+// once per trigger, instead of rescanning the whole directory.
 package moduleboot
 
 import (
@@ -48,49 +49,69 @@ func Discover(dir string) ([]loader.Source, error) {
 	var sources []loader.Source
 	for _, entry := range entries {
 		name := entry.Name()
-
-		if !entry.IsDir() {
-			if !strings.HasSuffix(name, ".erp") {
-				continue
-			}
-
-			src, err := readPackageSource(filepath.Join(dir, name))
-			if err != nil {
-				return nil, fmt.Errorf("read %s: %w", name, err)
-			}
-			if src != nil {
-				sources = append(sources, *src)
-			}
+		if !entry.IsDir() && !strings.HasSuffix(name, ".erp") {
 			continue
 		}
 
-		manifestBytes, err := os.ReadFile(filepath.Join(dir, name, "manifest.json"))
+		src, err := DiscoverOne(filepath.Join(dir, name))
 		if err != nil {
-			if os.IsNotExist(err) {
-				log.Warn().Str("module_dir", name).Msg("missing manifest.json, skipping")
-				continue
-			}
-			return nil, fmt.Errorf("read %s/manifest.json: %w", name, err)
+			return nil, fmt.Errorf("read %s: %w", name, err)
 		}
-
-		wasmBytes, err := os.ReadFile(filepath.Join(dir, name, "module.wasm"))
-		if err != nil {
-			if os.IsNotExist(err) {
-				log.Warn().Str("module_dir", name).Msg("missing module.wasm, skipping")
-				continue
-			}
-			return nil, fmt.Errorf("read %s/module.wasm: %w", name, err)
+		if src != nil {
+			sources = append(sources, *src)
 		}
-
-		sources = append(sources, loader.Source{
-			Name:          name,
-			ManifestBytes: manifestBytes,
-			WasmBytes:     wasmBytes,
-			PackagePath:   filepath.Join(dir, name),
-		})
 	}
 
 	return sources, nil
+}
+
+// DiscoverOne reads a single module source at path — either a *.erp
+// package file or a loose module directory containing manifest.json and
+// module.wasm (the same two layouts Discover accepts for a directory
+// scan). It returns (nil, nil), not an error, when path's module.wasm or
+// manifest.json is missing, mirroring Discover's own "skip one bad entry
+// with a warning" behavior. This is what lets a hot-reload trigger —
+// which points at exactly one path, not the whole module directory —
+// reuse Discover's own parsing logic instead of duplicating it.
+func DiscoverOne(path string) (*loader.Source, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %q: %w", path, err)
+	}
+
+	if !info.IsDir() {
+		if !strings.HasSuffix(path, ".erp") {
+			return nil, fmt.Errorf("%q is not a .erp package or a module directory", path)
+		}
+		return readPackageSource(path)
+	}
+
+	name := filepath.Base(path)
+
+	manifestBytes, err := os.ReadFile(filepath.Join(path, "manifest.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Warn().Str("module_dir", name).Msg("missing manifest.json, skipping")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s/manifest.json: %w", name, err)
+	}
+
+	wasmBytes, err := os.ReadFile(filepath.Join(path, "module.wasm"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Warn().Str("module_dir", name).Msg("missing module.wasm, skipping")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s/module.wasm: %w", name, err)
+	}
+
+	return &loader.Source{
+		Name:          name,
+		ManifestBytes: manifestBytes,
+		WasmBytes:     wasmBytes,
+		PackagePath:   path,
+	}, nil
 }
 
 var errZipMemberNotFound = errors.New("member not found")

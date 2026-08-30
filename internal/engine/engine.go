@@ -63,6 +63,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/eventdelivery"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/hotreload"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
@@ -104,6 +105,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -145,6 +147,12 @@ type Engine struct {
 	server          *httpx.Server
 	adminServer     *adminapi.Server
 	readiness       atomic.Bool
+
+	// instanceID identifies this process for hot reload's leader-election
+	// lock value (docs/engine-internals.md §10) — generated once per
+	// process, not persisted or configurable.
+	instanceID string
+	hotReload  *hotreload.Coordinator
 }
 
 func New(cfg *config.Config) (*Engine, error) {
@@ -882,12 +890,24 @@ func New(cfg *config.Config) (*Engine, error) {
 		Accept: schemaAdmin,
 	})
 
+	instanceID := uuid.NewString()
+	hotReloadCoordinator := hotreload.New(cacheClient, moduleRegistry, instanceID, hotreload.Config{
+		ModuleDir: cfg.ModuleDir,
+		LockTTL:   cfg.HotReloadLockTTL,
+		// PollInterval/RegistryClient are left zero/nil: the registry-poll
+		// trigger's own dependency (an external module registry service,
+		// backlog goerp#563) doesn't exist yet — see
+		// hotreload.RegistryClient's own doc comment.
+	}, stubHotReloadLeader, stubHotReloadFollower)
+
 	adminapi.RegisterModuleRoutes(adminServer.Router(), adminapi.ModulesDeps{
 		Install: &moduleinstall.Installer{
 			ModuleDir: cfg.ModuleDir,
 			JobClient: jobQueueClient,
 			JobQueue:  jobqueue.QueueAdmin,
 		},
+		Reload:        moduleReloadAdapter{coordinator: hotReloadCoordinator},
+		ReloadEnabled: cfg.HotReloadEnabled,
 	})
 
 	adminapi.RegisterConfigRoutes(adminServer.Router(), adminapi.ConfigDeps{
@@ -923,6 +943,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		adminServer:       adminServer,
 		tracer:            tracer,
 		tracerProvider:    tracerProvider,
+		instanceID:        instanceID,
+		hotReload:         hotReloadCoordinator,
 	}
 
 	// GET /_meta/permissions (goerp#417) is added here rather than to the
@@ -984,6 +1006,12 @@ func (e *Engine) Start(ctx context.Context) error {
 		return fmt.Errorf("start system worker: %w", err)
 	}
 
+	if e.cfg.HotReloadEnabled {
+		if err := e.hotReload.Start(ctx); err != nil {
+			return fmt.Errorf("start hot reload coordinator: %w", err)
+		}
+	}
+
 	e.readiness.Store(true)
 
 	return nil
@@ -996,6 +1024,10 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 	if e.cfg.ShutdownDrainDelay > 0 {
 		time.Sleep(e.cfg.ShutdownDrainDelay)
+	}
+
+	if e.cfg.HotReloadEnabled {
+		e.hotReload.Stop()
 	}
 
 	if err := e.adminServer.Shutdown(ctx); err != nil {
