@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/moduleinstall"
 )
@@ -103,5 +104,94 @@ func TestModuleInstallRoute_ErrorClassification(t *testing.T) {
 				t.Errorf("status = %d, want %d, body = %s", w.Code, tt.want, w.Body.String())
 			}
 		})
+	}
+}
+
+// fakeModuleReloader's TriggerReload is called from the reload handler's
+// own goroutine (RegisterModuleRoutes's reload doesn't block the HTTP
+// response on it — see (*moduleHandlers).reload's doc comment), so tests
+// observe the call via a buffered channel rather than a plain field.
+type fakeModuleReloader struct {
+	calls chan reloadCall
+}
+
+type reloadCall struct {
+	moduleName string
+	data       []byte
+}
+
+func newFakeModuleReloader() *fakeModuleReloader {
+	return &fakeModuleReloader{calls: make(chan reloadCall, 1)}
+}
+
+func (f *fakeModuleReloader) TriggerReload(ctx context.Context, moduleName string, data []byte) {
+	f.calls <- reloadCall{moduleName: moduleName, data: data}
+}
+
+func TestModuleReloadRoute_Success(t *testing.T) {
+	fake := newFakeModuleReloader()
+	mux := http.NewServeMux()
+	RegisterModuleRoutes(mux, ModulesDeps{Reload: fake, ReloadEnabled: true})
+
+	body := []byte("PK\x03\x04fake-erp-bytes")
+	req := httptest.NewRequest(http.MethodPost, "/admin/modules/widgets/reload", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case call := <-fake.calls:
+		if call.moduleName != "widgets" {
+			t.Errorf("TriggerReload called with module %q, want %q", call.moduleName, "widgets")
+		}
+		if !bytes.Equal(call.data, body) {
+			t.Errorf("TriggerReload called with %q, want %q", call.data, body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for TriggerReload to be called")
+	}
+}
+
+func TestModuleReloadRoute_DisabledReturns503(t *testing.T) {
+	fake := newFakeModuleReloader()
+	mux := http.NewServeMux()
+	RegisterModuleRoutes(mux, ModulesDeps{Reload: fake, ReloadEnabled: false})
+
+	body := []byte("PK\x03\x04fake-erp-bytes")
+	req := httptest.NewRequest(http.MethodPost, "/admin/modules/widgets/reload", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", w.Code)
+	}
+
+	select {
+	case call := <-fake.calls:
+		t.Errorf("TriggerReload was called (%+v) while ReloadEnabled=false, want it rejected before that", call)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestModuleReloadRoute_EmptyBodyReturns400(t *testing.T) {
+	fake := newFakeModuleReloader()
+	mux := http.NewServeMux()
+	RegisterModuleRoutes(mux, ModulesDeps{Reload: fake, ReloadEnabled: true})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/modules/widgets/reload", bytes.NewReader(nil))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+
+	select {
+	case call := <-fake.calls:
+		t.Errorf("TriggerReload was called (%+v) for an empty body, want it rejected before that", call)
+	case <-time.After(100 * time.Millisecond):
 	}
 }

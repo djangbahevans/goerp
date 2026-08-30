@@ -55,6 +55,16 @@ type Config struct {
 	ModuleDir          string        `env:"GOERP_MODULE_DIR" envDefault:"./modules"`
 	ShutdownTimeout    time.Duration `env:"GOERP_SHUTDOWN_TIMEOUT" envDefault:"30s"`
 	ShutdownDrainDelay time.Duration `env:"GOERP_SHUTDOWN_DRAIN_DELAY" envDefault:"5s"`
+	// HotReloadEnabled gates whether Engine.Start launches
+	// internal/engine/hotreload's trigger goroutines (fsnotify, pub/sub,
+	// registry poll) at all. Defaults to false: goerp#452 only builds the
+	// trigger/coordination scaffolding — the leader and follower paths it
+	// calls into (goerp#467, goerp#490) aren't implemented yet, so every
+	// real reload attempt would currently just fail. hotreload.Coordinator
+	// itself is always constructed and directly testable regardless of
+	// this flag.
+	HotReloadEnabled bool          `env:"GOERP_HOT_RELOAD_ENABLED" envDefault:"false"`
+	HotReloadLockTTL time.Duration `env:"GOERP_HOT_RELOAD_LOCK_TTL" envDefault:"60s"`
 
 	// SyncSubscriberTimeout bounds each async:false event subscriber's
 	// execution during inline synchronous dispatch (events.WithSync(),
