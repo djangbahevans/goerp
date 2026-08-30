@@ -148,10 +148,21 @@ func TestSpawnAllAttemptsEveryModuleBeforeReturning(t *testing.T) {
 // returns the path to the resulting binary.
 func buildTestWorker(t *testing.T) []byte {
 	t.Helper()
+	return buildTestWorkerVariant(t, "")
+}
+
+// buildTestWorkerVariant is buildTestWorker, but links a distinct variant
+// string into the binary via -ldflags -X, producing genuinely
+// content-distinct (and so checksum-distinct) output — needed by any test
+// simulating two different versions of the same workflow-worker, the same
+// convention internal/engine/moduleinstall's own compileFixtureVariant
+// documents for the analogous WASM-module case.
+func buildTestWorkerVariant(t *testing.T, variant string) []byte {
+	t.Helper()
 	out := filepath.Join(t.TempDir(), "testworker")
-	cmd := exec.Command("go", "build", "-o", out, "./testdata/testworker")
+	cmd := exec.Command("go", "build", "-ldflags", "-X main.variant="+variant, "-o", out, "./testdata/testworker")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build testworker: %v\n%s", err, output)
+		t.Fatalf("build testworker (variant=%q): %v\n%s", variant, err, output)
 	}
 	data, err := os.ReadFile(out)
 	if err != nil {
@@ -229,5 +240,131 @@ func TestSpawnConfirmAndStopAll(t *testing.T) {
 
 	if m.Validate(p.credential.Token, "spawntest") {
 		t.Error("Validate() true after StopAll() — credential should be revoked")
+	}
+}
+
+// TestRespawnReplacesProcessAndRevokesOldCredential exercises goerp#467's
+// hot-reload path: Respawn must start a new process (with its own
+// credential), confirm it's actually live before touching the old one,
+// then stop the old process and revoke its credential — never leaving two
+// live processes for the same module tracked at once.
+func TestRespawnReplacesProcessAndRevokesOldCredential(t *testing.T) {
+	temporalClient := newTestTemporalClient(t)
+	defer temporalClient.Close()
+
+	backend := newLocalStorage(t)
+	upload := func(variant string) string {
+		data := buildTestWorkerVariant(t, variant)
+		sum := sha256.Sum256(data)
+		checksum := "sha256:" + hex.EncodeToString(sum[:])
+		if _, err := backend.Upload(context.Background(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
+			t.Fatalf("Upload: %v", err)
+		}
+		return checksum
+	}
+	oldChecksum := upload("old")
+	newChecksum := upload("new")
+
+	m := NewManager(backend, temporalClient, t.TempDir())
+	oldMod := &module.LoadedModule{Manifest: manifest.Manifest{
+		Name:           "respawntest",
+		WorkerChecksum: oldChecksum,
+		WorkflowTypes:  []manifest.WorkflowType{{Name: "x"}},
+	}}
+	newMod := &module.LoadedModule{Manifest: manifest.Manifest{
+		Name:           "respawntest",
+		WorkerChecksum: newChecksum,
+		WorkflowTypes:  []manifest.WorkflowType{{Name: "x"}},
+	}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+
+	if err := m.spawn(ctx, oldMod); err != nil {
+		t.Fatalf("initial spawn() error: %v", err)
+	}
+	m.mu.Lock()
+	oldProcess := m.processes["respawntest"]
+	m.mu.Unlock()
+	oldToken := oldProcess.credential.Token
+
+	if err := m.Respawn(ctx, newMod); err != nil {
+		t.Fatalf("Respawn() error: %v", err)
+	}
+
+	m.mu.Lock()
+	newProcess, ok := m.processes["respawntest"]
+	m.mu.Unlock()
+	if !ok {
+		t.Fatal("Respawn() succeeded but process not tracked")
+	}
+	if newProcess.credential.Token == oldToken {
+		t.Error("Respawn() kept the old credential; expected a freshly minted one")
+	}
+	if !m.Validate(newProcess.credential.Token, "respawntest") {
+		t.Error("Validate() false for the new process's own credential")
+	}
+	if m.Validate(oldToken, "respawntest") {
+		t.Error("Validate() true for the old credential after Respawn() — it should have been revoked")
+	}
+
+	select {
+	case <-oldProcess.done:
+	case <-time.After(10 * time.Second):
+		t.Error("old process did not exit after Respawn()")
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stopCancel()
+	m.StopAll(stopCtx)
+}
+
+// TestRespawnNoOpWithoutExistingProcess covers the first-hot-reload case:
+// no old process to stop, just a plain spawn.
+func TestRespawnNoOpWithoutExistingProcess(t *testing.T) {
+	temporalClient := newTestTemporalClient(t)
+	defer temporalClient.Close()
+
+	data := buildTestWorker(t)
+	sum := sha256.Sum256(data)
+	checksum := "sha256:" + hex.EncodeToString(sum[:])
+
+	backend := newLocalStorage(t)
+	if _, err := backend.Upload(context.Background(), checksum, bytes.NewReader(data), storage.UploadOptions{}); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	m := NewManager(backend, temporalClient, t.TempDir())
+	mod := &module.LoadedModule{Manifest: manifest.Manifest{
+		Name:           "respawnfresh",
+		WorkerChecksum: checksum,
+		WorkflowTypes:  []manifest.WorkflowType{{Name: "x"}},
+	}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+
+	if err := m.Respawn(ctx, mod); err != nil {
+		t.Fatalf("Respawn() error: %v", err)
+	}
+	if !m.Validate(func() string {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.processes["respawnfresh"].credential.Token
+	}(), "respawnfresh") {
+		t.Error("Respawn() from no prior process did not leave a live, valid credential")
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stopCancel()
+	m.StopAll(stopCtx)
+}
+
+func TestRespawnSkipsModuleWithoutWorkflows(t *testing.T) {
+	m := NewManager(nil, nil, "")
+	mod := &module.LoadedModule{Manifest: manifest.Manifest{Name: "no-workflows"}}
+
+	if err := m.Respawn(context.Background(), mod); err != nil {
+		t.Errorf("Respawn() for a module with no workflow types: %v", err)
 	}
 }
