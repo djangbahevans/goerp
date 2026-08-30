@@ -11,6 +11,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue/jobqueuetest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -19,14 +20,14 @@ import (
 
 const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 
-// newTestJobsClient uses jobqueue.NewIsolated, not jobqueue.New: this
+// newTestJobsClient uses jobqueuetest.New, not jobqueue.New: this
 // package's own tests and every other package's River-backed tests run as
 // separate concurrent processes against the same shared dev Postgres, all
 // registering New's fixed, package-level queue names (QueueDefault,
 // QueueBulk, ...) with no per-process scoping — any one of them can poll
 // and claim a job another one enqueued, and a client whose own Workers
 // doesn't know that job's kind leaves it permanently retryable instead of
-// completed. See jobqueue.NewIsolated's own doc comment.
+// completed. See jobqueuetest.New's own doc comment.
 func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 
@@ -47,9 +48,9 @@ func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &jobqueue.ProbeWorker{})
 
-	client, err := jobqueue.NewIsolated(ctx, t, pool, cfg, workers)
+	client, err := jobqueuetest.New(ctx, t, pool, cfg, workers)
 	if err != nil {
-		t.Fatalf("jobqueue.NewIsolated: %v", err)
+		t.Fatalf("jobqueuetest.New: %v", err)
 	}
 	if err := client.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -206,7 +207,7 @@ func (w *outputTestWorker) Work(ctx context.Context, job *river.Job[outputTestAr
 	return river.RecordOutput(ctx, outputTestResult{Marker: job.Args.Marker})
 }
 
-// newTestJobsClientWithOutputWorker uses jobqueue.NewIsolated — see
+// newTestJobsClientWithOutputWorker uses jobqueuetest.New — see
 // newTestJobsClient's own doc comment for why.
 func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
@@ -228,9 +229,9 @@ func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &outputTestWorker{})
 
-	client, err := jobqueue.NewIsolated(ctx, t, pool, cfg, workers)
+	client, err := jobqueuetest.New(ctx, t, pool, cfg, workers)
 	if err != nil {
-		t.Fatalf("jobqueue.NewIsolated: %v", err)
+		t.Fatalf("jobqueuetest.New: %v", err)
 	}
 	if err := client.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
