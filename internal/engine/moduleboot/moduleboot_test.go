@@ -2,6 +2,7 @@ package moduleboot
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -575,5 +576,89 @@ func TestLoadCascading_FailsModuleWhenDeclaredTemplateMissing(t *testing.T) {
 	}
 	if !strings.Contains(m.FailureReason, "en") {
 		t.Errorf("FailureReason = %q, want it to mention the missing en variant", m.FailureReason)
+	}
+}
+
+// buildErpBytes zips manifestBytes and wasmBytes together in memory —
+// the same shape writeErpPackage writes to disk, but for ParsePackage's
+// byte-slice-in, not file-path-in, input.
+func buildErpBytes(t *testing.T, manifestBytes, wasmBytes []byte) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	if entry, err := w.Create("manifest.json"); err != nil {
+		t.Fatalf("create manifest.json entry: %v", err)
+	} else if _, err := entry.Write(manifestBytes); err != nil {
+		t.Fatalf("write manifest.json entry: %v", err)
+	}
+	if entry, err := w.Create("module.wasm"); err != nil {
+		t.Fatalf("create module.wasm entry: %v", err)
+	} else if _, err := entry.Write(wasmBytes); err != nil {
+		t.Fatalf("write module.wasm entry: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close zip writer: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestParsePackage_ReturnsSourceAndManifest(t *testing.T) {
+	manifestBytes := manifestJSON(t, "widgets", okModule, nil)
+	data := buildErpBytes(t, manifestBytes, okModule)
+
+	src, mf, err := ParsePackage(data)
+	if err != nil {
+		t.Fatalf("ParsePackage() error = %v", err)
+	}
+	if src.Name != "widgets" || mf.Name != "widgets" || mf.Version != "1.0.0" {
+		t.Errorf("src.Name/mf.Name/mf.Version = %q/%q/%q, want widgets/widgets/1.0.0", src.Name, mf.Name, mf.Version)
+	}
+	if string(src.WasmBytes) != string(okModule) {
+		t.Error("WasmBytes doesn't match the archived module.wasm bytes")
+	}
+	if src.PackagePath != "" {
+		t.Errorf("PackagePath = %q, want empty — ParsePackage has no file path to set it from", src.PackagePath)
+	}
+}
+
+func TestParsePackage_MissingManifestIsHardError(t *testing.T) {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	if entry, err := w.Create("module.wasm"); err != nil {
+		t.Fatalf("create module.wasm entry: %v", err)
+	} else if _, err := entry.Write(okModule); err != nil {
+		t.Fatalf("write module.wasm entry: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close zip writer: %v", err)
+	}
+
+	_, _, err := ParsePackage(buf.Bytes())
+	if err == nil {
+		t.Fatal("expected an error for a package with no manifest.json")
+	}
+}
+
+// TestParsePackage_MemberOverSizeLimitIsRejected guards readZipMember's
+// decompression cap: ParsePackage is reachable from an untrusted HTTP
+// request body (POST /admin/modules/install), so a member whose
+// decompressed size would exceed maxZipMemberSize must be rejected
+// rather than fully read into memory — the actual protection this test
+// exercises is the LimitReader inside readZipMember, not this specific
+// content (a real zip bomb achieves the same oversized-content result
+// from a tiny compressed input; a directly-oversized entry is simpler to
+// construct in a test and exercises the identical cap).
+func TestParsePackage_MemberOverSizeLimitIsRejected(t *testing.T) {
+	oversized := make([]byte, maxZipMemberSize+1)
+	manifestBytes := manifestJSON(t, "widgets", okModule, nil)
+	data := buildErpBytes(t, manifestBytes, oversized)
+
+	_, _, err := ParsePackage(data)
+	if err == nil {
+		t.Fatal("expected an error for a module.wasm entry over the decompressed size limit")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error = %q, want it to mention the size limit", err.Error())
 	}
 }
