@@ -43,12 +43,28 @@ func quoteIdent(name string) string {
 // comment (mirrors internal/engine/loader's compileRealFixture).
 func compileFixture(t *testing.T) []byte {
 	t.Helper()
+	return compileFixtureVariant(t, "")
+}
+
+// compileFixtureVariant is compileFixture, but links a distinct variant
+// string into the fixture's schema label via -ldflags -X — producing
+// genuinely content-distinct WASM binaries, rather than the
+// byte-for-byte identical output a deterministic Go build always
+// produces from the same source. Needed wherever a test would otherwise
+// have two differently-named "modules" share one entry in wasm.Runtime's
+// content-addressed compilation cache (see Runtime.CompileModule's own
+// doc comment) and so get skewed timing for a test that measures compile
+// cost.
+func compileFixtureVariant(t *testing.T, variant string) []byte {
+	t.Helper()
 
 	wasmPath := filepath.Join(t.TempDir(), "installfixture.wasm")
-	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/installfixture")
+	cmd := exec.Command("go", "build", "-buildmode=c-shared",
+		"-ldflags", "-X main.variant="+variant,
+		"-o", wasmPath, "./testdata/installfixture")
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("compile testdata/installfixture: %v\n%s", err, out)
+		t.Fatalf("compile testdata/installfixture (variant=%q): %v\n%s", variant, err, out)
 	}
 
 	data, err := os.ReadFile(wasmPath)
@@ -418,6 +434,71 @@ func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 	}
 	if _, ok := modules[nameB]; !ok {
 		t.Errorf("module %q missing from registry after concurrent install (lost update)", nameB)
+	}
+}
+
+// TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync is a
+// timing-based regression guard for goerp#487: mu now guards only
+// publish's final registry-merge step, not run's entire body, so two
+// different modules' compile (loader.LoadModule) and tenant-sync
+// (tenantsync.SyncModule) phases should run fully concurrently instead of
+// fully serializing behind each other. A regression back to holding mu
+// for run's entire body would make two concurrent installs take roughly
+// 2x a single install's own duration; this asserts they finish well
+// under that.
+func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	env.activeTenant(t, slug)
+
+	// Each install gets its own variant, compiled to genuinely distinct
+	// WASM content (see compileFixtureVariant's own doc comment) — so
+	// every one of the three below pays a real, comparable compile cost
+	// instead of two of them hitting a warm wazero compilation cache
+	// because they happen to share identical bytes with the baseline.
+	baselineName := "widgets_baseline_" + slug
+	baselinePath := writeTempPackage(t, buildPackage(t, baselineName, compileFixtureVariant(t, "baseline_"+slug), nil))
+
+	w, _ := newWorker(env, nil)
+
+	baselineStart := time.Now()
+	if _, err := w.run(context.Background(), Args{PackagePath: baselinePath}); err != nil {
+		t.Fatalf("baseline run() error: %v", err)
+	}
+	baseline := time.Since(baselineStart)
+
+	nameA := "widgets_overlap_a_" + slug
+	nameB := "widgets_overlap_b_" + slug
+	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), nil))
+	pathB := writeTempPackage(t, buildPackage(t, nameB, compileFixtureVariant(t, "b_"+slug), nil))
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	wg.Add(2)
+	concurrentStart := time.Now()
+	go func() {
+		defer wg.Done()
+		_, errs[0] = w.run(context.Background(), Args{PackagePath: pathA})
+	}()
+	go func() {
+		defer wg.Done()
+		_, errs[1] = w.run(context.Background(), Args{PackagePath: pathB})
+	}()
+	wg.Wait()
+	concurrent := time.Since(concurrentStart)
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("run() [%d] error: %v", i, err)
+		}
+	}
+
+	// Fully serialized (the pre-#487 behavior) would take roughly
+	// 2*baseline; a generous 1.7x threshold stays comfortably under that
+	// while tolerating scheduler/CI noise around genuinely concurrent
+	// (~1x baseline) runs.
+	if threshold := baseline + (baseline * 7 / 10); concurrent > threshold {
+		t.Errorf("two concurrent installs of different modules took %s (single-install baseline %s) — want well under 2x baseline (threshold %s); looks serialized", concurrent, baseline, threshold)
 	}
 }
 

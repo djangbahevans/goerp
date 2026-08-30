@@ -15,9 +15,17 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
+// variant is empty by default; worker_test.go's compileFixtureVariant
+// sets it via `-ldflags "-X main.variant=..."` so otherwise-identical
+// source produces content-distinct WASM binaries — needed by any test
+// that must avoid two "different" test modules sharing one entry in
+// wasm.Runtime's content-addressed compilation cache (see
+// Runtime.CompileModule's own doc comment).
+var variant string
+
 var schema = model.Schema{
 	Models: []*model.ModelDeclaration{
-		model.Define("widgets.widget", model.Label("Widget"), model.LabelPlural("Widgets")).
+		model.Define("widgets.widget", model.Label("Widget"+variant), model.LabelPlural("Widgets")).
 			WithStandardFields().
 			Field("name", model.Text().Required()),
 	},

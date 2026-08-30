@@ -54,22 +54,28 @@ type Worker struct {
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
 
-	// mu serializes an entire install end to end — not just the registry
-	// publish step. Two narrower problems both collapse into this one
-	// fix: (1) ModuleRegistry.Update replaces its whole module map on
-	// every call, so a read-current-snapshot/merge/Update sequence run by
-	// two installs at once can have the second overwrite the first's
-	// addition with a map built from a stale snapshot; (2) the "already
-	// loaded" check below and the compile/sync/publish that follows it
-	// are not atomic, so two concurrent installs of the same new module
-	// name can both pass the check, both fully load and sync
-	// independently, and whichever's own publish runs second silently
-	// discards the other's module — which is also never closed (see
-	// cleanup below), leaking its pool. The admin queue's default
-	// concurrency (5) makes both scenarios real, not theoretical.
-	// Install is not a hot path, so trading cross-install concurrency for
-	// this being simply correct is the right tradeoff.
+	// mu guards only the final read-current-snapshot/merge/Update/
+	// RebuildAll sequence in publish — not the compile or tenant-sync
+	// phases that precede it. It exists because ModuleRegistry.Update
+	// replaces its whole module map on every call, so a
+	// read-snapshot/merge/Update sequence run by two installs at once can
+	// have the second overwrite the first's addition with a map built
+	// from a stale snapshot; holding mu across that whole sequence keeps
+	// it atomic.
 	mu sync.Mutex
+
+	// reserveMu guards installing, a set of module names with an install
+	// currently reserved. reserve claims a name before the slow
+	// compile/tenant-sync phases start, so two concurrent installs of the
+	// same new module name fail fast — one rejected before it wastes any
+	// compile/sync work — without serializing installs of two different
+	// names against each other's I/O-bound work. It's advisory only:
+	// publish's own mu-guarded recheck (not this) is what actually
+	// prevents two installs from corrupting the registry, since the
+	// reservation is released before publish runs (see run's own comment
+	// on why).
+	reserveMu  sync.Mutex
+	installing map[string]struct{}
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
@@ -94,9 +100,6 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
 // run is Work's plain-Go core, callable without a real River execution
 // context — same split every other worker in this codebase documents.
 func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	// Every failure below except "already loaded" means a.PackagePath is
 	// not — and never was — backing any successfully-loaded module, so
 	// it's always safe to remove: leaving it behind would have Installer.
@@ -126,10 +129,20 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	}
 	src.PackagePath = a.PackagePath
 
-	existingModules := w.currentModules()
-	if existing, ok := existingModules[src.Name]; ok && existing.Status != module.StatusFailed {
-		return Result{}, fmt.Errorf("%w: %q (version %s) — installing a new version requires the upgrade path, not yet available (goerp#467)", errAlreadyLoaded, src.Name, existing.Manifest.Version)
+	release, err := w.reserve(src.Name)
+	if err != nil {
+		return Result{}, err
 	}
+	// Released explicitly right before publish below, once compile/sync
+	// are done — not deferred to run's exit. releaseOnce makes that
+	// explicit call and this defer safe together: whichever runs first
+	// wins, and the other is a no-op. Deferring is still needed to cover
+	// every early-return failure path between here and that explicit
+	// call.
+	releaseOnce := sync.OnceFunc(release)
+	defer releaseOnce()
+
+	existingModules := w.currentModules()
 
 	m := loader.LoadModule(ctx, w.Runtime, w.PoolCfg, *src)
 	if m.Status == module.StatusFailed {
@@ -182,6 +195,16 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 		return Result{}, fmt.Errorf("sync tenants: %w", err)
 	}
 	m.Status = module.StatusReady
+
+	// The reservation's job — fast-failing a concurrent same-name install
+	// before it wastes compile/sync work — is done; release it before
+	// publish acquires its own narrower mu, so the two never overlap.
+	// publish's own recheck under mu is what's now authoritative: a
+	// third install of this name reserved in the brief window between
+	// this release and publish's lock would waste its own compile/sync
+	// work, but would still correctly resolve to exactly one success and
+	// one clean rejection once it reaches its own publish call.
+	releaseOnce()
 
 	committed, err := w.publish(ctx, m)
 	published = committed // even a failed publish may have already committed m to the registry (see publish's doc comment) — never close a pool the registry now points to
@@ -260,16 +283,50 @@ func (w *Worker) currentModules() map[string]*module.LoadedModule {
 	return snap.Modules()
 }
 
+// reserve claims name for an install in progress, so a second concurrent
+// install of the same name fails immediately instead of running its own
+// compile/tenant-sync only to lose to the first at publish time. It
+// checks both the live registry and the set of installs already
+// reserved — from a caller's perspective, either means this name is
+// unavailable. Advisory only: it's released before publish runs (see
+// run's own comment on why), so publish's own mu-guarded recheck is what
+// actually has to be correct; this exists purely so unrelated names
+// installing concurrently don't waste real compile/sync work chasing an
+// outcome that's already decided.
+func (w *Worker) reserve(name string) (release func(), err error) {
+	w.reserveMu.Lock()
+	defer w.reserveMu.Unlock()
+
+	if existing, ok := w.currentModules()[name]; ok && existing.Status != module.StatusFailed {
+		return nil, fmt.Errorf("%w: %q (version %s) — installing a new version requires the upgrade path, not yet available (goerp#467)", errAlreadyLoaded, name, existing.Manifest.Version)
+	}
+	if _, ok := w.installing[name]; ok {
+		return nil, fmt.Errorf("%w: %q — another install of this module is already in progress", errAlreadyLoaded, name)
+	}
+	if w.installing == nil {
+		w.installing = make(map[string]struct{})
+	}
+	w.installing[name] = struct{}{}
+
+	return func() {
+		w.reserveMu.Lock()
+		delete(w.installing, name)
+		w.reserveMu.Unlock()
+	}, nil
+}
+
 // publish merges m into the registry's current module map and rebuilds
 // the permission cache (permcache.RolePermissionMap) that has to stay in
 // lockstep with it — engine.go's own startup sequence documents this as
-// registry.Update's only other caller. Callers must hold w.mu. m's own
-// event-subscription validity is checked by run before this is called
-// (see run's own comment on why); ModuleRegistry.Update below still
-// separately validates route and job-type name conflicts against every
-// other loaded module, which — unlike the subscription check — need
-// Update's own full-map view to detect and can't be narrowed the same
-// way.
+// registry.Update's only other caller. It re-checks "already loaded"
+// itself, under mu, since run's own reservation-time check (see reserve)
+// is released before this runs and so is only advisory by the time
+// publish is reached. m's own event-subscription validity is checked by
+// run before this is called (see run's own comment on why);
+// ModuleRegistry.Update below still separately validates route and
+// job-type name conflicts against every other loaded module, which —
+// unlike the subscription check — need Update's own full-map view to
+// detect and can't be narrowed the same way.
 //
 // committed reports whether Registry.Update itself succeeded,
 // independent of err: a RebuildAll failure after a successful Update
@@ -280,6 +337,13 @@ func (w *Worker) currentModules() map[string]*module.LoadedModule {
 // (a stale permission cache, which is real but a lesser problem than
 // closing a live module's pool).
 func (w *Worker) publish(ctx context.Context, m *module.LoadedModule) (committed bool, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if existing, ok := w.currentModules()[m.Manifest.Name]; ok && existing.Status != module.StatusFailed {
+		return false, fmt.Errorf("%w: %q (version %s) — installing a new version requires the upgrade path, not yet available (goerp#467)", errAlreadyLoaded, m.Manifest.Name, existing.Manifest.Version)
+	}
+
 	merged := maps.Clone(w.currentModules())
 	if merged == nil {
 		merged = make(map[string]*module.LoadedModule, 1)
