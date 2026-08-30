@@ -657,7 +657,22 @@ func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) 
 		t.Errorf("module %q should not be present in the registry after a validation failure", name)
 	}
 	if tableExists(t, env.conn, "tenant_"+slug, "widgets_widget") {
-		t.Error("expected no table to have been created — validation should fail before tenant sync ever runs")
+		t.Errorf("expected no table to have been created — validation should fail before tenant sync ever runs (own slug=%q, own module name=%q)", slug, name)
+		rows, qErr := env.conn.Query("SELECT table_schema FROM information_schema.tables WHERE table_name = 'widgets_widget'")
+		if qErr != nil {
+			t.Logf("diagnostic query failed: %v", qErr)
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var schema string
+				if err := rows.Scan(&schema); err == nil {
+					t.Logf("diagnostic: widgets_widget also/instead found in schema %q", schema)
+				}
+			}
+			if err := rows.Err(); err != nil {
+				t.Logf("diagnostic rows.Err(): %v", err)
+			}
+		}
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Errorf("expected the persisted package at %q to be removed after a permanent failure, stat error = %v", path, statErr)
