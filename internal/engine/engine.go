@@ -77,6 +77,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/moduleinstall"
+	"github.com/djangbahevans/goerp/internal/engine/modulereload"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -890,6 +891,20 @@ func New(cfg *config.Config) (*Engine, error) {
 		Accept: schemaAdmin,
 	})
 
+	reloadLeader := &modulereload.Leader{
+		Runtime:     runtime,
+		PoolCfg:     poolCfg,
+		Registry:    moduleRegistry,
+		RolePerms:   rolePermissionMap,
+		TenantStore: tenantStore,
+		RoleStore:   roleStore,
+		SyncPool:    syncPool,
+		DiffEngine:  diffEngine,
+		Storage:     storageBackend,
+		Cache:       cacheClient,
+		Workers:     workflowWorkers,
+	}
+
 	instanceID := uuid.NewString()
 	hotReloadCoordinator := hotreload.New(cacheClient, moduleRegistry, instanceID, hotreload.Config{
 		ModuleDir: cfg.ModuleDir,
@@ -898,7 +913,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		// trigger's own dependency (an external module registry service,
 		// backlog goerp#563) doesn't exist yet — see
 		// hotreload.RegistryClient's own doc comment.
-	}, stubHotReloadLeader, stubHotReloadFollower)
+	}, reloadLeader.Run, stubHotReloadFollower)
 
 	adminapi.RegisterModuleRoutes(adminServer.Router(), adminapi.ModulesDeps{
 		Install: &moduleinstall.Installer{

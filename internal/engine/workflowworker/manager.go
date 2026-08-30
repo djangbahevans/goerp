@@ -29,7 +29,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -61,6 +63,15 @@ type process struct {
 	// stdlib rejects a second call outright, and the Go race detector
 	// flags even the first call as racing against watch's).
 	done chan struct{}
+	// replaced is set by Respawn just before it signals this process to
+	// stop, so watch's own exit handler can tell "Respawn deliberately
+	// replaced this" apart from "this process crashed on its own" — the
+	// same distinction m.stopping gives watch for a full StopAll, narrowed
+	// to one process. Without it, Respawn's SIGTERM to the old process
+	// would itself look like an unexpected exit and race watch's own
+	// auto-respawn (using the old, just-replaced manifest) against the new
+	// process Respawn already started.
+	replaced atomic.Bool
 }
 
 // Manager tracks every spawned workflow-worker process and its credential —
@@ -161,6 +172,82 @@ func (m *Manager) spawn(ctx context.Context, mod *module.LoadedModule) error {
 	return nil
 }
 
+// Respawn replaces mod's currently-running workflow-worker process (if
+// any) with a freshly spawned one running mod's own binary, under a newly
+// minted Credential — the "at module load (and hot reload), the engine
+// downloads workflow-worker... verifies it... and execs it" respawn
+// workflow-guide.md §3 documents, and the credential rotation
+// engine-internals.md §11 describes ("hot reload: a new version gets a new
+// credential, not a renewed old one"). A no-op if mod declares no
+// workflow_types.
+//
+// Deliberately not SpawnAll: SpawnAll's own spawn unconditionally
+// overwrites m.processes[name], so calling it again for an
+// already-running module would leak the old process — it would keep
+// running, holding its now-stale credential live, with nothing left in
+// Manager tracking it to ever stop it. Respawn starts and confirms the new
+// process first (spawn's own WaitForPollers call), and only then stops the
+// old one — the same "old resource replaced only after the new one is
+// healthy" ordering the hot-reload pool swap itself uses — so a module
+// with a workflow-worker never has a window with zero live pollers for its
+// task queue.
+func (m *Manager) Respawn(ctx context.Context, mod *module.LoadedModule) error {
+	if len(mod.Manifest.WorkflowTypes) == 0 {
+		return nil
+	}
+
+	m.mu.Lock()
+	old, hadOld := m.processes[mod.Manifest.Name]
+	m.mu.Unlock()
+
+	// Set before spawn, not after: spawn's own WaitForPollers call can take
+	// several seconds, and if old crashes on its own during that window
+	// with replaced still false, watch's exit handler would treat it as an
+	// unexpected exit and auto-respawn it from its own stale manifest —
+	// racing the map entry this call is about to write. Reset back to
+	// false if spawn fails below, so watch's own crash-recovery still
+	// covers old when this attempt to replace it didn't pan out.
+	if hadOld {
+		old.replaced.Store(true)
+	}
+
+	if err := m.spawn(ctx, mod); err != nil {
+		if hadOld {
+			old.replaced.Store(false)
+		}
+		return err
+	}
+
+	if hadOld {
+		_ = old.cmd.Process.Signal(syscall.SIGTERM)
+		// Bounded independently of ctx: Respawn runs synchronously from
+		// hotreload's fsnotify trigger loop, whose own context lives for
+		// the engine's whole lifetime — an old process that ignores
+		// SIGTERM must not be able to wedge that loop until shutdown.
+		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		select {
+		case <-old.done:
+			// Best-effort: fetchAndVerify's cache directory is keyed by
+			// checksum (see its own doc comment on why), so every reload of
+			// a workflow-worker-bearing module leaves its previous version's
+			// binary behind under a new directory unless removed here —
+			// otherwise cacheDir grows by one full binary per version,
+			// forever, over a long-lived deployment's repeated reloads. Only
+			// removed once old is confirmed to have actually exited, never
+			// on the timeout branch below, in case it's still running.
+			if rmErr := os.RemoveAll(filepath.Join(m.cacheDir, old.mf.Name, checksumDirName(old.mf.WorkerChecksum))); rmErr != nil {
+				log.Warn().Err(rmErr).Str("module", mod.Manifest.Name).
+					Msg("hot reload: could not clean up old workflow-worker binary cache")
+			}
+		case <-waitCtx.Done():
+			log.Warn().Str("module", mod.Manifest.Name).Msg("old workflow-worker did not exit within the wait deadline")
+		}
+	}
+
+	return nil
+}
+
 func (m *Manager) fetchAndVerify(ctx context.Context, mf manifest.Manifest) (string, error) {
 	rc, _, err := m.storage.Download(ctx, mf.WorkerChecksum)
 	if err != nil {
@@ -177,7 +264,15 @@ func (m *Manager) fetchAndVerify(ctx context.Context, mf manifest.Manifest) (str
 		return "", err
 	}
 
-	dir := filepath.Join(m.cacheDir, mf.Name)
+	// Keyed by checksum, not just module name: Respawn (goerp#467) starts
+	// the new process before stopping the old one, so their two
+	// fetchAndVerify calls can overlap in time for the same module — a
+	// single per-module path would have this WriteFile collide with the
+	// still-running old binary's own executable file (ETXTBSY on Linux).
+	// Different versions almost always have different checksums, so this
+	// also means a rollback to a previously-cached version never needs to
+	// redownload it.
+	dir := filepath.Join(m.cacheDir, mf.Name, checksumDirName(mf.WorkerChecksum))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create cache dir: %w", err)
 	}
@@ -190,7 +285,11 @@ func (m *Manager) fetchAndVerify(ctx context.Context, mf manifest.Manifest) (str
 }
 
 // watch waits for p's process to exit and respawns it, unless the exit was
-// caused by StopAll (m.stopping).
+// caused by StopAll (m.stopping) or by Respawn deliberately replacing p
+// (p.replaced) — either way, something else is already responsible for
+// what happens next to this module, so treating the exit as "unexpected"
+// here would auto-respawn p's own (possibly already-superseded) binary
+// racing against that other caller.
 func (m *Manager) watch(name string, p *process) {
 	_ = p.cmd.Wait()
 	close(p.done)
@@ -198,7 +297,7 @@ func (m *Manager) watch(name string, p *process) {
 	m.mu.Lock()
 	stopping := m.stopping
 	m.mu.Unlock()
-	if stopping {
+	if stopping || p.replaced.Load() {
 		return
 	}
 

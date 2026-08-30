@@ -13,7 +13,17 @@ import (
 	"go.temporal.io/sdk/worker"
 )
 
+// variant is empty by default; manager_test.go's buildTestWorker sets it
+// via `-ldflags "-X main.variant=..."` when a test needs two
+// content-distinct binaries (and so two distinct checksums) — e.g.
+// TestRespawnReplacesProcessAndRevokesOldCredential, which spawns an "old"
+// and "new" process for the same module and would otherwise have both
+// fetchAndVerify calls collide on one checksum-keyed cache path. Otherwise
+// unused: it exists purely to perturb the compiled output's bytes.
+var variant string
+
 func main() {
+	_ = variant
 	hostPort := os.Getenv("GOERP_TEMPORAL_HOST_PORT")
 	if hostPort == "" {
 		hostPort = "127.0.0.1:7233"

@@ -28,3 +28,11 @@ func verifyChecksum(checksum string, data []byte) error {
 	}
 	return nil
 }
+
+// checksumDirName turns a "sha256:<hex>" checksum into a filesystem-safe
+// path segment for fetchAndVerify's cache directory — ":" isn't valid in a
+// Windows path component, and dropping it keeps every OS on the same
+// on-disk layout rather than diverging only there.
+func checksumDirName(checksum string) string {
+	return strings.ReplaceAll(checksum, ":", "_")
+}

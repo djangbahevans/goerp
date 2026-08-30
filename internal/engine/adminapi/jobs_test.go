@@ -19,6 +19,14 @@ import (
 
 const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 
+// newTestJobsClient uses jobqueue.NewIsolated, not jobqueue.New: this
+// package's own tests and every other package's River-backed tests run as
+// separate concurrent processes against the same shared dev Postgres, all
+// registering New's fixed, package-level queue names (QueueDefault,
+// QueueBulk, ...) with no per-process scoping — any one of them can poll
+// and claim a job another one enqueued, and a client whose own Workers
+// doesn't know that job's kind leaves it permanently retryable instead of
+// completed. See jobqueue.NewIsolated's own doc comment.
 func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 
@@ -32,10 +40,6 @@ func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	}
 	t.Cleanup(pool.Close)
 
-	if err := jobqueue.Migrate(ctx, pool); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-
 	cfg := &config.Config{
 		QueueCriticalConcurrency: 1, QueueDefaultConcurrency: 1,
 		QueueBulkConcurrency: 1, QueueSearchConcurrency: 1, QueueEmailConcurrency: 1,
@@ -43,9 +47,9 @@ func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &jobqueue.ProbeWorker{})
 
-	client, err := jobqueue.New(pool, cfg, workers)
+	client, err := jobqueue.NewIsolated(ctx, t, pool, cfg, workers)
 	if err != nil {
-		t.Fatalf("jobqueue.New: %v", err)
+		t.Fatalf("jobqueue.NewIsolated: %v", err)
 	}
 	if err := client.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -202,6 +206,8 @@ func (w *outputTestWorker) Work(ctx context.Context, job *river.Job[outputTestAr
 	return river.RecordOutput(ctx, outputTestResult{Marker: job.Args.Marker})
 }
 
+// newTestJobsClientWithOutputWorker uses jobqueue.NewIsolated — see
+// newTestJobsClient's own doc comment for why.
 func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 
@@ -215,10 +221,6 @@ func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
 	}
 	t.Cleanup(pool.Close)
 
-	if err := jobqueue.Migrate(ctx, pool); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-
 	cfg := &config.Config{
 		QueueCriticalConcurrency: 1, QueueDefaultConcurrency: 1,
 		QueueBulkConcurrency: 1, QueueSearchConcurrency: 1, QueueEmailConcurrency: 1,
@@ -226,9 +228,9 @@ func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &outputTestWorker{})
 
-	client, err := jobqueue.New(pool, cfg, workers)
+	client, err := jobqueue.NewIsolated(ctx, t, pool, cfg, workers)
 	if err != nil {
-		t.Fatalf("jobqueue.New: %v", err)
+		t.Fatalf("jobqueue.NewIsolated: %v", err)
 	}
 	if err := client.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)

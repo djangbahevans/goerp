@@ -67,29 +67,6 @@ type Worker struct {
 	// Concurrency bounds SyncModule's tenant fan-out; 0 uses
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
-
-	// mu guards only the final read-current-snapshot/merge/Update/
-	// RebuildAll sequence in publish — not the compile or tenant-sync
-	// phases that precede it. It exists because ModuleRegistry.Update
-	// replaces its whole module map on every call, so a
-	// read-snapshot/merge/Update sequence run by two installs at once can
-	// have the second overwrite the first's addition with a map built
-	// from a stale snapshot; holding mu across that whole sequence keeps
-	// it atomic.
-	mu sync.Mutex
-
-	// reserveMu guards installing, a set of module names with an install
-	// currently reserved. reserve claims a name before the slow
-	// compile/tenant-sync phases start, so two concurrent installs of the
-	// same new module name fail fast — one rejected before it wastes any
-	// compile/sync work — without serializing installs of two different
-	// names against each other's I/O-bound work. It's advisory only:
-	// publish's own mu-guarded recheck (not this) is what actually
-	// prevents two installs from corrupting the registry, since the
-	// reservation is released before publish runs (see run's own comment
-	// on why).
-	reserveMu  sync.Mutex
-	installing map[string]struct{}
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
@@ -309,53 +286,54 @@ func (w *Worker) currentModules() map[string]*module.LoadedModule {
 	return snap.Modules()
 }
 
-// reserve claims name for an install in progress, so a second concurrent
-// install of the same name fails immediately instead of running its own
-// compile/tenant-sync only to lose to the first at publish time. It
-// checks both the live registry and the set of installs already
-// reserved — from a caller's perspective, either means this name is
-// unavailable. Advisory only: it's released before publish runs (see
-// run's own comment on why), so publish's own mu-guarded recheck is what
-// actually has to be correct; this exists purely so unrelated names
-// installing concurrently don't waste real compile/sync work chasing an
-// outcome that's already decided.
+// reserve claims name for an install in progress via the registry's own
+// shared Reserve, so a second concurrent install of the same name — or a
+// concurrent hot reload of it (modulereload.Leader shares this exact same
+// call, against this exact same *registry.ModuleRegistry) — fails
+// immediately instead of running its own compile/tenant-sync only to lose
+// at publish time. Checks the live registry first (an already-loaded,
+// non-failed module is a different rejection than "someone else is mid-
+// write"); Reserve itself is advisory only — released before publish runs
+// (see run's own comment on why), so publish's own UpdateWith-guarded
+// recheck is what actually has to be correct; this exists purely so two
+// writers racing for the same name don't both waste real compile/sync
+// work chasing an outcome that's already decided.
 func (w *Worker) reserve(name string) (release func(), err error) {
-	w.reserveMu.Lock()
-	defer w.reserveMu.Unlock()
-
 	if existing, ok := w.currentModules()[name]; ok && existing.Status != module.StatusFailed {
 		return nil, alreadyLoadedErr(name, existing)
 	}
-	if _, ok := w.installing[name]; ok {
+	release, err = w.Registry.Reserve(name)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %q", errInstallInProgress, name)
 	}
-	if w.installing == nil {
-		w.installing = make(map[string]struct{})
-	}
-	w.installing[name] = struct{}{}
-
-	return func() {
-		w.reserveMu.Lock()
-		delete(w.installing, name)
-		w.reserveMu.Unlock()
-	}, nil
+	return release, nil
 }
 
 // publish merges m into the registry's current module map and rebuilds
 // the permission cache (permcache.RolePermissionMap) that has to stay in
-// lockstep with it — engine.go's own startup sequence documents this as
-// registry.Update's only other caller. It re-checks "already loaded"
-// itself, under mu, since run's own reservation-time check (see reserve)
-// is released before this runs and so is only advisory by the time
-// publish is reached. m's own event-subscription validity is checked by
-// run before this is called (see run's own comment on why);
-// ModuleRegistry.Update below still separately validates route and
-// job-type name conflicts against every other loaded module, which —
-// unlike the subscription check — need Update's own full-map view to
-// detect and can't be narrowed the same way.
+// lockstep with it. It re-checks "already loaded" itself, inside
+// UpdateWith's mutate closure — which runs with the registry's own
+// writeMu held for both UpdateWithLocked and the RebuildAll call right
+// after it, via Registry.Lock/Unlock rather than plain UpdateWith — a
+// concurrent writer (another install, or a hot reload of a different
+// module — modulereload.Leader.publish holds this exact same lock the same
+// way) must not be able to publish and rebuild its own permission cache
+// interleaved with this call's own pair, or whichever RebuildAll's
+// (potentially slow, several-tenant) DB queries happen to finish last wins
+// regardless of which one actually published last, silently reverting the
+// live permission cache to a stale writer's view. UpdateWithLocked is
+// handed the exact map about to be published, not a possibly-stale
+// Snapshot() read — since run's own reservation-time check (see reserve)
+// is released before this runs and so is only advisory by the time publish
+// is reached. m's own event-subscription validity is checked by run before
+// this is called (see run's own comment on why); ModuleRegistry.UpdateWithLocked
+// below still separately validates route and job-type name conflicts
+// against every other loaded module, which — unlike the subscription
+// check — need Update's own full-map view to detect and can't be narrowed
+// the same way.
 //
-// committed reports whether Registry.Update itself succeeded,
-// independent of err: a RebuildAll failure after a successful Update
+// committed reports whether Registry.UpdateWithLocked itself succeeded,
+// independent of err: a RebuildAll failure after a successful UpdateWithLocked
 // still returns committed=true, because m is already live and reachable
 // through the registry snapshot at that point — run's own cleanup defer
 // must not close m's pool out from under a module the registry now
@@ -363,20 +341,21 @@ func (w *Worker) reserve(name string) (release func(), err error) {
 // (a stale permission cache, which is real but a lesser problem than
 // closing a live module's pool).
 func (w *Worker) publish(ctx context.Context, m *module.LoadedModule) (committed bool, err error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.Registry.Lock()
+	defer w.Registry.Unlock()
 
-	if existing, ok := w.currentModules()[m.Manifest.Name]; ok && existing.Status != module.StatusFailed {
-		return false, alreadyLoadedErr(m.Manifest.Name, existing)
-	}
+	newSnap, err := w.Registry.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+		if existing, ok := current[m.Manifest.Name]; ok && existing.Status != module.StatusFailed {
+			return nil, alreadyLoadedErr(m.Manifest.Name, existing)
+		}
 
-	merged := maps.Clone(w.currentModules())
-	if merged == nil {
-		merged = make(map[string]*module.LoadedModule, 1)
-	}
-	merged[m.Manifest.Name] = m
-
-	newSnap, err := w.Registry.Update(merged)
+		merged := maps.Clone(current)
+		if merged == nil {
+			merged = make(map[string]*module.LoadedModule, 1)
+		}
+		merged[m.Manifest.Name] = m
+		return merged, nil
+	})
 	if err != nil {
 		return false, fmt.Errorf("publish module registry: %w", err)
 	}

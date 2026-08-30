@@ -29,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/google/uuid"
 )
 
 // localPostgresDSN matches internal/engine/tenant/sync's own test
@@ -206,9 +207,20 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 	return *tt
 }
 
+// uniqueSlug is a UUID-derived slug, not a raw time.Now().UnixNano() one —
+// this package's own tests and internal/engine/modulereload's run as
+// separate concurrent processes against the same shared dev Postgres
+// (review-goerp's own documented convention), and a nanosecond timestamp
+// has a real, if narrow, chance of colliding across processes under heavy
+// scheduling contention. Only the first 12 hex characters (48 bits —
+// collision probability is low enough to treat as never, even across many
+// concurrent processes' worth of slugs): some callers build a module name
+// out of two concatenated slugs (module + tenant), and manifest.Manifest's
+// own Name validation caps at 64 characters — a full UUID would blow that
+// budget.
 func uniqueSlug(t *testing.T) string {
 	t.Helper()
-	return fmt.Sprintf("s%d", time.Now().UnixNano())
+	return "s" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 }
 
 func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
@@ -224,15 +236,65 @@ func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
 	return exists
 }
 
+// moduleSyncRecorded reports whether tenantID has a
+// system.module_schema_versions row for moduleName — i.e. whether this
+// exact module was ever synced against this exact tenant. Unlike
+// tableExists, this is immune to a table another, unrelated concurrently
+// running test's own module happens to also create in the same tenant
+// schema (see TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync's
+// own doc comment for why that's a real scenario, not a hypothetical one):
+// the primary key is (tenant_id, module_name), so only this specific
+// module's own sync could ever produce a row here.
+func moduleSyncRecorded(t *testing.T, conn *sql.DB, tenantID, moduleName string) bool {
+	t.Helper()
+	var exists bool
+	err := conn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2)",
+		tenantID, moduleName,
+	).Scan(&exists)
+	if err != nil {
+		t.Fatalf("moduleSyncRecorded query: %v", err)
+	}
+	return exists
+}
+
 // newWorker builds a Worker wired against env, with a fresh, empty
 // registry unless preloaded overrides it.
-func newWorker(env *testEnv, preloaded map[string]*module.LoadedModule) (*Worker, *registry.ModuleRegistry) {
+func newWorker(t *testing.T, env *testEnv, preloaded map[string]*module.LoadedModule) (*Worker, *registry.ModuleRegistry) {
+	t.Helper()
+
 	reg := &registry.ModuleRegistry{}
 	if preloaded != nil {
 		_, _ = reg.Update(preloaded)
 	} else {
 		_, _ = reg.Update(map[string]*module.LoadedModule{})
 	}
+
+	// Drains and closes every module still live in reg at test end, before
+	// newTestEnv's own t.Cleanup closes the shared env.rt (t.Cleanup runs
+	// LIFO, and every test calls newTestEnv before newWorker, so this
+	// always fires first). A test that installs more than one module —
+	// several of this file's own tests, including the concurrent-install
+	// ones — otherwise leaves at least one live pool un-drained: its
+	// replenishLoop goroutine can still be mid-InstantiateModule when
+	// env.rt.Close() runs, a real data race under -race (caught
+	// reproducing goerp#467's own CI failure, on
+	// TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync).
+	t.Cleanup(func() {
+		snap := reg.Snapshot()
+		if snap == nil {
+			return
+		}
+		for _, m := range snap.Modules() {
+			if m.Pool == nil {
+				continue
+			}
+			m.Pool.DrainAndClose(context.Background(), 5*time.Second)
+			if m.CompiledModule != nil {
+				_ = m.CompiledModule.Close(context.Background())
+			}
+		}
+	})
 
 	return &Worker{
 		Runtime:     env.rt,
@@ -266,7 +328,7 @@ func TestWorker_Run_FreshInstallSucceeds(t *testing.T) {
 	pkg := buildPackage(t, name, wasmBytes, nil)
 	path := writeTempPackage(t, pkg)
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 	result, err := w.run(context.Background(), Args{PackagePath: path})
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
@@ -320,7 +382,7 @@ func TestWorker_Run_AlreadyLoadedModuleRejected(t *testing.T) {
 		Status:   module.StatusReady,
 		Manifest: manifest.Manifest{Name: name, Version: "0.9.0"},
 	}
-	w, _ := newWorker(env, map[string]*module.LoadedModule{name: existing})
+	w, _ := newWorker(t, env, map[string]*module.LoadedModule{name: existing})
 
 	wasmBytes := compileFixture(t)
 	pkg := buildPackage(t, name, wasmBytes, nil)
@@ -359,7 +421,7 @@ func TestWorker_Run_PartialTenantFailureStillReachesReady(t *testing.T) {
 	pkg := buildPackage(t, name, wasmBytes, nil)
 	path := writeTempPackage(t, pkg)
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 	result, err := w.run(context.Background(), Args{PackagePath: path})
 	if err != nil {
 		t.Fatalf("run() error: %v", err)
@@ -412,7 +474,7 @@ func TestWorker_Run_ConcurrentDifferentModulesBothLandInRegistry(t *testing.T) {
 	pathA := writeTempPackage(t, buildPackage(t, nameA, compileFixtureVariant(t, "a_"+slug), nil))
 	pathB := writeTempPackage(t, buildPackage(t, nameB, compileFixtureVariant(t, "b_"+slug), nil))
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -465,7 +527,7 @@ func TestWorker_Run_ConcurrentDifferentModules_OverlapCompileAndSync(t *testing.
 	baselineName := "widgets_baseline_" + slug
 	baselinePath := writeTempPackage(t, buildPackage(t, baselineName, compileFixtureVariant(t, "baseline_"+slug), nil))
 
-	w, _ := newWorker(env, nil)
+	w, _ := newWorker(t, env, nil)
 
 	baselineStart := time.Now()
 	if _, err := w.run(context.Background(), Args{PackagePath: baselinePath}); err != nil {
@@ -535,7 +597,7 @@ func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing
 	path1 := writeTempPackage(t, buildPackage(t, name, wasmBytes, nil))
 	path2 := writeTempPackage(t, buildPackage(t, name, wasmBytes, nil))
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
@@ -587,14 +649,30 @@ func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing
 // soft_depends_on to excuse it, is what triggers the failure. This can't
 // directly assert the pool was closed (DrainAndClose/Close are
 // unexported implementation details with no query surface), but does
-// confirm: the module never reaches the registry, no table was created in
-// the active tenant (proving sync never ran), and the persisted package
-// file is removed rather than left for a future engine restart to
-// rediscover and fail identically forever.
+// confirm: the module never reaches the registry, this module was never
+// recorded as synced against the tenant (proving sync never ran for it),
+// and the persisted package file is removed rather than left for a future
+// engine restart to rediscover and fail identically forever.
+//
+// Checking system.module_schema_versions for this tenant+module pair,
+// rather than checking whether the widgets_widget table exists in the
+// tenant's schema: ActiveTenants() (tenantsync's own enumeration) has no
+// per-test or per-process scoping — every module-install/reload test
+// suite in this repo runs against the one shared dev Postgres, so the
+// moment this test's own tenant goes active, any other concurrently
+// running test's own (unrelated, correctly-behaving) install can pick it
+// up as one of "its" active tenants and sync its own module into it. Since
+// most of this repo's fixtures default to an unqualified "widgets.widget"
+// model (same physical table name, different owning module), a bare
+// table-existence check can observe a real table an entirely different
+// test legitimately created — not evidence this test's own sync ran.
+// module_schema_versions is keyed (tenant_id, module_name), so it only
+// ever reflects what this test's own uniquely-named module did, immune to
+// that cross-test/cross-process interference.
 func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
-	env.activeTenant(t, slug)
+	tt := env.activeTenant(t, slug)
 
 	wasmBytes := compileFixture(t)
 	name := "widgets_" + slug
@@ -603,7 +681,7 @@ func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) 
 	})
 	path := writeTempPackage(t, pkg)
 
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 	_, err := w.run(context.Background(), Args{PackagePath: path})
 	if err == nil {
 		t.Fatal("expected an error from an unresolvable event subscription")
@@ -616,8 +694,8 @@ func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) 
 	if _, ok := snap.Modules()[name]; ok {
 		t.Errorf("module %q should not be present in the registry after a validation failure", name)
 	}
-	if tableExists(t, env.conn, "tenant_"+slug, "widgets_widget") {
-		t.Error("expected no table to have been created — validation should fail before tenant sync ever runs")
+	if moduleSyncRecorded(t, env.conn, tt.ID, name) {
+		t.Error("expected no module_schema_versions row for this module — validation should fail before tenant sync ever runs")
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Errorf("expected the persisted package at %q to be removed after a permanent failure, stat error = %v", path, statErr)
@@ -641,7 +719,7 @@ func TestWorker_Run_AlreadyLoadedRejection_DoesNotRemovePackageFile(t *testing.T
 		Status:   module.StatusReady,
 		Manifest: manifest.Manifest{Name: name, Version: "0.9.0"},
 	}
-	w, _ := newWorker(env, map[string]*module.LoadedModule{name: existing})
+	w, _ := newWorker(t, env, map[string]*module.LoadedModule{name: existing})
 
 	wasmBytes := compileFixture(t)
 	pkg := buildPackage(t, name, wasmBytes, nil)
@@ -667,7 +745,7 @@ func TestWorker_Run_AlreadyLoadedRejection_DoesNotRemovePackageFile(t *testing.T
 // snapshot now actually points to.
 func TestWorker_Publish_RegistryUpdateSucceedsDespiteRebuildAllFailure(t *testing.T) {
 	env := newTestEnv(t)
-	w, reg := newWorker(env, nil)
+	w, reg := newWorker(t, env, nil)
 
 	// Closing the connection makes RolePerms.RebuildAll's own
 	// ActiveTenants call fail without touching Registry.Update at all —
@@ -707,7 +785,7 @@ func TestWorker_Run_InstallInProgressRejection_RemovesPackageFile(t *testing.T) 
 	slug := uniqueSlug(t)
 
 	name := "widgets_" + slug
-	w, _ := newWorker(env, nil)
+	w, _ := newWorker(t, env, nil)
 
 	release, err := w.reserve(name)
 	if err != nil {

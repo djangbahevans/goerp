@@ -5,26 +5,17 @@ import (
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/hotreload"
-	"github.com/djangbahevans/goerp/internal/engine/loader"
-	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/rs/zerolog/log"
 )
 
-// stubHotReloadLeader and stubHotReloadFollower are goerp#452's own
-// placeholder LeaderFunc/FollowerFunc — the leader and follower paths
-// themselves are goerp#467 and goerp#490's scope, not this ticket's. Both
-// always fail, so a hot reload trigger never silently appears to succeed
-// before its real implementation lands: a leader-election winner logs
-// and returns an error (the trigger's own onChanged already treats that
-// as "leader failed," so no announcement is ever published and every
-// waiting follower correctly times out and stays on the old version, per
-// docs/engine-internals.md §10's leader-crash-recovery semantics).
-func stubHotReloadLeader(_ context.Context, moduleName string, _ loader.Source, m manifest.Manifest) error {
-	log.Warn().Str("module", moduleName).Str("version", m.Version).
-		Msg("hot reload: leader path not yet implemented (goerp#467)")
-	return fmt.Errorf("hot reload leader path not yet implemented (goerp#467)")
-}
-
+// stubHotReloadFollower is goerp#452's own placeholder FollowerFunc — the
+// follower path itself is goerp#490's scope, not this ticket's. It always
+// fails, so a hot reload trigger never silently appears to succeed on a
+// follower instance before the real implementation lands: this instance
+// stays on the old version and logs a warning, same as any other follower
+// failure (hotreload.Coordinator.OnReloadAnnouncement's own doc comment).
+// The leader path (goerp#467) is implemented for real by
+// modulereload.Leader — see New's own wiring.
 func stubHotReloadFollower(_ context.Context, moduleName, version, _ string) error {
 	log.Warn().Str("module", moduleName).Str("version", version).
 		Msg("hot reload: follower path not yet implemented (goerp#490)")
@@ -41,5 +32,5 @@ type moduleReloadAdapter struct {
 }
 
 func (a moduleReloadAdapter) TriggerReload(ctx context.Context, moduleName string, data []byte) {
-	a.coordinator.OnModuleBytesChanged(ctx, moduleName, data)
+	a.coordinator.TriggerReload(ctx, moduleName, data)
 }

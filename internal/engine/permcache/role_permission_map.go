@@ -40,11 +40,18 @@ func (m *RolePermissionMap) Lookup(roleID string) (permission.PermissionBitfield
 
 // RebuildAll rebuilds the whole map from scratch, across every active
 // tenant, and swaps it in atomically once fully built. Called right after
-// registry.ModuleRegistry.Update rebuilds the permission registry
-// (engine.go's startup sequence and moduleinstall.Worker's publish step,
-// its only two callers) — this map has to be rebuilt in lockstep, since a
-// stale map would resolve bitfields against index assignments that may no
-// longer match modulePerms.
+// registry.ModuleRegistry.Update/UpdateWithLocked rebuilds the permission
+// registry (engine.go's startup sequence, moduleinstall.Worker's publish
+// step, and modulereload.Leader's own publish step) — this map has to be
+// rebuilt in lockstep, since a stale map would resolve bitfields against
+// index assignments that may no longer match modulePerms. Every caller
+// that runs concurrently with another writer (Worker, Leader) calls this
+// while still holding the same *registry.ModuleRegistry's Lock it used for
+// its own UpdateWithLocked call — this function does no locking of its
+// own, so two overlapping RebuildAll calls for two different writers could
+// otherwise interleave and have whichever's DB queries happen to finish
+// last silently overwrite the other's more current result, regardless of
+// which one actually published last.
 //
 // Only tenants.ActiveTenants failing outright is fatal (the tenant list
 // itself couldn't be enumerated — a real infra problem). A single

@@ -1,9 +1,12 @@
 package registry
 
 import (
+	"errors"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -215,6 +218,132 @@ func TestModuleRegistry_Update_ConcurrentWritersSerialize(t *testing.T) {
 	}
 	if len(final.modules) != 1 {
 		t.Fatalf("final snapshot has %d modules, want exactly 1 (one writer's input, not a merge)", len(final.modules))
+	}
+}
+
+// TestModuleRegistry_UpdateWith_ConcurrentWritersMergeWithoutLosingUpdates
+// is UpdateWith's own version of TestModuleRegistry_Update_ConcurrentWritersSerialize
+// above — but where plain Update's own contract is "whichever caller runs
+// last wins wholesale, callers merge for themselves," UpdateWith exists
+// specifically so a caller's own merge (read current, add its module,
+// return the merged map) runs with writeMu already held. Two writer kinds
+// (install, hot reload) built exactly that shape independently on top of
+// plain Update before goerp#467 — read Snapshot(), clone+merge, then
+// Update(merged) — and it silently lost whichever update published second,
+// since the second caller's clone was built from a snapshot that didn't
+// yet include the first caller's just-published module. This test is that
+// scenario, fixed: every one of N concurrent writers must survive in the
+// final snapshot.
+func TestModuleRegistry_UpdateWith_ConcurrentWritersMergeWithoutLosingUpdates(t *testing.T) {
+	r := &ModuleRegistry{}
+	const writers = 20
+
+	var wg sync.WaitGroup
+	wg.Add(writers)
+	for i := range writers {
+		go func(i int) {
+			defer wg.Done()
+			name := "module" + string(rune('a'+i))
+			_, err := r.UpdateWith(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+				merged := make(map[string]*module.LoadedModule, len(current)+1)
+				maps.Copy(merged, current)
+				merged[name] = &module.LoadedModule{Manifest: manifest.Manifest{Type: "standard"}}
+				return merged, nil
+			})
+			if err != nil {
+				t.Errorf("UpdateWith() error = %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	final := r.Snapshot()
+	if final == nil {
+		t.Fatal("Snapshot() = nil after concurrent updates")
+	}
+	if len(final.modules) != writers {
+		t.Errorf("final snapshot has %d modules, want all %d writers' modules present (no lost update)", len(final.modules), writers)
+	}
+}
+
+// TestModuleRegistry_Reserve_SecondCallerForSameNameFails is the
+// reservation-stage half of the same goerp#467 fix: install and hot reload
+// used to each keep their own private "names in progress" set, so an
+// install and a hot reload of the identical module name could both pass
+// their own reservation check and run a full, wasted compile/sync pipeline
+// before UpdateWith's merge ever caught the conflict. Reserve is the one
+// shared gate both now go through first.
+func TestModuleRegistry_Reserve_SecondCallerForSameNameFails(t *testing.T) {
+	r := &ModuleRegistry{}
+
+	release, err := r.Reserve("widgets")
+	if err != nil {
+		t.Fatalf("first Reserve() error = %v", err)
+	}
+
+	if _, err := r.Reserve("widgets"); !errors.Is(err, ErrReserved) {
+		t.Errorf("second Reserve() for the same name error = %v, want ErrReserved", err)
+	}
+
+	if _, err := r.Reserve("gadgets"); err != nil {
+		t.Errorf("Reserve() for a different name error = %v, want nil", err)
+	}
+
+	release()
+
+	if _, err := r.Reserve("widgets"); err != nil {
+		t.Errorf("Reserve() after release error = %v, want nil", err)
+	}
+}
+
+// TestModuleRegistry_LockUpdateWithLocked_SerializesPublishPlusFollowUpStep
+// exercises the exact shape moduleinstall.Worker.publish and
+// modulereload.Leader.publish both use: Lock, UpdateWithLocked, some
+// further "rebuild a derived cache" step, Unlock — proving that step is
+// genuinely atomic with the publish across two concurrent callers, not
+// just the publish itself. Each goroutine's "step" records the module
+// count its own newSnap saw into a shared, unsynchronized-by-design
+// variable (protected only by the same Lock the real callers use); if
+// Lock didn't cover the step too, the two steps could interleave and the
+// final recorded count could reflect whichever finished last rather than
+// whichever published last. Since UpdateWithLocked always merges against
+// the true current map, the writer that publishes second always sees both
+// modules — so if the lock is doing its job, the final recorded count is
+// always 2, deterministically, on every run.
+func TestModuleRegistry_LockUpdateWithLocked_SerializesPublishPlusFollowUpStep(t *testing.T) {
+	r := &ModuleRegistry{}
+
+	var lastRebuiltCount int
+	publishAndRebuild := func(name string) {
+		r.Lock()
+		defer r.Unlock()
+
+		newSnap, err := r.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+			merged := make(map[string]*module.LoadedModule, len(current)+1)
+			maps.Copy(merged, current)
+			merged[name] = &module.LoadedModule{Manifest: manifest.Manifest{Type: "standard"}}
+			return merged, nil
+		})
+		if err != nil {
+			t.Errorf("UpdateWithLocked() error = %v", err)
+			return
+		}
+
+		// Simulates RebuildAll's own slow, several-tenant DB work — long
+		// enough that, without the lock covering this step too, the other
+		// goroutine's own step would very likely interleave with it.
+		time.Sleep(10 * time.Millisecond)
+		lastRebuiltCount = len(newSnap.modules)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); publishAndRebuild("a") }()
+	go func() { defer wg.Done(); publishAndRebuild("b") }()
+	wg.Wait()
+
+	if lastRebuiltCount != 2 {
+		t.Errorf("lastRebuiltCount = %d, want 2 (whichever writer published second must also run its own step last, atomically)", lastRebuiltCount)
 	}
 }
 
