@@ -106,6 +106,21 @@ func (c *Client) UploadFile(ctx context.Context, path, fieldName, fileName strin
 	return c.send(req)
 }
 
+// PostBinary POSTs body as-is with no JSON/multipart framing — `module
+// install`'s own contract per POST /admin/modules/install, which reads
+// the request body directly as the .erp package rather than expecting a
+// JSON envelope or a multipart form.
+func (c *Client) PostBinary(ctx context.Context, path string, body []byte) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	return c.send(req)
+}
+
 type envelope struct {
 	Data  json.RawMessage `json:"data"`
 	Error *apiErrorBody   `json:"error"`
