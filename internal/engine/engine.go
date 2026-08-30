@@ -904,6 +904,16 @@ func New(cfg *config.Config) (*Engine, error) {
 		Cache:       cacheClient,
 		Workers:     workflowWorkers,
 	}
+	reloadFollower := &modulereload.Follower{
+		Runtime:     runtime,
+		PoolCfg:     poolCfg,
+		Registry:    moduleRegistry,
+		RolePerms:   rolePermissionMap,
+		TenantStore: tenantStore,
+		RoleStore:   roleStore,
+		Storage:     storageBackend,
+		Workers:     workflowWorkers,
+	}
 
 	instanceID := uuid.NewString()
 	hotReloadCoordinator := hotreload.New(cacheClient, moduleRegistry, instanceID, hotreload.Config{
@@ -913,7 +923,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		// trigger's own dependency (an external module registry service,
 		// backlog goerp#563) doesn't exist yet — see
 		// hotreload.RegistryClient's own doc comment.
-	}, reloadLeader.Run, stubHotReloadFollower)
+	}, reloadLeader.Run, reloadFollower.Run)
 
 	adminapi.RegisterModuleRoutes(adminServer.Router(), adminapi.ModulesDeps{
 		Install: &moduleinstall.Installer{
