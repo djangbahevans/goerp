@@ -236,6 +236,28 @@ func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
 	return exists
 }
 
+// moduleSyncRecorded reports whether tenantID has a
+// system.module_schema_versions row for moduleName — i.e. whether this
+// exact module was ever synced against this exact tenant. Unlike
+// tableExists, this is immune to a table another, unrelated concurrently
+// running test's own module happens to also create in the same tenant
+// schema (see TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync's
+// own doc comment for why that's a real scenario, not a hypothetical one):
+// the primary key is (tenant_id, module_name), so only this specific
+// module's own sync could ever produce a row here.
+func moduleSyncRecorded(t *testing.T, conn *sql.DB, tenantID, moduleName string) bool {
+	t.Helper()
+	var exists bool
+	err := conn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2)",
+		tenantID, moduleName,
+	).Scan(&exists)
+	if err != nil {
+		t.Fatalf("moduleSyncRecorded query: %v", err)
+	}
+	return exists
+}
+
 // newWorker builds a Worker wired against env, with a fresh, empty
 // registry unless preloaded overrides it.
 func newWorker(t *testing.T, env *testEnv, preloaded map[string]*module.LoadedModule) (*Worker, *registry.ModuleRegistry) {
@@ -627,14 +649,30 @@ func TestWorker_Run_ConcurrentSameNameInstalls_OneSucceedsOneRejected(t *testing
 // soft_depends_on to excuse it, is what triggers the failure. This can't
 // directly assert the pool was closed (DrainAndClose/Close are
 // unexported implementation details with no query surface), but does
-// confirm: the module never reaches the registry, no table was created in
-// the active tenant (proving sync never ran), and the persisted package
-// file is removed rather than left for a future engine restart to
-// rediscover and fail identically forever.
+// confirm: the module never reaches the registry, this module was never
+// recorded as synced against the tenant (proving sync never ran for it),
+// and the persisted package file is removed rather than left for a future
+// engine restart to rediscover and fail identically forever.
+//
+// Checking system.module_schema_versions for this tenant+module pair,
+// rather than checking whether the widgets_widget table exists in the
+// tenant's schema: ActiveTenants() (tenantsync's own enumeration) has no
+// per-test or per-process scoping — every module-install/reload test
+// suite in this repo runs against the one shared dev Postgres, so the
+// moment this test's own tenant goes active, any other concurrently
+// running test's own (unrelated, correctly-behaving) install can pick it
+// up as one of "its" active tenants and sync its own module into it. Since
+// most of this repo's fixtures default to an unqualified "widgets.widget"
+// model (same physical table name, different owning module), a bare
+// table-existence check can observe a real table an entirely different
+// test legitimately created — not evidence this test's own sync ran.
+// module_schema_versions is keyed (tenant_id, module_name), so it only
+// ever reflects what this test's own uniquely-named module did, immune to
+// that cross-test/cross-process interference.
 func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) {
 	env := newTestEnv(t)
 	slug := uniqueSlug(t)
-	env.activeTenant(t, slug)
+	tt := env.activeTenant(t, slug)
 
 	wasmBytes := compileFixture(t)
 	name := "widgets_" + slug
@@ -656,23 +694,8 @@ func TestWorker_Run_UnresolvableSubscriptionFailsBeforeTenantSync(t *testing.T) 
 	if _, ok := snap.Modules()[name]; ok {
 		t.Errorf("module %q should not be present in the registry after a validation failure", name)
 	}
-	if tableExists(t, env.conn, "tenant_"+slug, "widgets_widget") {
-		t.Errorf("expected no table to have been created — validation should fail before tenant sync ever runs (own slug=%q, own module name=%q)", slug, name)
-		rows, qErr := env.conn.Query("SELECT table_schema FROM information_schema.tables WHERE table_name = 'widgets_widget'")
-		if qErr != nil {
-			t.Logf("diagnostic query failed: %v", qErr)
-		} else {
-			defer rows.Close()
-			for rows.Next() {
-				var schema string
-				if err := rows.Scan(&schema); err == nil {
-					t.Logf("diagnostic: widgets_widget also/instead found in schema %q", schema)
-				}
-			}
-			if err := rows.Err(); err != nil {
-				t.Logf("diagnostic rows.Err(): %v", err)
-			}
-		}
+	if moduleSyncRecorded(t, env.conn, tt.ID, name) {
+		t.Error("expected no module_schema_versions row for this module — validation should fail before tenant sync ever runs")
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Errorf("expected the persisted package at %q to be removed after a permanent failure, stat error = %v", path, statErr)
