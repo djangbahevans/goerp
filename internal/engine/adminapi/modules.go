@@ -116,15 +116,16 @@ func (h *moduleHandlers) reload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Detached from the request's own context (which is cancelled the
-	// moment this handler returns) — deliberately not tracked against any
-	// shutdown-aware WaitGroup, unlike Coordinator's own Start/Stop
-	// lifecycle for the other three trigger sources. Acceptable today
-	// because stubHotReloadLeader/Follower (goerp#452's own placeholders)
-	// return almost immediately; once goerp#467/#490 replace them with
-	// real, slow work, an in-flight reload triggered here could still be
-	// running after Engine.Shutdown returns. Revisit then, not before —
-	// solving it now would mean guessing at goerp#467/#490's own shape.
-	go h.deps.Reload.TriggerReload(context.Background(), name, body)
+	// moment this handler returns), but still tracked against Coordinator's
+	// own shutdown-aware WaitGroup — ModuleReloader.TriggerReload's real
+	// implementation (hotreload.Coordinator.TriggerReload) runs this in a
+	// goroutine it holds Stop's own wg.Wait() open for, the same guarantee
+	// Coordinator's other three trigger sources already have. Without that,
+	// an in-flight reload triggered here (real, possibly multi-second work:
+	// compile, tenant schema sync, two object storage uploads) could still
+	// be running after Engine.Shutdown proceeds to close the WASM runtime
+	// and DB pools out from under it.
+	h.deps.Reload.TriggerReload(context.Background(), name, body)
 
 	writeData(w, http.StatusAccepted, struct {
 		Module string `json:"module"`

@@ -265,7 +265,8 @@ func TestRespawnReplacesProcessAndRevokesOldCredential(t *testing.T) {
 	oldChecksum := upload("old")
 	newChecksum := upload("new")
 
-	m := NewManager(backend, temporalClient, t.TempDir())
+	cacheDir := t.TempDir()
+	m := NewManager(backend, temporalClient, cacheDir)
 	oldMod := &module.LoadedModule{Manifest: manifest.Manifest{
 		Name:           "respawntest",
 		WorkerChecksum: oldChecksum,
@@ -312,6 +313,15 @@ func TestRespawnReplacesProcessAndRevokesOldCredential(t *testing.T) {
 	case <-oldProcess.done:
 	case <-time.After(10 * time.Second):
 		t.Error("old process did not exit after Respawn()")
+	}
+
+	oldCacheDir := filepath.Join(cacheDir, "respawntest", checksumDirName(oldChecksum))
+	if _, err := os.Stat(oldCacheDir); !os.IsNotExist(err) {
+		t.Errorf("old workflow-worker cache dir %q still exists after Respawn(), want it cleaned up (stat err = %v)", oldCacheDir, err)
+	}
+	newCacheDir := filepath.Join(cacheDir, "respawntest", checksumDirName(newChecksum))
+	if _, err := os.Stat(newCacheDir); err != nil {
+		t.Errorf("new workflow-worker cache dir %q missing after Respawn(): %v", newCacheDir, err)
 	}
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -38,14 +38,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// errReloadInProgress is reserve's fast-fail rejection when another reload
-// of the same module is already running on this instance — mirrors
-// moduleinstall's errInstallInProgress (goerp#489's reserve/mu split): it
-// exists purely so a second local trigger for the same module (e.g. two
-// different versions racing, or a retried Admin API call) doesn't waste a
-// full compile/downgrade-check/sync run chasing an outcome the first run
+// errReloadInProgress is reserve's fast-fail rejection when another writer
+// — another reload of the same module, or an install of it — is already
+// running, on this instance or (for an install) anywhere in the cluster.
+// It exists purely so a second writer for the same module doesn't waste a
+// full compile/downgrade-check/sync run chasing an outcome the first one
 // already owns.
-var errReloadInProgress = errors.New("another reload of this module is already in progress")
+var errReloadInProgress = errors.New("another install or reload of this module is already in progress")
 
 // Leader implements hotreload.LeaderFunc via Run. Construct with the zero
 // value plus its exported fields set (no constructor needed — matches
@@ -65,26 +64,6 @@ type Leader struct {
 	// Concurrency bounds SyncModule's tenant fan-out; 0 uses
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
-
-	// mu guards only the final read-current-snapshot/merge/Update/
-	// RebuildAll sequence in publish — not the compile, downgrade-check, or
-	// tenant-sync phases that precede it. Same reasoning as
-	// moduleinstall.Worker.mu (goerp#489): ModuleRegistry.Update replaces
-	// its whole module map on every call, so two concurrent writers
-	// building from the same starting snapshot could otherwise have the
-	// second silently clobber the first's publish.
-	mu sync.Mutex
-
-	// reserveMu guards reloading, the set of module names with a reload
-	// currently running on this instance. reserve claims a name before the
-	// slow compile/downgrade-check/tenant-sync phases start, so a second
-	// concurrent local trigger for the same module fails fast instead of
-	// wasting that work — advisory only, released before publish runs (see
-	// Run's own comment on why); publish's own mu-guarded recheck-by-
-	// construction (it always installs whatever mod it's given, keyed by
-	// name) is what actually decides the outcome.
-	reserveMu sync.Mutex
-	reloading map[string]struct{}
 }
 
 // Run implements hotreload.LeaderFunc. Coordinator already guarantees only
@@ -177,16 +156,8 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	// specific correctness property this pre-check pass exists to
 	// guarantee.
 	if oldMod != nil {
-		for _, t := range tenants {
-			blocked, incompatibilities, err := l.checkTenantDowngrade(ctx, t, oldMod.Manifest.Version, mod)
-			if err != nil {
-				log.Warn().Err(err).Str("tenant", t.Slug).Str("module", moduleName).
-					Msg("hot reload: downgrade pre-check failed for a tenant; proceeding without it")
-				continue
-			}
-			if blocked {
-				return fmt.Errorf("tenant %s: downgrade blocked: %v", t.Slug, incompatibilities)
-			}
+		if err := l.checkAllTenantsDowngrade(ctx, tenants, oldMod.Manifest.Version, mod); err != nil {
+			return err
 		}
 	}
 
@@ -194,11 +165,10 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	// abort the reload — same partial-degradation semantics
 	// engine-internals.md's own Stage 4 documents ("a schema-sync failure
 	// on one tenant doesn't block others") and moduleinstall.Worker.run
-	// already applies to fresh installs.
-	syncResult, err := tenantsync.SyncModule(ctx, l.SyncPool, l.DiffEngine, l.TenantStore, mod, l.Concurrency)
-	if err != nil {
-		return fmt.Errorf("sync tenants: %w", err)
-	}
+	// already applies to fresh installs. SyncModuleTenants, not SyncModule:
+	// tenants was already fetched above for the downgrade pre-check: no
+	// reason to pay a second identical ActiveTenants round trip.
+	syncResult := tenantsync.SyncModuleTenants(ctx, l.SyncPool, l.DiffEngine, tenants, mod, l.Concurrency)
 	if len(syncResult.Failed) > 0 {
 		log.Warn().Str("module", moduleName).Int("failed_tenants", len(syncResult.Failed)).
 			Msg("hot reload: schema sync failed for some tenants; reload proceeds for the rest")
@@ -211,10 +181,28 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	// overlap (matches moduleinstall.Worker.run's identical ordering).
 	releaseOnce()
 
-	committed, err := l.publish(ctx, mod)
+	committed, publishErr := l.publish(ctx, mod)
 	published = committed // even a failed publish may have already committed mod to the registry (see publish's own doc comment) — never close a pool the registry now points to
-	if err != nil {
-		return err
+	if !committed {
+		return publishErr
+	}
+	if publishErr != nil {
+		// mod is live and reachable through the registry snapshot despite
+		// publishErr (publish's own doc comment: committed=true here means
+		// only RolePerms.RebuildAll failed, a stale permission cache — real
+		// but a lesser problem than the alternative). Everything below this
+		// point exists to finish what a live module needs regardless —
+		// respawning its workflow-worker, draining the pool it just
+		// replaced, and telling every other instance it can adopt this
+		// version too — none of which becomes optional just because the
+		// permission cache rebuild happened to fail. Returning early instead
+		// would silently leak oldMod's pool forever (nothing else ever
+		// closes it), leave the workflow-worker on its old binary/
+		// credential, and leave every follower waiting on an announcement
+		// that would never come — for a reload that, from every other
+		// instance's perspective, already fully succeeded on this one.
+		log.Error().Err(publishErr).Str("module", moduleName).
+			Msg("hot reload: module published but permission cache rebuild failed")
 	}
 
 	// Respawn (not SpawnAll) is required here: SpawnAll's own spawn would
@@ -257,6 +245,55 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	return nil
 }
 
+// checkAllTenantsDowngrade runs checkTenantDowngrade across tenants bounded
+// to l.Concurrency concurrent checks (tenantsync.DefaultConcurrency if
+// <= 0) — the same fan-out width the real sync pass right after this one
+// uses, so this pre-check pass doesn't pay a fully serial round of
+// session-open/diff/close calls immediately before a concurrent one for
+// the identical tenant set. Returns on the first real DowngradeStatusBlocked
+// verdict found (every tenant's check still gets to finish; only the first
+// blocked one is reported, since one is already enough to abort the whole
+// reload) — see checkTenantDowngrade's own doc comment for why a per-tenant
+// infrastructure error is logged and skipped here rather than treated the
+// same way.
+func (l *Leader) checkAllTenantsDowngrade(ctx context.Context, tenants []tenant.Tenant, currentVersion string, mod *module.LoadedModule) error {
+	concurrency := l.Concurrency
+	if concurrency <= 0 {
+		concurrency = tenantsync.DefaultConcurrency
+	}
+	sem := make(chan struct{}, concurrency)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var blockedErr error
+
+	for _, t := range tenants {
+		wg.Add(1)
+		go func(t tenant.Tenant) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			blocked, incompatibilities, err := l.checkTenantDowngrade(ctx, t, currentVersion, mod)
+			if err != nil {
+				log.Warn().Err(err).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).
+					Msg("hot reload: downgrade pre-check failed for a tenant; proceeding without it")
+				return
+			}
+			if blocked {
+				mu.Lock()
+				if blockedErr == nil {
+					blockedErr = fmt.Errorf("tenant %s: downgrade blocked: %v", t.Slug, incompatibilities)
+				}
+				mu.Unlock()
+			}
+		}(t)
+	}
+	wg.Wait()
+
+	return blockedErr
+}
+
 // checkTenantDowngrade reports blocked=true only for a real
 // DowngradeStatusBlocked verdict; any other error (opening the session,
 // running the diff) comes back through err instead, for the caller to
@@ -289,54 +326,47 @@ func (l *Leader) currentModules() map[string]*module.LoadedModule {
 	return snap.Modules()
 }
 
-// reserve claims name for a reload in progress on this instance, so a
-// second concurrent local trigger for the same module fails immediately
-// instead of running its own compile/downgrade-check/sync only to publish
-// second. See errReloadInProgress's own doc comment for why this is purely
-// advisory.
+// reserve claims name for a reload in progress via the registry's own
+// shared Reserve, so a second concurrent local trigger for the same
+// module — or a concurrent install of it (moduleinstall.Worker shares this
+// exact same call, against this exact same *registry.ModuleRegistry) —
+// fails immediately instead of running its own compile/downgrade-check/
+// sync only to publish second. See errReloadInProgress's own doc comment
+// for why this is purely advisory.
 func (l *Leader) reserve(name string) (release func(), err error) {
-	l.reserveMu.Lock()
-	defer l.reserveMu.Unlock()
-
-	if _, ok := l.reloading[name]; ok {
+	release, err = l.Registry.Reserve(name)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %q", errReloadInProgress, name)
 	}
-	if l.reloading == nil {
-		l.reloading = make(map[string]struct{})
-	}
-	l.reloading[name] = struct{}{}
-
-	return func() {
-		l.reserveMu.Lock()
-		delete(l.reloading, name)
-		l.reserveMu.Unlock()
-	}, nil
+	return release, nil
 }
 
 // publish merges mod into the registry's current module map and rebuilds
 // the permission cache that has to stay in lockstep with it — identical
 // shape to moduleinstall.Worker.publish, just never rejecting an "already
 // loaded" name the way that one does, since replacing an already-loaded
-// module's entry is the entire point of a reload.
+// module's entry is the entire point of a reload. Uses UpdateWith, not
+// Update, for the same reason Worker.publish does: it needs the exact map
+// the registry is about to publish, not a possibly-stale Snapshot() read a
+// concurrent install could have already moved past.
 //
-// committed reports whether Registry.Update itself succeeded, independent
-// of err: a RebuildAll failure after a successful Update still returns
-// committed=true, because mod is already live and reachable through the
-// registry snapshot at that point — Run's own cleanup defer must not close
-// mod's pool out from under a module the registry now routes traffic to,
-// even though this call is still reporting an error (a stale permission
-// cache, real but a lesser problem than closing a live module's pool).
+// committed reports whether Registry.UpdateWith itself succeeded,
+// independent of err: a RebuildAll failure after a successful UpdateWith
+// still returns committed=true, because mod is already live and reachable
+// through the registry snapshot at that point — Run's own cleanup defer
+// must not close mod's pool out from under a module the registry now
+// routes traffic to, even though this call is still reporting an error (a
+// stale permission cache, real but a lesser problem than closing a live
+// module's pool).
 func (l *Leader) publish(ctx context.Context, mod *module.LoadedModule) (committed bool, err error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	merged := maps.Clone(l.currentModules())
-	if merged == nil {
-		merged = make(map[string]*module.LoadedModule, 1)
-	}
-	merged[mod.Manifest.Name] = mod
-
-	newSnap, err := l.Registry.Update(merged)
+	newSnap, err := l.Registry.UpdateWith(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+		merged := maps.Clone(current)
+		if merged == nil {
+			merged = make(map[string]*module.LoadedModule, 1)
+		}
+		merged[mod.Manifest.Name] = mod
+		return merged, nil
+	})
 	if err != nil {
 		return false, fmt.Errorf("publish module registry: %w", err)
 	}

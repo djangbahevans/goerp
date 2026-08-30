@@ -32,5 +32,5 @@ type moduleReloadAdapter struct {
 }
 
 func (a moduleReloadAdapter) TriggerReload(ctx context.Context, moduleName string, data []byte) {
-	a.coordinator.OnModuleBytesChanged(ctx, moduleName, data)
+	a.coordinator.TriggerReload(ctx, moduleName, data)
 }

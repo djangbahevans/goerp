@@ -313,6 +313,22 @@ func (c *Coordinator) OnModuleBytesChanged(ctx context.Context, moduleName strin
 	c.onChanged(ctx, src.Name, *src, *m)
 }
 
+// TriggerReload runs OnModuleBytesChanged in a goroutine tracked by this
+// Coordinator's own Start/Stop WaitGroup — the Admin API upload trigger's
+// entry point for adminapi's ModuleReloader interface. Tracking this
+// matters once Leader/Follower do real, possibly multi-second work
+// (compile, tenant schema sync, object storage): an untracked goroutine
+// here could still be running after Stop returns and Engine.Shutdown
+// proceeds to close the WASM runtime and DB pools out from under it. Safe
+// to call whether or not Start was ever called — wg.Go works on a zero
+// WaitGroup — but Stop only ever waits for calls that happened before it,
+// same as its other three trigger sources.
+func (c *Coordinator) TriggerReload(ctx context.Context, moduleName string, data []byte) {
+	c.wg.Go(func() {
+		c.OnModuleBytesChanged(ctx, moduleName, data)
+	})
+}
+
 // onChanged is the lock/leader/wait sequence OnModuleFileChanged and
 // OnModuleBytesChanged both reduce to once they've each produced a
 // loader.Source + manifest.Manifest from their own different input

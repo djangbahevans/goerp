@@ -31,6 +31,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -199,21 +200,48 @@ func (m *Manager) Respawn(ctx context.Context, mod *module.LoadedModule) error {
 	old, hadOld := m.processes[mod.Manifest.Name]
 	m.mu.Unlock()
 
+	// Set before spawn, not after: spawn's own WaitForPollers call can take
+	// several seconds, and if old crashes on its own during that window
+	// with replaced still false, watch's exit handler would treat it as an
+	// unexpected exit and auto-respawn it from its own stale manifest —
+	// racing the map entry this call is about to write. Reset back to
+	// false if spawn fails below, so watch's own crash-recovery still
+	// covers old when this attempt to replace it didn't pan out.
+	if hadOld {
+		old.replaced.Store(true)
+	}
+
 	if err := m.spawn(ctx, mod); err != nil {
+		if hadOld {
+			old.replaced.Store(false)
+		}
 		return err
 	}
 
 	if hadOld {
-		// Set before signaling: watch's own exit handler checks this to
-		// tell "Respawn deliberately replaced this" apart from "this
-		// process crashed on its own" — see process.replaced's own doc
-		// comment for why that distinction matters here.
-		old.replaced.Store(true)
 		_ = old.cmd.Process.Signal(syscall.SIGTERM)
+		// Bounded independently of ctx: Respawn runs synchronously from
+		// hotreload's fsnotify trigger loop, whose own context lives for
+		// the engine's whole lifetime — an old process that ignores
+		// SIGTERM must not be able to wedge that loop until shutdown.
+		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 		select {
 		case <-old.done:
-		case <-ctx.Done():
-			log.Warn().Str("module", mod.Manifest.Name).Msg("old workflow-worker did not exit before context deadline")
+			// Best-effort: fetchAndVerify's cache directory is keyed by
+			// checksum (see its own doc comment on why), so every reload of
+			// a workflow-worker-bearing module leaves its previous version's
+			// binary behind under a new directory unless removed here —
+			// otherwise cacheDir grows by one full binary per version,
+			// forever, over a long-lived deployment's repeated reloads. Only
+			// removed once old is confirmed to have actually exited, never
+			// on the timeout branch below, in case it's still running.
+			if rmErr := os.RemoveAll(filepath.Join(m.cacheDir, old.mf.Name, checksumDirName(old.mf.WorkerChecksum))); rmErr != nil {
+				log.Warn().Err(rmErr).Str("module", mod.Manifest.Name).
+					Msg("hot reload: could not clean up old workflow-worker binary cache")
+			}
+		case <-waitCtx.Done():
+			log.Warn().Str("module", mod.Manifest.Name).Msg("old workflow-worker did not exit within the wait deadline")
 		}
 	}
 

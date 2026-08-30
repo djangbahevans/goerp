@@ -84,7 +84,15 @@ func SyncModule(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *sc
 		return SyncModuleResult{}, fmt.Errorf("enumerate active tenants: %w", err)
 	}
 
-	return syncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency), nil
+	return SyncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency), nil
+}
+
+// SyncModuleTenants is SyncModule, but for a caller that already has its
+// own tenants slice in hand (e.g. one that also needs it for a check that
+// has to run before sync, like a downgrade pre-check) and would otherwise
+// pay a second identical ActiveTenants round trip for no new information.
+func SyncModuleTenants(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenants []tenant.Tenant, mod *module.LoadedModule, concurrency int) SyncModuleResult {
+	return syncModuleTenants(ctx, pool, diffEngine, tenants, mod, concurrency)
 }
 
 func syncModuleTenants(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schema.SchemaDiffEngine, tenants []tenant.Tenant, mod *module.LoadedModule, concurrency int) SyncModuleResult {
