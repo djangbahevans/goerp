@@ -12,10 +12,10 @@ import (
 // TestLoadModule_RouteForbiddenTypes_RejectRoutes exercises
 // validateModuleRoutes (manifest-spec.md §3's "may register routes"
 // column): of the 8 module types, only domain and connector allow
-// registering routes — l10n, bridge, theme, report_bundle, and automation
-// all forbid it, and a module of one of those types whose get_routes()
-// export returns a non-empty route set must fail to load, while one
-// returning an empty route set loads normally. okModule/oneRouteModule
+// registering routes — l10n, bridge, theme, report_bundle, automation,
+// and field_extension all forbid it, and a module of one of those types
+// whose get_routes() export returns a non-empty route set must fail to
+// load, while one returning an empty route set loads normally. okModule/oneRouteModule
 // are the same hand-crafted WASM fixtures TestLoadModule_Success and
 // TestLoadModule_DecodesRealRouteFromGetRoutes already use, so this needs
 // no new binary fixture — only the manifest's type/required-field extras
@@ -88,6 +88,32 @@ func TestLoadModule_RouteForbiddenTypes_RejectRoutes(t *testing.T) {
 		"automation with a route fails": {
 			oneRouteModule,
 			map[string]any{"type": "automation", "subscribes": []map[string]any{{"name": "widgets.thing.created"}}},
+			true,
+		},
+		"field_extension with no routes loads normally": {
+			okModule,
+			map[string]any{
+				"type":            "field_extension",
+				"view_extensions": []map[string]any{{"extends": "core", "extension": "ext"}},
+				"schema": map[string]any{
+					"owned_models":   []string{},
+					"extends_module": "core",
+					"extends_models": []string{"sales.order"},
+				},
+			},
+			false,
+		},
+		"field_extension with a route fails": {
+			oneRouteModule,
+			map[string]any{
+				"type":            "field_extension",
+				"view_extensions": []map[string]any{{"extends": "core", "extension": "ext"}},
+				"schema": map[string]any{
+					"owned_models":   []string{},
+					"extends_module": "core",
+					"extends_models": []string{"sales.order"},
+				},
+			},
 			true,
 		},
 	}

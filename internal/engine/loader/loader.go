@@ -347,15 +347,15 @@ func callGetDataMigrations(ctx context.Context, inst *wasm.ModuleInstance) ([]mo
 
 // validateModuleRoutes enforces manifest-spec.md §3's "may register
 // routes" column: of the 8 module types, only domain and connector allow
-// registering routes — l10n, bridge, theme, report_bundle, and
-// automation all forbid it. Detecting a violation needs the actual
-// get_routes() result, not a manifest field alone (there's no manifest
-// routes key to check), which is why this lives in the loader package
-// rather than alongside manifest.validateModuleType's other per-type
-// checks.
+// registering routes — l10n, bridge, theme, report_bundle, automation,
+// and field_extension all forbid it. Detecting a violation needs the
+// actual get_routes() result, not a manifest field alone (there's no
+// manifest routes key to check), which is why this lives in the loader
+// package rather than alongside manifest.validateModuleType's other
+// per-type checks.
 func validateModuleRoutes(mf *manifest.Manifest, routes []engine.RouteDeclaration) error {
 	switch mf.Type {
-	case "l10n", "bridge", "theme", "report_bundle", "automation":
+	case "l10n", "bridge", "theme", "report_bundle", "automation", "field_extension":
 		if len(routes) > 0 {
 			return fmt.Errorf("type %q must not register routes, got %d", mf.Type, len(routes))
 		}
