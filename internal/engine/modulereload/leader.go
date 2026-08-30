@@ -345,13 +345,17 @@ func (l *Leader) reserve(name string) (release func(), err error) {
 // the permission cache that has to stay in lockstep with it — identical
 // shape to moduleinstall.Worker.publish, just never rejecting an "already
 // loaded" name the way that one does, since replacing an already-loaded
-// module's entry is the entire point of a reload. Uses UpdateWith, not
-// Update, for the same reason Worker.publish does: it needs the exact map
-// the registry is about to publish, not a possibly-stale Snapshot() read a
-// concurrent install could have already moved past.
+// module's entry is the entire point of a reload. Holds Registry.Lock
+// across both UpdateWithLocked and RebuildAll, the same reason
+// Worker.publish does (see its own doc comment): moduleinstall.Worker.publish
+// holds this exact same shared lock, so an install and a reload publishing
+// concurrently can't have their two RebuildAll calls interleave and let
+// whichever's slower DB queries finish last silently overwrite the other's
+// more current permission cache, regardless of which one actually
+// published last.
 //
-// committed reports whether Registry.UpdateWith itself succeeded,
-// independent of err: a RebuildAll failure after a successful UpdateWith
+// committed reports whether Registry.UpdateWithLocked itself succeeded,
+// independent of err: a RebuildAll failure after a successful UpdateWithLocked
 // still returns committed=true, because mod is already live and reachable
 // through the registry snapshot at that point — Run's own cleanup defer
 // must not close mod's pool out from under a module the registry now
@@ -359,7 +363,10 @@ func (l *Leader) reserve(name string) (release func(), err error) {
 // stale permission cache, real but a lesser problem than closing a live
 // module's pool).
 func (l *Leader) publish(ctx context.Context, mod *module.LoadedModule) (committed bool, err error) {
-	newSnap, err := l.Registry.UpdateWith(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+	l.Registry.Lock()
+	defer l.Registry.Unlock()
+
+	newSnap, err := l.Registry.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
 		merged := maps.Clone(current)
 		if merged == nil {
 			merged = make(map[string]*module.LoadedModule, 1)

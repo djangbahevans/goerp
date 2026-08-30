@@ -313,18 +313,27 @@ func (w *Worker) reserve(name string) (release func(), err error) {
 // the permission cache (permcache.RolePermissionMap) that has to stay in
 // lockstep with it. It re-checks "already loaded" itself, inside
 // UpdateWith's mutate closure — which runs with the registry's own
-// writeMu held and is handed the exact map about to be published, not a
-// possibly-stale Snapshot() read — since run's own reservation-time check
-// (see reserve) is released before this runs and so is only advisory by
-// the time publish is reached. m's own event-subscription validity is
-// checked by run before this is called (see run's own comment on why);
-// ModuleRegistry.UpdateWith below still separately validates route and
-// job-type name conflicts against every other loaded module, which —
-// unlike the subscription check — need Update's own full-map view to
-// detect and can't be narrowed the same way.
+// writeMu held for both UpdateWithLocked and the RebuildAll call right
+// after it, via Registry.Lock/Unlock rather than plain UpdateWith — a
+// concurrent writer (another install, or a hot reload of a different
+// module — modulereload.Leader.publish holds this exact same lock the same
+// way) must not be able to publish and rebuild its own permission cache
+// interleaved with this call's own pair, or whichever RebuildAll's
+// (potentially slow, several-tenant) DB queries happen to finish last wins
+// regardless of which one actually published last, silently reverting the
+// live permission cache to a stale writer's view. UpdateWithLocked is
+// handed the exact map about to be published, not a possibly-stale
+// Snapshot() read — since run's own reservation-time check (see reserve)
+// is released before this runs and so is only advisory by the time publish
+// is reached. m's own event-subscription validity is checked by run before
+// this is called (see run's own comment on why); ModuleRegistry.UpdateWithLocked
+// below still separately validates route and job-type name conflicts
+// against every other loaded module, which — unlike the subscription
+// check — need Update's own full-map view to detect and can't be narrowed
+// the same way.
 //
-// committed reports whether Registry.UpdateWith itself succeeded,
-// independent of err: a RebuildAll failure after a successful UpdateWith
+// committed reports whether Registry.UpdateWithLocked itself succeeded,
+// independent of err: a RebuildAll failure after a successful UpdateWithLocked
 // still returns committed=true, because m is already live and reachable
 // through the registry snapshot at that point — run's own cleanup defer
 // must not close m's pool out from under a module the registry now
@@ -332,7 +341,10 @@ func (w *Worker) reserve(name string) (release func(), err error) {
 // (a stale permission cache, which is real but a lesser problem than
 // closing a live module's pool).
 func (w *Worker) publish(ctx context.Context, m *module.LoadedModule) (committed bool, err error) {
-	newSnap, err := w.Registry.UpdateWith(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
+	w.Registry.Lock()
+	defer w.Registry.Unlock()
+
+	newSnap, err := w.Registry.UpdateWithLocked(func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error) {
 		if existing, ok := current[m.Manifest.Name]; ok && existing.Status != module.StatusFailed {
 			return nil, alreadyLoadedErr(m.Manifest.Name, existing)
 		}

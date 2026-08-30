@@ -50,26 +50,46 @@ func (r *ModuleRegistry) Update(modules map[string]*module.LoadedModule) (*Regis
 	})
 }
 
-// UpdateWith runs mutate with writeMu already held, handing it the exact
-// module map the registry currently publishes (nil on the very first
-// call) so it can read-then-merge without any gap a concurrent writer
-// could land in between — the single shared lock every registry writer
-// (install, hot reload, and any future enable/disable/uninstall) must go
-// through for its own read-current/merge/publish sequence, restoring the
-// "held for every writer" guarantee engine-internals.md §4 describes,
-// which two independent per-writer-kind mutexes (one for install, one for
-// hot reload) can't provide on their own: each only serializes writers of
-// its own kind against each other, not against the other kind, so an
-// install and a hot reload publishing concurrently could otherwise each
-// build from the same pre-either-update snapshot and have the second
-// silently clobber the first's change. mutate returning an error aborts
-// before anything is built or published — e.g. Worker.publish's own
-// "already loaded" recheck, now safe to run here since it sees the exact
-// map this call will publish against, not a stale one.
+// UpdateWith locks writeMu, runs UpdateWithLocked, and unlocks — for a
+// caller with no other locked work to do around the publish itself. A
+// caller that also needs some further step (e.g. rebuilding a derived
+// cache from the just-published snapshot) to be atomic with the publish —
+// not just internally consistent, but also not interleaved with a second
+// writer's own publish+step pair — must instead call Lock, then
+// UpdateWithLocked, do that step, then Unlock; see Reserve's own doc
+// comment for why two writer kinds racing for the same publish+step pair
+// is a real scenario here, not a hypothetical one.
 func (r *ModuleRegistry) UpdateWith(mutate func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error)) (*RegistrySnapshot, error) {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
+	return r.UpdateWithLocked(mutate)
+}
 
+// Lock and Unlock guard writeMu directly, for a caller that needs to hold
+// it across UpdateWithLocked plus some further locked step — see
+// UpdateWith's own doc comment for when that's actually needed instead of
+// just calling UpdateWith.
+func (r *ModuleRegistry) Lock()   { r.writeMu.Lock() }
+func (r *ModuleRegistry) Unlock() { r.writeMu.Unlock() }
+
+// UpdateWithLocked is UpdateWith's body, callable only while the caller
+// already holds writeMu (via Lock) — see UpdateWith's own doc comment for
+// why a caller would reach for this instead. Handed the exact module map
+// the registry currently publishes (nil on the very first call) so mutate
+// can read-then-merge without any gap a concurrent writer could land in
+// between — restoring, across the shared *ModuleRegistry every writer
+// (install, hot reload, and any future enable/disable/uninstall) holds a
+// reference to, the "held for every writer" guarantee engine-internals.md
+// §4 describes, which two independent per-writer-kind mutexes (one for
+// install, one for hot reload) can't provide on their own: each only
+// serializes writers of its own kind against each other, not against the
+// other kind, so an install and a hot reload publishing concurrently could
+// otherwise each build from the same pre-either-update snapshot and have
+// the second silently clobber the first's change. mutate returning an
+// error aborts before anything is built or published — e.g. Worker.publish's
+// own "already loaded" recheck, safe to run here since it sees the exact
+// map this call will publish against, not a stale one.
+func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module.LoadedModule) (map[string]*module.LoadedModule, error)) (*RegistrySnapshot, error) {
 	old := r.current.Load() // may be nil on the very first call
 	var currentModules map[string]*module.LoadedModule
 	if old != nil {
