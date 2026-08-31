@@ -637,12 +637,8 @@ func scanRowsToMaps(rows *sql.Rows) ([]map[string]any, error) {
 
 	var records []map[string]any
 	for rows.Next() {
-		values := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range values {
-			ptrs[i] = &values[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
+		values, err := scanRowValues(rows, len(cols))
+		if err != nil {
 			return nil, err
 		}
 		record := make(map[string]any, len(cols))

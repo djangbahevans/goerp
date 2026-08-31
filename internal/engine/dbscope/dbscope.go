@@ -51,7 +51,14 @@ func ValidateNoQualifiedTableRefs(sql string) error {
 	if err != nil {
 		return fmt.Errorf("parse SQL: %w", err)
 	}
+	return ValidateTreeNoQualifiedTableRefs(tree)
+}
 
+// ValidateTreeNoQualifiedTableRefs is ValidateNoQualifiedTableRefs against
+// an already-parsed tree, for a caller that also needs the same parse for
+// something else (e.g. host.db.query's own DDL-keyword rejection) and
+// would otherwise pay for parsing the same SQL text twice.
+func ValidateTreeNoQualifiedTableRefs(tree *pg_query.ParseResult) error {
 	if ref, ok := firstQualifiedTableRef(reflect.ValueOf(tree)); ok {
 		return fmt.Errorf("%w: %q — tenant scoping is automatic, use unqualified table names only", ErrQualifiedTableReference, ref)
 	}

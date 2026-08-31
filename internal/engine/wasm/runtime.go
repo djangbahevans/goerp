@@ -32,6 +32,7 @@ type Runtime struct {
 	eventInsertClient     *river.Client[*sql.Tx]
 	syncEventDispatcher   SyncEventDispatcher
 	syncSubscriberTimeout time.Duration
+	replicaDB             atomic.Pointer[sql.DB]
 }
 
 // SetSyncEventDispatcher wires the resolver host.event.emit's inline
@@ -46,6 +47,16 @@ func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
 	r.syncEventDispatcher = d
 }
 
+// SetReplicaDB wires the read-replica pool host.db.query/query_replica
+// (goerp#459) route reads against. Set after New returns, same as
+// SetSyncEventDispatcher and for the same reason (replica Postgres is
+// warn-only, engine-internals.md §2) — left unset, host.db.query/
+// query_replica's own nil-guard returns db.replica_unavailable rather
+// than panicking.
+func (r *Runtime) SetReplicaDB(db *sql.DB) {
+	r.replicaDB.Store(db)
+}
+
 // New builds the shared wazero runtime and registers the host ABI against
 // it. db is the primary connection pool host.db's transaction-lifecycle
 // functions (host-abi-reference.md §5) open transactions on — it must
@@ -57,6 +68,10 @@ func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
 // cacheClient backs Transient-model host.orm routing (goerp#344) — unlike
 // storageBackend, Redis is fail-hard at Stage 1 (engine-internals.md §2),
 // so cacheClient is never nil by the time New is called.
+//
+// replicaDB (host.db.query's opts.read_only routing and
+// host.db.query_replica) is not a New parameter — see SetReplicaDB's own
+// doc comment for why.
 func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheClient *cache.Client) (*Runtime, error) {
 	ctx := context.Background()
 

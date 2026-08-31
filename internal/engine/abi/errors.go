@@ -40,6 +40,19 @@ const (
 	ErrCodeCommitFailed             = "db.commit_failed"
 )
 
+// host.db.query/host.db.query_replica error codes (host-abi-reference.md §5
+// "host.db.query"/"host.db.query_replica"). ErrCodeDBTimeout is distinct
+// from the generic ErrCodeTimeout above — the doc documents "db.timeout"
+// specifically for a query exceeding its own timeout_ms, not the general
+// ABI-wide "abi.timeout".
+const (
+	ErrCodeQueryError         = "db.query_error"
+	ErrCodeDBTimeout          = "db.timeout"
+	ErrCodeTableAccessDenied  = "db.table_access_denied"
+	ErrCodeResultTooLarge     = "db.result_too_large"
+	ErrCodeReplicaUnavailable = "db.replica_unavailable"
+)
+
 // host.orm error codes (host-abi-reference.md §5a "host.orm.search"/
 // "host.orm.search_read"/"host.orm.read").
 const (
