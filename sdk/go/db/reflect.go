@@ -115,11 +115,16 @@ func returningColumnsFor[T any]() ([]string, error) {
 	return cols, nil
 }
 
-// scanRow populates a new T from row — one host.db.exec RETURNING row,
-// positionally aligned with cols (the exact column order ExecReturning/
-// InsertReturning themselves requested via opts.returning, since
-// host.db.exec's own ABI output carries no column_names to match against
-// by name the way host.db.query's does).
+// scanRow populates a new T from row, matching each cols[i] against T's
+// own db-tag-mapped column names — the machinery ExecReturning/
+// InsertReturning and Query/QueryReplica all share. ExecReturning/
+// InsertReturning call it with cols already in T's own field order
+// (returningColumnsFor[T]'s own output, the exact opts.returning it
+// requested), since host.db.exec's ABI output carries no column_names to
+// match against by name the way host.db.query's does — a caller-side
+// detail of those two, not a requirement scanRow itself imposes; any
+// column order works here as long as cols and row stay index-aligned
+// with each other.
 func scanRow[T any](cols []string, row []any) (T, error) {
 	var out T
 	v := reflect.ValueOf(&out).Elem()
@@ -145,6 +150,21 @@ func scanRow[T any](cols []string, row []any) (T, error) {
 		if err := setFieldValue(v.Field(f.index), row[i]); err != nil {
 			return out, fmt.Errorf("db: column %q: %w", col, err)
 		}
+	}
+	return out, nil
+}
+
+// scanRows populates one T per row via scanRow, all against the same
+// cols — what Query/QueryReplica build their own []T result from
+// host.db.query's rows/column_names.
+func scanRows[T any](cols []string, rows [][]any) ([]T, error) {
+	out := make([]T, len(rows))
+	for i, row := range rows {
+		v, err := scanRow[T](cols, row)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = v
 	}
 	return out, nil
 }

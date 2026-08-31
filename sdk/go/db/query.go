@@ -68,18 +68,46 @@ func WithReadOnly() QueryOption {
 }
 
 // Query runs a parameterized SELECT via host.db.query — rejects anything
-// but a single SELECT statement, engine-side (host-abi-reference.md §5).
-// params are positional ($1, $2, ...); the host substitutes them, never
-// the module itself, so injection requires no caller discipline beyond
-// not string-building the SQL itself.
-func Query(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
-	return query(hostDBQuery, sql, params, opts)
+// but a single SELECT statement, engine-side (host-abi-reference.md §5) —
+// and maps each returned row into a T via its own db-tag-mapped fields,
+// the same struct-mapping conventions ExecReturning[T]/InsertReturning[T]
+// use (reflect.go's mappedFields/scanRow[T]). params are positional
+// ($1, $2, ...); the host substitutes them, never the module itself, so
+// injection requires no caller discipline beyond not string-building the
+// SQL itself.
+func Query[T any](sql string, params []any, opts ...QueryOption) ([]T, error) {
+	res, err := QueryRaw(sql, params, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return scanRows[T](res.ColumnNames, res.Rows)
 }
 
 // QueryReplica is Query, but always routed to a read replica regardless
 // of opts.read_only (host-abi-reference.md §5) — for read traffic that
 // can tolerate replica lag and shouldn't add load to the primary.
-func QueryReplica(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
+func QueryReplica[T any](sql string, params []any, opts ...QueryOption) ([]T, error) {
+	res, err := QueryReplicaRaw(sql, params, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return scanRows[T](res.ColumnNames, res.Rows)
+}
+
+// QueryRaw is Query without the struct-tag-mapped []T layer — every
+// returned row as its own positional []any, aligned against
+// ColumnNames. Query[T] is the right choice for anything with a known
+// result shape; QueryRaw is for a caller with no single T to map every
+// row into instead (sdk/go/model.ProcessBatches, reading an arbitrary,
+// caller-chosen table into map[string]any via QueryResult.AsMaps()).
+func QueryRaw(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
+	return query(hostDBQuery, sql, params, opts)
+}
+
+// QueryReplicaRaw is QueryRaw, but always routed to a read replica —
+// QueryReplica's own counterpart to QueryRaw, the same way QueryReplica
+// is Query's.
+func QueryReplicaRaw(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
 	return query(hostDBQueryReplica, sql, params, opts)
 }
 

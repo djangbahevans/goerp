@@ -73,7 +73,7 @@ func queryBatch(table, condition string, batchSize int) ([]map[string]any, error
 	var result *db.QueryResult
 	err := withRetry(func() error {
 		var queryErr error
-		result, queryErr = db.Query(sql, nil)
+		result, queryErr = db.QueryRaw(sql, nil)
 		return queryErr
 	})
 	if err != nil {

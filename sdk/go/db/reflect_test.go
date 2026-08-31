@@ -105,6 +105,36 @@ func TestScanRow_PopulatesFieldsPositionally(t *testing.T) {
 	}
 }
 
+func TestScanRows_PopulatesEachRow(t *testing.T) {
+	cols := []string{"id", "name", "company_id", "count"}
+	got, err := scanRows[scanRowTestModel](cols, [][]any{
+		{"1", "Widget", "acme", int64(5)},
+		{"2", "Gadget", nil, int64(0)},
+	})
+	if err != nil {
+		t.Fatalf("scanRows: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("scanRows returned %d rows, want 2", len(got))
+	}
+	if got[0].ID != "1" || got[0].Name != "Widget" || got[0].CompanyID == nil || *got[0].CompanyID != "acme" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if got[1].ID != "2" || got[1].CompanyID != nil {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
+
+func TestScanRows_EmptyRowsReturnsEmptySlice(t *testing.T) {
+	got, err := scanRows[scanRowTestModel]([]string{"id"}, nil)
+	if err != nil {
+		t.Fatalf("scanRows: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("scanRows = %+v, want empty", got)
+	}
+}
+
 func TestScanRow_NilValueLeavesPointerNil(t *testing.T) {
 	got, err := scanRow[scanRowTestModel]([]string{"id", "name", "company_id", "count"}, []any{"1", "Widget", nil, int64(0)})
 	if err != nil {
