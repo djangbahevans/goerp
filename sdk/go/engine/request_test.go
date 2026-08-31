@@ -50,6 +50,40 @@ func TestRequest_ParseJSONMalformedReturnsDescriptiveError(t *testing.T) {
 	}
 }
 
+func TestRequest_ParseJSONRejectsDuplicateObjectMemberNames(t *testing.T) {
+	req := &Request{Body: []byte(`{"name":"widget","name":"gadget"}`)}
+
+	var v map[string]any
+	err := req.ParseJSON(&v)
+	if err == nil {
+		t.Fatal("ParseJSON() error = nil, want an error for a duplicate object member name")
+	}
+}
+
+func TestRequest_ParseJSONRejectsInvalidUTF8(t *testing.T) {
+	req := &Request{Body: []byte("{\"name\":\"\xff\xfe\"}")}
+
+	var v map[string]any
+	err := req.ParseJSON(&v)
+	if err == nil {
+		t.Fatal("ParseJSON() error = nil, want an error for invalid UTF-8")
+	}
+}
+
+func TestRequest_ParseJSONMatchesFieldNamesCaseSensitively(t *testing.T) {
+	req := &Request{Body: []byte(`{"NAME":"widget"}`)}
+
+	var v struct {
+		Name string `json:"name"`
+	}
+	if err := req.ParseJSON(&v); err != nil {
+		t.Fatalf("ParseJSON() error: %v", err)
+	}
+	if v.Name != "" {
+		t.Errorf("ParseJSON() name = %q, want empty — a case-mismatched field name is unknown, not matched", v.Name)
+	}
+}
+
 // TestRequest_RawBodyAndParseJSONBothReadTheSameUnderlyingBody proves
 // calling one doesn't consume or mutate what the other sees — Body is a
 // plain []byte field, not a stream, so both accessors are always safe to

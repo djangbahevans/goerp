@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"time"
 )
@@ -44,6 +44,14 @@ func (r *Request) RawBody() []byte {
 // descriptive error on malformed JSON rather than json.Unmarshal's own
 // terser error, consistent with this package's other user-facing error
 // messages.
+//
+// Uses encoding/json/v2's stricter, case-sensitive defaults: invalid
+// UTF-8 and duplicate object member names are rejected outright, and a
+// JSON field name is matched to v's struct fields case-sensitively — a
+// name that only differs in case from its json tag is treated as
+// unknown and silently ignored, the same as any other unrecognized
+// field, rather than being matched the way v1's case-insensitive
+// fallback would.
 func (r *Request) ParseJSON(v any) error {
 	if err := json.Unmarshal(r.Body, v); err != nil {
 		return fmt.Errorf("parse json body: %w", err)
