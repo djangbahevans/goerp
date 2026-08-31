@@ -1395,19 +1395,30 @@ func writeAuditLogEntry(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, 
 		recordID = newData[pkCol]
 	}
 
+	if err := insertAuditLogRow(ctx, tx, modCtx, tableNameForORM(md), recordID, operation, excludeCols, oldData, newData); err != nil {
+		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	return nil
+}
+
+// insertAuditLogRow marshals oldData/newData (excludeCols stripped) and
+// inserts one audit_log row. Shared by writeAuditLogEntry (host.orm's
+// single-record write path) and writeOneExecAuditEntry
+// (host_db_exec_audit.go's raw-SQL path) so the two can't drift apart.
+func insertAuditLogRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, table string, recordID any, operation string, excludeCols map[string]bool, oldData, newData map[string]any) error {
 	oldJSON, err := auditJSON(oldData, excludeCols)
 	if err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return err
 	}
 	newJSON, err := auditJSON(newData, excludeCols)
 	if err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return err
 	}
 
 	sqlStr := fmt.Sprintf(`INSERT INTO %s (table_name, record_id, operation, old_data, new_data, changed_by, request_id, trace_id)
 		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid, $7, $8)`, quoteIdentORM(auditLogTableName))
-	if _, err := tx.ExecContext(ctx, sqlStr, tableNameForORM(md), recordID, operation, oldJSON, newJSON, modCtx.UserID, modCtx.RequestID, modCtx.TraceID); err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	if _, err := tx.ExecContext(ctx, sqlStr, table, recordID, operation, oldJSON, newJSON, modCtx.UserID, modCtx.RequestID, modCtx.TraceID); err != nil {
+		return fmt.Errorf("insert audit_log row: %w", err)
 	}
 	return nil
 }
