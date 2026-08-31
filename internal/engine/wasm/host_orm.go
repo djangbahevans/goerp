@@ -630,6 +630,8 @@ func orderByExpr(order string) string {
 }
 
 func scanRowsToMaps(rows *sql.Rows) ([]map[string]any, error) {
+	defer func() { _ = rows.Close() }()
+
 	cols, err := rows.Columns()
 	if err != nil {
 		return nil, err

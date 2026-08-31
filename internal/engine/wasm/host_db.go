@@ -33,6 +33,7 @@ func registerHostDB(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.
 		NewFunctionBuilder().WithFunc(makeDBRollback(r)).Export("rollback").
 		NewFunctionBuilder().WithFunc(makeDBQuery(r, db, false)).Export("query").
 		NewFunctionBuilder().WithFunc(makeDBQuery(r, db, true)).Export("query_replica").
+		NewFunctionBuilder().WithFunc(makeDBExec(r, db)).Export("exec").
 		Instantiate(ctx)
 	return err
 }
