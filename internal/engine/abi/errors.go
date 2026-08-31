@@ -53,6 +53,19 @@ const (
 	ErrCodeReplicaUnavailable = "db.replica_unavailable"
 )
 
+// host.db.exec error codes (host-abi-reference.md §5 "host.db.exec").
+// Distinct from the host.orm write codes below despite covering the same
+// underlying Postgres errors (unique/FK violation, etag mismatch): the
+// doc documents these under the "db." prefix specifically for exec's raw
+// SQL path, not "orm.".
+const (
+	ErrCodeExecError             = "db.exec_error"
+	ErrCodeNoRowsAffected        = "db.no_rows_affected"
+	ErrCodeDBUniqueViolation     = "db.unique_violation"
+	ErrCodeDBEtagMismatch        = "db.etag_mismatch"
+	ErrCodeDBForeignKeyViolation = "db.foreign_key_violation"
+)
+
 // host.orm error codes (host-abi-reference.md §5a "host.orm.search"/
 // "host.orm.search_read"/"host.orm.read").
 const (

@@ -177,27 +177,66 @@ func deparseSelectAll(relation *pg_query.RangeVar, whereClause *pg_query.Node) (
 // oldRows from captureRowsBeforeExec, newRows from the exec statement's
 // own RETURNING output (empty for DELETE; for UPDATE, host.db.exec must
 // request pkCol plus every non-excluded column via RETURNING regardless
-// of the module's own opts.returning). Rows pair positionally rather than
-// by pkCol value, so an UPDATE that changes the primary key itself still
-// produces one accurate before/after entry instead of a spurious
-// delete+insert pair; a leftover, unpaired row on either side records
-// with the other side NULL. Runs inside tx, so a later failure in the
-// same write rolls these back too.
+// of the module's own opts.returning).
+//
+// Rows pair by pkCol value first — Postgres gives no ordering guarantee
+// for either the pre-write SELECT or an UPDATE...RETURNING, so for a
+// multi-row statement, pairing purely by array position risks matching
+// row A's old_data against row B's new_data if the two statements ever
+// scan in different orders. Only a row whose primary key itself changed
+// (no value-match on either side) falls back to positional pairing
+// against the equally-unmatched remainder, so an UPDATE that changes the
+// primary key still produces one accurate before/after entry instead of
+// a spurious delete+insert pair — this fallback set is normally at most
+// one row (bulk primary-key mutation is not a realistic access pattern),
+// where position is unambiguous regardless of scan order. A leftover,
+// unpaired row on either side records with the other side NULL. Runs
+// inside tx, so a later failure in the same write rolls these back too.
 func writeExecAuditEntries(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, table string, stmt auditableExecStmt, pkCol string, excludeCols map[string]bool, oldRows, newRows []map[string]any) error {
-	n := max(len(oldRows), len(newRows))
-	for i := range n {
-		var oldData, newData map[string]any
-		if i < len(oldRows) {
-			oldData = oldRows[i]
+	type pair struct{ old, new map[string]any }
+	var pairs []pair
+
+	newByPK := make(map[any]map[string]any, len(newRows))
+	for _, row := range newRows {
+		newByPK[row[pkCol]] = row
+	}
+	consumed := make(map[any]bool, len(newRows))
+
+	var unpairedOld []map[string]any
+	for _, old := range oldRows {
+		pk := old[pkCol]
+		if newRow, ok := newByPK[pk]; ok && !consumed[pk] {
+			pairs = append(pairs, pair{old: old, new: newRow})
+			consumed[pk] = true
+			continue
 		}
-		if i < len(newRows) {
-			newData = newRows[i]
+		unpairedOld = append(unpairedOld, old)
+	}
+
+	var unpairedNew []map[string]any
+	for _, row := range newRows {
+		if !consumed[row[pkCol]] {
+			unpairedNew = append(unpairedNew, row)
 		}
-		recordID := oldData[pkCol]
-		if newData != nil {
-			recordID = newData[pkCol]
+	}
+
+	for i := range max(len(unpairedOld), len(unpairedNew)) {
+		var p pair
+		if i < len(unpairedOld) {
+			p.old = unpairedOld[i]
 		}
-		if err := insertAuditLogRow(ctx, tx, modCtx, table, recordID, stmt.Operation, excludeCols, oldData, newData); err != nil {
+		if i < len(unpairedNew) {
+			p.new = unpairedNew[i]
+		}
+		pairs = append(pairs, p)
+	}
+
+	for _, p := range pairs {
+		recordID := p.old[pkCol]
+		if p.new != nil {
+			recordID = p.new[pkCol]
+		}
+		if err := insertAuditLogRow(ctx, tx, modCtx, table, recordID, stmt.Operation, excludeCols, p.old, p.new); err != nil {
 			return err
 		}
 	}
