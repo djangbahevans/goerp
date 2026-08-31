@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdbtest"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivertype"
 )
 
@@ -27,7 +29,9 @@ const jobsTestDSN = "postgres://goerp:dev@localhost:6432/goerp"
 // QueueBulk, ...) with no per-process scoping — any one of them can poll
 // and claim a job another one enqueued, and a client whose own Workers
 // doesn't know that job's kind leaves it permanently retryable instead of
-// completed. See jobqueuetest.New's own doc comment.
+// completed. See jobqueuetest.New's own doc comment — including for why
+// riverdbtest.TestSchema is called directly here rather than through
+// jobqueuetest.
 func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	t.Helper()
 
@@ -48,7 +52,10 @@ func newTestJobsClient(t *testing.T) *river.Client[pgx.Tx] {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &jobqueue.ProbeWorker{})
 
-	client, err := jobqueuetest.New(ctx, t, pool, cfg, workers)
+	driver := riverpgxv5.New(pool)
+	schema := riverdbtest.TestSchema(ctx, t, driver, &riverdbtest.TestSchemaOpts{DisableReuse: true})
+
+	client, err := jobqueuetest.New(driver, schema, cfg, workers)
 	if err != nil {
 		t.Fatalf("jobqueuetest.New: %v", err)
 	}
@@ -229,7 +236,10 @@ func newTestJobsClientWithOutputWorker(t *testing.T) *river.Client[pgx.Tx] {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &outputTestWorker{})
 
-	client, err := jobqueuetest.New(ctx, t, pool, cfg, workers)
+	driver := riverpgxv5.New(pool)
+	schema := riverdbtest.TestSchema(ctx, t, driver, &riverdbtest.TestSchemaOpts{DisableReuse: true})
+
+	client, err := jobqueuetest.New(driver, schema, cfg, workers)
 	if err != nil {
 		t.Fatalf("jobqueuetest.New: %v", err)
 	}

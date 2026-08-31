@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdbtest"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivertype"
 )
 
@@ -143,16 +145,24 @@ func testConfig() *config.Config {
 // client's Workers doesn't know the claimed job's kind, logs "Unhandled
 // job kind", and leaves it permanently retryable, not completed. See
 // jobqueuetest.New's own doc comment.
+//
+// riverdbtest.TestSchema is called directly here, not through
+// jobqueuetest — see jobqueuetest.New's own doc comment for why a wrapper
+// around that specific call breaks its own package-name-based schema
+// isolation.
 func startedClient(t *testing.T, workers *river.Workers) *river.Client[pgx.Tx] {
 	t.Helper()
 	pool := testPool(t)
+	ctx := context.Background()
 
-	client, err := jobqueuetest.New(context.Background(), t, pool, testConfig(), workers)
+	driver := riverpgxv5.New(pool)
+	schema := riverdbtest.TestSchema(ctx, t, driver, &riverdbtest.TestSchemaOpts{DisableReuse: true})
+
+	client, err := jobqueuetest.New(driver, schema, testConfig(), workers)
 	if err != nil {
 		t.Fatalf("jobqueuetest.New: %v", err)
 	}
 
-	ctx := context.Background()
 	if err := client.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
