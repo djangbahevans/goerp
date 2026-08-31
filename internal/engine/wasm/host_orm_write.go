@@ -1516,12 +1516,29 @@ func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pk
 // applyComputedValue writes a single computed field's new value directly
 // — never routed back through writeOneRecordTx, which would rotate the
 // row's etag, re-emit orm.record.updated, and re-trigger recompute
-// (single-hop only, no cascading, per the AC).
+// (single-hop only, no cascading, per the AC). If the table carries the
+// engine's update_etag() trigger (internal/engine/schema/etag_trigger.go,
+// installed for any table in a module's audited_tables[]), that BEFORE
+// UPDATE trigger would otherwise rotate etag/updated_at on this UPDATE
+// regardless of which column is in its SET clause — app.skip_etag_trigger
+// tells it to skip, the same set_config-based session-variable mechanism
+// applyTenantScope uses for app.current_user_id etc. (tenant_scope.go).
+// Scoped SET LOCAL (is_local=true), so it can't leak past this
+// transaction or suppress etag rotation on any other write in it.
 func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, field string, value any) *abi.HostError {
 	table := quoteIdentORM(tableNameForORM(md))
+
+	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.skip_etag_trigger', 'true', true)"); err != nil {
+		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
 	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2", table, quoteIdentORM(field), quoteIdentORM(pkCol))
 	if _, err := tx.ExecContext(ctx, sqlStr, value, pkValue); err != nil {
 		return translateWriteError(err, md)
+	}
+
+	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.skip_etag_trigger', 'false', true)"); err != nil {
+		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 	return nil
 }
