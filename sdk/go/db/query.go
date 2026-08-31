@@ -96,10 +96,10 @@ func QueryReplica[T any](sql string, params []any, opts ...QueryOption) ([]T, er
 
 // QueryRaw is Query without the struct-tag-mapped []T layer — every
 // returned row as its own positional []any, aligned against
-// ColumnNames. For a caller that doesn't have a single T to map every
-// row into (sdk/go/model.ProcessBatches, reading an arbitrary,
-// caller-chosen table into map[string]any via QueryResult.AsMaps());
-// Query[T] is the right choice for anything with a known result shape.
+// ColumnNames. Query[T] is the right choice for anything with a known
+// result shape; QueryRaw is for a caller with no single T to map every
+// row into instead (sdk/go/model.ProcessBatches, reading an arbitrary,
+// caller-chosen table into map[string]any via QueryResult.AsMaps()).
 func QueryRaw(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
 	return query(hostDBQuery, sql, params, opts)
 }
