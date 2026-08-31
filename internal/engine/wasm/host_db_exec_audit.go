@@ -106,11 +106,12 @@ func captureRowsBeforeExec(ctx context.Context, tx *sql.Tx, stmt auditableExecSt
 // renumberParams deep-clones node and rewrites every ParamRef.Number to
 // a contiguous 1-based sequence (first-appearance order), returning the
 // clone and the params subset each new number maps to. (nil, nil, nil) if
-// node is nil. Walks via protobuf reflection rather than a type switch
-// over every SQL expression node a WHERE clause can contain. Errors
-// rather than panicking on a $n beyond len(params) — params comes from
-// the module's own exec call, an untrusted boundary input, not something
-// this function can assume is well-formed.
+// node is nil. Walks via walkPGQueryTree (host_db_exec_pgquery_walk.go)
+// rather than a type switch over every SQL expression node a WHERE
+// clause can contain. Errors rather than panicking on a $n beyond
+// len(params) — params comes from the module's own exec call, an
+// untrusted boundary input, not something this function can assume is
+// well-formed.
 func renumberParams(node *pg_query.Node, params []any) (*pg_query.Node, []any, error) {
 	if node == nil {
 		return nil, nil, nil
@@ -124,41 +125,27 @@ func renumberParams(node *pg_query.Node, params []any) (*pg_query.Node, []any, e
 	var walkErr error
 	seen := make(map[int32]int32)
 
-	var walk func(m protoreflect.Message)
-	walk = func(m protoreflect.Message) {
-		if !m.IsValid() || walkErr != nil {
-			return
+	walkPGQueryTree(clone.ProtoReflect(), func(m protoreflect.Message) bool {
+		if walkErr != nil {
+			return false
 		}
-		if pr, ok := m.Interface().(*pg_query.ParamRef); ok {
-			if pr.Number < 1 || int(pr.Number) > len(params) {
-				walkErr = fmt.Errorf("parameter $%d has no corresponding value (%d supplied)", pr.Number, len(params))
-				return
-			}
-			newNum, ok := seen[pr.Number]
-			if !ok {
-				newParams = append(newParams, params[pr.Number-1])
-				newNum = int32(len(newParams))
-				seen[pr.Number] = newNum
-			}
-			pr.Number = newNum
-			return
-		}
-		m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
-			if fd.Kind() != protoreflect.MessageKind {
-				return true
-			}
-			if fd.IsList() {
-				list := v.List()
-				for i := 0; i < list.Len(); i++ {
-					walk(list.Get(i).Message())
-				}
-				return true
-			}
-			walk(v.Message())
+		pr, ok := m.Interface().(*pg_query.ParamRef)
+		if !ok {
 			return true
-		})
-	}
-	walk(clone.ProtoReflect())
+		}
+		if pr.Number < 1 || int(pr.Number) > len(params) {
+			walkErr = fmt.Errorf("parameter $%d has no corresponding value (%d supplied)", pr.Number, len(params))
+			return false
+		}
+		newNum, ok := seen[pr.Number]
+		if !ok {
+			newParams = append(newParams, params[pr.Number-1])
+			newNum = int32(len(newParams))
+			seen[pr.Number] = newNum
+		}
+		pr.Number = newNum
+		return false // a ParamRef has no useful children to descend into
+	})
 	if walkErr != nil {
 		return nil, nil, walkErr
 	}

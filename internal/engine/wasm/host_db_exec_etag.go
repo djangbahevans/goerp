@@ -38,56 +38,67 @@ func resolveEtagTable(modCtx *ModuleContext, table string) (md model.ModelDeclar
 	return model.ModelDeclaration{}, false
 }
 
-// whereClauseHasEtagCheck reports whether whereClause contains an
-// equality comparison against an "etag" column — bare or table-qualified
-// (e.g. "t.etag") — anywhere in its own top-level boolean expression
-// tree, regardless of AND/OR nesting. Walked via protobuf reflection
-// rather than a type switch over every SQL expression node a WHERE
-// clause can contain, the same approach renumberParams
-// (host_db_exec_audit.go) uses for its own tree walk. Does not recurse
-// into a SubLink's own Subselect: an "etag = $n" inside a subquery (e.g.
-// WHERE id IN (SELECT ... FROM other_table WHERE etag = $n)) scopes a
-// different relation entirely, not the row this UPDATE targets, so
-// treating it as this statement's own etag check would be a false
-// positive.
-func whereClauseHasEtagCheck(whereClause *pg_query.Node) bool {
+// whereClauseHasEtagCheck reports whether whereClause, the WHERE clause
+// of an UPDATE against relation, contains an equality comparison against
+// relation's own etag column — bare ("etag") or qualified by relation's
+// own name or alias ("t.etag") — reachable through nothing but AND from
+// the top. Walked via walkPGQueryTree (host_db_exec_pgquery_walk.go).
+// Three things intentionally stop the walk from crediting a nested
+// comparison as this statement's own protection:
+//   - A SubLink's own Subselect: "WHERE id IN (SELECT ... FROM other
+//     WHERE etag = $n)" checks a different relation's etag entirely.
+//   - A BoolExpr that isn't AND (OR, NOT): "WHERE id = $1 OR etag = $2"
+//     can update a row whose etag was never checked, since the OR's
+//     other branch alone can satisfy the condition — only a conjunct
+//     every matched row must satisfy is a real check.
+//   - A ColumnRef qualified to a different table/alias than relation's
+//     own: "UPDATE widget ... FROM other WHERE other.etag = $n" checks
+//     other's etag, not widget's — see columnRefNamesEtag.
+func whereClauseHasEtagCheck(whereClause *pg_query.Node, relation *pg_query.RangeVar) bool {
 	if whereClause == nil {
 		return false
 	}
+	targetNames := targetRelationNames(relation)
 
 	found := false
-	var walk func(m protoreflect.Message)
-	walk = func(m protoreflect.Message) {
-		if !m.IsValid() || found {
-			return
+	walkPGQueryTree(whereClause.ProtoReflect(), func(m protoreflect.Message) bool {
+		if found {
+			return false
 		}
 		if expr, ok := m.Interface().(*pg_query.A_Expr); ok {
 			if expr.Kind == pg_query.A_Expr_Kind_AEXPR_OP && aExprNameIsEquality(expr.Name) &&
-				(columnRefNamesEtag(expr.Lexpr) || columnRefNamesEtag(expr.Rexpr)) {
+				(columnRefNamesEtag(expr.Lexpr, targetNames) || columnRefNamesEtag(expr.Rexpr, targetNames)) {
 				found = true
 			}
-			return
+			return false // an A_Expr has no useful children for this search
 		}
 		if _, ok := m.Interface().(*pg_query.SubLink); ok {
-			return
+			return false
 		}
-		m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
-			if fd.Kind() != protoreflect.MessageKind {
-				return true
-			}
-			if fd.IsList() {
-				list := v.List()
-				for i := 0; i < list.Len(); i++ {
-					walk(list.Get(i).Message())
-				}
-				return true
-			}
-			walk(v.Message())
-			return true
-		})
-	}
-	walk(whereClause.ProtoReflect())
+		if be, ok := m.Interface().(*pg_query.BoolExpr); ok && be.Boolop != pg_query.BoolExprType_AND_EXPR {
+			return false
+		}
+		return true
+	})
 	return found
+}
+
+// targetRelationNames returns the names an "etag" ColumnRef's qualifier
+// must match to count as relation's own column: relation's real name,
+// plus its alias if the UPDATE gave it one (e.g. "UPDATE widget AS w
+// ... WHERE w.etag = $1").
+func targetRelationNames(relation *pg_query.RangeVar) map[string]bool {
+	names := map[string]bool{}
+	if relation == nil {
+		return names
+	}
+	if name := relation.GetRelname(); name != "" {
+		names[name] = true
+	}
+	if alias := relation.GetAlias(); alias != nil && alias.GetAliasname() != "" {
+		names[alias.GetAliasname()] = true
+	}
+	return names
 }
 
 func aExprNameIsEquality(name []*pg_query.Node) bool {
@@ -99,17 +110,39 @@ func aExprNameIsEquality(name []*pg_query.Node) bool {
 	return false
 }
 
-func columnRefNamesEtag(node *pg_query.Node) bool {
+// columnRefNamesEtag reports whether node is a ColumnRef naming an
+// "etag" column that belongs to the UPDATE's own target relation.
+// Unqualified ("etag") is assumed to be the target's own column: if the
+// statement also references a different table's etag column via a FROM
+// clause, an unqualified reference would only be valid SQL at all
+// (Postgres rejects an ambiguous unqualified reference outright) when
+// exactly one of the tables in scope actually has that column — and
+// resolveEtagTable's own caller (host.db.exec, once built) only reaches
+// this check when the target table has one. A qualified reference
+// ("other.etag") only counts when the qualifier matches targetNames —
+// see targetRelationNames and whereClauseHasEtagCheck's own doc comment
+// for why a differently-qualified one doesn't.
+func columnRefNamesEtag(node *pg_query.Node, targetNames map[string]bool) bool {
 	if node == nil {
 		return false
 	}
 	cr, ok := node.GetNode().(*pg_query.Node_ColumnRef)
-	if !ok || len(cr.ColumnRef.GetFields()) == 0 {
+	if !ok {
 		return false
 	}
 	fields := cr.ColumnRef.GetFields()
+	if len(fields) == 0 {
+		return false
+	}
 	last, ok := fields[len(fields)-1].GetNode().(*pg_query.Node_String_)
-	return ok && last.String_.GetSval() == "etag"
+	if !ok || last.String_.GetSval() != "etag" {
+		return false
+	}
+	if len(fields) == 1 {
+		return true
+	}
+	qualifier, ok := fields[len(fields)-2].GetNode().(*pg_query.Node_String_)
+	return ok && targetNames[qualifier.String_.GetSval()]
 }
 
 // isEtagMismatch reports whether a zero-rows-affected UPDATE should be
