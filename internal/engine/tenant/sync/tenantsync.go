@@ -217,6 +217,13 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 		return fmt.Errorf("sync RLS policies: %w", err)
 	}
 
+	if err := diffEngine.SyncEtagTriggers(ctx, sess, mod.ModelDecls, mod.Manifest.AuditedTables); err != nil {
+		if recErr := sess.RecordSyncFailure(ctx); recErr != nil {
+			log.Warn().Err(recErr).Str("tenant", t.Slug).Str("module", mod.Manifest.Name).Msg("could not record sync failure")
+		}
+		return fmt.Errorf("sync etag triggers: %w", err)
+	}
+
 	if err := sess.RecordSyncSuccess(ctx); err != nil {
 		return fmt.Errorf("record sync success: %w", err)
 	}
