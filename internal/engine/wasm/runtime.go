@@ -32,6 +32,7 @@ type Runtime struct {
 	eventInsertClient     *river.Client[*sql.Tx]
 	syncEventDispatcher   SyncEventDispatcher
 	syncSubscriberTimeout time.Duration
+	replicaDB             atomic.Pointer[sql.DB]
 }
 
 // SetSyncEventDispatcher wires the resolver host.event.emit's inline
@@ -46,6 +47,24 @@ func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
 	r.syncEventDispatcher = d
 }
 
+// SetReplicaDB wires the read-replica pool host.db.query's opts.read_only
+// routing and host.db.query_replica (goerp#459) query against — set after
+// New returns, the same reason SetSyncEventDispatcher is: replica
+// Postgres is a warn-only Stage 1 dependency (engine-internals.md §2), so
+// engine.go doesn't necessarily have a connected pool in hand yet at the
+// point it calls wasm.New (nor is the replica pool's own lifecycle tied
+// to the wasm Runtime's — engine.go closes it independently). Threading
+// it through New's constructor instead would force every one of this
+// package's ~15 existing test call sites (none of which exercise replica
+// routing) to pass an extra, almost always nil, argument. Never called
+// with a nil db.DB — a genuinely absent replica leaves this unset (nil
+// atomic.Pointer, its zero value), and host.db.query/query_replica's own
+// nil-guard turns that into db.replica_unavailable rather than a
+// nil-pointer panic.
+func (r *Runtime) SetReplicaDB(db *sql.DB) {
+	r.replicaDB.Store(db)
+}
+
 // New builds the shared wazero runtime and registers the host ABI against
 // it. db is the primary connection pool host.db's transaction-lifecycle
 // functions (host-abi-reference.md §5) open transactions on — it must
@@ -57,6 +76,10 @@ func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
 // cacheClient backs Transient-model host.orm routing (goerp#344) — unlike
 // storageBackend, Redis is fail-hard at Stage 1 (engine-internals.md §2),
 // so cacheClient is never nil by the time New is called.
+//
+// replicaDB (host.db.query's opts.read_only routing and
+// host.db.query_replica) is not a New parameter — see SetReplicaDB's own
+// doc comment for why.
 func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheClient *cache.Client) (*Runtime, error) {
 	ctx := context.Background()
 

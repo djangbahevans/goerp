@@ -590,6 +590,11 @@ func New(cfg *config.Config) (*Engine, error) {
 
 		return nil, fmt.Errorf("create wasm runtime: %w", err)
 	}
+	// replicaPool is warn-only (nil on a failed connect, per Stage 1 above)
+	// — SetReplicaDB tolerates that, and host.db.query/query_replica's own
+	// nil-guard turns a replica-requiring call into db.replica_unavailable
+	// rather than a nil-pointer panic.
+	runtime.SetReplicaDB(replicaPool)
 
 	// Telemetry setup happens here, immediately before closeOnFailure is
 	// first defined, rather than at the top of New() — SetupTracing opens
