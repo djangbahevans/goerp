@@ -20,6 +20,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/meilisearch/meilisearch-go v0.36.3
+	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
@@ -33,6 +34,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
+	github.com/wasilibs/go-pgquery v0.0.0-20260818004747-c59cae23afec
 	github.com/yeqown/go-qrcode/v2 v2.3.0
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.45.0
@@ -111,6 +113,7 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+	github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yeqown/reedsolomon v1.0.0 // indirect
 	github.com/zclconf/go-cty v1.14.4 // indirect
