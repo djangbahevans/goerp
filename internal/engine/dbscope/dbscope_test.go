@@ -2,8 +2,11 @@ package dbscope
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+
+	pg_query "github.com/pganalyze/pg_query_go/v6"
 )
 
 func TestValidateNoQualifiedTableRefs_AllowsUnqualifiedReferences(t *testing.T) {
@@ -66,6 +69,25 @@ func TestValidateNoQualifiedTableRefs_RejectsQualifiedReferenceAmongUnqualifiedO
 	}
 	if !strings.Contains(err.Error(), "system.users") {
 		t.Errorf("error = %q, want it to name the offending reference", err.Error())
+	}
+}
+
+// TestFirstQualifiedTableRef_WalksMapValues proves the Map case actually
+// works: no field in pg_query_go's real ParseResult tree is map-typed
+// today, so ValidateNoQualifiedTableRefs' own tests never exercise it —
+// this synthesizes a map holding a *pg_query.RangeVar directly, the shape
+// firstQualifiedTableRef's own doc comment says protobuf map fields take.
+func TestFirstQualifiedTableRef_WalksMapValues(t *testing.T) {
+	m := map[string]*pg_query.RangeVar{
+		"x": {Schemaname: "system", Relname: "users"},
+	}
+
+	ref, ok := firstQualifiedTableRef(reflect.ValueOf(m))
+	if !ok {
+		t.Fatal("expected a qualified reference to be found inside the map, got none")
+	}
+	if ref != "system.users" {
+		t.Errorf("ref = %q, want %q", ref, "system.users")
 	}
 }
 

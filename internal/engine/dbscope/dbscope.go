@@ -52,52 +52,77 @@ func ValidateNoQualifiedTableRefs(sql string) error {
 		return fmt.Errorf("parse SQL: %w", err)
 	}
 
-	for _, ref := range qualifiedTableRefs(tree) {
+	if ref, ok := firstQualifiedTableRef(reflect.ValueOf(tree)); ok {
 		return fmt.Errorf("%w: %q — tenant scoping is automatic, use unqualified table names only", ErrQualifiedTableReference, ref)
 	}
 	return nil
 }
 
-// qualifiedTableRefs walks tree's protobuf AST for every *pg_query.RangeVar
-// with a non-empty Schemaname, returning each as "schema.table". A plain
-// recursive reflect walk, not a hand-written visitor: pg_query_go's
-// ParseResult is a deeply nested oneof tree — every statement type its
-// own message, joins/CTEs/subqueries nested arbitrarily — and RangeVar is
-// the one node type that ever carries a schema-qualified table name, so a
-// generic walk that stops descending at *pg_query.RangeVar covers every
-// statement shape Postgres's own grammar produces without hand-enumerating
-// one case per statement/clause type the way a bespoke visitor would.
-func qualifiedTableRefs(node any) []string {
-	var refs []string
-	var walk func(reflect.Value)
-	walk = func(v reflect.Value) {
-		if !v.IsValid() {
-			return
+// firstQualifiedTableRef walks tree's protobuf AST for the first
+// *pg_query.RangeVar with a non-empty Schemaname, returning it as
+// "schema.table" and stopping there — ValidateNoQualifiedTableRefs only
+// ever needs one match to reject the statement, so the walk
+// short-circuits instead of collecting every match in a statement that
+// might have many.
+//
+// A plain recursive reflect walk, not a hand-written visitor:
+// pg_query_go's ParseResult is a deeply nested oneof tree — every
+// statement type its own message, joins/CTEs/subqueries nested
+// arbitrarily — and RangeVar is the one node type that ever carries a
+// schema-qualified table name, so a generic walk that stops descending at
+// *pg_query.RangeVar covers every statement shape Postgres's own grammar
+// produces without hand-enumerating one case per statement/clause type
+// the way a bespoke visitor would.
+//
+// Handles every reflect.Kind a protobuf-generated message tree actually
+// produces: Pointer/Interface for optional/oneof fields, Struct for
+// message fields, Slice/Array for repeated fields, and Map for the one
+// shape protobuf ever generates for a map field (no map-typed field is
+// currently reachable from ParseResult, but nothing here assumes that
+// stays true — an unhandled Map would otherwise silently skip whatever it
+// held, defeating a validator whose whole job is not missing a
+// reference). Every other Kind — string, bool, the various int/float
+// widths, and so on — is a scalar protobuf field, deliberately left as a
+// no-op fallthrough rather than a panic on "unhandled Kind": those are
+// the overwhelming majority of fields visited on any real input, and
+// were never in-band candidates for a table reference either way.
+func firstQualifiedTableRef(v reflect.Value) (string, bool) {
+	if !v.IsValid() {
+		return "", false
+	}
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if v.IsNil() {
+			return "", false
 		}
-		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
-			if v.IsNil() {
-				return
+		if rv, ok := reflect.TypeAssert[*pg_query.RangeVar](v); ok {
+			if rv.Schemaname != "" {
+				return rv.Schemaname + "." + rv.Relname, true
 			}
-			if rv, ok := reflect.TypeAssert[*pg_query.RangeVar](v); ok {
-				if rv.Schemaname != "" {
-					refs = append(refs, rv.Schemaname+"."+rv.Relname)
-				}
-				return
+			return "", false
+		}
+		return firstQualifiedTableRef(v.Elem())
+	case reflect.Struct:
+		for _, field := range v.Fields() {
+			if !field.CanInterface() {
+				continue
 			}
-			walk(v.Elem())
-		case reflect.Struct:
-			for _, field := range v.Fields() {
-				if field.CanInterface() {
-					walk(field)
-				}
+			if ref, ok := firstQualifiedTableRef(field); ok {
+				return ref, true
 			}
-		case reflect.Slice, reflect.Array:
-			for i := range v.Len() {
-				walk(v.Index(i))
+		}
+	case reflect.Slice, reflect.Array:
+		for i := range v.Len() {
+			if ref, ok := firstQualifiedTableRef(v.Index(i)); ok {
+				return ref, true
+			}
+		}
+	case reflect.Map:
+		for _, key := range v.MapKeys() {
+			if ref, ok := firstQualifiedTableRef(v.MapIndex(key)); ok {
+				return ref, true
 			}
 		}
 	}
-	walk(reflect.ValueOf(node))
-	return refs
+	return "", false
 }
