@@ -27,7 +27,7 @@ func newStorageHostcallTestRuntime(t *testing.T, primaryDB *sql.DB, backend stor
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:    filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:    sharedTestCompilationCacheDir(),
 		Environment:         string(config.Production),
 		PoolMaxMemoryByes:   8 << 20,
 		StorageMaxFileBytes: 100 << 20,

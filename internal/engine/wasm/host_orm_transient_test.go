@@ -35,7 +35,7 @@ func openTestCacheClient(t *testing.T) *cache.Client {
 func newHostORMTransientTestRuntime(t *testing.T, primaryDB *sql.DB, cacheClient *cache.Client) *Runtime {
 	t.Helper()
 	rt, err := New(&config.Config{
-		CompilationCache:  t.TempDir(),
+		CompilationCache:  sharedTestCompilationCacheDir(),
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 1 << 20,
 	}, primaryDB, nil, cacheClient)

@@ -2,12 +2,29 @@ package wasm
 
 import (
 	"context"
-	"path/filepath"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 )
+
+// sharedTestCompilationCacheDir is one wazero compilation cache shared
+// by every test in this package's own process, instead of a fresh
+// t.TempDir() per test — the fixture WASM modules these tests load are
+// the same handful across ~300 test functions, so a per-test cache
+// bought nothing but redundant AOT compilation (goerp#527). Not cleaned
+// up on its own; relies on the OS temp directory's own lifecycle, the
+// same as any other os.MkdirTemp caller that isn't tied to a single
+// test's own t.TempDir().
+var sharedTestCompilationCacheDir = sync.OnceValue(func() string {
+	dir, err := os.MkdirTemp("", "wasm-test-cache-")
+	if err != nil {
+		panic(err)
+	}
+	return dir
+})
 
 // A minimal WASM module declaring memory {min: 1, max: 100} pages, exported as "mem".
 var wasmModuleWithMemory = []byte{
@@ -20,7 +37,7 @@ func newTestRuntime(t *testing.T, maxMemoryBytes uint32) *Runtime {
 	t.Helper()
 
 	cfg := &config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  sharedTestCompilationCacheDir(),
 		PoolMaxMemoryByes: maxMemoryBytes,
 		Environment:       string(config.Production),
 	}

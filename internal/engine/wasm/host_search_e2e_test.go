@@ -23,7 +23,7 @@ func newSearchHostcallTestRuntime(t *testing.T, primaryDB *sql.DB) *Runtime {
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  sharedTestCompilationCacheDir(),
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 8 << 20,
 	}, primaryDB, nil, nil)
