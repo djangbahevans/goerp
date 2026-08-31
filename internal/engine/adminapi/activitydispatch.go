@@ -1,7 +1,8 @@
 package adminapi
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"strings"
@@ -49,15 +50,15 @@ type activityDispatchHandler struct {
 // activityDispatchRequest is the JSON body a workflow-worker process POSTs
 // (workflow-guide.md §2), covering every field engine.ActivityRequest needs.
 type activityDispatchRequest struct {
-	Module     string          `json:"module"`
-	Activity   string          `json:"activity"`
-	Payload    json.RawMessage `json:"payload"`
-	TenantID   string          `json:"tenant_id"`
-	UserID     string          `json:"user_id"`
-	TraceID    string          `json:"trace_id"`
-	WorkflowID string          `json:"workflow_id"`
-	RunID      string          `json:"run_id"`
-	Attempt    int32           `json:"attempt"`
+	Module     string         `json:"module"`
+	Activity   string         `json:"activity"`
+	Payload    jsontext.Value `json:"payload"`
+	TenantID   string         `json:"tenant_id"`
+	UserID     string         `json:"user_id"`
+	TraceID    string         `json:"trace_id"`
+	WorkflowID string         `json:"workflow_id"`
+	RunID      string         `json:"run_id"`
+	Attempt    int32          `json:"attempt"`
 }
 
 // activityDispatchResult is engine.ActivityResult, JSON-transcoded for the

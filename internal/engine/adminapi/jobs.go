@@ -1,7 +1,8 @@
 package adminapi
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,7 +24,11 @@ type JobsDeps struct {
 	// about any specific job kind's Result shape. A nil OutputDecryptor
 	// (or one that returns output unchanged for a kind it doesn't
 	// recognize) leaves Output exactly as recorded.
-	OutputDecryptor func(kind string, output json.RawMessage) (json.RawMessage, error)
+	//
+	// jsontext.Value here is binary-compatible with the json.RawMessage
+	// callers elsewhere (internal/engine.go, tenantexport.DecryptOutput)
+	// still use — Go 1.27 makes RawMessage a type alias for it.
+	OutputDecryptor func(kind string, output jsontext.Value) (jsontext.Value, error)
 }
 
 func RegisterJobsRoutes(mux *http.ServeMux, deps JobsDeps) {
@@ -77,13 +82,13 @@ func newJobView(row *rivertype.JobRow) jobView {
 type jobDetailView struct {
 	jobView
 	Errors []rivertype.AttemptError `json:"errors"`
-	Output json.RawMessage          `json:"output,omitempty"`
+	Output jsontext.Value           `json:"output,omitempty"`
 }
 
 func newJobDetailView(row *rivertype.JobRow) jobDetailView {
 	view := jobDetailView{jobView: newJobView(row), Errors: row.Errors}
 	if len(row.Metadata) > 0 {
-		var metadata map[string]json.RawMessage
+		var metadata map[string]jsontext.Value
 		if err := json.Unmarshal(row.Metadata, &metadata); err == nil {
 			view.Output = metadata[rivertype.MetadataKeyOutput]
 		}

@@ -2,7 +2,7 @@ package gateway
 
 import (
 	"crypto/hmac"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"strings"
 )
@@ -41,5 +41,5 @@ type authErrorBody struct {
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(authErrorEnvelope{Error: authErrorBody{Code: code, Message: message}})
+	_ = json.MarshalWrite(w, authErrorEnvelope{Error: authErrorBody{Code: code, Message: message}})
 }

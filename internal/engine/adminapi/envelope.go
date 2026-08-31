@@ -1,7 +1,7 @@
 package adminapi
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 
 	"github.com/rs/zerolog/log"
@@ -26,7 +26,7 @@ type envelopeError struct {
 func writeData(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(envelope{Data: data}); err != nil {
+	if err := json.MarshalWrite(w, envelope{Data: data}); err != nil {
 		log.Error().Err(err).Msg("admin api: encode response")
 	}
 }
@@ -34,7 +34,7 @@ func writeData(w http.ResponseWriter, status int, data any) {
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(envelope{Error: &envelopeError{Code: code, Message: message}}); err != nil {
+	if err := json.MarshalWrite(w, envelope{Error: &envelopeError{Code: code, Message: message}}); err != nil {
 		log.Error().Err(err).Msg("admin api: encode error response")
 	}
 }
