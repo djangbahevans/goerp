@@ -51,7 +51,7 @@ func TestResolveEtagTable(t *testing.T) {
 	}
 }
 
-func whereClauseOf(t *testing.T, sqlText string) *pg_query.Node {
+func parsedUpdateStmt(t *testing.T, sqlText string) auditableExecStmt {
 	t.Helper()
 	tree, err := pg_query.Parse(sqlText)
 	if err != nil {
@@ -61,7 +61,7 @@ func whereClauseOf(t *testing.T, sqlText string) *pg_query.Node {
 	if !ok {
 		t.Fatalf("parseAuditableExecStmt(%q): expected ok=true", sqlText)
 	}
-	return stmt.WhereClause
+	return stmt
 }
 
 func TestWhereClauseHasEtagCheck(t *testing.T) {
@@ -71,21 +71,26 @@ func TestWhereClauseHasEtagCheck(t *testing.T) {
 		want bool
 	}{
 		{"bare etag equality", "UPDATE widget SET name = $1 WHERE etag = $2", true},
-		{"qualified etag equality", "UPDATE widget SET name = $1 WHERE widget.etag = $2", true},
+		{"qualified etag equality against the target's own name", "UPDATE widget SET name = $1 WHERE widget.etag = $2", true},
+		{"qualified etag equality against the target's own alias", "UPDATE widget AS w SET name = $1 WHERE w.etag = $2", true},
 		{"etag on right-hand side", "UPDATE widget SET name = $1 WHERE $2 = etag", true},
 		{"etag combined with other conditions via AND", "UPDATE widget SET name = $1 WHERE id = $2 AND etag = $3", true},
-		{"etag nested under OR", "UPDATE widget SET name = $1 WHERE id = $2 OR (etag = $3 AND name = $4)", true},
+		{"etag AND'ed outside a sibling OR group", "UPDATE widget SET name = $1 WHERE etag = $2 AND (id = $3 OR id = $4)", true},
 		{"no etag check at all", "UPDATE widget SET name = $1 WHERE id = $2", false},
 		{"etag mentioned only as a value, not compared", "UPDATE widget SET name = $1 WHERE id = 'etag'", false},
 		{"no where clause", "UPDATE widget SET name = $1", false},
 		{"etag compared with inequality, not equality", "UPDATE widget SET name = $1 WHERE etag != $2", false},
 		{"etag check inside an unrelated subquery is not this statement's own check", "UPDATE widget SET name = $1 WHERE id IN (SELECT order_id FROM line_items WHERE etag = $2)", false},
 		{"etag check outside a subquery still detected alongside one", "UPDATE widget SET name = $1 WHERE etag = $2 AND id IN (SELECT order_id FROM line_items WHERE etag = $3)", true},
+		{"etag check only reachable through OR is not a required condition", "UPDATE widget SET name = $1 WHERE id = $2 OR (etag = $3 AND name = $4)", false},
+		{"etag check negated by NOT is not a required condition", "UPDATE widget SET name = $1 WHERE NOT (etag = $2)", false},
+		{"etag qualified to a different, joined table is not the target's own check", "UPDATE widget SET name = other.name FROM other_table AS other WHERE widget.id = $1 AND other.etag = $2", false},
+		{"etag qualified to the target amid an unrelated join is still detected", "UPDATE widget SET name = other.name FROM other_table AS other WHERE widget.id = $1 AND widget.etag = $2", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			where := whereClauseOf(t, tt.sql)
-			if got := whereClauseHasEtagCheck(where); got != tt.want {
+			stmt := parsedUpdateStmt(t, tt.sql)
+			if got := whereClauseHasEtagCheck(stmt.WhereClause, stmt.Relation); got != tt.want {
 				t.Errorf("whereClauseHasEtagCheck(%q) = %v, want %v", tt.sql, got, tt.want)
 			}
 		})
