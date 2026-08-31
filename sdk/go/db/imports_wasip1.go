@@ -16,3 +16,9 @@ func hostDBQuery(ptr, size uint32) uint64
 
 //go:wasmimport host.db query_replica
 func hostDBQueryReplica(ptr, size uint32) uint64
+
+//go:wasmimport host.db exec
+func hostDBExec(ptr, size uint32) uint64
+
+//go:wasmimport host.db exec_batch
+func hostDBExecBatch(ptr, size uint32) uint64

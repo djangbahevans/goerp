@@ -13,7 +13,9 @@ import (
 
 var (
 	// ErrNotFound is returned by QueryOne/QueryOneReplica (goerp#507) when
-	// a query matches zero rows.
+	// a query matches zero rows, and by ExecReturning/InsertReturning
+	// when the statement itself matches zero rows (host.db.exec's own
+	// db.no_rows_affected).
 	ErrNotFound = errors.New("db: no matching row")
 
 	// ErrEtagMismatch is returned by UpdateByID (goerp#506) when the row's
@@ -66,6 +68,8 @@ func wrapExecError(err error) error {
 	switch he.Code {
 	case "db.etag_mismatch":
 		return ErrEtagMismatch
+	case "db.no_rows_affected":
+		return ErrNotFound
 	case "db.unique_violation", "db.foreign_key_violation":
 		return &PGError{
 			Code:           detailString(he.Details, "sqlstate"),
