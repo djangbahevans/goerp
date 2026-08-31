@@ -45,23 +45,20 @@ func UpdateByID(table, id string, patch map[string]any) (ExecResult, error) {
 	return exec(dbExecInput{SQL: sql, Params: params, Opts: dbExecOpts{ExpectRows: true}})
 }
 
+// etagRow is currentEtag's own single-column mapping target.
+type etagRow struct {
+	Etag string `db:"etag"`
+}
+
 // currentEtag reads table's row's own etag column for the row identified
 // by id, returning ErrNotFound if no such row exists.
 func currentEtag(table, id string) (string, error) {
-	res, err := Query(fmt.Sprintf("SELECT etag FROM %s WHERE id = $1", table), []any{id})
+	rows, err := Query[etagRow](fmt.Sprintf("SELECT etag FROM %s WHERE id = $1", table), []any{id})
 	if err != nil {
 		return "", wrapExecError(err)
 	}
-	if len(res.Rows) == 0 {
+	if len(rows) == 0 {
 		return "", ErrNotFound
 	}
-	etag, ok := res.Rows[0][0].(string)
-	if !ok {
-		// Discarding this ok would turn a real decode problem into a
-		// false ErrEtagMismatch below (UPDATE ... AND etag = '' never
-		// matches the real row) — indistinguishable from a genuine
-		// stale write.
-		return "", fmt.Errorf("db: table %s's etag column did not decode as a string (got %T)", table, res.Rows[0][0])
-	}
-	return etag, nil
+	return rows[0].Etag, nil
 }
