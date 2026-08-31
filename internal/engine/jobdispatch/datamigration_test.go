@@ -3,6 +3,7 @@ package jobdispatch
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/riverqueue/river/rivertest"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/tetratelabs/wazero"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func testJob(args jobqueue.WASMJobArgs) *river.Job[jobqueue.WASMJobArgs] {
@@ -78,11 +80,17 @@ func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 }
 
 // newDataMigrationModule builds a real StatusReady *module.LoadedModule
-// backed by handleJobEchoModule (zero status on an empty payload — every
-// job EnqueueApplicableDataMigration builds carries a nil Payload, so this
-// always looks like handler success), declaring migrations but
-// deliberately no JobTypes — proving dispatch for a migration handler
-// doesn't depend on it being separately declared there too.
+// backed by handleJobEchoModule (zero status on an empty payload,
+// non-zero on any other length) — this package's own tests that call
+// Work() against it construct their own WASMJobArgs by hand with Payload
+// left at its zero value, rather than reading back what
+// EnqueueApplicableDataMigration actually inserted (which does now carry
+// a real msgpack-encoded model.MigrationJobPayload, never nil — see
+// realfixture_test.go for tests that exercise that real payload, against
+// the real compiled fixture that can actually decode it). Declares
+// migrations but deliberately no JobTypes — proving dispatch for a
+// migration handler doesn't depend on it being separately declared there
+// too.
 func newDataMigrationModule(t *testing.T, migrations []model.DataMigration, version string) *module.LoadedModule {
 	t.Helper()
 	ctx := context.Background()
@@ -247,6 +255,65 @@ func TestEnqueueApplicableDataMigration_EnqueuesOnlyFirstApplicable(t *testing.T
 	}
 	if got := countRiverJobsForHandler(t, jobsConn, migrationTestModuleName, "backfill_b", tenantID); got != 0 {
 		t.Errorf("backfill_b jobs = %d, want 0 (not enqueued until backfill_a succeeds)", got)
+	}
+}
+
+// TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler
+// guards the wire contract engine.DispatchDataMigration decodes on the
+// module's own side (sdk/go/model.MigrationJobPayload) — a regression
+// here would silently break every real handler's MigrationContext
+// without failing any WASM-side dispatch test, since those construct
+// their own payload fixtures directly rather than through this function.
+func TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler(t *testing.T) {
+	_, syncPool := openTestSchemaSyncPool(t)
+	riverClient := newTestRiverClient(t)
+	jobsConn := openJobsConn(t)
+
+	tenantID := uuid.NewString()
+	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
+	mod := newDataMigrationModule(t, []model.DataMigration{
+		{FromVersion: "< 1.4.0", ToVersion: ">= 1.4.0", Handler: "backfill_a"},
+	}, "1.4.0")
+	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.4.0")
+
+	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
+	}
+
+	var argsJSON []byte
+	if err := jobsConn.QueryRow(
+		`SELECT args FROM river_job WHERE kind = 'wasm_job' AND args->>'module_name' = $1 AND args->>'job_type' = $2 AND args->>'tenant_id' = $3`,
+		migrationTestModuleName, "backfill_a", tenantID,
+	).Scan(&argsJSON); err != nil {
+		t.Fatalf("query enqueued job args: %v", err)
+	}
+
+	var args jobqueue.WASMJobArgs
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		t.Fatalf("unmarshal WASMJobArgs: %v", err)
+	}
+	if args.MigrationFromVersion != "0.0.0" {
+		t.Errorf("MigrationFromVersion = %q, want 0.0.0 (this tenant's fresh watermark)", args.MigrationFromVersion)
+	}
+	if args.MigrationToVersion != "1.4.0" {
+		t.Errorf("MigrationToVersion = %q, want 1.4.0", args.MigrationToVersion)
+	}
+
+	var payload model.MigrationJobPayload
+	if err := msgpack.Unmarshal(args.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal Payload as model.MigrationJobPayload: %v", err)
+	}
+	if payload.Handler != "backfill_a" {
+		t.Errorf("payload.Handler = %q, want backfill_a", payload.Handler)
+	}
+	if payload.TenantID != tenantID {
+		t.Errorf("payload.TenantID = %q, want %q", payload.TenantID, tenantID)
+	}
+	if payload.FromVersion != "0.0.0" {
+		t.Errorf("payload.FromVersion = %q, want 0.0.0", payload.FromVersion)
+	}
+	if payload.ToVersion != "1.4.0" {
+		t.Errorf("payload.ToVersion = %q, want 1.4.0", payload.ToVersion)
 	}
 }
 

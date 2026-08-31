@@ -22,9 +22,11 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // Worker processes jobqueue.WASMJobArgs jobs: resolve the target module,
@@ -197,12 +199,29 @@ func EnqueueApplicableDataMigration(ctx context.Context, riverClient *river.Clie
 		return fmt.Errorf("migration %q: %w", next.Handler, err)
 	}
 
+	// The wire payload engine.DispatchDataMigration decodes on the
+	// module's own side — shared directly via import with
+	// sdk/go/model.MigrationJobPayload (see that type's own doc comment
+	// for why this can be a direct import rather than an independently
+	// mirrored copy).
+	payload, err := msgpack.Marshal(model.MigrationJobPayload{
+		Handler:     next.Handler,
+		TenantID:    tenantID,
+		FromVersion: watermark,
+		ToVersion:   toVersion.String(),
+	})
+	if err != nil {
+		return fmt.Errorf("encode data migration payload: %w", err)
+	}
+
 	_, err = riverClient.Insert(ctx, jobqueue.WASMJobArgs{
-		ModuleName:         mod.Manifest.Name,
-		JobType:            next.Handler,
-		TenantID:           tenantID,
-		IsDataMigration:    true,
-		MigrationToVersion: toVersion.String(),
+		ModuleName:           mod.Manifest.Name,
+		JobType:              next.Handler,
+		Payload:              payload,
+		TenantID:             tenantID,
+		IsDataMigration:      true,
+		MigrationFromVersion: watermark,
+		MigrationToVersion:   toVersion.String(),
 	}, &river.InsertOpts{
 		Queue: jobqueue.QueueDefault,
 		// ByState covers redelivery after this exact migration already

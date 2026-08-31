@@ -20,3 +20,11 @@ func hostDBCommit(ptr, size uint32) uint64 {
 func hostDBRollback(ptr, size uint32) uint64 {
 	panic("sdk/go/db: host.db.rollback is only available in a wasip1 build")
 }
+
+func hostDBQuery(ptr, size uint32) uint64 {
+	panic("sdk/go/db: host.db.query is only available in a wasip1 build")
+}
+
+func hostDBQueryReplica(ptr, size uint32) uint64 {
+	panic("sdk/go/db: host.db.query_replica is only available in a wasip1 build")
+}
