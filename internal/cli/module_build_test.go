@@ -69,7 +69,7 @@ export default fixtureModule;
 
 const buildFixtureGoMod = `module goerp-cli-build-fixture
 
-go 1.26.5
+go 1.27.0
 `
 
 const buildFixtureMainGo = `package main
