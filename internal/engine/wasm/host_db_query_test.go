@@ -196,12 +196,19 @@ func TestHostDBQuery_RejectsSchemaQualifiedReference(t *testing.T) {
 	}
 }
 
-func TestHostDBQuery_RejectsDDL(t *testing.T) {
+// TestHostDBQuery_RejectsNonSelectStatements covers requireSelectOnly's
+// allowlist directly: the four DDL keywords host-abi-reference.md names
+// explicitly, plus RENAME/CREATE INDEX/GRANT/COMMENT — none of which are
+// CREATE/DROP/ALTER/TRUNCATE at the parse-tree level, so a blocklist of
+// just those four node types would miss them (verified empirically while
+// reviewing this change: each parses to its own distinct node type).
+func TestHostDBQuery_RejectsNonSelectStatements(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
 	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
+	newFixtureWidgetsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
@@ -212,6 +219,11 @@ func TestHostDBQuery_RejectsDDL(t *testing.T) {
 		"DROP TABLE widgets",
 		"ALTER TABLE widgets ADD COLUMN evil text",
 		"TRUNCATE widgets",
+		"ALTER TABLE widgets RENAME TO evil",
+		"CREATE INDEX evil_idx ON widgets(name)",
+		"GRANT SELECT ON widgets TO someone",
+		"COMMENT ON TABLE widgets IS 'x'",
+		"INSERT INTO widgets (name) VALUES ('evil')",
 	}
 	for _, sql := range cases {
 		env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: sql})
@@ -223,6 +235,63 @@ func TestHostDBQuery_RejectsDDL(t *testing.T) {
 			t.Errorf("query %q: Error.Code = %q, want %q", sql, env.Error.Code, abi.ErrCodeQueryError)
 		}
 	}
+}
+
+func TestHostDBQuery_RejectsSelectInto(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	newFixtureWidgetsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
+	inst := newHostDBQueryCaller(t, ctx, r, mc)
+
+	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT * INTO shadow FROM widgets"})
+	if env.OK {
+		t.Fatal("expected an error for SELECT ... INTO, got success")
+	}
+	if env.Error.Code != abi.ErrCodeQueryError {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeQueryError)
+	}
+}
+
+func TestHostDBQueryReplica_TxIDIsRejected(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("hostdbquerytest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	newFixtureWidgetsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newTestModuleContext(slug, abi.CapDBRead|abi.CapDBWrite, r.TxLimiter())
+	inst := newHostDBQueryCaller(t, ctx, r, mc)
+
+	beginEnv := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	if !beginEnv.OK {
+		t.Fatalf("begin failed: %+v", beginEnv.Error)
+	}
+	var beginOut dbBeginOutput
+	if err := msgpack.Unmarshal(beginEnv.Data, &beginOut); err != nil {
+		t.Fatalf("unmarshal begin output: %v", err)
+	}
+
+	// A borrowed transaction is always bound to primary (host.db.begin
+	// never opens against a replica) — host.db.query_replica's "always
+	// routes to replica" guarantee can't be honored with a tx_id, so it
+	// must be rejected rather than silently running on primary.
+	env := callHost(t, ctx, inst, "call_query_replica", dbQueryInput{SQL: "SELECT name FROM widgets", TxID: beginOut.TxID})
+	if env.OK {
+		t.Fatal("expected an error, got success")
+	}
+	if env.Error.Code != abi.ErrCodeReplicaUnavailable {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeReplicaUnavailable)
+	}
+
+	_ = callHost(t, ctx, inst, "call_rollback", dbTxIDInput{TxID: beginOut.TxID})
 }
 
 func TestHostDBQuery_TxID_RunsInsideExistingTransactionWithoutClosingIt(t *testing.T) {

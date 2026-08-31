@@ -47,20 +47,12 @@ func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
 	r.syncEventDispatcher = d
 }
 
-// SetReplicaDB wires the read-replica pool host.db.query's opts.read_only
-// routing and host.db.query_replica (goerp#459) query against — set after
-// New returns, the same reason SetSyncEventDispatcher is: replica
-// Postgres is a warn-only Stage 1 dependency (engine-internals.md §2), so
-// engine.go doesn't necessarily have a connected pool in hand yet at the
-// point it calls wasm.New (nor is the replica pool's own lifecycle tied
-// to the wasm Runtime's — engine.go closes it independently). Threading
-// it through New's constructor instead would force every one of this
-// package's ~15 existing test call sites (none of which exercise replica
-// routing) to pass an extra, almost always nil, argument. Never called
-// with a nil db.DB — a genuinely absent replica leaves this unset (nil
-// atomic.Pointer, its zero value), and host.db.query/query_replica's own
-// nil-guard turns that into db.replica_unavailable rather than a
-// nil-pointer panic.
+// SetReplicaDB wires the read-replica pool host.db.query/query_replica
+// (goerp#459) route reads against. Set after New returns, same as
+// SetSyncEventDispatcher and for the same reason (replica Postgres is
+// warn-only, engine-internals.md §2) — left unset, host.db.query/
+// query_replica's own nil-guard returns db.replica_unavailable rather
+// than panicking.
 func (r *Runtime) SetReplicaDB(db *sql.DB) {
 	r.replicaDB.Store(db)
 }

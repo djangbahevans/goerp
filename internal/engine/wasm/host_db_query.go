@@ -55,17 +55,6 @@ type dbQueryOutput struct {
 	DurationMs   float64  `msgpack:"duration_ms"`
 }
 
-// dbQuerier is the *sql.Tx method both a borrowed (host.db.begin-owned)
-// transaction and a fresh, self-opened one satisfy — makeDBQuery only
-// ever runs a query against one or the other, never db.DB directly, per
-// multitenancy-internals.md §5's own TenantConn design: a bare read still
-// goes through a transaction, both so applyTenantScope's SET LOCAL has
-// somewhere pooling-safe to apply (§5's "PgBouncer correctness note") and
-// so a borrowed and a fresh call share one code path below.
-type dbQuerier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
 // makeDBQuery builds host.db.query (forceReplica false, opts.read_only
 // still routes it to r's replica when set) or host.db.query_replica
 // (forceReplica true, always routes to replica regardless of opts).
@@ -88,15 +77,13 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		// Parsed once, up front: rejectDDL and dbscope.ValidateTreeNoQualifiedTableRefs
-		// both need the same tree, and both must run before anything is
-		// executed — a syntax error, a DDL statement, or a schema-qualified
-		// reference all abort before a transaction is ever opened.
+		// One parse feeds both checks below, and both must run before
+		// anything executes.
 		tree, err := pgquery.Parse(input.SQL)
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeQueryError, Message: err.Error()})
 		}
-		if err := rejectDDL(tree); err != nil {
+		if err := requireSelectOnly(tree); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeQueryError, Message: err.Error()})
 		}
 		if err := dbscope.ValidateTreeNoQualifiedTableRefs(tree); err != nil {
@@ -111,10 +98,21 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 		defer cancel()
 
 		var (
-			q      dbQuerier
+			q      *sql.Tx
 			finish func(error) error
 		)
 		if input.TxID != "" {
+			// A borrowed transaction is already bound to whatever pool
+			// host.db.begin opened it against — always primary, never a
+			// replica — so host.db.query_replica's "always routes to
+			// replica" guarantee can't be honored here; reject rather than
+			// silently running on primary.
+			if forceReplica {
+				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+					Code:    abi.ErrCodeReplicaUnavailable,
+					Message: "host.db.query_replica cannot run inside an existing transaction, which is always bound to primary",
+				})
+			}
 			tx, ok := modCtx.Transaction(input.TxID)
 			if !ok {
 				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
@@ -123,8 +121,7 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 				})
 			}
 			q = tx
-			// Owned by whoever called host.db.begin — a single query run
-			// inside it must never commit or roll back that transaction.
+			// Owned by whoever called host.db.begin.
 			finish = func(error) error { return nil }
 		} else {
 			target := primary
@@ -192,19 +189,21 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 	}
 }
 
-// rejectDDL inspects tree's own parsed statement types rather than
-// grepping input.SQL for keywords — CREATE/DROP/ALTER/TRUNCATE as
-// substrings would false-positive on a column or parameter named "create"
-// (or one appearing inside a string literal) and could be evaded by
-// whitespace/case tricks a real parse can't be fooled by.
-// host-abi-reference.md's own documented rationale: schema changes are
-// handled exclusively by the schema sync engine via
-// get_model_declarations, never by module-supplied SQL.
-func rejectDDL(tree *pg_query.ParseResult) error {
+// requireSelectOnly allowlists *pg_query.Node_SelectStmt rather than
+// blocklisting DDL node types: Postgres has more schema/permission-
+// mutating statement kinds than CREATE/DROP/ALTER/TRUNCATE alone (RENAME,
+// GRANT, CREATE INDEX, COMMENT ON, ...), and a blocklist only catches the
+// ones it happens to enumerate. A SelectStmt with a non-nil IntoClause
+// (SELECT ... INTO new_table) is rejected too — it creates a table
+// despite the SELECT keyword.
+func requireSelectOnly(tree *pg_query.ParseResult) error {
 	for _, raw := range tree.GetStmts() {
-		switch raw.GetStmt().GetNode().(type) {
-		case *pg_query.Node_CreateStmt, *pg_query.Node_DropStmt, *pg_query.Node_AlterTableStmt, *pg_query.Node_TruncateStmt:
-			return fmt.Errorf("SQL must not contain DDL (CREATE/DROP/ALTER/TRUNCATE) — schema changes are handled exclusively by the schema sync engine")
+		sel, ok := raw.GetStmt().GetNode().(*pg_query.Node_SelectStmt)
+		if !ok {
+			return fmt.Errorf("host.db.query only permits SELECT statements — schema changes are handled exclusively by the schema sync engine, and writes go through host.db.exec")
+		}
+		if sel.SelectStmt.GetIntoClause() != nil {
+			return fmt.Errorf("SELECT ... INTO is not permitted — it creates a table, which host.db.query does not allow")
 		}
 	}
 	return nil
@@ -227,12 +226,8 @@ func scanRowsToSlices(rows *sql.Rows, maxRows int) (columns []string, values [][
 		if len(values) >= maxRows {
 			return nil, nil, errResultTooLarge
 		}
-		row := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range row {
-			ptrs[i] = &row[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
+		row, err := scanRowValues(rows, len(cols))
+		if err != nil {
 			return nil, nil, err
 		}
 		values = append(values, row)
@@ -241,6 +236,24 @@ func scanRowsToSlices(rows *sql.Rows, maxRows int) (columns []string, values [][
 		return nil, nil, err
 	}
 	return cols, values, nil
+}
+
+// scanRowValues scans the row rows.Next() just advanced to into a
+// []any of length numCols — the one piece of scan mechanics
+// scanRowsToSlices and host_orm.go's scanRowsToMaps share, despite
+// building different output shapes (positional slice vs. column-keyed
+// map) and different outer-loop behavior (a row cap here, none there)
+// around it.
+func scanRowValues(rows *sql.Rows, numCols int) ([]any, error) {
+	values := make([]any, numCols)
+	ptrs := make([]any, numCols)
+	for i := range values {
+		ptrs[i] = &values[i]
+	}
+	if err := rows.Scan(ptrs...); err != nil {
+		return nil, err
+	}
+	return values, nil
 }
 
 // queryHostError maps err to the ABI error code host-abi-reference.md
