@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -323,6 +324,131 @@ func TestDBExec_ForeignKeyViolation(t *testing.T) {
 	}
 	if hostErr.Details["table"] != "widget" || hostErr.Details["column"] != "parent_id" {
 		t.Errorf("Details = %+v, want table=widget column=parent_id", hostErr.Details)
+	}
+}
+
+// TestDBExec_UniqueViolation_IncludesSQLState and
+// TestDBExec_Deadlock_SurfacesSQLState cover translateExecError's
+// "sqlstate" Details field, added for sdk/go/db.PGError (goerp#509).
+func TestDBExec_UniqueViolation_IncludesSQLState(t *testing.T) {
+	primaryDB, _, mc := setupExecTest(t)
+	ctx := context.Background()
+
+	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
+		Params: []any{"30000000-0000-0000-0000-000000000001", "SQLStateDup"},
+	}); hostErr != nil {
+		t.Fatalf("seed insert: %+v", hostErr)
+	}
+
+	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
+		Params: []any{"30000000-0000-0000-0000-000000000002", "SQLStateDup"},
+	})
+	if hostErr == nil {
+		t.Fatal("expected a unique violation")
+	}
+	if hostErr.Details["sqlstate"] != "23505" {
+		t.Errorf("Details[sqlstate] = %v, want %q", hostErr.Details["sqlstate"], "23505")
+	}
+}
+
+// TestDBExec_Deadlock_SurfacesSQLState triggers a real Postgres deadlock
+// (opposite lock order on the same two rows, in two caller-owned
+// transactions) and confirms the aborted side's db.exec_error carries
+// Details["sqlstate"] == "40P01".
+func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
+	primaryDB, _, mc := setupExecTest(t)
+	ctx := context.Background()
+
+	id1 := "30000000-0000-0000-0000-000000000003"
+	id2 := "30000000-0000-0000-0000-000000000004"
+	for _, id := range []string{id1, id2} {
+		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+			SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "Row " + id},
+		}); hostErr != nil {
+			t.Fatalf("seed insert %s: %+v", id, hostErr)
+		}
+	}
+
+	beginTx := func(txID string) *sql.Tx {
+		tx, err := primaryDB.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin %s: %v", txID, err)
+		}
+		if err := applyTenantScope(ctx, tx, mc); err != nil {
+			t.Fatalf("applyTenantScope %s: %v", txID, err)
+		}
+		t.Cleanup(func() { _ = tx.Rollback() })
+		mc.RegisterTransaction(txID, tx)
+		return tx
+	}
+	tx1 := beginTx("deadlock-tx1")
+	tx2 := beginTx("deadlock-tx2")
+
+	// Rendezvous barrier, not a timing guess: a time.Sleep-based version
+	// raced, since the faster goroutine could finish entirely before the
+	// slower one even started, leaving wg.Wait() blocked on a lock only
+	// an unrolled-back transaction held.
+	var firstLockDone sync.WaitGroup
+	firstLockDone.Add(2)
+
+	var wg sync.WaitGroup
+	errs := make([]*abi.HostError, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"A1", id1}, TxID: "deadlock-tx1",
+		}); hostErr != nil {
+			errs[0] = hostErr
+			firstLockDone.Done()
+			return
+		}
+		firstLockDone.Done()
+		firstLockDone.Wait()
+		_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"A2", id2}, TxID: "deadlock-tx1",
+		})
+		errs[0] = hostErr
+	}()
+	go func() {
+		defer wg.Done()
+		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"B1", id2}, TxID: "deadlock-tx2",
+		}); hostErr != nil {
+			errs[1] = hostErr
+			firstLockDone.Done()
+			return
+		}
+		firstLockDone.Done()
+		firstLockDone.Wait()
+		_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"B2", id1}, TxID: "deadlock-tx2",
+		})
+		errs[1] = hostErr
+	}()
+	wg.Wait()
+
+	_ = tx1.Rollback()
+	_ = tx2.Rollback()
+
+	var deadlockErr *abi.HostError
+	survivorIdx := -1
+	for i, e := range errs {
+		if e != nil && e.Details["sqlstate"] == "40P01" {
+			deadlockErr = e
+			survivorIdx = 1 - i
+		}
+	}
+	if deadlockErr == nil {
+		t.Fatalf("expected one side to report a deadlock (sqlstate 40P01); got errs = %+v, %+v", errs[0], errs[1])
+	}
+	if deadlockErr.Code != abi.ErrCodeExecError {
+		t.Errorf("Code = %q, want %q", deadlockErr.Code, abi.ErrCodeExecError)
+	}
+	if errs[survivorIdx] != nil {
+		t.Errorf("the non-deadlocked side should have succeeded, got: %+v", errs[survivorIdx])
 	}
 }
 

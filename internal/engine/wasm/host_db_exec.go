@@ -498,9 +498,17 @@ func translateExecError(err error) *abi.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
 		case "23505": // unique_violation
-			return &abi.HostError{Code: abi.ErrCodeDBUniqueViolation, Message: pgErr.Message, Details: map[string]any{"constraint": pgErr.ConstraintName}}
+			return &abi.HostError{Code: abi.ErrCodeDBUniqueViolation, Message: pgErr.Message, Details: map[string]any{"constraint": pgErr.ConstraintName, "sqlstate": pgErr.Code}}
 		case "23503", "23001": // foreign_key_violation, restrict_violation
-			return &abi.HostError{Code: abi.ErrCodeDBForeignKeyViolation, Message: pgErr.Message, Details: map[string]any{"table": pgErr.TableName, "column": fkViolationColumn(pgErr)}}
+			return &abi.HostError{Code: abi.ErrCodeDBForeignKeyViolation, Message: pgErr.Message, Details: map[string]any{"table": pgErr.TableName, "column": fkViolationColumn(pgErr), "sqlstate": pgErr.Code}}
+		default:
+			// Every other Postgres error (deadlocks, check/not-null
+			// violations, ...) stays under the generic db.exec_error
+			// code, but still carries its own SQLSTATE — the only
+			// structured signal a caller has to distinguish, say, a
+			// deadlock (40P01, safe to retry) from anything else in
+			// this bucket without parsing Message's own free text.
+			return &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error(), Details: map[string]any{"sqlstate": pgErr.Code}}
 		}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
