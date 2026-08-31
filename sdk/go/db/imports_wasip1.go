@@ -10,3 +10,9 @@ func hostDBCommit(ptr, size uint32) uint64
 
 //go:wasmimport host.db rollback
 func hostDBRollback(ptr, size uint32) uint64
+
+//go:wasmimport host.db query
+func hostDBQuery(ptr, size uint32) uint64
+
+//go:wasmimport host.db query_replica
+func hostDBQueryReplica(ptr, size uint32) uint64

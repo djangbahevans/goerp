@@ -45,6 +45,13 @@ type WASMJobArgs struct {
 	// data_migration_version watermark once this job succeeds. Only
 	// meaningful when IsDataMigration is true.
 	MigrationToVersion string `json:"migration_to_version,omitempty"`
+	// MigrationFromVersion is the tenant's data_migration_version watermark
+	// at the moment this job was enqueued (EnqueueApplicableDataMigration's
+	// own "watermark" value) — carried alongside MigrationToVersion so
+	// Payload's own model.MigrationJobPayload can report both bounds to the
+	// handler as model.MigrationContext.FromVersion/ToVersion. Only
+	// meaningful when IsDataMigration is true.
+	MigrationFromVersion string `json:"migration_from_version,omitempty"`
 }
 
 func (WASMJobArgs) Kind() string { return "wasm_job" }
