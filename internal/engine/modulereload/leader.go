@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -34,6 +35,8 @@ import (
 	tenantsync "github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
 
@@ -60,6 +63,14 @@ type Leader struct {
 	Storage     storage.Backend
 	Cache       *cache.Client
 	Workers     *workflowworker.Manager
+	// RiverClient inserts the data migration jobs jobdispatch.EnqueueApplicableDataMigration
+	// builds, once mod is live in the registry (see Run's own comment on
+	// why that ordering matters). Unlike moduleinstall.Worker's own
+	// enqueue of the same helper, Run never runs as a River job itself
+	// (its trigger sources are fsnotify/Redis pub-sub/Admin API/registry
+	// poll, engine-internals.md §10) — river.ClientFromContext would have
+	// nothing to find on ctx here, so this must be injected explicitly.
+	RiverClient *river.Client[pgx.Tx]
 	// Concurrency bounds SyncModule's tenant fan-out; 0 uses
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
@@ -203,6 +214,21 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		log.Error().Err(publishErr).Str("module", moduleName).
 			Msg("hot reload: module published but permission cache rebuild failed")
 	}
+
+	// Trigger data migration dispatch (engine-internals.md §2 Stage 4 step
+	// 26, migration-guide.md §4) only now that mod is live in the registry
+	// under moduleName — jobdispatch.Worker resolves the target module
+	// fresh from the registry snapshot at dispatch time, not from this
+	// closure's mod, so enqueueing before publish risked a job racing
+	// ahead of it and, on a publish failure, matching against whichever
+	// module (old or none) is actually registered instead of this one.
+	// Only tenants whose schema sync just succeeded are eligible — a
+	// tenant schema sync failed for is not safely at mod.Manifest.Version
+	// yet, so its own watermark evaluation is deferred to its next
+	// successful sync. One handler enqueued per tenant here is enough:
+	// jobdispatch.Worker enqueues the next applicable one itself once each
+	// handler succeeds (EnqueueApplicableDataMigration's own doc comment).
+	jobdispatch.EnqueueApplicableDataMigrations(ctx, l.RiverClient, l.SyncPool, syncResult.Succeeded, mod, "hot reload")
 
 	// Respawn (not SpawnAll) is required here: SpawnAll's own spawn would
 	// silently leak oldMod's still-running workflow-worker process by

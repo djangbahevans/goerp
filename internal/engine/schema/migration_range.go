@@ -53,14 +53,19 @@ func ApplicableDataMigrations(currentVersion, targetVersion string, migrations [
 			continue
 		}
 
-		boundary, err := migrationBoundary(m.ToVersion)
+		boundary, err := MigrationBoundaryVersion(m.ToVersion)
 		if err != nil {
 			return nil, fmt.Errorf("migration %q: %w", m.Handler, err)
 		}
 		candidates = append(candidates, candidate{migration: m, boundary: boundary})
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
+	// SliceStable, not Slice: migration-guide.md §4 "Execution order"
+	// guarantees multiple handlers sharing the same ToVersion boundary run
+	// in declaration order — Slice's equal-element ordering isn't
+	// guaranteed to preserve that once len(candidates) crosses Go's
+	// small-slice insertion-sort threshold.
+	sort.SliceStable(candidates, func(i, j int) bool {
 		return candidates[i].boundary.LessThan(candidates[j].boundary)
 	})
 
@@ -71,7 +76,12 @@ func ApplicableDataMigrations(currentVersion, targetVersion string, migrations [
 	return applicable, nil
 }
 
-func migrationBoundary(toVersion string) (*semver.Version, error) {
+// MigrationBoundaryVersion extracts the concrete version literal embedded
+// in a ToVersion constraint (e.g. ">= 1.4.0" -> "1.4.0") — used both to
+// order applicable migrations here and, once a migration's job succeeds,
+// as the plain semver value schema.SchemaSyncPool.AdvanceDataMigrationVersion
+// records as the new data_migration_version watermark.
+func MigrationBoundaryVersion(toVersion string) (*semver.Version, error) {
 	match := boundaryVersionPattern.FindString(toVersion)
 	if match == "" {
 		return nil, fmt.Errorf("could not extract a version boundary from to_version %q", toVersion)

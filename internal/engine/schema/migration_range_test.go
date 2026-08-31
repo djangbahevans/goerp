@@ -96,6 +96,23 @@ func TestApplicableDataMigrations_PartialUpgradeOnlyIncludesInRangeMigrations(t 
 	assertHandlerOrder(t, got, []string{"split_names"})
 }
 
+// TestApplicableDataMigrations_TiedToVersionPreservesDeclarationOrder
+// guards migration-guide.md §4's "Multiple handlers can declare the same
+// ToVersion. They execute in declaration order" guarantee — a sort that
+// isn't stable on ties could silently swap them.
+func TestApplicableDataMigrations_TiedToVersionPreservesDeclarationOrder(t *testing.T) {
+	migrations := []model.DataMigration{
+		{FromVersion: "< 1.4.0", ToVersion: ">= 1.4.0", Handler: "backfill_first"},
+		{FromVersion: "< 1.4.0", ToVersion: ">= 1.4.0", Handler: "backfill_second"},
+	}
+
+	got, err := ApplicableDataMigrations("1.3.0", "1.4.0", migrations)
+	if err != nil {
+		t.Fatalf("ApplicableDataMigrations() error: %v", err)
+	}
+	assertHandlerOrder(t, got, []string{"backfill_first", "backfill_second"})
+}
+
 func TestApplicableDataMigrations_InvalidCurrentVersionFails(t *testing.T) {
 	if _, err := ApplicableDataMigrations("not-a-version", "1.0.0", nil); err == nil {
 		t.Fatal("ApplicableDataMigrations() error = nil, want an error for an invalid current version")
