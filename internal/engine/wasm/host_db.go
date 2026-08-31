@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
@@ -102,21 +101,11 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 			})
 		}
 
-		// search_path and the ABAC session vars, set together as SET LOCAL
-		// (via set_config's third "is_local" arg) in one statement so there
-		// is no inter-statement gap for PgBouncer's transaction-pooling mode
-		// to route a later statement to a different backend on
-		// (multitenancy-internals.md §5a "Layer 1 — Postgres search_path",
-		// "PgBouncer correctness note"). Discarded automatically at
-		// commit/rollback — never leaks into whatever this backend
-		// connection is reused for next.
-		if _, err := tx.ExecContext(ctx, `SELECT set_config('search_path', $1, true),
-			set_config('app.current_user_id', $2, true),
-			set_config('app.current_user_contact_id', $3, true),
-			set_config('app.current_user_roles', $4, true)`,
-			"tenant_"+modCtx.TenantSlug+", public",
-			modCtx.UserID, modCtx.ContactID, strings.Join(modCtx.Roles, ","),
-		); err != nil {
+		// search_path and the ABAC session vars — see applyTenantScope's own
+		// doc comment (multitenancy-internals.md §5's "PgBouncer correctness
+		// note"). Discarded automatically at commit/rollback — never leaks
+		// into whatever this backend connection is reused for next.
+		if err := applyTenantScope(ctx, tx, modCtx); err != nil {
 			_ = tx.Rollback()
 			r.txLimiter.Release()
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{

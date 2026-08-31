@@ -596,13 +596,7 @@ func beginTenantScopedRead(ctx context.Context, db *sql.DB, modCtx *ModuleContex
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `SELECT set_config('search_path', $1, true),
-		set_config('app.current_user_id', $2, true),
-		set_config('app.current_user_contact_id', $3, true),
-		set_config('app.current_user_roles', $4, true)`,
-		"tenant_"+modCtx.TenantSlug+", public",
-		modCtx.UserID, modCtx.ContactID, strings.Join(modCtx.Roles, ","),
-	); err != nil {
+	if err := applyTenantScope(ctx, tx, modCtx); err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}
