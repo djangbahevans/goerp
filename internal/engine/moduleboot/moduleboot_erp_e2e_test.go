@@ -32,7 +32,7 @@ const e2eFixtureManifest = `{
 
 const e2eFixtureGoMod = `module goerp-moduleboot-e2e-fixture
 
-go 1.26.5
+go 1.27.0
 `
 
 const e2eFixtureMainGo = `package main

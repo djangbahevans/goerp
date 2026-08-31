@@ -52,7 +52,7 @@ func main() {}
 
 const wasmFixtureGoMod = `module goerp-wasmbuild-fixture
 
-go 1.26.5
+go 1.27.0
 `
 
 func writeWasmFixture(t *testing.T, dir, manifestJSON string) {

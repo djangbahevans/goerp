@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const scaffoldGoVersion = "1.26.5"
+const scaffoldGoVersion = "1.27.0"
 
 func Create(dir, name, moduleType, org string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {

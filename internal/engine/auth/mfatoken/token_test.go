@@ -124,15 +124,13 @@ func TestVerify_RejectsWrongPurpose(t *testing.T) {
 
 	now := time.Now()
 	claims := Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   "user-1",
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(TTL)),
-		},
-		TenantID: "tenant-1",
-		Txn:      "txn-1",
-		Purpose:  "something_else",
-		Origin:   "https://acmecorp.goerp.io",
+		Subject:   "user-1",
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(TTL)),
+		TenantID:  "tenant-1",
+		Txn:       "txn-1",
+		Purpose:   "something_else",
+		Origin:    "https://acmecorp.goerp.io",
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tok.Header["kid"] = key.KeyID

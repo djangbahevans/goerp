@@ -175,13 +175,11 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 	}
 
 	claims := Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    issuerName,
-			Subject:   userID,
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenTTL)),
-			ID:        uuid.NewString(),
-		},
+		Issuer:        issuerName,
+		Subject:       userID,
+		IssuedAt:      jwt.NewNumericDate(now),
+		ExpiresAt:     jwt.NewNumericDate(now.Add(accessTokenTTL)),
+		ID:            uuid.NewString(),
 		SessionID:     sessionID,
 		TenantID:      tenantID,
 		Roles:         roleNames,
