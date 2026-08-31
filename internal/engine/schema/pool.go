@@ -258,6 +258,107 @@ func (p *SchemaSyncPool) StatusFiltered(ctx context.Context, tenantSlug, moduleN
 	return statuses, nil
 }
 
+// DataMigrationVersion returns the tenant's current data-migration
+// watermark for a module — the version data migrations have actually run
+// up to, tracked separately from current_version (the DDL watermark) since
+// a tenant's schema can be synced to a new version before its data
+// migrations for that version have run (migration-guide.md §4). No row at
+// all (never synced) or a NULL column (synced, but no data migration has
+// ever run for this tenant/module — including a tenant whose every
+// declared migration so far predates it) both return "0.0.0": the version
+// every FromVersion/ToVersion range is defined relative to, so a fresh
+// tenant runs the exact same range-matching logic as one migrating forward
+// (migration-guide.md §4 "Running during provisioning" — no special case).
+func (p *SchemaSyncPool) DataMigrationVersion(ctx context.Context, tenantID, moduleName string) (string, error) {
+	var version sql.NullString
+	err := p.primary.QueryRowContext(ctx,
+		"SELECT data_migration_version FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2",
+		tenantID, moduleName,
+	).Scan(&version)
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "0.0.0", nil
+	case err != nil:
+		return "", fmt.Errorf("read data migration watermark: %w", err)
+	}
+
+	if !version.Valid {
+		return "0.0.0", nil
+	}
+	return version.String, nil
+}
+
+// DataMigrationWatermark is DataMigrationVersion narrowed to what
+// jobdispatch.EnqueueApplicableDataMigration actually needs: the
+// watermark, plus whether the tenant is currently eligible to have a data
+// migration enqueued against targetVersion at all. Eligible requires the
+// tenant's own current_version to already equal targetVersion with
+// schema_sync_status "ok" — a tenant mid-sync, one whose most recent sync
+// failed, or one that has simply never synced this module yet is not
+// eligible, reported via eligible=false rather than an error (an
+// ordinary, expected state — e.g. a startup sweep racing a sync that's
+// still in flight — not a failure). Without this check, a data migration
+// job could run its handler against a tenant's schema before the DDL
+// changes that handler assumes have actually landed for that tenant.
+func (p *SchemaSyncPool) DataMigrationWatermark(ctx context.Context, tenantID, moduleName, targetVersion string) (watermark string, eligible bool, err error) {
+	var currentVersion, syncStatus string
+	var dmVersion sql.NullString
+	err = p.primary.QueryRowContext(ctx,
+		"SELECT current_version, schema_sync_status, data_migration_version FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2",
+		tenantID, moduleName,
+	).Scan(&currentVersion, &syncStatus, &dmVersion)
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "0.0.0", false, nil
+	case err != nil:
+		return "", false, fmt.Errorf("read data migration watermark: %w", err)
+	}
+
+	if currentVersion != targetVersion || syncStatus != "ok" {
+		return "0.0.0", false, nil
+	}
+	if !dmVersion.Valid {
+		return "0.0.0", true, nil
+	}
+	return dmVersion.String, true, nil
+}
+
+// AdvanceDataMigrationVersion records that a tenant's data migration
+// watermark has reached toVersion — called once the WASM job running that
+// migration's handler has completed successfully. A plain UPDATE, not an
+// upsert: it runs against a (tenant_id, module_name) row that DDL sync's
+// own RecordSyncSuccess already created (schema DDL always syncs before
+// any data migration job is enqueued for that sync, per engine-internals.md
+// §2 Stage 4 steps 25/26) — same assumption RecordSyncFailure's own plain
+// UPDATE already makes, and an equally real bug elsewhere (not something
+// to paper over with a fabricated current_version) if the row is ever
+// actually missing here.
+func (p *SchemaSyncPool) AdvanceDataMigrationVersion(ctx context.Context, tenantID, moduleName, toVersion string) error {
+	result, err := p.primary.ExecContext(ctx, `
+		UPDATE system.module_schema_versions
+		SET data_migration_version = $1, data_migration_status = 'ok'
+		WHERE tenant_id = $2 AND module_name = $3
+	`, toVersion, tenantID, moduleName)
+	if err != nil {
+		return fmt.Errorf("advance data migration watermark: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("advance data migration watermark: %w", err)
+	}
+	if rows == 0 {
+		// The assumption this method's own doc comment states didn't
+		// hold — surfaced as an error rather than a silent no-op, since a
+		// job that reports success without ever actually recording the
+		// watermark is exactly the kind of bug that assumption exists to
+		// catch, not paper over.
+		return fmt.Errorf("advance data migration watermark: no module_schema_versions row for tenant %s module %s", tenantID, moduleName)
+	}
+	return nil
+}
+
 // TableCount returns the number of tables in the tenant's own Postgres
 // schema (tenant_{slug}) — the schema table count cli-reference.md §5
 // documents as part of `goerp tenant status`'s output. A tenant whose

@@ -6,11 +6,13 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 )
 
@@ -59,6 +61,11 @@ type SyncWorker struct {
 	Registry    *registry.ModuleRegistry
 	Pool        *schema.SchemaSyncPool
 	DiffEngine  *schema.SchemaDiffEngine
+	// RiverClient triggers data migration dispatch after a pair syncs
+	// successfully — nil-guarded (job_test.go calls run directly with a
+	// plain context, the same reason moduleinstall.Worker's identical
+	// field is), not river.ClientFromContext.
+	RiverClient *river.Client[pgx.Tx]
 }
 
 func (w *SyncWorker) Work(ctx context.Context, job *river.Job[SyncArgs]) error {
@@ -108,6 +115,7 @@ func (w *SyncWorker) run(ctx context.Context, a SyncArgs) (SyncResult, error) {
 			mu.Unlock()
 			return
 		}
+		jobdispatch.EnqueueApplicableDataMigrations(ctx, w.RiverClient, w.Pool, []tenant.Tenant{p.tenant}, p.mod, "schema sync")
 		mu.Lock()
 		result.Synced = append(result.Synced, pairResult)
 		mu.Unlock()
@@ -203,6 +211,9 @@ type AcceptResyncWorker struct {
 	Registry    *registry.ModuleRegistry
 	Pool        *schema.SchemaSyncPool
 	DiffEngine  *schema.SchemaDiffEngine
+	// RiverClient triggers data migration dispatch after the resync
+	// succeeds — nil-guarded for the same reason SyncWorker's own field is.
+	RiverClient *river.Client[pgx.Tx]
 }
 
 func (w *AcceptResyncWorker) Work(ctx context.Context, job *river.Job[AcceptResyncArgs]) error {
@@ -223,5 +234,10 @@ func (w *AcceptResyncWorker) Work(ctx context.Context, job *river.Job[AcceptResy
 		return fmt.Errorf("load accepted schema diff hashes: %w", err)
 	}
 
-	return SyncOne(ctx, w.Pool, w.DiffEngine, t, mod, accepted)
+	if err := SyncOne(ctx, w.Pool, w.DiffEngine, t, mod, accepted); err != nil {
+		return err
+	}
+
+	jobdispatch.EnqueueApplicableDataMigrations(ctx, w.RiverClient, w.Pool, []tenant.Tenant{t}, mod, "accept resync")
+	return nil
 }

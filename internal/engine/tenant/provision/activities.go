@@ -10,6 +10,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
+	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -17,6 +18,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
 
@@ -45,6 +48,21 @@ type Activities struct {
 	syncPool   *schema.SchemaSyncPool
 	diffEngine *schema.SchemaDiffEngine
 	registry   *registry.ModuleRegistry
+
+	// RiverClient inserts the data migration jobs SyncModuleSchema
+	// triggers after a successful sync. Exported and set directly rather
+	// than threaded through NewActivities or a setter method: engine.go
+	// constructs Activities before the job queue client exists (same
+	// "doesn't exist until here" ordering NewActivities' own call site
+	// already documents for moduleRegistry/diffEngine) but every
+	// Activities method only runs later, at workflow-execution time, well
+	// after this field has had a chance to be set — and it must be a
+	// plain field, not a method: systemWorker.RegisterActivity(a) reflects
+	// over every exported method of *Activities and requires each one to
+	// look like an activity function (error, or (result, error)), so an
+	// exported zero-return setter method would itself break activity
+	// registration.
+	RiverClient *river.Client[pgx.Tx]
 
 	// platformDomain is appended to a tenant's slug to build its default
 	// subdomain (RegisterDomain) — e.g. slug "acme" + platformDomain
@@ -300,7 +318,17 @@ func (a *Activities) SyncModuleSchema(ctx context.Context, tenantID, tenantSlug,
 	t := tenant.Tenant{ID: tenantID, Slug: tenantSlug}
 	if err := tenantsync.SyncOne(ctx, a.syncPool, a.diffEngine, t, mod, nil); err != nil {
 		log.Error().Err(err).Str("tenant", tenantSlug).Str("module", moduleName).Msg("module schema sync failed during provisioning")
+		return nil
 	}
+
+	// Trigger data migration dispatch (engine-internals.md §2 Stage 4 step
+	// 26, migration-guide.md §4 "Running during provisioning") — a fresh
+	// tenant runs every applicable handler from 0.0.0 up to the module's
+	// current version, the same watermark-driven evaluation an upgrade
+	// uses, no special case needed. a.RiverClient nil (never wired — a
+	// test constructing Activities directly, or a real engine still
+	// starting up before Start()) is a no-op inside the helper below.
+	jobdispatch.EnqueueApplicableDataMigrations(ctx, a.RiverClient, a.syncPool, []tenant.Tenant{t}, mod, "provisioning")
 
 	return nil
 }

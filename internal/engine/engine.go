@@ -814,19 +814,21 @@ func New(cfg *config.Config) (*Engine, error) {
 		Provision:      provisionActivities,
 		Keys:           rowKeySet,
 	})
-	river.AddWorker(jobWorkers, &tenantsync.SyncWorker{
+	syncWorker := &tenantsync.SyncWorker{
 		TenantStore: tenantStore,
 		Registry:    moduleRegistry,
 		Pool:        syncPool,
 		DiffEngine:  diffEngine,
-	})
-	river.AddWorker(jobWorkers, &tenantsync.AcceptResyncWorker{
+	}
+	river.AddWorker(jobWorkers, syncWorker)
+	acceptResyncWorker := &tenantsync.AcceptResyncWorker{
 		TenantStore: tenantStore,
 		Registry:    moduleRegistry,
 		Pool:        syncPool,
 		DiffEngine:  diffEngine,
-	})
-	river.AddWorker(jobWorkers, &moduleinstall.Worker{
+	}
+	river.AddWorker(jobWorkers, acceptResyncWorker)
+	moduleInstallWorker := &moduleinstall.Worker{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,
 		Registry:    moduleRegistry,
@@ -836,13 +838,14 @@ func New(cfg *config.Config) (*Engine, error) {
 		SyncPool:    syncPool,
 		DiffEngine:  diffEngine,
 		Workers:     workflowWorkers,
-	})
+	}
+	river.AddWorker(jobWorkers, moduleInstallWorker)
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry})
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: primaryPool})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
-	river.AddWorker(jobWorkers, &jobdispatch.Worker{ModuleRegistry: moduleRegistry})
+	river.AddWorker(jobWorkers, &jobdispatch.Worker{ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()
@@ -856,6 +859,27 @@ func New(cfg *config.Config) (*Engine, error) {
 	if err := schema.EnqueuePendingValidations(ctx, primaryPool, jobQueueClient); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("enqueue pending constraint validations: %w", err)
+	}
+
+	// provisionActivities, moduleInstallWorker, syncWorker, and
+	// acceptResyncWorker were all constructed before jobQueueClient
+	// existed (see their own RiverClient field doc comments) — wired now
+	// that it does.
+	provisionActivities.RiverClient = jobQueueClient
+	moduleInstallWorker.RiverClient = jobQueueClient
+	syncWorker.RiverClient = jobQueueClient
+	acceptResyncWorker.RiverClient = jobQueueClient
+
+	// Same "job queue client didn't exist yet" reasoning as
+	// EnqueuePendingValidations just above, applied to data migrations:
+	// Stage 4's schema sync (tenantsync.SyncAll) ran before this client
+	// existed, so it could advance current_version but never enqueue a
+	// migration job directly. This sweep catches every module × tenant
+	// pair Stage 4 left with an un-advanced data_migration_version
+	// watermark.
+	if err := jobdispatch.EnqueueStartupDataMigrations(ctx, jobQueueClient, syncPool, tenantStore, orderedModules); err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("enqueue startup data migrations: %w", err)
 	}
 
 	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{
@@ -908,6 +932,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Storage:     storageBackend,
 		Cache:       cacheClient,
 		Workers:     workflowWorkers,
+		RiverClient: jobQueueClient,
 	}
 	reloadFollower := &modulereload.Follower{
 		Runtime:     runtime,

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
@@ -23,6 +24,7 @@ import (
 	tenantsync "github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -64,6 +66,17 @@ type Worker struct {
 	SyncPool    *schema.SchemaSyncPool
 	DiffEngine  *schema.SchemaDiffEngine
 	Workers     *workflowworker.Manager
+	// RiverClient inserts the data migration jobs jobdispatch.EnqueueApplicableDataMigration
+	// builds after a successful sync. An explicit field rather than
+	// river.ClientFromContext(ctx): existing tests call run directly with
+	// a plain context to exercise it without a real River job wrapper
+	// (ClientFromContext panics outside one), and this Worker itself is
+	// constructed before the job queue client exists (engine.go builds
+	// the full jobWorkers set, this one included, before jobqueue.New) —
+	// set once the client exists, the same deferred-wiring pattern
+	// tenantprovision.Activities.RiverClient uses for the identical
+	// ordering reason.
+	RiverClient *river.Client[pgx.Tx]
 	// Concurrency bounds SyncModule's tenant fan-out; 0 uses
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
@@ -227,6 +240,11 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	for _, r := range syncResult.Failed {
 		result.Failed = append(result.Failed, TenantResult{Tenant: r.Tenant.Slug, Error: r.Err.Error()})
 	}
+
+	// Trigger data migration dispatch (engine-internals.md §2 Stage 4 step
+	// 26) now that m is live under its name in the registry — same
+	// ordering rationale as modulereload.Leader.Run's identical call.
+	jobdispatch.EnqueueApplicableDataMigrations(ctx, w.RiverClient, w.SyncPool, syncResult.Succeeded, m, "module install")
 
 	// Best-effort: the module is already live (published above) regardless
 	// of whether its workflow-worker spawns cleanly, and retrying this job
