@@ -28,3 +28,11 @@ func hostDBQuery(ptr, size uint32) uint64 {
 func hostDBQueryReplica(ptr, size uint32) uint64 {
 	panic("sdk/go/db: host.db.query_replica is only available in a wasip1 build")
 }
+
+func hostDBExec(ptr, size uint32) uint64 {
+	panic("sdk/go/db: host.db.exec is only available in a wasip1 build")
+}
+
+func hostDBExecBatch(ptr, size uint32) uint64 {
+	panic("sdk/go/db: host.db.exec_batch is only available in a wasip1 build")
+}

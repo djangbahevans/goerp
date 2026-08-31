@@ -1,16 +1,18 @@
 // Package db is the module-side caller for the host.db namespace
 // (host-abi-reference.md §5): Begin/Commit/Rollback for a transaction a
 // module opens and does work under (e.g. sdk/go/events.EmitTx),
-// Query/QueryReplica for read-only SELECTs (see query.go), and this
-// package's own sentinel errors/type matchers for classifying a
-// host.db.exec-originated failure (see errors.go).
+// Query/QueryReplica for read-only SELECTs (query.go), Exec/ExecTx/
+// ExecReturning/ExecBatch/Insert/InsertReturning/UpdateByID for writes
+// (exec.go/exec_batch.go/insert.go/update.go, go-sdk-reference.md §6
+// "Exec — write rows"), and this package's own sentinel errors/type
+// matchers for classifying a host.db.exec-originated failure
+// (errors.go).
 //
 // host.db.lock/notify are documented in host-abi-reference.md §5 but not
 // yet implemented engine-side, so db.Lock and friends aren't buildable
-// yet either. host.db.exec/exec_batch now exist engine-side, but this
-// package's own Exec/ExecBatch/Insert/UpdateByID write helpers
-// (go-sdk-reference.md §6 "Exec — write rows") haven't landed yet
-// (goerp#506).
+// yet either. QueryOne/QueryPaged/Exists/Count/WithTx/QueryTx/
+// QueryOneTx/ExecReturningTx (go-sdk-reference.md §6's remaining
+// read/transaction helpers) haven't landed yet either (goerp#507).
 package db
 
 import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
