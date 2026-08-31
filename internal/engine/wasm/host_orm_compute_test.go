@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -109,7 +108,7 @@ func newComputeTestRuntime(t *testing.T, primaryDB *sql.DB) *Runtime {
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            sharedTestCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           64 << 20,
 		DBMaxConcurrentTransactions: 10,

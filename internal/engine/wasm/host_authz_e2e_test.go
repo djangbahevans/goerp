@@ -20,7 +20,7 @@ func newAuthzHostcallTestRuntime(t *testing.T) *Runtime {
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:  sharedTestCompilationCacheDir(),
 		Environment:       string(config.Production),
 		PoolMaxMemoryByes: 8 << 20,
 	}, nil, nil, nil)

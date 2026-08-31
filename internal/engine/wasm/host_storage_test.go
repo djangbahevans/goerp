@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -41,7 +40,7 @@ func newHostStorageTestRuntime(t *testing.T, primaryDB *sql.DB, backend storage.
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:    filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:    sharedTestCompilationCacheDir(),
 		Environment:         string(config.Production),
 		PoolMaxMemoryByes:   1 << 20,
 		StorageMaxFileBytes: 100 << 20,

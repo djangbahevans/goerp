@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -73,7 +72,7 @@ func newHostDBTestRuntime(t *testing.T, primaryDB *sql.DB, maxConcurrentTx int) 
 	t.Helper()
 
 	rt, err := New(&config.Config{
-		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		CompilationCache:            sharedTestCompilationCacheDir(),
 		Environment:                 string(config.Production),
 		PoolMaxMemoryByes:           1 << 20,
 		DBMaxConcurrentTransactions: maxConcurrentTx,
