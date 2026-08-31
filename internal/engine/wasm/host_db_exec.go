@@ -197,30 +197,49 @@ func projectReturning(rows []map[string]any, cols []string) [][]any {
 	return out
 }
 
-// DBExec implements host.db.exec (host-abi-reference.md §5). primary is
-// only used to open a new transaction when input.TxID is empty — every
-// statement this function runs goes through a *sql.Tx either way, since
-// host.db.exec's own etag/audit mechanisms need transactional
-// consistency between the pre-write read and the write itself.
-func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input dbExecInput) (dbExecOutput, *abi.HostError) {
-	tree, err := pgquery.Parse(input.SQL)
+// preparedExec is host.db.exec's own parsed, validated, deparsed
+// statement plus everything about it that doesn't vary per parameter
+// set — computed once by prepareExec and reused by execRow however many
+// times a caller runs it (once for DBExec, once per parameter set for
+// DBExecBatch, host_db_exec_batch.go).
+type preparedExec struct {
+	stmt          execStmt
+	table         string
+	finalSQL      string
+	needReturning bool
+	requestedCols []string
+	audited       bool
+	pkCol         string
+	excludeCols   map[string]bool
+	hasEtagCol    bool
+	hadEtagCheck  bool
+}
+
+// prepareExec parses sqlText as a single INSERT/UPDATE/DELETE statement,
+// validates it the way host.db.exec's own ABI contract requires (no
+// qualified table refs, no caller-supplied RETURNING), and resolves the
+// audit/etag mechanisms against modCtx's declared models — everything
+// execRow needs that stays constant across every parameter set a single
+// statement is run against.
+func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (preparedExec, *abi.HostError) {
+	tree, err := pgquery.Parse(sqlText)
 	if err != nil {
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
 	}
 	stmt, err := parseExecStmt(tree)
 	if err != nil {
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
 	}
 	if len(stmt.ReturningList) > 0 {
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: "host.db.exec statements must not include their own RETURNING clause — use opts.returning instead"}
+		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: "host.db.exec statements must not include their own RETURNING clause — use opts.returning instead"}
 	}
 	if err := dbscope.ValidateTreeNoQualifiedTableRefs(tree); err != nil {
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeTableAccessDenied, Message: err.Error()}
+		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeTableAccessDenied, Message: err.Error()}
 	}
 
-	requestedCols, err := parseReturningColumns(input.Opts.Returning)
+	requestedCols, err := parseReturningColumns(opts.Returning)
 	if err != nil {
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
 	}
 
 	table := stmt.Relation.GetRelname()
@@ -232,60 +251,13 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 		hasEtagCol   bool
 		hadEtagCheck bool
 	)
-	if !input.Opts.SkipAudit {
+	if !opts.SkipAudit {
 		pkCol, excludeCols, audited = resolveAuditedExecTable(modCtx, table)
 	}
-	if stmt.Operation == "UPDATE" && !input.Opts.SkipEtag {
+	if stmt.Operation == "UPDATE" && !opts.SkipEtag {
 		if _, ok := resolveEtagTable(modCtx, table); ok {
 			hasEtagCol = true
 			hadEtagCheck = whereClauseHasEtagCheck(stmt.WhereClause, stmt.Relation)
-		}
-	}
-
-	timeout := defaultExecTimeout
-	if input.Opts.TimeoutMs > 0 {
-		timeout = time.Duration(input.Opts.TimeoutMs) * time.Millisecond
-	}
-	qCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var (
-		tx     *sql.Tx
-		finish func(error) error
-	)
-	if input.TxID != "" {
-		borrowed, ok := modCtx.Transaction(input.TxID)
-		if !ok {
-			return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
-		}
-		tx = borrowed
-		finish = func(error) error { return nil } // owned by whoever called host.db.begin
-	} else {
-		newTx, err := primary.BeginTx(qCtx, nil)
-		if err != nil {
-			return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
-		}
-		if err := applyTenantScope(qCtx, newTx, modCtx); err != nil {
-			_ = newTx.Rollback()
-			return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
-		}
-		tx = newTx
-		finish = func(callErr error) error {
-			if callErr != nil {
-				return tx.Rollback()
-			}
-			return tx.Commit()
-		}
-	}
-
-	var oldRows []map[string]any
-	if audited && stmt.Operation != "INSERT" {
-		oldRows, err = captureRowsBeforeExec(qCtx, tx, auditableExecStmt{
-			Operation: stmt.Operation, Table: table, Relation: stmt.Relation, WhereClause: stmt.WhereClause,
-		}, input.Params)
-		if err != nil {
-			_ = finish(err)
-			return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
 		}
 	}
 
@@ -295,8 +267,83 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 	}
 	finalSQL, err := pgquery.Deparse(tree)
 	if err != nil {
-		_ = finish(err)
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+	}
+
+	return preparedExec{
+		stmt: stmt, table: table, finalSQL: finalSQL, needReturning: needReturning,
+		requestedCols: requestedCols, audited: audited, pkCol: pkCol, excludeCols: excludeCols,
+		hasEtagCol: hasEtagCol, hadEtagCheck: hadEtagCheck,
+	}, nil
+}
+
+// beginOrBorrowExecTx returns the *sql.Tx a statement should run in — the
+// caller's own transaction if txID names one already registered via
+// host.db.begin, otherwise a freshly-opened, tenant-scoped one. finish
+// commits or rolls back a freshly-opened transaction; for a borrowed one
+// it's a no-op, since that transaction is owned by whoever called
+// host.db.begin, not by this call.
+func beginOrBorrowExecTx(qCtx context.Context, primary *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, finish func(error) error, hostErr *abi.HostError) {
+	if txID != "" {
+		borrowed, ok := modCtx.Transaction(txID)
+		if !ok {
+			return nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
+		}
+		return borrowed, func(error) error { return nil }, nil
+	}
+
+	newTx, err := primary.BeginTx(qCtx, nil)
+	if err != nil {
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	if err := applyTenantScope(qCtx, newTx, modCtx); err != nil {
+		_ = newTx.Rollback()
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	finish = func(callErr error) error {
+		if callErr != nil {
+			return newTx.Rollback()
+		}
+		return newTx.Commit()
+	}
+	return newTx, finish, nil
+}
+
+// execRowResult is what a single execRow call produces on success.
+// Duration covers only the statement's own execution (the
+// QueryContext/ExecContext call) — not audit-log writes — matching what
+// host.db.exec's own duration_ms has always measured.
+type execRowResult struct {
+	RowsAffected int64
+	Returning    [][]any
+	Duration     time.Duration
+}
+
+// execRow runs p — a statement prepareExec already parsed, validated, and
+// deparsed — once against tx with params, applying its etag/audit
+// mechanisms exactly as a single host.db.exec call would. This is the
+// unit both DBExec (once) and DBExecBatch (host_db_exec_batch.go, once
+// per parameter set within a single shared transaction) run — the reuse
+// goerp#461's own scope calls for, rather than either one reimplementing
+// RETURNING construction, constraint-violation translation, or the
+// etag/audit mechanisms itself.
+//
+// ctx must already carry whatever deadline this row's execution should
+// run under — execRow doesn't derive one itself. DBExec bounds its one
+// call with a single timeout shared with its own transaction's BeginTx;
+// DBExecBatch (host_db_exec_batch.go) instead gives each parameter set
+// its own fresh per-row timeout window, independent of the batch
+// transaction's own lifetime.
+func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedExec, params []any) (execRowResult, *abi.HostError) {
+	var oldRows []map[string]any
+	if p.audited && p.stmt.Operation != "INSERT" {
+		var err error
+		oldRows, err = captureRowsBeforeExec(ctx, tx, auditableExecStmt{
+			Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause,
+		}, params)
+		if err != nil {
+			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		}
 	}
 
 	start := time.Now()
@@ -304,11 +351,10 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 		newRows      []map[string]any
 		rowsAffected int64
 	)
-	if needReturning {
-		rows, execErr := tx.QueryContext(qCtx, finalSQL, input.Params...)
+	if p.needReturning {
+		rows, execErr := tx.QueryContext(ctx, p.finalSQL, params...)
 		if execErr != nil {
-			_ = finish(execErr)
-			return dbExecOutput{}, translateExecError(execErr)
+			return execRowResult{}, translateExecError(execErr)
 		}
 		// The internally-executed RETURNING * always includes every
 		// column, so its own result set defines the table's real column
@@ -317,52 +363,83 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 		// mistyped or nonexistent opts.returning column would otherwise
 		// silently project to nil (indistinguishable from a real NULL
 		// value) instead of a clear error.
-		if requestedCols != nil {
+		if p.requestedCols != nil {
 			available, err := rows.Columns()
 			if err != nil {
 				_ = rows.Close()
-				_ = finish(err)
-				return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+				return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
 			}
-			if err := validateRequestedColumns(requestedCols, available); err != nil {
+			if err := validateRequestedColumns(p.requestedCols, available); err != nil {
 				_ = rows.Close()
-				_ = finish(err)
-				return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+				return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
 			}
 		}
+		var err error
 		newRows, err = scanRowsToMaps(rows)
 		if err != nil {
-			_ = finish(err)
-			return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
 		}
 		rowsAffected = int64(len(newRows))
 	} else {
-		result, execErr := tx.ExecContext(qCtx, finalSQL, input.Params...)
+		result, execErr := tx.ExecContext(ctx, p.finalSQL, params...)
 		if execErr != nil {
-			_ = finish(execErr)
-			return dbExecOutput{}, translateExecError(execErr)
+			return execRowResult{}, translateExecError(execErr)
 		}
+		var err error
 		rowsAffected, err = result.RowsAffected()
 		if err != nil {
-			_ = finish(err)
-			return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
 		}
 	}
 	duration := time.Since(start)
 
-	if hasEtagCol && isEtagMismatch(hadEtagCheck, rowsAffected) {
-		_ = finish(errors.New("etag mismatch"))
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeDBEtagMismatch, Message: "record has been modified since it was last read"}
+	if p.hasEtagCol && isEtagMismatch(p.hadEtagCheck, rowsAffected) {
+		return execRowResult{}, &abi.HostError{Code: abi.ErrCodeDBEtagMismatch, Message: "record has been modified since it was last read"}
 	}
 
-	if audited {
-		if auditErr := writeAuditForExec(qCtx, tx, modCtx, table, stmt, pkCol, excludeCols, oldRows, newRows); auditErr != nil {
-			_ = finish(auditErr)
-			return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: auditErr.Error()}
+	if p.audited {
+		if auditErr := writeAuditForExec(ctx, tx, modCtx, p.table, p.stmt, p.pkCol, p.excludeCols, oldRows, newRows); auditErr != nil {
+			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: auditErr.Error()}
 		}
 	}
 
-	if input.Opts.ExpectRows && rowsAffected == 0 {
+	out := execRowResult{RowsAffected: rowsAffected, Duration: duration}
+	if p.requestedCols != nil {
+		out.Returning = projectReturning(newRows, p.requestedCols)
+	}
+	return out, nil
+}
+
+// DBExec implements host.db.exec (host-abi-reference.md §5). primary is
+// only used to open a new transaction when input.TxID is empty — every
+// statement this function runs goes through a *sql.Tx either way, since
+// host.db.exec's own etag/audit mechanisms need transactional
+// consistency between the pre-write read and the write itself.
+func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input dbExecInput) (dbExecOutput, *abi.HostError) {
+	p, hostErr := prepareExec(input.SQL, input.Opts, modCtx)
+	if hostErr != nil {
+		return dbExecOutput{}, hostErr
+	}
+
+	timeout := defaultExecTimeout
+	if input.Opts.TimeoutMs > 0 {
+		timeout = time.Duration(input.Opts.TimeoutMs) * time.Millisecond
+	}
+	qCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	tx, finish, hostErr := beginOrBorrowExecTx(qCtx, primary, modCtx, input.TxID)
+	if hostErr != nil {
+		return dbExecOutput{}, hostErr
+	}
+
+	result, hostErr := execRow(qCtx, tx, modCtx, p, input.Params)
+	if hostErr != nil {
+		_ = finish(errors.New(hostErr.Message))
+		return dbExecOutput{}, hostErr
+	}
+
+	if input.Opts.ExpectRows && result.RowsAffected == 0 {
 		_ = finish(errors.New("no rows affected"))
 		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeNoRowsAffected, Message: "statement matched zero rows"}
 	}
@@ -371,14 +448,14 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
-	if duration > slowQueryThreshold {
+	if result.Duration > slowQueryThreshold {
 		log.Warn().Str("module", modCtx.ModuleName).Str("sql", input.SQL).
-			Dur("duration", duration).Msg("host.db.exec: slow exec")
+			Dur("duration", result.Duration).Msg("host.db.exec: slow exec")
 	}
 
-	output := dbExecOutput{RowsAffected: int(rowsAffected), DurationMs: float64(duration.Microseconds()) / 1000}
-	if requestedCols != nil {
-		output.Returning = projectReturning(newRows, requestedCols)
+	output := dbExecOutput{RowsAffected: int(result.RowsAffected), DurationMs: float64(result.Duration.Microseconds()) / 1000}
+	if p.requestedCols != nil {
+		output.Returning = result.Returning
 	}
 	return output, nil
 }

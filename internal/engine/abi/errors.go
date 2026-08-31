@@ -66,6 +66,13 @@ const (
 	ErrCodeDBForeignKeyViolation = "db.foreign_key_violation"
 )
 
+// host.db.exec_batch error codes (host-abi-reference.md §5
+// "host.db.exec_batch").
+const (
+	ErrCodeDBBatchError        = "db.batch_error"
+	ErrCodeDBBatchPartialError = "db.batch_partial_error"
+)
+
 // host.orm error codes (host-abi-reference.md §5a "host.orm.search"/
 // "host.orm.search_read"/"host.orm.read").
 const (
