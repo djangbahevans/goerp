@@ -30,7 +30,8 @@ package engine
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -884,7 +885,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	adminapi.RegisterJobsRoutes(adminServer.Router(), adminapi.JobsDeps{
 		Client: jobQueueClient,
-		OutputDecryptor: func(kind string, output json.RawMessage) (json.RawMessage, error) {
+		OutputDecryptor: func(kind string, output jsontext.Value) (jsontext.Value, error) {
 			return tenantexport.DecryptOutput(rowKeySet, kind, output)
 		},
 	})
@@ -1177,7 +1178,12 @@ func (e *Engine) invokeHandler(
 		return EngineResponse{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	bodyBytes, err := json.Marshal(wire.Body)
+	// jsontext options match encoding/json v1's Encoder defaults, which
+	// json.Marshal doesn't apply on its own — EngineResponse.Body is
+	// written straight to the HTTP response by writeResponse's w.Write,
+	// so it needs the same HTML/JS-escape parity as every other
+	// client-facing encode call in this migration.
+	bodyBytes, err := json.Marshal(wire.Body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
 		return EngineResponse{}, fmt.Errorf("marshal response body: %w", err)
 	}

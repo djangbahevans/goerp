@@ -2,7 +2,8 @@ package httpx
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"time"
 
@@ -46,11 +47,18 @@ type HealthFn func(context.Context) HealthReport
 // instance warming (Stage 5) is separate, later scope.
 type ModulesFn func() (ModulesReport, []FailedModule)
 
+// writeJSON matches encoding/json v1's Encoder defaults, which
+// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
+// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
+func writeJSON(w http.ResponseWriter, v any) error {
+	return json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if s.healthFn == nil {
-		if err := json.NewEncoder(w).Encode(HealthReport{
+		if err := writeJSON(w, HealthReport{
 			Status:        "healthy",
 			Version:       "dev",
 			UptimeSeconds: 0,
@@ -67,7 +75,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	if err := json.NewEncoder(w).Encode(report); err != nil {
+	if err := writeJSON(w, report); err != nil {
 		log.Error().Err(err).Msg("encode health response")
 	}
 }
@@ -98,7 +106,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if s.readyFn != nil {
 		if err := s.readyFn(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			if encErr := json.NewEncoder(w).Encode(ReadyReport{
+			if encErr := writeJSON(w, ReadyReport{
 				Ready:         false,
 				Modules:       modules,
 				FailedModules: failedModules,
@@ -109,7 +117,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := json.NewEncoder(w).Encode(ReadyReport{
+	if err := writeJSON(w, ReadyReport{
 		Ready:         true,
 		Modules:       modules,
 		FailedModules: failedModules,

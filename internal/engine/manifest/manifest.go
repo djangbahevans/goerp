@@ -8,7 +8,8 @@
 package manifest
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"unicode/utf8"
@@ -31,7 +32,12 @@ func Load(m []byte) (*Manifest, error) {
 		return nil, ErrInvalidUtf8
 	}
 
-	if ok := json.Valid(m); !ok {
+	// jsontext.Value.IsValid's own default already covers invalid UTF-8
+	// (redundant with the utf8.Valid check above, harmlessly) and, unlike
+	// v1's json.Valid, also rejects a duplicate object member name —
+	// consistent with this migration's other stricter-by-default decode
+	// paths.
+	if ok := jsontext.Value(m).IsValid(); !ok {
 		return nil, ErrInvalidJSON
 	}
 

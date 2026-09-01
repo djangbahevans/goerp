@@ -3,7 +3,8 @@ package engine
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"strconv"
@@ -284,7 +285,7 @@ func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, p
 // surfaces here as a *http.MaxBytesError, which gets its own 413 rather
 // than being folded into the generic 400 a malformed body gets.
 func decodeJSONRecord(w http.ResponseWriter, r *http.Request) (record map[string]any, ok bool) {
-	if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+	if err := json.UnmarshalRead(r.Body, &record); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeRouteError(w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
 			return nil, false
@@ -295,10 +296,13 @@ func decodeJSONRecord(w http.ResponseWriter, r *http.Request) (record map[string
 	return record, true
 }
 
+// jsontext options match encoding/json v1's Encoder defaults, which
+// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
+// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(body); err != nil {
+	if err := json.MarshalWrite(w, body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)); err != nil {
 		log.Error().Err(err).Msg("dispatchORMRoute: encode response")
 	}
 }
