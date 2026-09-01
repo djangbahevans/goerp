@@ -22,6 +22,14 @@ import (
 
 const widgetModel = "testmodule.widget"
 
+// widget mirrors "testmodule.widget"'s own declared fields via db tags,
+// the shape every orm.*[T] function here maps a record into.
+type widget struct {
+	ID    string `db:"id"`
+	Name  string `db:"name"`
+	Price int64  `db:"price"`
+}
+
 type stepResult struct {
 	Step   string `msgpack:"step"`
 	OK     bool   `msgpack:"ok"`
@@ -56,51 +64,43 @@ func runOrmFlow() uint64 {
 	}
 
 	id1 := uuid.NewString()
-	created, err := orm.Create(orm.CreateInput{
-		Model:  widgetModel,
-		Record: map[string]any{"id": id1, "name": "Widget A", "price": int64(100)},
-	})
-	if !record("create", created.Record["name"].(string), err) {
+	created, err := orm.Create[widget](widgetModel, map[string]any{"id": id1, "name": "Widget A", "price": int64(100)})
+	if !record("create", created.Name, err) {
 		return writeReport(report)
 	}
 
-	readOut, err := orm.Read(orm.ReadInput{Model: widgetModel, IDs: []string{id1}})
-	record("read", strconv.Itoa(len(readOut.Records)), err)
+	readOut, err := orm.Read[widget](widgetModel, []string{id1}, nil)
+	record("read", strconv.Itoa(len(readOut)), err)
 
-	_, err = orm.Write(orm.WriteInput{Model: widgetModel, ID: id1, Record: map[string]any{"price": int64(200)}})
+	err = orm.Write(widgetModel, id1, map[string]any{"price": int64(200)}, "")
 	record("write", "", err)
 
-	searchOut, err := orm.Search(orm.SearchInput{Model: widgetModel, Domain: "record.price = 200"})
-	record("search", strconv.Itoa(len(searchOut.IDs)), err)
+	searchIDs, err := orm.Search(widgetModel, "record.price = 200")
+	record("search", strconv.Itoa(len(searchIDs)), err)
 
-	searchReadOut, err := orm.SearchRead(orm.SearchReadInput{Model: widgetModel, Domain: "record.price = 200", Fields: []string{"id", "name", "price"}})
-	record("search_read", strconv.Itoa(len(searchReadOut.Records)), err)
+	searchReadOut, _, err := orm.SearchRead[widget](widgetModel, "record.price = 200", []string{"id", "name", "price"})
+	record("search_read", strconv.Itoa(len(searchReadOut)), err)
 
 	id2, id3 := uuid.NewString(), uuid.NewString()
-	batchOut, err := orm.CreateBatch(orm.CreateBatchInput{
-		Model: widgetModel,
-		Records: []map[string]any{
-			{"id": id2, "name": "Widget B", "price": int64(50)},
-			{"id": id3, "name": "Widget C", "price": int64(50)},
-		},
+	batchOut, err := orm.CreateBatch[widget](widgetModel, []map[string]any{
+		{"id": id2, "name": "Widget B", "price": int64(50)},
+		{"id": id3, "name": "Widget C", "price": int64(50)},
 	})
-	record("create_batch", strconv.Itoa(len(batchOut.Records)), err)
+	record("create_batch", strconv.Itoa(len(batchOut)), err)
 
-	focOut, err := orm.FirstOrCreate(orm.FirstOrCreateInput{
-		Model:  widgetModel,
-		Domain: "record.name = 'Widget A'",
-		Record: map[string]any{"id": uuid.NewString(), "name": "Widget A", "price": int64(999)},
-	})
-	record("first_or_create", strconv.FormatBool(focOut.Created), err)
+	focRecord, focCreated, err := orm.FirstOrCreate[widget](widgetModel, "record.name = 'Widget A'",
+		map[string]any{"id": uuid.NewString(), "name": "Widget A", "price": int64(999)})
+	_ = focRecord
+	record("first_or_create", strconv.FormatBool(focCreated), err)
 
-	writeManyOut, err := orm.WriteMany(orm.WriteManyInput{Model: widgetModel, IDs: []string{id2, id3}, Record: map[string]any{"price": int64(300)}})
+	writeManyOut, err := orm.WriteMany(widgetModel, []string{id2, id3}, map[string]any{"price": int64(300)})
 	record("write_many", strconv.Itoa(writeManyOut.Count), err)
 
-	writeWhereOut, err := orm.WriteWhere(orm.WriteWhereInput{Model: widgetModel, Domain: "record.price = 300", Record: map[string]any{"name": "Bulk"}})
+	writeWhereOut, err := orm.WriteWhere(widgetModel, "record.price = 300", map[string]any{"name": "Bulk"})
 	record("write_where", strconv.Itoa(writeWhereOut.Count), err)
 
-	unlinkOut, err := orm.Unlink(orm.UnlinkInput{Model: widgetModel, ID: id1})
-	record("unlink", strconv.FormatBool(unlinkOut.Deleted), err)
+	deleted, err := orm.Unlink(widgetModel, id1)
+	record("unlink", strconv.FormatBool(deleted), err)
 
 	return writeReport(report)
 }

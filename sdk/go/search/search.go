@@ -177,8 +177,8 @@ func decodeHits[T any](hits []map[string]any) ([]T, error) {
 
 // setHitFieldValue assigns raw (one value from a msgpack-decoded hit)
 // into field — sdk/go/db/reflect.go's own setFieldValue, duplicated
-// rather than imported (sdk/go/orm/hostcall.go's own stated precedent):
-// both packages decode the same msgpack-native Go value shapes off host
+// rather than imported (sdk/go/orm/orm.go's own stated precedent): both
+// packages decode the same msgpack-native Go value shapes off host
 // responses, so the same nil/pointer/numeric-conversion rules apply.
 func setHitFieldValue(field reflect.Value, raw any) error {
 	if raw == nil {
