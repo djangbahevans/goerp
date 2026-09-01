@@ -915,9 +915,7 @@ func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
 	env := callORMHost(t, ctx, inst, "call_first_or_create", ORMFirstOrCreateInput{
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"code": "FOC-2"},
-		// "code" is deliberately absent from CreateVals — go-sdk-reference.md
-		// §6a documents createVals as merged with uniqueVals for the insert,
-		// so the caller shouldn't have to repeat the match field here.
+		// "code" is absent from CreateVals — the miss-path merge should supply it.
 		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New"},
 	}, &out)
 	if !env.OK {
@@ -932,6 +930,71 @@ func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
 
 	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
 		t.Errorf("orm.record.created jobs = %d, want 1", got)
+	}
+}
+
+// TestHostORM_FirstOrCreate_ConflictingOverlapKey_UniqueValsWins verifies
+// that when the same field appears in both maps with different values,
+// the inserted row still satisfies UniqueVals — otherwise a second,
+// identical call's match query would miss the row it just created,
+// breaking the idempotency guarantee FirstOrCreate exists for.
+func TestHostORM_FirstOrCreate_ConflictingOverlapKey_UniqueValsWins(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormfocoverlap%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	req := ORMFirstOrCreateInput{
+		Model:      "testmodule.item",
+		UniqueVals: map[string]any{"code": "FOC-3"},
+		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New", "code": "wrong"},
+	}
+
+	var out1 ORMFirstOrCreateOutput
+	if env := callORMHost(t, ctx, inst, "call_first_or_create", req, &out1); !env.OK {
+		t.Fatalf("first call failed: %+v", env.Error)
+	}
+	if out1.Record["code"] != "FOC-3" {
+		t.Fatalf("Record[code] = %v, want %q (UniqueVals must win over CreateVals)", out1.Record["code"], "FOC-3")
+	}
+
+	var out2 ORMFirstOrCreateOutput
+	if env := callORMHost(t, ctx, inst, "call_first_or_create", req, &out2); !env.OK {
+		t.Fatalf("second call failed: %+v", env.Error)
+	}
+	if out2.Created {
+		t.Error("Created = true on second call, want false — the first call's row should have matched")
+	}
+}
+
+func TestHostORM_FirstOrCreate_NilUniqueVal_ValidationFailed(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormfocnil%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	env := callORMHost(t, ctx, inst, "call_first_or_create", ORMFirstOrCreateInput{
+		Model:      "testmodule.item",
+		UniqueVals: map[string]any{"code": nil},
+		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New"},
+	}, nil)
+	if env.OK {
+		t.Fatal("expected a nil unique_vals entry to fail rather than silently never matching")
+	}
+	if env.Error.Code != abi.ErrCodeValidationFailed {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeValidationFailed)
 	}
 }
 

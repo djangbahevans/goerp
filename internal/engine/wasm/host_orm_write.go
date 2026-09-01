@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -393,14 +394,27 @@ func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sq
 // ORMFirstOrCreate matches an existing record by input.UniqueVals —
 // validated against md's own declared unique indexes the same way
 // validateOnConflictTarget validates OnConflictIgnore/OnConflictUpdate's
-// target — and creates input.UniqueVals merged with input.CreateVals only
-// on a miss, inside one transaction. Race-safety for concurrent callers
-// racing the identical match uses a transaction-scoped Postgres advisory
-// lock keyed by hash(tenant, model, sorted unique-vals) — the
+// target — and creates input.CreateVals merged with input.UniqueVals
+// (UniqueVals wins on any overlapping key, so the inserted row always
+// satisfies the same match a later call will look for) only on a miss,
+// inside one transaction. Race-safety for concurrent callers racing the
+// identical match uses a transaction-scoped Postgres advisory lock keyed
+// by hash(tenant, model, msgpack-encoded sorted unique-vals pairs) — the
 // general-condition counterpart to AcquireNext's (internal/engine/orm)
-// keyed INSERT...ON CONFLICT DO UPDATE upsert pattern. The lock only
+// keyed INSERT...ON CONFLICT DO UPDATE upsert pattern. msgpack encoding
+// (rather than a naive "field=value" string join) keeps distinct
+// unique-vals combinations from ever formatting to the same key, since
+// separators can appear inside a field's own value. The lock only
 // serializes callers racing the identical (tenant, model, unique-vals)
 // triple; it's released automatically at commit/rollback.
+//
+// Kept as this SELECT-then-INSERT shape rather than createOneRecordTx's
+// INSERT...ON CONFLICT DO NOTHING (used by OnConflictIgnore) deliberately:
+// go-sdk-reference.md §6a documents CreateVals as "only used when
+// created," meaning a hit must never run validateRequired/DynamicLink/
+// sequence-acquisition against a CreateVals map that's allowed to be
+// incomplete when the record already exists — an INSERT-first attempt
+// can't know that until after already running them.
 func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMFirstOrCreateInput) (ORMFirstOrCreateOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMFirstOrCreateOutput{}, abi.CapabilityDenied("db.write")
@@ -421,13 +435,22 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 
 	whereConds := make([]string, len(fields))
 	whereArgs := make([]any, len(fields))
-	lockKeyParts := make([]string, len(fields))
+	lockKeyPairs := make([][2]any, len(fields))
 	for i, f := range fields {
+		v := input.UniqueVals[f]
+		if v == nil {
+			return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unique_vals[" + f + "] must not be nil"}
+		}
 		whereConds[i] = fmt.Sprintf("%s = $%d", quoteIdentORM(f), i+1)
-		whereArgs[i] = input.UniqueVals[f]
-		lockKeyParts[i] = fmt.Sprintf("%s=%v", f, input.UniqueVals[f])
+		whereArgs[i] = v
+		lockKeyPairs[i] = [2]any{f, v}
 	}
 	whereFrag := strings.Join(whereConds, " AND ")
+
+	lockKeyBytes, err := msgpack.Marshal(lockKeyPairs)
+	if err != nil {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
 
 	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
 	if err != nil {
@@ -435,7 +458,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	lockKey := modCtx.TenantSlug + ":" + input.Model + ":" + strings.Join(lockKeyParts, ",")
+	lockKey := modCtx.TenantSlug + ":" + input.Model + ":" + hex.EncodeToString(lockKeyBytes)
 	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
@@ -458,8 +481,8 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	}
 
 	record := make(map[string]any, len(input.UniqueVals)+len(input.CreateVals))
-	maps.Copy(record, input.UniqueVals)
 	maps.Copy(record, input.CreateVals)
+	maps.Copy(record, input.UniqueVals)
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -1144,11 +1167,9 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 // index — the model's single-column primary key, or a md.Indexes entry
 // with Def.IsUnique whose column set matches exactly (order-independent).
 // No match is orm.conflict_target_invalid rather than a silent
-// full-table-scan fallback for conflict detection. paramName names the
-// caller's own field in error messages (e.g. "on_conflict.fields",
-// "unique_vals") — this validation is shared by OnConflictIgnore/
-// OnConflictUpdate and ORMFirstOrCreate, and each names its target field
-// differently on the wire.
+// full-table-scan fallback for conflict detection. paramName is the
+// caller's own wire field name (e.g. "on_conflict.fields", "unique_vals"),
+// used in error messages.
 func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, fields []string, paramName string) ([]string, *abi.HostError) {
 	if len(fields) == 0 {
 		return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: paramName + " must not be empty"}
