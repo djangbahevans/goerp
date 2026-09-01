@@ -356,76 +356,23 @@ func insertArgs(md model.ModelDeclaration, record map[string]any) ([]any, error)
 }
 
 // numberPreservingUnmarshalers restores v1's Decoder.UseNumber() behavior
-// for a map[string]any/[]any-typed decode target: every JSON number, at
-// any nesting depth, decodes as jsonv1.Number instead of encoding/json/v2's
-// own any-decode default of float64 — sqlValue below needs that to avoid
-// precision loss on a bigint/id column.
-var numberPreservingUnmarshalers = json.UnmarshalFunc(func(data []byte, v *any) error {
-	val, err := decodeAnyPreservingNumbers(data)
+// for a map[string]any/[]any-typed decode target — sqlValue below needs a
+// JSON number as jsonv1.Number, not v2's own any-decode default of
+// float64, to avoid precision loss on a bigint/id column. Falling back to
+// errors.ErrUnsupported for every other kind lets v2's own any-decoder
+// recurse through objects/arrays, re-invoking this same unmarshaler at
+// every nesting depth.
+var numberPreservingUnmarshalers = json.UnmarshalFromFunc(func(dec *jsontext.Decoder, v *any) error {
+	if dec.PeekKind() != '0' {
+		return errors.ErrUnsupported
+	}
+	tok, err := dec.ReadToken()
 	if err != nil {
 		return err
 	}
-	*v = val
+	*v = jsonv1.Number(tok.String())
 	return nil
 })
-
-// decodeAnyPreservingNumbers decodes data (a single JSON value) into a Go
-// any, walking objects/arrays by hand so a JSON number is always
-// jsonv1.Number, regardless of nesting depth.
-func decodeAnyPreservingNumbers(data []byte) (any, error) {
-	dec := jsontext.NewDecoder(bytes.NewReader(data))
-	return decodeTokenPreservingNumbers(dec)
-}
-
-func decodeTokenPreservingNumbers(dec *jsontext.Decoder) (any, error) {
-	tok, err := dec.ReadToken()
-	if err != nil {
-		return nil, err
-	}
-	switch tok.Kind() {
-	case '0':
-		return jsonv1.Number(tok.String()), nil
-	case '"':
-		return tok.String(), nil
-	case 't', 'f':
-		return tok.Bool(), nil
-	case 'n':
-		return nil, nil
-	case '{':
-		obj := make(map[string]any)
-		for dec.PeekKind() != '}' {
-			nameTok, err := dec.ReadToken()
-			if err != nil {
-				return nil, err
-			}
-			name := nameTok.String()
-			val, err := decodeTokenPreservingNumbers(dec)
-			if err != nil {
-				return nil, err
-			}
-			obj[name] = val
-		}
-		if _, err := dec.ReadToken(); err != nil { // consume '}'
-			return nil, err
-		}
-		return obj, nil
-	case '[':
-		var arr []any
-		for dec.PeekKind() != ']' {
-			val, err := decodeTokenPreservingNumbers(dec)
-			if err != nil {
-				return nil, err
-			}
-			arr = append(arr, val)
-		}
-		if _, err := dec.ReadToken(); err != nil { // consume ']'
-			return nil, err
-		}
-		return arr, nil
-	default:
-		return nil, fmt.Errorf("unexpected JSON token kind %v", tok.Kind())
-	}
-}
 
 func sqlValue(v any) (any, error) {
 	switch vv := v.(type) {
@@ -441,7 +388,10 @@ func sqlValue(v any) (any, error) {
 	case float64:
 		return vv, nil
 	case map[string]any, []any:
-		b, err := json.Marshal(vv)
+		// Deterministic sorts a map's keys — matches v1's Marshal default,
+		// in case the target column is json rather than jsonb (which would
+		// otherwise re-normalize key order on its own).
+		b, err := json.Marshal(vv, json.Deterministic(true))
 		if err != nil {
 			return nil, fmt.Errorf("re-encode JSON value: %w", err)
 		}

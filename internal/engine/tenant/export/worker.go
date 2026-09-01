@@ -303,7 +303,10 @@ func writeRowsAsJSONLines(rows *sql.Rows, modelName string, cols []string, w io.
 		for i, col := range cols {
 			record[col] = values[i]
 		}
-		line, err := json.Marshal(exportRecord{Model: modelName, Record: record})
+		// Deterministic sorts record's map keys — v1's Encoder always did,
+		// and re-exporting identical data should still produce identical
+		// bytes.
+		line, err := json.Marshal(exportRecord{Model: modelName, Record: record}, json.Deterministic(true))
 		if err != nil {
 			return err
 		}
