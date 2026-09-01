@@ -103,7 +103,7 @@ func TestEncodeManifestIsDeterministic(t *testing.T) {
 		t.Fatalf("encodeManifest: %v", err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		got, err := encodeManifest(v)
 		if err != nil {
 			t.Fatalf("encodeManifest: %v", err)
