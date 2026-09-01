@@ -2,8 +2,8 @@
 // internal/engine/wasm's own module-side host-call FFI tests (goerp#432)
 // — it calls OUT to host.db/host.event through the real sdk/go/db and
 // sdk/go/events packages (db.Begin/events.EmitTx/tx.Commit,
-// events.Emit(..., events.WithSync())), rather than a hand-assembled
-// bytecode stand-in.
+// events.Emit(..., events.WithSync()), tx.Lock/tx.TryLock — goerp#508),
+// rather than a hand-assembled bytecode stand-in.
 //
 // Must be built with:
 //
@@ -63,6 +63,32 @@ func runEmitSyncFlow() uint64 {
 		return writeResult(flowResult{Error: "emit: " + err.Error()})
 	}
 	return writeResult(flowResult{OK: true, EventID: eventID})
+}
+
+//go:wasmexport run_lock_flow
+func runLockFlow() uint64 {
+	tx, err := db.Begin()
+	if err != nil {
+		return writeResult(flowResult{Error: "begin: " + err.Error()})
+	}
+	defer tx.Rollback()
+
+	acquired, err := tx.TryLock("fixture-lock-key")
+	if err != nil {
+		return writeResult(flowResult{Error: "try_lock: " + err.Error()})
+	}
+	if !acquired {
+		return writeResult(flowResult{Error: "try_lock: expected to acquire a free lock"})
+	}
+
+	if err := tx.Lock("fixture-lock-key-2"); err != nil {
+		return writeResult(flowResult{Error: "lock: " + err.Error()})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return writeResult(flowResult{Error: "commit: " + err.Error()})
+	}
+	return writeResult(flowResult{OK: true})
 }
 
 //go:wasmexport allocate
