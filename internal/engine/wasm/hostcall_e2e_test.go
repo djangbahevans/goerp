@@ -180,3 +180,25 @@ func TestHostcallFixture_EmitSync_SubscriberFailureSurfacedAsError(t *testing.T)
 		t.Fatalf("expected exactly 1 sync subscriber dispatched, got %v", dispatcher.calls)
 	}
 }
+
+// TestHostcallFixture_LockFlow_TryLockAndLockBothSucceed is goerp#508's
+// acceptance criterion: a real compiled module calls db.Begin(),
+// tx.TryLock (acquiring a free lock), tx.Lock (blocking, also free), and
+// tx.Commit() — proving sdk/go/db's Lock/TryLock round-trip through the
+// real host.db.lock call rather than just host_db_lock_test.go's own
+// direct calls into the host function.
+func TestHostcallFixture_LockFlow_TryLockAndLockBothSucceed(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+	wasmBytes := compileHostcallFixture(t)
+
+	tenantID := uuid.NewString()
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "hostcalllocktest", "trace-1", abi.CapDBWrite, nil, ModuleSnapshot{})
+
+	r := newHostcallTestRuntime(t, primaryDB, 10)
+
+	out := callHostcallFixture(t, ctx, r, wasmBytes, mc, "run_lock_flow")
+	if !out.OK {
+		t.Fatalf("run_lock_flow failed: %s", out.Error)
+	}
+}
