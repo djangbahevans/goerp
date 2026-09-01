@@ -91,6 +91,40 @@ func TestManifestTemplateOwnsNoModelsByDefault(t *testing.T) {
 	}
 }
 
+// TestEncodeManifestIsDeterministic guards against encoding/json/v2's
+// default map key ordering, which is randomized per call (unlike v1, which
+// always sorted) — without Deterministic(true), scaffolding or patching the
+// same manifest twice would produce different bytes each time.
+func TestEncodeManifestIsDeterministic(t *testing.T) {
+	v := manifestTemplate("demo_module", "domain")
+
+	first, err := encodeManifest(v)
+	if err != nil {
+		t.Fatalf("encodeManifest: %v", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		got, err := encodeManifest(v)
+		if err != nil {
+			t.Fatalf("encodeManifest: %v", err)
+		}
+		if string(got) != string(first) {
+			t.Fatalf("encodeManifest is nondeterministic:\nfirst: %s\ngot:   %s", first, got)
+		}
+	}
+}
+
+func TestEncodeManifestEndsWithNewline(t *testing.T) {
+	data, err := encodeManifest(manifestTemplate("demo_module", "domain"))
+	if err != nil {
+		t.Fatalf("encodeManifest: %v", err)
+	}
+
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		t.Errorf("encodeManifest output does not end with a newline: %q", data)
+	}
+}
+
 func TestDisplayName(t *testing.T) {
 	tests := []struct {
 		name string

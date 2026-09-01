@@ -1,8 +1,8 @@
 package module
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -91,14 +91,16 @@ func writeFile(path string, content []byte) error {
 	return nil
 }
 
+// encodeManifest indents the same way v1's json.Encoder did and appends the
+// trailing newline it always wrote. Deterministic(true) is required for v's
+// map[string]any inputs — v2 randomizes a map's key order per call by
+// default (v1 always sorted), which would otherwise make every scaffolded
+// or patched manifest.json byte-for-byte different from the last run.
 func encodeManifest(v any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
+	out, err := json.Marshal(v, jsontext.WithIndent("  "), json.Deterministic(true))
+	if err != nil {
 		return nil, err
 	}
 
-	return buf.Bytes(), nil
+	return append(out, '\n'), nil
 }

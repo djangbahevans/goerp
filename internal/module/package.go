@@ -4,6 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	// Stays on v1: manifest.json may have been hand-authored or written by
+	// an older version of this CLI's own `module scaffold`/`module build`,
+	// so json/v2's stricter rejection of invalid UTF-8 or a duplicate
+	// object member name could newly break a module that packaged fine
+	// before.
 	"encoding/json"
 	"fmt"
 	"io"

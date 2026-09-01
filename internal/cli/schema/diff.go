@@ -2,7 +2,8 @@ package schema
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/url"
@@ -67,7 +68,7 @@ func newDiffCmd() *cobra.Command {
 			}
 
 			var responses []schemaDiffResponse
-			var rawResponses []json.RawMessage
+			var rawResponses []jsontext.Value
 			for _, slug := range tenants {
 				data, err := fetchDiff(cmd.Context(), client, module, slug, verbose)
 				if err != nil {
@@ -115,7 +116,11 @@ func newDiffCmd() *cobra.Command {
 	return cmd
 }
 
-func fetchDiff(ctx context.Context, client *adminclient.Client, module, tenantSlug string, verbose bool) (json.RawMessage, error) {
+// fetchDiff returns the raw response body as jsontext.Value — v1's
+// json.RawMessage under a different name, since encoding/json/v2 doesn't
+// re-export it — so --all --json can re-marshal every tenant's response
+// verbatim without a redundant decode/re-encode round trip.
+func fetchDiff(ctx context.Context, client *adminclient.Client, module, tenantSlug string, verbose bool) (jsontext.Value, error) {
 	query := url.Values{}
 	query.Set("tenant", tenantSlug)
 	if verbose {

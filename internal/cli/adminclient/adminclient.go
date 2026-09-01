@@ -8,6 +8,12 @@ package adminclient
 import (
 	"bytes"
 	"context"
+	// Stays on v1: this is the admin API's own network boundary — decoding
+	// its response envelope with json/v2's stricter defaults (rejecting
+	// invalid UTF-8 and duplicate object member names, matching field
+	// names case-sensitively) could newly reject a response the server
+	// currently sends. Migrating here depends on internal/engine/adminapi's
+	// own migration (goerp#521) landing first.
 	"encoding/json"
 	"errors"
 	"fmt"
