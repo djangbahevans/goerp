@@ -6,7 +6,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -134,7 +134,7 @@ func newImportCmd() *cobra.Command {
 			}
 
 			if jsonOut {
-				out, err := json.Marshal(result)
+				out, err := json.Marshal(result, adminclient.JSONEscapeOpts...)
 				if err != nil {
 					return fmt.Errorf("encode result: %w", err)
 				}
@@ -168,7 +168,7 @@ func runImportDryRun(cmd *cobra.Command, archiveBytes []byte, decryptionKey stri
 	}
 
 	if jsonOut {
-		out, err := json.Marshal(man)
+		out, err := json.Marshal(man, adminclient.JSONEscapeOpts...)
 		if err != nil {
 			return fmt.Errorf("encode manifest: %w", err)
 		}

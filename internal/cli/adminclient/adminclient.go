@@ -8,7 +8,8 @@ package adminclient
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,14 @@ import (
 	"github.com/djangbahevans/goerp/internal/cli/clierr"
 	"github.com/spf13/cobra"
 )
+
+// JSONEscapeOpts restores v1's json.Marshal default escaping — '<', '>',
+// and '&' escaped for safe HTML embedding, and U+2028/U+2029 escaped for
+// safe JS embedding — which encoding/json/v2's Marshal doesn't apply on
+// its own. Every command that Marshals its own --json output (rather than
+// passing a server response's raw bytes straight through) passes this, so
+// a script parsing that output sees the same bytes it always has.
+var JSONEscapeOpts = []json.Options{jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)}
 
 type Client struct {
 	baseURL string
@@ -64,11 +73,11 @@ func New(baseURL, token string, timeout time.Duration) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) Get(ctx context.Context, path string) (json.RawMessage, error) {
+func (c *Client) Get(ctx context.Context, path string) (jsontext.Value, error) {
 	return c.Do(ctx, http.MethodGet, path, nil)
 }
 
-func (c *Client) Post(ctx context.Context, path string, body any) (json.RawMessage, error) {
+func (c *Client) Post(ctx context.Context, path string, body any) (jsontext.Value, error) {
 	return c.Do(ctx, http.MethodPost, path, body)
 }
 
@@ -79,7 +88,7 @@ func (c *Client) Post(ctx context.Context, path string, body any) (json.RawMessa
 // key. Streamed via an io.Pipe so an arbitrarily large archive is never
 // buffered whole in memory, the same reason downloadAndVerifyExport
 // streams the export path's own archive straight to disk.
-func (c *Client) UploadFile(ctx context.Context, path, fieldName, fileName string, r io.Reader) (json.RawMessage, error) {
+func (c *Client) UploadFile(ctx context.Context, path, fieldName, fileName string, r io.Reader) (jsontext.Value, error) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 
@@ -110,7 +119,7 @@ func (c *Client) UploadFile(ctx context.Context, path, fieldName, fileName strin
 // install`'s own contract per POST /admin/modules/install, which reads
 // the request body directly as the .erp package rather than expecting a
 // JSON envelope or a multipart form.
-func (c *Client) PostBinary(ctx context.Context, path string, body []byte) (json.RawMessage, error) {
+func (c *Client) PostBinary(ctx context.Context, path string, body []byte) (jsontext.Value, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -122,8 +131,8 @@ func (c *Client) PostBinary(ctx context.Context, path string, body []byte) (json
 }
 
 type envelope struct {
-	Data  json.RawMessage `json:"data"`
-	Error *apiErrorBody   `json:"error"`
+	Data  jsontext.Value `json:"data"`
+	Error *apiErrorBody  `json:"error"`
 }
 
 type apiErrorBody struct {
@@ -155,7 +164,7 @@ func ErrorEnvelopeJSON(err error) ([]byte, bool) {
 		return nil, false
 	}
 
-	out, marshalErr := json.Marshal(envelope{Error: &apiErrorBody{Code: apiErr.Code, Message: apiErr.Message}})
+	out, marshalErr := json.Marshal(envelope{Error: &apiErrorBody{Code: apiErr.Code, Message: apiErr.Message}}, JSONEscapeOpts...)
 	if marshalErr != nil {
 		return nil, false
 	}
@@ -168,7 +177,7 @@ func ErrorEnvelopeJSON(err error) ([]byte, bool) {
 // already mapped from the HTTP status (exitCodeForStatus) and whose Err
 // is an *APIError carrying the admin API's own code/message — callers
 // just `return err`; root.go's existing ExitCoder handling does the rest.
-func (c *Client) Do(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
+func (c *Client) Do(ctx context.Context, method, path string, body any) (jsontext.Value, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -192,7 +201,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (json.Ra
 
 // send issues req and decodes the admin API's envelope response — the
 // part Do and UploadFile share once their own request bodies are built.
-func (c *Client) send(req *http.Request) (json.RawMessage, error) {
+func (c *Client) send(req *http.Request) (jsontext.Value, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, &clierr.Error{Code: 1, Err: fmt.Errorf("admin API request failed: %w", err)}
@@ -200,7 +209,7 @@ func (c *Client) send(req *http.Request) (json.RawMessage, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	var env envelope
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &env); err != nil {
 		return nil, &clierr.Error{Code: 1, Err: fmt.Errorf("decode admin API response: %w", err)}
 	}
 
@@ -256,8 +265,8 @@ const PollInterval = 2 * time.Second
 // WaitForJob caller needs: State to know when to stop polling, Output to
 // decode into the caller's own result type once it's completed.
 type jobDetail struct {
-	State  string          `json:"state"`
-	Output json.RawMessage `json:"output,omitempty"`
+	State  string         `json:"state"`
+	Output jsontext.Value `json:"output,omitempty"`
 }
 
 // WaitForJob polls GET /admin/jobs/{id} until jobID reaches a terminal

@@ -1,7 +1,7 @@
 package schema
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/cli/adminclient"

@@ -5,6 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	// Stays on v1: manifest.json may be hand-authored or from an older
+	// toolchain, where v2's stricter invalid-UTF-8/duplicate-key rejection
+	// could newly break a module that built fine before (package.go and
+	// wasmbuild.go read it under this same reasoning).
 	"encoding/json"
 	"fmt"
 	"os"

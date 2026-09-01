@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	// Stays on v1 — see build.go's identical import comment.
 	"encoding/json"
 	"fmt"
 	"io"

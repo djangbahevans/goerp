@@ -2,7 +2,7 @@ package schema
 
 import (
 	"bufio"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"strings"
@@ -126,7 +126,7 @@ func newSyncCmd() *cobra.Command {
 			}
 
 			if jsonOut {
-				out, err := json.Marshal(result)
+				out, err := json.Marshal(result, adminclient.JSONEscapeOpts...)
 				if err != nil {
 					return fmt.Errorf("encode schema sync result: %w", err)
 				}

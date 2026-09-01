@@ -76,6 +76,46 @@ func TestDo_SuccessReturnsData(t *testing.T) {
 	}
 }
 
+// TestDo_RejectsDuplicateObjectMemberNames and TestDo_RejectsInvalidUTF8
+// pin encoding/json/v2's stricter decode of the admin API's own response
+// envelope — the two behaviors goerp#520's ParseJSON migration established
+// as the pattern, now that goerp#529 has moved internal/engine/adminapi's
+// encoding to v2 too and this client no longer needs to stay lenient for
+// it.
+func TestDo_RejectsDuplicateObjectMemberNames(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"slug":"acme"},"data":{"slug":"acme"},"error":null}`))
+	}))
+	defer srv.Close()
+
+	client, err := New(srv.URL, "testtoken", 5*time.Second)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	if _, err := client.Get(context.Background(), "/admin/tenants/acme"); err == nil {
+		t.Fatal("Get() error = nil, want an error for a duplicate object member name")
+	}
+}
+
+func TestDo_RejectsInvalidUTF8(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"data\":{\"slug\":\"\xff\xfe\"},\"error\":null}"))
+	}))
+	defer srv.Close()
+
+	client, err := New(srv.URL, "testtoken", 5*time.Second)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	if _, err := client.Get(context.Background(), "/admin/tenants/acme"); err == nil {
+		t.Fatal("Get() error = nil, want an error for invalid UTF-8")
+	}
+}
+
 func TestDo_ExitCodeMapping(t *testing.T) {
 	cases := []struct {
 		status   int
@@ -159,6 +199,36 @@ func TestErrorEnvelopeJSON_RoundTrips(t *testing.T) {
 	}
 	if env.Error.Code != "not_found" || env.Error.Message != "tenant not found" {
 		t.Errorf("Error = %+v, want code=not_found message=%q", env.Error, "tenant not found")
+	}
+}
+
+// TestErrorEnvelopeJSON_EscapesHTMLUnsafeCharacters pins JSONEscapeOpts:
+// encoding/json/v2's Marshal doesn't apply v1's default HTML/JS-safe
+// escaping on its own, so a server-supplied error message containing
+// '<'/'>'/'&' must still come out escaped, matching the CLI's historical
+// --json output bytes.
+func TestErrorEnvelopeJSON_EscapesHTMLUnsafeCharacters(t *testing.T) {
+	err := &clierr.Error{Code: 4, Err: &APIError{Code: "bad_input", Message: "value <b>&\"quoted\"</b> is invalid"}}
+
+	out, ok := ErrorEnvelopeJSON(err)
+	if !ok {
+		t.Fatal("ErrorEnvelopeJSON() ok = false, want true")
+	}
+
+	if bytes.ContainsAny(out, "<>&") {
+		t.Errorf("ErrorEnvelopeJSON() = %s, want '<', '>', '&' escaped as \\u00XX", out)
+	}
+
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	if want := `value <b>&"quoted"</b> is invalid`; env.Error.Message != want {
+		t.Errorf("Error.Message = %q, want %q", env.Error.Message, want)
 	}
 }
 
