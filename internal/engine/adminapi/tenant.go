@@ -14,7 +14,7 @@ package adminapi
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -153,9 +153,18 @@ type tenantHandlers struct {
 	deps TenantDeps
 }
 
+// decodeJSON decodes r's entire body as a single JSON value of type T,
+// using encoding/json/v2's stricter, case-sensitive defaults: invalid
+// UTF-8 and duplicate object member names are rejected outright, and a
+// JSON field name that only differs in case from its struct's json tag
+// is treated as unknown rather than matched. Shared by every adminapi
+// handler that decodes a request body — including handlers in files that
+// don't import encoding/json/v2 directly (config.go, events.go,
+// operators.go, schema.go), since this is the only call site that reads
+// their bodies.
 func decodeJSON[T any](r *http.Request) (T, error) {
 	var v T
-	err := json.NewDecoder(r.Body).Decode(&v)
+	err := json.UnmarshalRead(r.Body, &v)
 	return v, err
 }
 

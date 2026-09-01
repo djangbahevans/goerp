@@ -1,7 +1,8 @@
 package adminapi
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 
 	"github.com/rs/zerolog/log"
@@ -23,10 +24,17 @@ type envelopeError struct {
 	Message string `json:"message"`
 }
 
+// encodeEnvelope writes v with encoding/json v1's Encoder defaults, which
+// MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for safe
+// HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
+func encodeEnvelope(w http.ResponseWriter, v envelope) error {
+	return json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+}
+
 func writeData(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(envelope{Data: data}); err != nil {
+	if err := encodeEnvelope(w, envelope{Data: data}); err != nil {
 		log.Error().Err(err).Msg("admin api: encode response")
 	}
 }
@@ -34,7 +42,7 @@ func writeData(w http.ResponseWriter, status int, data any) {
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(envelope{Error: &envelopeError{Code: code, Message: message}}); err != nil {
+	if err := encodeEnvelope(w, envelope{Error: &envelopeError{Code: code, Message: message}}); err != nil {
 		log.Error().Err(err).Msg("admin api: encode error response")
 	}
 }

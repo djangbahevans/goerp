@@ -282,6 +282,60 @@ func TestSuspendRoute_MissingReasonIsBadRequest(t *testing.T) {
 	}
 }
 
+// The next three exercise decodeJSON's encoding/json/v2 strictness
+// (goerp#529) through a real route rather than testing the helper in
+// isolation, distinguishing a decode-level rejection ("malformed JSON
+// body") from decodeJSON succeeding but leaving Reason unset
+// ("reason is required").
+
+func TestSuspendRoute_DuplicateObjectMemberNameIsBadRequest(t *testing.T) {
+	mux := newTestTenantMux(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/acme/suspend", strings.NewReader(`{"reason":"a","reason":"b"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	env := decodeEnvelope(t, w)
+	if env.Error == nil || env.Error.Message != "malformed JSON body" {
+		t.Errorf("error = %+v, want message %q", env.Error, "malformed JSON body")
+	}
+}
+
+func TestSuspendRoute_InvalidUTF8IsBadRequest(t *testing.T) {
+	mux := newTestTenantMux(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/acme/suspend", strings.NewReader("{\"reason\":\"\xff\xfe\"}"))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	env := decodeEnvelope(t, w)
+	if env.Error == nil || env.Error.Message != "malformed JSON body" {
+		t.Errorf("error = %+v, want message %q", env.Error, "malformed JSON body")
+	}
+}
+
+func TestSuspendRoute_CaseMismatchedFieldNameIsUnknownNotMatched(t *testing.T) {
+	mux := newTestTenantMux(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants/acme/suspend", strings.NewReader(`{"REASON":"scheduled maintenance"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	env := decodeEnvelope(t, w)
+	if env.Error == nil || env.Error.Message != "reason is required" {
+		t.Errorf("error = %+v, want message %q — a case-mismatched field name should be unknown, not matched", env.Error, "reason is required")
+	}
+}
+
 // fakeSessionRevoker records RevokeAllForTenant calls, or returns
 // forcedErr if set, without needing a real sessionrevoke.Revoker (Redis +
 // a populated sessions table).
