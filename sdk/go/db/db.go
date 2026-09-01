@@ -8,9 +8,10 @@
 // matchers for classifying a host.db.exec-originated failure
 // (errors.go).
 //
-// host.db.lock/notify are documented in host-abi-reference.md §5 but not
-// yet implemented engine-side, so db.Lock and friends aren't buildable
-// yet either.
+// host.db.notify is documented in host-abi-reference.md §5 but not yet
+// implemented engine-side, so db.Notify isn't buildable yet either.
+// host.db.lock now exists (goerp#462); its own Tx.Lock/Tx.TryLock wrapper
+// is tracked separately in goerp#508.
 package db
 
 import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
