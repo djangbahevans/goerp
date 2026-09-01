@@ -118,15 +118,9 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, accountName str
 		return nil, "", err
 	}
 
-	// encoding/json/v2 omits a zero-valued, omitempty-tagged struct field
-	// (go-webauthn's own CredentialCreation.AuthenticatorSelection) that v1
-	// always included as {} — a real difference, verified against the real
-	// library, but an absent optional field and an empty object are
-	// equivalent to any spec-compliant WebAuthn client.
-	//
-	// optionsJSON is eventually written straight to an HTTP response body
-	// by a future caller, so it gets the same HTML/JS-escape parity as
-	// every other client-facing encode call in this migration.
+	// v2 omits a zero-valued AuthenticatorSelection that v1 sent as {} —
+	// spec-equivalent to any WebAuthn client. Escape options match v1's
+	// Encoder defaults, since optionsJSON reaches an HTTP client verbatim.
 	optionsJSON, err = json.Marshal(creation, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal webauthn registration options: %w", err)

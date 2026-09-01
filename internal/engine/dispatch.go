@@ -3,7 +3,8 @@ package engine
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -331,7 +332,12 @@ func writeRouteError(w http.ResponseWriter, status int, code, message string) {
 func writeRouteErrorDetails(w http.ResponseWriter, status int, code, message string, details map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(routeErrorEnvelope{Error: routeErrorBody{Code: code, Message: message, Details: details}}); err != nil {
+	// jsontext options match encoding/json v1's Encoder defaults, which
+	// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped
+	// for safe HTML embedding, and U+2028/U+2029 escaped for safe JS
+	// embedding.
+	env := routeErrorEnvelope{Error: routeErrorBody{Code: code, Message: message, Details: details}}
+	if err := json.MarshalWrite(w, env, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)); err != nil {
 		log.Error().Err(err).Msg("dispatch: encode error response")
 	}
 }

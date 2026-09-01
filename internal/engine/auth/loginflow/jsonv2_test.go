@@ -1,10 +1,26 @@
 package loginflow
 
 import (
+	"encoding/json/v2"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// encoding/json/v2 matches JSON field names to Go struct fields
+// case-sensitively, with no v1-style case-insensitive fallback — a
+// case-mismatched key is unknown, not matched, and left at its zero
+// value rather than erroring. Intentional (goerp#520/#529/#530); this
+// makes that behavior explicit for loginRequest specifically.
+func TestLoginRequestDecode_CaseMismatchedFieldNamesAreUnknownNotMatched(t *testing.T) {
+	var req loginRequest
+	if err := json.Unmarshal([]byte(`{"Email":"a@b.com","Password":"x","Tenant":"acme","Device_id":"d"}`), &req); err != nil {
+		t.Fatalf("Unmarshal() error: %v", err)
+	}
+	if req.Email != "" || req.Password != "" || req.Tenant != "" || req.DeviceID != "" {
+		t.Errorf("req = %+v, want every field left at its zero value", req)
+	}
+}
 
 // The next three exercise encoding/json/v2's stricter decode defaults
 // (goerp#530) through the real handler, before any dependency is
