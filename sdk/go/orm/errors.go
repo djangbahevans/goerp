@@ -19,8 +19,8 @@ func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
 func IsEtagMismatch(err error) bool { return hostErrorCodeIs(err, "orm.etag_mismatch") }
 
 // IsValidationFailed reports whether err is a host.orm validation
-// failure — orm.validation_failed. The field name is reachable via
-// errors.As(err, &he); he.Details["field"].
+// failure — orm.validation_failed. Some (not all) of these errors carry
+// a "field" Details key, reachable via errors.As(err, &he).
 func IsValidationFailed(err error) bool { return hostErrorCodeIs(err, "orm.validation_failed") }
 
 // IsUniqueViolation reports whether err is a host.orm.create/create_batch

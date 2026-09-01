@@ -6,6 +6,7 @@ package domain_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
@@ -24,6 +25,7 @@ func TestOrmDomain_OutputParsesAsValidDomain(t *testing.T) {
 		{"float", "record.price = ?", []any{3.14}},
 		{"bool", "record.is_active = ?", []any{true}},
 		{"nil", "record.deleted_at = ?", []any{nil}},
+		{"time.Time", "record.created_at < ?", []any{time.Now()}},
 		{"multiple placeholders", "record.type = ? AND record.is_active = ?", []any{"person", true}},
 	}
 	for _, c := range cases {

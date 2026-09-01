@@ -1,6 +1,9 @@
 package orm
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDomain_ReplacesPlaceholdersByType(t *testing.T) {
 	got := Domain("record.name = ? AND record.price = ? AND record.is_active = ?", "Acme", 42, true)
@@ -30,6 +33,18 @@ func TestDomain_FloatNeverUsesScientificNotation(t *testing.T) {
 	got := Domain("record.price = ?", 0.0000001)
 	if got != "record.price = 0.0000001" {
 		t.Errorf("Domain() = %q, want %q (no scientific notation)", got, "record.price = 0.0000001")
+	}
+}
+
+// TestDomain_TimeRendersRFC3339 pins go-sdk-reference.md §6a's own
+// worked example: `orm.Domain("state = 'draft' AND created_at < ?",
+// cutoff)` with a time.Time cutoff — Postgres parses RFC 3339 directly.
+func TestDomain_TimeRendersRFC3339(t *testing.T) {
+	at := time.Date(2026, 8, 2, 16, 32, 19, 123456789, time.UTC)
+	got := Domain("record.created_at < ?", at)
+	want := "record.created_at < '2026-08-02T16:32:19.123456789Z'"
+	if got != want {
+		t.Errorf("Domain() = %q, want %q", got, want)
 	}
 }
 

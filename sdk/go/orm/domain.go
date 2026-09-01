@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Domain builds a domain expression string (manifest-spec.md §8) from
@@ -26,16 +27,19 @@ func Domain(template string, args ...any) string {
 }
 
 // domainLiteral renders v as a domain-language literal: a quoted string
-// (embedded quotes doubled, SQL's own rule), the true/false/null
-// keywords, or plain digit text — never scientific notation, which the
-// domain lexer doesn't parse. An unrecognized type falls back to a
-// quoted string of its fmt.Sprint form.
+// (embedded quotes doubled, SQL's own rule) — time.Time as RFC 3339,
+// which Postgres parses directly — the true/false/null keywords, or
+// plain digit text, never scientific notation, which the domain lexer
+// doesn't parse. An unrecognized type falls back to a quoted string of
+// its fmt.Sprint form.
 func domainLiteral(v any) string {
 	switch x := v.(type) {
 	case nil:
 		return "null"
 	case string:
 		return quoteDomainString(x)
+	case time.Time:
+		return quoteDomainString(x.Format(time.RFC3339Nano))
 	case bool:
 		return strconv.FormatBool(x)
 	case int:
