@@ -8,8 +8,11 @@ type ormUnlinkInput struct {
 }
 
 // Unlink deletes records by ID via host.orm.unlink. A missing ID aborts
-// the whole call — matching WriteMany/WriteWhere's own all-or-nothing
-// semantics — so a returned ExecResult always has Count == len(ids).
+// the whole call, so a returned ExecResult always has Count == len(ids)
+// — matching WriteMany/WriteWhere's own all-or-nothing semantics for a
+// SQL-backed model. A model.Transient() model has no transaction to roll
+// back: a missing ID partway through still aborts the call, but any
+// earlier ID in the same list is already deleted for good, not undone.
 func Unlink(model string, ids []string) (ExecResult, error) {
 	var out ExecResult
 	err := hostcall.Do(hostORMUnlink, ormUnlinkInput{Model: model, IDs: ids}, &out)
