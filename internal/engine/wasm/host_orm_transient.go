@@ -156,19 +156,27 @@ func diagnoseTransientZeroRowWrite(ctx context.Context, cacheClient *cache.Clien
 	return &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
 }
 
-func transientUnlink(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, qualifiedModel, id string) (ORMUnlinkOutput, *abi.HostError) {
-	key := transientKey(modCtx.TenantSlug, qualifiedModel, id)
+// transientUnlink deletes multiple Transient-backed records from
+// host.cache — one Delete per ID, not atomic the way the SQL-backed path
+// is inside a transaction: a missing ID partway through aborts, but
+// whatever was already deleted stays deleted.
+func transientUnlink(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, qualifiedModel string, ids []string) (ExecResult, *abi.HostError) {
+	affected := make([]string, 0, len(ids))
+	for _, id := range ids {
+		key := transientKey(modCtx.TenantSlug, qualifiedModel, id)
 
-	_, found, err := cacheClient.GetHash(ctx, key)
-	if err != nil {
-		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
-	}
-	if !found {
-		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
-	}
+		_, found, err := cacheClient.GetHash(ctx, key)
+		if err != nil {
+			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		}
+		if !found {
+			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+		}
 
-	if err := cacheClient.Delete(ctx, key); err != nil {
-		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		if err := cacheClient.Delete(ctx, key); err != nil {
+			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		}
+		affected = append(affected, id)
 	}
-	return ORMUnlinkOutput{Deleted: true}, nil
+	return ExecResult{Count: len(affected), IDs: affected}, nil
 }

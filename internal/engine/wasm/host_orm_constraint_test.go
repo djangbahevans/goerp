@@ -74,7 +74,7 @@ func TestORMUnlink_ConstraintHook_Rejects_NoRowDeleted(t *testing.T) {
 
 	_, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
 		Model: "testmodule.order",
-		ID:    orderID,
+		IDs:   []string{orderID},
 	})
 	if hostErr == nil {
 		t.Fatal("ORMUnlink: expected a rejection, got nil error")
@@ -119,13 +119,13 @@ func TestORMUnlink_ConstraintHook_Allows_RowDeleted(t *testing.T) {
 
 	out, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
 		Model: "testmodule.order",
-		ID:    orderID,
+		IDs:   []string{orderID},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMUnlink: %+v", hostErr)
 	}
-	if !out.Deleted {
-		t.Error("Deleted = false, want true")
+	if out.Count != 1 || len(out.IDs) != 1 || out.IDs[0] != orderID {
+		t.Errorf("ExecResult = %+v, want Count=1 IDs=[%s]", out, orderID)
 	}
 
 	var count int

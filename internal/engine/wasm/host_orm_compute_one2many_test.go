@@ -239,7 +239,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildUnlink(t *testing.T) {
 
 	if _, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
 		Model: "testmodule.order_line",
-		ID:    lineID,
+		IDs:   []string{lineID},
 	}); hostErr != nil {
 		t.Fatalf("unlink order_line: %+v", hostErr)
 	}
