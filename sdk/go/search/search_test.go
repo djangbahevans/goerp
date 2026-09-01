@@ -109,3 +109,37 @@ func TestDecodeHits_EmptyHitsReturnsEmptySlice(t *testing.T) {
 		t.Errorf("len(got) = %d, want 0", len(got))
 	}
 }
+
+func TestDecodeHits_UnknownKeyIsSkipped(t *testing.T) {
+	got, err := decodeHits[contactHit]([]map[string]any{{"id": "1", "unknown_key": "whatever"}})
+	if err != nil {
+		t.Fatalf("decodeHits: %v", err)
+	}
+	if got[0].ID != "1" {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "1")
+	}
+}
+
+// TestDecodeHits_NullIntoNonPointerField_Errors matches
+// sdk/go/db/reflect_test.go's own TestScanRow_NullIntoNonPointerField_Errors
+// — a non-pointer field can't represent NULL, so it must error rather than
+// silently zero-value.
+func TestDecodeHits_NullIntoNonPointerField_Errors(t *testing.T) {
+	if _, err := decodeHits[contactHit]([]map[string]any{{"id": "1", "name": nil}}); err == nil {
+		t.Fatal("expected an error assigning NULL into a non-pointer field")
+	}
+}
+
+// TestDecodeHits_OneBadHitFailsWholeBatch pins decodeHits' all-or-nothing
+// failure semantics — matching sdk/go/db/reflect.go's own scanRows, which
+// fails a whole []T on the first bad row rather than dropping just that
+// one.
+func TestDecodeHits_OneBadHitFailsWholeBatch(t *testing.T) {
+	hits := []map[string]any{
+		{"id": "1", "name": "Acme"},
+		{"id": "2", "name": nil},
+	}
+	if _, err := decodeHits[contactHit](hits); err == nil {
+		t.Fatal("expected an error from the second hit's NULL name")
+	}
+}

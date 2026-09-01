@@ -9,16 +9,17 @@
 package search
 
 import (
-	"encoding/json/v2"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
 // searchQueryOpts/searchQueryInput/searchQueryOutput are host.search.query's
-// own msgpack wire shape. Filter/Sort/Facets are Meilisearch-only — the
-// trigram backend ignores them and FacetDistribution in searchQueryOutput
-// is always empty — until Meilisearch is introduced.
+// msgpack wire shape. Filter/Sort/Facets are ignored (and
+// FacetDistribution always empty) until Meilisearch replaces the initial
+// trigram backend.
 type searchQueryOpts struct {
 	Filter string   `msgpack:"filter,omitempty"`
 	Sort   []string `msgpack:"sort,omitempty"`
@@ -68,11 +69,14 @@ func WithFacets(fields ...string) SearchOption {
 	return func(in *searchQueryInput) { in.Opts.Facets = fields }
 }
 
-// SearchResult is Query's own result — Hits already mapped into T via its
-// own json-tag-mapped fields, matching go-sdk-reference.md §12's own
-// ContactSearchHit example.
+// SearchResult is Query's own result, Hits mapped into T via its own
+// json-tag-mapped fields (go-sdk-reference.md §12's ContactSearchHit
+// example).
 type SearchResult[T any] struct {
-	Hits              []T
+	Hits []T
+	// TotalHits matches go-sdk-reference.md §12's documented `int` —
+	// narrowed from the wire's int64 count, which only loses precision
+	// past 2^31 matching rows, unreachable at this system's real scale.
 	TotalHits         int
 	ProcessingTimeMs  int
 	FacetDistribution map[string]map[string]int
@@ -80,13 +84,7 @@ type SearchResult[T any] struct {
 }
 
 // Query searches indexName — one of the calling module's own declared
-// search_indexes entries — via host.search.query, populating each hit
-// into a T via its own json-tag-mapped fields. A hit arrives as an
-// already-decoded map[string]any keyed by column name, so a marshal/
-// unmarshal round trip through T's own json tags is simpler here than
-// duplicating sdk/go/db/reflect.go's positional row-scanning machinery,
-// which solves a different problem (a []any row paired with a parallel
-// []string of column names, not a map).
+// search_indexes entries — via host.search.query.
 func Query[T any](indexName, query string, opts ...SearchOption) (SearchResult[T], error) {
 	in := searchQueryInput{Index: indexName, Query: query}
 	for _, opt := range opts {
@@ -112,16 +110,108 @@ func Query[T any](indexName, query string, opts ...SearchOption) (SearchResult[T
 	}, nil
 }
 
-// decodeHits maps each hit into a T via its own json-tag-mapped fields.
-func decodeHits[T any](hits []map[string]any) ([]T, error) {
-	b, err := json.Marshal(hits)
-	if err != nil {
-		return nil, fmt.Errorf("search: marshal hits: %w", err)
+// searchHitField pairs one T field with the json key its value maps to —
+// this package's map-keyed counterpart to sdk/go/db/reflect.go's
+// db-tag-mapped structField, since a hit is a map[string]any rather than
+// a positional row.
+type searchHitField struct {
+	key   string
+	index int
+}
+
+// searchHitFields returns t's own json-tag-mapped fields (json tags, not
+// db.Query[T]'s db tags — go-sdk-reference.md §12's ContactSearchHit
+// example), matching encoding/json's own tag semantics: name, "-" to
+// skip, untagged falls back to the Go field name as-is.
+func searchHitFields(t reflect.Type) ([]searchHitField, error) {
+	if t.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("search: %s is not a struct", t)
 	}
-	var out []T
-	if err := json.Unmarshal(b, &out); err != nil {
-		var zero T
-		return nil, fmt.Errorf("search: unmarshal hits into []%T: %w", zero, err)
+	fields := make([]searchHitField, 0, t.NumField())
+	for i := range t.NumField() {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		tag, ok := f.Tag.Lookup("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if ok && name == "-" {
+			continue
+		}
+		key := name
+		if key == "" {
+			key = f.Name
+		}
+		fields = append(fields, searchHitField{key: key, index: i})
+	}
+	return fields, nil
+}
+
+// decodeHits maps each hit into a T via one reflective pass over its own
+// json-tag-mapped fields — hits have already paid for one full
+// deserialization in hostcall.Do's own msgpack.Unmarshal, so this avoids
+// re-serializing them to JSON text just to parse that text back out.
+func decodeHits[T any](hits []map[string]any) ([]T, error) {
+	if len(hits) == 0 {
+		return nil, nil
+	}
+	fields, err := searchHitFields(reflect.TypeFor[T]())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]T, len(hits))
+	for i, hit := range hits {
+		v := reflect.ValueOf(&out[i]).Elem()
+		for _, f := range fields {
+			raw, ok := hit[f.key]
+			if !ok {
+				continue
+			}
+			if err := setHitFieldValue(v.Field(f.index), raw); err != nil {
+				return nil, fmt.Errorf("search: hit %d field %q: %w", i, f.key, err)
+			}
+		}
 	}
 	return out, nil
+}
+
+// setHitFieldValue assigns raw (one value from a msgpack-decoded hit)
+// into field — sdk/go/db/reflect.go's own setFieldValue, duplicated
+// rather than imported (sdk/go/orm/hostcall.go's own stated precedent):
+// both packages decode the same msgpack-native Go value shapes off host
+// responses, so the same nil/pointer/numeric-conversion rules apply.
+func setHitFieldValue(field reflect.Value, raw any) error {
+	if raw == nil {
+		if field.Kind() != reflect.Pointer {
+			return fmt.Errorf("cannot assign NULL into non-pointer field type %s", field.Type())
+		}
+		return nil
+	}
+	if field.Kind() == reflect.Pointer {
+		elem := reflect.New(field.Type().Elem())
+		if err := setHitFieldValue(elem.Elem(), raw); err != nil {
+			return err
+		}
+		field.Set(elem)
+		return nil
+	}
+
+	rv := reflect.ValueOf(raw)
+	if rv.Type().AssignableTo(field.Type()) {
+		field.Set(rv)
+		return nil
+	}
+	if rv.Type().ConvertibleTo(field.Type()) {
+		switch field.Kind() {
+		case reflect.String, reflect.Bool, reflect.Struct:
+			// A ConvertibleTo pass for these kinds is almost always a
+			// coincidental method-set match, not a real, intended
+			// conversion — restrict conversion to the numeric kinds it's
+			// actually meant for.
+		default:
+			field.Set(rv.Convert(field.Type()))
+			return nil
+		}
+	}
+	return fmt.Errorf("cannot assign %s into %s", rv.Type(), field.Type())
 }
