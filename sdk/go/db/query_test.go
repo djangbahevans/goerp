@@ -38,19 +38,39 @@ func TestQueryOptions_WithTimeoutSetsField(t *testing.T) {
 	}
 }
 
-func TestQueryOptions_WithTxSetsTxID(t *testing.T) {
-	tx := &Tx{id: "tx-abc"}
-	var in dbQueryInput
-	WithTx(tx)(&in)
-	if in.TxID != "tx-abc" {
-		t.Errorf("TxID = %q, want tx-abc", in.TxID)
-	}
-}
-
 func TestQueryOptions_WithReadOnlySetsField(t *testing.T) {
 	var in dbQueryInput
 	WithReadOnly()(&in)
 	if !in.Opts.ReadOnly {
 		t.Error("ReadOnly = false, want true")
+	}
+}
+
+type firstRowTestRecord struct {
+	ID   string `db:"id"`
+	Name string `db:"name"`
+}
+
+func TestFirstRow_EmptyRowsReturnsErrNotFound(t *testing.T) {
+	res := &QueryResult{ColumnNames: []string{"id", "name"}}
+
+	_, err := firstRow[firstRowTestRecord](res)
+	if !IsNotFound(err) {
+		t.Errorf("firstRow() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestFirstRow_ScansOnlyTheFirstRow(t *testing.T) {
+	res := &QueryResult{
+		ColumnNames: []string{"id", "name"},
+		Rows:        [][]any{{"id-1", "Alice"}, {"id-2", "Bob"}},
+	}
+
+	got, err := firstRow[firstRowTestRecord](res)
+	if err != nil {
+		t.Fatalf("firstRow: %v", err)
+	}
+	if got.ID != "id-1" || got.Name != "Alice" {
+		t.Errorf("firstRow() = %+v, want id=id-1 name=Alice", got)
 	}
 }

@@ -42,20 +42,16 @@ type dbQueryInput struct {
 	Opts   dbQueryOpts `msgpack:"opts"`
 }
 
-// QueryOption configures Query/QueryReplica — WithTimeout, WithTx,
-// WithReadOnly.
+// QueryOption configures Query/QueryReplica — WithTimeout, WithReadOnly.
+// Scoping a query to an open transaction is a tx.Query[T]/tx.QueryOne[T]
+// method call instead (db.go) — there's no WithTx QueryOption here, so it
+// doesn't collide with the package-level db.WithTx(fn) convenience
+// wrapper (db.go).
 type QueryOption func(*dbQueryInput)
 
 // WithTimeout overrides host.db.query's default timeout.
 func WithTimeout(ms int64) QueryOption {
 	return func(in *dbQueryInput) { in.Opts.TimeoutMs = ms }
-}
-
-// WithTx scopes the query to an open transaction's own connection —
-// mutually exclusive with QueryReplica, which always runs against a
-// replica regardless of any open primary-side transaction.
-func WithTx(tx *Tx) QueryOption {
-	return func(in *dbQueryInput) { in.TxID = tx.TxID() }
 }
 
 // WithReadOnly routes a Query call (one that would otherwise run against
@@ -101,18 +97,21 @@ func QueryReplica[T any](sql string, params []any, opts ...QueryOption) ([]T, er
 // row into instead (sdk/go/model.ProcessBatches, reading an arbitrary,
 // caller-chosen table into map[string]any via QueryResult.AsMaps()).
 func QueryRaw(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
-	return query(hostDBQuery, sql, params, opts)
+	return query(hostDBQuery, sql, params, opts, "")
 }
 
 // QueryReplicaRaw is QueryRaw, but always routed to a read replica —
 // QueryReplica's own counterpart to QueryRaw, the same way QueryReplica
 // is Query's.
 func QueryReplicaRaw(sql string, params []any, opts ...QueryOption) (*QueryResult, error) {
-	return query(hostDBQueryReplica, sql, params, opts)
+	return query(hostDBQueryReplica, sql, params, opts, "")
 }
 
-func query(invoke hostcall.Invoke, sql string, params []any, opts []QueryOption) (*QueryResult, error) {
-	in := dbQueryInput{SQL: sql, Params: params}
+// query is Query/QueryReplica's shared implementation, plus the
+// transaction-scoped path (tx *Tx) Query[T]/QueryOne[T] (db.go) call it
+// through by passing tx's own ID as txID instead of "".
+func query(invoke hostcall.Invoke, sql string, params []any, opts []QueryOption, txID string) (*QueryResult, error) {
+	in := dbQueryInput{SQL: sql, Params: params, TxID: txID}
 	for _, opt := range opts {
 		opt(&in)
 	}
@@ -122,4 +121,15 @@ func query(invoke hostcall.Invoke, sql string, params []any, opts []QueryOption)
 		return nil, err
 	}
 	return &out, nil
+}
+
+// firstRow returns res's own first row scanned into a T, or ErrNotFound
+// if res carries no rows — QueryOne/QueryOneReplica/tx.QueryOne's shared
+// zero-or-one-row interpretation of an already-fetched QueryResult.
+func firstRow[T any](res *QueryResult) (T, error) {
+	var zero T
+	if len(res.Rows) == 0 {
+		return zero, ErrNotFound
+	}
+	return scanRow[T](res.ColumnNames, res.Rows[0])
 }
