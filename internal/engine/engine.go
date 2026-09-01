@@ -1178,11 +1178,8 @@ func (e *Engine) invokeHandler(
 		return EngineResponse{}, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	// jsontext options match encoding/json v1's Encoder defaults, which
-	// json.Marshal doesn't apply on its own — EngineResponse.Body is
-	// written straight to the HTTP response by writeResponse's w.Write,
-	// so it needs the same HTML/JS-escape parity as every other
-	// client-facing encode call in this migration.
+	// Escape options match v1's Encoder defaults, since Body reaches the
+	// client verbatim via writeResponse's w.Write.
 	bodyBytes, err := json.Marshal(wire.Body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
 		return EngineResponse{}, fmt.Errorf("marshal response body: %w", err)

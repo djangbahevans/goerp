@@ -296,14 +296,25 @@ func decodeJSONRecord(w http.ResponseWriter, r *http.Request) (record map[string
 	return record, true
 }
 
-// jsontext options match encoding/json v1's Encoder defaults, which
-// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
-// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
+// writeJSON marshals to a buffer before writing anything to w — unlike
+// json.MarshalWrite straight to w, a marshal failure partway through a
+// large body (e.g. an ORM list response, easily over MarshalWrite's own
+// ~4KB flush threshold) can't leave a truncated body behind an
+// already-committed status code. The jsontext options match encoding/json
+// v1's Encoder defaults, which json.Marshal doesn't apply on its own:
+// '<', '>', '&' escaped for safe HTML embedding, and U+2028/U+2029
+// escaped for safe JS embedding.
 func writeJSON(w http.ResponseWriter, status int, body any) {
+	encoded, err := json.Marshal(body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+	if err != nil {
+		log.Error().Err(err).Msg("dispatchORMRoute: encode response")
+		writeRouteError(w, http.StatusInternalServerError, "internal", "failed to encode response")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.MarshalWrite(w, body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)); err != nil {
-		log.Error().Err(err).Msg("dispatchORMRoute: encode response")
+	if _, err := w.Write(encoded); err != nil {
+		log.Error().Err(err).Msg("dispatchORMRoute: write response")
 	}
 }
 

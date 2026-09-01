@@ -32,11 +32,8 @@ func Load(m []byte) (*Manifest, error) {
 		return nil, ErrInvalidUtf8
 	}
 
-	// jsontext.Value.IsValid's own default already covers invalid UTF-8
-	// (redundant with the utf8.Valid check above, harmlessly) and, unlike
-	// v1's json.Valid, also rejects a duplicate object member name —
-	// consistent with this migration's other stricter-by-default decode
-	// paths.
+	// Unlike v1's json.Valid, this also rejects a duplicate object member
+	// name — intentional, matching this migration's stricter decode paths.
 	if ok := jsontext.Value(m).IsValid(); !ok {
 		return nil, ErrInvalidJSON
 	}
