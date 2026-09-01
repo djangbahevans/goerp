@@ -153,6 +153,11 @@ func testFinalAttemptJob(id int64, args Args) *river.Job[Args] {
 // than imported (this package stays independent of tenantexport's
 // unexported internals, same as production code never imports across that
 // boundary either).
+// encryptTestArchive deliberately keeps this file's own encoding/json
+// import on v1 rather than following import/worker.go's v2 migration —
+// building fixtures with it is what makes TestWorkerRun_ImportsArchiveIntoNewTenant
+// a genuine "a v1-encoded archive still imports" check (goerp#532), not
+// just a v2-writes/v2-reads round trip.
 func encryptTestArchive(t *testing.T, man manifest, moduleData map[string][]byte) (ciphertext []byte, keyB64 string) {
 	t.Helper()
 

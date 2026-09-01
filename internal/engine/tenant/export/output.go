@@ -1,7 +1,8 @@
 package tenantexport
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
@@ -17,7 +18,7 @@ import (
 // the same dispatch-by-kind shape adminapi/jobs.go's own hook signature
 // expects, since one engine-wide OutputDecryptor is threaded through every
 // job kind, not just this package's.
-func DecryptOutput(keys *rowcrypt.RowKeySet, kind string, output json.RawMessage) (json.RawMessage, error) {
+func DecryptOutput(keys *rowcrypt.RowKeySet, kind string, output jsontext.Value) (jsontext.Value, error) {
 	if kind != (Args{}).Kind() {
 		return output, nil
 	}

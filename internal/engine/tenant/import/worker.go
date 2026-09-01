@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
+	jsonv1 "encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -282,9 +284,7 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 			continue
 		}
 		var rec exportRecord
-		dec := json.NewDecoder(bytes.NewReader(line))
-		dec.UseNumber() // preserve int64 precision for sqlValue below — plain Unmarshal decodes every number as float64
-		if err := dec.Decode(&rec); err != nil {
+		if err := json.Unmarshal(line, &rec, json.WithUnmarshalers(numberPreservingUnmarshalers)); err != nil {
 			return fmt.Errorf("decode record: %w", err)
 		}
 
@@ -355,9 +355,28 @@ func insertArgs(md model.ModelDeclaration, record map[string]any) ([]any, error)
 	return args, nil
 }
 
+// numberPreservingUnmarshalers restores v1's Decoder.UseNumber() behavior
+// for a map[string]any/[]any-typed decode target — sqlValue below needs a
+// JSON number as jsonv1.Number, not v2's own any-decode default of
+// float64, to avoid precision loss on a bigint/id column. Falling back to
+// errors.ErrUnsupported for every other kind lets v2's own any-decoder
+// recurse through objects/arrays, re-invoking this same unmarshaler at
+// every nesting depth.
+var numberPreservingUnmarshalers = json.UnmarshalFromFunc(func(dec *jsontext.Decoder, v *any) error {
+	if dec.PeekKind() != '0' {
+		return errors.ErrUnsupported
+	}
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return err
+	}
+	*v = jsonv1.Number(tok.String())
+	return nil
+})
+
 func sqlValue(v any) (any, error) {
 	switch vv := v.(type) {
-	case json.Number:
+	case jsonv1.Number:
 		if i, err := vv.Int64(); err == nil {
 			return i, nil
 		}
@@ -369,7 +388,10 @@ func sqlValue(v any) (any, error) {
 	case float64:
 		return vv, nil
 	case map[string]any, []any:
-		b, err := json.Marshal(vv)
+		// Deterministic sorts a map's keys — matches v1's Marshal default,
+		// in case the target column is json rather than jsonb (which would
+		// otherwise re-normalize key order on its own).
+		b, err := json.Marshal(vv, json.Deterministic(true))
 		if err != nil {
 			return nil, fmt.Errorf("re-encode JSON value: %w", err)
 		}

@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -236,7 +236,6 @@ func toSet(names []string) map[string]bool {
 func (w *Worker) dumpModule(ctx context.Context, tenantSlug string, mod *module.LoadedModule) ([]byte, error) {
 	var buf bytes.Buffer
 	bw := bufio.NewWriter(&buf)
-	enc := json.NewEncoder(bw)
 
 	tx, err := beginTenantScopedRead(ctx, w.RawDB, tenantSlug)
 	if err != nil {
@@ -268,7 +267,7 @@ func (w *Worker) dumpModule(ctx context.Context, tenantSlug string, mod *module.
 		if err != nil {
 			return nil, fmt.Errorf("query %s: %w", md.Name, err)
 		}
-		if err := writeRowsAsJSONLines(rows, md.Name, cols, enc); err != nil {
+		if err := writeRowsAsJSONLines(rows, md.Name, cols, bw); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan %s: %w", md.Name, err)
 		}
@@ -286,7 +285,10 @@ type exportRecord struct {
 	Record map[string]any `json:"record"`
 }
 
-func writeRowsAsJSONLines(rows *sql.Rows, modelName string, cols []string, enc *json.Encoder) error {
+// writeRowsAsJSONLines writes one JSON object per line to w — json.Marshal
+// plus a manual newline, since encoding/json/v2 has no Encoder type with
+// v1's own Encode-then-trailing-newline behavior.
+func writeRowsAsJSONLines(rows *sql.Rows, modelName string, cols []string, w io.Writer) error {
 	values := make([]any, len(cols))
 	ptrs := make([]any, len(cols))
 	for i := range values {
@@ -301,7 +303,17 @@ func writeRowsAsJSONLines(rows *sql.Rows, modelName string, cols []string, enc *
 		for i, col := range cols {
 			record[col] = values[i]
 		}
-		if err := enc.Encode(exportRecord{Model: modelName, Record: record}); err != nil {
+		// Deterministic sorts record's map keys — v1's Encoder always did,
+		// and re-exporting identical data should still produce identical
+		// bytes.
+		line, err := json.Marshal(exportRecord{Model: modelName, Record: record}, json.Deterministic(true))
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write(line); err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte("\n")); err != nil {
 			return err
 		}
 	}

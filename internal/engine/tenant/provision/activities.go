@@ -3,7 +3,7 @@ package tenantprovision
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"sort"
@@ -358,7 +358,7 @@ func (a *Activities) SeedTenantConfig(ctx context.Context, slug string) error {
 			continue
 		}
 		for key, value := range mod.Manifest.TenantConfigSeeds {
-			valueJSON, err := json.Marshal(value)
+			valueJSON, err := json.Marshal(value, json.Deterministic(true))
 			if err != nil {
 				return fmt.Errorf("encode config seed %s.%s: %w", mod.Manifest.Name, key, err)
 			}

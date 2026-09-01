@@ -9,7 +9,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"time"
 )
@@ -38,7 +39,7 @@ func buildArchive(m manifest, moduleData map[string][]byte) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
-	manifestBytes, err := json.MarshalIndent(m, "", "  ")
+	manifestBytes, err := json.Marshal(m, jsontext.WithIndent("  "))
 	if err != nil {
 		return nil, fmt.Errorf("marshal manifest: %w", err)
 	}
