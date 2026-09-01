@@ -17,6 +17,7 @@ package webauthn
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -122,7 +123,11 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, accountName str
 	// always included as {} — a real difference, verified against the real
 	// library, but an absent optional field and an empty object are
 	// equivalent to any spec-compliant WebAuthn client.
-	optionsJSON, err = json.Marshal(creation)
+	//
+	// optionsJSON is eventually written straight to an HTTP response body
+	// by a future caller, so it gets the same HTML/JS-escape parity as
+	// every other client-facing encode call in this migration.
+	optionsJSON, err = json.Marshal(creation, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal webauthn registration options: %w", err)
 	}
@@ -194,7 +199,8 @@ func (s *Service) BeginLogin(ctx context.Context, userID, accountName string) (o
 		return nil, "", err
 	}
 
-	optionsJSON, err = json.Marshal(assertion)
+	// Same HTML/JS-escape parity as BeginRegistration's optionsJSON above.
+	optionsJSON, err = json.Marshal(assertion, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal webauthn login options: %w", err)
 	}
@@ -270,6 +276,10 @@ func (s *Service) FinishLogin(ctx context.Context, userID, ceremonyID, accountNa
 	return mfaID, nil
 }
 
+// encryptCredential's own JSON never leaves this process unencrypted —
+// unlike optionsJSON above, it's decrypted and Unmarshaled only by
+// loadUser, so it doesn't need the HTML/JS-escape parity a client-facing
+// encode does.
 func (s *Service) encryptCredential(credential *wan.Credential) ([]byte, error) {
 	blob, err := json.Marshal(credential)
 	if err != nil {
@@ -358,6 +368,9 @@ type ceremonySession struct {
 func regKey(ceremonyID string) string  { return "webauthn:reg:" + ceremonyID }
 func authKey(ceremonyID string) string { return "webauthn:auth:" + ceremonyID }
 
+// Same reasoning as encryptCredential: this JSON only round-trips through
+// Redis back to loadSession, never to a client, so it skips the
+// HTML/JS-escape parity optionsJSON needs.
 func (s *Service) storeSession(ctx context.Context, key, userID string, data wan.SessionData) error {
 	blob, err := json.Marshal(ceremonySession{UserID: userID, Data: data})
 	if err != nil {
