@@ -20,7 +20,8 @@
 package mfareverify
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"time"
@@ -68,10 +69,17 @@ type reverifyRequest struct {
 	Code string `json:"code"`
 }
 
+// writeJSON matches encoding/json v1's Encoder defaults, which
+// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
+// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
+func writeJSON(w http.ResponseWriter, v any) {
+	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+}
+
 func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"error": map[string]string{"code": code, "message": message},
 	})
 }
@@ -108,7 +116,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req reverifyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.UnmarshalRead(r.Body, &req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
@@ -174,7 +182,7 @@ func writeAccessToken(w http.ResponseWriter, r *http.Request, accessToken string
 	w.Header().Set("Content-Type", "application/json")
 
 	if loginsession.IsNonBrowser(r) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeJSON(w, map[string]any{
 			"access_token": accessToken,
 			"expires_in":   expiresIn,
 		})
@@ -190,5 +198,5 @@ func writeAccessToken(w http.ResponseWriter, r *http.Request, accessToken string
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	_ = json.NewEncoder(w).Encode(map[string]any{"expires_in": expiresIn})
+	writeJSON(w, map[string]any{"expires_in": expiresIn})
 }

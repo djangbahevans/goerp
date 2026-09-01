@@ -17,7 +17,7 @@ package webauthn
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"time"
@@ -117,6 +117,11 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, accountName str
 		return nil, "", err
 	}
 
+	// encoding/json/v2 omits a zero-valued, omitempty-tagged struct field
+	// (go-webauthn's own CredentialCreation.AuthenticatorSelection) that v1
+	// always included as {} — a real difference, verified against the real
+	// library, but an absent optional field and an empty object are
+	// equivalent to any spec-compliant WebAuthn client.
 	optionsJSON, err = json.Marshal(creation)
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal webauthn registration options: %w", err)
