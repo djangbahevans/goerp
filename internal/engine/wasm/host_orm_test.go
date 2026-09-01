@@ -49,6 +49,13 @@ func widgetModelDecl() model.ModelDeclaration {
 			{Name: "name", Def: model.Text().Required()},
 			{Name: "price", Def: model.Integer()},
 		},
+		// Declared for validateOnConflictTarget/FirstOrCreate's registry
+		// check only — createFixtureWidgetsTable's hand-rolled DDL has no
+		// matching physical constraint, so fixtures elsewhere are free to
+		// seed duplicate names.
+		Indexes: []model.NamedIndex{
+			{Name: "idx_widgets_name_unique", Def: model.BTreeIndex("name").Unique()},
+		},
 	}
 }
 
