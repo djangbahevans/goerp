@@ -91,11 +91,9 @@ func writeFile(path string, content []byte) error {
 	return nil
 }
 
-// encodeManifest indents the same way v1's json.Encoder did and appends the
-// trailing newline it always wrote. Deterministic(true) is required for v's
-// map[string]any inputs — v2 randomizes a map's key order per call by
-// default (v1 always sorted), which would otherwise make every scaffolded
-// or patched manifest.json byte-for-byte different from the last run.
+// encodeManifest matches v1's json.Encoder: two-space indent, a trailing
+// newline, and (Deterministic) sorted map keys — v2 randomizes map key
+// order per call by default.
 func encodeManifest(v any) ([]byte, error) {
 	out, err := json.Marshal(v, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {

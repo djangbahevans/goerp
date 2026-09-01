@@ -5,10 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	// Stays on v1: manifest.json may have been hand-authored or written by
-	// an older version of this CLI's own `module scaffold`/`module build`,
-	// so json/v2's stricter rejection of invalid UTF-8 or a duplicate
-	// object member name could newly break a module that built fine before.
+	// Stays on v1: manifest.json may be hand-authored or from an older
+	// toolchain, where v2's stricter invalid-UTF-8/duplicate-key rejection
+	// could newly break a module that built fine before (package.go and
+	// wasmbuild.go read it under this same reasoning).
 	"encoding/json"
 	"fmt"
 	"os"
