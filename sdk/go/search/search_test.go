@@ -6,11 +6,11 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-func TestQueryInput_MsgpackRoundTrip(t *testing.T) {
-	in := QueryInput{
+func TestSearchQueryInput_MsgpackRoundTrip(t *testing.T) {
+	in := searchQueryInput{
 		Index: "contacts",
 		Query: "acme",
-		Opts:  QueryOpts{Limit: 10, Offset: 5},
+		Opts:  searchQueryOpts{Limit: 10, Offset: 5},
 	}
 
 	raw, err := msgpack.Marshal(in)
@@ -18,7 +18,7 @@ func TestQueryInput_MsgpackRoundTrip(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var got QueryInput
+	var got searchQueryInput
 	if err := msgpack.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -27,8 +27,8 @@ func TestQueryInput_MsgpackRoundTrip(t *testing.T) {
 	}
 }
 
-func TestQueryOutput_MsgpackRoundTrip(t *testing.T) {
-	out := QueryOutput{
+func TestSearchQueryOutput_MsgpackRoundTrip(t *testing.T) {
+	out := searchQueryOutput{
 		Hits:      []map[string]any{{"id": "1", "name": "Acme"}},
 		TotalHits: 1,
 	}
@@ -38,11 +38,74 @@ func TestQueryOutput_MsgpackRoundTrip(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var got QueryOutput
+	var got searchQueryOutput
 	if err := msgpack.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if got.TotalHits != out.TotalHits || len(got.Hits) != len(out.Hits) {
 		t.Fatalf("got %+v, want %+v", got, out)
+	}
+}
+
+func TestSearchOptions_SetFields(t *testing.T) {
+	var in searchQueryInput
+
+	WithFilter("is_active = true")(&in)
+	WithSort("name:asc", "created_at:desc")(&in)
+	WithLimit(50)(&in)
+	WithOffset(10)(&in)
+	WithFacets("type", "country_code")(&in)
+
+	if in.Opts.Filter != "is_active = true" {
+		t.Errorf("Filter = %q, want %q", in.Opts.Filter, "is_active = true")
+	}
+	if len(in.Opts.Sort) != 2 || in.Opts.Sort[0] != "name:asc" || in.Opts.Sort[1] != "created_at:desc" {
+		t.Errorf("Sort = %v, want [name:asc created_at:desc]", in.Opts.Sort)
+	}
+	if in.Opts.Limit != 50 {
+		t.Errorf("Limit = %d, want 50", in.Opts.Limit)
+	}
+	if in.Opts.Offset != 10 {
+		t.Errorf("Offset = %d, want 10", in.Opts.Offset)
+	}
+	if len(in.Opts.Facets) != 2 || in.Opts.Facets[0] != "type" || in.Opts.Facets[1] != "country_code" {
+		t.Errorf("Facets = %v, want [type country_code]", in.Opts.Facets)
+	}
+}
+
+type contactHit struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
+}
+
+func TestDecodeHits_MapsEachHitByJSONTag(t *testing.T) {
+	hits := []map[string]any{
+		{"id": "1", "name": "Acme", "email": "acme@example.com"},
+		{"id": "2", "name": "Beta"},
+	}
+
+	got, err := decodeHits[contactHit](hits)
+	if err != nil {
+		t.Fatalf("decodeHits: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0] != (contactHit{ID: "1", Name: "Acme", Email: "acme@example.com"}) {
+		t.Errorf("got[0] = %+v, want {1 Acme acme@example.com}", got[0])
+	}
+	if got[1] != (contactHit{ID: "2", Name: "Beta"}) {
+		t.Errorf("got[1] = %+v, want {2 Beta }", got[1])
+	}
+}
+
+func TestDecodeHits_EmptyHitsReturnsEmptySlice(t *testing.T) {
+	got, err := decodeHits[contactHit](nil)
+	if err != nil {
+		t.Fatalf("decodeHits: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(got) = %d, want 0", len(got))
 	}
 }

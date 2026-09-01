@@ -23,6 +23,14 @@ type result struct {
 	TotalHits int64    `msgpack:"total_hits,omitempty"`
 }
 
+// widgetHit mirrors "widgets" search index's own Displayed columns
+// (host_search_test.go's widgetSearchIndex) via json tags, the shape
+// search.Query[T] populates each hit into.
+type widgetHit struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 func writeResult(r result) uint64 {
 	data, err := msgpack.Marshal(r)
 	if err != nil {
@@ -35,17 +43,15 @@ func writeResult(r result) uint64 {
 
 //go:wasmexport run_search_query
 func runSearchQuery() uint64 {
-	out, err := search.Query(search.QueryInput{Index: "widgets", Query: "Widget"})
+	out, err := search.Query[widgetHit]("widgets", "Widget")
 	if err != nil {
 		return writeResult(result{Error: err.Error()})
 	}
 	names := make([]string, 0, len(out.Hits))
 	for _, hit := range out.Hits {
-		if name, ok := hit["name"].(string); ok {
-			names = append(names, name)
-		}
+		names = append(names, hit.Name)
 	}
-	return writeResult(result{OK: true, Names: names, TotalHits: out.TotalHits})
+	return writeResult(result{OK: true, Names: names, TotalHits: int64(out.TotalHits)})
 }
 
 //go:wasmexport allocate
