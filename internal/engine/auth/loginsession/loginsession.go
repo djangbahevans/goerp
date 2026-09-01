@@ -9,7 +9,8 @@
 package loginsession
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net"
 	"net/http"
 
@@ -59,6 +60,13 @@ func IsNonBrowser(r *http.Request) bool {
 	return r.Header.Get("X-Client-Type") == "cli"
 }
 
+// writeJSON matches encoding/json v1's Encoder defaults, which
+// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
+// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
+func writeJSON(w http.ResponseWriter, v any) {
+	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+}
+
 // WriteResponse writes the final success response for a completed login:
 // a JSON body carrying the tokens directly for a non-browser client, or
 // __Host-access_token/refresh_token/device_id cookies plus a minimal JSON
@@ -66,7 +74,7 @@ func IsNonBrowser(r *http.Request) bool {
 func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh, nonBrowser bool) {
 	w.Header().Set("Content-Type", "application/json")
 	if nonBrowser {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeJSON(w, map[string]any{
 			"access_token":  tokens.AccessToken,
 			"refresh_token": tokens.RefreshToken,
 			"device_id":     deviceID,
@@ -76,7 +84,7 @@ func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID str
 	}
 
 	setCookies(w, tokens, deviceID, deviceIDIsFresh)
-	_ = json.NewEncoder(w).Encode(map[string]any{"expires_in": tokens.ExpiresIn})
+	writeJSON(w, map[string]any{"expires_in": tokens.ExpiresIn})
 }
 
 func setCookies(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh bool) {
