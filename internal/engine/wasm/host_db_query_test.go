@@ -12,7 +12,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-var hostDBQueryCallerModule = buildHostCallerModule("host.db", []string{"begin", "commit", "rollback", "query", "query_replica"})
+var hostDBQueryCallerModule = buildHostCallerModule("host.db", []string{"begin", "commit", "rollback", "query", "query_replica", "lock"})
 
 func newHostDBQueryCaller(t *testing.T, ctx context.Context, r *Runtime, mc *ModuleContext) *ModuleInstance {
 	t.Helper()
