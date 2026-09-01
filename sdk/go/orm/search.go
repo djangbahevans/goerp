@@ -1,6 +1,10 @@
 package orm
 
-import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+import (
+	"fmt"
+
+	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+)
 
 // ormSearchInput omits host.orm.search's own offset field — Search has
 // no public Offset SearchOption (go-sdk-reference.md §6a steers callers
@@ -57,19 +61,25 @@ func Limit(n int) SearchOption {
 	return func(o *searchOpts) { o.Limit = n }
 }
 
-// Cursor resumes SearchRead from a previous page's next cursor. Has no
-// effect on Search — host.orm.search doesn't support cursor pagination.
+// Cursor resumes SearchRead from a previous page's next cursor. Search
+// rejects it — host.orm.search doesn't support cursor pagination.
 func Cursor(cursor string) SearchOption {
 	return func(o *searchOpts) { o.Cursor = cursor }
 }
 
 // Search finds matching record IDs via host.orm.search. domain is the
 // domain expression language (manifest-spec.md §8), not raw SQL or a
-// model-field struct.
+// model-field struct. Errors if a Cursor option was passed — Search has
+// no next-cursor return to resume from, unlike SearchRead, so silently
+// ignoring it would leave a caller stuck on the same page forever with
+// no signal anything was wrong.
 func Search(model, domain string, opts ...SearchOption) ([]string, error) {
 	var o searchOpts
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.Cursor != "" {
+		return nil, fmt.Errorf("orm: Search does not support Cursor (use SearchRead for cursor pagination)")
 	}
 	var out ormSearchOutput
 	err := hostcall.Do(hostORMSearch, ormSearchInput{Model: model, Domain: domain, Order: o.Order, Limit: o.Limit}, &out)

@@ -25,3 +25,12 @@ func TestSearchOptions_SetFields(t *testing.T) {
 		t.Errorf("Cursor = %q, want %q", o.Cursor, "abc123")
 	}
 }
+
+// TestSearch_CursorOptionErrors pins Search's rejection of Cursor —
+// checked before any host call, so this doesn't need a wasip1 build to
+// exercise.
+func TestSearch_CursorOptionErrors(t *testing.T) {
+	if _, err := Search("contacts.contact", "", Cursor("abc123")); err == nil {
+		t.Fatal("Search() with a Cursor option: error = nil, want an error")
+	}
+}

@@ -67,32 +67,46 @@ func decodeRecord[T any](rec map[string]any) (T, error) {
 	if err != nil {
 		return out, err
 	}
+	if err := populateRecord(v, fields, rec); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// decodeRecords populates one T per record — T's own db-tag-mapped
+// fields are computed once via reflection, not once per record.
+func decodeRecords[T any](recs []map[string]any) ([]T, error) {
+	if len(recs) == 0 {
+		return nil, nil
+	}
+	fields, err := ormFields(reflect.TypeFor[T]())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]T, len(recs))
+	for i, rec := range recs {
+		v := reflect.ValueOf(&out[i]).Elem()
+		if err := populateRecord(v, fields, rec); err != nil {
+			return nil, fmt.Errorf("orm: record %d: %w", i, err)
+		}
+	}
+	return out, nil
+}
+
+// populateRecord assigns rec's own values into v's fields (v addresses a
+// struct of the type fields was computed from) — decodeRecord/
+// decodeRecords' shared per-record step.
+func populateRecord(v reflect.Value, fields []ormField, rec map[string]any) error {
 	for _, f := range fields {
 		raw, ok := rec[f.key]
 		if !ok {
 			continue
 		}
 		if err := setFieldValue(v.Field(f.index), raw); err != nil {
-			return out, fmt.Errorf("orm: field %q: %w", f.key, err)
+			return fmt.Errorf("orm: field %q: %w", f.key, err)
 		}
 	}
-	return out, nil
-}
-
-// decodeRecords populates one T per record via decodeRecord.
-func decodeRecords[T any](recs []map[string]any) ([]T, error) {
-	if len(recs) == 0 {
-		return nil, nil
-	}
-	out := make([]T, len(recs))
-	for i, rec := range recs {
-		v, err := decodeRecord[T](rec)
-		if err != nil {
-			return nil, fmt.Errorf("orm: record %d: %w", i, err)
-		}
-		out[i] = v
-	}
-	return out, nil
+	return nil
 }
 
 // setFieldValue assigns raw (one value from a msgpack-decoded record)
