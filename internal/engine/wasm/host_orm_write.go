@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -77,9 +78,10 @@ type ORMCreateBatchOutput struct {
 }
 
 type ORMFirstOrCreateInput struct {
-	Model  string         `msgpack:"model"`
-	Domain string         `msgpack:"domain"`
-	Record map[string]any `msgpack:"record"`
+	Model      string         `msgpack:"model"`
+	UniqueVals map[string]any `msgpack:"unique_vals"`
+	CreateVals map[string]any `msgpack:"create_vals"`
+	TxID       string         `msgpack:"tx_id"`
 }
 
 type ORMFirstOrCreateOutput struct {
@@ -396,15 +398,30 @@ func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sq
 	}
 }
 
-// ORMFirstOrCreate searches input.Domain and creates input.Record only on
-// a miss, inside one transaction. Race-safety for concurrent callers
-// racing an *arbitrary* domain (unlike OnConflict's target, a domain
-// isn't necessarily backed by a unique index) uses a transaction-scoped
-// Postgres advisory lock keyed by hash(tenant, model, domain) — the
+// ORMFirstOrCreate matches an existing record by input.UniqueVals —
+// validated against md's own declared unique indexes the same way
+// validateOnConflictTarget validates OnConflictIgnore/OnConflictUpdate's
+// target — and creates input.CreateVals merged with input.UniqueVals
+// (UniqueVals wins on any overlapping key, so the inserted row always
+// satisfies the same match a later call will look for) only on a miss,
+// inside one transaction. Race-safety for concurrent callers racing the
+// identical match uses a transaction-scoped Postgres advisory lock keyed
+// by hash(tenant, model, msgpack-encoded sorted unique-vals pairs) — the
 // general-condition counterpart to AcquireNext's (internal/engine/orm)
-// keyed INSERT...ON CONFLICT DO UPDATE upsert pattern. The lock only
-// serializes callers racing the identical (tenant, model, domain) triple;
-// it's released automatically at commit/rollback.
+// keyed INSERT...ON CONFLICT DO UPDATE upsert pattern. msgpack encoding
+// (rather than a naive "field=value" string join) keeps distinct
+// unique-vals combinations from ever formatting to the same key, since
+// separators can appear inside a field's own value. The lock only
+// serializes callers racing the identical (tenant, model, unique-vals)
+// triple; it's released automatically at commit/rollback.
+//
+// Kept as this SELECT-then-INSERT shape rather than createOneRecordTx's
+// INSERT...ON CONFLICT DO NOTHING (used by OnConflictIgnore) deliberately:
+// go-sdk-reference.md §6a documents CreateVals as "only used when
+// created," meaning a hit must never run validateRequired/DynamicLink/
+// sequence-acquisition against a CreateVals map that's allowed to be
+// incomplete when the record already exists — an INSERT-first attempt
+// can't know that until after already running them.
 func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMFirstOrCreateInput) (ORMFirstOrCreateOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMFirstOrCreateOutput{}, abi.CapabilityDenied("db.write")
@@ -418,18 +435,37 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "first_or_create is not supported for Transient-backed models"}
 	}
 
-	whereFrag, whereArgs, hostErr := compileDomain(input.Domain)
-	if hostErr != nil {
+	fields := slices.Sorted(maps.Keys(input.UniqueVals))
+	if _, hostErr := validateOnConflictTarget(md, input.Model, fields, "unique_vals"); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
 
-	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-	if err != nil {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	whereConds := make([]string, len(fields))
+	whereArgs := make([]any, len(fields))
+	lockKeyPairs := make([][2]any, len(fields))
+	for i, f := range fields {
+		v := input.UniqueVals[f]
+		if v == nil {
+			return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unique_vals[" + f + "] must not be nil"}
+		}
+		whereConds[i] = fmt.Sprintf("%s = $%d", quoteIdentORM(f), i+1)
+		whereArgs[i] = v
+		lockKeyPairs[i] = [2]any{f, v}
 	}
-	defer func() { _ = tx.Rollback() }()
+	whereFrag := strings.Join(whereConds, " AND ")
 
-	lockKey := modCtx.TenantSlug + ":" + input.Model + ":" + input.Domain
+	lockKeyBytes, err := msgpack.Marshal(lockKeyPairs)
+	if err != nil {
+		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
+	defer rollback()
+
+	lockKey := modCtx.TenantSlug + ":" + input.Model + ":" + hex.EncodeToString(lockKeyBytes)
 	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
@@ -445,14 +481,15 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	}
 
 	if len(found) > 0 {
-		if err := tx.Commit(); err != nil {
+		if err := commit(); err != nil {
 			return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 		}
 		return ORMFirstOrCreateOutput{Record: found[0], Created: false}, nil
 	}
 
-	record := make(map[string]any, len(input.Record))
-	maps.Copy(record, input.Record)
+	record := make(map[string]any, len(input.UniqueVals)+len(input.CreateVals))
+	maps.Copy(record, input.CreateVals)
+	maps.Copy(record, input.UniqueVals)
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -487,7 +524,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, row); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
@@ -1111,7 +1148,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 
 	if onConflict != nil {
-		targetCols, hostErr := validateOnConflictTarget(md, qualifiedModel, onConflict.Fields)
+		targetCols, hostErr := validateOnConflictTarget(md, qualifiedModel, onConflict.Fields, "on_conflict.fields")
 		if hostErr != nil {
 			return nil, false, hostErr
 		}
@@ -1161,10 +1198,12 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 // index — the model's single-column primary key, or a md.Indexes entry
 // with Def.IsUnique whose column set matches exactly (order-independent).
 // No match is orm.conflict_target_invalid rather than a silent
-// full-table-scan fallback for conflict detection.
-func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, fields []string) ([]string, *abi.HostError) {
+// full-table-scan fallback for conflict detection. paramName is the
+// caller's own wire field name (e.g. "on_conflict.fields", "unique_vals"),
+// used in error messages.
+func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, fields []string, paramName string) ([]string, *abi.HostError) {
 	if len(fields) == 0 {
-		return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: "on_conflict.fields must not be empty"}
+		return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: paramName + " must not be empty"}
 	}
 	sorted := slices.Clone(fields)
 	slices.Sort(sorted)
@@ -1182,7 +1221,7 @@ func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, 
 			return fields, nil
 		}
 	}
-	return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: "on_conflict.fields " + strings.Join(fields, ", ") + " does not match any declared unique index on " + qualifiedModel}
+	return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: paramName + " " + strings.Join(fields, ", ") + " does not match any declared unique index on " + qualifiedModel}
 }
 
 // writeOneRecordTx updates the row identified by id on tx — the shared

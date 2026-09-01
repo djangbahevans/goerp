@@ -201,14 +201,15 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 	}
 
 	wantDetail := map[string]string{
-		"create_tx":       "Tx Widget A",
-		"read_one_tx":     "Tx Widget A",
-		"write_tx":        "",
-		"create_batch_tx": "1",
-		"write_many_tx":   "1",
-		"write_where_tx":  "1",
-		"unlink_tx":       "1",
-		"with_tx":         "1", // SearchCountTx, run before WriteTx renamed anything else matching
+		"create_tx":          "Tx Widget A",
+		"read_one_tx":        "Tx Widget A",
+		"write_tx":           "",
+		"create_batch_tx":    "1",
+		"write_many_tx":      "1",
+		"write_where_tx":     "1",
+		"unlink_tx":          "1",
+		"first_or_create_tx": "false", // hits the row create_tx already inserted on this same transaction
+		"with_tx":            "1",     // SearchCountTx, run before WriteTx renamed anything else matching
 	}
 	for _, s := range report.Steps {
 		if !s.OK {
@@ -219,8 +220,8 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 			t.Errorf("step %q detail = %q, want %q", s.Step, s.Detail, want)
 		}
 	}
-	if len(report.Steps) != 8 {
-		t.Errorf("got %d steps, want 8: %+v", len(report.Steps), report.Steps)
+	if len(report.Steps) != 9 {
+		t.Errorf("got %d steps, want 9: %+v", len(report.Steps), report.Steps)
 	}
 
 	// The whole point of _Tx: only WithTx's own commit persists anything.

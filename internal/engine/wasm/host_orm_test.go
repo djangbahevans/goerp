@@ -49,6 +49,10 @@ func widgetModelDecl() model.ModelDeclaration {
 			{Name: "name", Def: model.Text().Required()},
 			{Name: "price", Def: model.Integer()},
 		},
+		// Registry metadata only — createFixtureWidgetsTable enforces nothing physically.
+		Indexes: []model.NamedIndex{
+			{Name: "idx_widgets_name_unique", Def: model.BTreeIndex("name").Unique()},
+		},
 	}
 }
 

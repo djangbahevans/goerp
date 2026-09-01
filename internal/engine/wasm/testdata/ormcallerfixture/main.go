@@ -89,8 +89,9 @@ func runOrmFlow() uint64 {
 	})
 	record("create_batch", strconv.Itoa(len(batchOut)), err)
 
-	focRecord, focCreated, err := orm.FirstOrCreate[widget](widgetModel, "record.name = 'Widget A'",
-		map[string]any{"id": uuid.NewString(), "name": "Widget A", "price": int64(999)})
+	focRecord, focCreated, err := orm.FirstOrCreate[widget](widgetModel,
+		map[string]any{"name": "Widget A"},
+		map[string]any{"id": uuid.NewString(), "price": int64(999)})
 	_ = focRecord
 	record("first_or_create", strconv.FormatBool(focCreated), err)
 
@@ -176,6 +177,15 @@ func runOrmTxFlow() uint64 {
 			return err
 		}
 		record("unlink_tx", strconv.Itoa(unlinkOut.Count), nil)
+
+		// Matches "name", which CreateTx already inserted on this same tx.
+		_, focCreated, err := orm.FirstOrCreateTx[widget](tx, widgetModel,
+			map[string]any{"name": "Tx Widget A"},
+			map[string]any{"id": uuid.NewString(), "price": int64(999)})
+		if err != nil {
+			return err
+		}
+		record("first_or_create_tx", strconv.FormatBool(focCreated), nil)
 
 		return nil
 	})
