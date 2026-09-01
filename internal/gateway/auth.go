@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"crypto/hmac"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
 	"strings"
@@ -38,8 +39,11 @@ type authErrorBody struct {
 }
 
 // Matches the admin API's own {"error":{"code","message"}} envelope shape.
+// The escape options match encoding/json v1's Encoder defaults, which
+// MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for safe
+// HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.MarshalWrite(w, authErrorEnvelope{Error: authErrorBody{Code: code, Message: message}})
+	_ = json.MarshalWrite(w, authErrorEnvelope{Error: authErrorBody{Code: code, Message: message}}, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
