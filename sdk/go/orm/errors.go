@@ -16,7 +16,23 @@ func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
 // IsEtagMismatch reports whether err is a host.orm.write failure caused
 // by expectedEtag no longer matching the record's current etag —
 // host.orm.write's own orm.etag_mismatch.
-func IsEtagMismatch(err error) bool {
+func IsEtagMismatch(err error) bool { return hostErrorCodeIs(err, "orm.etag_mismatch") }
+
+// IsValidationFailed reports whether err is a host.orm validation
+// failure — orm.validation_failed. Some (not all) of these errors carry
+// a "field" Details key, reachable via errors.As(err, &he).
+func IsValidationFailed(err error) bool { return hostErrorCodeIs(err, "orm.validation_failed") }
+
+// IsUniqueViolation reports whether err is a host.orm.create/create_batch
+// failure caused by a unique constraint — orm.unique_violation.
+func IsUniqueViolation(err error) bool { return hostErrorCodeIs(err, "orm.unique_violation") }
+
+// IsFieldNotWritable reports whether err is a host.orm.create/write
+// failure caused by the caller supplying a value for a computed,
+// relation-owned, or otherwise non-writable field — orm.field_not_writable.
+func IsFieldNotWritable(err error) bool { return hostErrorCodeIs(err, "orm.field_not_writable") }
+
+func hostErrorCodeIs(err error, code string) bool {
 	var he *hostcall.HostError
-	return errors.As(err, &he) && he.Code == "orm.etag_mismatch"
+	return errors.As(err, &he) && he.Code == code
 }

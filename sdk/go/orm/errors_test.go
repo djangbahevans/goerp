@@ -20,14 +20,31 @@ func TestIsNotFound_MatchesErrNotFound(t *testing.T) {
 	}
 }
 
-func TestIsEtagMismatch_MatchesHostErrorCode(t *testing.T) {
-	he := &hostcall.HostError{Code: "orm.etag_mismatch", Message: "record has been modified since it was last read"}
-	if !IsEtagMismatch(he) {
-		t.Error("IsEtagMismatch(orm.etag_mismatch) = false, want true")
+func TestHostErrorCodeMatchers_MatchTheirOwnCodeOnly(t *testing.T) {
+	cases := []struct {
+		name    string
+		matcher func(error) bool
+		code    string
+	}{
+		{"IsEtagMismatch", IsEtagMismatch, "orm.etag_mismatch"},
+		{"IsValidationFailed", IsValidationFailed, "orm.validation_failed"},
+		{"IsUniqueViolation", IsUniqueViolation, "orm.unique_violation"},
+		{"IsFieldNotWritable", IsFieldNotWritable, "orm.field_not_writable"},
 	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			he := &hostcall.HostError{Code: c.code, Message: "boom"}
+			if !c.matcher(he) {
+				t.Errorf("%s(%s) = false, want true", c.name, c.code)
+			}
+			if !c.matcher(fmt.Errorf("wrap: %w", he)) {
+				t.Errorf("%s(wrapped %s) = false, want true", c.name, c.code)
+			}
 
-	other := &hostcall.HostError{Code: "orm.not_found", Message: "record not found"}
-	if IsEtagMismatch(other) {
-		t.Error("IsEtagMismatch(orm.not_found) = true, want false")
+			other := &hostcall.HostError{Code: "orm.not_found", Message: "record not found"}
+			if c.matcher(other) {
+				t.Errorf("%s(orm.not_found) = true, want false", c.name)
+			}
+		})
 	}
 }
