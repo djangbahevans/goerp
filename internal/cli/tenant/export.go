@@ -3,6 +3,7 @@ package tenant
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -134,11 +135,13 @@ func downloadAndVerifyExport(cmd *cobra.Command, result exportResult, outputPath
 		// Deterministic(true): v2 randomizes map key order per call by
 		// default (unlike v1, which always sorted); --json output is a
 		// scripted CLI contract, so key order must stay stable across runs.
+		// jsontext.EscapeForHTML/EscapeForJS restore v1's default escaping,
+		// in case outputPath ever contains '<', '>', or '&'.
 		out, err := json.Marshal(map[string]string{
 			"output":          outputPath,
 			"checksum_sha256": result.Checksum,
 			"decryption_key":  result.DecryptionKey,
-		}, json.Deterministic(true))
+		}, json.Deterministic(true), jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 		if err != nil {
 			return fmt.Errorf("encode result: %w", err)
 		}
