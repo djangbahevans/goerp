@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
+	jsonv1 "encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -282,9 +284,7 @@ func (w *Worker) loadModule(ctx context.Context, tenantSlug string, mod *module.
 			continue
 		}
 		var rec exportRecord
-		dec := json.NewDecoder(bytes.NewReader(line))
-		dec.UseNumber() // preserve int64 precision for sqlValue below — plain Unmarshal decodes every number as float64
-		if err := dec.Decode(&rec); err != nil {
+		if err := json.Unmarshal(line, &rec, json.WithUnmarshalers(numberPreservingUnmarshalers)); err != nil {
 			return fmt.Errorf("decode record: %w", err)
 		}
 
@@ -355,9 +355,81 @@ func insertArgs(md model.ModelDeclaration, record map[string]any) ([]any, error)
 	return args, nil
 }
 
+// numberPreservingUnmarshalers restores v1's Decoder.UseNumber() behavior
+// for a map[string]any/[]any-typed decode target: every JSON number, at
+// any nesting depth, decodes as jsonv1.Number instead of encoding/json/v2's
+// own any-decode default of float64 — sqlValue below needs that to avoid
+// precision loss on a bigint/id column.
+var numberPreservingUnmarshalers = json.UnmarshalFunc(func(data []byte, v *any) error {
+	val, err := decodeAnyPreservingNumbers(data)
+	if err != nil {
+		return err
+	}
+	*v = val
+	return nil
+})
+
+// decodeAnyPreservingNumbers decodes data (a single JSON value) into a Go
+// any, walking objects/arrays by hand so a JSON number is always
+// jsonv1.Number, regardless of nesting depth.
+func decodeAnyPreservingNumbers(data []byte) (any, error) {
+	dec := jsontext.NewDecoder(bytes.NewReader(data))
+	return decodeTokenPreservingNumbers(dec)
+}
+
+func decodeTokenPreservingNumbers(dec *jsontext.Decoder) (any, error) {
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return nil, err
+	}
+	switch tok.Kind() {
+	case '0':
+		return jsonv1.Number(tok.String()), nil
+	case '"':
+		return tok.String(), nil
+	case 't', 'f':
+		return tok.Bool(), nil
+	case 'n':
+		return nil, nil
+	case '{':
+		obj := make(map[string]any)
+		for dec.PeekKind() != '}' {
+			nameTok, err := dec.ReadToken()
+			if err != nil {
+				return nil, err
+			}
+			name := nameTok.String()
+			val, err := decodeTokenPreservingNumbers(dec)
+			if err != nil {
+				return nil, err
+			}
+			obj[name] = val
+		}
+		if _, err := dec.ReadToken(); err != nil { // consume '}'
+			return nil, err
+		}
+		return obj, nil
+	case '[':
+		var arr []any
+		for dec.PeekKind() != ']' {
+			val, err := decodeTokenPreservingNumbers(dec)
+			if err != nil {
+				return nil, err
+			}
+			arr = append(arr, val)
+		}
+		if _, err := dec.ReadToken(); err != nil { // consume ']'
+			return nil, err
+		}
+		return arr, nil
+	default:
+		return nil, fmt.Errorf("unexpected JSON token kind %v", tok.Kind())
+	}
+}
+
 func sqlValue(v any) (any, error) {
 	switch vv := v.(type) {
-	case json.Number:
+	case jsonv1.Number:
 		if i, err := vv.Int64(); err == nil {
 			return i, nil
 		}
