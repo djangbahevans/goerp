@@ -119,12 +119,8 @@ type ExecResult struct {
 }
 
 type ORMUnlinkInput struct {
-	Model string `msgpack:"model"`
-	ID    string `msgpack:"id"`
-}
-
-type ORMUnlinkOutput struct {
-	Deleted bool `msgpack:"deleted"`
+	Model string   `msgpack:"model"`
+	IDs   []string `msgpack:"ids"`
 }
 
 func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -813,80 +809,99 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 // ORMUnlink is host.orm unlink's plain-Go core — see ORMSearch's doc
 // comment (host_orm.go) for the shared-entry-point rationale. Branches to
 // transientUnlink (host_orm_transient.go) for Transient-backed models
-// internally. Fetches the row before deleting it (fetchRowByPK,
-// goerp#377) so the OnDelete constraint hook (goerp#378) can run against
-// it — and, per go-sdk-reference.md §22, before either the FK check or
-// the delete SQL itself, unlike OnCreate/OnWrite's after-the-write
-// placement (see this file's own package doc comment for why those two
-// differ).
-func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMUnlinkInput) (ORMUnlinkOutput, *abi.HostError) {
+// internally; otherwise shares unlinkManyIDsTx with the SQL-backed loop
+// below. A missing ID aborts the whole transaction (orm.not_found),
+// matching writeManyIDsTx's own all-or-nothing semantics for WriteMany/
+// WriteWhere.
+func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMUnlinkInput) (ExecResult, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ORMUnlinkOutput{}, abi.CapabilityDenied("db.write")
+		return ExecResult{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 
 	if md.Backend == model.BackendTransient {
-		return transientUnlink(ctx, cacheClient, modCtx, input.Model, input.ID)
+		return transientUnlink(ctx, cacheClient, modCtx, input.Model, input.IDs)
 	}
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
 	if err != nil {
-		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	table := quoteIdentORM(tableNameForORM(md))
-	pkColQuoted := quoteIdentORM(pkCol)
-
-	existing, hostErr := fetchRowByPK(ctx, tx, md, pkCol, input.ID)
+	result, hostErr := unlinkManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, input.IDs)
 	if hostErr != nil {
-		return ORMUnlinkOutput{}, hostErr
-	}
-	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "delete", existing); hostErr != nil {
-		return ORMUnlinkOutput{}, hostErr
-	}
-
-	var deletedID string
-	if hasField(md, "deleted_at") {
-		deleteSQL := fmt.Sprintf("UPDATE %s SET %s = NOW() WHERE %s = $1 AND %s IS NULL RETURNING %s",
-			table, quoteIdentORM("deleted_at"), pkColQuoted, quoteIdentORM("deleted_at"), pkColQuoted)
-		err = tx.QueryRowContext(ctx, deleteSQL, input.ID).Scan(&deletedID)
-	} else {
-		deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1 RETURNING %s", table, pkColQuoted, pkColQuoted)
-		err = tx.QueryRowContext(ctx, deleteSQL, input.ID).Scan(&deletedID)
-	}
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
-		}
-		return ORMUnlinkOutput{}, translateWriteError(err, md)
-	}
-
-	if hostErr := recomputeParentsAfterChildUnlink(ctx, tx, r, modCtx, input.Model, existing); hostErr != nil {
-		return ORMUnlinkOutput{}, hostErr
-	}
-	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "DELETE", existing, nil); hostErr != nil {
-		return ORMUnlinkOutput{}, hostErr
-	}
-
-	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.deleted", input.Model, map[string]any{"id": deletedID}); err != nil {
-		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return ExecResult{}, hostErr
 	}
 
 	if err := tx.Commit(); err != nil {
-		return ORMUnlinkOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
-	return ORMUnlinkOutput{Deleted: true}, nil
+	return result, nil
+}
+
+// unlinkManyIDsTx deletes (or soft-deletes) every id on tx, running the
+// per-record OnDelete constraint hook/audit/orm.record.deleted event
+// sequence for each — the same shared-loop shape writeManyIDsTx uses for
+// WriteMany/WriteWhere. Fetches each row before deleting it (fetchRowByPK,
+// goerp#377) so the constraint hook can run against it, and — per
+// go-sdk-reference.md §22 — before either the FK check or the delete SQL
+// itself, unlike OnCreate/OnWrite's after-the-write placement (this
+// file's own package doc comment explains why those two differ).
+func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string) (ExecResult, *abi.HostError) {
+	table := quoteIdentORM(tableNameForORM(md))
+	pkColQuoted := quoteIdentORM(pkCol)
+
+	affected := make([]string, 0, len(ids))
+	for _, id := range ids {
+		existing, hostErr := fetchRowByPK(ctx, tx, md, pkCol, id)
+		if hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if hostErr := runConstraintHook(ctx, r, modCtx, qualifiedModel, "delete", existing); hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+
+		var deletedID string
+		var err error
+		if hasField(md, "deleted_at") {
+			deleteSQL := fmt.Sprintf("UPDATE %s SET %s = NOW() WHERE %s = $1 AND %s IS NULL RETURNING %s",
+				table, quoteIdentORM("deleted_at"), pkColQuoted, quoteIdentORM("deleted_at"), pkColQuoted)
+			err = tx.QueryRowContext(ctx, deleteSQL, id).Scan(&deletedID)
+		} else {
+			deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1 RETURNING %s", table, pkColQuoted, pkColQuoted)
+			err = tx.QueryRowContext(ctx, deleteSQL, id).Scan(&deletedID)
+		}
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ExecResult{}, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+			}
+			return ExecResult{}, translateWriteError(err, md)
+		}
+
+		if hostErr := recomputeParentsAfterChildUnlink(ctx, tx, r, modCtx, qualifiedModel, existing); hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "DELETE", existing, nil); hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.deleted", qualifiedModel, map[string]any{"id": deletedID}); err != nil {
+			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		}
+
+		affected = append(affected, deletedID)
+	}
+	return ExecResult{Count: len(affected), IDs: affected}, nil
 }
 
 // beginTenantScopedWrite is beginTenantScopedRead without ReadOnly — same

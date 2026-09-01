@@ -446,13 +446,13 @@ func TestHostORM_Unlink_SoftDeletesWithStandardFields(t *testing.T) {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
 
-	var out ORMUnlinkOutput
-	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", ID: id}, &out)
+	var out ExecResult
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", IDs: []string{id}}, &out)
 	if !env.OK {
 		t.Fatalf("unlink failed: %+v", env.Error)
 	}
-	if !out.Deleted {
-		t.Error("expected Deleted = true")
+	if out.Count != 1 || len(out.IDs) != 1 || out.IDs[0] != id {
+		t.Errorf("ExecResult = %+v, want Count=1 IDs=[%s]", out, id)
 	}
 
 	var deletedAt sql.NullTime
@@ -485,8 +485,8 @@ func TestHostORM_Unlink_HardDeletesWithoutStandardFields(t *testing.T) {
 		t.Fatalf("insert fixture row: %v", err)
 	}
 
-	var out ORMUnlinkOutput
-	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.hard_item", ID: id}, &out)
+	var out ExecResult
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.hard_item", IDs: []string{id}}, &out)
 	if !env.OK {
 		t.Fatalf("unlink failed: %+v", env.Error)
 	}
@@ -512,7 +512,7 @@ func TestHostORM_Unlink_MissingRecord_NotFound(t *testing.T) {
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", ID: "99999999-9999-9999-9999-999999999999"}, nil)
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", IDs: []string{"99999999-9999-9999-9999-999999999999"}}, nil)
 	if env.OK {
 		t.Fatal("expected unlink of a missing record to fail")
 	}
@@ -550,12 +550,94 @@ func TestHostORM_Unlink_ForeignKeyViolation(t *testing.T) {
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.hard_item", ID: parentID}, nil)
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.hard_item", IDs: []string{parentID}}, nil)
 	if env.OK {
 		t.Fatal("expected a Restrict FK violation to fail")
 	}
 	if env.Error.Code != abi.ErrCodeForeignKeyViolation {
 		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeForeignKeyViolation)
+	}
+}
+
+func TestHostORM_Unlink_BulkDeletesAllInOneTransaction(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormunlinkbulkok%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	ids := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
+	for i, id := range ids {
+		if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+			Model:  "testmodule.item",
+			Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Item %d", i)},
+		}, nil); !env.OK {
+			t.Fatalf("create %d failed: %+v", i, env.Error)
+		}
+	}
+
+	var out ExecResult
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", IDs: ids}, &out)
+	if !env.OK {
+		t.Fatalf("unlink failed: %+v", env.Error)
+	}
+	if out.Count != 2 {
+		t.Errorf("Count = %d, want 2", out.Count)
+	}
+
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE deleted_at IS NULL`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("remaining non-deleted row count = %d, want 0", count)
+	}
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.deleted", slug); got != 2 {
+		t.Errorf("orm.record.deleted jobs = %d, want 2 (one per affected record, not batched)", got)
+	}
+}
+
+func TestHostORM_Unlink_MissingIDInBatch_AbortsWholeBatch(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormunlinkbulkabort%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	inst := newHostORMWriteCaller(t, ctx, r, mc)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+	}, nil); !env.OK {
+		t.Fatalf("create failed: %+v", env.Error)
+	}
+
+	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{
+		Model: "testmodule.item", IDs: []string{id, "99999999-9999-9999-9999-999999999999"},
+	}, nil)
+	if env.OK {
+		t.Fatal("expected a missing ID to fail the whole batch")
+	}
+	if env.Error.Code != abi.ErrCodeNotFound {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeNotFound)
+	}
+
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_`+slug+`.item WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count = %d, want 1 (the first ID's delete should have rolled back too)", count)
 	}
 }
 

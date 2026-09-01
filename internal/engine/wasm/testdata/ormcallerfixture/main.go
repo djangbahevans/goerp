@@ -99,8 +99,8 @@ func runOrmFlow() uint64 {
 	writeWhereOut, err := orm.WriteWhere(widgetModel, "record.price = 300", map[string]any{"name": "Bulk"})
 	record("write_where", strconv.Itoa(writeWhereOut.Count), err)
 
-	deleted, err := orm.Unlink(widgetModel, id1)
-	record("unlink", strconv.FormatBool(deleted), err)
+	unlinkOut, err := orm.Unlink(widgetModel, []string{id1})
+	record("unlink", strconv.Itoa(unlinkOut.Count), err)
 
 	return writeReport(report)
 }

@@ -66,8 +66,8 @@ type ormFlowReport struct {
 // got read back afterward. Fixed by having Allocate retain the buffer
 // in a package-level map until Deallocate removes it — see
 // sdk/go/internal/wasmmem/mem_wasip1.go's own comment for the full
-// story. Without that fix, this test's "unlink" step decodes
-// Deleted:false even though the engine computed and sent true.
+// story. Without that fix, this test's "unlink" step decodes a corrupted
+// ExecResult even though the engine computed and sent the real one.
 func TestOrmCallerFixture_AllTenFunctions_RoundTripThroughRealModule(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
@@ -130,7 +130,7 @@ func TestOrmCallerFixture_AllTenFunctions_RoundTripThroughRealModule(t *testing.
 		"first_or_create": "false", // "Widget A" already exists from the create step
 		"write_many":      "2",
 		"write_where":     "2",
-		"unlink":          "true",
+		"unlink":          "1",
 	}
 	for _, s := range report.Steps {
 		if !s.OK {

@@ -266,13 +266,13 @@ func TestHostORM_Transient_Unlink_RemovesKey(t *testing.T) {
 	}
 	id := created.Record["id"].(string)
 
-	var out ORMUnlinkOutput
-	env := callORMHost(t, ctx, writeInst, "call_unlink", ORMUnlinkInput{Model: "testmodule.wizard_item", ID: id}, &out)
+	var out ExecResult
+	env := callORMHost(t, ctx, writeInst, "call_unlink", ORMUnlinkInput{Model: "testmodule.wizard_item", IDs: []string{id}}, &out)
 	if !env.OK {
 		t.Fatalf("unlink failed: %+v", env.Error)
 	}
-	if !out.Deleted {
-		t.Error("expected Deleted = true")
+	if out.Count != 1 || len(out.IDs) != 1 || out.IDs[0] != id {
+		t.Errorf("ExecResult = %+v, want Count=1 IDs=[%s]", out, id)
 	}
 
 	env = callORMHost(t, ctx, readInst, "call_read", ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, nil)
@@ -281,6 +281,59 @@ func TestHostORM_Transient_Unlink_RemovesKey(t *testing.T) {
 	}
 	if env.Error.Code != abi.ErrCodeNotFound {
 		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeNotFound)
+	}
+}
+
+// TestHostORM_Transient_Unlink_Bulk_MissingIDAbortsButPriorDeletesStay
+// pins transientUnlink's own documented non-atomicity: host.cache has no
+// transaction concept, so a missing ID partway through a batch still
+// aborts the call, but whatever was already deleted before it stays
+// deleted — unlike the SQL-backed path's real transactional rollback.
+func TestHostORM_Transient_Unlink_Bulk_MissingIDAbortsButPriorDeletesStay(t *testing.T) {
+	ctx := context.Background()
+	cacheClient := openTestCacheClient(t)
+	primaryDB := openTestPrimaryDB(t)
+	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
+
+	slug := fmt.Sprintf("transientunlinkbulk%d", time.Now().UnixNano())
+	md := transientItemModelDecl(time.Minute)
+	mc := newTransientTestModuleContext(slug, []model.ModelDeclaration{md})
+	writeInst := newHostORMWriteCaller(t, ctx, rt, mc)
+	readInst := newHostORMCaller(t, ctx, rt, mc)
+
+	var created1, created2 ORMCreateOutput
+	if env := callORMHost(t, ctx, writeInst, "call_create", ORMCreateInput{
+		Model: "testmodule.wizard_item", Record: map[string]any{"name": "Step 1"},
+	}, &created1); !env.OK {
+		t.Fatalf("create 1 failed: %+v", env.Error)
+	}
+	if env := callORMHost(t, ctx, writeInst, "call_create", ORMCreateInput{
+		Model: "testmodule.wizard_item", Record: map[string]any{"name": "Step 2"},
+	}, &created2); !env.OK {
+		t.Fatalf("create 2 failed: %+v", env.Error)
+	}
+	id1 := created1.Record["id"].(string)
+	id2 := created2.Record["id"].(string)
+
+	env := callORMHost(t, ctx, writeInst, "call_unlink", ORMUnlinkInput{
+		Model: "testmodule.wizard_item", IDs: []string{id1, "99999999-9999-9999-9999-999999999999", id2},
+	}, nil)
+	if env.OK {
+		t.Fatal("expected a missing ID to fail the whole call")
+	}
+	if env.Error.Code != abi.ErrCodeNotFound {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeNotFound)
+	}
+
+	env = callORMHost(t, ctx, readInst, "call_read", ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id1}}, nil)
+	if env.OK {
+		t.Error("expected id1 (deleted before the missing ID was hit) to already be gone")
+	}
+
+	var readOut ORMReadOutput
+	env = callORMHost(t, ctx, readInst, "call_read", ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id2}}, &readOut)
+	if !env.OK {
+		t.Errorf("expected id2 (never reached) to still exist: %+v", env.Error)
 	}
 }
 

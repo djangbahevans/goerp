@@ -244,7 +244,7 @@ func TestORMUnlink_AuditedTable_WritesDeleteRowWithOldData(t *testing.T) {
 
 	if _, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
 		Model: "testmodule.widget",
-		ID:    widgetID,
+		IDs:   []string{widgetID},
 	}); hostErr != nil {
 		t.Fatalf("ORMUnlink: %+v", hostErr)
 	}
