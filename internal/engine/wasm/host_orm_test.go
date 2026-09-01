@@ -118,6 +118,70 @@ func TestHostORM_Search_ReturnsIDsAndCount(t *testing.T) {
 	}
 }
 
+// TestHostORM_Search_TxID_SeesUncommittedWriteInSameTransaction is the
+// read-side counterpart to host_orm_write_test.go's TxID tests — proves
+// the point of a borrowed transaction: a search running inside it sees a
+// write made earlier on the very same transaction, before that write is
+// visible to any other connection (primaryDB itself, queried directly).
+func TestHostORM_Search_TxID_SeesUncommittedWriteInSameTransaction(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormsearchtxtest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureWidgetsTable(t, primaryDB, slug, nil)
+
+	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
+
+	tx, err := beginTenantScopedWrite(ctx, primaryDB, mc)
+	if err != nil {
+		t.Fatalf("beginTenantScopedWrite: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	const txID = "test-tx-search-1"
+	mc.RegisterTransaction(txID, tx)
+
+	if _, err := tx.ExecContext(ctx, "INSERT INTO widgets (id, name, price) VALUES ($1, $2, 100)",
+		"11111111-1111-1111-1111-111111111111", "Uncommitted Widget"); err != nil {
+		t.Fatalf("insert on borrowed tx: %v", err)
+	}
+
+	out, hostErr := ORMSearch(ctx, primaryDB, mc, ORMSearchInput{Model: "testmodule.widget", TxID: txID})
+	if hostErr != nil {
+		t.Fatalf("search failed: %+v", hostErr)
+	}
+	if out.Count != 1 {
+		t.Errorf("Count = %d, want 1 (search inside the same transaction should see its own uncommitted insert)", out.Count)
+	}
+
+	var countFromSeparateConn int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.widgets`).Scan(&countFromSeparateConn); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if countFromSeparateConn != 0 {
+		t.Errorf("row visible to a separate connection before commit, want invisible (count = %d)", countFromSeparateConn)
+	}
+}
+
+func TestHostORM_Search_TxIDNotFound(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormsearchtxnotfoundtest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureWidgetsTable(t, primaryDB, slug, nil)
+
+	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
+
+	_, hostErr := ORMSearch(ctx, primaryDB, mc, ORMSearchInput{Model: "testmodule.widget", TxID: "does-not-exist"})
+	if hostErr == nil {
+		t.Fatal("expected an error for an unregistered tx_id")
+	}
+	if hostErr.Code != abi.ErrCodeTransactionNotFound {
+		t.Errorf("Error.Code = %q, want %q", hostErr.Code, abi.ErrCodeTransactionNotFound)
+	}
+}
+
 func TestHostORM_Search_DomainFilters(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()

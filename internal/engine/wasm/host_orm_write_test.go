@@ -202,6 +202,150 @@ func TestHostORM_Create_Succeeds_AcquiresSequence_EmitsEvent(t *testing.T) {
 	}
 }
 
+// TestHostORM_Create_TxID_ParticipatesInCallersTransaction proves
+// ORMCreate never commits or rolls back a borrowed transaction itself:
+// the row and its orm.record.created event-delivery job must stay
+// invisible to a separate connection (primaryDB itself, not tx) until
+// the caller — not ORMCreate — actually commits.
+func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormcreatetxtest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	insertClient := r.EventInsertClient()
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+
+	tx, err := beginTenantScopedWrite(ctx, primaryDB, mc)
+	if err != nil {
+		t.Fatalf("beginTenantScopedWrite: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	const txID = "test-tx-1"
+	mc.RegisterTransaction(txID, tx)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A"},
+		TxID:   txID,
+	})
+	if hostErr != nil {
+		t.Fatalf("create failed: %+v", hostErr)
+	}
+	if out.Record["name"] != "Widget A" {
+		t.Errorf("Record[name] = %v, want Widget A", out.Record["name"])
+	}
+
+	if _, ok := mc.Transaction(txID); !ok {
+		t.Fatal("expected the transaction to still be registered after ORMCreate")
+	}
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE id = '` + id + `'`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("row visible to a separate connection before commit, want invisible (count = %d)", count)
+	}
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 0 {
+		t.Errorf("orm.record.created jobs = %d, want 0 before commit", got)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE id = '` + id + `'`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count after commit = %d, want 1", count)
+	}
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+		t.Errorf("orm.record.created jobs after commit = %d, want 1", got)
+	}
+}
+
+// TestHostORM_Write_TxID_RollbackUndoesWrite proves ORMWrite's effects
+// roll back along with the caller's own borrowed transaction — ORMWrite
+// itself must never have committed anything for a partial effect to
+// survive.
+func TestHostORM_Write_TxID_RollbackUndoesWrite(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormwritetxtest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	insertClient := r.EventInsertClient()
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+
+	id := "11111111-1111-1111-1111-111111111111"
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Original"},
+	}); hostErr != nil {
+		t.Fatalf("create failed: %+v", hostErr)
+	}
+
+	tx, err := beginTenantScopedWrite(ctx, primaryDB, mc)
+	if err != nil {
+		t.Fatalf("beginTenantScopedWrite: %v", err)
+	}
+	const txID = "test-tx-2"
+	mc.RegisterTransaction(txID, tx)
+
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+		Model:  "testmodule.item",
+		ID:     id,
+		Record: map[string]any{"name": "Changed"},
+		TxID:   txID,
+	}); hostErr != nil {
+		t.Fatalf("write failed: %+v", hostErr)
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+
+	var name string
+	if err := primaryDB.QueryRow(`SELECT name FROM tenant_` + slug + `.item WHERE id = '` + id + `'`).Scan(&name); err != nil {
+		t.Fatalf("query name: %v", err)
+	}
+	if name != "Original" {
+		t.Errorf("name = %q after rollback, want %q — ORMWrite must not have committed anything itself", name, "Original")
+	}
+}
+
+func TestHostORM_Create_TxIDNotFound(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormcreatetxnotfoundtest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	insertClient := r.EventInsertClient()
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+
+	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+		TxID:   "does-not-exist",
+	})
+	if hostErr == nil {
+		t.Fatal("expected an error for an unregistered tx_id")
+	}
+	if hostErr.Code != abi.ErrCodeTransactionNotFound {
+		t.Errorf("Error.Code = %q, want %q", hostErr.Code, abi.ErrCodeTransactionNotFound)
+	}
+}
+
 func TestHostORM_Create_MissingRequiredField_ValidationFailed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
@@ -995,6 +1139,62 @@ func TestHostORM_FirstOrCreate_NilUniqueVal_ValidationFailed(t *testing.T) {
 	}
 	if env.Error.Code != abi.ErrCodeValidationFailed {
 		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeValidationFailed)
+	}
+}
+
+// TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction is
+// TestHostORM_Create_TxID_ParticipatesInCallersTransaction's counterpart
+// for the miss-then-insert path: ORMFirstOrCreate must never commit or
+// roll back a borrowed transaction itself.
+func TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormfoctxtest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	insertClient := r.EventInsertClient()
+	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+
+	tx, err := beginTenantScopedWrite(ctx, primaryDB, mc)
+	if err != nil {
+		t.Fatalf("beginTenantScopedWrite: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	const txID = "test-tx-foc-1"
+	mc.RegisterTransaction(txID, tx)
+
+	out, hostErr := ORMFirstOrCreate(ctx, r, primaryDB, insertClient, mc, ORMFirstOrCreateInput{
+		Model:      "testmodule.item",
+		UniqueVals: map[string]any{"code": "FOC-TX-1"},
+		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New"},
+		TxID:       txID,
+	})
+	if hostErr != nil {
+		t.Fatalf("first_or_create failed: %+v", hostErr)
+	}
+	if !out.Created {
+		t.Error("Created = false, want true")
+	}
+
+	var count int
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE code = 'FOC-TX-1'`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("row visible to a separate connection before commit, want invisible (count = %d)", count)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if err := primaryDB.QueryRow(`SELECT count(*) FROM tenant_` + slug + `.item WHERE code = 'FOC-TX-1'`).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count after commit = %d, want 1", count)
 	}
 }
 

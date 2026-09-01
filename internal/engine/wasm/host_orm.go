@@ -57,6 +57,7 @@ type ORMSearchInput struct {
 	Order  string `msgpack:"order,omitempty"`
 	Limit  int    `msgpack:"limit,omitempty"`
 	Offset int    `msgpack:"offset,omitempty"`
+	TxID   string `msgpack:"tx_id"`
 }
 
 type ORMSearchOutput struct {
@@ -72,6 +73,7 @@ type ORMSearchReadInput struct {
 	Limit  int      `msgpack:"limit,omitempty"`
 	Offset int      `msgpack:"offset,omitempty"`
 	Cursor string   `msgpack:"cursor,omitempty"`
+	TxID   string   `msgpack:"tx_id"`
 }
 
 type ORMSearchReadOutput struct {
@@ -83,6 +85,7 @@ type ORMReadInput struct {
 	Model  string   `msgpack:"model"`
 	IDs    []string `msgpack:"ids"`
 	Fields []string `msgpack:"fields,omitempty"`
+	TxID   string   `msgpack:"tx_id"`
 }
 
 type ORMReadOutput struct {
@@ -141,11 +144,11 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORM
 		return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
-	tx, err := beginTenantScopedRead(ctx, db, modCtx)
-	if err != nil {
-		return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ORMSearchOutput{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer finish()
 
 	table := quoteIdentORM(tableNameForORM(md))
 	pkColQuoted := quoteIdentORM(pkCol)
@@ -236,11 +239,11 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		whereFrag = fmt.Sprintf("(%s) AND (%s > $%d)", whereFrag, quoteIdentORM(pkCol), len(args))
 	}
 
-	tx, err := beginTenantScopedRead(ctx, db, modCtx)
-	if err != nil {
-		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ORMSearchReadOutput{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer finish()
 
 	table := quoteIdentORM(tableNameForORM(md))
 	selectCols := make([]string, len(columns))
@@ -344,11 +347,11 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		return ORMReadOutput{Records: []map[string]any{}}, nil
 	}
 
-	tx, err := beginTenantScopedRead(ctx, db, modCtx)
-	if err != nil {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ORMReadOutput{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer finish()
 
 	table := quoteIdentORM(tableNameForORM(md))
 	selectCols := make([]string, len(columns))
@@ -584,6 +587,30 @@ func applyMaskPattern(pattern string, value any) string {
 	}
 	out = strings.ReplaceAll(out, "{first2}", first2)
 	return out
+}
+
+// resolveORMReadTx returns the transaction a host.orm read should run
+// on: txID's borrowed transaction (registered by a prior host.db.begin,
+// already tenant-scoped when makeDBBegin opened it) when txID is
+// non-empty, or a freshly-opened tenant-scoped one otherwise. The
+// returned finish func is a no-op for a borrowed transaction — committing
+// or rolling it back is the caller's own host.db.commit/rollback
+// responsibility, never host.orm's — and rolls back an owned one
+// (read-only, so there's never anything to commit), matching every
+// existing host.orm read function's own defer-rollback-only pattern.
+func resolveORMReadTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, finish func(), hostErr *abi.HostError) {
+	if txID != "" {
+		tx, ok := modCtx.Transaction(txID)
+		if !ok {
+			return nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
+		}
+		return tx, func() {}, nil
+	}
+	tx, err := beginTenantScopedRead(ctx, db, modCtx)
+	if err != nil {
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	return tx, func() { _ = tx.Rollback() }, nil
 }
 
 // beginTenantScopedRead opens a read-only transaction with the same

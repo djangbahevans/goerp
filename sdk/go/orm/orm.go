@@ -5,6 +5,4 @@
 // internal/engine/wasm/host_orm.go's/host_orm_write.go's own, duplicated
 // rather than imported since this compiles into a module's own wasip1
 // binary.
-//
-// No _Tx transaction-scoped variants exist yet (goerp#544).
 package orm

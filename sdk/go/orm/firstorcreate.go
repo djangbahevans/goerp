@@ -1,11 +1,15 @@
 package orm
 
-import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+import (
+	"github.com/djangbahevans/goerp/sdk/go/db"
+	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+)
 
 type ormFirstOrCreateInput struct {
 	Model      string         `msgpack:"model"`
 	UniqueVals map[string]any `msgpack:"unique_vals"`
 	CreateVals map[string]any `msgpack:"create_vals"`
+	TxID       string         `msgpack:"tx_id"`
 }
 
 type ormFirstOrCreateOutput struct {
@@ -20,9 +24,18 @@ type ormFirstOrCreateOutput struct {
 // same rule OnConflictIgnore/OnConflictUpdate's target fields follow —
 // see go-sdk-reference.md §6a.
 func FirstOrCreate[T any](model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
+	return firstOrCreate[T]("", model, uniqueVals, createVals)
+}
+
+// FirstOrCreateTx is FirstOrCreate, scoped to tx's own open transaction.
+func FirstOrCreateTx[T any](tx *db.Tx, model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
+	return firstOrCreate[T](tx.TxID(), model, uniqueVals, createVals)
+}
+
+func firstOrCreate[T any](txID, model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
 	var zero T
 	var out ormFirstOrCreateOutput
-	in := ormFirstOrCreateInput{Model: model, UniqueVals: uniqueVals, CreateVals: createVals}
+	in := ormFirstOrCreateInput{Model: model, UniqueVals: uniqueVals, CreateVals: createVals, TxID: txID}
 	if err := hostcall.Do(hostORMFirstOrCreate, in, &out); err != nil {
 		return zero, false, err
 	}
