@@ -1,6 +1,9 @@
 package orm
 
-import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+import (
+	"github.com/djangbahevans/goerp/sdk/go/db"
+	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+)
 
 // ormOnConflict is Create/CreateBatch's own idempotent-insert wire shape
 // — Policy is "ignore" or "update".
@@ -13,6 +16,7 @@ type ormCreateInput struct {
 	Model      string         `msgpack:"model"`
 	Record     map[string]any `msgpack:"record"`
 	OnConflict *ormOnConflict `msgpack:"on_conflict,omitempty"`
+	TxID       string         `msgpack:"tx_id"`
 }
 
 type ormCreateOutput struct {
@@ -23,6 +27,7 @@ type ormCreateBatchInput struct {
 	Model      string           `msgpack:"model"`
 	Records    []map[string]any `msgpack:"records"`
 	OnConflict *ormOnConflict   `msgpack:"on_conflict,omitempty"`
+	TxID       string           `msgpack:"tx_id"`
 }
 
 type ormCreateBatchOutput struct {
@@ -55,13 +60,22 @@ func OnConflictUpdate(uniqueFields ...string) CreateOption {
 // Create inserts one record via host.orm.create, mapping the result into
 // a T via its own db-tag-mapped fields.
 func Create[T any](model string, vals map[string]any, opts ...CreateOption) (T, error) {
+	return create[T]("", model, vals, opts...)
+}
+
+// CreateTx is Create, scoped to tx's own open transaction.
+func CreateTx[T any](tx *db.Tx, model string, vals map[string]any, opts ...CreateOption) (T, error) {
+	return create[T](tx.TxID(), model, vals, opts...)
+}
+
+func create[T any](txID, model string, vals map[string]any, opts ...CreateOption) (T, error) {
 	var zero T
 	var o createOpts
 	for _, opt := range opts {
 		opt(&o)
 	}
 	var out ormCreateOutput
-	in := ormCreateInput{Model: model, Record: vals, OnConflict: o.OnConflict}
+	in := ormCreateInput{Model: model, Record: vals, OnConflict: o.OnConflict, TxID: txID}
 	if err := hostcall.Do(hostORMCreate, in, &out); err != nil {
 		return zero, err
 	}
@@ -73,12 +87,21 @@ func Create[T any](model string, vals map[string]any, opts ...CreateOption) (T, 
 // since host.orm.create_batch already fully supports on_conflict
 // (host-abi-reference.md §5a).
 func CreateBatch[T any](model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
+	return createBatch[T]("", model, valsList, opts...)
+}
+
+// CreateBatchTx is CreateBatch, scoped to tx's own open transaction.
+func CreateBatchTx[T any](tx *db.Tx, model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
+	return createBatch[T](tx.TxID(), model, valsList, opts...)
+}
+
+func createBatch[T any](txID, model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
 	var o createOpts
 	for _, opt := range opts {
 		opt(&o)
 	}
 	var out ormCreateBatchOutput
-	in := ormCreateBatchInput{Model: model, Records: valsList, OnConflict: o.OnConflict}
+	in := ormCreateBatchInput{Model: model, Records: valsList, OnConflict: o.OnConflict, TxID: txID}
 	if err := hostcall.Do(hostORMCreateBatch, in, &out); err != nil {
 		return nil, err
 	}

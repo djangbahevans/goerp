@@ -58,6 +58,7 @@ type ORMCreateInput struct {
 	Model      string            `msgpack:"model"`
 	Record     map[string]any    `msgpack:"record"`
 	OnConflict *OnConflictOption `msgpack:"on_conflict,omitempty"`
+	TxID       string            `msgpack:"tx_id"`
 }
 
 type ORMCreateOutput struct {
@@ -68,6 +69,7 @@ type ORMCreateBatchInput struct {
 	Model      string            `msgpack:"model"`
 	Records    []map[string]any  `msgpack:"records"`
 	OnConflict *OnConflictOption `msgpack:"on_conflict,omitempty"`
+	TxID       string            `msgpack:"tx_id"`
 }
 
 type ORMCreateBatchOutput struct {
@@ -90,6 +92,7 @@ type ORMWriteInput struct {
 	ID           string         `msgpack:"id"`
 	Record       map[string]any `msgpack:"record"`
 	ExpectedEtag string         `msgpack:"expected_etag,omitempty"`
+	TxID         string         `msgpack:"tx_id"`
 }
 
 type ORMWriteOutput struct {
@@ -100,12 +103,14 @@ type ORMWriteManyInput struct {
 	Model  string         `msgpack:"model"`
 	IDs    []string       `msgpack:"ids"`
 	Record map[string]any `msgpack:"record"`
+	TxID   string         `msgpack:"tx_id"`
 }
 
 type ORMWriteWhereInput struct {
 	Model  string         `msgpack:"model"`
 	Domain string         `msgpack:"domain"`
 	Record map[string]any `msgpack:"record"`
+	TxID   string         `msgpack:"tx_id"`
 }
 
 // ExecResult is write_many/write_where's return shape — how many rows
@@ -121,6 +126,7 @@ type ExecResult struct {
 type ORMUnlinkInput struct {
 	Model string   `msgpack:"model"`
 	IDs   []string `msgpack:"ids"`
+	TxID  string   `msgpack:"tx_id"`
 }
 
 func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -177,11 +183,11 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return transientCreate(ctx, cacheClient, modCtx, md, input.Model, record)
 	}
 
-	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-	if err != nil {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ORMCreateOutput{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollback()
 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
@@ -202,7 +208,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		// there's nothing to return and no event to emit. Matches the
 		// doc's own framing: a successful create call looks identical
 		// whether it inserted or hit the conflict target.
-		if err := tx.Commit(); err != nil {
+		if err := commit(); err != nil {
 			return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 		}
 		return ORMCreateOutput{}, nil
@@ -234,7 +240,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
@@ -292,11 +298,11 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "records must not be empty"}
 	}
 
-	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-	if err != nil {
-		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ORMCreateBatchOutput{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollback()
 
 	var all, createdForEvent, updatedForEvent []map[string]any
 	for _, rec := range input.Records {
@@ -360,7 +366,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
@@ -551,11 +557,11 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
-	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-	if err != nil {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ORMWriteOutput{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollback()
 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
 		return ORMWriteOutput{}, hostErr
@@ -588,7 +594,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
@@ -656,11 +662,11 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 		record["etag"] = uuid.Must(uuid.NewV7()).String()
 	}
 
-	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-	if err != nil {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ExecResult{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollback()
 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
 		return ExecResult{}, hostErr
@@ -671,7 +677,7 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 		return ExecResult{}, hostErr
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
@@ -743,11 +749,11 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 		record["etag"] = uuid.Must(uuid.NewV7()).String()
 	}
 
-	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-	if err != nil {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ExecResult{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollback()
 
 	table := quoteIdentORM(tableNameForORM(md))
 	pkColQuoted := quoteIdentORM(pkCol)
@@ -776,7 +782,7 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 		return ExecResult{}, hostErr
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
@@ -832,18 +838,18 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
-	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
-	if err != nil {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
+	if hostErr != nil {
+		return ExecResult{}, hostErr
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollback()
 
 	result, hostErr := unlinkManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, input.IDs)
 	if hostErr != nil {
 		return ExecResult{}, hostErr
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commit(); err != nil {
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
@@ -902,6 +908,30 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 		affected = append(affected, deletedID)
 	}
 	return ExecResult{Count: len(affected), IDs: affected}, nil
+}
+
+// resolveORMWriteTx is resolveORMReadTx's (host_orm.go) write-side
+// counterpart: txID's borrowed transaction when non-empty, or a freshly
+// opened tenant-scoped one otherwise. commit and rollback are both
+// no-ops for a borrowed transaction — a host.orm write call must never
+// commit or roll back a transaction it didn't open itself, since that's
+// the caller's own host.db.commit/rollback responsibility. For an owned
+// transaction, commit/rollback are tx.Commit/tx.Rollback directly, so
+// existing call sites keep their own "defer rollback, explicit commit on
+// success" shape unchanged.
+func resolveORMWriteTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, commit func() error, rollback func(), hostErr *abi.HostError) {
+	if txID != "" {
+		tx, ok := modCtx.Transaction(txID)
+		if !ok {
+			return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
+		}
+		return tx, func() error { return nil }, func() {}, nil
+	}
+	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
+	if err != nil {
+		return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	return tx, tx.Commit, func() { _ = tx.Rollback() }, nil
 }
 
 // beginTenantScopedWrite is beginTenantScopedRead without ReadOnly — same
