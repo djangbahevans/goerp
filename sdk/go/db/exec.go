@@ -37,9 +37,11 @@ func Exec(sql string, args ...any) (ExecResult, error) {
 	return exec(dbExecInput{SQL: sql, Params: args})
 }
 
-// ExecTx is Exec, scoped to tx's own open transaction.
-func ExecTx(tx *Tx, sql string, args ...any) (ExecResult, error) {
-	return exec(dbExecInput{SQL: sql, Params: args, TxID: tx.TxID()})
+// Exec is Exec, scoped to tx's own open transaction — a method rather
+// than an ExecTx-suffixed free function, since Tx and this method are
+// both defined in db itself (go-sdk-reference.md §6 "Transactions").
+func (tx *Tx) Exec(sql string, args ...any) (ExecResult, error) {
+	return exec(dbExecInput{SQL: sql, Params: args, TxID: tx.id})
 }
 
 func exec(in dbExecInput) (ExecResult, error) {
@@ -57,6 +59,17 @@ func exec(in dbExecInput) (ExecResult, error) {
 // host.db.query's does), and unmarshals the single matched row into a
 // new T. Returns ErrNotFound if the statement matched no rows.
 func ExecReturning[T any](sql string, args ...any) (T, error) {
+	return execReturning[T](sql, args, "")
+}
+
+// ExecReturning is ExecReturning, scoped to tx's own open transaction —
+// a generic method (Go 1.27+), the write-side counterpart to
+// tx.QueryOne[T].
+func (tx *Tx) ExecReturning[T any](sql string, args ...any) (T, error) {
+	return execReturning[T](sql, args, tx.id)
+}
+
+func execReturning[T any](sql string, args []any, txID string) (T, error) {
 	var zero T
 	cols, err := returningColumnsFor[T]()
 	if err != nil {
@@ -66,7 +79,7 @@ func ExecReturning[T any](sql string, args ...any) (T, error) {
 		return zero, fmt.Errorf("db: %T has no db-mapped fields to return", zero)
 	}
 	return scanOneReturning[T](dbExecInput{
-		SQL: sql, Params: args,
+		SQL: sql, Params: args, TxID: txID,
 		Opts: dbExecOpts{Returning: strings.Join(cols, ","), ExpectRows: true},
 	}, cols)
 }
