@@ -52,6 +52,16 @@ func TestExecReturning_NoMappedFields_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestTxExecReturning_NoMappedFields_ReturnsError(t *testing.T) {
+	type empty struct {
+		unexported string //nolint:unused
+	}
+	tx := &Tx{id: "tx-1"}
+	if _, err := tx.ExecReturning[empty]("INSERT INTO t DEFAULT VALUES"); err == nil {
+		t.Fatal("expected an error for a type with no db-mapped fields")
+	}
+}
+
 // TestWrapExecError_NoRowsAffected_IsErrNotFound covers the sentinel
 // wiring exec.go relies on for ExecReturning's own zero-match case.
 func TestWrapExecError_NoRowsAffected_IsErrNotFound(t *testing.T) {
