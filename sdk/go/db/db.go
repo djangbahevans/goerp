@@ -10,9 +10,10 @@
 //
 // host.db.lock/notify are documented in host-abi-reference.md §5 but not
 // yet implemented engine-side, so db.Lock and friends aren't buildable
-// yet either. QueryOne/QueryPaged/Exists/Count/WithTx/QueryTx/
-// QueryOneTx/ExecReturningTx (go-sdk-reference.md §6's remaining
-// read/transaction helpers) haven't landed yet either (goerp#507).
+// yet either. tx.Exec/tx.ExecReturning (go-sdk-reference.md §6's own
+// generic-method redesign of the write side) haven't landed yet either —
+// ExecTx (exec.go) is still the free-function shape goerp#506 shipped
+// before that redesign.
 package db
 
 import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
@@ -99,4 +100,45 @@ func (tx *Tx) Rollback() error {
 
 	var out dbDurationOutput
 	return hostcall.Do(hostDBRollback, dbTxIDInput{TxID: tx.id}, &out)
+}
+
+// Query is Query, scoped to tx's own open transaction — a generic
+// method (Go 1.27+) rather than a QueryTx-suffixed free function, since
+// Tx and this method are both defined in db itself (go-sdk-reference.md
+// §6 "Transactions").
+func (tx *Tx) Query[T any](sql string, params []any, opts ...QueryOption) ([]T, error) {
+	res, err := query(hostDBQuery, sql, params, opts, tx.id)
+	if err != nil {
+		return nil, err
+	}
+	return scanRows[T](res.ColumnNames, res.Rows)
+}
+
+// QueryOne is QueryOne, scoped to tx's own open transaction.
+func (tx *Tx) QueryOne[T any](sql string, params []any, opts ...QueryOption) (T, error) {
+	var zero T
+	res, err := query(hostDBQuery, sql, params, opts, tx.id)
+	if err != nil {
+		return zero, err
+	}
+	return firstRow[T](res)
+}
+
+// WithTx runs fn inside a new transaction opened via Begin: a nil return
+// commits, any other return (or a panic) rolls back instead, propagating
+// fn's own error or panic unchanged. The deferred Rollback also covers a
+// failed Commit — Commit only marks tx committed on success, so a
+// deferred Rollback after a failed Commit still runs for real instead of
+// leaving the transaction open on the engine until it expires.
+func WithTx(fn func(tx *Tx) error) error {
+	tx, err := Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
