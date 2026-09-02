@@ -39,23 +39,28 @@ $$ LANGUAGE plpgsql;
 // SyncEtagTriggers installs the update_etag() BEFORE UPDATE trigger
 // (data-layer.md §2.4 "Etag trigger") on every table in the module's
 // manifest audited_tables[] declaration, so every write path gets the
-// same etag-hashing guarantee without reimplementing it. Runs after DDL
+// same etag-hashing guarantee without reimplementing it, then reconciles
+// away the trigger for any table this module owns that dropped out of
+// that list — a manifest edit, or, when auditedTables is nil (a module
+// uninstall), every table it used to audit. modelDecls must still
+// reflect the module's owned tables in that case, the same requirement
+// SyncRLSPolicies documents for its own uninstall path. Runs after DDL
 // apply (Execute) in the same schema-sync sequence as SyncRLSPolicies,
 // over the same connection/session, so the audited tables already exist.
 func (e *SchemaDiffEngine) SyncEtagTriggers(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, auditedTables []manifest.AuditedTable) error {
-	if len(auditedTables) == 0 {
-		return nil
+	if len(auditedTables) > 0 {
+		if err := e.execWithRetry(ctx, sess.conn, createUpdateEtagFunction); err != nil {
+			return fmt.Errorf("create update_etag function: %w", err)
+		}
 	}
 
-	if err := e.execWithRetry(ctx, sess.conn, createUpdateEtagFunction); err != nil {
-		return fmt.Errorf("create update_etag function: %w", err)
-	}
-
+	desired := make(map[string]bool, len(auditedTables))
 	for _, a := range auditedTables {
 		table, err := resolveAuditedTableName(a, modelDecls)
 		if err != nil {
 			return err
 		}
+		desired[table] = true
 
 		triggerName := table + "_etag_trigger"
 		dropStmt := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s", quoteIdent(triggerName), quoteIdent(table))
@@ -69,7 +74,71 @@ func (e *SchemaDiffEngine) SyncEtagTriggers(ctx context.Context, sess *SchemaSyn
 			return fmt.Errorf("audited table %q: create etag trigger: %w", table, err)
 		}
 	}
+
+	return e.reconcileEtagTriggers(ctx, sess, modelDecls, desired)
+}
+
+// reconcileEtagTriggers drops the etag trigger for any table this module
+// owns that isn't in desired. Unlike reconcileRLSPolicies (rls.go), a
+// trigger's name carries no module segment to prove ownership by — none
+// is needed today: resolveAuditedTableName already requires an
+// audited_tables[] entry's table to be owned by a model in this same
+// modelDecls, and manifest-spec.md §28's schema.owned_models exclusivity
+// rule (the field_extension carve-out excepted) keeps table ownership
+// 1:1 with a module's own ModelDecls as long as field_extension's own
+// field-adding mechanism — which would let a second module's ModelDecls
+// reach the same table — stays unbuilt. Revisit if that changes.
+// update_etag() itself is never dropped — it's shared across every
+// module's etag triggers, not owned by any one of them.
+func (e *SchemaDiffEngine) reconcileEtagTriggers(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]bool) error {
+	schemaName := "tenant_" + sess.tenantSlug
+	tables := dedupedOwnedTables(modelDecls)
+
+	liveTables, err := listEtagTriggerTables(ctx, sess.conn, schemaName, tables)
+	if err != nil {
+		return fmt.Errorf("list etag triggers: %w", err)
+	}
+
+	for _, table := range liveTables {
+		if desired[table] {
+			continue
+		}
+		triggerName := table + "_etag_trigger"
+		dropStmt := fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s", quoteIdent(triggerName), quoteIdent(table))
+		if err := e.execWithRetry(ctx, sess.conn, dropStmt); err != nil {
+			return fmt.Errorf("drop etag trigger on %s: %w", table, err)
+		}
+	}
+
 	return nil
+}
+
+// listEtagTriggerTables returns which of tables currently carry a live
+// {table}_etag_trigger, in one round-trip via pg_trigger — the same
+// catalog etag_trigger_test.go's own assertions already query — using
+// pqStringArray/`= ANY($2)` (rls.go) to batch across every table.
+func listEtagTriggerTables(ctx context.Context, execer execQuerier, schemaName string, tables []string) ([]string, error) {
+	rows, err := execer.QueryContext(ctx, `
+		SELECT c.relname
+		FROM pg_trigger t
+		JOIN pg_class c ON t.tgrelid = c.oid
+		JOIN pg_namespace n ON c.relnamespace = n.oid
+		WHERE n.nspname = $1 AND c.relname = ANY($2) AND t.tgname = c.relname || '_etag_trigger'
+	`, schemaName, pqStringArray(tables))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var live []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			return nil, err
+		}
+		live = append(live, table)
+	}
+	return live, rows.Err()
 }
 
 // resolveAuditedTableName validates a's table name against modelDecls,
