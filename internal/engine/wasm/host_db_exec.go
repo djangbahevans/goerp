@@ -277,36 +277,63 @@ func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (prepar
 	}, nil
 }
 
-// beginOrBorrowExecTx returns the *sql.Tx a statement should run in — the
-// caller's own transaction if txID names one already registered via
-// host.db.begin, otherwise a freshly-opened, tenant-scoped one. finish
-// commits or rolls back a freshly-opened transaction; for a borrowed one
-// it's a no-op, since that transaction is owned by whoever called
-// host.db.begin, not by this call.
-func beginOrBorrowExecTx(qCtx context.Context, primary *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, finish func(error) error, hostErr *abi.HostError) {
+// beginOrBorrowExecTx returns the *sql.Conn/*sql.Tx a statement should
+// run in — the caller's own transaction (and its pinned connection, via
+// ModuleContext.RawConn) if txID names one already registered via
+// host.db.begin, otherwise a freshly-opened, tenant-scoped one, pinned
+// the same way host.db.begin pins its own (goerp#511) — needed so a
+// caller can reach the raw pgx handle via conn.Raw(...) for
+// host.db.exec_batch's COPY/pipeline fast paths (goerp#513); a plain
+// host.db.exec caller that has no use for conn simply discards it.
+// finish commits or rolls back a freshly-opened transaction and closes
+// its pinned connection (Commit/Rollback alone never returns a
+// db.Conn-acquired connection to the pool — see openTransaction's own
+// doc comment in context.go); for a borrowed transaction it's a no-op,
+// since that transaction is owned by whoever called host.db.begin, not
+// by this call.
+func beginOrBorrowExecTx(qCtx context.Context, primary *sql.DB, modCtx *ModuleContext, txID string) (conn *sql.Conn, tx *sql.Tx, finish func(error) error, hostErr *abi.HostError) {
 	if txID != "" {
-		borrowed, ok := modCtx.Transaction(txID)
+		borrowedTx, ok := modCtx.Transaction(txID)
 		if !ok {
-			return nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
+			return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
 		}
-		return borrowed, func(error) error { return nil }, nil
+		borrowedConn, ok := modCtx.RawConn(txID)
+		if !ok {
+			// Transaction and RawConn are populated together by
+			// RegisterTransaction — this only trips if that invariant
+			// is ever broken elsewhere.
+			return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "transaction has no pinned connection"}
+		}
+		return borrowedConn, borrowedTx, func(error) error { return nil }, nil
 	}
 
-	newTx, err := primary.BeginTx(qCtx, nil)
+	newConn, err := primary.Conn(qCtx)
 	if err != nil {
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	newTx, err := newConn.BeginTx(qCtx, nil)
+	if err != nil {
+		_ = newConn.Close()
+		return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	if err := applyTenantScope(qCtx, newTx, modCtx); err != nil {
 		_ = newTx.Rollback()
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		_ = newConn.Close()
+		return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	finish = func(callErr error) error {
+		var finishErr error
 		if callErr != nil {
-			return newTx.Rollback()
+			finishErr = newTx.Rollback()
+		} else {
+			finishErr = newTx.Commit()
 		}
-		return newTx.Commit()
+		if closeErr := newConn.Close(); closeErr != nil && finishErr == nil {
+			finishErr = closeErr
+		}
+		return finishErr
 	}
-	return newTx, finish, nil
+	return newConn, newTx, finish, nil
 }
 
 // execRowResult is what a single execRow call produces on success.
@@ -428,7 +455,7 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 	qCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	tx, finish, hostErr := beginOrBorrowExecTx(qCtx, primary, modCtx, input.TxID)
+	_, tx, finish, hostErr := beginOrBorrowExecTx(qCtx, primary, modCtx, input.TxID)
 	if hostErr != nil {
 		return dbExecOutput{}, hostErr
 	}
