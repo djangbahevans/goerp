@@ -4,14 +4,10 @@
 // Query/QueryReplica for read-only SELECTs (query.go), Exec/ExecReturning/
 // ExecBatch/Insert/InsertReturning/UpdateByID for writes
 // (exec.go/exec_batch.go/insert.go/update.go, go-sdk-reference.md §6
-// "Exec — write rows"), and this package's own sentinel errors/type
-// matchers for classifying a host.db.exec-originated failure
-// (errors.go).
-//
-// host.db.notify is documented in host-abi-reference.md §5 but not yet
-// implemented engine-side, so db.Notify isn't buildable yet either.
-// host.db.lock now exists (goerp#462); its own Tx.Lock/Tx.TryLock wrapper
-// is tracked separately in goerp#508.
+// "Exec — write rows"), Lock/TryLock for tenant-scoped Postgres advisory
+// locking (lock.go), Notify for tenant-scoped Postgres NOTIFY (notify.go),
+// and this package's own sentinel errors/type matchers for classifying a
+// host.db.exec-originated failure (errors.go).
 package db
 
 import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"

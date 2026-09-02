@@ -25,3 +25,6 @@ func hostDBExecBatch(ptr, size uint32) uint64
 
 //go:wasmimport host.db lock
 func hostDBLock(ptr, size uint32) uint64
+
+//go:wasmimport host.db notify
+func hostDBNotify(ptr, size uint32) uint64
