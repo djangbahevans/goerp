@@ -227,6 +227,17 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		t.Error("expected the event_log table to have been created by CreateEngineTables")
 	}
 
+	var recordSharesExists bool
+	if err := env.conn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'record_shares')",
+		"tenant_"+slug,
+	).Scan(&recordSharesExists); err != nil {
+		t.Fatalf("check record_shares table: %v", err)
+	}
+	if !recordSharesExists {
+		t.Error("expected the record_shares table to have been created by CreateEngineTables")
+	}
+
 	for _, table := range []string{"audit_log", "event_log"} {
 		var registered bool
 		if err := env.conn.QueryRow(
