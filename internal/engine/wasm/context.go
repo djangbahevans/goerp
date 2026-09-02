@@ -97,7 +97,7 @@ type ModuleContext struct {
 	TraceID    string
 	SpanStack  []trace.Span
 
-	transactions map[string]*sql.Tx
+	transactions map[string]openTransaction
 	txMu         sync.Mutex
 	txLimiter    *TransactionLimiter
 
@@ -117,7 +117,7 @@ func NewModuleContext(requestID, moduleName, userID, contactID string, roles []s
 		TenantID:      tenantID,
 		TenantSlug:    tenantSlug,
 		TraceID:       traceID,
-		transactions:  make(map[string]*sql.Tx),
+		transactions:  make(map[string]openTransaction),
 		capabilities:  capabilities,
 		txLimiter:     txLimiter,
 		snapshot:      snapshot,
@@ -170,20 +170,26 @@ func (mc *ModuleContext) PermissionRegistry() *permission.PermissionRegistry {
 	return mc.snapshot.PermissionRegistry
 }
 
-// RollbackAll rolls back every transaction still open in this context and
-// releases each one's TransactionLimiter slot — the dispatch-path safety net
-// (invokeHandler's defer, engine-internals.md §6) drains through this, not
-// through the 30s expires_at on the transaction, whether the handler
-// returned normally, with an error, or via a WASM trap.
+// RollbackAll rolls back every transaction still open in this context,
+// closes each one's pinned *sql.Conn (returning it to the pool — see
+// openTransaction's own doc comment for why Rollback alone isn't enough),
+// and releases each one's TransactionLimiter slot — the dispatch-path
+// safety net (invokeHandler's defer, engine-internals.md §6) drains
+// through this, not through the 30s expires_at on the transaction,
+// whether the handler returned normally, with an error, or via a WASM
+// trap.
 func (mc *ModuleContext) RollbackAll() {
 	mc.txMu.Lock()
 	txs := mc.transactions
-	mc.transactions = make(map[string]*sql.Tx)
+	mc.transactions = make(map[string]openTransaction)
 	mc.txMu.Unlock()
 
-	for txID, tx := range txs {
-		if err := tx.Rollback(); err != nil {
+	for txID, ot := range txs {
+		if err := ot.tx.Rollback(); err != nil {
 			log.Warn().Err(err).Str("tx_id", txID).Msg("could not roll back transaction left open by module handler")
+		}
+		if err := ot.conn.Close(); err != nil {
+			log.Warn().Err(err).Str("tx_id", txID).Msg("could not release connection pinned by a transaction left open by module handler")
 		}
 		if mc.txLimiter != nil {
 			mc.txLimiter.Release()
@@ -206,14 +212,29 @@ func (mc *ModuleContext) HasOpenTransaction() bool {
 	return len(mc.transactions) > 0
 }
 
-// RegisterTransaction records a transaction host.db.begin opened, keyed by
-// the tx_id handed back to the module. txID is scoped to this ModuleContext
-// (one request/WASM instance) and cannot be reused across requests.
-func (mc *ModuleContext) RegisterTransaction(txID string, tx *sql.Tx) {
+// openTransaction pairs a host.db.begin transaction with the *sql.Conn
+// pinned for its lifetime — host.db.begin acquires the connection via
+// (*sql.DB).Conn before calling BeginTx on it (rather than calling BeginTx
+// on the pool directly) specifically so RawConn can later hand a host
+// function the same physical connection via the connection's own Raw()
+// escape hatch (goerp#511). *sql.Tx.Commit/Rollback alone never returns a
+// conn acquired this way to the pool — only closing the *sql.Conn does —
+// so every path that ends a transaction must close conn, not just call
+// tx.Commit()/tx.Rollback().
+type openTransaction struct {
+	conn *sql.Conn
+	tx   *sql.Tx
+}
+
+// RegisterTransaction records a transaction host.db.begin opened — conn is
+// the *sql.Conn tx was started on — keyed by the tx_id handed back to the
+// module. txID is scoped to this ModuleContext (one request/WASM instance)
+// and cannot be reused across requests.
+func (mc *ModuleContext) RegisterTransaction(txID string, conn *sql.Conn, tx *sql.Tx) {
 	mc.txMu.Lock()
 	defer mc.txMu.Unlock()
 
-	mc.transactions[txID] = tx
+	mc.transactions[txID] = openTransaction{conn: conn, tx: tx}
 }
 
 // Transaction looks up a transaction previously registered under txID.
@@ -221,18 +242,40 @@ func (mc *ModuleContext) Transaction(txID string) (*sql.Tx, bool) {
 	mc.txMu.Lock()
 	defer mc.txMu.Unlock()
 
-	tx, ok := mc.transactions[txID]
-	return tx, ok
+	ot, ok := mc.transactions[txID]
+	return ot.tx, ok
 }
 
-// RemoveTransaction drops txID's bookkeeping entry. Callers that acquired a
-// TransactionLimiter slot for this transaction are responsible for
-// releasing it — RemoveTransaction only forgets the *sql.Tx.
-func (mc *ModuleContext) RemoveTransaction(txID string) {
+// RawConn returns the *sql.Conn txID's transaction is pinned to — the same
+// physical connection Transaction's own *sql.Tx runs on — for a host
+// function that needs pgx-specific functionality database/sql doesn't
+// expose (COPY, pipelining) via that connection's own Raw() call. Work
+// issued through the raw handle participates in the same transaction,
+// since both share one physical connection (goerp#511).
+func (mc *ModuleContext) RawConn(txID string) (*sql.Conn, bool) {
 	mc.txMu.Lock()
 	defer mc.txMu.Unlock()
 
+	ot, ok := mc.transactions[txID]
+	return ot.conn, ok
+}
+
+// RemoveTransaction drops txID's bookkeeping entry and closes its pinned
+// *sql.Conn, returning it to the pool. Callers that acquired a
+// TransactionLimiter slot for this transaction are still responsible for
+// releasing it themselves — RemoveTransaction only forgets the
+// bookkeeping entry and releases its connection-level resources.
+func (mc *ModuleContext) RemoveTransaction(txID string) {
+	mc.txMu.Lock()
+	ot, ok := mc.transactions[txID]
 	delete(mc.transactions, txID)
+	mc.txMu.Unlock()
+
+	if ok {
+		if err := ot.conn.Close(); err != nil {
+			log.Warn().Err(err).Str("tx_id", txID).Msg("could not release connection pinned by a finished transaction")
+		}
+	}
 }
 
 // TransactionIDs returns the tx_ids of every transaction still open in this

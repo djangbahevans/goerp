@@ -57,12 +57,18 @@ func newEventTestModuleContext(reg *event.EventRegistry) *ModuleContext {
 // a full host.db ABI round trip.
 func beginAndRegisterTx(t *testing.T, ctx context.Context, primaryDB *sql.DB, mc *ModuleContext) (txID string, tx *sql.Tx) {
 	t.Helper()
-	tx, err := primaryDB.BeginTx(ctx, nil)
+	conn, err := primaryDB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire conn: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	tx, err = conn.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
 	txID = uuid.NewString()
-	mc.RegisterTransaction(txID, tx)
+	mc.RegisterTransaction(txID, conn, tx)
 	return txID, tx
 }
 

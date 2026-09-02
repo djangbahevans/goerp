@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"database/sql"
 	"sync"
 	"testing"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func TestModuleContext_TransactionsGuardedByTxMu(t *testing.T) {
-	modCtx := &ModuleContext{transactions: make(map[string]*sql.Tx)}
+	modCtx := &ModuleContext{transactions: make(map[string]openTransaction)}
 
 	var wg sync.WaitGroup
 	for i := range 20 {
@@ -20,7 +19,7 @@ func TestModuleContext_TransactionsGuardedByTxMu(t *testing.T) {
 			defer wg.Done()
 			modCtx.txMu.Lock()
 			defer modCtx.txMu.Unlock()
-			modCtx.transactions[string(rune('a'+n))] = nil
+			modCtx.transactions[string(rune('a'+n))] = openTransaction{}
 		}(i)
 	}
 	wg.Wait()

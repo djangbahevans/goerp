@@ -153,6 +153,31 @@ func newTestModuleContext(tenantSlug string, caps abi.CapabilitySet, txLimiter *
 	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, "tenant-id-1", tenantSlug, "trace-1", caps, txLimiter, ModuleSnapshot{})
 }
 
+// registerTenantScopedTestTx opens a tenant-scoped transaction pinned to
+// its own *sql.Conn — mirroring makeDBBegin's own conn-then-tx pattern,
+// which RegisterTransaction now requires — and registers it on mc under
+// txID. Schedules the conn's own release via t.Cleanup; callers remain
+// responsible for committing or rolling back tx themselves.
+func registerTenantScopedTestTx(t *testing.T, ctx context.Context, db *sql.DB, mc *ModuleContext, txID string) *sql.Tx {
+	t.Helper()
+
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire conn: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := applyTenantScope(ctx, tx, mc); err != nil {
+		t.Fatalf("applyTenantScope: %v", err)
+	}
+	mc.RegisterTransaction(txID, conn, tx)
+	return tx
+}
+
 func createFixtureTenantSchema(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
 	ctx := context.Background()

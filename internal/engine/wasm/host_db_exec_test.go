@@ -372,15 +372,8 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 	}
 
 	beginTx := func(txID string) *sql.Tx {
-		tx, err := primaryDB.BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatalf("begin %s: %v", txID, err)
-		}
-		if err := applyTenantScope(ctx, tx, mc); err != nil {
-			t.Fatalf("applyTenantScope %s: %v", txID, err)
-		}
+		tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
 		t.Cleanup(func() { _ = tx.Rollback() })
-		mc.RegisterTransaction(txID, tx)
 		return tx
 	}
 	tx1 := beginTx("deadlock-tx1")
@@ -702,15 +695,8 @@ func TestDBExec_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	tx, err := primaryDB.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
-	}
-	if err := applyTenantScope(ctx, tx, mc); err != nil {
-		t.Fatalf("applyTenantScope: %v", err)
-	}
 	txID := "test-tx-1"
-	mc.RegisterTransaction(txID, tx)
+	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
 
 	id := "10000000-0000-0000-0000-000000000010"
 	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{

@@ -97,8 +97,23 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 			})
 		}
 
-		tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: isolation, ReadOnly: input.ReadOnly})
+		// Pinned to this one *sql.Conn (rather than calling BeginTx on the
+		// pool directly) so a host function can later reach the same
+		// physical connection's raw pgx handle via ModuleContext.RawConn,
+		// e.g. for host.db.exec_batch's COPY/pipeline path (goerp#511).
+		conn, err := db.Conn(ctx)
 		if err != nil {
+			r.txLimiter.Release()
+			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+				Code:    abi.ErrCodeUnavailable,
+				Message: err.Error(),
+				Retry:   true,
+			})
+		}
+
+		tx, err := conn.BeginTx(ctx, &sql.TxOptions{Isolation: isolation, ReadOnly: input.ReadOnly})
+		if err != nil {
+			_ = conn.Close()
 			r.txLimiter.Release()
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
 				Code:    abi.ErrCodeUnavailable,
@@ -113,6 +128,7 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		// into whatever this backend connection is reused for next.
 		if err := applyTenantScope(ctx, tx, modCtx); err != nil {
 			_ = tx.Rollback()
+			_ = conn.Close()
 			r.txLimiter.Release()
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
 				Code:    abi.ErrCodeUnavailable,
@@ -122,7 +138,7 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		}
 
 		txID := uuid.NewString()
-		modCtx.RegisterTransaction(txID, tx)
+		modCtx.RegisterTransaction(txID, conn, tx)
 
 		return abi.WriteToModule(ctx, m, allocate, dbBeginOutput{
 			TxID:      txID,
