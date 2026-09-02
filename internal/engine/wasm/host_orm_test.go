@@ -133,13 +133,9 @@ func TestHostORM_Search_TxID_SeesUncommittedWriteInSameTransaction(t *testing.T)
 
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
 
-	tx, err := beginTenantScopedWrite(ctx, primaryDB, mc)
-	if err != nil {
-		t.Fatalf("beginTenantScopedWrite: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	const txID = "test-tx-search-1"
-	mc.RegisterTransaction(txID, tx)
+	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, "INSERT INTO widgets (id, name, price) VALUES ($1, $2, 100)",
 		"11111111-1111-1111-1111-111111111111", "Uncommitted Widget"); err != nil {

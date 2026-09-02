@@ -219,13 +219,9 @@ func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	insertClient := r.EventInsertClient()
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 
-	tx, err := beginTenantScopedWrite(ctx, primaryDB, mc)
-	if err != nil {
-		t.Fatalf("beginTenantScopedWrite: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	const txID = "test-tx-1"
-	mc.RegisterTransaction(txID, tx)
+	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
+	defer func() { _ = tx.Rollback() }()
 
 	id := "11111111-1111-1111-1111-111111111111"
 	out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
@@ -292,12 +288,8 @@ func TestHostORM_Write_TxID_RollbackUndoesWrite(t *testing.T) {
 		t.Fatalf("create failed: %+v", hostErr)
 	}
 
-	tx, err := beginTenantScopedWrite(ctx, primaryDB, mc)
-	if err != nil {
-		t.Fatalf("beginTenantScopedWrite: %v", err)
-	}
 	const txID = "test-tx-2"
-	mc.RegisterTransaction(txID, tx)
+	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
 
 	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
 		Model:  "testmodule.item",
@@ -1158,13 +1150,9 @@ func TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction(t *testing.
 	insertClient := r.EventInsertClient()
 	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 
-	tx, err := beginTenantScopedWrite(ctx, primaryDB, mc)
-	if err != nil {
-		t.Fatalf("beginTenantScopedWrite: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	const txID = "test-tx-foc-1"
-	mc.RegisterTransaction(txID, tx)
+	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
+	defer func() { _ = tx.Rollback() }()
 
 	out, hostErr := ORMFirstOrCreate(ctx, r, primaryDB, insertClient, mc, ORMFirstOrCreateInput{
 		Model:      "testmodule.item",

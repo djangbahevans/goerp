@@ -304,19 +304,12 @@ func TestDBExecBatch_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	tx, err := primaryDB.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
+	txID := "test-batch-tx"
+	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
 	// Rolling back an already-committed tx is a safe no-op — this just
 	// guarantees the transaction never outlives the test (and blocks the
 	// fixture schema's own cleanup) if an assertion below fails first.
 	t.Cleanup(func() { _ = tx.Rollback() })
-	if err := applyTenantScope(ctx, tx, mc); err != nil {
-		t.Fatalf("applyTenantScope: %v", err)
-	}
-	txID := "test-batch-tx"
-	mc.RegisterTransaction(txID, tx)
 
 	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
