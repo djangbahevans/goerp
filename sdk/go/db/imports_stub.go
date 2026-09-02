@@ -40,3 +40,7 @@ func hostDBExecBatch(ptr, size uint32) uint64 {
 func hostDBLock(ptr, size uint32) uint64 {
 	panic("sdk/go/db: host.db.lock is only available in a wasip1 build")
 }
+
+func hostDBNotify(ptr, size uint32) uint64 {
+	panic("sdk/go/db: host.db.notify is only available in a wasip1 build")
+}

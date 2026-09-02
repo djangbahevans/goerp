@@ -36,6 +36,7 @@ func registerHostDB(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.
 		NewFunctionBuilder().WithFunc(makeDBExec(r, db)).Export("exec").
 		NewFunctionBuilder().WithFunc(makeDBExecBatch(r, db)).Export("exec_batch").
 		NewFunctionBuilder().WithFunc(makeDBLock(r)).Export("lock").
+		NewFunctionBuilder().WithFunc(makeDBNotify(r, db)).Export("notify").
 		Instantiate(ctx)
 	return err
 }
