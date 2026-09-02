@@ -176,6 +176,24 @@ func TableNameFor(md model.ModelDeclaration) string {
 	return snakeCase(md.Name)
 }
 
+// dedupedOwnedTables returns modelDecls's table names via TableNameFor,
+// duplicates removed — the walk list reconcileRLSPolicies (rls.go) and
+// reconcileEtagTriggers (etag_trigger.go) both build before diffing
+// against their own live-catalog query.
+func dedupedOwnedTables(modelDecls []model.ModelDeclaration) []string {
+	seen := make(map[string]bool, len(modelDecls))
+	tables := make([]string, 0, len(modelDecls))
+	for _, md := range modelDecls {
+		table := TableNameFor(md)
+		if seen[table] {
+			continue
+		}
+		seen[table] = true
+		tables = append(tables, table)
+	}
+	return tables
+}
+
 func toAtlasTable(md model.ModelDeclaration, enumTypes map[string]*schema.EnumType) (*schema.Table, error) {
 	tableName := TableNameFor(md)
 

@@ -91,17 +91,7 @@ func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSync
 // so a foreign policy surviving this pass keeps the table's RLS on.
 func (e *SchemaDiffEngine) reconcileRLSPolicies(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]string) error {
 	schemaName := "tenant_" + sess.tenantSlug
-
-	seenTables := make(map[string]bool, len(modelDecls))
-	tables := make([]string, 0, len(modelDecls))
-	for _, md := range modelDecls {
-		table := TableNameFor(md)
-		if seenTables[table] {
-			continue
-		}
-		seenTables[table] = true
-		tables = append(tables, table)
-	}
+	tables := dedupedOwnedTables(modelDecls)
 
 	liveByTable, err := listRLSPoliciesByTable(ctx, sess.conn, schemaName, tables)
 	if err != nil {

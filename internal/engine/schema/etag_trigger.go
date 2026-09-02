@@ -81,25 +81,18 @@ func (e *SchemaDiffEngine) SyncEtagTriggers(ctx context.Context, sess *SchemaSyn
 // reconcileEtagTriggers drops the etag trigger for any table this module
 // owns that isn't in desired. Unlike reconcileRLSPolicies (rls.go), a
 // trigger's name carries no module segment to prove ownership by — none
-// is needed here: resolveAuditedTableName already requires an
+// is needed today: resolveAuditedTableName already requires an
 // audited_tables[] entry's table to be owned by a model in this same
-// modelDecls, so a table this walk reaches can only ever have been
-// audited by whichever module currently declares its model.
+// modelDecls, and manifest-spec.md §28's schema.owned_models exclusivity
+// rule (the field_extension carve-out excepted) keeps table ownership
+// 1:1 with a module's own ModelDecls as long as field_extension's own
+// field-adding mechanism — which would let a second module's ModelDecls
+// reach the same table — stays unbuilt. Revisit if that changes.
 // update_etag() itself is never dropped — it's shared across every
 // module's etag triggers, not owned by any one of them.
 func (e *SchemaDiffEngine) reconcileEtagTriggers(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]bool) error {
 	schemaName := "tenant_" + sess.tenantSlug
-
-	seenTables := make(map[string]bool, len(modelDecls))
-	tables := make([]string, 0, len(modelDecls))
-	for _, md := range modelDecls {
-		table := TableNameFor(md)
-		if seenTables[table] {
-			continue
-		}
-		seenTables[table] = true
-		tables = append(tables, table)
-	}
+	tables := dedupedOwnedTables(modelDecls)
 
 	liveTables, err := listEtagTriggerTables(ctx, sess.conn, schemaName, tables)
 	if err != nil {
