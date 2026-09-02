@@ -83,6 +83,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/poolwarm"
+	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -137,18 +138,20 @@ type Engine struct {
 	tracer         trace.Tracer
 	tracerProvider *sdktrace.TracerProvider
 
-	secretsBackend  secrets.Backend
-	primaryDB       *sql.DB
-	replicaDB       *sql.DB
-	cacheClient     *cache.Client
-	searchClient    *search.Client
-	storageBackend  storage.Backend
-	temporalClient  *temporal.Client
-	workflowWorkers *workflowworker.Manager
-	systemWorker    *systemworker.Worker
-	server          *httpx.Server
-	adminServer     *adminapi.Server
-	readiness       atomic.Bool
+	secretsBackend    secrets.Backend
+	primaryDB         *sql.DB
+	replicaDB         *sql.DB
+	userStore         *user.Store
+	recordSharesStore *recordshares.Store
+	cacheClient       *cache.Client
+	searchClient      *search.Client
+	storageBackend    storage.Backend
+	temporalClient    *temporal.Client
+	workflowWorkers   *workflowworker.Manager
+	systemWorker      *systemworker.Worker
+	server            *httpx.Server
+	adminServer       *adminapi.Server
+	readiness         atomic.Bool
 
 	// instanceID identifies this process for hot reload's leader-election
 	// lock value (docs/engine-internals.md §10) — generated once per
@@ -240,6 +243,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	userStore := user.NewStore(primaryPool)
+	recordSharesStore := recordshares.NewStore(primaryPool)
 	if err := userStore.Bootstrap(ctx); err != nil {
 		_ = primaryPool.Close()
 		_ = schemaPool.Close()
@@ -989,6 +993,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		secretsBackend:    secretsBackend,
 		primaryDB:         primaryPool,
 		replicaDB:         replicaPool,
+		userStore:         userStore,
+		recordSharesStore: recordSharesStore,
 		cacheClient:       cacheClient,
 		searchClient:      searchClient,
 		storageBackend:    storageBackend,
@@ -1008,6 +1014,15 @@ func New(cfg *config.Config) (*Engine, error) {
 	// couldn't be referenced there: dispatchPermissionsRoute is an
 	// *Engine method, which doesn't exist until the literal above runs.
 	builtinRoutes["GET /_meta/permissions"] = http.HandlerFunc(e.dispatchPermissionsRoute)
+
+	// /_meta/shares (goerp#475) follows the identical EngineNative,
+	// not-EngineBuiltin pattern /_meta/permissions establishes just
+	// above — same reason: dispatchSharesCreateRoute/ListRoute/
+	// DeleteRoute are *Engine methods that don't exist until the
+	// literal above runs.
+	builtinRoutes["POST /_meta/shares"] = http.HandlerFunc(e.dispatchSharesCreateRoute)
+	builtinRoutes["GET /_meta/shares"] = http.HandlerFunc(e.dispatchSharesListRoute)
+	builtinRoutes["DELETE /_meta/shares/{id}"] = http.HandlerFunc(e.dispatchSharesDeleteRoute)
 
 	// buildChain needs e (dispatchORMRoute/invokeHandler are *Engine
 	// methods), which doesn't exist until the literal above — this call

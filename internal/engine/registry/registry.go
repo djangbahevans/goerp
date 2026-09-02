@@ -238,8 +238,8 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 
 // registerBuiltinRoutes registers the engine's own built-in routes into
 // table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
-// /auth/mfa/reverify, /admin/users/{id}/mfa/reset, and
-// /_meta/permissions resolve through the exact same RouteTable.Lookup
+// /auth/mfa/reverify, /admin/users/{id}/mfa/reset, /_meta/permissions,
+// and /_meta/shares resolve through the exact same RouteTable.Lookup
 // module routes do — no second router. Safe against collision by
 // construction: RegisterModuleRoutes already rejects any module route
 // whose top path segment starts with "_", or is exactly "auth" or
@@ -250,12 +250,13 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 // for why that prefix doesn't mean it belongs to the separate
 // internal/engine/adminapi operator surface.
 //
-// /_meta/permissions is deliberately not EngineBuiltin, unlike every
-// other route registered here — auth-internals.md §9 classifies it Class
-// A (the default for "every other route"), so it needs the standard
-// tenant/auth/permission middleware chain to populate authFromContext/
-// tenantFromContext for it, rather than resolving its own identity the
-// way the true bootstrap/anonymous routes above do.
+// /_meta/permissions and /_meta/shares are deliberately not
+// EngineBuiltin, unlike every other route registered here —
+// auth-internals.md §9 classifies them Class A (the default for "every
+// other route"), so they need the standard tenant/auth/permission
+// middleware chain to populate authFromContext/tenantFromContext,
+// rather than resolving their own identity the way the true
+// bootstrap/anonymous routes above do.
 func registerBuiltinRoutes(table *route.RouteTable) {
 	for _, path := range []string{"/_health", "/_ready"} {
 		table.Register("GET", path, &route.RouteEntry{
@@ -272,6 +273,27 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 	table.Register("GET", "/_meta/permissions", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/permissions",
+	})
+
+	// /_meta/shares (goerp#475) — same not-EngineBuiltin posture as
+	// /_meta/permissions above, for the same reason: it rides the
+	// standard tenant/auth/permission middleware chain rather than
+	// resolving its own identity.
+	table.Register("POST", "/_meta/shares", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/shares",
+	})
+	table.Register("GET", "/_meta/shares", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/shares",
+	})
+	table.Register("DELETE", "/_meta/shares/{id}", &route.RouteEntry{
+		Manifest: route.RouteManifest{
+			EngineNative: true,
+			Auth:         "required",
+			PathParams:   map[string]string{"id": "uuid"},
+		},
+		PathTemplate: "/_meta/shares/{id}",
 	})
 }
 
