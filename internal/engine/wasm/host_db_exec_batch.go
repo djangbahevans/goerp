@@ -92,6 +92,68 @@ func makeDBExecBatch(r *Runtime, primary *sql.DB) func(ctx context.Context, m ap
 	}
 }
 
+// batchErrorForHostErr builds host.db.exec_batch's own db.batch_error
+// envelope (host-abi-reference.md §5) attributing a batch failure to
+// param_sets[index], from a HostError a lower call already produced —
+// shared by every dispatch path (sequential and pipeline) that wraps one
+// row's own structured failure this way. index is -1 for a failure no
+// single param_sets entry can be blamed for (wrapCopyBatchFailure, and
+// captureRowsBeforeExecBatch's own batched pre-read, use the same
+// convention).
+func batchErrorForHostErr(index int, err *abi.HostError) *abi.HostError {
+	return &abi.HostError{
+		Code:    abi.ErrCodeDBBatchError,
+		Message: fmt.Sprintf("parameter set %d: %s", index, err.Message),
+		Details: map[string]any{"index": index, "code": err.Code, "message": err.Message, "details": err.Details},
+	}
+}
+
+// batchErrorForRowErr is batchErrorForHostErr's own counterpart for a
+// plain Go error with no HostError to unwrap. outerPrefix, when
+// non-empty, prefixes the envelope's own top-level Message only (e.g.
+// "audit write failed: ") — Details["message"] always stays err's own
+// bare text, matching what a caller reading Details["message"] for
+// retriable-error triage already expects from batchErrorForHostErr.
+func batchErrorForRowErr(index int, code, outerPrefix string, err error) *abi.HostError {
+	return &abi.HostError{
+		Code:    abi.ErrCodeDBBatchError,
+		Message: fmt.Sprintf("parameter set %d: %s%s", index, outerPrefix, err.Error()),
+		Details: map[string]any{"index": index, "code": code, "message": err.Error()},
+	}
+}
+
+// finishBatchTx commits/rolls back a batch's transaction via finish and
+// measures its own duration, logging a slow-batch warning past
+// slowQueryThreshold — the finish+duration+slow-log sequence shared by
+// every host.db.exec_batch dispatch path (COPY, pipeline, and the
+// sequential path), run before each one's own success/partial-failure
+// decision.
+func finishBatchTx(finish func(error) error, start time.Time, modCtx *ModuleContext, sqlText string, numParamSets int, logMsg string) (time.Duration, *abi.HostError) {
+	if err := finish(nil); err != nil {
+		return 0, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	}
+	duration := time.Since(start)
+	if duration > slowQueryThreshold {
+		log.Warn().Str("module", modCtx.ModuleName).Str("sql", sqlText).
+			Int("param_sets", numParamSets).Dur("duration", duration).
+			Msg(logMsg)
+	}
+	return duration, nil
+}
+
+// batchOutput assembles host.db.exec_batch's own successful output shape
+// — shared by every dispatch path's own success case.
+func batchOutput(totalRowsAffected int, duration time.Duration, returning [][]any, requestedCols []string) dbExecBatchOutput {
+	output := dbExecBatchOutput{
+		TotalRowsAffected: totalRowsAffected,
+		DurationMs:        float64(duration.Microseconds()) / 1000,
+	}
+	if requestedCols != nil {
+		output.Returning = returning
+	}
+	return output
+}
+
 // runSavepointOp executes sql — a SAVEPOINT/ROLLBACK TO SAVEPOINT/RELEASE
 // SAVEPOINT statement — against tx, rolling back the whole batch (via
 // finish) and returning an abi.unavailable error on failure. A broken
@@ -219,11 +281,7 @@ func DBExecBatch(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, in
 			if !input.Opts.ContinueOnError {
 				rowCancel()
 				_ = finish(errors.New(rowErr.Message))
-				return dbExecBatchOutput{}, &abi.HostError{
-					Code:    abi.ErrCodeDBBatchError,
-					Message: fmt.Sprintf("parameter set %d: %s", i, rowErr.Message),
-					Details: map[string]any{"index": i, "code": rowErr.Code, "message": rowErr.Message, "details": rowErr.Details},
-				}
+				return dbExecBatchOutput{}, batchErrorForHostErr(i, rowErr)
 			}
 
 			if hostErr := runSavepointOp(rowCtx, tx, finish, "ROLLBACK TO SAVEPOINT exec_batch_row"); hostErr != nil {
@@ -253,15 +311,9 @@ func DBExecBatch(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, in
 		}
 	}
 
-	if err := finish(nil); err != nil {
-		return dbExecBatchOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
-	}
-	duration := time.Since(start)
-
-	if duration > slowQueryThreshold {
-		log.Warn().Str("module", modCtx.ModuleName).Str("sql", input.SQL).
-			Int("param_sets", len(input.ParamSets)).Dur("duration", duration).
-			Msg("host.db.exec_batch: slow batch")
+	duration, hostErr := finishBatchTx(finish, start, modCtx, input.SQL, len(input.ParamSets), "host.db.exec_batch: slow batch")
+	if hostErr != nil {
+		return dbExecBatchOutput{}, hostErr
 	}
 
 	if len(batchErrors) > 0 {
@@ -280,12 +332,5 @@ func DBExecBatch(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, in
 		}
 	}
 
-	output := dbExecBatchOutput{
-		TotalRowsAffected: totalRowsAffected,
-		DurationMs:        float64(duration.Microseconds()) / 1000,
-	}
-	if p.requestedCols != nil {
-		output.Returning = returning
-	}
-	return output, nil
+	return batchOutput(totalRowsAffected, duration, returning, p.requestedCols), nil
 }

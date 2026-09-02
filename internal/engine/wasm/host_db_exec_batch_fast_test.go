@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -644,6 +645,80 @@ func TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary(t *testing.T
 	}
 }
 
+// TestDBExecBatch_PipelinePath_Update_AuditedTable_OverlappingTargets_BothEntriesPreserved
+// is the regression test for a real bug caught by review: pipelineHasDuplicateAuditTargets
+// only excludes a batch whose rows bind *identical* WHERE-clause parameter
+// values — two rows with different bound values can still resolve to the
+// same physical row (here, "id = $2 OR secret = $3" matched via two
+// different branches). An earlier version of captureRowsBeforeExecBatch
+// combined every row's own old rows into one flat pool and paired them
+// against every row's own new rows by primary key in a single pass; since
+// both statements here target the same row's primary key, that pairing
+// silently collapsed the first statement's own audit entry into the
+// second's, discarding it entirely. This proves both statements now
+// produce their own audit_log entry.
+func TestDBExecBatch_PipelinePath_Update_AuditedTable_OverlappingTargets_BothEntriesPreserved(t *testing.T) {
+	primaryDB, slug, mc := setupExecTest(t)
+	ctx := context.Background()
+
+	id := "30f00000-0000-0000-0000-000000000001"
+	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		SQL:    "INSERT INTO widget (id, tenant_id, name, secret) VALUES ($1, $2, $3, $4)",
+		Params: []any{id, fastPathTenantID, "Before", "mysecret"},
+	}); hostErr != nil {
+		t.Fatalf("seed insert: %+v", hostErr)
+	}
+
+	paramSets := [][]any{
+		{"After-0", id, "no-such-secret-0"},                             // matches via id
+		{"After-1", "00000000-0000-0000-0000-000000000000", "mysecret"}, // matches via secret — same row, different bound values
+	}
+
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+		SQL:       "UPDATE widget SET name = $1 WHERE id = $2 OR secret = $3",
+		ParamSets: paramSets,
+	})
+	if hostErr != nil {
+		t.Fatalf("DBExecBatch: %+v", hostErr)
+	}
+	if out.TotalRowsAffected != 2 {
+		t.Errorf("TotalRowsAffected = %d, want 2 (both statements affect the same physical row)", out.TotalRowsAffected)
+	}
+
+	var finalName string
+	if err := primaryDB.QueryRowContext(ctx, "SELECT name FROM tenant_"+slug+".widget WHERE id = $1", id).Scan(&finalName); err != nil {
+		t.Fatalf("query final name: %v", err)
+	}
+	if finalName != "After-1" {
+		t.Errorf("final name = %q, want %q (second statement runs after the first in the same pipelined batch)", finalName, "After-1")
+	}
+
+	rows := queryAuditLogRows(t, primaryDB, slug, "widget")
+	var updateRows []auditLogRow
+	for _, r := range rows {
+		if r.Operation == "UPDATE" {
+			updateRows = append(updateRows, r)
+		}
+	}
+	if len(updateRows) != 2 {
+		t.Fatalf("UPDATE audit_log rows = %d, want 2 — one per statement, not collapsed by primary-key pairing", len(updateRows))
+	}
+
+	gotNames := make(map[string]bool, 2)
+	for _, r := range updateRows {
+		var newData map[string]any
+		if err := json.Unmarshal([]byte(r.NewData.String), &newData); err != nil {
+			t.Fatalf("unmarshal new_data: %v", err)
+		}
+		gotNames[fmt.Sprint(newData["name"])] = true
+	}
+	for _, want := range []string{"After-0", "After-1"} {
+		if !gotNames[want] {
+			t.Errorf("no audit_log entry with new_data.name = %q — got names %v", want, gotNames)
+		}
+	}
+}
+
 func TestDBExecBatch_PipelinePath_Update_AuditedTable_WritesAuditAndReturning(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := context.Background()
@@ -698,6 +773,80 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_WritesAuditAndReturning(t 
 	}
 	if updateRows != n {
 		t.Fatalf("UPDATE audit_log rows = %d, want %d (out of %d total)", updateRows, n, len(rows))
+	}
+}
+
+// TestDBExecBatch_PipelinePath_Update_AuditedTable_CrossesAuditChunkBoundary
+// proves captureRowsBeforeExecBatch's own batched pre-read and
+// insertAuditLogRows' own batched write both stay correct across
+// insertAuditLogRows' own internal chunk boundary (maxAuditBatchChunkParams/8
+// = 625 rows per multi-row INSERT) — the pipeline path's counterpart to
+// TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary. Spot-checks
+// rows straddling that boundary specifically, since an off-by-one in the
+// chunking loop would most likely show up there.
+func TestDBExecBatch_PipelinePath_Update_AuditedTable_CrossesAuditChunkBoundary(t *testing.T) {
+	primaryDB, slug, mc := setupExecTest(t)
+	ctx := context.Background()
+
+	const n = 700
+	ids := make([]string, n)
+	paramSets := make([][]any, n)
+	for i := range n {
+		id := fmt.Sprintf("30700000-0000-0000-0000-%012d", i+1)
+		ids[i] = id
+		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+			SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
+			Params: []any{id, fastPathTenantID, fmt.Sprintf("Chunk Before %04d", i)},
+		}); hostErr != nil {
+			t.Fatalf("seed insert %d: %+v", i, hostErr)
+		}
+		paramSets[i] = []any{fmt.Sprintf("Chunk After %04d", i), id}
+	}
+
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+		SQL:       "UPDATE widget SET name = $1 WHERE id = $2",
+		ParamSets: paramSets,
+	})
+	if hostErr != nil {
+		t.Fatalf("DBExecBatch: %+v", hostErr)
+	}
+	if out.TotalRowsAffected != n {
+		t.Errorf("TotalRowsAffected = %d, want %d", out.TotalRowsAffected, n)
+	}
+
+	rows := queryAuditLogRows(t, primaryDB, slug, "widget")
+	byRecordID := make(map[string]auditLogRow, len(rows))
+	var updateRows int
+	for _, r := range rows {
+		if r.Operation == "UPDATE" {
+			updateRows++
+			byRecordID[r.RecordID] = r
+		}
+	}
+	if updateRows != n {
+		t.Fatalf("UPDATE audit_log rows = %d, want %d", updateRows, n)
+	}
+
+	for _, i := range []int{0, 624, 625, 626, n - 1} {
+		row, ok := byRecordID[ids[i]]
+		if !ok {
+			t.Fatalf("no audit_log UPDATE row for id %s (index %d)", ids[i], i)
+		}
+		var oldData, newData map[string]any
+		if err := json.Unmarshal([]byte(row.OldData.String), &oldData); err != nil {
+			t.Fatalf("unmarshal old_data for index %d: %v", i, err)
+		}
+		if err := json.Unmarshal([]byte(row.NewData.String), &newData); err != nil {
+			t.Fatalf("unmarshal new_data for index %d: %v", i, err)
+		}
+		wantOld := fmt.Sprintf("Chunk Before %04d", i)
+		wantNew := fmt.Sprintf("Chunk After %04d", i)
+		if oldData["name"] != wantOld {
+			t.Errorf("index %d: old_data[name] = %v, want %q", i, oldData["name"], wantOld)
+		}
+		if newData["name"] != wantNew {
+			t.Errorf("index %d: new_data[name] = %v, want %q", i, newData["name"], wantNew)
+		}
 	}
 }
 
