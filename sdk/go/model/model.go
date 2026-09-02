@@ -3,18 +3,20 @@ package model
 import "time"
 
 type ModelDeclaration struct {
-	Name                string          `msgpack:"name"`
-	Table               string          `msgpack:"table,omitempty"`
-	Label               string          `msgpack:"label,omitempty"`
-	LabelPlural         string          `msgpack:"label_plural,omitempty"`
-	Fields              []NamedField    `msgpack:"fields"`
-	Indexes             []NamedIndex    `msgpack:"indexes,omitempty"`
-	EnabledOps          []Op            `msgpack:"enabled_ops,omitempty"`
-	EnabledViews        []ViewType      `msgpack:"enabled_views,omitempty"`
-	NavDecl             *NavDeclaration `msgpack:"nav,omitempty"`
-	Backend             ModelBackend    `msgpack:"backend,omitempty"`
-	TransientTTLSeconds int             `msgpack:"transient_ttl_seconds,omitempty"`
-	RoutePrefixOverride string          `msgpack:"route_prefix,omitempty"`
+	Name                string            `msgpack:"name"`
+	Table               string            `msgpack:"table,omitempty"`
+	Label               string            `msgpack:"label,omitempty"`
+	LabelPlural         string            `msgpack:"label_plural,omitempty"`
+	Fields              []NamedField      `msgpack:"fields"`
+	Indexes             []NamedIndex      `msgpack:"indexes,omitempty"`
+	EnabledOps          []Op              `msgpack:"enabled_ops,omitempty"`
+	EnabledViews        []ViewType        `msgpack:"enabled_views,omitempty"`
+	NavDecl             *NavDeclaration   `msgpack:"nav,omitempty"`
+	Backend             ModelBackend      `msgpack:"backend,omitempty"`
+	TransientTTLSeconds int               `msgpack:"transient_ttl_seconds,omitempty"`
+	RoutePrefixOverride string            `msgpack:"route_prefix,omitempty"`
+	Shareable           bool              `msgpack:"shareable,omitempty"`
+	SharePerms          []SharePermission `msgpack:"share_perms,omitempty"`
 }
 
 // ModelBackend selects what storage backend a model is read/written
@@ -76,6 +78,31 @@ func Transient(ttl time.Duration) ModelOption {
 	return func(d *ModelDeclaration) {
 		d.Backend = BackendTransient
 		d.TransientTTLSeconds = int(ttl / time.Second)
+	}
+}
+
+// SharePermission is the access level an ad hoc per-record grant confers —
+// go-sdk-reference.md §22 "Document sharing". ReadShare widens only the
+// compiled model's FOR SELECT policy; WriteShare widens FOR ALL, never
+// FOR SELECT alone, so a read-only grant can't accidentally imply write
+// access.
+type SharePermission string
+
+const (
+	ReadShare  SharePermission = "read"
+	WriteShare SharePermission = "write"
+)
+
+// Shareable opts a model into ad hoc per-record grants managed through
+// the built-in /_meta/shares endpoint (view-system.md §12), independent
+// of role/ABAC — go-sdk-reference.md §22 "Document sharing". perms lists
+// which grant levels /_meta/shares will accept for this model; requesting
+// a permission not listed here is a rejection. Opt-in per model, the same
+// allowlist posture as EnableOps/EnableViews/.Nav().
+func Shareable(perms ...SharePermission) ModelOption {
+	return func(d *ModelDeclaration) {
+		d.Shareable = true
+		d.SharePerms = perms
 	}
 }
 
