@@ -79,38 +79,37 @@ func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSync
 // dropping gets RLS disabled too, so it doesn't fail closed against a
 // policy that no longer exists.
 //
-// A table's live policies can include a different module's policy too
-// (e.g. a field_extension-style table two modules both declare policies
-// on, multitenancy-internals.md §5a's "Document sharing" note on shared
-// tables). Only a name whose first `:`-delimited segment is exactly this
-// module's own name is ever a drop candidate, since that's the only
-// ownership this reconciliation can prove: manifest-spec.md §8's `name`
-// format (`{module}:{resource}:{policy_name}`, unique across all loaded
-// modules) always starts with the declaring module's own name, and §2's
-// module-name regex (`^[a-z][a-z0-9_]{0,63}$`) excludes `:` from every
-// module name — so splitting a live policy's name on its first `:` and
-// comparing that segment to this module's name is a lossless,
-// unambiguous ownership test, unlike a prefix match on an
-// underscore-joined name (which two module names like
+// A table's live policies can include a different module's policy too (a
+// field_extension-style shared table, multitenancy-internals.md §5a).
+// Ownership is an exact match on a live name's first `:`-delimited
+// segment against this module's own name — manifest-spec.md §8's `name`
+// format always starts with the declaring module, and §2's module-name
+// regex excludes `:` from every module name, so the split is lossless,
+// unlike a prefix match on an underscore-joined name (which
 // "connector_paystack" and "connector_paystack_v2" could both satisfy).
-// Whether RLS stays enabled is decided from every live policy regardless
-// of ownership, so a foreign policy surviving this pass keeps the
-// table's RLS on.
+// RLS stays enabled if any live policy remains regardless of ownership,
+// so a foreign policy surviving this pass keeps the table's RLS on.
 func (e *SchemaDiffEngine) reconcileRLSPolicies(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]string) error {
 	schemaName := "tenant_" + sess.tenantSlug
 
 	seenTables := make(map[string]bool, len(modelDecls))
+	tables := make([]string, 0, len(modelDecls))
 	for _, md := range modelDecls {
 		table := TableNameFor(md)
 		if seenTables[table] {
 			continue
 		}
 		seenTables[table] = true
+		tables = append(tables, table)
+	}
 
-		liveNames, err := listRLSPolicyNames(ctx, sess.conn, schemaName, table)
-		if err != nil {
-			return fmt.Errorf("list RLS policies on %s: %w", table, err)
-		}
+	liveByTable, err := listRLSPoliciesByTable(ctx, sess.conn, schemaName, tables)
+	if err != nil {
+		return fmt.Errorf("list RLS policies: %w", err)
+	}
+
+	for _, table := range tables {
+		liveNames := liveByTable[table]
 
 		anyRemain := false
 		for _, name := range liveNames {
@@ -174,6 +173,47 @@ func listRLSPolicyNames(ctx context.Context, execer execQuerier, schemaName, tab
 		names = append(names, name)
 	}
 	return names, rows.Err()
+}
+
+// listRLSPoliciesByTable is listRLSPolicyNames batched across every table
+// in one round-trip (internal/engine/eventdelivery/replay.go's own
+// `= ANY($1)` precedent) instead of one query per table, grouped by
+// tablename for reconcileRLSPolicies's per-table walk.
+func listRLSPoliciesByTable(ctx context.Context, execer execQuerier, schemaName string, tables []string) (map[string][]string, error) {
+	rows, err := execer.QueryContext(ctx,
+		"SELECT tablename, policyname FROM pg_policies WHERE schemaname = $1 AND tablename = ANY($2)",
+		schemaName, pqStringArray(tables))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byTable := make(map[string][]string, len(tables))
+	for rows.Next() {
+		var table, name string
+		if err := rows.Scan(&table, &name); err != nil {
+			return nil, err
+		}
+		byTable[table] = append(byTable[table], name)
+	}
+	return byTable, rows.Err()
+}
+
+// pqStringArray formats a Go string slice as a Postgres text[] literal for
+// an `= ANY($1)` match — database/sql has no native []string binding, and
+// this package has no pq/pgtype array-encoding wired into its plain
+// *sql.Conn/*sql.DB use (same rationale as eventdelivery's own copy of
+// this helper). Table names come from TableNameFor (snake_case(Name) or
+// an explicit Table override), not free-form user input, but escaping
+// costs nothing.
+func pqStringArray(vals []string) string {
+	quoted := make([]string, len(vals))
+	for i, v := range vals {
+		escaped := strings.ReplaceAll(v, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		quoted[i] = `"` + escaped + `"`
+	}
+	return "{" + strings.Join(quoted, ",") + "}"
 }
 
 // resolvePolicyTarget resolves a policy's applies_to
