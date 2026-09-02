@@ -25,6 +25,16 @@ func invoicesModel() model.ModelDeclaration {
 		Index("idx_sales_invoices_id", model.BTreeIndex("id").Unique())
 }
 
+// sharedInvoiceModel has a bare (module-unqualified) Name so two
+// differently-named modules' policies can both target it via the same
+// resource token in applies_to — simulating a field_extension-style
+// table two modules share.
+func sharedInvoiceModel() model.ModelDeclaration {
+	return *model.Define("invoice", model.Table("shared_invoices")).
+		Field("id", model.UUID().Required()).
+		Field("amount", model.Integer().Required())
+}
+
 // openTestRLSReader creates (or reuses) a NOSUPERUSER, non-BYPASSRLS login
 // role and returns a *sql.DB connected as it — RLS is a no-op for a
 // superuser or BYPASSRLS role (multitenancy-internals.md §5a's
@@ -215,8 +225,8 @@ func TestSyncRLSPolicies_RemovingOnePolicyKeepsOthersOnSameTable(t *testing.T) {
 	}
 
 	names := livePolicyNames(t, adminConn, schemaName, table)
-	if len(names) != 1 || names[0] != "sales_order_managers_write" {
-		t.Fatalf("after removing own_only, live policies = %v, want [sales_order_managers_write]", names)
+	if len(names) != 1 || names[0] != "sales:order:managers_write" {
+		t.Fatalf("after removing own_only, live policies = %v, want [sales:order:managers_write]", names)
 	}
 	if !rlsEnabled(t, adminConn, schemaName, table) {
 		t.Fatalf("RLS disabled even though managers_write policy still remains")
@@ -331,8 +341,85 @@ func TestSyncRLSPolicies_Reconciliation_DropsStalePolicyWhenNameRetargetsTable(t
 	if rlsEnabled(t, adminConn, schemaName, "sales_orders") {
 		t.Fatalf("RLS still enabled on sales_orders after its only policy was retargeted away")
 	}
-	if names := livePolicyNames(t, adminConn, schemaName, "sales_invoices"); len(names) != 1 || names[0] != "sales_order_own_only" {
-		t.Fatalf("after retarget, sales_invoices live policies = %v, want [sales_order_own_only]", names)
+	if names := livePolicyNames(t, adminConn, schemaName, "sales_invoices"); len(names) != 1 || names[0] != "sales:order:own_only" {
+		t.Fatalf("after retarget, sales_invoices live policies = %v, want [sales:order:own_only]", names)
+	}
+}
+
+// goerp#557: two modules whose names are prefix-related (both legal under
+// manifest-spec.md §2's `^[a-z][a-z0-9_]{0,63}$`) declaring policies on
+// the same shared table must never be confused for one another — the
+// exact first-segment ownership match this fixes, replacing a substring
+// prefix test that could have let "connector_paystack"'s reconciliation
+// mistake "connector_paystack_v2"'s live policy for its own.
+func TestSyncRLSPolicies_Reconciliation_DistinguishesPrefixRelatedModuleNames(t *testing.T) {
+	conn, pool := openTestPool(t, 5*time.Second)
+	tenantSlug := "rlsprefixtest"
+
+	if _, err := conn.Exec("DROP SCHEMA IF EXISTS " + quoteIdent("tenant_"+tenantSlug) + " CASCADE"); err != nil {
+		t.Fatalf("drop tenant schema: %v", err)
+	}
+	if _, err := conn.Exec("CREATE SCHEMA " + quoteIdent("tenant_"+tenantSlug)); err != nil {
+		t.Fatalf("create tenant schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec("DROP SCHEMA IF EXISTS " + quoteIdent("tenant_"+tenantSlug) + " CASCADE")
+	})
+
+	tenantID := "44444444-4444-4444-4444-444444444444"
+	engine := NewSchemaDiffEngine(&Config{})
+	modelDecls := []model.ModelDeclaration{sharedInvoiceModel()}
+
+	shortSess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, "connector_paystack", testManifest("1.0.0"))
+	if err != nil {
+		t.Fatalf("BeginSync() (connector_paystack) error: %v", err)
+	}
+	t.Cleanup(func() { _ = shortSess.Close(context.Background()) })
+	syncOrdersTable(t, engine, shortSess, modelDecls)
+
+	shortModulePolicy := manifest.Policy{
+		Name:      "connector_paystack:invoice:own_only",
+		AppliesTo: "connector_paystack:invoice:read",
+		Condition: "record.amount > 0",
+	}
+	if err := engine.SyncRLSPolicies(context.Background(), shortSess, modelDecls, []manifest.Policy{shortModulePolicy}); err != nil {
+		t.Fatalf("SyncRLSPolicies() (connector_paystack install) error: %v", err)
+	}
+
+	longSess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, "connector_paystack_v2", testManifest("1.0.0"))
+	if err != nil {
+		t.Fatalf("BeginSync() (connector_paystack_v2) error: %v", err)
+	}
+	t.Cleanup(func() { _ = longSess.Close(context.Background()) })
+
+	longModulePolicy := manifest.Policy{
+		Name:      "connector_paystack_v2:invoice:v2_only",
+		AppliesTo: "connector_paystack_v2:invoice:read",
+		Condition: "record.amount > 100",
+	}
+	if err := engine.SyncRLSPolicies(context.Background(), longSess, modelDecls, []manifest.Policy{longModulePolicy}); err != nil {
+		t.Fatalf("SyncRLSPolicies() (connector_paystack_v2 install) error: %v", err)
+	}
+
+	schemaName := "tenant_" + tenantSlug
+	table := "shared_invoices"
+	if names := livePolicyNames(t, conn, schemaName, table); len(names) != 2 {
+		t.Fatalf("after both installs, live policies = %v, want 2", names)
+	}
+
+	// connector_paystack uninstalls (policies: nil) — its reconciliation
+	// must never mistake connector_paystack_v2's policy for its own, even
+	// though "connector_paystack_v2:..." starts with "connector_paystack".
+	if err := engine.SyncRLSPolicies(context.Background(), shortSess, modelDecls, nil); err != nil {
+		t.Fatalf("SyncRLSPolicies() (connector_paystack uninstall) error: %v", err)
+	}
+
+	names := livePolicyNames(t, conn, schemaName, table)
+	if len(names) != 1 || names[0] != "connector_paystack_v2:invoice:v2_only" {
+		t.Fatalf("after connector_paystack uninstall, live policies = %v, want [connector_paystack_v2:invoice:v2_only] only", names)
+	}
+	if !rlsEnabled(t, conn, schemaName, table) {
+		t.Fatalf("RLS disabled even though connector_paystack_v2's policy still remains")
 	}
 }
 

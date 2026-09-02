@@ -44,7 +44,12 @@ func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSync
 			return fmt.Errorf("policy %q: %w", policy.Name, err)
 		}
 
-		pgPolicyName := postgresPolicyName(policy.Name)
+		// The Postgres policy is named after the manifest policy's own
+		// `name` verbatim, colons included — quoteIdent's quoting already
+		// handles arbitrary identifier text, and keeping the `:` intact
+		// is what lets reconcileRLSPolicies recover the module segment
+		// unambiguously below.
+		pgPolicyName := policy.Name
 		desired[pgPolicyName] = table
 
 		enableRLS := fmt.Sprintf("ALTER TABLE %s ENABLE ROW LEVEL SECURITY", quoteIdent(table))
@@ -77,27 +82,22 @@ func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSync
 // A table's live policies can include a different module's policy too
 // (e.g. a field_extension-style table two modules both declare policies
 // on, multitenancy-internals.md §5a's "Document sharing" note on shared
-// tables). Only a name carrying this module's own "{moduleName}_" prefix
-// is ever a drop candidate, since that's the only ownership this
-// reconciliation can prove — manifest-spec.md §8's `name` format
-// (`{module}:{resource}:{policy_name}`, unique across all loaded modules)
-// guarantees postgresPolicyName always produces that prefix for a policy
-// this module declared. Whether RLS stays enabled is decided from every
-// live policy regardless of prefix, so a foreign policy surviving this
-// pass keeps the table's RLS on.
-//
-// The prefix match is a substring test, not a segment boundary: two
-// modules whose names share a "shorter-is-a-prefix-of-longer" relationship
-// with an underscore at the boundary (both legal under manifest-spec.md
-// §1's `^[a-z][a-z0-9_]{0,63}$`, e.g. "connector_paystack" and
-// "connector_paystack_v2") aren't distinguishable from this string alone
-// if they ever share a table. Closing that gap needs an unambiguous
-// ownership signal beyond the postgresPolicyName encoding goerp#71 already
-// shipped and every provisioned tenant's live policies already use —
-// tracked separately rather than changed here.
+// tables). Only a name whose first `:`-delimited segment is exactly this
+// module's own name is ever a drop candidate, since that's the only
+// ownership this reconciliation can prove: manifest-spec.md §8's `name`
+// format (`{module}:{resource}:{policy_name}`, unique across all loaded
+// modules) always starts with the declaring module's own name, and §2's
+// module-name regex (`^[a-z][a-z0-9_]{0,63}$`) excludes `:` from every
+// module name — so splitting a live policy's name on its first `:` and
+// comparing that segment to this module's name is a lossless,
+// unambiguous ownership test, unlike a prefix match on an
+// underscore-joined name (which two module names like
+// "connector_paystack" and "connector_paystack_v2" could both satisfy).
+// Whether RLS stays enabled is decided from every live policy regardless
+// of ownership, so a foreign policy surviving this pass keeps the
+// table's RLS on.
 func (e *SchemaDiffEngine) reconcileRLSPolicies(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]string) error {
 	schemaName := "tenant_" + sess.tenantSlug
-	prefix := sess.moduleName + "_"
 
 	seenTables := make(map[string]bool, len(modelDecls))
 	for _, md := range modelDecls {
@@ -114,7 +114,8 @@ func (e *SchemaDiffEngine) reconcileRLSPolicies(ctx context.Context, sess *Schem
 
 		anyRemain := false
 		for _, name := range liveNames {
-			if !strings.HasPrefix(name, prefix) {
+			owningModule, _, ok := strings.Cut(name, ":")
+			if !ok || owningModule != sess.moduleName {
 				anyRemain = true
 				continue
 			}
@@ -213,13 +214,6 @@ func resolvePolicyTarget(policy manifest.Policy, modelDecls []model.ModelDeclara
 	}
 
 	return TableNameFor(md), forAll, nil
-}
-
-// postgresPolicyName turns a manifest policy name like
-// "sales:order:own_only" into the Postgres identifier form
-// "sales_order_own_only" used in multitenancy-internals.md §5a's example.
-func postgresPolicyName(name string) string {
-	return strings.ReplaceAll(name, ":", "_")
 }
 
 func buildCreatePolicyStmt(pgPolicyName, table, compiledExpr string, forAll bool) string {
