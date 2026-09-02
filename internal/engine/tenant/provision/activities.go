@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -213,20 +214,21 @@ func registerTenantPartition(ctx context.Context, pool *sql.DB, slug, table, con
 // before module schema sync and config seeding can run: roles/
 // role_permissions/user_roles (role.Store.Bootstrap), tenant_invitations
 // (invite.Store.Bootstrap — requires roles to exist first, per its own
-// foreign key), module_config (this ticket's own SeedTenantConfig step),
-// sequences (backing store for Sequence-kind fields' per-tenant
-// counters, keyed by (model, field, period_key)), audit_log (goerp#363 —
-// host.orm's write path records one row here per INSERT/UPDATE/DELETE on
-// a module's own audited_tables[]), and event_log (goerp#16 —
-// eventdelivery.Worker records one row here per dispatched domain
-// event). multitenancy-internals.md §6 step 3 lists several further
-// engine-owned tables (files, notifications, notification_preferences,
-// saved_filters, record_shares, view_overrides) — deliberately not
-// created here: nothing in this codebase reads or writes any of them yet
-// (each is its own separate, untriaged feature area), and this ticket's
-// own acceptance criteria don't exercise them, only "seeded config"
-// (module_config) and "default roles". Creating unconsumed tables now
-// would be schema no code can yet verify against.
+// foreign key), record_shares (recordshares.Store.Bootstrap — goerp#472,
+// the .Shareable() model widening's compiled RLS EXISTS lookup reads
+// this uniformly regardless of which module owns the model), module_config
+// (this ticket's own SeedTenantConfig step), sequences (backing store for
+// Sequence-kind fields' per-tenant counters, keyed by
+// (model, field, period_key)), audit_log (goerp#363 — host.orm's write
+// path records one row here per INSERT/UPDATE/DELETE on a module's own
+// audited_tables[]), and event_log (goerp#16 — eventdelivery.Worker
+// records one row here per dispatched domain event).
+// multitenancy-internals.md §6 step 3 lists several further engine-owned
+// tables (files, notifications, notification_preferences, saved_filters,
+// view_overrides) — deliberately not created here: nothing in this
+// codebase reads or writes any of them yet (each is its own separate,
+// untriaged feature area). Creating unconsumed tables now would be
+// schema no code can yet verify against.
 func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error {
 	if err := role.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
 		return fmt.Errorf("bootstrap roles: %w", err)
@@ -237,6 +239,10 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 	// nil is safe here, this instance exists for exactly one call.
 	if err := invite.NewStore(a.schemaSyncPool, nil, nil, nil, nil).Bootstrap(ctx, slug); err != nil {
 		return fmt.Errorf("bootstrap invitations: %w", err)
+	}
+
+	if err := recordshares.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
+		return fmt.Errorf("bootstrap record_shares: %w", err)
 	}
 
 	query := fmt.Sprintf(createModuleConfigTable, tenantschema.Name(slug))
