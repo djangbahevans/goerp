@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
-	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -352,34 +351,18 @@ func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, 
 		}
 	}
 
-	if err := finish(nil); err != nil {
-		return dbExecBatchOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	duration, hostErr := finishBatchTx(finish, start, modCtx, input.SQL, len(input.ParamSets), "host.db.exec_batch: slow COPY batch")
+	if hostErr != nil {
+		return dbExecBatchOutput{}, hostErr
 	}
-	duration := time.Since(start)
-
-	if duration > slowQueryThreshold {
-		log.Warn().Str("module", modCtx.ModuleName).Str("sql", input.SQL).
-			Int("param_sets", len(input.ParamSets)).Dur("duration", duration).
-			Msg("host.db.exec_batch: slow COPY batch")
-	}
-
-	output := dbExecBatchOutput{
-		TotalRowsAffected: int(rowsCopied),
-		DurationMs:        float64(duration.Microseconds()) / 1000,
-	}
-	if p.requestedCols != nil {
-		output.Returning = returning
-	}
-	return output, nil
+	return batchOutput(int(rowsCopied), duration, returning, p.requestedCols), nil
 }
 
 // maxReadbackChunkParams caps how many primary-key values a single
-// post-copy read-back SELECT binds at once. Postgres rejects any
-// statement needing more than 65535 bound parameters (each pk value is
-// bound twice in copyReadbackChunk's own query text — once for the
-// IN-list, once for its CASE/WHEN ordering branch — but a value bound
-// twice in one statement's text still counts as one parameter, so this
-// cap bounds len(paramSets) directly, comfortably clear of that limit).
+// post-copy read-back SELECT binds at once — one bound parameter per
+// row (copyReadbackChunk's own UNION ALL branches each reference their
+// row's pk value exactly once), comfortably clear of Postgres's
+// 65535-bound-parameters-per-statement limit.
 const maxReadbackChunkParams = 5000
 
 // copyReadback re-queries the rows execBatchCopy just copied, by their
@@ -412,34 +395,43 @@ func copyReadback(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan
 // pk column's position within plan.Columns, precomputed once by the
 // caller since it's the same for every chunk.
 func copyReadbackChunk(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan, pkIdx int, paramSets [][]any) ([]map[string]any, *abi.HostError) {
-	pkValues := make([]any, len(paramSets))
-	inPlaceholders := make([]string, len(paramSets))
 	// A plain "WHERE pk IN (...)" gives Postgres no ordering guarantee —
 	// this ABI's own contract requires opts.returning rows back in
 	// param_sets order (see host-abi-reference.md's own ABI-level output
-	// shape). A CASE/WHEN over the same placeholders sorts by that order
-	// entirely in SQL, using each pk value's own already-correct type via
-	// ordinary "=" comparison — the same reasoning behind not binding
-	// pkValues as a single Postgres array parameter: paramSets can carry
-	// any pk type (uuid, text, int, ...), and database/sql has no generic
-	// way to bind a heterogeneous []any as one typed array parameter.
-	// Known scope boundary: this costs Postgres one CASE/WHEN branch
-	// evaluation per row per WHEN clause (up to maxReadbackChunkParams²
-	// comparisons worst-case per chunk) to compute the sort order — a
-	// join against an explicit ordinal list would let the planner use a
-	// hash or merge join instead, without changing the bind shape, but
-	// isn't implemented here.
-	caseWhens := make([]string, len(paramSets))
+	// shape). One UNION ALL branch per row, each a direct "t.pk = $n"
+	// point lookup tagged with its own literal ordinal, replaces the
+	// CASE/WHEN technique this function used before (one branch
+	// evaluated per row per WHEN clause — O(n²) worst case per chunk)
+	// with N independent index scans (confirmed via EXPLAIN against a
+	// real table) plus a single cheap sort of the (small) unioned
+	// result by that ordinal. A join against a (pk, ordinal) VALUES
+	// list was tried and rejected: a VALUES list's own column type
+	// resolves independently of how its rows are later compared
+	// elsewhere in the statement, so an untyped pk parameter used only
+	// inside VALUES(...) defaults to text regardless of context —
+	// confirmed against real Postgres — and a text = uuid (or any
+	// other non-text pk type) comparison has no operator; each branch
+	// here instead compares $n directly against t.<pk>, the same
+	// context that already lets Postgres infer $n's real type
+	// correctly (proven by the WHERE ... IN (...) form this replaced).
+	// Selecting each branch's row as one whole-row composite
+	// (row_data) rather than t.* keeps the UNION to two columns
+	// (row_data, ordinal) regardless of the table's own column count,
+	// so ORDER BY sorts a small fixed-width row rather than the
+	// table's full row shape; the outer SELECT then expands
+	// (row_data).* back into the table's own column set, unchanged
+	// from a plain "SELECT *"'s own shape.
+	pkIdent := pgx.Identifier{plan.PKCol}.Sanitize()
+	tableIdent := pgx.Identifier{p.table}.Sanitize()
+
+	branches := make([]string, len(paramSets))
+	pkValues := make([]any, len(paramSets))
 	for i, params := range paramSets {
 		pkValues[i] = params[pkIdx]
-		placeholder := fmt.Sprintf("$%d", i+1)
-		inPlaceholders[i] = placeholder
-		caseWhens[i] = fmt.Sprintf("WHEN %s THEN %d", placeholder, i)
+		branches[i] = fmt.Sprintf("SELECT t AS row_data, %d AS copy_readback_seq FROM %s t WHERE t.%s = $%d", i, tableIdent, pkIdent, i+1)
 	}
 
-	pkIdent := pgx.Identifier{plan.PKCol}.Sanitize()
-	selectSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s IN (%s) ORDER BY CASE %s %s END",
-		pgx.Identifier{p.table}.Sanitize(), pkIdent, strings.Join(inPlaceholders, ","), pkIdent, strings.Join(caseWhens, " "))
+	selectSQL := fmt.Sprintf("SELECT (x.row_data).* FROM (%s) x ORDER BY x.copy_readback_seq", strings.Join(branches, " UNION ALL "))
 
 	rows, err := tx.QueryContext(ctx, selectSQL, pkValues...)
 	if err != nil {
@@ -546,22 +538,16 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 
 	start := time.Now()
 
-	oldRowsPerIndex := make([][]map[string]any, len(input.ParamSets))
+	var allOldRows []map[string]any
 	if p.audited {
-		for i, params := range input.ParamSets {
-			rows, err := captureRowsBeforeExec(ctx, tx, auditableExecStmt{
-				Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause,
-			}, params)
-			if err != nil {
-				_ = finish(err)
-				return dbExecBatchOutput{}, &abi.HostError{
-					Code:    abi.ErrCodeDBBatchError,
-					Message: fmt.Sprintf("parameter set %d: %s", i, err.Error()),
-					Details: map[string]any{"index": i, "code": abi.ErrCodeExecError, "message": err.Error()},
-				}
-			}
-			oldRowsPerIndex[i] = rows
+		rows, err := captureRowsBeforeExecBatch(ctx, tx, auditableExecStmt{
+			Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause,
+		}, input.ParamSets)
+		if err != nil {
+			_ = finish(err)
+			return dbExecBatchOutput{}, batchErrorForRowErr(-1, abi.ErrCodeExecError, "", err)
 		}
+		allOldRows = rows
 	}
 
 	batch := &pgx.Batch{}
@@ -637,25 +623,19 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 	if pipelineErr != nil {
 		_ = finish(pipelineErr)
 		if rowErr, ok := errors.AsType[*pipelineRowError](pipelineErr); ok {
-			return dbExecBatchOutput{}, &abi.HostError{
-				Code:    abi.ErrCodeDBBatchError,
-				Message: fmt.Sprintf("parameter set %d: %s", rowErr.index, rowErr.host.Message),
-				Details: map[string]any{"index": rowErr.index, "code": rowErr.host.Code, "message": rowErr.host.Message, "details": rowErr.host.Details},
-			}
+			return dbExecBatchOutput{}, batchErrorForHostErr(rowErr.index, rowErr.host)
 		}
 		return dbExecBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: pipelineErr.Error(), Retry: true}
 	}
 
 	if p.audited {
-		for i, res := range results {
-			if err := writeAuditForExec(ctx, tx, modCtx, p.table, p.stmt, p.pkCol, p.excludeCols, oldRowsPerIndex[i], res.newRows); err != nil {
-				_ = finish(err)
-				return dbExecBatchOutput{}, &abi.HostError{
-					Code:    abi.ErrCodeDBBatchError,
-					Message: fmt.Sprintf("parameter set %d: audit write failed: %s", i, err.Error()),
-					Details: map[string]any{"index": i, "code": abi.ErrCodeUnavailable, "message": err.Error()},
-				}
-			}
+		var allNewRows []map[string]any
+		for _, res := range results {
+			allNewRows = append(allNewRows, res.newRows...)
+		}
+		if err := writeAuditForExec(ctx, tx, modCtx, p.table, p.stmt, p.pkCol, p.excludeCols, allOldRows, allNewRows); err != nil {
+			_ = finish(err)
+			return dbExecBatchOutput{}, batchErrorForRowErr(-1, abi.ErrCodeUnavailable, "audit write failed: ", err)
 		}
 	}
 
@@ -668,23 +648,9 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 		}
 	}
 
-	if err := finish(nil); err != nil {
-		return dbExecBatchOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+	duration, hostErr := finishBatchTx(finish, start, modCtx, input.SQL, len(input.ParamSets), "host.db.exec_batch: slow pipelined batch")
+	if hostErr != nil {
+		return dbExecBatchOutput{}, hostErr
 	}
-	duration := time.Since(start)
-
-	if duration > slowQueryThreshold {
-		log.Warn().Str("module", modCtx.ModuleName).Str("sql", input.SQL).
-			Int("param_sets", len(input.ParamSets)).Dur("duration", duration).
-			Msg("host.db.exec_batch: slow pipelined batch")
-	}
-
-	output := dbExecBatchOutput{
-		TotalRowsAffected: totalRowsAffected,
-		DurationMs:        float64(duration.Microseconds()) / 1000,
-	}
-	if p.requestedCols != nil {
-		output.Returning = returning
-	}
-	return output, nil
+	return batchOutput(totalRowsAffected, duration, returning, p.requestedCols), nil
 }

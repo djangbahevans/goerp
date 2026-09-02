@@ -293,16 +293,9 @@ func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (prepar
 // by this call.
 func beginOrBorrowExecTx(qCtx context.Context, primary *sql.DB, modCtx *ModuleContext, txID string) (conn *sql.Conn, tx *sql.Tx, finish func(error) error, hostErr *abi.HostError) {
 	if txID != "" {
-		borrowedTx, ok := modCtx.Transaction(txID)
+		borrowedConn, borrowedTx, ok := modCtx.TransactionAndConn(txID)
 		if !ok {
 			return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
-		}
-		borrowedConn, ok := modCtx.RawConn(txID)
-		if !ok {
-			// Transaction and RawConn are populated together by
-			// RegisterTransaction — this only trips if that invariant
-			// is ever broken elsewhere.
-			return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "transaction has no pinned connection"}
 		}
 		return borrowedConn, borrowedTx, func(error) error { return nil }, nil
 	}
@@ -495,12 +488,11 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 // exercise it.
 func writeAuditForExec(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, table string, stmt execStmt, pkCol string, excludeCols map[string]bool, oldRows, newRows []map[string]any) error {
 	if stmt.Operation == "INSERT" {
-		for _, row := range newRows {
-			if err := insertAuditLogRow(ctx, tx, modCtx, table, row[pkCol], "INSERT", excludeCols, nil, row); err != nil {
-				return err
-			}
+		entries := make([]auditLogEntry, len(newRows))
+		for i, row := range newRows {
+			entries[i] = auditLogEntry{RecordID: row[pkCol], NewData: row}
 		}
-		return nil
+		return insertAuditLogRows(ctx, tx, modCtx, table, "INSERT", excludeCols, entries)
 	}
 	if stmt.Operation == "DELETE" {
 		// newRows may be non-nil here if the module set opts.returning on

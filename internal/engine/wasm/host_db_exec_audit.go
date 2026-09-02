@@ -113,6 +113,16 @@ func captureRowsBeforeExec(ctx context.Context, tx *sql.Tx, stmt auditableExecSt
 // untrusted boundary input, not something this function can assume is
 // well-formed.
 func renumberParams(node *pg_query.Node, params []any) (*pg_query.Node, []any, error) {
+	return renumberParamsFrom(node, params, 0)
+}
+
+// renumberParamsFrom is renumberParams' own base-offset form: renumbered
+// placeholders start at base+1 instead of always $1. Needed when more
+// than one clause's own params must coexist as $n literals in a single
+// combined statement (captureRowsBeforeExecBatch), where each row's own
+// renumbered placeholders must continue on from the previous row's own
+// highest number rather than every row restarting at $1.
+func renumberParamsFrom(node *pg_query.Node, params []any, base int32) (*pg_query.Node, []any, error) {
 	if node == nil {
 		return nil, nil, nil
 	}
@@ -140,7 +150,7 @@ func renumberParams(node *pg_query.Node, params []any) (*pg_query.Node, []any, e
 		newNum, ok := seen[pr.Number]
 		if !ok {
 			newParams = append(newParams, params[pr.Number-1])
-			newNum = int32(len(newParams))
+			newNum = base + int32(len(newParams))
 			seen[pr.Number] = newNum
 		}
 		pr.Number = newNum
@@ -151,6 +161,69 @@ func renumberParams(node *pg_query.Node, params []any) (*pg_query.Node, []any, e
 	}
 
 	return clone, newParams, nil
+}
+
+// captureRowsBeforeExecBatch is captureRowsBeforeExec's own batched form:
+// one SELECT for the whole batch (every row's own WHERE-clause target
+// OR'd together) instead of one per row. Safe because
+// pipelineHasDuplicateAuditTargets already excludes any batch whose rows
+// could target the same primary key twice, so the combined result set is
+// unambiguous regardless of statement order — the same guarantee
+// execBatchPipeline's own eligibility check (host_db_exec_batch_fast.go)
+// already relies on for pairing old/new rows by primary key after the
+// fact. Chunked at maxAuditBatchChunkParams total bound parameters
+// (host_orm_write.go), tracked per row via len(paramSets[i]) — a
+// deliberately conservative proxy for a row's own true referenced-param
+// count (renumberParamsFrom's own dedup can only make the real count
+// smaller), safe to overestimate since it only ever makes a chunk
+// somewhat smaller than the limit allows, never over it.
+func captureRowsBeforeExecBatch(ctx context.Context, tx *sql.Tx, stmt auditableExecStmt, paramSets [][]any) ([]map[string]any, error) {
+	if len(paramSets) == 0 {
+		return nil, nil
+	}
+	if len(paramSets) == 1 {
+		return captureRowsBeforeExec(ctx, tx, stmt, paramSets[0])
+	}
+
+	var allRows []map[string]any
+	for i := 0; i < len(paramSets); {
+		var nodes []*pg_query.Node
+		var chunkParams []any
+		weight := 0
+		for i < len(paramSets) {
+			rowWeight := len(paramSets[i])
+			if len(nodes) > 0 && weight+rowWeight > maxAuditBatchChunkParams {
+				break
+			}
+			node, rowParams, err := renumberParamsFrom(stmt.WhereClause, paramSets[i], int32(len(chunkParams)))
+			if err != nil {
+				return nil, err
+			}
+			nodes = append(nodes, node)
+			chunkParams = append(chunkParams, rowParams...)
+			weight += rowWeight
+			i++
+		}
+
+		combined := nodes[0]
+		if len(nodes) > 1 {
+			combined = pg_query.MakeBoolExprNode(pg_query.BoolExprType_OR_EXPR, nodes, 0)
+		}
+		selectSQL, err := deparseSelectAll(stmt.Relation, combined)
+		if err != nil {
+			return nil, fmt.Errorf("build batched audit pre-read query: %w", err)
+		}
+		rows, err := tx.QueryContext(ctx, selectSQL, chunkParams...)
+		if err != nil {
+			return nil, fmt.Errorf("read rows before audited exec batch: %w", err)
+		}
+		chunkRows, err := scanRowsToMaps(rows)
+		if err != nil {
+			return nil, err
+		}
+		allRows = append(allRows, chunkRows...)
+	}
+	return allRows, nil
 }
 
 // deparseSelectAll renders `SELECT * FROM relation [WHERE whereClause]`
@@ -231,14 +304,13 @@ func writeExecAuditEntries(ctx context.Context, tx *sql.Tx, modCtx *ModuleContex
 		pairs = append(pairs, p)
 	}
 
-	for _, p := range pairs {
+	entries := make([]auditLogEntry, len(pairs))
+	for i, p := range pairs {
 		recordID := p.old[pkCol]
 		if p.new != nil {
 			recordID = p.new[pkCol]
 		}
-		if err := insertAuditLogRow(ctx, tx, modCtx, table, recordID, stmt.Operation, excludeCols, p.old, p.new); err != nil {
-			return err
-		}
+		entries[i] = auditLogEntry{RecordID: recordID, OldData: p.old, NewData: p.new}
 	}
-	return nil
+	return insertAuditLogRows(ctx, tx, modCtx, table, stmt.Operation, excludeCols, entries)
 }

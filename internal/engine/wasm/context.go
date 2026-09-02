@@ -237,12 +237,22 @@ func (mc *ModuleContext) RegisterTransaction(txID string, conn *sql.Conn, tx *sq
 	mc.transactions[txID] = openTransaction{conn: conn, tx: tx}
 }
 
-// Transaction looks up a transaction previously registered under txID.
-func (mc *ModuleContext) Transaction(txID string) (*sql.Tx, bool) {
+// transactionEntry looks up txID's registered transaction under one
+// lock — the shared primitive Transaction, RawConn, and
+// TransactionAndConn all build on, so a caller needing both halves (as
+// beginOrBorrowExecTx does, host_db_exec.go) pays one lock/lookup
+// instead of two.
+func (mc *ModuleContext) transactionEntry(txID string) (openTransaction, bool) {
 	mc.txMu.Lock()
 	defer mc.txMu.Unlock()
 
 	ot, ok := mc.transactions[txID]
+	return ot, ok
+}
+
+// Transaction looks up a transaction previously registered under txID.
+func (mc *ModuleContext) Transaction(txID string) (*sql.Tx, bool) {
+	ot, ok := mc.transactionEntry(txID)
 	return ot.tx, ok
 }
 
@@ -253,11 +263,17 @@ func (mc *ModuleContext) Transaction(txID string) (*sql.Tx, bool) {
 // issued through the raw handle participates in the same transaction,
 // since both share one physical connection (goerp#511).
 func (mc *ModuleContext) RawConn(txID string) (*sql.Conn, bool) {
-	mc.txMu.Lock()
-	defer mc.txMu.Unlock()
-
-	ot, ok := mc.transactions[txID]
+	ot, ok := mc.transactionEntry(txID)
 	return ot.conn, ok
+}
+
+// TransactionAndConn returns both txID's *sql.Tx and its pinned *sql.Conn
+// (RawConn's own connection) from a single lock/lookup — for a caller
+// like beginOrBorrowExecTx that needs both together, instead of two
+// separate locked lookups via Transaction and RawConn.
+func (mc *ModuleContext) TransactionAndConn(txID string) (*sql.Conn, *sql.Tx, bool) {
+	ot, ok := mc.transactionEntry(txID)
+	return ot.conn, ot.tx, ok
 }
 
 // RemoveTransaction drops txID's bookkeeping entry and closes its pinned

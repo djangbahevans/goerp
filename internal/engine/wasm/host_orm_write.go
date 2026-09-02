@@ -1507,6 +1507,71 @@ func insertAuditLogRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, t
 	return nil
 }
 
+// auditLogEntry is one row insertAuditLogRows writes to audit_log —
+// oldData/newData in the same shape insertAuditLogRow itself takes.
+type auditLogEntry struct {
+	RecordID any
+	OldData  map[string]any
+	NewData  map[string]any
+}
+
+// maxAuditBatchChunkParams caps how many bound parameters
+// insertAuditLogRows/captureRowsBeforeExecBatch (host_db_exec_audit.go)
+// build into a single statement — comfortably under Postgres's
+// 65535-bound-parameters-per-statement limit, with headroom for the
+// per-row parameter count each of those two functions actually uses (8
+// and a WHERE clause's own arbitrary count respectively).
+const maxAuditBatchChunkParams = 5000
+
+// insertAuditLogRows writes entries to audit_log via one multi-row INSERT
+// per chunk, instead of insertAuditLogRow's own one-round-trip-per-row
+// form — table, operation, excludeCols, and modCtx's own changed_by/
+// request_id/trace_id are shared across every row, since every call site
+// (writeAuditForExec's own INSERT branch, writeExecAuditEntries) already
+// writes audit rows for one table/operation within one request. A
+// single-entry chunk reuses insertAuditLogRow's own SQL text unchanged,
+// rather than building a one-row VALUES list a different way.
+func insertAuditLogRows(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, table, operation string, excludeCols map[string]bool, entries []auditLogEntry) error {
+	const paramsPerRow = 8
+	rowsPerChunk := maxAuditBatchChunkParams / paramsPerRow
+
+	for start := 0; start < len(entries); start += rowsPerChunk {
+		chunk := entries[start:min(start+rowsPerChunk, len(entries))]
+
+		if len(chunk) == 1 {
+			e := chunk[0]
+			if err := insertAuditLogRow(ctx, tx, modCtx, table, e.RecordID, operation, excludeCols, e.OldData, e.NewData); err != nil {
+				return err
+			}
+			continue
+		}
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk)*paramsPerRow)
+		for i, e := range chunk {
+			oldJSON, err := auditJSON(e.OldData, excludeCols)
+			if err != nil {
+				return err
+			}
+			newJSON, err := auditJSON(e.NewData, excludeCols)
+			if err != nil {
+				return err
+			}
+			base := i * paramsPerRow
+			placeholders[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, NULLIF($%d, '')::uuid, $%d, $%d)",
+				base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8)
+			args = append(args, table, e.RecordID, operation, oldJSON, newJSON, modCtx.UserID, modCtx.RequestID, modCtx.TraceID)
+		}
+
+		sqlStr := fmt.Sprintf(`INSERT INTO %s (table_name, record_id, operation, old_data, new_data, changed_by, request_id, trace_id)
+			VALUES %s`, quoteIdentORM(auditLogTableName), strings.Join(placeholders, ", "))
+		if _, err := tx.ExecContext(ctx, sqlStr, args...); err != nil {
+			return fmt.Errorf("insert audit_log rows: %w", err)
+		}
+	}
+	return nil
+}
+
 // fetchRowForAuditBeforeWrite fetches qualifiedModel's row by pkValue
 // before an UPDATE runs, so writeAuditLogEntry has a real old_data
 // snapshot to record — but only when the table is actually audited, so
