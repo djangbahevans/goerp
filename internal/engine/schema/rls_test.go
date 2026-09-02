@@ -3,11 +3,14 @@ package schema
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -456,4 +459,500 @@ func countVisibleRows(t *testing.T, conn *sql.DB, schemaName, table, userContact
 		t.Fatalf("count rows: %v", err)
 	}
 	return count
+}
+
+// shareableOrdersModel is ordersModel with two changes: an explicit
+// .PrimaryKey() on id (syncShareWidening's primaryKeyColumnName needs a
+// real IsPrimaryKey field, unlike ordersModel's own bare .Required()),
+// and a bare, undotted Name ("order", not ordersModel's "sales.order") —
+// route.RegisterModelRoutes's/registry.RegistrySnapshot.ModelByName's
+// documented convention is moduleName + "." + the model's bare Name,
+// which syncShareWidening's own qualifiedName also follows; ordersModel's
+// dotted Name only happens to work for the ABAC-only tests above because
+// resolvePolicyTarget separately accepts either form.
+// .Shareable(perms...) is applied only when perms is non-nil — mirroring
+// dispatch_meta_test.go's own "nil means don't declare Shareable at all"
+// fixture convention, so a test can build a genuinely non-Shareable model
+// via zero args.
+func shareableOrdersModel(perms ...model.SharePermission) model.ModelDeclaration {
+	opts := []model.ModelOption{model.Table("sales_orders")}
+	if perms != nil {
+		opts = append(opts, model.Shareable(perms...))
+	}
+	d := model.Define("order", opts...).
+		Field("id", model.UUID().Required().PrimaryKey()).
+		Field("salesperson_id", model.UUID().Required()).
+		Index("idx_sales_orders_id", model.BTreeIndex("id").Unique())
+	return *d
+}
+
+// bootstrapRecordShares creates record_shares in the tenant schema
+// syncShareWidening's compiled EXISTS clause reads from — real deployments
+// get this from tenant provisioning's CreateEngineTables activity, ahead
+// of any module's own schema sync.
+func bootstrapRecordShares(t *testing.T, conn *sql.DB, tenantSlug string) {
+	t.Helper()
+	if err := recordshares.NewStore(conn).Bootstrap(context.Background(), tenantSlug); err != nil {
+		t.Fatalf("bootstrap record_shares: %v", err)
+	}
+}
+
+// insertShare seeds a record_shares row directly (as the admin/superuser
+// connection, bypassing RLS) — the row a widening policy's EXISTS clause
+// is meant to match.
+func insertShare(t *testing.T, conn *sql.DB, schemaName, qualifiedModel, recordID, sharedWithUserID, permission string) {
+	t.Helper()
+	if _, err := conn.Exec(
+		"INSERT INTO "+quoteIdent(schemaName)+".record_shares (model, record_id, shared_with_user_id, permission, shared_by) VALUES ($1, $2, $3, $4, gen_random_uuid())",
+		qualifiedModel, recordID, sharedWithUserID, permission,
+	); err != nil {
+		t.Fatalf("insert record_shares row: %v", err)
+	}
+}
+
+// grantSelectOn grants the test reader role SELECT on an additional
+// schema-qualified table — openTestRLSReader only grants the one table
+// its own caller names, but a share-widening policy's EXISTS subquery
+// against record_shares runs as the querying role, so the reader needs
+// SELECT on record_shares too or the subquery itself fails on a
+// permission error rather than evaluating to false.
+func grantSelectOn(t *testing.T, adminConn *sql.DB, roleName, qualifiedTable string) {
+	t.Helper()
+	if _, err := adminConn.Exec("GRANT SELECT ON " + qualifiedTable + " TO " + roleName); err != nil {
+		t.Fatalf("grant select on %s: %v", qualifiedTable, err)
+	}
+}
+
+// countVisibleRowsAsUser is countVisibleRows's counterpart for
+// syncShareWidening's own session variable — app.current_user_id, which
+// its compiled EXISTS clause reads via the same current_setting(...)
+// expression internal/engine/domain's UserAttr "id" case compiles ABAC
+// current_user.id conditions to.
+func countVisibleRowsAsUser(t *testing.T, conn *sql.DB, schemaName, table, userContactID, userID string) int {
+	t.Helper()
+	tx, err := conn.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec("SET LOCAL search_path = " + quoteIdent(schemaName)); err != nil {
+		t.Fatalf("set search_path: %v", err)
+	}
+	if _, err := tx.Exec("SELECT set_config('app.current_user_contact_id', $1, true)", userContactID); err != nil {
+		t.Fatalf("set app.current_user_contact_id: %v", err)
+	}
+	if _, err := tx.Exec("SELECT set_config('app.current_user_id', $1, true)", userID); err != nil {
+		t.Fatalf("set app.current_user_id: %v", err)
+	}
+
+	var count int
+	if err := tx.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	return count
+}
+
+func policyCmd(t *testing.T, conn *sql.DB, schemaName, table, policyName string) string {
+	t.Helper()
+	var cmd string
+	if err := conn.QueryRow(
+		"SELECT cmd FROM pg_policies WHERE schemaname = $1 AND tablename = $2 AND policyname = $3",
+		schemaName, table, policyName,
+	).Scan(&cmd); err != nil {
+		t.Fatalf("query policy cmd for %q: %v", policyName, err)
+	}
+	return cmd
+}
+
+// A .Shareable(ReadShare) model, sharing an ABAC-restricted row with a
+// user who isn't its owner and holds no ABAC-granting role, makes that
+// row visible to the recipient — and only the recipient, not an
+// unrelated third user with no share at all — goerp#471 AC.
+func TestSyncShareWidening_ReadShareGrantsVisibilityToRecipientOnly(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "shareread", "sales")
+	tenantSlug := "shareread"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare, model.WriteShare)}
+	syncOrdersTable(t, engine, sess, modelDecls)
+
+	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v", err)
+	}
+
+	schemaName := "tenant_" + tenantSlug
+	table := "sales_orders"
+	qualifiedTable := quoteIdent(schemaName) + "." + quoteIdent(table)
+
+	ownerID := "22222222-2222-2222-2222-222222222222"
+	insertRow(t, adminConn, qualifiedTable, ownerID)
+
+	var recordID string
+	if err := adminConn.QueryRow("SELECT id FROM " + qualifiedTable + " LIMIT 1").Scan(&recordID); err != nil {
+		t.Fatalf("read back inserted row id: %v", err)
+	}
+
+	recipientID := "66666666-6666-6666-6666-666666666666"
+	insertShare(t, adminConn, schemaName, "sales.order", recordID, recipientID, "read")
+
+	readerConn := openTestRLSReader(t, adminConn, schemaName, qualifiedTable)
+	grantSelectOn(t, adminConn, "goerp_test_rls_reader", quoteIdent(schemaName)+".record_shares")
+
+	// The share recipient — no ABAC-owning contact_id, no role — sees the
+	// row purely via the share.
+	if rows := countVisibleRowsAsUser(t, readerConn, schemaName, table, "77777777-7777-7777-7777-777777777777", recipientID); rows != 1 {
+		t.Fatalf("recipient session saw %d rows, want 1", rows)
+	}
+
+	// An unrelated user with no share and no ABAC ownership sees nothing.
+	unrelatedID := "88888888-8888-8888-8888-888888888888"
+	if rows := countVisibleRowsAsUser(t, readerConn, schemaName, table, "99999999-9999-9999-9999-999999999999", unrelatedID); rows != 0 {
+		t.Fatalf("unrelated session saw %d rows, want 0", rows)
+	}
+}
+
+// A .Shareable() model with zero declared ABAC policies never gets RLS
+// enabled, and gets no widening policy either — goerp#471 AC: no
+// restrictive base policy means every permitted user already sees every
+// row, so a share grant would be redundant.
+func TestSyncShareWidening_ModelWithNoABACPolicies_NeverEnablesRLS(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharenoabac", "sales")
+	tenantSlug := "sharenoabac"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare, model.WriteShare)}
+	syncOrdersTable(t, engine, sess, modelDecls)
+
+	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, nil); err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v", err)
+	}
+
+	schemaName := "tenant_" + tenantSlug
+	table := "sales_orders"
+	if names := livePolicyNames(t, adminConn, schemaName, table); len(names) != 0 {
+		t.Fatalf("live policies = %v, want none — no ABAC policy was ever declared", names)
+	}
+	if rlsEnabled(t, adminConn, schemaName, table) {
+		t.Fatalf("RLS enabled on a .Shareable() table with zero declared ABAC policies")
+	}
+}
+
+// A write-share widening policy is installed FOR ALL, and a read-share
+// widening policy FOR SELECT only — never the reverse — goerp#471 AC /
+// go-sdk-reference.md §22: "a write share only widens the FOR ALL
+// policy, never FOR SELECT alone."
+func TestSyncShareWidening_WriteSharePolicyIsForAll_ReadSharePolicyIsForSelect(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharecmd", "sales")
+	tenantSlug := "sharecmd"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare, model.WriteShare)}
+	syncOrdersTable(t, engine, sess, modelDecls)
+
+	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy(), managersWritePolicy()}); err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v", err)
+	}
+
+	schemaName := "tenant_" + tenantSlug
+	table := "sales_orders"
+
+	if cmd := policyCmd(t, adminConn, schemaName, table, "sales:order:__share_read"); cmd != "SELECT" {
+		t.Errorf("read-share policy cmd = %q, want SELECT", cmd)
+	}
+	if cmd := policyCmd(t, adminConn, schemaName, table, "sales:order:__share_write"); cmd != "ALL" {
+		t.Errorf("write-share policy cmd = %q, want ALL", cmd)
+	}
+}
+
+// Dropping WriteShare from a model's declared SharePerms on a later sync
+// drops only the write-share widening policy, leaving the read-share one
+// (and the underlying ABAC policy) untouched — the same reconciliation
+// guarantee TestSyncRLSPolicies_RemovingOnePolicyKeepsOthersOnSameTable
+// already exercises for ordinary ABAC policies, now for widening
+// policies going through the same desired-map mechanism.
+func TestSyncShareWidening_RemovingSharePermDropsOnlyThatWideningPolicy(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharedrop", "sales")
+	tenantSlug := "sharedrop"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	schemaName := "tenant_" + tenantSlug
+	table := "sales_orders"
+
+	bothShared := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare, model.WriteShare)}
+	syncOrdersTable(t, engine, sess, bothShared)
+	if err := engine.SyncRLSPolicies(context.Background(), sess, bothShared, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+		t.Fatalf("SyncRLSPolicies() (both perms) error: %v", err)
+	}
+	if names := livePolicyNames(t, adminConn, schemaName, table); len(names) != 3 {
+		t.Fatalf("after install, live policies = %v, want 3 (ABAC + read-share + write-share)", names)
+	}
+
+	readOnlyShared := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare)}
+	if err := engine.SyncRLSPolicies(context.Background(), sess, readOnlyShared, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+		t.Fatalf("SyncRLSPolicies() (read-only perm) error: %v", err)
+	}
+
+	names := livePolicyNames(t, adminConn, schemaName, table)
+	if len(names) != 2 {
+		t.Fatalf("after dropping WriteShare, live policies = %v, want 2 (ABAC + read-share)", names)
+	}
+	for _, n := range names {
+		if n == "sales:order:__share_write" {
+			t.Fatalf("write-share policy %q still present after WriteShare removed from SharePerms", n)
+		}
+	}
+}
+
+// An unrecognized SharePermission value (SharePermission is a bare string
+// type, so a typo'd or bypassed-constant value compiles fine) errors
+// instead of silently skipping — a model that looks Shareable must not
+// silently get zero widening for a permission no one notices was never
+// installed.
+func TestSyncShareWidening_UnrecognizedSharePermissionErrors(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharebadperm", "sales")
+	tenantSlug := "sharebadperm"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.SharePermission("delete"))}
+	syncOrdersTable(t, engine, sess, modelDecls)
+
+	err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()})
+	if err == nil {
+		t.Fatal("SyncRLSPolicies() error = nil, want an error for an unrecognized SharePermission")
+	}
+}
+
+// A .Shareable() model whose primary key isn't UUID-kind errors at sync
+// time with a clear message, instead of surfacing as an opaque Postgres
+// "operator does not exist: <type> = uuid" the first time the compiled
+// policy is evaluated. record_shares.record_id is UUID, and nothing in
+// the SDK stops a module from declaring a non-UUID primary key.
+func TestSyncShareWidening_NonUUIDPrimaryKeyErrors(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharebadpk", "sales")
+	tenantSlug := "sharebadpk"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	badPKModel := *model.Define("order", model.Table("sales_orders"), model.Shareable(model.ReadShare)).
+		Field("id", model.Integer().Required().PrimaryKey()).
+		Field("salesperson_id", model.UUID().Required())
+	modelDecls := []model.ModelDeclaration{badPKModel}
+	syncOrdersTable(t, engine, sess, modelDecls)
+
+	err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{{
+		Name:      "sales:order:own_only",
+		AppliesTo: "sales:order:read",
+		Condition: "record.salesperson_id = current_user.contact_id",
+	}})
+	if err == nil {
+		t.Fatal("SyncRLSPolicies() error = nil, want an error for a non-UUID primary key")
+	}
+}
+
+// A session with app.current_user_id set to an empty string (rather than
+// left unset) — e.g. a workflow activity dispatched with no live user,
+// modCtx.UserID == "" (internal/engine/wasm/tenant_scope.go always calls
+// set_config with whatever UserID it's given) — must not error out of a
+// query against a .Shareable() table entirely; it should simply see no
+// share-widened rows, the same way it already sees no ABAC-widened rows
+// for a policy it fails — goerp#471 /code-review: a bare ”::uuid cast
+// errors, unlike NULLIF(...,”)::uuid.
+func TestSyncShareWidening_EmptyCurrentUserIDDoesNotError(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "shareemptyuser", "sales")
+	tenantSlug := "shareemptyuser"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare)}
+	syncOrdersTable(t, engine, sess, modelDecls)
+	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v", err)
+	}
+
+	schemaName := "tenant_" + tenantSlug
+	table := "sales_orders"
+	qualifiedTable := quoteIdent(schemaName) + "." + quoteIdent(table)
+	insertRow(t, adminConn, qualifiedTable, "22222222-2222-2222-2222-222222222222")
+
+	readerConn := openTestRLSReader(t, adminConn, schemaName, qualifiedTable)
+	grantSelectOn(t, adminConn, "goerp_test_rls_reader", quoteIdent(schemaName)+".record_shares")
+
+	rows := countVisibleRowsAsUser(t, readerConn, schemaName, table, "99999999-9999-9999-9999-999999999999", "")
+	if rows != 0 {
+		t.Fatalf("session with empty app.current_user_id saw %d rows, want 0 (and no query error)", rows)
+	}
+}
+
+// A .Shareable() model with a composite primary key (more than one
+// .PrimaryKey() field, which atlas.go's toAtlasTable otherwise supports)
+// errors at sync time instead of silently keying the widening policy off
+// just the first PK column found — record_shares.record_id is a single
+// UUID column, so it can't represent a composite key at all, and keying
+// off only part of it would widen access too broadly — goerp#471
+// /code-review.
+func TestSyncShareWidening_CompositePrimaryKeyErrors(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharecompositepk", "sales")
+	tenantSlug := "sharecompositepk"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	compositePKModel := *model.Define("order", model.Table("sales_orders"), model.Shareable(model.ReadShare)).
+		Field("id", model.UUID().Required().PrimaryKey()).
+		Field("salesperson_id", model.UUID().Required().PrimaryKey())
+	modelDecls := []model.ModelDeclaration{compositePKModel}
+	syncOrdersTable(t, engine, sess, modelDecls)
+
+	err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{{
+		Name:      "sales:order:own_only",
+		AppliesTo: "sales:order:read",
+		Condition: "record.salesperson_id = current_user.contact_id",
+	}})
+	if err == nil {
+		t.Fatal("SyncRLSPolicies() error = nil, want an error for a composite primary key")
+	}
+}
+
+// A tenant whose schema predates .Shareable() (or was provisioned via a
+// path that skipped record_shares.Bootstrap — regular module sync never
+// revisits it, only tenant provisioning's own CreateEngineTables activity
+// does) still syncs successfully: syncShareWidening creates record_shares
+// itself instead of hard-failing with "relation record_shares does not
+// exist" the moment a .Shareable() model tries to install a policy
+// against it.
+func TestSyncShareWidening_CreatesRecordSharesTableIfMissing(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharenoprovision", "sales")
+	tenantSlug := "sharenoprovision"
+	// Deliberately no bootstrapRecordShares(t, adminConn, tenantSlug) call
+	// here — this is the whole point of the test.
+
+	modelDecls := []model.ModelDeclaration{shareableOrdersModel(model.ReadShare)}
+	syncOrdersTable(t, engine, sess, modelDecls)
+
+	if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{ownOnlyPolicy()}); err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v", err)
+	}
+
+	schemaName := "tenant_" + tenantSlug
+	var tableExists bool
+	if err := adminConn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'record_shares')",
+		schemaName,
+	).Scan(&tableExists); err != nil {
+		t.Fatalf("check record_shares table: %v", err)
+	}
+	if !tableExists {
+		t.Fatal("expected record_shares to have been created by syncShareWidening")
+	}
+
+	if names := livePolicyNames(t, adminConn, schemaName, "sales_orders"); len(names) != 2 {
+		t.Fatalf("live policies = %v, want 2 (ABAC + read-share)", names)
+	}
+}
+
+// model.Shareable() called with zero SharePermission args is legal (a
+// model opted into being shareable ahead of picking which permission
+// levels to actually offer) and installs zero widening policies — the
+// PK-shape validation must not run for it, since no widening SQL
+// referencing the PK is ever built for a model with nothing in
+// SharePerms. A non-UUID PK here must not fail the sync.
+func TestSyncShareWidening_ZeroSharePermsSkipsPKValidation(t *testing.T) {
+	sess, engine, adminConn := setupTenantSchemaForModule(t, "sharezeroperms", "sales")
+	tenantSlug := "sharezeroperms"
+	bootstrapRecordShares(t, adminConn, tenantSlug)
+
+	// Shareable() with zero args and a non-UUID PK — would error if the PK
+	// check ran unconditionally.
+	shareableNoPermsModel := *model.Define("order", model.Table("sales_orders"), model.Shareable()).
+		Field("id", model.Integer().Required().PrimaryKey()).
+		Field("salesperson_id", model.UUID().Required())
+	modelDecls := []model.ModelDeclaration{shareableNoPermsModel}
+	syncOrdersTable(t, engine, sess, modelDecls)
+
+	err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{{
+		Name:      "sales:order:own_only",
+		AppliesTo: "sales:order:read",
+		Condition: "record.salesperson_id = current_user.contact_id",
+	}})
+	if err != nil {
+		t.Fatalf("SyncRLSPolicies() error: %v, want nil — zero SharePerms should skip PK validation", err)
+	}
+
+	schemaName := "tenant_" + tenantSlug
+	if names := livePolicyNames(t, adminConn, schemaName, "sales_orders"); len(names) != 1 {
+		t.Fatalf("live policies = %v, want 1 (ABAC only, no widening policy)", names)
+	}
+}
+
+// TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed guards
+// against goerp#171 directly, for ensureRecordSharesTable specifically —
+// BeginSync's own advisory lock is scoped to (tenant, module), not tenant
+// alone, so two different modules' syncs against the same tenant, both
+// hitting a still-missing record_shares table for the first time, run
+// concurrently. Without ensureRecordSharesTable's own tenant-scoped
+// pg_advisory_xact_lock (the same key recordshares.Store.Bootstrap
+// takes), a bare "CREATE TABLE IF NOT EXISTS" from both at once can race.
+func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.T) {
+	conn, pool := openTestPool(t, 5*time.Second)
+	tenantSlug := "shareconcurrent"
+
+	if _, err := conn.Exec("DROP SCHEMA IF EXISTS " + quoteIdent("tenant_"+tenantSlug) + " CASCADE"); err != nil {
+		t.Fatalf("drop tenant schema: %v", err)
+	}
+	if _, err := conn.Exec("CREATE SCHEMA " + quoteIdent("tenant_"+tenantSlug)); err != nil {
+		t.Fatalf("create tenant schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec("DROP SCHEMA IF EXISTS " + quoteIdent("tenant_"+tenantSlug) + " CASCADE")
+	})
+
+	tenantID := "44444444-4444-4444-4444-444444444444"
+	engine := NewSchemaDiffEngine(&Config{})
+
+	const moduleCount = 5
+	var wg sync.WaitGroup
+	errs := make(chan error, moduleCount)
+	for i := range moduleCount {
+		moduleName := fmt.Sprintf("shareconcurrentmod%d", i)
+		wg.Go(func() {
+			sess, err := pool.BeginSync(context.Background(), tenantID, tenantSlug, moduleName, testManifest("1.0.0"))
+			if err != nil {
+				errs <- fmt.Errorf("%s: BeginSync: %w", moduleName, err)
+				return
+			}
+			defer func() { _ = sess.Close(context.Background()) }()
+
+			tableName := fmt.Sprintf("orders_%d", i)
+			modelDecls := []model.ModelDeclaration{
+				*model.Define("order", model.Table(tableName), model.Shareable(model.ReadShare)).
+					Field("id", model.UUID().Required().PrimaryKey()).
+					Field("salesperson_id", model.UUID().Required()),
+			}
+			changes, err := engine.Diff(context.Background(), sess, modelDecls, nil)
+			if err != nil {
+				errs <- fmt.Errorf("%s: Diff: %w", moduleName, err)
+				return
+			}
+			if _, _, err := engine.ExecuteAccepted(context.Background(), sess, modelDecls, changes, nil); err != nil {
+				errs <- fmt.Errorf("%s: Execute: %w", moduleName, err)
+				return
+			}
+
+			policy := manifest.Policy{
+				Name:      moduleName + ":order:own_only",
+				AppliesTo: moduleName + ":order:read",
+				Condition: "record.salesperson_id = current_user.contact_id",
+			}
+			if err := engine.SyncRLSPolicies(context.Background(), sess, modelDecls, []manifest.Policy{policy}); err != nil {
+				errs <- fmt.Errorf("%s: SyncRLSPolicies: %w", moduleName, err)
+				return
+			}
+			errs <- nil
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent module sync error: %v", err)
+		}
+	}
 }

@@ -28,11 +28,15 @@ func compileRLS(expr Expr) (string, error) {
 		return quoteColumn(e.Field), nil
 
 	case UserAttr:
+		// NULLIF(...,'') guards a session where the GUC is set to an
+		// empty string rather than left unset (e.g. a workflow activity
+		// dispatched with no live user) — a bare ''::uuid cast errors
+		// outright instead of evaluating the condition to false.
 		switch e.Attr {
 		case "id":
-			return "current_setting('app.current_user_id', true)::uuid", nil
+			return "NULLIF(current_setting('app.current_user_id', true), '')::uuid", nil
 		case "contact_id":
-			return "current_setting('app.current_user_contact_id', true)::uuid", nil
+			return "NULLIF(current_setting('app.current_user_contact_id', true), '')::uuid", nil
 		default:
 			return "", fmt.Errorf("domain: current_user.%s has no session variable to compile against in the RLS context yet", e.Attr)
 		}
@@ -41,7 +45,7 @@ func compileRLS(expr Expr) (string, error) {
 		return "", fmt.Errorf("domain: tenant.%s is only bound in tenant-only contexts (report_overrides[].condition), not in an ABAC policy condition", e.Field)
 
 	case RoleCheck:
-		return fmt.Sprintf("current_setting('app.current_user_roles', true) LIKE '%%%s%%'", escapeSQLString(e.Role)), nil
+		return fmt.Sprintf("current_setting('app.current_user_roles', true) LIKE '%%%s%%'", EscapeSQLString(e.Role)), nil
 
 	case PermCheck:
 		return "", fmt.Errorf("domain: user_has_permission('%s') has no precomputed permission-set session variable to compile against yet", e.Perm)
@@ -127,18 +131,20 @@ func compileLiteral(lit Literal) (string, error) {
 	case Number:
 		return string(v), nil
 	case string:
-		return "'" + escapeSQLString(v) + "'", nil
+		return "'" + EscapeSQLString(v) + "'", nil
 	default:
 		return "", fmt.Errorf("domain: unsupported literal type %T", v)
 	}
 }
 
-// escapeSQLString doubles embedded single quotes, per manifest-spec.md §8's
+// EscapeSQLString doubles embedded single quotes, per manifest-spec.md §8's
 // "String literals in a domain follow the same escaping rule as SQL string
 // literals" rule. The lexer has already stripped the source's own doubled
 // quotes down to a single literal quote per manifest-spec.md §8, so this
-// re-escapes before splicing into the compiled SQL string.
-func escapeSQLString(s string) string {
+// re-escapes before splicing into the compiled SQL string. Exported since
+// internal/engine/schema's own RLS-widening policy compilation
+// (goerp#471) needs the identical escaping for its own SQL literals.
+func EscapeSQLString(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 

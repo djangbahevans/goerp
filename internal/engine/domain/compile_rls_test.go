@@ -21,7 +21,7 @@ func TestCompileToRLS_DocExample(t *testing.T) {
 	// are semantically identical in Postgres, and quoting defensively
 	// covers field names that collide with reserved words).
 	got := compileSrc(t, "record.salesperson_id = current_user.contact_id OR user_has_role('sales_manager')")
-	want := `(("salesperson_id" = current_setting('app.current_user_contact_id', true)::uuid) ` +
+	want := `(("salesperson_id" = NULLIF(current_setting('app.current_user_contact_id', true), '')::uuid) ` +
 		`OR current_setting('app.current_user_roles', true) LIKE '%sales_manager%')`
 	if got != want {
 		t.Fatalf("CompileToRLS() =\n  %s\nwant\n  %s", got, want)
@@ -30,7 +30,7 @@ func TestCompileToRLS_DocExample(t *testing.T) {
 
 func TestCompileToRLS_CurrentUserID(t *testing.T) {
 	got := compileSrc(t, "record.owner_id = current_user.id")
-	want := `("owner_id" = current_setting('app.current_user_id', true)::uuid)`
+	want := `("owner_id" = NULLIF(current_setting('app.current_user_id', true), '')::uuid)`
 	if got != want {
 		t.Fatalf("CompileToRLS() = %s, want %s", got, want)
 	}
@@ -38,7 +38,7 @@ func TestCompileToRLS_CurrentUserID(t *testing.T) {
 
 func TestCompileToRLS_And(t *testing.T) {
 	got := compileSrc(t, "record.state = 'draft' AND current_user.id = record.created_by")
-	want := `(("state" = 'draft') AND (current_setting('app.current_user_id', true)::uuid = "created_by"))`
+	want := `(("state" = 'draft') AND (NULLIF(current_setting('app.current_user_id', true), '')::uuid = "created_by"))`
 	if got != want {
 		t.Fatalf("CompileToRLS() = %s, want %s", got, want)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -57,18 +58,207 @@ func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSync
 			return fmt.Errorf("policy %q: enable RLS on %s: %w", policy.Name, table, err)
 		}
 
-		dropStmt := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s", quoteIdent(pgPolicyName), quoteIdent(table))
-		if err := e.execWithRetry(ctx, sess.conn, dropStmt); err != nil {
-			return fmt.Errorf("policy %q: drop existing policy: %w", policy.Name, err)
-		}
-
-		createStmt := buildCreatePolicyStmt(pgPolicyName, table, compiled, forAll)
-		if err := e.execWithRetry(ctx, sess.conn, createStmt); err != nil {
-			return fmt.Errorf("policy %q: create policy: %w", policy.Name, err)
+		if err := e.dropAndCreatePolicy(ctx, sess, pgPolicyName, table, compiled, forAll); err != nil {
+			return fmt.Errorf("policy %q: %w", policy.Name, err)
 		}
 	}
 
+	if err := e.syncShareWidening(ctx, sess, modelDecls, desired); err != nil {
+		return err
+	}
+
 	return e.reconcileRLSPolicies(ctx, sess, modelDecls, desired)
+}
+
+// syncShareWidening installs a separate permissive RLS policy per
+// .Shareable() model/SharePermission (multitenancy-internals.md §5a) —
+// Postgres already ORs multiple permissive policies on the same
+// table/command, so this has the same effect as appending an
+// `OR EXISTS(...)` to each ABAC policy above, without editing their
+// compiled expressions. Skips a table with no ABAC policy in desired
+// (go-sdk-reference.md §22: no restrictive base policy, so widening
+// would be redundant).
+func (e *SchemaDiffEngine) syncShareWidening(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]string) error {
+	tableEnsured := false
+
+	for _, md := range modelDecls {
+		if !md.Shareable || len(md.SharePerms) == 0 {
+			continue
+		}
+		table := TableNameFor(md)
+		if !tableHasDesiredPolicy(desired, table) {
+			continue
+		}
+		pkCol, pkKind, err := primaryKeyColumnName(md)
+		if err != nil {
+			return err
+		}
+		if pkKind != model.KindUUID {
+			// record_shares.record_id is UUID — a non-UUID PK would
+			// otherwise surface as an opaque Postgres "operator does not
+			// exist" error the first time this policy is evaluated.
+			return fmt.Errorf("model %s: .Shareable() requires a UUID primary key", md.Name)
+		}
+		qualifiedName := sess.moduleName + "." + md.Name
+
+		if !tableEnsured {
+			// record_shares is normally created by tenant provisioning's
+			// CreateEngineTables activity, once, at tenant-creation time —
+			// never revisited by this package's own per-module sync. A
+			// tenant whose schema predates this feature would otherwise
+			// hard-fail every module's sync the moment any .Shareable()
+			// model tries to install a policy referencing a table that
+			// doesn't exist yet. IF NOT EXISTS makes this a no-op on
+			// every other sync once the table is there.
+			if err := e.ensureRecordSharesTable(ctx, sess); err != nil {
+				return fmt.Errorf("ensure record_shares: %w", err)
+			}
+			tableEnsured = true
+		}
+
+		for _, perm := range md.SharePerms {
+			var suffix string
+			var forAll bool
+			switch perm {
+			case model.ReadShare:
+				suffix, forAll = "__share_read", false
+			case model.WriteShare:
+				suffix, forAll = "__share_write", true
+			default:
+				return fmt.Errorf("model %s: unrecognized SharePermission %q", md.Name, perm)
+			}
+
+			// ":"-prefixed with sess.moduleName, matching the ABAC
+			// policies above — reconcileRLSPolicies's ownership match
+			// depends on that first segment.
+			pgPolicyName := sess.moduleName + ":" + md.Name + ":" + suffix
+			// record_shares has its own "id" column, so the PK reference
+			// must be table-qualified or it resolves to record_shares.id
+			// inside this correlated subquery instead of the outer row.
+			// NULLIF(...,'') guards against a session (e.g. a workflow
+			// activity dispatched with no live user, modCtx.UserID == "")
+			// where app.current_user_id is set to an empty string rather
+			// than left unset — a bare ''::uuid cast errors outright,
+			// unlike every other table's read/write, which never
+			// evaluates this cast unless its own ABAC condition happens
+			// to reference current_user.id.
+			condition := fmt.Sprintf(
+				`EXISTS (SELECT 1 FROM record_shares WHERE model = '%s' AND record_id = %s.%s AND shared_with_user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid AND permission = '%s' AND (expires_at IS NULL OR expires_at > NOW()))`,
+				domain.EscapeSQLString(qualifiedName), quoteIdent(table), quoteIdent(pkCol), domain.EscapeSQLString(string(perm)),
+			)
+
+			desired[pgPolicyName] = table
+
+			if err := e.dropAndCreatePolicy(ctx, sess, pgPolicyName, table, condition, forAll); err != nil {
+				return fmt.Errorf("share policy %q: %w", pgPolicyName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// ensureRecordSharesTable creates record_shares in the syncing session's
+// tenant schema if it doesn't already exist yet — mirrors
+// internal/engine/recordshares.Store.Bootstrap's own DDL, duplicated
+// rather than called directly since that Store takes a *sql.DB (to open
+// its own advisory-locked transaction) while this runs inside the
+// already-open *sql.Conn a schema-sync session shares across every
+// statement it issues. Takes the identical advisory lock key Bootstrap
+// itself takes (via pg_advisory_xact_lock instead of pool.BeginTx, since
+// sess.conn is a single already-checked-out connection, not a *sql.DB) —
+// two syncs for different modules against the same tenant can run
+// concurrently (BeginSync's own lock is scoped to (tenant, module), not
+// tenant alone), and this is the exact concurrent-CREATE-TABLE race
+// goerp#171 already fixed once for Bootstrap; reusing its lock key
+// serializes against both Bootstrap and every other sync's own call here.
+func (e *SchemaDiffEngine) ensureRecordSharesTable(ctx context.Context, sess *SchemaSyncSession) error {
+	tx, err := sess.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	lockKey := db.AdvisoryLockKey("recordshares.Bootstrap:" + sess.tenantSlug)
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
+		return fmt.Errorf("acquire advisory lock: %w", err)
+	}
+
+	const createTable = `
+		CREATE TABLE IF NOT EXISTS record_shares (
+		    id                   UUID PRIMARY KEY DEFAULT uuidv7(),
+		    model                TEXT NOT NULL,
+		    record_id            UUID NOT NULL,
+		    shared_with_user_id  UUID NOT NULL,
+		    permission           TEXT NOT NULL CHECK (permission IN ('read', 'write')),
+		    shared_by            UUID NOT NULL,
+		    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		    expires_at           TIMESTAMPTZ
+		)
+	`
+	if _, err := tx.ExecContext(ctx, createTable); err != nil {
+		return fmt.Errorf("create table: %w", err)
+	}
+
+	const createIndex = `
+		CREATE INDEX IF NOT EXISTS idx_record_shares_lookup
+		    ON record_shares(model, record_id, shared_with_user_id)
+	`
+	if _, err := tx.ExecContext(ctx, createIndex); err != nil {
+		return fmt.Errorf("create lookup index: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// dropAndCreatePolicy replaces table's pgPolicyName policy — DROP POLICY
+// IF EXISTS, then CREATE POLICY — shared by the ABAC loop above and
+// syncShareWidening.
+func (e *SchemaDiffEngine) dropAndCreatePolicy(ctx context.Context, sess *SchemaSyncSession, pgPolicyName, table, condition string, forAll bool) error {
+	dropStmt := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s", quoteIdent(pgPolicyName), quoteIdent(table))
+	if err := e.execWithRetry(ctx, sess.conn, dropStmt); err != nil {
+		return fmt.Errorf("drop existing policy: %w", err)
+	}
+	createStmt := buildCreatePolicyStmt(pgPolicyName, table, condition, forAll)
+	if err := e.execWithRetry(ctx, sess.conn, createStmt); err != nil {
+		return fmt.Errorf("create policy: %w", err)
+	}
+	return nil
+}
+
+// tableHasDesiredPolicy reports whether desired (this module's own ABAC
+// policies) targets table.
+func tableHasDesiredPolicy(desired map[string]string, table string) bool {
+	for _, t := range desired {
+		if t == table {
+			return true
+		}
+	}
+	return false
+}
+
+// primaryKeyColumnName returns md's single IsPrimaryKey-flagged field's
+// name and kind — record_shares.record_id is one UUID column, so a
+// composite key (more than one IsPrimaryKey field, which atlas.go's own
+// toAtlasTable otherwise supports) is rejected rather than silently
+// keying widening off just the first one found.
+func primaryKeyColumnName(md model.ModelDeclaration) (name string, kind model.FieldKind, err error) {
+	found := false
+	for _, f := range md.Fields {
+		if !f.Def.IsPrimaryKey {
+			continue
+		}
+		if found {
+			return "", 0, fmt.Errorf("model %s: .Shareable() does not support a composite primary key", md.Name)
+		}
+		name, kind, found = f.Name, f.Def.Kind, true
+	}
+	if !found {
+		return "", 0, fmt.Errorf("model %s: .Shareable() requires a declared primary key field", md.Name)
+	}
+	return name, kind, nil
 }
 
 // reconcileRLSPolicies walks the live pg_policies catalog for every table
