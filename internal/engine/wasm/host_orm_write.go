@@ -1515,13 +1515,17 @@ type auditLogEntry struct {
 	NewData  map[string]any
 }
 
-// maxAuditBatchChunkParams caps how many bound parameters
-// insertAuditLogRows/captureRowsBeforeExecBatch (host_db_exec_audit.go)
-// build into a single statement — comfortably under Postgres's
-// 65535-bound-parameters-per-statement limit, with headroom for the
-// per-row parameter count each of those two functions actually uses (8
-// and a WHERE clause's own arbitrary count respectively).
-const maxAuditBatchChunkParams = 5000
+// maxAuditWriteChunkParams caps how many bound parameters
+// insertAuditLogRows builds into a single multi-row INSERT — comfortably
+// under Postgres's 65535-bound-parameters-per-statement limit, with
+// headroom for its own fixed 8-params-per-row shape.
+// captureRowsBeforeExecBatch (host_db_exec_audit.go) chunks its own
+// batched pre-read against a separate constant of the same value
+// (maxAuditPreReadChunkWeight) — the two happen to share a value but
+// bound structurally different things (an exact per-row parameter count
+// here vs. a conservative per-row weight estimate there), so tuning one
+// is never assumed to be safe for the other.
+const maxAuditWriteChunkParams = 5000
 
 // insertAuditLogRows writes entries to audit_log via one multi-row INSERT
 // per chunk, instead of insertAuditLogRow's own one-round-trip-per-row
@@ -1533,7 +1537,7 @@ const maxAuditBatchChunkParams = 5000
 // rather than building a one-row VALUES list a different way.
 func insertAuditLogRows(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, table, operation string, excludeCols map[string]bool, entries []auditLogEntry) error {
 	const paramsPerRow = 8
-	rowsPerChunk := maxAuditBatchChunkParams / paramsPerRow
+	rowsPerChunk := maxAuditWriteChunkParams / paramsPerRow
 
 	for start := 0; start < len(entries); start += rowsPerChunk {
 		chunk := entries[start:min(start+rowsPerChunk, len(entries))]

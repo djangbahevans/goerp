@@ -538,7 +538,7 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 
 	start := time.Now()
 
-	var allOldRows []map[string]any
+	var oldRowsPerIndex [][]map[string]any
 	if p.audited {
 		rows, err := captureRowsBeforeExecBatch(ctx, tx, auditableExecStmt{
 			Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause,
@@ -547,7 +547,7 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 			_ = finish(err)
 			return dbExecBatchOutput{}, batchErrorForRowErr(-1, abi.ErrCodeExecError, "", err)
 		}
-		allOldRows = rows
+		oldRowsPerIndex = rows
 	}
 
 	batch := &pgx.Batch{}
@@ -629,11 +629,27 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 	}
 
 	if p.audited {
-		var allNewRows []map[string]any
-		for _, res := range results {
-			allNewRows = append(allNewRows, res.newRows...)
+		// Each statement's own old/new rows are paired in isolation, one
+		// statement at a time — never merging two different statements'
+		// own rows into one pairing pass, since primary-key pairing
+		// across statements is unsafe whenever their WHERE clauses can
+		// target overlapping rows without binding identical parameter
+		// values (see captureRowsBeforeExecBatch's own doc comment).
+		// Only the resulting entries are accumulated for one batched
+		// write — pairing itself stays per-row.
+		entries := make([]auditLogEntry, 0, len(results))
+		for i, res := range results {
+			newRows := res.newRows
+			if p.stmt.Operation == "DELETE" {
+				// new_data must stay NULL for a DELETE regardless of
+				// whether opts.returning requested rows back for the
+				// module's own purposes — matches writeAuditForExec's
+				// own DELETE handling (host_db_exec.go).
+				newRows = nil
+			}
+			entries = append(entries, pairAuditEntries(p.pkCol, oldRowsPerIndex[i], newRows)...)
 		}
-		if err := writeAuditForExec(ctx, tx, modCtx, p.table, p.stmt, p.pkCol, p.excludeCols, allOldRows, allNewRows); err != nil {
+		if err := insertAuditLogRows(ctx, tx, modCtx, p.table, p.stmt.Operation, p.excludeCols, entries); err != nil {
 			_ = finish(err)
 			return dbExecBatchOutput{}, batchErrorForRowErr(-1, abi.ErrCodeUnavailable, "audit write failed: ", err)
 		}

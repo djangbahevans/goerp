@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	pgquery "github.com/wasilibs/go-pgquery"
@@ -163,56 +164,76 @@ func renumberParamsFrom(node *pg_query.Node, params []any, base int32) (*pg_quer
 	return clone, newParams, nil
 }
 
-// captureRowsBeforeExecBatch is captureRowsBeforeExec's own batched form:
-// one SELECT for the whole batch (every row's own WHERE-clause target
-// OR'd together) instead of one per row. Safe because
-// pipelineHasDuplicateAuditTargets already excludes any batch whose rows
-// could target the same primary key twice, so the combined result set is
-// unambiguous regardless of statement order — the same guarantee
-// execBatchPipeline's own eligibility check (host_db_exec_batch_fast.go)
-// already relies on for pairing old/new rows by primary key after the
-// fact. Chunked at maxAuditBatchChunkParams total bound parameters
-// (host_orm_write.go), tracked per row via len(paramSets[i]) — a
-// deliberately conservative proxy for a row's own true referenced-param
-// count (renumberParamsFrom's own dedup can only make the real count
-// smaller), safe to overestimate since it only ever makes a chunk
-// somewhat smaller than the limit allows, never over it.
-func captureRowsBeforeExecBatch(ctx context.Context, tx *sql.Tx, stmt auditableExecStmt, paramSets [][]any) ([]map[string]any, error) {
-	if len(paramSets) == 0 {
-		return nil, nil
-	}
-	if len(paramSets) == 1 {
-		return captureRowsBeforeExec(ctx, tx, stmt, paramSets[0])
-	}
+// maxAuditPreReadChunkWeight caps how much total per-row weight
+// captureRowsBeforeExecBatch builds into a single chunked SELECT —
+// comfortably under Postgres's 65535-bound-parameters-per-statement
+// limit, with headroom since each row's own weight (len(paramSets[i]))
+// is a deliberate overestimate of its true referenced-param count (see
+// captureRowsBeforeExecBatch's own doc comment). insertAuditLogRows
+// (host_orm_write.go) chunks its own multi-row INSERT against a separate
+// constant of the same value (maxAuditWriteChunkParams) — the two happen
+// to share a value but bound structurally different things, so tuning
+// one is never assumed to be safe for the other.
+const maxAuditPreReadChunkWeight = 5000
 
-	var allRows []map[string]any
+// captureRowsBeforeExecBatch is captureRowsBeforeExec's own batched form:
+// a few chunked SELECTs for the whole batch instead of one per row, using
+// one UNION ALL branch per row — each branch selects its own row as a
+// whole-row composite (row_data) tagged with its own batch index
+// (batch_idx), the same technique copyReadbackChunk (host_db_exec_batch_
+// fast.go) uses for the COPY path's own post-copy read-back — so the
+// returned [][]map[string]any stays indexed by paramSets position exactly
+// like calling captureRowsBeforeExec once per row would produce. Chunked
+// at maxAuditPreReadChunkWeight total bound parameters, tracked per row
+// via len(paramSets[i]) — a deliberately conservative proxy for a row's
+// own true referenced-param count (renumberParamsFrom's own dedup can
+// only make the real count smaller), safe to overestimate since it only
+// ever makes a chunk somewhat smaller than the limit allows, never over
+// it.
+//
+// This per-row attribution matters beyond ordering: pipelineHasDuplicate
+// AuditTargets (host_db_exec_batch_fast.go) only excludes a batch whose
+// rows bind *identical* WHERE-clause parameter values — two rows with
+// different bound values can still resolve to overlapping physical rows
+// (e.g. "salary > 50000" and "salary > 40000" both matching the same
+// employee). Combining every row's own WHERE clause into one OR'd SELECT
+// and returning a single flat pool of rows — relying on primary-key
+// pairing (writeExecAuditEntries) to sort them back out afterward — would
+// be unsafe: two different statements' own old/new rows sharing a primary
+// key is exactly the overlapping-target case above, and pk-based pairing
+// across statements silently collapses that batch's two independent
+// audit entries into one, discarding the earlier statement's own audit
+// trail entirely. Keeping each row's own old rows attributed to its own
+// paramSets index, and pairing per statement (see execBatchPipeline's
+// own audit-write pass), avoids that collapse regardless of what
+// pipelineHasDuplicateAuditTargets does or doesn't catch.
+func captureRowsBeforeExecBatch(ctx context.Context, tx *sql.Tx, stmt auditableExecStmt, paramSets [][]any) ([][]map[string]any, error) {
+	oldRowsPerIndex := make([][]map[string]any, len(paramSets))
+
 	for i := 0; i < len(paramSets); {
-		var nodes []*pg_query.Node
+		var branches []string
 		var chunkParams []any
 		weight := 0
 		for i < len(paramSets) {
 			rowWeight := len(paramSets[i])
-			if len(nodes) > 0 && weight+rowWeight > maxAuditBatchChunkParams {
+			if len(branches) > 0 && weight+rowWeight > maxAuditPreReadChunkWeight {
 				break
 			}
 			node, rowParams, err := renumberParamsFrom(stmt.WhereClause, paramSets[i], int32(len(chunkParams)))
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("parameter set %d: %w", i, err)
 			}
-			nodes = append(nodes, node)
+			branchSQL, err := deparseTaggedRowSelect(stmt, node, int32(i))
+			if err != nil {
+				return nil, fmt.Errorf("parameter set %d: build batched audit pre-read query: %w", i, err)
+			}
+			branches = append(branches, branchSQL)
 			chunkParams = append(chunkParams, rowParams...)
 			weight += rowWeight
 			i++
 		}
 
-		combined := nodes[0]
-		if len(nodes) > 1 {
-			combined = pg_query.MakeBoolExprNode(pg_query.BoolExprType_OR_EXPR, nodes, 0)
-		}
-		selectSQL, err := deparseSelectAll(stmt.Relation, combined)
-		if err != nil {
-			return nil, fmt.Errorf("build batched audit pre-read query: %w", err)
-		}
+		selectSQL := fmt.Sprintf("SELECT (x.row_data).*, x.batch_idx FROM (%s) x", strings.Join(branches, " UNION ALL "))
 		rows, err := tx.QueryContext(ctx, selectSQL, chunkParams...)
 		if err != nil {
 			return nil, fmt.Errorf("read rows before audited exec batch: %w", err)
@@ -221,9 +242,63 @@ func captureRowsBeforeExecBatch(ctx context.Context, tx *sql.Tx, stmt auditableE
 		if err != nil {
 			return nil, err
 		}
-		allRows = append(allRows, chunkRows...)
+		for _, row := range chunkRows {
+			idx, err := popBatchIdx(row)
+			if err != nil {
+				return nil, fmt.Errorf("parse batched audit pre-read row: %w", err)
+			}
+			oldRowsPerIndex[idx] = append(oldRowsPerIndex[idx], row)
+		}
 	}
-	return allRows, nil
+	return oldRowsPerIndex, nil
+}
+
+// deparseTaggedRowSelect renders "SELECT <table> AS row_data, <tag> AS
+// batch_idx FROM relation WHERE whereClause" — <table> selected bare
+// (no alias) refers to the whole row as a single composite value, the
+// same construct copyReadbackChunk's own "t AS row_data" relies on.
+// captureRowsBeforeExecBatch UNION-ALLs one such branch per row so a
+// caller can recover which paramSets index each returned row belongs to.
+func deparseTaggedRowSelect(stmt auditableExecStmt, whereClause *pg_query.Node, tag int32) (string, error) {
+	rowTarget := pg_query.MakeResTargetNodeWithNameAndVal("row_data",
+		pg_query.MakeColumnRefNode([]*pg_query.Node{pg_query.MakeStrNode(stmt.Table)}, 0), 0)
+	tagTarget := pg_query.MakeResTargetNodeWithNameAndVal("batch_idx", pg_query.MakeAConstIntNode(int64(tag), 0), 0)
+
+	selectStmt := &pg_query.SelectStmt{
+		TargetList:  []*pg_query.Node{rowTarget, tagTarget},
+		FromClause:  []*pg_query.Node{{Node: &pg_query.Node_RangeVar{RangeVar: stmt.Relation}}},
+		WhereClause: whereClause,
+	}
+	tree := &pg_query.ParseResult{
+		Stmts: []*pg_query.RawStmt{
+			{Stmt: &pg_query.Node{Node: &pg_query.Node_SelectStmt{SelectStmt: selectStmt}}},
+		},
+	}
+	return pgquery.Deparse(tree)
+}
+
+// popBatchIdx removes and returns row's own "batch_idx" tag column
+// (deparseTaggedRowSelect's own addition, not a real column of the
+// audited table) — database/sql's generic driver.Value conversion for a
+// plain integer literal can surface as any of Go's signed integer types
+// depending on the driver, so this accepts the ones actually in use
+// rather than assuming one.
+func popBatchIdx(row map[string]any) (int, error) {
+	v, ok := row["batch_idx"]
+	delete(row, "batch_idx")
+	if !ok {
+		return 0, fmt.Errorf("missing batch_idx column")
+	}
+	switch n := v.(type) {
+	case int64:
+		return int(n), nil
+	case int32:
+		return int(n), nil
+	case int:
+		return n, nil
+	default:
+		return 0, fmt.Errorf("unexpected batch_idx type %T", v)
+	}
 }
 
 // deparseSelectAll renders `SELECT * FROM relation [WHERE whereClause]`
@@ -266,6 +341,22 @@ func deparseSelectAll(relation *pg_query.RangeVar, whereClause *pg_query.Node) (
 // unpaired row on either side records with the other side NULL. Runs
 // inside tx, so a later failure in the same write rolls these back too.
 func writeExecAuditEntries(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, table string, stmt auditableExecStmt, pkCol string, excludeCols map[string]bool, oldRows, newRows []map[string]any) error {
+	return insertAuditLogRows(ctx, tx, modCtx, table, stmt.Operation, excludeCols, pairAuditEntries(pkCol, oldRows, newRows))
+}
+
+// pairAuditEntries computes writeExecAuditEntries' own old/new pairing
+// (see its doc comment above for the algorithm) without writing
+// anything — split out so a caller pairing more than one statement's own
+// oldRows/newRows (execBatchPipeline, host_db_exec_batch_fast.go) can
+// accumulate every statement's own entries into one batched write while
+// still pairing each statement's own rows in isolation, one statement at
+// a time. Pairing across two different statements' own rows by primary
+// key alone is unsafe whenever their WHERE clauses can target
+// overlapping rows without binding identical parameter values — see
+// captureRowsBeforeExecBatch's own doc comment for why that
+// cross-statement collapse is a real, reachable case, not just
+// theoretical.
+func pairAuditEntries(pkCol string, oldRows, newRows []map[string]any) []auditLogEntry {
 	type pair struct{ old, new map[string]any }
 	var pairs []pair
 
@@ -312,5 +403,5 @@ func writeExecAuditEntries(ctx context.Context, tx *sql.Tx, modCtx *ModuleContex
 		}
 		entries[i] = auditLogEntry{RecordID: recordID, OldData: p.old, NewData: p.new}
 	}
-	return insertAuditLogRows(ctx, tx, modCtx, table, stmt.Operation, excludeCols, entries)
+	return entries
 }
