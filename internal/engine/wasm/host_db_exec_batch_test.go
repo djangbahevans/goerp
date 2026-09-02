@@ -21,6 +21,19 @@ import (
 // later rows would fail with "sql: transaction has already been
 // committed or rolled back" — confirmed by temporarily reintroducing the
 // bug against this exact test before fixing it for real.
+//
+// This batch's own shape (an UPDATE, >1 row, no tx_id) qualifies for
+// goerp#513's pipeline fast path, which DBExecBatch attempts first
+// regardless of continue_on_error — but that attempt is itself bound to
+// the same 300ms opts.timeout_ms as a single whole-operation budget (a
+// deliberately different semantic from the sequential path's own
+// per-row window), so it times out against the cumulative 1000ms+ of
+// sleeps before ever reaching this test's own regression concern.
+// continue_on_error: true is what makes DBExecBatch retry that failure
+// via the sequential path instead of returning it directly — landing on
+// the per-row-timeout code path this test is actually about, just by a
+// different route than a plain "continue_on_error excludes pipelining"
+// rule would suggest.
 func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
@@ -42,7 +55,7 @@ func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *te
 	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
 		SQL:       "UPDATE gadget SET name = $1 WHERE id = $2 AND (SELECT pg_sleep(0.05)) IS NOT NULL",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{TimeoutMs: 300},
+		Opts:      dbExecBatchOpts{TimeoutMs: 300, ContinueOnError: true},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
