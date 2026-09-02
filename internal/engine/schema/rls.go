@@ -20,7 +20,15 @@ import (
 // applies_to's permission-name validity was already checked at manifest
 // load time (validatePolicies, internal/engine/manifest); this step only
 // needs to resolve which table each policy's applies_to targets.
+// Called with policies == nil for a module uninstall — reconciliation
+// below then has nothing desired and drops every policy this module ever
+// owned, exactly as it would for any other policy that dropped out of the
+// manifest. modelDecls must still reflect the module's owned tables in
+// that case (its last-loaded ModelDecls, read before the registry drops
+// the module) for reconciliation to know which tables to check.
 func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, policies []manifest.Policy) error {
+	desired := make(map[string]string, len(policies)) // pg policy name -> table
+
 	for _, policy := range policies {
 		table, forAll, err := resolvePolicyTarget(policy, modelDecls)
 		if err != nil {
@@ -37,6 +45,7 @@ func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSync
 		}
 
 		pgPolicyName := postgresPolicyName(policy.Name)
+		desired[pgPolicyName] = table
 
 		enableRLS := fmt.Sprintf("ALTER TABLE %s ENABLE ROW LEVEL SECURITY", quoteIdent(table))
 		if err := e.execWithRetry(ctx, sess.conn, enableRLS); err != nil {
@@ -53,7 +62,117 @@ func (e *SchemaDiffEngine) SyncRLSPolicies(ctx context.Context, sess *SchemaSync
 			return fmt.Errorf("policy %q: create policy: %w", policy.Name, err)
 		}
 	}
+
+	return e.reconcileRLSPolicies(ctx, sess, modelDecls, desired)
+}
+
+// reconcileRLSPolicies walks the live pg_policies catalog for every table
+// the module owns and drops whichever of its own policies aren't in
+// desired (built by the loop above from the module's current manifest) —
+// a policy renamed or deleted from the manifest, or, when desired is
+// empty, every policy the module ever owned. A table left with none after
+// dropping gets RLS disabled too, so it doesn't fail closed against a
+// policy that no longer exists.
+//
+// A table's live policies can include a different module's policy too
+// (e.g. a field_extension-style table two modules both declare policies
+// on, multitenancy-internals.md §5a's "Document sharing" note on shared
+// tables). Only a name carrying this module's own "{moduleName}_" prefix
+// is ever a drop candidate, since that's the only ownership this
+// reconciliation can prove — manifest-spec.md §8's `name` format
+// (`{module}:{resource}:{policy_name}`, unique across all loaded modules)
+// guarantees postgresPolicyName always produces that prefix for a policy
+// this module declared. Whether RLS stays enabled is decided from every
+// live policy regardless of prefix, so a foreign policy surviving this
+// pass keeps the table's RLS on.
+//
+// The prefix match is a substring test, not a segment boundary: two
+// modules whose names share a "shorter-is-a-prefix-of-longer" relationship
+// with an underscore at the boundary (both legal under manifest-spec.md
+// §1's `^[a-z][a-z0-9_]{0,63}$`, e.g. "connector_paystack" and
+// "connector_paystack_v2") aren't distinguishable from this string alone
+// if they ever share a table. Closing that gap needs an unambiguous
+// ownership signal beyond the postgresPolicyName encoding goerp#71 already
+// shipped and every provisioned tenant's live policies already use —
+// tracked separately rather than changed here.
+func (e *SchemaDiffEngine) reconcileRLSPolicies(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, desired map[string]string) error {
+	schemaName := "tenant_" + sess.tenantSlug
+	prefix := sess.moduleName + "_"
+
+	seenTables := make(map[string]bool, len(modelDecls))
+	for _, md := range modelDecls {
+		table := TableNameFor(md)
+		if seenTables[table] {
+			continue
+		}
+		seenTables[table] = true
+
+		liveNames, err := listRLSPolicyNames(ctx, sess.conn, schemaName, table)
+		if err != nil {
+			return fmt.Errorf("list RLS policies on %s: %w", table, err)
+		}
+
+		anyRemain := false
+		for _, name := range liveNames {
+			if !strings.HasPrefix(name, prefix) {
+				anyRemain = true
+				continue
+			}
+			// desired maps a policy name to the one table it's
+			// currently declared against — a name can appear here for a
+			// *different* table (its applies_to moved to another
+			// resource across a manifest edit; validatePolicies never
+			// requires a policy's name and applies_to to reference the
+			// same resource), so only that exact (name, table) pairing
+			// counts as still desired. Anything else is this module's
+			// own stale leftover on this table.
+			if desiredTable, stillDesired := desired[name]; stillDesired && desiredTable == table {
+				anyRemain = true
+				continue
+			}
+			dropStmt := fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s", quoteIdent(name), quoteIdent(table))
+			if err := e.execWithRetry(ctx, sess.conn, dropStmt); err != nil {
+				return fmt.Errorf("drop policy %q on %s: %w", name, table, err)
+			}
+		}
+
+		// Nothing to disable when the table never had a live policy to
+		// begin with, or when something (this module's own or a
+		// foreign one) is still standing after the loop above.
+		if len(liveNames) == 0 || anyRemain {
+			continue
+		}
+		disableRLS := fmt.Sprintf("ALTER TABLE %s DISABLE ROW LEVEL SECURITY", quoteIdent(table))
+		if err := e.execWithRetry(ctx, sess.conn, disableRLS); err != nil {
+			return fmt.Errorf("disable RLS on %s: %w", table, err)
+		}
+	}
+
 	return nil
+}
+
+// listRLSPolicyNames returns every policy name Postgres has installed on
+// table, regardless of which module created it — reconcileRLSPolicies is
+// what narrows this down to the names it can attribute to the syncing
+// module before treating any of them as a drop candidate.
+func listRLSPolicyNames(ctx context.Context, execer execQuerier, schemaName, table string) ([]string, error) {
+	rows, err := execer.QueryContext(ctx,
+		"SELECT policyname FROM pg_policies WHERE schemaname = $1 AND tablename = $2",
+		schemaName, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }
 
 // resolvePolicyTarget resolves a policy's applies_to
