@@ -16,6 +16,42 @@ func etagWidgetModel() model.ModelDeclaration {
 		Field("name", model.Text())
 }
 
+func etagGadgetModel() model.ModelDeclaration {
+	return *model.Define("etagtest.gadget", model.Table("etag_gadgets")).
+		WithStandardFields().
+		Field("name", model.Text())
+}
+
+// etagTriggerExists reports whether table carries a live
+// {table}_etag_trigger, via the same pg_trigger catalog query this
+// file's own assertions already use.
+func etagTriggerExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {
+	t.Helper()
+	var count int
+	if err := conn.QueryRow(
+		"SELECT count(*) FROM pg_trigger t JOIN pg_class c ON t.tgrelid = c.oid JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname = $1 AND c.relname = $2 AND t.tgname = $3",
+		schemaName, table, table+"_etag_trigger",
+	).Scan(&count); err != nil {
+		t.Fatalf("count triggers: %v", err)
+	}
+	return count > 0
+}
+
+// updateEtagFunctionExists reports whether the shared update_etag()
+// function still exists in schemaName — reconciliation must never drop
+// it, since every module's etag triggers there call it.
+func updateEtagFunctionExists(t *testing.T, conn *sql.DB, schemaName string) bool {
+	t.Helper()
+	var count int
+	if err := conn.QueryRow(
+		"SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = $1 AND p.proname = 'update_etag'",
+		schemaName,
+	).Scan(&count); err != nil {
+		t.Fatalf("count update_etag function: %v", err)
+	}
+	return count > 0
+}
+
 func createAndSyncEtagWidget(t *testing.T, sess *SchemaSyncSession, engine *SchemaDiffEngine, modelDecls []model.ModelDeclaration, auditedTables []manifest.AuditedTable) {
 	t.Helper()
 
@@ -184,5 +220,70 @@ func TestSyncEtagTriggers_ReSync_Idempotent(t *testing.T) {
 
 	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, auditedTables); err != nil {
 		t.Fatalf("second SyncEtagTriggers() call error: %v", err)
+	}
+}
+
+// Removing a table from audited_tables[] (module stays installed) drops
+// that table's etag trigger on the next sync, leaving any other audited
+// table's trigger untouched — goerp#563 AC.
+func TestSyncEtagTriggers_Reconciliation_RemovingOneTableKeepsOthers(t *testing.T) {
+	slug := "etagtriggerremoveone"
+	sess, engine := setupTenantSchema(t, slug)
+	adminConn, _ := openTestPool(t, 5*time.Second)
+
+	modelDecls := []model.ModelDeclaration{etagWidgetModel(), etagGadgetModel()}
+	auditedTables := []manifest.AuditedTable{{Table: "etag_widgets"}, {Table: "etag_gadgets"}}
+	createAndSyncEtagWidget(t, sess, engine, modelDecls, auditedTables)
+
+	schemaName := "tenant_" + slug
+	if !etagTriggerExists(t, adminConn, schemaName, "etag_widgets") || !etagTriggerExists(t, adminConn, schemaName, "etag_gadgets") {
+		t.Fatalf("expected both tables to have an etag trigger after install")
+	}
+
+	// etag_widgets removed from audited_tables; etag_gadgets stays declared.
+	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, []manifest.AuditedTable{{Table: "etag_gadgets"}}); err != nil {
+		t.Fatalf("SyncEtagTriggers() (remove one) error: %v", err)
+	}
+
+	if etagTriggerExists(t, adminConn, schemaName, "etag_widgets") {
+		t.Errorf("etag_widgets still has its trigger after being removed from audited_tables")
+	}
+	if !etagTriggerExists(t, adminConn, schemaName, "etag_gadgets") {
+		t.Errorf("etag_gadgets lost its trigger even though it's still declared")
+	}
+}
+
+// A module uninstall (or a manifest edit removing every audited_tables[]
+// entry) drops the etag trigger on every table this module owns, but
+// never drops the shared update_etag() function itself — goerp#563 AC.
+func TestSyncEtagTriggers_Reconciliation_EmptyAuditedTablesDropsAllTriggersKeepsFunction(t *testing.T) {
+	slug := "etagtriggeremptyall"
+	sess, engine := setupTenantSchema(t, slug)
+	adminConn, _ := openTestPool(t, 5*time.Second)
+
+	modelDecls := []model.ModelDeclaration{etagWidgetModel(), etagGadgetModel()}
+	auditedTables := []manifest.AuditedTable{{Table: "etag_widgets"}, {Table: "etag_gadgets"}}
+	createAndSyncEtagWidget(t, sess, engine, modelDecls, auditedTables)
+
+	schemaName := "tenant_" + slug
+	if !updateEtagFunctionExists(t, adminConn, schemaName) {
+		t.Fatalf("expected update_etag() to exist after install")
+	}
+
+	// Simulate module uninstall (or every entry removed from
+	// audited_tables) — modelDecls still reflects the module's
+	// last-known owned tables, but no tables are declared audited.
+	if err := engine.SyncEtagTriggers(context.Background(), sess, modelDecls, nil); err != nil {
+		t.Fatalf("SyncEtagTriggers() (empty audited_tables) error: %v", err)
+	}
+
+	if etagTriggerExists(t, adminConn, schemaName, "etag_widgets") {
+		t.Errorf("etag_widgets still has its trigger after audited_tables emptied")
+	}
+	if etagTriggerExists(t, adminConn, schemaName, "etag_gadgets") {
+		t.Errorf("etag_gadgets still has its trigger after audited_tables emptied")
+	}
+	if !updateEtagFunctionExists(t, adminConn, schemaName) {
+		t.Errorf("update_etag() was dropped — it's shared across every module's etag triggers, never owned by just one")
 	}
 }
