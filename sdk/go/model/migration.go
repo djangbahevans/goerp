@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/djangbahevans/goerp/sdk/go/db"
 )
 
 type DataMigration struct {
@@ -74,6 +76,23 @@ func (c *MigrationContext) Log(msg string, fields ...any) {
 // stream without a separate reporting path.
 func (c *MigrationContext) RecordProgress(n int) {
 	c.Log("progress", "records", n)
+}
+
+// DropColumn drops table's column column immediately, via
+// host.db.migration_ddl (goerp#500) — the only way to execute this
+// operation, bypassing ordinary schema sync's "never automatic" rule for
+// dropped columns (migration-guide.md §1 "The safety boundary") by
+// providing explicit programmatic consent. Only valid from inside a data
+// migration handler; the host rejects it otherwise.
+func (c *MigrationContext) DropColumn(table, column string) error {
+	return db.MigrationDropColumn(table, column)
+}
+
+// DropTable drops table immediately, via host.db.migration_ddl
+// (goerp#500) — DropColumn's own table-level counterpart
+// (migration-guide.md §4 "Dropping a column or table").
+func (c *MigrationContext) DropTable(table string) error {
+	return db.MigrationDropTable(table)
 }
 
 // formatFields renders a Log call's variadic key/value pairs as

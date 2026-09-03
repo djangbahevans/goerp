@@ -76,6 +76,17 @@ type ModuleSnapshot struct {
 	// search.Query index name to its declared manifest.SearchIndex
 	// (host.search.query, host-abi-reference.md §12).
 	SearchIndexRegistry *searchindex.Registry
+
+	// OwnedModels and ExtendsModels mirror the calling module's own
+	// manifest.SchemaConfig.OwnedModels/ExtendsModels — the same model
+	// ownership relationship internal/engine/schema/session.go's
+	// SchemaSyncSession exposes for ordinary schema sync, needed here so
+	// host.db.migration_ddl (goerp#500) can verify a DropColumn/DropTable
+	// target belongs to the calling module without constructing a full
+	// SchemaSyncSession (which pulls in Atlas diff/apply machinery this
+	// single explicit-consent statement has no use for).
+	OwnedModels   []string
+	ExtendsModels []string
 }
 
 type ModuleContext struct {
@@ -96,6 +107,15 @@ type ModuleContext struct {
 	TenantSlug string
 	TraceID    string
 	SpanStack  []trace.Span
+
+	// IsDataMigrationJob is true only for a ModuleContext built around a
+	// data-migration handle_job invocation (internal/engine/jobdispatch,
+	// goerp#500) — never set via NewModuleContext itself, set directly by
+	// the caller afterward the same way SpanStack is. host.db.migration_ddl
+	// (host_db_migration_ddl.go) checks this in addition to
+	// CapDBMigrationDDL, so holding the capability alone doesn't let a
+	// module call it from an ordinary HTTP/event/workflow dispatch.
+	IsDataMigrationJob bool
 
 	transactions map[string]openTransaction
 	txMu         sync.Mutex
@@ -168,6 +188,18 @@ func (mc *ModuleContext) DataAuditRegistry() *dataaudit.Registry {
 // request, for interpreting PermissionSet's bitfield indices.
 func (mc *ModuleContext) PermissionRegistry() *permission.PermissionRegistry {
 	return mc.snapshot.PermissionRegistry
+}
+
+// OwnedModels returns the calling module's own currently declared
+// owned-model names (dotted "{module}.{resource}" form).
+func (mc *ModuleContext) OwnedModels() []string {
+	return mc.snapshot.OwnedModels
+}
+
+// ExtendsModels returns the calling module's own currently declared
+// extended-model names (dotted "{module}.{resource}" form).
+func (mc *ModuleContext) ExtendsModels() []string {
+	return mc.snapshot.ExtendsModels
 }
 
 // RollbackAll rolls back every transaction still open in this context,

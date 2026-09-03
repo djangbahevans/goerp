@@ -28,3 +28,6 @@ func hostDBLock(ptr, size uint32) uint64
 
 //go:wasmimport host.db notify
 func hostDBNotify(ptr, size uint32) uint64
+
+//go:wasmimport host.db migration_ddl
+func hostDBMigrationDDL(ptr, size uint32) uint64

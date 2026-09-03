@@ -850,7 +850,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry})
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: primaryPool})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
-	river.AddWorker(jobWorkers, &jobdispatch.Worker{ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool})
+	river.AddWorker(jobWorkers, &jobdispatch.Worker{ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool, Runtime: runtime, TenantStore: tenantStore})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()
@@ -1151,6 +1151,8 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 		ComputeTargets:      computeTargets,
 		PermissionRegistry:  permRegistry,
 		SearchIndexRegistry: searchIndexRegistry,
+		OwnedModels:         mod.Manifest.Schema.OwnedModels,
+		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 	})
 }
 

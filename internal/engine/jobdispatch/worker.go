@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -51,6 +52,13 @@ type Worker struct {
 	river.WorkerDefaults[jobqueue.WASMJobArgs]
 	ModuleRegistry *registry.ModuleRegistry
 	SchemaSyncPool *schema.SchemaSyncPool
+	// Runtime and TenantStore are what Work needs to build a real
+	// wasm.ModuleContext around each handle_job invocation (goerp#500) —
+	// previously missing entirely, so any host.db/host.orm call from
+	// inside a job handler (data migration or ordinary) would
+	// nil-dereference on (*wasm.ModuleInstance).ModuleContext.
+	Runtime     *wasm.Runtime
+	TenantStore *tenant.Store
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs]) error {
@@ -107,6 +115,23 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 	}
 	defer mod.Pool.Return(inst)
 
+	// ModuleContext needs the tenant slug too (wasm.applyTenantScope builds
+	// the search path from it); args only carries the ID — same reason
+	// adminapi/activitydispatch.go's own moduleCtx construction resolves it.
+	t, err := w.TenantStore.GetByID(ctx, args.TenantID)
+	if err != nil {
+		return fmt.Errorf("resolve tenant %s: %w", args.TenantID, err)
+	}
+
+	moduleCtx := w.newModuleContext(mod, args, t.Slug, snap)
+	inst.SetModuleContext(moduleCtx)
+	w.Runtime.RegisterInstance(inst)
+	defer func() {
+		w.Runtime.UnregisterInstance(inst)
+		moduleCtx.RollbackAll()
+		inst.SetModuleContext(nil)
+	}()
+
 	status, err := inst.InvokeHandleJob(ctx, args.Payload)
 	if err != nil {
 		return fmt.Errorf("invoke handle_job for %s/%s: %w", args.ModuleName, args.JobType, err)
@@ -145,6 +170,30 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 	}
 
 	return nil
+}
+
+// newModuleContext builds the wasm.ModuleContext a handle_job invocation
+// runs under — the same registry-derived data engine.go's own
+// newModuleContext pulls from a snapshot for an HTTP-dispatched request,
+// with no live user (permSet/roles empty, same as
+// adminapi/activitydispatch.go's own workflow-activity dispatch).
+// IsDataMigrationJob is set only for a real data-migration job — the gate
+// host.db.migration_ddl (host_db_migration_ddl.go, goerp#500) checks so
+// CapDBMigrationDDL alone isn't enough to call it from an ordinary job.
+func (w *Worker) newModuleContext(mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
+	mc := wasm.NewModuleContext("", mod.Manifest.Name, "", "", nil, nil, args.TenantID, tenantSlug, "", mod.Capabilities, w.Runtime.TxLimiter(), wasm.ModuleSnapshot{
+		ModelDecls:          mod.ModelDecls,
+		FieldSecRegistry:    snap.FieldSecRegistry(),
+		EventRegistry:       snap.EventRegistry(),
+		ComputedIndex:       snap.ComputedIndex(),
+		ComputeTargets:      registry.ComputeTargets(snap),
+		PermissionRegistry:  snap.PermissionRegistry(),
+		SearchIndexRegistry: snap.SearchIndexRegistry(),
+		OwnedModels:         mod.Manifest.Schema.OwnedModels,
+		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
+	})
+	mc.IsDataMigrationJob = args.IsDataMigration
+	return mc
 }
 
 func hasDataMigrationHandler(mod *module.LoadedModule, handler string) bool {

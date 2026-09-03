@@ -44,3 +44,7 @@ func hostDBLock(ptr, size uint32) uint64 {
 func hostDBNotify(ptr, size uint32) uint64 {
 	panic("sdk/go/db: host.db.notify is only available in a wasip1 build")
 }
+
+func hostDBMigrationDDL(ptr, size uint32) uint64 {
+	panic("sdk/go/db: host.db.migration_ddl is only available in a wasip1 build")
+}
