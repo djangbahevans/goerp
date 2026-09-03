@@ -48,6 +48,14 @@ type EventDeliveryArgs struct {
 	// is, and must never affect whether two emissions of the same event
 	// dedupe against each other.
 	SyncDispatched bool `json:"sync_dispatched,omitempty"`
+	// Transactional records whether this emission came in through
+	// host.event.emit_tx (true) rather than host.event.emit (false) — the
+	// two host functions share this args type and insertEventDeliveryTx/
+	// insertEventDelivery respectively, but only the tx path's emission
+	// happened inside, and only becomes visible on commit of, the
+	// caller's own transaction. sdk/go/modeltest's h.Events exposes this
+	// as Event.WasTransactional (testing-guide.md §8).
+	Transactional bool `json:"transactional,omitempty"`
 }
 
 func (EventDeliveryArgs) Kind() string { return "event_delivery" }

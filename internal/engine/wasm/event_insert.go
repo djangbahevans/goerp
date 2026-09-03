@@ -53,6 +53,7 @@ func insertEventDeliveryTx(
 		TraceID:       traceID,
 		Payload:       payload,
 		EmittedAt:     emittedAt,
+		Transactional: true,
 	}, opts)
 	return err
 }
