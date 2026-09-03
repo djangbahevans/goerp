@@ -275,7 +275,7 @@ func TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds(t *testing.T) 
 			{Name: "legacy_name", Def: model.Text()},
 		},
 	}}
-	w := newRealFixtureWorkerWithCapabilities(t, syncPool, tenantStore, conn, wasmBytes, migrations, "1.0.0", abi.CapDBMigrationDDL, modelDecls, []string{"widget"})
+	w := newRealFixtureWorkerWithCapabilities(t, syncPool, tenantStore, conn, wasmBytes, migrations, "1.0.0", abi.CapDBMigrationDDL, modelDecls, []string{migrationTestModuleName + ".widget"})
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
 
 	mod := w.ModuleRegistry.Snapshot().Modules()[migrationTestModuleName]

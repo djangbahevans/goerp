@@ -57,7 +57,7 @@ func (s *SchemaSyncSession) Close(ctx context.Context) error {
 		}
 		return closeErr
 	}
-	lockA, lockB := advisoryLockKeys(s.tenantSlug, s.moduleName)
+	lockA, lockB := AdvisoryLockKeys(s.tenantSlug, s.moduleName)
 	_, unlockErr := s.conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1, $2)", lockA, lockB)
 	closeErr := s.conn.Close()
 	if unlockErr != nil {

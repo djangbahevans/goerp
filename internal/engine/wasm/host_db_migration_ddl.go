@@ -5,12 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"regexp"
+	"hash/fnv"
 	"slices"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
-	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
@@ -23,7 +22,11 @@ import (
 // safety boundary"): dropping a column and dropping a table. Unlike
 // schema sync's own DDL apply path (internal/engine/schema/apply.go), it
 // runs a single, already-consented-to statement directly — no Atlas
-// diffing, no NOT VALID/validate-later staging.
+// diffing, no NOT VALID/validate-later staging — but it still takes the
+// same pg_advisory_lock BeginSync (internal/engine/schema/pool.go) holds
+// for this (tenant, module) pair's whole DDL apply, so a direct drop can
+// never interleave with a concurrent Atlas-driven sync for the same pair
+// mutating the same catalog state out from under either one.
 //
 // A caller supplies structured {op, table, column}, not raw SQL — so this
 // file builds the DDL itself from separately-validated identifiers rather
@@ -33,12 +36,11 @@ import (
 // when the caller never sends SQL text at all.
 //
 // Ownership is checked against the caller's *currently declared* models
-// only (ModuleContext.OwnedModels/ExtendsModels, resolved the same way
-// host_db_exec_etag.go's resolveEtagTable resolves a bare table name) —
-// deliberately, not against any broader table-ownership history. A table
-// whose model has already been removed from the caller's own declaration
-// (the shape migration-guide.md §4's own dropOldOrdersTable example
-// describes) cannot be verified this way and is rejected: no persistent
+// only (ModuleContext.OwnedModels/ExtendsModels) — deliberately, not
+// against any broader table-ownership history. A table whose model has
+// already been removed from the caller's own declaration (the shape
+// migration-guide.md §4's own dropOldOrdersTable example describes)
+// cannot be verified this way and is rejected: no persistent
 // table→module ownership record exists anywhere in the engine to fall
 // back on, and a deny-list check ("allow unless some *other* module
 // currently owns it") would let any module drop any table nobody
@@ -48,19 +50,28 @@ import (
 // whose model the caller still declares (e.g. dropped in the same version
 // as a data migration that first empties it) — extending it to a
 // genuinely orphaned table needs a real ownership-history mechanism,
-// deliberately left for later.
+// deliberately left for later. The same table-level check also doesn't
+// consult *other* modules' ExtendsModels: a field_extension module's own
+// columns on a table this caller legitimately owns are destroyed by
+// DropTable with no separate signal to that other module — accepted for
+// the same reason, not something this ownership check can see without
+// that same history mechanism.
+//
+// DropColumn's own target, by contrast, only needs the table's model
+// still owned/extended — the column itself does not need to still appear
+// in the caller's current field declaration. migration-guide.md §3.11's
+// own documented workflow ("Remove from the model declaration and add a
+// handler") removes the Field() call in the very same change that adds
+// the DropColumn handler, so by the time the handler runs,
+// get_model_declarations() already reflects the column's removal —
+// requiring it to still be declared would reject the documented workflow
+// outright. A genuinely nonexistent column is instead caught by Postgres
+// itself (translateMigrationDDLError's undefined_column case below).
 
 const (
 	migrationDDLOpDropColumn = "drop_column"
 	migrationDDLOpDropTable  = "drop_table"
 )
-
-// migrationDDLIdentifierRe is the same bare-identifier shape
-// returningColumnRe (host_db_exec.go) validates opts.returning against —
-// applied here to table/column so the DDL text below can be built by
-// direct string concatenation with no SQL-injection risk through either
-// field.
-var migrationDDLIdentifierRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 type dbMigrationDDLInput struct {
 	Op     string `msgpack:"op"`
@@ -107,9 +118,10 @@ func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m
 
 // DBMigrationDDL implements host.db.migration_ddl's business logic —
 // identifier/ownership validation (buildMigrationDDL) and executing the
-// resulting statement — separated from makeDBMigrationDDL's own
-// capability/IsDataMigrationJob gating and ABI marshaling so it's testable
-// directly, matching DBExec's own split (host_db_exec.go).
+// resulting statement under the same advisory lock schema sync uses —
+// separated from makeDBMigrationDDL's own capability/IsDataMigrationJob
+// gating and ABI marshaling so it's testable directly, matching DBExec's
+// own split (host_db_exec.go).
 func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input dbMigrationDDLInput) (dbMigrationDDLOutput, *abi.HostError) {
 	sqlText, hostErr := buildMigrationDDL(modCtx, input)
 	if hostErr != nil {
@@ -119,14 +131,11 @@ func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext,
 	qCtx, cancel := context.WithTimeout(ctx, defaultExecTimeout)
 	defer cancel()
 
-	tx, err := primary.BeginTx(qCtx, nil)
-	if err != nil {
-		return dbMigrationDDLOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	tx, cleanup, hostErr := beginMigrationDDLTx(qCtx, primary, modCtx)
+	if hostErr != nil {
+		return dbMigrationDDLOutput{}, hostErr
 	}
-	if err := applyTenantScope(qCtx, tx, modCtx); err != nil {
-		_ = tx.Rollback()
-		return dbMigrationDDLOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
-	}
+	defer cleanup()
 
 	start := time.Now()
 	if _, execErr := tx.ExecContext(qCtx, sqlText); execErr != nil {
@@ -140,77 +149,120 @@ func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext,
 	return dbMigrationDDLOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000}, nil
 }
 
-// buildMigrationDDL validates input — the table (and, for a column drop,
-// the column) must belong to a model modCtx's own module currently owns
-// or extends — and returns the exact DDL statement to run. See this
-// file's own doc comment for why a since-removed model's table is
-// rejected rather than allowed.
-func buildMigrationDDL(modCtx *ModuleContext, input dbMigrationDDLInput) (string, *abi.HostError) {
-	if !migrationDDLIdentifierRe.MatchString(input.Table) {
-		return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: fmt.Sprintf("table %q is not a valid identifier", input.Table)}
+// beginMigrationDDLTx acquires a *sql.Conn, takes the same pg_advisory_lock
+// BeginSync itself takes for (modCtx.TenantSlug, modCtx.ModuleName) —
+// serializing this direct DDL statement against a concurrent Atlas-driven
+// schema sync for the identical pair — then opens a transaction on that
+// same connection and applies tenant scope to it. cleanup unlocks and
+// closes conn; the caller must defer it exactly once as soon as it's
+// returned non-nil, regardless of how tx is later used.
+func beginMigrationDDLTx(ctx context.Context, primary *sql.DB, modCtx *ModuleContext) (tx *sql.Tx, cleanup func(), hostErr *abi.HostError) {
+	conn, err := primary.Conn(ctx)
+	if err != nil {
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
-	decl, ok := resolveOwnedMigrationTable(modCtx, input.Table)
-	if !ok {
+	lockA, lockB := migrationDDLAdvisoryLockKeys(modCtx.TenantSlug, modCtx.ModuleName)
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1, $2)", lockA, lockB); err != nil {
+		_ = conn.Close()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, nil, &abi.HostError{Code: abi.ErrCodeDBTimeout, Message: "timed out waiting for the schema sync lock (a sync is in progress for this module/tenant)", Retry: true}
+		}
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	cleanup = func() {
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1, $2)", lockA, lockB)
+		_ = conn.Close()
+	}
+
+	newTx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		cleanup()
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+	if err := applyTenantScope(ctx, newTx, modCtx); err != nil {
+		_ = newTx.Rollback()
+		cleanup()
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	}
+
+	return newTx, cleanup, nil
+}
+
+// migrationDDLAdvisoryLockKeys mirrors internal/engine/schema/pool.go's
+// own AdvisoryLockKeys exactly — duplicated locally rather than imported,
+// since internal/engine/schema's own test suite
+// (enum_realmodule_test.go) imports this package (a real compiled-module
+// integration test), and this package importing schema back would be a
+// cycle (the same reason host_orm.go's tableNameForORM duplicates
+// schema.TableNameFor instead of importing it).
+// TestMigrationDDLAdvisoryLockKeys_MatchesSchemaPackage cross-checks this
+// against schema.AdvisoryLockKeys directly (safe in a test file, since
+// only schema's test files import wasm, not schema's production code).
+func migrationDDLAdvisoryLockKeys(tenantSlug, moduleName string) (int32, int32) {
+	h := fnv.New32a()
+	h.Write([]byte(tenantSlug))
+	a := int32(h.Sum32())
+	h.Reset()
+	h.Write([]byte(moduleName))
+	b := int32(h.Sum32())
+	return a, b
+}
+
+// buildMigrationDDL validates input — the table must belong to a model
+// modCtx's own module currently owns or extends — and returns the exact
+// DDL statement to run. See this file's own doc comment for why a
+// since-removed model's table is rejected rather than allowed, and why
+// DropColumn's own column argument isn't checked against the current
+// declaration the same way.
+func buildMigrationDDL(modCtx *ModuleContext, input dbMigrationDDLInput) (string, *abi.HostError) {
+	if !returningColumnRe.MatchString(input.Table) {
+		return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: fmt.Sprintf("table %q is not a valid identifier", input.Table)}
+	}
+	if !migrationDDLTableOwned(modCtx, input.Table) {
 		return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLNotOwned, Message: fmt.Sprintf("table %q is not owned or extended by module %q", input.Table, modCtx.ModuleName)}
 	}
 
 	switch input.Op {
 	case migrationDDLOpDropColumn:
-		if !migrationDDLIdentifierRe.MatchString(input.Column) {
+		if !returningColumnRe.MatchString(input.Column) {
 			return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: fmt.Sprintf("column %q is not a valid identifier", input.Column)}
 		}
-		if !hasField(decl, input.Column) {
-			return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLTargetNotFound, Message: fmt.Sprintf("column %q does not exist on %q", input.Column, input.Table)}
-		}
-		return "ALTER TABLE " + quoteIdent(input.Table) + " DROP COLUMN " + quoteIdent(input.Column), nil
+		return "ALTER TABLE " + quoteIdentORM(input.Table) + " DROP COLUMN " + quoteIdentORM(input.Column), nil
 	case migrationDDLOpDropTable:
-		return "DROP TABLE " + quoteIdent(input.Table), nil
+		return "DROP TABLE " + quoteIdentORM(input.Table), nil
 	default:
 		return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: fmt.Sprintf("unknown op %q", input.Op)}
 	}
 }
 
-// resolveOwnedMigrationTable resolves table against modCtx's own
-// currently declared models, requiring the match to be a member of
-// modCtx's OwnedModels or ExtendsModels — the same ownership
-// relationship internal/engine/schema/session.go's SchemaSyncSession
-// exposes for ordinary schema sync, applied here to a single explicit-
-// consent DDL statement instead of a full diff/apply pass.
-func resolveOwnedMigrationTable(modCtx *ModuleContext, table string) (model.ModelDeclaration, bool) {
+// migrationDDLTableOwned reports whether table resolves (via
+// tableNameForORM, the same bare-name mapping resolveEtagTable and
+// resolveAuditedExecTable use) to one of modCtx's own currently declared
+// models, *and* that model's fully-qualified "{module}.{resource}" name
+// — the form manifest.SchemaConfig.OwnedModels/ExtendsModels always use,
+// the same qualification resolveModel (host_orm.go) strips before
+// comparing against a bare ModelDecls entry — is a member of
+// modCtx.OwnedModels() or modCtx.ExtendsModels().
+func migrationDDLTableOwned(modCtx *ModuleContext, table string) bool {
 	for _, decl := range modCtx.ModelDecls() {
 		if tableNameForORM(decl) != table {
 			continue
 		}
-		if migrationDDLOwnsModel(modCtx, decl.Name) {
-			return decl, true
-		}
-		return model.ModelDeclaration{}, false
+		qualified := modCtx.ModuleName + "." + decl.Name
+		return slices.Contains(modCtx.OwnedModels(), qualified) || slices.Contains(modCtx.ExtendsModels(), qualified)
 	}
-	return model.ModelDeclaration{}, false
-}
-
-func migrationDDLOwnsModel(modCtx *ModuleContext, modelName string) bool {
-	return slices.Contains(modCtx.OwnedModels(), modelName) || slices.Contains(modCtx.ExtendsModels(), modelName)
-}
-
-// quoteIdent double-quotes name for use as a Postgres identifier. Only
-// ever called on a string already validated against
-// migrationDDLIdentifierRe (bare [a-zA-Z_][a-zA-Z0-9_]* — no quote
-// characters possible), so no escaping of embedded quotes is needed.
-func quoteIdent(name string) string {
-	return `"` + name + `"`
+	return false
 }
 
 // translateMigrationDDLError maps a Postgres DDL failure to the ABI error
 // code host-abi-reference.md documents for host.db.migration_ddl.
 // undefined_column/undefined_table map to db.migration_ddl_target_not_found
-// — buildMigrationDDL already checks the column against the caller's own
-// declared model above, but the table's live catalog state is never
-// re-checked before executing, only its declared-model membership, so a
-// table dropped by a concurrent statement between validation and
-// execution still surfaces this way. Everything else stays under the
-// generic db.migration_ddl_error, carrying its own SQLSTATE.
+// — the only place a nonexistent DropColumn target is ever caught, per
+// this file's own doc comment on why buildMigrationDDL doesn't pre-check
+// the column against the caller's current declaration. Everything else
+// stays under the generic db.migration_ddl_error, carrying its own
+// SQLSTATE.
 func translateMigrationDDLError(err error) *abi.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {

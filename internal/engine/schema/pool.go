@@ -385,7 +385,7 @@ func (p *SchemaSyncPool) BeginSync(ctx context.Context, tenantID, tenantSlug, mo
 	lockCtx, cancel := context.WithTimeout(ctx, p.lockAcquireTimeout)
 	defer cancel()
 
-	lockA, lockB := advisoryLockKeys(tenantSlug, moduleName)
+	lockA, lockB := AdvisoryLockKeys(tenantSlug, moduleName)
 	if _, err := conn.ExecContext(lockCtx, "SELECT pg_advisory_lock($1, $2)", lockA, lockB); err != nil {
 		_ = conn.Close()
 		if errors.Is(lockCtx.Err(), context.DeadlineExceeded) {
@@ -450,7 +450,15 @@ func (p *SchemaSyncPool) BeginRead(ctx context.Context, tenantID, tenantSlug, mo
 	}, nil
 }
 
-func advisoryLockKeys(tenantSlug, moduleName string) (int32, int32) {
+// AdvisoryLockKeys derives the pg_advisory_lock key pair BeginSync itself
+// uses to serialize DDL per (tenantSlug, moduleName) — exported so a test
+// can pin internal/engine/wasm's own local duplicate of this exact logic
+// (host_db_migration_ddl.go's migrationDDLAdvisoryLockKeys, goerp#500)
+// against it. wasm can't import this package directly to reuse it
+// outright — see migrationDDLAdvisoryLockKeys's own doc comment for the
+// import-cycle reason — so the two must be kept in sync by that
+// cross-check test instead.
+func AdvisoryLockKeys(tenantSlug, moduleName string) (int32, int32) {
 	h := fnv.New32a()
 	h.Write([]byte(tenantSlug))
 	a := int32(h.Sum32())

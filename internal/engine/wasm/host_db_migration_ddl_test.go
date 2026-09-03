@@ -28,7 +28,7 @@ func migrationDDLWidgetModelDecl() model.ModelDeclaration {
 
 // migrationDDLUnownedModelDecl is declared in ModelDecls but deliberately
 // left out of both OwnedModels and ExtendsModels — the defensive branch
-// resolveOwnedMigrationTable rejects even though a matching declaration
+// migrationDDLTableOwned rejects even though a matching declaration
 // exists, since manifest-spec.md's own load-time validation should never
 // let this happen for a real module (owned_models must exactly match
 // get_model_declarations()) but the host function checks it anyway.
@@ -54,6 +54,16 @@ func migrationDDLExtendedModelDecl() model.ModelDeclaration {
 	}
 }
 
+// OwnedModels/ExtendsModels always carry the manifest's own dotted
+// "{module}.{resource}" form (manifest.SchemaConfig.OwnedModels,
+// confirmed by internal/engine/manifest/manifest_test.go and
+// internal/engine/schema/session_test.go) — never the bare
+// model.ModelDeclaration.Name form host.orm's own resolveModel
+// (host_orm.go) strips the module prefix down to before comparing. These
+// fixtures use "testmodule.widget"/"testmodule.shared" to match that real
+// shape, not the bare names a first, buggy version of this test suite
+// used (which happened to "pass" only because the same bare-vs-dotted
+// mismatch existed on both sides of the comparison).
 func newMigrationDDLTestModuleContext(tenantSlug string, isDataMigrationJob bool) *ModuleContext {
 	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, tenantSlug, tenantSlug, "trace-1",
 		abi.CapDBMigrationDDL, nil, ModuleSnapshot{
@@ -62,8 +72,8 @@ func newMigrationDDLTestModuleContext(tenantSlug string, isDataMigrationJob bool
 				migrationDDLUnownedModelDecl(),
 				migrationDDLExtendedModelDecl(),
 			},
-			OwnedModels:   []string{"widget"},
-			ExtendsModels: []string{"shared"},
+			OwnedModels:   []string{"testmodule.widget"},
+			ExtendsModels: []string{"testmodule.shared"},
 		})
 	mc.IsDataMigrationJob = isDataMigrationJob
 	return mc
@@ -215,13 +225,53 @@ func TestDBMigrationDDL_RejectsUnknownColumn(t *testing.T) {
 		Op: migrationDDLOpDropColumn, Table: "widget", Column: "does_not_exist",
 	})
 	if hostErr == nil {
-		t.Fatal("expected an error dropping a column the model doesn't declare")
+		t.Fatal("expected an error dropping a column that doesn't exist on the real table")
 	}
 	if hostErr.Code != abi.ErrCodeMigrationDDLTargetNotFound {
 		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeMigrationDDLTargetNotFound)
 	}
 	if !columnExists(t, primaryDB, slug, "widget", "legacy_name") {
 		t.Error("unrelated legacy_name column was affected")
+	}
+}
+
+// TestDBMigrationDDL_DropColumn_AlreadyRemovedFromDeclaration is
+// migration-guide.md §3.11's own documented workflow ("Remove from the
+// model declaration and add a handler"): the field is gone from
+// ModelDecls by the time the handler runs (removed in the same change
+// that adds the DropColumn call), but the table's own model is still
+// owned. This must succeed — requiring the column to still be declared
+// would reject the workflow the docs themselves teach.
+func TestDBMigrationDDL_DropColumn_AlreadyRemovedFromDeclaration(t *testing.T) {
+	primaryDB, slug, _ := setupMigrationDDLTest(t)
+	ctx := context.Background()
+
+	// A widget declaration with legacy_name already removed — same table,
+	// same ownership, one fewer declared field than the real table still
+	// has (mirroring the real table created by createFixtureMigrationDDLTables,
+	// which still has the column at the DB level even though the Go
+	// declaration no longer mentions it).
+	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, slug, slug, "trace-1",
+		abi.CapDBMigrationDDL, nil, ModuleSnapshot{
+			ModelDecls: []model.ModelDeclaration{{
+				Name: "widget",
+				Fields: []model.NamedField{
+					{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+					{Name: "tenant_id", Def: model.UUID().Required()},
+				},
+			}},
+			OwnedModels: []string{"testmodule.widget"},
+		})
+	mc.IsDataMigrationJob = true
+
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
+		Op: migrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
+	})
+	if hostErr != nil {
+		t.Fatalf("DBMigrationDDL: %+v", hostErr)
+	}
+	if columnExists(t, primaryDB, slug, "widget", "legacy_name") {
+		t.Error("legacy_name column still exists after dropping it via the documented remove-then-drop workflow")
 	}
 }
 
@@ -290,7 +340,7 @@ func TestHostDBMigrationDDL_WiredThroughWASMBoundary(t *testing.T) {
 	t.Run("without db.migration_ddl capability", func(t *testing.T) {
 		mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, slug, slug, "trace-1", 0, nil, ModuleSnapshot{
 			ModelDecls:    []model.ModelDeclaration{migrationDDLWidgetModelDecl()},
-			OwnedModels:   []string{"widget"},
+			OwnedModels:   []string{"testmodule.widget"},
 			ExtendsModels: nil,
 		})
 		mc.IsDataMigrationJob = true
