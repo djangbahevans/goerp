@@ -18,6 +18,7 @@ docs/
 # goerp module build output.
 modules/*/module.wasm
 modules/*/build/
+sdk/go/modeltest/testdata/*/module.wasm
 
 # OS / editor cruft.
 .DS_Store
