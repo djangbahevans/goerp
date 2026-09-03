@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -159,13 +160,6 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		writeRouteError(w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
 		return
 	}
-	var bodyMap map[string]any
-	if len(bodyBytes) > 0 {
-		// Best-effort: a handler that cares about a malformed body sees an
-		// empty one, rather than the request failing here before the
-		// handler (which may not even read Body, e.g. GET/DELETE) runs.
-		_ = json.Unmarshal(bodyBytes, &bodyMap)
-	}
 
 	authCtx := authFromContext(ctx)
 	tenantCtx := tenantFromContext(ctx)
@@ -196,14 +190,25 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		}
 	}
 
+	// The module's own SDK router matches against routes exactly as its
+	// author declared them, unprefixed — a module has no way to know its
+	// own manifest name at route-registration time, so the module-name
+	// namespace RegisterModuleRoutes prepends for the engine's own
+	// RouteTable (route.ModulePathPrefix) has to come back off before the
+	// module sees this request's path, or its router can never match.
+	modulePath := strings.TrimPrefix(r.URL.Path, route.ModulePathPrefix(entry.ModuleName, mod.Manifest.Type))
+	if modulePath == "" {
+		modulePath = "/"
+	}
+
 	req := EngineRequest{
 		ID:            requestIDFromContext(ctx),
 		Method:        r.Method,
-		Path:          r.URL.Path,
+		Path:          modulePath,
 		PathParams:    rr.pathParams,
 		QueryParams:   query,
 		Headers:       headers,
-		Body:          bodyMap,
+		Body:          bodyBytes,
 		UserID:        authCtx.UserID,
 		PermissionSet: authCtx.PermissionSet,
 		TenantID:      tenantCtx.TenantID,

@@ -41,7 +41,7 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 	var suppressed []SuppressedRoute
 	claimedThisCall := make(map[string]string, len(models)) // "method path" -> qualified model that claimed it
 
-	prefix := modulePathPrefix(moduleName, moduleType)
+	prefix := ModulePathPrefix(moduleName, moduleType)
 
 	for _, md := range models {
 		qualifiedModel := moduleName + "." + md.Name
@@ -161,11 +161,18 @@ func storageBackendString(b model.ModelBackend) string {
 	}
 }
 
-// modulePathPrefix mirrors RegisterModuleRoutes's own prefix computation
+// ModulePathPrefix mirrors RegisterModuleRoutes's own prefix computation
 // (route_module.go) — factored out here so both explicit and
 // EnableOps-derived routes expand against the identical module/connector
-// prefix rule.
-func modulePathPrefix(moduleName, moduleType string) string {
+// prefix rule. Exported so dispatchWASMRoute (internal/engine/dispatch.go)
+// can strip it back off an inbound request's path before handing that
+// path to the module's own SDK router, which matches against routes
+// exactly as the module author declared them — unprefixed, since a
+// module has no way to know its own manifest name at route-registration
+// time (engine-internals.md's "the Go Module SDK's own Router... matches
+// req.Path the same way the engine's own RouteTable does" — both match
+// the same *unprefixed* string, not the same literal request URL).
+func ModulePathPrefix(moduleName, moduleType string) string {
 	if moduleType == "connector" {
 		return "/connectors/" + moduleName
 	}
