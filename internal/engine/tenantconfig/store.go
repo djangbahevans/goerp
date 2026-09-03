@@ -11,16 +11,41 @@
 // declares a config_schema (manifest-spec.md §17) — this package is
 // only the minimal key/value store and read/write path goerp#308 (MFA
 // enforcement modes) needs.
+//
+// Resolver (resolver.go) layers multitenancy-internals.md §7's own
+// three-tier config resolution chain — operator override, tenant-admin-set
+// module_config, manifest tenant_config_seeds default — over this store,
+// fronted by a TTL-only in-memory cache. Listener (listener.go) is that
+// cache's cross-instance counterpart: Store.Set broadcasts a Postgres
+// NOTIFY on every write, and a Listener invalidates a Resolver's matching
+// cache entry the moment it arrives, rather than waiting out the TTL.
 package tenantconfig
 
 import (
 	"context"
 	"database/sql"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
+
+// configChangedChannel is the single Postgres NOTIFY channel every write
+// broadcasts on and every Listener subscribes to — one channel for every
+// tenant, with the affected tenant/key in the payload (configChangedPayload),
+// rather than one channel per tenant: a per-tenant channel would need every
+// already-running engine instance to issue a fresh LISTEN the moment a new
+// tenant is provisioned, with no existing mechanism to trigger that.
+const configChangedChannel = "config_changed"
+
+// configChangedPayload is configChangedChannel's own NOTIFY payload —
+// small enough to stay well under Postgres's 8000-byte pg_notify cap for
+// any realistic tenant ID/key.
+type configChangedPayload struct {
+	TenantID string `json:"tenant_id"`
+	Key      string `json:"key"`
+}
 
 const createTenantConfigOverridesTable = `
 CREATE TABLE IF NOT EXISTS system.tenant_config_overrides (
@@ -75,15 +100,36 @@ func (s *Store) Get(ctx context.Context, tenantID, key string) (value string, ok
 	return value, true, nil
 }
 
-// Set upserts key's value for tenantID.
+// Set upserts key's value for tenantID and broadcasts configChangedChannel
+// so every engine instance's Resolver cache drops its now-stale entry —
+// Postgres defers a transactional NOTIFY's delivery until COMMIT (and
+// drops it on rollback), so a failed upsert never broadcasts a change
+// that didn't actually happen.
 func (s *Store) Set(ctx context.Context, tenantID, key, value string) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin set tenant config value: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO system.tenant_config_overrides (tenant_id, key, value)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (tenant_id, key) DO UPDATE SET value = $3, updated_at = NOW()
-	`, tenantID, key, value)
-	if err != nil {
+	`, tenantID, key, value); err != nil {
 		return fmt.Errorf("set tenant config value: %w", err)
+	}
+
+	payload, err := json.Marshal(configChangedPayload{TenantID: tenantID, Key: key})
+	if err != nil {
+		return fmt.Errorf("encode config changed payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "SELECT pg_notify($1, $2)", configChangedChannel, string(payload)); err != nil {
+		return fmt.Errorf("notify config changed: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit set tenant config value: %w", err)
 	}
 	return nil
 }

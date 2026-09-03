@@ -83,7 +83,7 @@ func TestResolver_Get_PriorityOrder_OverrideBeatsModuleConfigBeatsDefault(t *tes
 	if err := env.store.Set(context.Background(), tt.ID, "contacts.default_country_code", "DE"); err != nil {
 		t.Fatalf("Set() override error: %v", err)
 	}
-	resolver.cache = map[string]cachedValue{} // bypass the cache to observe the new resolution
+	resolver.Invalidate(tt.ID, "contacts.default_country_code") // bypass the cache to observe the new resolution
 
 	value, ok, err = resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
 	if err != nil {
@@ -151,6 +151,34 @@ func TestResolver_Get_CachesResolvedValue(t *testing.T) {
 	value, ok, err = resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
 	if err != nil || !ok || value != "DE" {
 		t.Fatalf("second Get() = %q, %v, %v, want cached %q, true, nil", value, ok, err, "DE")
+	}
+}
+
+func TestResolver_CacheSetIfFresh_SkipsWriteAfterConcurrentInvalidate(t *testing.T) {
+	resolver := NewResolver(nil, nil, nil)
+	gen := resolver.currentGeneration()
+
+	// Simulates an Invalidate arriving (e.g. via a Listener notification)
+	// while a Get's own DB read, which captured gen before issuing that
+	// read, is still in flight.
+	resolver.Invalidate("tenant-1", "some.key")
+
+	resolver.cacheSetIfFresh("k", "stale-value-read-before-the-invalidate", true, gen)
+
+	if _, ok := resolver.cachedGet("k"); ok {
+		t.Fatal("cacheSetIfFresh cached a value read before a concurrent Invalidate, want it skipped")
+	}
+}
+
+func TestResolver_CacheSetIfFresh_WritesWithNoInterveningInvalidate(t *testing.T) {
+	resolver := NewResolver(nil, nil, nil)
+	gen := resolver.currentGeneration()
+
+	resolver.cacheSetIfFresh("k", "fresh-value", true, gen)
+
+	cached, ok := resolver.cachedGet("k")
+	if !ok || cached.value != "fresh-value" {
+		t.Fatalf("cacheSetIfFresh() did not cache a read with no intervening invalidation: ok=%v value=%q", ok, cached.value)
 	}
 }
 
