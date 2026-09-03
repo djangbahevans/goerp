@@ -6,6 +6,8 @@
 // (exec.go/exec_batch.go/insert.go/update.go, go-sdk-reference.md §6
 // "Exec — write rows"), Lock/TryLock for tenant-scoped Postgres advisory
 // locking (lock.go), Notify for tenant-scoped Postgres NOTIFY (notify.go),
+// NewQuery/NewPatch for hand-assembling dynamic SQL (query_builder.go/
+// patch.go, go-sdk-reference.md section 6 "Query builder"/"Patch builder"),
 // and this package's own sentinel errors/type matchers for classifying a
 // host.db.exec-originated failure (errors.go).
 package db
