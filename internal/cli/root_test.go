@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -46,6 +47,24 @@ func runCLIWithStdin(t *testing.T, stdin string, args ...string) (exitCode int, 
 		_ = inW.Close()
 	}()
 
+	// outR/errR must be drained concurrently with Execute(), not after it
+	// returns: a command whose subprocess writes more than one pipe
+	// buffer's worth of output (Linux's default is 64KiB — go test -v
+	// against a real module's test suite has no bound on this) blocks on
+	// write(2) once the buffer fills, and Execute() then never returns —
+	// a deadlock nothing reading only after Execute() can ever unblock.
+	var outBuf, errBuf bytes.Buffer
+	var drain sync.WaitGroup
+	drain.Add(2)
+	go func() {
+		defer drain.Done()
+		_, _ = io.Copy(&outBuf, outR)
+	}()
+	go func() {
+		defer drain.Done()
+		_, _ = io.Copy(&errBuf, errR)
+	}()
+
 	exitCode = Execute()
 
 	_ = inR.Close()
@@ -53,9 +72,11 @@ func runCLIWithStdin(t *testing.T, stdin string, args ...string) (exitCode int, 
 	_ = errW.Close()
 	os.Stdin, os.Stdout, os.Stderr = origStdin, origStdout, origStderr
 
-	var outBuf, errBuf bytes.Buffer
-	_, _ = io.Copy(&outBuf, outR)
-	_, _ = io.Copy(&errBuf, errR)
+	// Closing outW/errW above makes each io.Copy see EOF and return, so
+	// this always completes — the pipe's write end has no other open
+	// reference once Execute() (which held the only other one, via
+	// os.Stdout/os.Stderr during the call above) has returned.
+	drain.Wait()
 
 	return exitCode, outBuf.String(), errBuf.String()
 }
