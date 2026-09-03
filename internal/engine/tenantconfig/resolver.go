@@ -15,10 +15,9 @@ import (
 )
 
 // cacheTTL is the resolved-value in-memory cache's lifetime —
-// multitenancy-internals.md §7's own 5-minute figure. Invalidating it
-// early on a config write, across every engine instance, is goerp#555's
-// separate, still-blocked scope; until then, a change here takes up to
-// cacheTTL to become visible.
+// multitenancy-internals.md §7's own 5-minute figure — and so also the
+// worst-case propagation delay for an instance a Listener never reaches
+// (e.g. its LISTEN connection was down when configChangedChannel fired).
 const cacheTTL = 5 * time.Minute
 
 // resolveConfigQuery COALESCEs the three sources multitenancy-internals.md
@@ -51,8 +50,9 @@ type Resolver struct {
 	tenants  *tenant.Store
 	registry *registry.ModuleRegistry
 
-	mu    sync.Mutex
-	cache map[string]cachedValue
+	mu         sync.Mutex
+	cache      map[string]cachedValue
+	generation uint64
 }
 
 func NewResolver(store *Store, tenants *tenant.Store, reg *registry.ModuleRegistry) *Resolver {
@@ -69,10 +69,11 @@ func NewResolver(store *Store, tenants *tenant.Store, reg *registry.ModuleRegist
 // describes. found is false, with a nil error, when none of the three
 // sources has a value for key.
 func (r *Resolver) Get(ctx context.Context, tenantID, key string) (value string, found bool, err error) {
-	cacheKey := "config:" + tenantID + ":" + key
+	cacheKey := configCacheKey(tenantID, key)
 	if cached, ok := r.cachedGet(cacheKey); ok {
 		return cached.value, cached.found, nil
 	}
+	gen := r.currentGeneration()
 
 	t, err := r.tenants.GetByID(ctx, tenantID)
 	if err != nil {
@@ -88,7 +89,7 @@ func (r *Resolver) Get(ctx context.Context, tenantID, key string) (value string,
 		return "", false, fmt.Errorf("resolve tenant config %q: %w", key, err)
 	}
 
-	r.cacheSet(cacheKey, resolved.String, resolved.Valid)
+	r.cacheSetIfFresh(cacheKey, resolved.String, resolved.Valid, gen)
 	return resolved.String, resolved.Valid, nil
 }
 
@@ -130,8 +131,37 @@ func (r *Resolver) cachedGet(cacheKey string) (cachedValue, bool) {
 	return entry, true
 }
 
-func (r *Resolver) cacheSet(cacheKey, value string, found bool) {
+func (r *Resolver) currentGeneration() uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.generation
+}
+
+// cacheSetIfFresh caches value/found under cacheKey, unless generation has
+// advanced past gen — an Invalidate call landed while this read was still
+// in flight, meaning the value just read may already be stale. Skipping
+// the cache write in that case is safe: the next Get simply re-reads,
+// rather than risking caching a value Invalidate's own notification was
+// specifically trying to evict.
+func (r *Resolver) cacheSetIfFresh(cacheKey, value string, found bool, gen uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.generation != gen {
+		return
+	}
 	r.cache[cacheKey] = cachedValue{value: value, found: found, expiresAt: time.Now().Add(cacheTTL)}
+}
+
+// Invalidate drops tenantID/key's cached entry, if any, and advances the
+// generation counter cacheSetIfFresh checks — a Listener's own reaction
+// to a configChangedChannel notification naming this pair.
+func (r *Resolver) Invalidate(tenantID, key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.cache, configCacheKey(tenantID, key))
+	r.generation++
+}
+
+func configCacheKey(tenantID, key string) string {
+	return "config:" + tenantID + ":" + key
 }

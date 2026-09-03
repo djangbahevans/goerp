@@ -158,6 +158,8 @@ type Engine struct {
 	// process, not persisted or configurable.
 	instanceID string
 	hotReload  *hotreload.Coordinator
+
+	tenantConfigListener *tenantconfig.Listener
 }
 
 func New(cfg *config.Config) (*Engine, error) {
@@ -679,6 +681,15 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("build role permission map: %w", err)
 	}
 
+	// tenantConfigResolver isn't stored as an Engine field, matching
+	// tenantConfigStore's own convention above — nothing outside this
+	// Listener consumes it yet (host.config's own ABI, resolving it
+	// against a real request, is unbuilt). tenantConfigListener is kept,
+	// since Start/Shutdown (below, and *Engine methods, so outside New's
+	// own scope) need it to start and stop the LISTEN goroutine.
+	tenantConfigResolver := tenantconfig.NewResolver(tenantConfigStore, tenantStore, moduleRegistry)
+	tenantConfigListener := tenantconfig.NewListener(primaryPool, tenantConfigResolver)
+
 	// authChecker isn't consumed yet — wiring it into an actual HTTP
 	// middleware chain is goerp#91, which also owns resolving the current
 	// registry.RegistrySnapshot's PermissionRegistry to pass into
@@ -1007,6 +1018,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		tracerProvider:    tracerProvider,
 		instanceID:        instanceID,
 		hotReload:         hotReloadCoordinator,
+
+		tenantConfigListener: tenantConfigListener,
 	}
 
 	// GET /_meta/permissions (goerp#417) is added here rather than to the
@@ -1083,6 +1096,8 @@ func (e *Engine) Start(ctx context.Context) error {
 		}
 	}
 
+	e.tenantConfigListener.Start(ctx, nil)
+
 	e.readiness.Store(true)
 
 	return nil
@@ -1100,6 +1115,8 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	if e.cfg.HotReloadEnabled {
 		e.hotReload.Stop()
 	}
+
+	e.tenantConfigListener.Stop()
 
 	if err := e.adminServer.Shutdown(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not shut down admin server")
