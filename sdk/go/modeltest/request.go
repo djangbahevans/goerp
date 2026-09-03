@@ -3,6 +3,7 @@ package modeltest
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -49,9 +50,7 @@ func (h *Harness) baseState() *requestState {
 func (s *requestState) clone() *requestState {
 	c := *s
 	c.headers = make(map[string]string, len(s.headers))
-	for k, v := range s.headers {
-		c.headers[k] = v
-	}
+	maps.Copy(c.headers, s.headers)
 	return &c
 }
 

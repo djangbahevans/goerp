@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"regexp"
@@ -57,9 +58,7 @@ func (d *TestDB) SeedSystem(table string, records any) {
 func (d *TestDB) insert(table string, row map[string]any) {
 	d.t.Helper()
 	cloned := make(map[string]any, len(row)+1)
-	for k, v := range row {
-		cloned[k] = v
-	}
+	maps.Copy(cloned, row)
 	cloned["tenant_id"] = d.tenantID
 	d.insertInto(d.schema(), table, cloned)
 }

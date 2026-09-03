@@ -140,6 +140,15 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	if mod.Status == module.StatusFailed {
 		t.Fatalf("modeltest: module failed to load: %s", mod.FailureReason)
 	}
+	// Registered after rt's own Close cleanup (line above) so it runs
+	// first — t.Cleanup is LIFO. mod.Pool's replenishLoop goroutine can
+	// still be mid-InstantiateModule when rt.Close fires otherwise,
+	// racing under -race (the same pattern moduleinstall/worker_test.go
+	// and modulereload/leader_test.go hit and fixed the same way).
+	t.Cleanup(func() {
+		mod.Pool.DrainAndClose(context.Background(), 5*time.Second)
+		_ = mod.CompiledModule.Close(context.Background())
+	})
 	moduleName := mod.Manifest.Name
 
 	tenantID := uuid.NewString()

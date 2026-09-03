@@ -61,7 +61,7 @@ func (r *Response) ensureDecoded() any {
 func (r *Response) JSON(path string) any {
 	r.t.Helper()
 	cur := r.ensureDecoded()
-	for _, seg := range strings.Split(path, ".") {
+	for seg := range strings.SplitSeq(path, ".") {
 		m, ok := cur.(map[string]any)
 		if !ok {
 			r.t.Fatalf("modeltest: JSON(%q): %q is not an object in response body", path, seg)
