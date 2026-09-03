@@ -16,7 +16,7 @@ import (
 // flags to go test's flags and streaming its output live, the same way
 // a developer running `go test` directly would see it.
 func newTestCmd() *cobra.Command {
-	var run string
+	var run, tags string
 	var verbose, cover, race bool
 	var timeout time.Duration
 
@@ -48,6 +48,9 @@ func newTestCmd() *cobra.Command {
 			if race {
 				goArgs = append(goArgs, "-race")
 			}
+			if tags != "" {
+				goArgs = append(goArgs, "-tags", tags)
+			}
 			goArgs = append(goArgs, "-timeout", timeout.String(), "./...")
 
 			goTest := exec.CommandContext(cmd.Context(), "go", goArgs...)
@@ -65,6 +68,7 @@ func newTestCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show test output (translated to go test -v)")
 	cmd.Flags().BoolVar(&cover, "cover", false, "Generate coverage report (translated to go test -cover)")
 	cmd.Flags().BoolVar(&race, "race", false, "Enable race detector (translated to go test -race)")
+	cmd.Flags().StringVar(&tags, "tags", "", "Comma-separated build tags to include, e.g. integration (translated to go test -tags)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "Test timeout (translated to go test -timeout)")
 
 	return cmd

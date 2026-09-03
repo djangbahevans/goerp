@@ -30,6 +30,24 @@ func TestFails(t *testing.T) {
 func TestOtherPasses(t *testing.T) {}
 `
 
+const moduleTestFixtureIntegrationTaggedTest = `//go:build integration
+
+package fixture
+
+import "testing"
+
+func TestIntegrationOnly(t *testing.T) {}
+`
+
+const moduleTestFixtureSlowTaggedTest = `//go:build slow
+
+package fixture
+
+import "testing"
+
+func TestSlowOnly(t *testing.T) {}
+`
+
 func writeModuleTestFixture(t *testing.T, dir, testFile string) {
 	t.Helper()
 
@@ -118,6 +136,75 @@ func TestModuleTest_PositionalPatternTakesPrecedenceOverRunFlag(t *testing.T) {
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 — positional pattern should take precedence over --run (stdout: %s, stderr: %s)", code, stdout, stderr)
+	}
+}
+
+func TestModuleTest_ExcludesIntegrationTaggedTestByDefault(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(moduleTestFixtureGoMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fixture_test.go"), []byte(moduleTestFixturePassingTest), 0o644); err != nil {
+		t.Fatalf("write fixture_test.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "integration_test.go"), []byte(moduleTestFixtureIntegrationTaggedTest), 0o644); err != nil {
+		t.Fatalf("write integration_test.go: %v", err)
+	}
+	t.Chdir(dir)
+
+	code, stdout, stderr := runCLI(t, "module", "test", "--verbose")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if strings.Contains(stdout, "TestIntegrationOnly") {
+		t.Errorf("stdout = %q, want the //go:build integration test excluded without --tags", stdout)
+	}
+}
+
+func TestModuleTest_TagsFlagIncludesBuildTaggedTest(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(moduleTestFixtureGoMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fixture_test.go"), []byte(moduleTestFixturePassingTest), 0o644); err != nil {
+		t.Fatalf("write fixture_test.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "integration_test.go"), []byte(moduleTestFixtureIntegrationTaggedTest), 0o644); err != nil {
+		t.Fatalf("write integration_test.go: %v", err)
+	}
+	t.Chdir(dir)
+
+	code, stdout, stderr := runCLI(t, "module", "test", "--tags", "integration", "--verbose")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "TestIntegrationOnly") {
+		t.Errorf("stdout = %q, want --tags integration to include the //go:build integration test", stdout)
+	}
+}
+
+func TestModuleTest_TagsFlagAcceptsCommaSeparatedList(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(moduleTestFixtureGoMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "integration_test.go"), []byte(moduleTestFixtureIntegrationTaggedTest), 0o644); err != nil {
+		t.Fatalf("write integration_test.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "slow_test.go"), []byte(moduleTestFixtureSlowTaggedTest), 0o644); err != nil {
+		t.Fatalf("write slow_test.go: %v", err)
+	}
+	t.Chdir(dir)
+
+	code, stdout, stderr := runCLI(t, "module", "test", "--tags", "integration,slow", "--verbose")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "TestIntegrationOnly") || !strings.Contains(stdout, "TestSlowOnly") {
+		t.Errorf("stdout = %q, want --tags integration,slow to include both build-tagged tests", stdout)
 	}
 }
 
