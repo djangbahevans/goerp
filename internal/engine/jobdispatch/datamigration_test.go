@@ -206,15 +206,17 @@ func TestWork_DataMigrationHandlerNotDeclaredReturnsError(t *testing.T) {
 func TestWork_DataMigrationHandlerDeclaredSucceedsWithoutJobTypesEntry(t *testing.T) {
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)
+	_, tenantStore := newTestTenantStore(t)
+	tt := newFixtureTenant(t, conn, tenantStore)
+	tenantID := tt.ID
 
-	tenantID := uuid.NewString()
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
 	})
 	mod := newDataMigrationModule(t, []model.DataMigration{
 		{FromVersion: "< 1.0.0", ToVersion: ">= 1.0.0", Handler: "backfill"},
 	}, "1.0.0")
-	w := &Worker{ModuleRegistry: newTestRegistry(t, mod), SchemaSyncPool: syncPool}
+	w := &Worker{ModuleRegistry: newTestRegistry(t, mod), SchemaSyncPool: syncPool, Runtime: newTestWasmRuntime(t), TenantStore: tenantStore}
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
 
 	ctx := rivertest.WorkContext(context.Background(), riverClient)
@@ -380,8 +382,10 @@ func TestWork_DataMigrationSuccess_AdvancesWatermarkAndEnqueuesNext(t *testing.T
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)
 	jobsConn := openJobsConn(t)
+	_, tenantStore := newTestTenantStore(t)
+	tt := newFixtureTenant(t, conn, tenantStore)
+	tenantID := tt.ID
 
-	tenantID := uuid.NewString()
 	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
@@ -390,7 +394,7 @@ func TestWork_DataMigrationSuccess_AdvancesWatermarkAndEnqueuesNext(t *testing.T
 		{FromVersion: "< 1.4.0", ToVersion: ">= 1.4.0", Handler: "backfill_a"},
 		{FromVersion: "< 1.5.0", ToVersion: ">= 1.5.0", Handler: "backfill_b"},
 	}, "1.5.0")
-	w := &Worker{ModuleRegistry: newTestRegistry(t, mod), SchemaSyncPool: syncPool}
+	w := &Worker{ModuleRegistry: newTestRegistry(t, mod), SchemaSyncPool: syncPool, Runtime: newTestWasmRuntime(t), TenantStore: tenantStore}
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.5.0")
 
 	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {

@@ -162,6 +162,8 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		ComputedIndex:      snap.ComputedIndex(),
 		ComputeTargets:     registry.ComputeTargets(snap),
 		PermissionRegistry: snap.PermissionRegistry(),
+		OwnedModels:        mod.Manifest.Schema.OwnedModels,
+		ExtendsModels:      mod.Manifest.Schema.ExtendsModels,
 	})
 	inst.SetModuleContext(moduleCtx)
 	defer func() {

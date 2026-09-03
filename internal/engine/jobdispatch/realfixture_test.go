@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertest"
 	"github.com/riverqueue/river/rivertype"
@@ -58,19 +58,22 @@ func compileMigrationFixture(t *testing.T) []byte {
 // so this exercises the real host boundary rather than assuming (as the
 // hand-assembled fixtures safely can) that no host.* import will ever be
 // referenced.
-func newRealFixtureWorker(t *testing.T, syncPool *schema.SchemaSyncPool, wasmBytes []byte, migrations []model.DataMigration, version string) *Worker {
+func newRealFixtureWorker(t *testing.T, syncPool *schema.SchemaSyncPool, tenantStore *tenant.Store, wasmBytes []byte, migrations []model.DataMigration, version string) *Worker {
+	t.Helper()
+	return newRealFixtureWorkerWithCapabilities(t, syncPool, tenantStore, nil, wasmBytes, migrations, version, 0, nil, nil)
+}
+
+// newRealFixtureWorkerWithCapabilities is newRealFixtureWorker, extended
+// with the module-declaration fields a real host.db.migration_ddl call
+// (goerp#500) needs to succeed: caps must include abi.CapDBMigrationDDL,
+// modelDecls/ownedModels must describe whatever table the fixture's own
+// handler under test targets, and primaryDB (nil for every other caller)
+// must be a real *sql.DB when that handler actually executes DDL.
+func newRealFixtureWorkerWithCapabilities(t *testing.T, syncPool *schema.SchemaSyncPool, tenantStore *tenant.Store, primaryDB *sql.DB, wasmBytes []byte, migrations []model.DataMigration, version string, caps abi.CapabilitySet, modelDecls []model.ModelDeclaration, ownedModels []string) *Worker {
 	t.Helper()
 	ctx := context.Background()
 
-	rt, err := wasm.New(&config.Config{
-		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
-		PoolMaxMemoryByes: 64 << 20,
-		Environment:       string(config.Production),
-	}, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("wasm.New: %v", err)
-	}
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	rt := newTestWasmRuntimeWithPrimaryDB(t, primaryDB)
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
@@ -93,14 +96,17 @@ func newRealFixtureWorker(t *testing.T, syncPool *schema.SchemaSyncPool, wasmByt
 				Name:    migrationTestModuleName,
 				Type:    "standard",
 				Version: version,
+				Schema:  manifest.SchemaConfig{OwnedModels: ownedModels},
 			},
+			Capabilities:   caps,
+			ModelDecls:     modelDecls,
 			DataMigrations: migrations,
 		},
 	}); err != nil {
 		t.Fatalf("ModuleRegistry.Update: %v", err)
 	}
 
-	return &Worker{ModuleRegistry: reg, SchemaSyncPool: syncPool}
+	return &Worker{ModuleRegistry: reg, SchemaSyncPool: syncPool, Runtime: rt, TenantStore: tenantStore}
 }
 
 // loadWASMJobArgs reads back the one river_job row
@@ -143,8 +149,10 @@ func TestWork_RealCompiledFixture_DataMigrationSucceeds(t *testing.T) {
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)
 	jobsConn := openJobsConn(t)
+	_, tenantStore := newTestTenantStore(t)
+	tt := newFixtureTenant(t, conn, tenantStore)
+	tenantID := tt.ID
 
-	tenantID := uuid.NewString()
 	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
@@ -154,7 +162,7 @@ func TestWork_RealCompiledFixture_DataMigrationSucceeds(t *testing.T) {
 	migrations := []model.DataMigration{
 		{FromVersion: "< 1.0.0", ToVersion: ">= 1.0.0", Handler: "backfill_test"},
 	}
-	w := newRealFixtureWorker(t, syncPool, wasmBytes, migrations, "1.0.0")
+	w := newRealFixtureWorker(t, syncPool, tenantStore, wasmBytes, migrations, "1.0.0")
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
 
 	mod := w.ModuleRegistry.Snapshot().Modules()[migrationTestModuleName]
@@ -188,8 +196,10 @@ func TestWork_RealCompiledFixture_DataMigrationHandlerErrorReturnsError(t *testi
 	conn, syncPool := openTestSchemaSyncPool(t)
 	riverClient := newTestRiverClient(t)
 	jobsConn := openJobsConn(t)
+	_, tenantStore := newTestTenantStore(t)
+	tt := newFixtureTenant(t, conn, tenantStore)
+	tenantID := tt.ID
 
-	tenantID := uuid.NewString()
 	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
@@ -199,7 +209,7 @@ func TestWork_RealCompiledFixture_DataMigrationHandlerErrorReturnsError(t *testi
 	migrations := []model.DataMigration{
 		{FromVersion: "< 1.0.0", ToVersion: ">= 1.0.0", Handler: "failing_test"},
 	}
-	w := newRealFixtureWorker(t, syncPool, wasmBytes, migrations, "1.0.0")
+	w := newRealFixtureWorker(t, syncPool, tenantStore, wasmBytes, migrations, "1.0.0")
 	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
 
 	mod := w.ModuleRegistry.Snapshot().Modules()[migrationTestModuleName]
@@ -221,5 +231,75 @@ func TestWork_RealCompiledFixture_DataMigrationHandlerErrorReturnsError(t *testi
 	}
 	if got != "0.0.0" {
 		t.Errorf("data_migration_version = %q, want 0.0.0 (unchanged) after a failed handler", got)
+	}
+}
+
+// TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds is the
+// end-to-end proof that goerp#500's whole chain works together: a real
+// compiled module's data migration handler calls ctx.DropColumn, which
+// reaches host.db.migration_ddl through the real WASM boundary — and,
+// critically, that Worker.Work now actually wires a ModuleContext around
+// InvokeHandleJob at all (previously missing entirely, so any host.db/
+// host.orm call from inside a job handler would nil-dereference before
+// this fix).
+func TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds(t *testing.T) {
+	conn, syncPool := openTestSchemaSyncPool(t)
+	riverClient := newTestRiverClient(t)
+	jobsConn := openJobsConn(t)
+	_, tenantStore := newTestTenantStore(t)
+	tt := newFixtureTenant(t, conn, tenantStore)
+	tenantID := tt.ID
+
+	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
+	})
+
+	schemaName := "tenant_" + tt.Slug
+	if _, err := conn.Exec(`CREATE SCHEMA ` + schemaName); err != nil {
+		t.Fatalf("create fixture tenant schema: %v", err)
+	}
+	t.Cleanup(func() { _, _ = conn.Exec(`DROP SCHEMA IF EXISTS ` + schemaName + ` CASCADE`) })
+	if _, err := conn.Exec(`CREATE TABLE ` + schemaName + `.widget (id UUID PRIMARY KEY, legacy_name TEXT)`); err != nil {
+		t.Fatalf("create fixture widget table: %v", err)
+	}
+
+	wasmBytes := compileMigrationFixture(t)
+	migrations := []model.DataMigration{
+		{FromVersion: "< 1.0.0", ToVersion: ">= 1.0.0", Handler: "drop_column_test"},
+	}
+	modelDecls := []model.ModelDeclaration{{
+		Name: "widget",
+		Fields: []model.NamedField{
+			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+			{Name: "legacy_name", Def: model.Text()},
+		},
+	}}
+	w := newRealFixtureWorkerWithCapabilities(t, syncPool, tenantStore, conn, wasmBytes, migrations, "1.0.0", abi.CapDBMigrationDDL, modelDecls, []string{migrationTestModuleName + ".widget"})
+	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.0.0")
+
+	mod := w.ModuleRegistry.Snapshot().Modules()[migrationTestModuleName]
+	if err := EnqueueApplicableDataMigration(context.Background(), riverClient, syncPool, tenantID, mod); err != nil {
+		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
+	}
+
+	args := loadWASMJobArgs(t, jobsConn, migrationTestModuleName, "drop_column_test", tenantID)
+	job := &river.Job[jobqueue.WASMJobArgs]{JobRow: &rivertype.JobRow{}, Args: args}
+
+	ctx := rivertest.WorkContext(context.Background(), riverClient)
+	if err := w.Work(ctx, job); err != nil {
+		t.Fatalf("Work() error: %v", err)
+	}
+
+	var exists bool
+	if err := conn.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = $1 AND table_name = 'widget' AND column_name = 'legacy_name'
+		)`, schemaName).Scan(&exists); err != nil {
+		t.Fatalf("check column existence: %v", err)
+	}
+	if exists {
+		t.Error("legacy_name column still exists after ctx.DropColumn through a real data migration job")
 	}
 }

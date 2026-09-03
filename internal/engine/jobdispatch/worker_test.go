@@ -12,7 +12,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
-	"github.com/tetratelabs/wazero"
 )
 
 // getDataModule exports get_data (not handle_job) — enough to exercise
@@ -73,13 +72,17 @@ const testJobType = "test_job"
 // ModuleRegistry.Update pipeline, the same pattern
 // eventdelivery/worker_test.go's newTestModuleRegistry establishes,
 // extended with a real WASM pool since (unlike eventdelivery.Worker) this
-// worker actually invokes WASM.
-func newTestWorker(t *testing.T, wasmBytes []byte) *Worker {
+// worker actually invokes WASM. Also wires a real Runtime/TenantStore and
+// returns a real fixture tenant's ID (goerp#500): Work now resolves the
+// tenant slug through TenantStore.GetByID before invoking handle_job, so
+// every test job needs a real tenant row, not just a module registry.
+func newTestWorker(t *testing.T, wasmBytes []byte) (*Worker, string) {
 	t.Helper()
 	ctx := context.Background()
 
-	rt := wazero.NewRuntime(ctx)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	conn, tenantStore := newTestTenantStore(t)
+	tt := newFixtureTenant(t, conn, tenantStore)
+	rt := newTestWasmRuntime(t)
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
@@ -87,7 +90,7 @@ func newTestWorker(t *testing.T, wasmBytes []byte) *Worker {
 	}
 	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
 
-	pool := wasm.NewInstancePool(testModuleName, compiled, rt, wasm.PoolConfig{
+	pool := rt.NewPool(testModuleName, compiled, wasm.PoolConfig{
 		MaxSize:       2,
 		BorrowTimeout: time.Second,
 	})
@@ -107,7 +110,7 @@ func newTestWorker(t *testing.T, wasmBytes []byte) *Worker {
 		t.Fatalf("ModuleRegistry.Update: %v", err)
 	}
 
-	return &Worker{ModuleRegistry: reg}
+	return &Worker{ModuleRegistry: reg, Runtime: rt, TenantStore: tenantStore}, tt.ID
 }
 
 func runWork(t *testing.T, w *Worker, args jobqueue.WASMJobArgs) error {
@@ -116,43 +119,43 @@ func runWork(t *testing.T, w *Worker, args jobqueue.WASMJobArgs) error {
 }
 
 func TestWork_ZeroPayloadSucceeds(t *testing.T) {
-	w := newTestWorker(t, handleJobEchoModule)
+	w, tenantID := newTestWorker(t, handleJobEchoModule)
 
-	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType, Payload: nil})
+	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType, TenantID: tenantID, Payload: nil})
 	if err != nil {
 		t.Fatalf("Work() error: %v", err)
 	}
 }
 
 func TestWork_NonZeroStatusReturnsError(t *testing.T) {
-	w := newTestWorker(t, handleJobEchoModule)
+	w, tenantID := newTestWorker(t, handleJobEchoModule)
 
-	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType, Payload: []byte("nonempty")})
+	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType, TenantID: tenantID, Payload: []byte("nonempty")})
 	if err == nil {
 		t.Fatal("expected an error for a non-zero handle_job status")
 	}
 }
 
 func TestWork_TrapReturnsError(t *testing.T) {
-	w := newTestWorker(t, handleJobTrapsModule)
+	w, tenantID := newTestWorker(t, handleJobTrapsModule)
 
-	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType})
+	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType, TenantID: tenantID})
 	if err == nil {
 		t.Fatal("expected an error from a handler that traps")
 	}
 }
 
 func TestWork_MissingHandleJobExportReturnsError(t *testing.T) {
-	w := newTestWorker(t, getDataModule)
+	w, tenantID := newTestWorker(t, getDataModule)
 
-	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType})
+	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType, TenantID: tenantID})
 	if err == nil {
 		t.Fatal("expected an error when the module has no handle_job export")
 	}
 }
 
 func TestWork_UnknownModuleReturnsError(t *testing.T) {
-	w := newTestWorker(t, handleJobEchoModule)
+	w, _ := newTestWorker(t, handleJobEchoModule)
 
 	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: "does-not-exist", JobType: testJobType})
 	if err == nil {
@@ -189,7 +192,7 @@ func TestWork_NilPoolReturnsErrorNotPanic(t *testing.T) {
 }
 
 func TestWork_JobTypeNotOwnedByModuleReturnsError(t *testing.T) {
-	w := newTestWorker(t, handleJobEchoModule)
+	w, _ := newTestWorker(t, handleJobEchoModule)
 
 	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: "not_a_declared_job_type"})
 	if err == nil {

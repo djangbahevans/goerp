@@ -27,6 +27,9 @@ func init() {
 	engine.OnDataMigration("failing_test", func(ctx *model.MigrationContext) error {
 		return errors.New("intentional failure for testing")
 	})
+	engine.OnDataMigration("drop_column_test", func(ctx *model.MigrationContext) error {
+		return ctx.DropColumn("widget", "legacy_name")
+	})
 }
 
 //go:wasmexport handle_job

@@ -73,6 +73,17 @@ const (
 	ErrCodeDBBatchPartialError = "db.batch_partial_error"
 )
 
+// host.db.migration_ddl error codes (host-abi-reference.md §5
+// "host.db.migration_ddl") — the explicit-consent DropColumn/DropTable
+// escape hatch for data migration handlers (migration-guide.md §4,
+// goerp#500).
+const (
+	ErrCodeMigrationDDLError          = "db.migration_ddl_error"
+	ErrCodeMigrationDDLNotOwned       = "db.migration_ddl_not_owned"
+	ErrCodeMigrationDDLNotInContext   = "db.migration_ddl_not_in_migration_context"
+	ErrCodeMigrationDDLTargetNotFound = "db.migration_ddl_target_not_found"
+)
+
 // host.orm error codes (host-abi-reference.md §5a "host.orm.search"/
 // "host.orm.search_read"/"host.orm.read").
 const (

@@ -26,6 +26,10 @@ const (
 	CapAnalyticsQuery
 	CapAnalyticsInsert
 	CapAnalyticsExport
+	// CapDBMigrationDDL gates host.db.migration_ddl (host_db_migration_ddl.go,
+	// goerp#500) — appended last rather than inserted among the db.* bits
+	// above so every existing capability's bit value stays stable.
+	CapDBMigrationDDL
 )
 
 func (cs CapabilitySet) Has(cap CapabilitySet) bool {
@@ -54,6 +58,7 @@ var capabilityBits = map[string]CapabilitySet{
 	"analytics.query":          CapAnalyticsQuery,
 	"analytics.insert":         CapAnalyticsInsert,
 	"analytics.export":         CapAnalyticsExport,
+	"db.migration_ddl":         CapDBMigrationDDL,
 }
 
 func ResolveCapabilities(caps []string) (CapabilitySet, error) {
