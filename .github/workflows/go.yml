@@ -133,8 +133,19 @@ jobs:
       - name: Start Dev Stack
         run: docker compose -f compose.dev.yml up -d --wait
 
+      # See the identical step in cli-build-test below — this job also
+      # runs internal/module's frontend-build tests, so it's exposed to
+      # the same cold-npm-cache flakiness (goerp#585).
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('internal/module/build_test.go') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
       - name: Run Engine Tests
-        run: go test -v -race -coverprofile=coverage-engine.txt -covermode=atomic ./internal/engine/... ./internal/module/... ./sdk/... ./cmd/engine/...
+        run: go test -v -race -timeout 30m -coverprofile=coverage-engine.txt -covermode=atomic ./internal/engine/... ./internal/module/... ./sdk/... ./cmd/engine/...
 
       - name: Stop Dev Stack
         if: always()
@@ -170,8 +181,24 @@ jobs:
           CGO_ENABLED=0 go build -o goerp ./cmd/goerp
           CGO_ENABLED=0 go build -o admin-gateway ./cmd/admin-gateway
 
+      # internal/module's frontend-build tests run a real `npm install`
+      # against a synthetic fixture generated fresh in a temp dir at test
+      # time — there's no committed lockfile for actions/setup-node's own
+      # npm cache option to key against, so this caches ~/.npm directly.
+      # A cold cache still has to fetch vite's full registry metadata
+      # (tens of MB — npm's registry API has no way to ask for just one
+      # version), which alone can approach these tests' own timeouts; a
+      # warm cache serves that from disk instead (goerp#585).
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('internal/module/build_test.go') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
       - name: Run CLI Tests
-        run: go test -v -race -coverprofile=coverage-cli.txt -covermode=atomic ./internal/cli/... ./internal/gateway/... ./internal/module/... ./cmd/goerp/... ./cmd/admin-gateway/...
+        run: go test -v -race -timeout 30m -coverprofile=coverage-cli.txt -covermode=atomic ./internal/cli/... ./internal/gateway/... ./internal/module/... ./cmd/goerp/... ./cmd/admin-gateway/...
 
   ci-gate:
     needs: [changes, lint-and-vulncheck, engine-build-test, cli-build-test]
