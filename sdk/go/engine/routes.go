@@ -23,23 +23,10 @@ type RouteDeclaration struct {
 	Model        string         `msgpack:"model,omitempty"`
 	Name         string         `msgpack:"name,omitempty"`
 
-	CRUDAction     string                    `msgpack:"crud_action,omitempty"`
-	ResponseIsList bool                      `msgpack:"response_is_list"`
-	Embedded       []EmbeddedDecl            `msgpack:"embedded,omitempty"`
-	PathParams     map[string]string         `msgpack:"path_params,omitempty"`
-	QueryParams    map[string]QueryParamDecl `msgpack:"query_params,omitempty"`
-}
-
-// QueryParamDecl documents one query-string parameter a route accepts —
-// purely descriptive metadata for /_meta/schema and goerp codegen's
-// generated client types; the engine neither validates nor enforces it at
-// request time (req.QueryParam and friends, sdk/go/engine.Request, remain
-// the only runtime-facing query-string API).
-type QueryParamDecl struct {
-	Type    string   `msgpack:"type"`
-	Enum    []string `msgpack:"enum,omitempty"`
-	Default any      `msgpack:"default,omitempty"`
-	Max     *int     `msgpack:"max,omitempty"`
+	CRUDAction     string            `msgpack:"crud_action,omitempty"`
+	ResponseIsList bool              `msgpack:"response_is_list"`
+	Embedded       []EmbeddedDecl    `msgpack:"embedded,omitempty"`
+	PathParams     map[string]string `msgpack:"path_params,omitempty"`
 }
 
 type RateLimitDecl struct {

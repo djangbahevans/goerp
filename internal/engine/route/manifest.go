@@ -8,10 +8,8 @@ type RouteManifest struct {
 
 	RateLimit *RateLimitConfig // nil = use the engine-wide default, not "no limit"
 
-	Name           string // "{module}.{name}"; "" for a route with no declared name
 	Model          string // "{module}.{resource}"; "" = no model binding
 	ResponseIsList bool
-	QueryParams    map[string]QueryParamDecl // descriptive only — /_meta/schema, goerp#573
 
 	MaxBodyBytes int64
 	RawBody      bool
@@ -49,14 +47,4 @@ type RateLimitConfig struct {
 	Requests      int
 	WindowSeconds int
 	Scope         string
-}
-
-// QueryParamDecl mirrors sdk/go/engine.QueryParamDecl — the wire shape a
-// module's declared engine.QueryParam options deserialize into. Purely
-// descriptive; /_meta/schema (goerp#573) is its only consumer.
-type QueryParamDecl struct {
-	Type    string
-	Enum    []string
-	Default any
-	Max     *int
 }

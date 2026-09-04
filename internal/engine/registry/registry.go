@@ -1,11 +1,16 @@
 package registry
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
@@ -116,7 +121,7 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 
 	newSnap := &RegistrySnapshot{
 		modules:          modules,
-		builtAt:          time.Now(),
+		schemaHash:       computeSchemaHash(modules, routeTable),
 		routeTable:       routeTable,
 		eventRegistry:    buildEventRegistry(modules),
 		permRegistry:     buildPermissionRegistry(modules),
@@ -216,6 +221,68 @@ func buildDataAuditRegistry(modules map[string]*module.LoadedModule) *dataaudit.
 		reg.Register(name, m.Manifest.AuditedTables, m.ModelDecls)
 	}
 	return reg
+}
+
+// computeSchemaHash returns a stable hex digest that changes if and only
+// if any non-failed module's routes, views, or navigation changed —
+// GET /_meta/schema's (goerp#573) "schema_hash" field, used by the shell
+// and goerp codegen --watch as an ETag-like cache-busting signal rather
+// than diffing the full response on every poll. Built from routeTable
+// (already sorted by RouteTable.All) plus each module's own manifest
+// content, sorted by module name for determinism — never from Go's map
+// iteration order directly.
+func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *route.RouteTable) string {
+	var b strings.Builder
+
+	for _, r := range routeTable.All() {
+		if r.Entry.ModuleName == "" {
+			continue // engine built-ins never change per module reload
+		}
+		b.WriteString(r.Entry.ModuleName)
+		b.WriteByte('\x00')
+		b.WriteString(r.Method)
+		b.WriteByte('\x00')
+		b.WriteString(r.Entry.PathTemplate)
+		b.WriteByte('\x00')
+		b.WriteString(r.Entry.Manifest.Model)
+		b.WriteByte('\x00')
+		b.WriteString(r.Entry.Manifest.CrudAction)
+		b.WriteByte('\n')
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(modules)) {
+		m := modules[name]
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		b.WriteString(name)
+		b.WriteByte('\x00')
+		b.WriteString(m.Manifest.Version)
+		b.WriteByte('\n')
+		for _, v := range m.Manifest.Views {
+			b.WriteString(v.Name)
+			b.WriteByte('\x00')
+			b.WriteString(v.Type)
+			b.WriteByte('\x00')
+			b.WriteString(v.Resource)
+			b.WriteByte('\n')
+		}
+		for _, g := range m.Manifest.Navigation {
+			b.WriteString(g.Label)
+			b.WriteByte('\x00')
+			b.WriteString(strconv.Itoa(g.Order))
+			b.WriteByte('\n')
+			for _, item := range g.Children {
+				b.WriteString(item.Label)
+				b.WriteByte('\x00')
+				b.WriteString(item.Route)
+				b.WriteByte('\n')
+			}
+		}
+	}
+
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable, error) {

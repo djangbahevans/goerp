@@ -23,7 +23,6 @@ func TestGET_AppliesOptionsToDeclaration(t *testing.T) {
 		MaxBody(65536),
 		Embeds("lines", "sales.order_line", true),
 		PathParam("id", UUIDParam),
-		QueryParam("include", QueryString, QueryEnum("lines", "customer")),
 	)
 
 	decls := routeDeclarations(DefaultRouter.routes)
@@ -52,10 +51,6 @@ func TestGET_AppliesOptionsToDeclaration(t *testing.T) {
 	}
 	if got.PathParams["id"] != string(UUIDParam) {
 		t.Errorf("PathParams[id] = %q, want %q", got.PathParams["id"], UUIDParam)
-	}
-	wantQP := QueryParamDecl{Type: string(QueryString), Enum: []string{"lines", "customer"}}
-	if gotQP := got.QueryParams["include"]; gotQP.Type != wantQP.Type || len(gotQP.Enum) != 2 {
-		t.Errorf("QueryParams[include] = %+v, want %+v", gotQP, wantQP)
 	}
 }
 

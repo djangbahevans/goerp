@@ -21,9 +21,7 @@ type ExplicitRoute struct {
 	Streaming    bool
 	Websocket    bool
 	PathParams   map[string]string
-	QueryParams  map[string]QueryParamDecl
 
-	Name           string
 	Model          string
 	ResponseIsList bool
 	CRUDAction     string
@@ -45,18 +43,6 @@ func ExplicitRoutesFrom(decls []engine.RouteDeclaration) []ExplicitRoute {
 				Scope:         string(d.RateLimit.Scope),
 			}
 		}
-		var qp map[string]QueryParamDecl
-		if d.QueryParams != nil {
-			qp = make(map[string]QueryParamDecl, len(d.QueryParams))
-			for name, decl := range d.QueryParams {
-				qp[name] = QueryParamDecl{
-					Type:    decl.Type,
-					Enum:    decl.Enum,
-					Default: decl.Default,
-					Max:     decl.Max,
-				}
-			}
-		}
 		out[i] = ExplicitRoute{
 			Method:         d.Method,
 			Path:           d.Path,
@@ -69,8 +55,6 @@ func ExplicitRoutesFrom(decls []engine.RouteDeclaration) []ExplicitRoute {
 			Streaming:      d.Streaming,
 			Websocket:      d.Websocket,
 			PathParams:     d.PathParams,
-			QueryParams:    qp,
-			Name:           d.Name,
 			Model:          d.Model,
 			ResponseIsList: d.ResponseIsList,
 			CRUDAction:     d.CRUDAction,
@@ -143,8 +127,6 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 				Streaming:      r.Streaming,
 				Websocket:      r.Websocket,
 				PathParams:     r.PathParams,
-				QueryParams:    r.QueryParams,
-				Name:           r.Name,
 				Model:          r.Model,
 				ResponseIsList: r.ResponseIsList,
 				CrudAction:     r.CRUDAction,

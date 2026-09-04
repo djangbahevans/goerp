@@ -2,7 +2,6 @@ package registry
 
 import (
 	"strings"
-	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
@@ -20,7 +19,7 @@ import (
 
 type RegistrySnapshot struct {
 	modules          map[string]*module.LoadedModule
-	builtAt          time.Time
+	schemaHash       string
 	routeTable       *route.RouteTable
 	eventRegistry    *event.EventRegistry
 	permRegistry     *permission.PermissionRegistry
@@ -39,12 +38,13 @@ func (s *RegistrySnapshot) Modules() map[string]*module.LoadedModule {
 	return s.modules
 }
 
-// BuiltAt returns when this snapshot was published — /_meta/schema's
-// (goerp#573) top-level "version" timestamp, a cheap staleness marker for
+// SchemaHash returns this snapshot's content hash — GET /_meta/schema's
+// (goerp#573) top-level "schema_hash" field, a cheap staleness marker for
 // goerp codegen --watch and the shell to detect a schema change without
-// diffing the full response.
-func (s *RegistrySnapshot) BuiltAt() time.Time {
-	return s.builtAt
+// diffing the full response. Changes if and only if a route, view, or
+// navigation declaration changed (computeSchemaHash).
+func (s *RegistrySnapshot) SchemaHash() string {
+	return s.schemaHash
 }
 
 // RouteTable returns this snapshot's route table — module-declared routes

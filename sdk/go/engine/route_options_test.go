@@ -108,31 +108,3 @@ func TestPathParam_AccumulatesAcrossCalls(t *testing.T) {
 		t.Fatalf("pathParams = %+v, want %+v", c.pathParams, want)
 	}
 }
-
-func TestQueryParam_AccumulatesAcrossCalls(t *testing.T) {
-	max := 200
-	c := newRouteConfig(
-		QueryParam("q", QueryString),
-		QueryParam("limit", QueryInteger, QueryDefault(50), QueryMax(200)),
-		QueryParam("filter[type]", QueryString, QueryEnum("person", "company")),
-	)
-	want := map[string]QueryParamDecl{
-		"q":            {Type: "string"},
-		"limit":        {Type: "integer", Default: 50, Max: &max},
-		"filter[type]": {Type: "string", Enum: []string{"person", "company"}},
-	}
-	if !reflect.DeepEqual(c.queryParams, want) {
-		t.Fatalf("queryParams = %+v, want %+v", c.queryParams, want)
-	}
-}
-
-func TestQueryParam_LaterCallOverridesSameName(t *testing.T) {
-	c := newRouteConfig(
-		QueryParam("q", QueryString),
-		QueryParam("q", QueryInteger),
-	)
-	want := map[string]QueryParamDecl{"q": {Type: "integer"}}
-	if !reflect.DeepEqual(c.queryParams, want) {
-		t.Fatalf("queryParams = %+v, want %+v", c.queryParams, want)
-	}
-}
