@@ -6,9 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
@@ -366,4 +368,104 @@ func (e *Engine) dispatchSharesDeleteRoute(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// metaSchemaResponse is GET /_meta/schema's response shape — view-system.md
+// §2 "The /_meta/schema endpoint" is the canonical worked example.
+type metaSchemaResponse struct {
+	Version string                       `json:"version"`
+	Modules map[string]*metaSchemaModule `json:"modules"`
+}
+
+type metaSchemaModule struct {
+	Version    string              `json:"version"`
+	Routes     []metaSchemaRoute   `json:"routes"`
+	Views      []manifest.View     `json:"views"`
+	Navigation []manifest.NavGroup `json:"navigation"`
+}
+
+type metaSchemaRoute struct {
+	Method string `json:"method"`
+	// Path is the module-relative path as declared (or, for an
+	// EnableOps-derived route, the equivalent relative path the engine
+	// itself derived) — "/" for a route registered at its module's root.
+	// ExpandedPath is the full path the engine actually dispatches on.
+	Path           string                          `json:"path"`
+	ExpandedPath   string                          `json:"expanded_path"`
+	Name           string                          `json:"name,omitempty"`
+	QueryParams    map[string]route.QueryParamDecl `json:"query_params,omitempty"`
+	Model          string                          `json:"model,omitempty"`
+	ResponseIsList bool                            `json:"response_is_list"`
+	Permissions    []string                        `json:"permissions,omitempty"`
+}
+
+// dispatchSchemaRoute is GET /_meta/schema's handler (goerp#573) — same
+// EngineNative-not-EngineBuiltin posture as dispatchPermissionsRoute
+// above. Unlike /_meta/permissions, the response is not filtered by the
+// caller's own grants: it reflects the engine's full declared API
+// surface (every non-failed module's routes/views/navigation), the same
+// way goerp codegen --from-engine and the shell's schema-discovery
+// bootstrap both need it — a per-tenant API key is enough to call this
+// (cli-reference.md), not an elevated one.
+func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
+	authCtx := authFromContext(r.Context())
+	tenantCtx := tenantFromContext(r.Context())
+	if authCtx == nil || tenantCtx == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		return
+	}
+
+	snap := e.moduleRegistry.Snapshot()
+	if snap == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+		return
+	}
+
+	modules := map[string]*metaSchemaModule{}
+	prefixes := map[string]string{}
+	for name, m := range snap.Modules() {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		modules[name] = &metaSchemaModule{
+			Version:    m.Manifest.Version,
+			Routes:     []metaSchemaRoute{},
+			Views:      m.Manifest.Views,
+			Navigation: m.Manifest.Navigation,
+		}
+		prefixes[name] = route.ModulePathPrefix(name, m.Manifest.Type)
+	}
+
+	for _, rt := range snap.RouteTable().All() {
+		mod, ok := modules[rt.Entry.ModuleName]
+		if !ok {
+			// Either an engine built-in (ModuleName == "") or, in
+			// principle, a module the snapshot's own route table
+			// disagrees with modules{} about — unreachable in practice
+			// since both are read from the same snap, but not assumed.
+			continue
+		}
+
+		mf := rt.Entry.Manifest
+		declaredPath := strings.TrimPrefix(rt.Entry.PathTemplate, prefixes[rt.Entry.ModuleName])
+		if declaredPath == "" {
+			declaredPath = "/"
+		}
+
+		mod.Routes = append(mod.Routes, metaSchemaRoute{
+			Method:         rt.Method,
+			Path:           declaredPath,
+			ExpandedPath:   rt.Entry.PathTemplate,
+			Name:           mf.Name,
+			QueryParams:    mf.QueryParams,
+			Model:          mf.Model,
+			ResponseIsList: mf.ResponseIsList,
+			Permissions:    mf.Permissions,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, metaSchemaResponse{
+		Version: snap.BuiltAt().UTC().Format(time.RFC3339),
+		Modules: modules,
+	})
 }

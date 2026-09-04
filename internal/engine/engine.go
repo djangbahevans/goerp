@@ -1037,6 +1037,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["GET /_meta/shares"] = http.HandlerFunc(e.dispatchSharesListRoute)
 	builtinRoutes["DELETE /_meta/shares/{id}"] = http.HandlerFunc(e.dispatchSharesDeleteRoute)
 
+	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
+	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.
+	builtinRoutes["GET /_meta/schema"] = http.HandlerFunc(e.dispatchSchemaRoute)
+
 	// buildChain needs e (dispatchORMRoute/invokeHandler are *Engine
 	// methods), which doesn't exist until the literal above — this call
 	// used to sit right after builtinRoutes/defaultRateLimit were built,

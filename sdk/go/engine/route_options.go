@@ -43,6 +43,7 @@ type routeConfig struct {
 	streaming    bool
 	embedded     []EmbeddedDecl
 	pathParams   map[string]string
+	queryParams  map[string]QueryParamDecl
 }
 
 func newRouteConfig(opts ...RouteOption) routeConfig {
@@ -126,5 +127,55 @@ func PathParam(name string, kind ParamKind) RouteOption {
 			c.pathParams = make(map[string]string)
 		}
 		c.pathParams[name] = string(kind)
+	}
+}
+
+// QueryParamType selects a declared query parameter's value type
+// (engine.QueryParam) — descriptive only, for /_meta/schema and codegen;
+// see QueryParamDecl's doc comment.
+type QueryParamType string
+
+const (
+	QueryString  QueryParamType = "string"
+	QueryInteger QueryParamType = "integer"
+	QueryBoolean QueryParamType = "boolean"
+)
+
+// QueryParamSetting further describes a query parameter declared via
+// QueryParam — QueryEnum, QueryDefault, or QueryMax below.
+type QueryParamSetting func(*QueryParamDecl)
+
+// QueryEnum restricts a query parameter to one of values.
+func QueryEnum(values ...string) QueryParamSetting {
+	return func(d *QueryParamDecl) { d.Enum = values }
+}
+
+// QueryDefault documents a query parameter's default value when the
+// caller omits it.
+func QueryDefault(v any) QueryParamSetting {
+	return func(d *QueryParamDecl) { d.Default = v }
+}
+
+// QueryMax documents a query parameter's maximum accepted value
+// (QueryInteger) or length (QueryString).
+func QueryMax(n int) QueryParamSetting {
+	return func(d *QueryParamDecl) { d.Max = &n }
+}
+
+// QueryParam declares a query-string parameter a route accepts —
+// descriptive metadata surfaced via /_meta/schema and goerp codegen's
+// generated client types (go-sdk-reference.md §2a "Route options"). It
+// does not affect request handling: use req.QueryParam and friends to
+// actually read the value.
+func QueryParam(name string, typ QueryParamType, settings ...QueryParamSetting) RouteOption {
+	return func(c *routeConfig) {
+		if c.queryParams == nil {
+			c.queryParams = make(map[string]QueryParamDecl)
+		}
+		d := QueryParamDecl{Type: string(typ)}
+		for _, s := range settings {
+			s(&d)
+		}
+		c.queryParams[name] = d
 	}
 }

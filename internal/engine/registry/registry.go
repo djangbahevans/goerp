@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
@@ -115,6 +116,7 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 
 	newSnap := &RegistrySnapshot{
 		modules:          modules,
+		builtAt:          time.Now(),
 		routeTable:       routeTable,
 		eventRegistry:    buildEventRegistry(modules),
 		permRegistry:     buildPermissionRegistry(modules),
@@ -239,19 +241,19 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 // registerBuiltinRoutes registers the engine's own built-in routes into
 // table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
 // /auth/mfa/reverify, /admin/users/{id}/mfa/reset, /_meta/permissions,
-// and /_meta/shares resolve through the exact same RouteTable.Lookup
-// module routes do — no second router. Safe against collision by
-// construction: RegisterModuleRoutes already rejects any module route
-// whose top path segment starts with "_", or is exactly "auth" or
-// "admin", as a reserved engine namespace.
+// /_meta/shares, and /_meta/schema resolve through the exact same
+// RouteTable.Lookup module routes do — no second router. Safe against
+// collision by construction: RegisterModuleRoutes already rejects any
+// module route whose top path segment starts with "_", or is exactly
+// "auth" or "admin", as a reserved engine namespace.
 //
 // /admin/users/{id}/mfa/reset is a tenant-facing route despite its
 // "/admin/" prefix — see internal/engine/auth/mfareset's own package doc
 // for why that prefix doesn't mean it belongs to the separate
 // internal/engine/adminapi operator surface.
 //
-// /_meta/permissions and /_meta/shares are deliberately not
-// EngineBuiltin, unlike every other route registered here —
+// /_meta/permissions, /_meta/shares, and /_meta/schema are deliberately
+// not EngineBuiltin, unlike every other route registered here —
 // auth-internals.md §9 classifies them Class A (the default for "every
 // other route"), so they need the standard tenant/auth/permission
 // middleware chain to populate authFromContext/tenantFromContext,
@@ -273,6 +275,13 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 	table.Register("GET", "/_meta/permissions", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/permissions",
+	})
+
+	// /_meta/schema (goerp#573) — same not-EngineBuiltin posture as
+	// /_meta/permissions above.
+	table.Register("GET", "/_meta/schema", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/schema",
 	})
 
 	// /_meta/shares (goerp#475) — same not-EngineBuiltin posture as

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"strings"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
@@ -19,6 +20,7 @@ import (
 
 type RegistrySnapshot struct {
 	modules          map[string]*module.LoadedModule
+	builtAt          time.Time
 	routeTable       *route.RouteTable
 	eventRegistry    *event.EventRegistry
 	permRegistry     *permission.PermissionRegistry
@@ -35,6 +37,14 @@ type RegistrySnapshot struct {
 // StatusFailed alike. Callers must treat it as read-only.
 func (s *RegistrySnapshot) Modules() map[string]*module.LoadedModule {
 	return s.modules
+}
+
+// BuiltAt returns when this snapshot was published — /_meta/schema's
+// (goerp#573) top-level "version" timestamp, a cheap staleness marker for
+// goerp codegen --watch and the shell to detect a schema change without
+// diffing the full response.
+func (s *RegistrySnapshot) BuiltAt() time.Time {
+	return s.builtAt
 }
 
 // RouteTable returns this snapshot's route table — module-declared routes

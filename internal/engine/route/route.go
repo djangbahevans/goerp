@@ -146,6 +146,42 @@ func (rt *RouteTable) find(segments []string) *node {
 	return current
 }
 
+// AllRoute is one (method, entry) pair returned by RouteTable.All.
+type AllRoute struct {
+	Method string
+	Entry  *RouteEntry
+}
+
+// All returns every route registered in rt — module-declared and engine
+// built-in alike — sorted by (path, method) for a deterministic order
+// (mirroring Lookup's own sorted-methods convention for
+// RouteMethodNotAllowed). Entry.PathTemplate already carries each route's
+// full expanded path, so callers never need to reconstruct one from the
+// trie's own segment structure.
+func (rt *RouteTable) All() []AllRoute {
+	var out []AllRoute
+	rt.tree.collectAll(&out)
+	slices.SortFunc(out, func(a, b AllRoute) int {
+		if c := strings.Compare(a.Entry.PathTemplate, b.Entry.PathTemplate); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Method, b.Method)
+	})
+	return out
+}
+
+func (n *node) collectAll(out *[]AllRoute) {
+	for _, method := range slices.Sorted(maps.Keys(n.handlers)) {
+		*out = append(*out, AllRoute{Method: method, Entry: n.handlers[method]})
+	}
+	for _, seg := range slices.Sorted(maps.Keys(n.staticChildren)) {
+		n.staticChildren[seg].collectAll(out)
+	}
+	if n.paramChild != nil {
+		n.paramChild.collectAll(out)
+	}
+}
+
 func (rt *RouteTable) Registered(method, path string) bool {
 	normalizedPath := normalizePath(path)
 

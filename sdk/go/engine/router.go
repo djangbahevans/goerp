@@ -155,6 +155,7 @@ func routeDeclarations(routes []route) []RouteDeclaration {
 			CRUDAction:   r.crudAction,
 			Embedded:     r.embedded,
 			PathParams:   r.pathParams,
+			QueryParams:  r.queryParams,
 		})
 	}
 	return decls
