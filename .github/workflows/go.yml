@@ -153,7 +153,7 @@ jobs:
       # Catches module-level regressions the engine tests above don't exercise.
       - name: Run WASM Module Test Suite
         working-directory: sdk/go/modeltest/testdata/fixture
-        run: ${{ github.workspace }}/goerp module test
+        run: ${{ github.workspace }}/goerp module test --timeout 30m
 
       - name: Stop Dev Stack
         if: always()
