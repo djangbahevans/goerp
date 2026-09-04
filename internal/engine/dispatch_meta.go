@@ -444,65 +444,13 @@ type metaSchemaFrontend struct {
 	BundleSHA256 string `json:"bundle_sha256"`
 }
 
-// fieldKindName maps sdkmodel.FieldKind onto the lowercase type names
-// shell-architecture.md §9's FieldDef documents — the same names
-// go-sdk-reference.md §22's field constructors use (model.Char ->
-// "char", model.Many2One -> "many2one", ...). Kinds with no FieldDef
-// constructor yet (Many2Many, Tree, Delegate, File/FileMulti — see
-// route_view.go's columnType doc comment) have no case here because
-// sdkmodel.FieldKind itself has no value for them yet.
-func fieldKindName(k sdkmodel.FieldKind) string {
-	switch k {
-	case sdkmodel.KindChar:
-		return "char"
-	case sdkmodel.KindText:
-		return "text"
-	case sdkmodel.KindInteger:
-		return "integer"
-	case sdkmodel.KindBigInt:
-		return "bigint"
-	case sdkmodel.KindFloat:
-		return "float"
-	case sdkmodel.KindDecimal:
-		return "decimal"
-	case sdkmodel.KindBoolean:
-		return "boolean"
-	case sdkmodel.KindUUID:
-		return "uuid"
-	case sdkmodel.KindTimestampTZ:
-		return "timestamptz"
-	case sdkmodel.KindDate:
-		return "date"
-	case sdkmodel.KindTime:
-		return "time"
-	case sdkmodel.KindJSONB:
-		return "jsonb"
-	case sdkmodel.KindBytea:
-		return "bytea"
-	case sdkmodel.KindSelection:
-		return "selection"
-	case sdkmodel.KindEnum:
-		return "enum"
-	case sdkmodel.KindMany2One:
-		return "many2one"
-	case sdkmodel.KindSequence:
-		return "sequence"
-	case sdkmodel.KindDynamicLink:
-		return "dynamic_link"
-	case sdkmodel.KindOne2Many:
-		return "one2many"
-	default:
-		return ""
-	}
-}
-
 // metaSchemaModelFrom builds md's ModelDef entry.
 func metaSchemaModelFrom(md sdkmodel.ModelDeclaration) metaSchemaModel {
 	fields := make([]metaSchemaField, 0, len(md.Fields))
 	for _, f := range md.Fields {
 		fields = append(fields, metaSchemaField{
 			Name:         f.Name,
-			Type:         fieldKindName(f.Def.Kind),
+			Type:         f.Def.Kind.String(),
 			Required:     f.Def.IsRequired,
 			RelatedModel: f.Def.RelatedModel,
 		})
@@ -533,18 +481,29 @@ func metaSchemaViewFor(views []manifest.View, model, crudAction string) string {
 		if v.Resource != model {
 			continue
 		}
-		if v.Type == "form" {
-			switch crudAction {
-			case "get", "create", "update":
-				return v.Name
-			}
-			continue
-		}
-		if crudAction == "list" {
+		switch {
+		case v.Type == "form" && (crudAction == "get" || crudAction == "create" || crudAction == "update"):
+			return v.Name
+		case listShapedViewTypes[v.Type] && crudAction == "list":
 			return v.Name
 		}
 	}
 	return ""
+}
+
+// listShapedViewTypes are every view-system.md type that visualizes a
+// list dataset (as opposed to a single record, "form") — all claim a
+// resource's "list" CrudAction route in metaSchemaViewFor. Kanban/
+// calendar/pivot/timeline aren't built yet (backlog #26-#28), but their
+// names are fixed by view-system.md's own type vocabulary, so this stays
+// exhaustive rather than falling through by default for anything
+// non-"form".
+var listShapedViewTypes = map[string]bool{
+	"list":     true,
+	"kanban":   true,
+	"calendar": true,
+	"pivot":    true,
+	"timeline": true,
 }
 
 // dispatchSchemaRoute is GET /_meta/schema's handler (goerp#573) — same
@@ -587,16 +546,30 @@ func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		permissions := make([]metaSchemaPermission, len(m.Manifest.Permissions))
-		copy(permissions, m.Manifest.Permissions)
+		// A module with no declared views/navigation/permissions leaves
+		// these nil on its manifest — coalesced to an empty slice so
+		// every array-typed field in the response consistently
+		// serializes as "[]", never "null", the same as Routes below.
+		views := m.Manifest.Views
+		if views == nil {
+			views = []manifest.View{}
+		}
+		navigation := m.Manifest.Navigation
+		if navigation == nil {
+			navigation = []manifest.NavGroup{}
+		}
+		permissions := m.Manifest.Permissions
+		if permissions == nil {
+			permissions = []manifest.Permission{}
+		}
 
 		modules[name] = &metaSchemaModule{
 			Name:         name,
 			Version:      m.Manifest.Version,
 			DisplayName:  m.Manifest.DisplayName,
 			Routes:       []metaSchemaRoute{},
-			Views:        m.Manifest.Views,
-			Navigation:   m.Manifest.Navigation,
+			Views:        views,
+			Navigation:   navigation,
 			Models:       models,
 			Permissions:  permissions,
 			Frontend:     nil, // goerp#588 — no bundle-serving mechanism exists yet

@@ -3,12 +3,9 @@ package registry
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -17,10 +14,12 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
 )
 
@@ -231,57 +230,136 @@ func buildDataAuditRegistry(modules map[string]*module.LoadedModule) *dataaudit.
 // (already sorted by RouteTable.All) plus each module's own manifest
 // content, sorted by module name for determinism — never from Go's map
 // iteration order directly.
+// schemaHashRoute/-Model/-Field mirror the subset of RouteManifest/
+// model.ModelDeclaration that participates in GET /_meta/schema's response
+// (internal/engine's metaSchemaRoute/metaSchemaModel/metaSchemaField) —
+// kept as this package's own local copy rather than importing engine's
+// types (which would need to import registry, an import cycle) or
+// exporting engine's types into registry (a bigger layering change than
+// this hash needs). Whenever a field is added to what /_meta/schema
+// reports for a module, add it here too, or a real content change stops
+// changing the hash.
+type schemaHashRoute struct {
+	Method         string
+	Path           string
+	Permissions    []string
+	Model          string
+	CrudAction     string
+	ResponseIsList bool
+}
+
+type schemaHashModel struct {
+	Name        string
+	Label       string
+	LabelPlural string
+	Fields      []schemaHashField
+	EnabledOps  []string
+	Shareable   bool
+}
+
+type schemaHashField struct {
+	Name         string
+	Kind         model.FieldKind
+	Required     bool
+	RelatedModel string
+}
+
+type schemaHashModule struct {
+	Version      string
+	Routes       []schemaHashRoute
+	Views        []manifest.View
+	Navigation   []manifest.NavGroup
+	Models       map[string]schemaHashModel
+	Permissions  []manifest.Permission
+	PublicConfig map[string]any
+}
+
+// computeSchemaHash returns a stable hex digest that changes if and only
+// if GET /_meta/schema's (goerp#573) response content would change for
+// any non-failed module — used as that endpoint's "schema_hash" field, an
+// ETag-like cache-busting signal for the shell and goerp codegen --watch
+// rather than diffing the full response on every poll. Hashes a
+// JSON-marshaled, key-sorted snapshot of every field the response
+// reports (encoding/json sorts map keys and struct fields serialize in
+// declaration order, so the input bytes are deterministic without any
+// hand-rolled delimiter scheme).
 func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *route.RouteTable) string {
-	var b strings.Builder
-
-	for _, r := range routeTable.All() {
-		if r.Entry.ModuleName == "" {
-			continue // engine built-ins never change per module reload
-		}
-		b.WriteString(r.Entry.ModuleName)
-		b.WriteByte('\x00')
-		b.WriteString(r.Method)
-		b.WriteByte('\x00')
-		b.WriteString(r.Entry.PathTemplate)
-		b.WriteByte('\x00')
-		b.WriteString(r.Entry.Manifest.Model)
-		b.WriteByte('\x00')
-		b.WriteString(r.Entry.Manifest.CrudAction)
-		b.WriteByte('\n')
-	}
-
-	for _, name := range slices.Sorted(maps.Keys(modules)) {
-		m := modules[name]
+	prefixes := make(map[string]string, len(modules))
+	hashModules := make(map[string]schemaHashModule, len(modules))
+	for name, m := range modules {
 		if m.Status == module.StatusFailed {
 			continue
 		}
-		b.WriteString(name)
-		b.WriteByte('\x00')
-		b.WriteString(m.Manifest.Version)
-		b.WriteByte('\n')
-		for _, v := range m.Manifest.Views {
-			b.WriteString(v.Name)
-			b.WriteByte('\x00')
-			b.WriteString(v.Type)
-			b.WriteByte('\x00')
-			b.WriteString(v.Resource)
-			b.WriteByte('\n')
-		}
-		for _, g := range m.Manifest.Navigation {
-			b.WriteString(g.Label)
-			b.WriteByte('\x00')
-			b.WriteString(strconv.Itoa(g.Order))
-			b.WriteByte('\n')
-			for _, item := range g.Children {
-				b.WriteString(item.Label)
-				b.WriteByte('\x00')
-				b.WriteString(item.Route)
-				b.WriteByte('\n')
+		prefixes[name] = route.ModulePathPrefix(name, m.Manifest.Type)
+
+		models := make(map[string]schemaHashModel, len(m.ModelDecls))
+		for _, md := range m.ModelDecls {
+			fields := make([]schemaHashField, 0, len(md.Fields))
+			for _, f := range md.Fields {
+				fields = append(fields, schemaHashField{
+					Name:         f.Name,
+					Kind:         f.Def.Kind,
+					Required:     f.Def.IsRequired,
+					RelatedModel: f.Def.RelatedModel,
+				})
 			}
+			ops := make([]string, 0, len(md.EnabledOps))
+			for _, op := range md.EnabledOps {
+				ops = append(ops, op.Name)
+			}
+			models[name+"."+md.Name] = schemaHashModel{
+				Name:        md.Name,
+				Label:       md.Label,
+				LabelPlural: md.LabelPlural,
+				Fields:      fields,
+				EnabledOps:  ops,
+				Shareable:   md.Shareable,
+			}
+		}
+
+		publicConfig := map[string]any{}
+		for _, c := range m.Manifest.ConfigSchema {
+			if c.Public {
+				publicConfig[c.Key] = c.Default
+			}
+		}
+
+		hashModules[name] = schemaHashModule{
+			Version:      m.Manifest.Version,
+			Routes:       []schemaHashRoute{},
+			Views:        m.Manifest.Views,
+			Navigation:   m.Manifest.Navigation,
+			Models:       models,
+			Permissions:  m.Manifest.Permissions,
+			PublicConfig: publicConfig,
 		}
 	}
 
-	sum := sha256.Sum256([]byte(b.String()))
+	for _, r := range routeTable.All() {
+		hm, ok := hashModules[r.Entry.ModuleName]
+		if !ok {
+			continue // engine built-in (ModuleName == "") or a failed module
+		}
+		mf := r.Entry.Manifest
+		hm.Routes = append(hm.Routes, schemaHashRoute{
+			Method:         r.Method,
+			Path:           r.Entry.PathTemplate,
+			Permissions:    mf.Permissions,
+			Model:          mf.Model,
+			CrudAction:     mf.CrudAction,
+			ResponseIsList: mf.ResponseIsList,
+		})
+		hashModules[r.Entry.ModuleName] = hm
+	}
+
+	data, err := json.Marshal(hashModules)
+	if err != nil {
+		// hashModules contains only strings, bools, slices, and maps of
+		// those — never a channel, func, or cyclic value — so
+		// json.Marshal cannot fail on it in practice.
+		panic(fmt.Sprintf("computeSchemaHash: marshal: %v", err))
+	}
+	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
 

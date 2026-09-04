@@ -25,7 +25,7 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 			PathParams:     map[string]string{"id": "uuid"},
 			Model:          "sales.order",
 			ResponseIsList: false,
-			CRUDAction:     "get",
+			CrudAction:     "get",
 		},
 	})
 	if err != nil {
@@ -92,7 +92,7 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			PathParams:     map[string]string{"id": "uuid"},
 			Model:          "sales.order",
 			ResponseIsList: false,
-			CRUDAction:     "create",
+			CrudAction:     "create",
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

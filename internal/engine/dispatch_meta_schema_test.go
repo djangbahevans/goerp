@@ -205,6 +205,35 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 	}
 }
 
+func TestMetaSchemaViewFor(t *testing.T) {
+	views := []manifest.View{
+		{Name: "widgets.kanban", Type: "kanban", Resource: "widgets.widget"},
+		{Name: "widgets.list", Type: "list", Resource: "widgets.widget"},
+		{Name: "widgets.form", Type: "form", Resource: "widgets.widget"},
+		{Name: "other.list", Type: "list", Resource: "other.thing"},
+	}
+
+	cases := []struct {
+		crudAction string
+		want       string
+	}{
+		{"list", "widgets.kanban"}, // first list-shaped match wins by declaration order
+		{"get", "widgets.form"},
+		{"create", "widgets.form"},
+		{"update", "widgets.form"},
+		{"delete", ""}, // no view claims delete
+	}
+	for _, c := range cases {
+		if got := metaSchemaViewFor(views, "widgets.widget", c.crudAction); got != c.want {
+			t.Errorf("metaSchemaViewFor(%q) = %q, want %q", c.crudAction, got, c.want)
+		}
+	}
+
+	if got := metaSchemaViewFor(views, "unknown.model", "list"); got != "" {
+		t.Errorf("metaSchemaViewFor for unknown model = %q, want \"\"", got)
+	}
+}
+
 func TestDispatchSchemaRoute_RootPathIsExpanded(t *testing.T) {
 	loadedModules := map[string]*module.LoadedModule{
 		"contacts": {
