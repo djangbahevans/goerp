@@ -21,6 +21,10 @@ type ExplicitRoute struct {
 	Streaming    bool
 	Websocket    bool
 	PathParams   map[string]string
+
+	Model          string
+	ResponseIsList bool
+	CrudAction     string
 }
 
 // ExplicitRoutesFrom converts a module's deserialized get_routes output
@@ -40,17 +44,20 @@ func ExplicitRoutesFrom(decls []engine.RouteDeclaration) []ExplicitRoute {
 			}
 		}
 		out[i] = ExplicitRoute{
-			Method:       d.Method,
-			Path:         d.Path,
-			Auth:         d.Auth,
-			Permissions:  d.Permissions,
-			RateLimit:    rl,
-			MaxBodyBytes: int64(d.MaxBodyBytes),
-			RawBody:      d.RawBody,
-			Timeout:      time.Duration(d.TimeoutMs) * time.Millisecond,
-			Streaming:    d.Streaming,
-			Websocket:    d.Websocket,
-			PathParams:   d.PathParams,
+			Method:         d.Method,
+			Path:           d.Path,
+			Auth:           d.Auth,
+			Permissions:    d.Permissions,
+			RateLimit:      rl,
+			MaxBodyBytes:   int64(d.MaxBodyBytes),
+			RawBody:        d.RawBody,
+			Timeout:        time.Duration(d.TimeoutMs) * time.Millisecond,
+			Streaming:      d.Streaming,
+			Websocket:      d.Websocket,
+			PathParams:     d.PathParams,
+			Model:          d.Model,
+			ResponseIsList: d.ResponseIsList,
+			CrudAction:     d.CRUDAction,
 		}
 	}
 	return out
@@ -111,15 +118,18 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 			ModuleName:   moduleName,
 			PathTemplate: expandedPath,
 			Manifest: RouteManifest{
-				Auth:         r.Auth,
-				Permissions:  r.Permissions,
-				RateLimit:    r.RateLimit,
-				MaxBodyBytes: r.MaxBodyBytes,
-				RawBody:      r.RawBody,
-				Timeout:      r.Timeout,
-				Streaming:    r.Streaming,
-				Websocket:    r.Websocket,
-				PathParams:   r.PathParams,
+				Auth:           r.Auth,
+				Permissions:    r.Permissions,
+				RateLimit:      r.RateLimit,
+				MaxBodyBytes:   r.MaxBodyBytes,
+				RawBody:        r.RawBody,
+				Timeout:        r.Timeout,
+				Streaming:      r.Streaming,
+				Websocket:      r.Websocket,
+				PathParams:     r.PathParams,
+				Model:          r.Model,
+				ResponseIsList: r.ResponseIsList,
+				CrudAction:     r.CrudAction,
 			},
 		}
 		scratch.Register(r.Method, expandedPath, entry)

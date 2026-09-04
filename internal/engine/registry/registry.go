@@ -1,6 +1,9 @@
 package registry
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,10 +14,12 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
 )
 
@@ -115,6 +120,7 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 
 	newSnap := &RegistrySnapshot{
 		modules:          modules,
+		schemaHash:       computeSchemaHash(modules, routeTable),
 		routeTable:       routeTable,
 		eventRegistry:    buildEventRegistry(modules),
 		permRegistry:     buildPermissionRegistry(modules),
@@ -216,6 +222,147 @@ func buildDataAuditRegistry(modules map[string]*module.LoadedModule) *dataaudit.
 	return reg
 }
 
+// computeSchemaHash returns a stable hex digest that changes if and only
+// if any non-failed module's routes, views, or navigation changed —
+// GET /_meta/schema's (goerp#573) "schema_hash" field, used by the shell
+// and goerp codegen --watch as an ETag-like cache-busting signal rather
+// than diffing the full response on every poll. Built from routeTable
+// (already sorted by RouteTable.All) plus each module's own manifest
+// content, sorted by module name for determinism — never from Go's map
+// iteration order directly.
+// schemaHashRoute/-Model/-Field mirror the subset of RouteManifest/
+// model.ModelDeclaration that participates in GET /_meta/schema's response
+// (internal/engine's metaSchemaRoute/metaSchemaModel/metaSchemaField) —
+// kept as this package's own local copy rather than importing engine's
+// types (which would need to import registry, an import cycle) or
+// exporting engine's types into registry (a bigger layering change than
+// this hash needs). Whenever a field is added to what /_meta/schema
+// reports for a module, add it here too, or a real content change stops
+// changing the hash.
+type schemaHashRoute struct {
+	Method         string
+	Path           string
+	Permissions    []string
+	Model          string
+	CrudAction     string
+	ResponseIsList bool
+}
+
+type schemaHashModel struct {
+	Name        string
+	Label       string
+	LabelPlural string
+	Fields      []schemaHashField
+	EnabledOps  []string
+	Shareable   bool
+}
+
+type schemaHashField struct {
+	Name         string
+	Kind         model.FieldKind
+	Required     bool
+	RelatedModel string
+}
+
+type schemaHashModule struct {
+	Version      string
+	Routes       []schemaHashRoute
+	Views        []manifest.View
+	Navigation   []manifest.NavGroup
+	Models       map[string]schemaHashModel
+	Permissions  []manifest.Permission
+	PublicConfig map[string]any
+}
+
+// computeSchemaHash returns a stable hex digest that changes if and only
+// if GET /_meta/schema's (goerp#573) response content would change for
+// any non-failed module — used as that endpoint's "schema_hash" field, an
+// ETag-like cache-busting signal for the shell and goerp codegen --watch
+// rather than diffing the full response on every poll. Hashes a
+// JSON-marshaled, key-sorted snapshot of every field the response
+// reports (encoding/json sorts map keys and struct fields serialize in
+// declaration order, so the input bytes are deterministic without any
+// hand-rolled delimiter scheme).
+func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *route.RouteTable) string {
+	prefixes := make(map[string]string, len(modules))
+	hashModules := make(map[string]schemaHashModule, len(modules))
+	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		prefixes[name] = route.ModulePathPrefix(name, m.Manifest.Type)
+
+		models := make(map[string]schemaHashModel, len(m.ModelDecls))
+		for _, md := range m.ModelDecls {
+			fields := make([]schemaHashField, 0, len(md.Fields))
+			for _, f := range md.Fields {
+				fields = append(fields, schemaHashField{
+					Name:         f.Name,
+					Kind:         f.Def.Kind,
+					Required:     f.Def.IsRequired,
+					RelatedModel: f.Def.RelatedModel,
+				})
+			}
+			ops := make([]string, 0, len(md.EnabledOps))
+			for _, op := range md.EnabledOps {
+				ops = append(ops, op.Name)
+			}
+			models[name+"."+md.Name] = schemaHashModel{
+				Name:        md.Name,
+				Label:       md.Label,
+				LabelPlural: md.LabelPlural,
+				Fields:      fields,
+				EnabledOps:  ops,
+				Shareable:   md.Shareable,
+			}
+		}
+
+		publicConfig := map[string]any{}
+		for _, c := range m.Manifest.ConfigSchema {
+			if c.Public {
+				publicConfig[c.Key] = c.Default
+			}
+		}
+
+		hashModules[name] = schemaHashModule{
+			Version:      m.Manifest.Version,
+			Routes:       []schemaHashRoute{},
+			Views:        m.Manifest.Views,
+			Navigation:   m.Manifest.Navigation,
+			Models:       models,
+			Permissions:  m.Manifest.Permissions,
+			PublicConfig: publicConfig,
+		}
+	}
+
+	for _, r := range routeTable.All() {
+		hm, ok := hashModules[r.Entry.ModuleName]
+		if !ok {
+			continue // engine built-in (ModuleName == "") or a failed module
+		}
+		mf := r.Entry.Manifest
+		hm.Routes = append(hm.Routes, schemaHashRoute{
+			Method:         r.Method,
+			Path:           r.Entry.PathTemplate,
+			Permissions:    mf.Permissions,
+			Model:          mf.Model,
+			CrudAction:     mf.CrudAction,
+			ResponseIsList: mf.ResponseIsList,
+		})
+		hashModules[r.Entry.ModuleName] = hm
+	}
+
+	data, err := json.Marshal(hashModules)
+	if err != nil {
+		// hashModules contains only strings, bools, slices, and maps of
+		// those — never a channel, func, or cyclic value — so
+		// json.Marshal cannot fail on it in practice.
+		panic(fmt.Sprintf("computeSchemaHash: marshal: %v", err))
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable, error) {
 	table := route.New()
 	registerBuiltinRoutes(table)
@@ -239,19 +386,19 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 // registerBuiltinRoutes registers the engine's own built-in routes into
 // table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
 // /auth/mfa/reverify, /admin/users/{id}/mfa/reset, /_meta/permissions,
-// and /_meta/shares resolve through the exact same RouteTable.Lookup
-// module routes do — no second router. Safe against collision by
-// construction: RegisterModuleRoutes already rejects any module route
-// whose top path segment starts with "_", or is exactly "auth" or
-// "admin", as a reserved engine namespace.
+// /_meta/shares, and /_meta/schema resolve through the exact same
+// RouteTable.Lookup module routes do — no second router. Safe against
+// collision by construction: RegisterModuleRoutes already rejects any
+// module route whose top path segment starts with "_", or is exactly
+// "auth" or "admin", as a reserved engine namespace.
 //
 // /admin/users/{id}/mfa/reset is a tenant-facing route despite its
 // "/admin/" prefix — see internal/engine/auth/mfareset's own package doc
 // for why that prefix doesn't mean it belongs to the separate
 // internal/engine/adminapi operator surface.
 //
-// /_meta/permissions and /_meta/shares are deliberately not
-// EngineBuiltin, unlike every other route registered here —
+// /_meta/permissions, /_meta/shares, and /_meta/schema are deliberately
+// not EngineBuiltin, unlike every other route registered here —
 // auth-internals.md §9 classifies them Class A (the default for "every
 // other route"), so they need the standard tenant/auth/permission
 // middleware chain to populate authFromContext/tenantFromContext,
@@ -273,6 +420,13 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 	table.Register("GET", "/_meta/permissions", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/permissions",
+	})
+
+	// /_meta/schema (goerp#573) — same not-EngineBuiltin posture as
+	// /_meta/permissions above.
+	table.Register("GET", "/_meta/schema", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/schema",
 	})
 
 	// /_meta/shares (goerp#475) — same not-EngineBuiltin posture as

@@ -24,6 +24,42 @@ const (
 	KindOne2Many
 )
 
+// fieldKindNames maps FieldKind onto the lowercase name go-sdk-reference.md
+// §22's field constructors use (Char -> "char", Many2One -> "many2one",
+// ...) — the single canonical source other packages should read from
+// (goerp#573 review: internal/engine/route's columnType and internal/
+// engine/schema's Atlas-type switch each map FieldKind to a *different*
+// vocabulary for their own purposes and intentionally don't use this
+// table; this one is for anything that needs the kind's own declared
+// name, not a UI widget type or a SQL type).
+var fieldKindNames = map[FieldKind]string{
+	KindChar:        "char",
+	KindText:        "text",
+	KindInteger:     "integer",
+	KindBigInt:      "bigint",
+	KindFloat:       "float",
+	KindDecimal:     "decimal",
+	KindBoolean:     "boolean",
+	KindUUID:        "uuid",
+	KindTimestampTZ: "timestamptz",
+	KindDate:        "date",
+	KindTime:        "time",
+	KindJSONB:       "jsonb",
+	KindBytea:       "bytea",
+	KindSelection:   "selection",
+	KindEnum:        "enum",
+	KindMany2One:    "many2one",
+	KindSequence:    "sequence",
+	KindDynamicLink: "dynamic_link",
+	KindOne2Many:    "one2many",
+}
+
+// String returns k's declared name (fieldKindNames), or "" for a value
+// outside the FieldKind enum.
+func (k FieldKind) String() string {
+	return fieldKindNames[k]
+}
+
 // OnDeleteBehaviour is a Many2One field's FOREIGN KEY ON DELETE action.
 // The zero value (Restrict) is the safe default for a field with no
 // explicit .OnDelete() call.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
@@ -366,4 +367,241 @@ func (e *Engine) dispatchSharesDeleteRoute(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// engineVersion is the running binary's own build version, reported as
+// MetaSchema.engine_version (goerp#573) — "dev" until a real build-time
+// version is injected, matching /_health's identical placeholder
+// (engine.go's HealthReport{Version: "dev"}) rather than inventing a
+// second, possibly-inconsistent convention.
+const engineVersion = "dev"
+
+// metaSchemaResponse is GET /_meta/schema's response shape —
+// shell-architecture.md §9 "/_meta/schema response shape" (MetaSchema) is
+// the canonical type reference; view-system.md §2 has a shorter
+// illustrative example of the same endpoint.
+type metaSchemaResponse struct {
+	Modules       map[string]*metaSchemaModule `json:"modules"`
+	EngineVersion string                       `json:"engine_version"`
+	SchemaHash    string                       `json:"schema_hash"`
+}
+
+type metaSchemaModule struct {
+	Name         string                     `json:"name"`
+	Version      string                     `json:"version"`
+	DisplayName  string                     `json:"display_name"`
+	Routes       []metaSchemaRoute          `json:"routes"`
+	Views        []manifest.View            `json:"views"`
+	Navigation   []manifest.NavGroup        `json:"navigation"`
+	Models       map[string]metaSchemaModel `json:"models"`
+	Permissions  []metaSchemaPermission     `json:"permissions"`
+	Frontend     *metaSchemaFrontend        `json:"frontend"`
+	PublicConfig map[string]any             `json:"public_config"`
+}
+
+// metaSchemaRoute is shell-architecture.md §9's RouteSchema — a subset of
+// RouteManifest, only the fields the shell needs. Path is always the
+// engine-expanded path (RouteEntry.PathTemplate) — not the module-relative
+// declared path, which isn't part of this contract.
+type metaSchemaRoute struct {
+	Method         string   `json:"method"`
+	Path           string   `json:"path"`
+	Permissions    []string `json:"permissions"`
+	Model          string   `json:"model,omitempty"`
+	CrudAction     string   `json:"crud_action,omitempty"`
+	ResponseIsList bool     `json:"response_is_list"`
+	View           string   `json:"view,omitempty"`
+}
+
+// metaSchemaModel is shell-architecture.md §9's ModelDef.
+type metaSchemaModel struct {
+	Name        string            `json:"name"`
+	Label       string            `json:"label"`
+	LabelPlural string            `json:"label_plural"`
+	Fields      []metaSchemaField `json:"fields"`
+	EnabledOps  []string          `json:"enabled_ops"`
+	Shareable   bool              `json:"shareable"`
+}
+
+// metaSchemaField is shell-architecture.md §9's FieldDef.
+type metaSchemaField struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Required     bool   `json:"required,omitempty"`
+	RelatedModel string `json:"related_model,omitempty"`
+}
+
+// metaSchemaPermission is shell-architecture.md §9's PermissionDeclaration
+// — a direct reflection of manifest.Permission, whose JSON tags already
+// match the documented wire shape.
+type metaSchemaPermission = manifest.Permission
+
+// metaSchemaFrontend is shell-architecture.md §9's ModuleSchema.frontend.
+// Always nil today — goerp#588 (engine-side bundle extraction/serving)
+// doesn't exist yet, so no module has a bundle_url to report.
+type metaSchemaFrontend struct {
+	BundleURL    string `json:"bundle_url"`
+	BundleSHA256 string `json:"bundle_sha256"`
+}
+
+// metaSchemaModelFrom builds md's ModelDef entry.
+func metaSchemaModelFrom(md sdkmodel.ModelDeclaration) metaSchemaModel {
+	fields := make([]metaSchemaField, 0, len(md.Fields))
+	for _, f := range md.Fields {
+		fields = append(fields, metaSchemaField{
+			Name:         f.Name,
+			Type:         f.Def.Kind.String(),
+			Required:     f.Def.IsRequired,
+			RelatedModel: f.Def.RelatedModel,
+		})
+	}
+	ops := make([]string, 0, len(md.EnabledOps))
+	for _, op := range md.EnabledOps {
+		ops = append(ops, op.Name)
+	}
+	return metaSchemaModel{
+		Name:        md.Name,
+		Label:       md.Label,
+		LabelPlural: md.LabelPlural,
+		Fields:      fields,
+		EnabledOps:  ops,
+		Shareable:   md.Shareable,
+	}
+}
+
+// metaSchemaViewFor reports which of m's Views (if any) route serves —
+// RouteSchema.view. A "list"-shaped view (list, kanban, calendar, pivot,
+// or timeline — all alternate visualizations of the same list dataset per
+// view-system.md's overview) claims that resource's "list" CrudAction; a
+// "form" view claims "get"/"create"/"update". This doesn't yet honor a
+// view's own FetchRoute/CreateRoute/UpdateRoute/DeleteRoute override
+// fields — refine once a view actually uses one.
+func metaSchemaViewFor(views []manifest.View, model, crudAction string) string {
+	for _, v := range views {
+		if v.Resource != model {
+			continue
+		}
+		switch {
+		case v.Type == "form" && (crudAction == "get" || crudAction == "create" || crudAction == "update"):
+			return v.Name
+		case listShapedViewTypes[v.Type] && crudAction == "list":
+			return v.Name
+		}
+	}
+	return ""
+}
+
+// listShapedViewTypes are every view-system.md type that visualizes a
+// list dataset (as opposed to a single record, "form") — all claim a
+// resource's "list" CrudAction route in metaSchemaViewFor. Kanban/
+// calendar/pivot/timeline aren't built yet (backlog #26-#28), but their
+// names are fixed by view-system.md's own type vocabulary, so this stays
+// exhaustive rather than falling through by default for anything
+// non-"form".
+var listShapedViewTypes = map[string]bool{
+	"list":     true,
+	"kanban":   true,
+	"calendar": true,
+	"pivot":    true,
+	"timeline": true,
+}
+
+// dispatchSchemaRoute is GET /_meta/schema's handler (goerp#573) — same
+// EngineNative-not-EngineBuiltin posture as dispatchPermissionsRoute
+// above. Unlike /_meta/permissions, the response is not filtered by the
+// caller's own grants: it reflects the engine's full declared API
+// surface (every non-failed module's routes/views/navigation/models/
+// permissions/public_config), the same way goerp codegen --from-engine
+// and the shell's schema-discovery bootstrap both need it — a per-tenant
+// API key is enough to call this (cli-reference.md), not an elevated one.
+func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
+	authCtx := authFromContext(r.Context())
+	tenantCtx := tenantFromContext(r.Context())
+	if authCtx == nil || tenantCtx == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		return
+	}
+
+	snap := e.moduleRegistry.Snapshot()
+	if snap == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+		return
+	}
+
+	modules := map[string]*metaSchemaModule{}
+	for name, m := range snap.Modules() {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+
+		models := map[string]metaSchemaModel{}
+		for _, md := range m.ModelDecls {
+			models[name+"."+md.Name] = metaSchemaModelFrom(md)
+		}
+
+		publicConfig := map[string]any{}
+		for _, c := range m.Manifest.ConfigSchema {
+			if c.Public {
+				publicConfig[c.Key] = c.Default
+			}
+		}
+
+		// A module with no declared views/navigation/permissions leaves
+		// these nil on its manifest — coalesced to an empty slice so
+		// every array-typed field in the response consistently
+		// serializes as "[]", never "null", the same as Routes below.
+		views := m.Manifest.Views
+		if views == nil {
+			views = []manifest.View{}
+		}
+		navigation := m.Manifest.Navigation
+		if navigation == nil {
+			navigation = []manifest.NavGroup{}
+		}
+		permissions := m.Manifest.Permissions
+		if permissions == nil {
+			permissions = []manifest.Permission{}
+		}
+
+		modules[name] = &metaSchemaModule{
+			Name:         name,
+			Version:      m.Manifest.Version,
+			DisplayName:  m.Manifest.DisplayName,
+			Routes:       []metaSchemaRoute{},
+			Views:        views,
+			Navigation:   navigation,
+			Models:       models,
+			Permissions:  permissions,
+			Frontend:     nil, // goerp#588 — no bundle-serving mechanism exists yet
+			PublicConfig: publicConfig,
+		}
+	}
+
+	for _, rt := range snap.RouteTable().All() {
+		mod, ok := modules[rt.Entry.ModuleName]
+		if !ok {
+			// Either an engine built-in (ModuleName == "") or, in
+			// principle, a module the snapshot's own route table
+			// disagrees with modules{} about — unreachable in practice
+			// since both are read from the same snap, but not assumed.
+			continue
+		}
+
+		mf := rt.Entry.Manifest
+		mod.Routes = append(mod.Routes, metaSchemaRoute{
+			Method:         rt.Method,
+			Path:           rt.Entry.PathTemplate,
+			Permissions:    mf.Permissions,
+			Model:          mf.Model,
+			CrudAction:     mf.CrudAction,
+			ResponseIsList: mf.ResponseIsList,
+			View:           metaSchemaViewFor(mod.Views, mf.Model, mf.CrudAction),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, metaSchemaResponse{
+		Modules:       modules,
+		EngineVersion: engineVersion,
+		SchemaHash:    snap.SchemaHash(),
+	})
 }

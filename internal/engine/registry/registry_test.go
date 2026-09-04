@@ -417,6 +417,95 @@ func TestModuleRegistry_Update_SkipsFailedModuleEvenWithConflictingRoutes(t *tes
 	}
 }
 
+func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnRouteChange(t *testing.T) {
+	r := &ModuleRegistry{}
+	snap1, err := r.Update(map[string]*module.LoadedModule{
+		"contacts": {
+			Status:         module.StatusReady,
+			Manifest:       manifest.Manifest{Type: "standard"},
+			ExplicitRoutes: []engine.RouteDeclaration{{Method: "GET", Path: "/", Auth: "required"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if snap1.SchemaHash() == "" {
+		t.Fatal("SchemaHash() is empty")
+	}
+
+	snap2, err := r.Update(map[string]*module.LoadedModule{
+		"contacts": {
+			Status:         module.StatusReady,
+			Manifest:       manifest.Manifest{Type: "standard"},
+			ExplicitRoutes: []engine.RouteDeclaration{{Method: "GET", Path: "/other", Auth: "required"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if snap1.SchemaHash() == snap2.SchemaHash() {
+		t.Errorf("SchemaHash() unchanged (%s) after a route changed", snap1.SchemaHash())
+	}
+}
+
+func TestModuleRegistry_Update_SnapshotSchemaHashStableAcrossIdenticalRebuilds(t *testing.T) {
+	buildModules := func() map[string]*module.LoadedModule {
+		return map[string]*module.LoadedModule{
+			"contacts": {
+				Status:         module.StatusReady,
+				Manifest:       manifest.Manifest{Type: "standard"},
+				ExplicitRoutes: []engine.RouteDeclaration{{Method: "GET", Path: "/", Auth: "required"}},
+			},
+		}
+	}
+
+	r1 := &ModuleRegistry{}
+	snap1, err := r1.Update(buildModules())
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	r2 := &ModuleRegistry{}
+	snap2, err := r2.Update(buildModules())
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if snap1.SchemaHash() != snap2.SchemaHash() {
+		t.Errorf("SchemaHash() differs across two registries built from identical modules: %s vs %s", snap1.SchemaHash(), snap2.SchemaHash())
+	}
+}
+
+func TestModuleRegistry_Update_SnapshotSchemaHashIgnoresFailedModules(t *testing.T) {
+	r := &ModuleRegistry{}
+	snap1, err := r.Update(map[string]*module.LoadedModule{
+		"contacts": {
+			Status:         module.StatusReady,
+			Manifest:       manifest.Manifest{Type: "standard"},
+			ExplicitRoutes: []engine.RouteDeclaration{{Method: "GET", Path: "/", Auth: "required"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	snap2, err := r.Update(map[string]*module.LoadedModule{
+		"contacts": {
+			Status:         module.StatusReady,
+			Manifest:       manifest.Manifest{Type: "standard"},
+			ExplicitRoutes: []engine.RouteDeclaration{{Method: "GET", Path: "/", Auth: "required"}},
+		},
+		"broken": {Status: module.StatusFailed, Manifest: manifest.Manifest{Type: "standard"}},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if snap1.SchemaHash() != snap2.SchemaHash() {
+		t.Errorf("SchemaHash() changed after adding only a StatusFailed module: %s vs %s", snap1.SchemaHash(), snap2.SchemaHash())
+	}
+}
+
 func TestBuildRouteTable_FromModules(t *testing.T) {
 	modules := map[string]*module.LoadedModule{
 		"contacts": {

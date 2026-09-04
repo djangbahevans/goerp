@@ -19,6 +19,7 @@ import (
 
 type RegistrySnapshot struct {
 	modules          map[string]*module.LoadedModule
+	schemaHash       string
 	routeTable       *route.RouteTable
 	eventRegistry    *event.EventRegistry
 	permRegistry     *permission.PermissionRegistry
@@ -35,6 +36,15 @@ type RegistrySnapshot struct {
 // StatusFailed alike. Callers must treat it as read-only.
 func (s *RegistrySnapshot) Modules() map[string]*module.LoadedModule {
 	return s.modules
+}
+
+// SchemaHash returns this snapshot's content hash — GET /_meta/schema's
+// (goerp#573) top-level "schema_hash" field, a cheap staleness marker for
+// goerp codegen --watch and the shell to detect a schema change without
+// diffing the full response. Changes if and only if a route, view, or
+// navigation declaration changed (computeSchemaHash).
+func (s *RegistrySnapshot) SchemaHash() string {
+	return s.schemaHash
 }
 
 // RouteTable returns this snapshot's route table — module-declared routes

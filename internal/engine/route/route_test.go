@@ -189,6 +189,42 @@ func TestRouteTable_Lookup_NotFound(t *testing.T) {
 	}
 }
 
+func TestRouteTable_All_ReturnsEveryRouteSortedByPathThenMethod(t *testing.T) {
+	rt := New()
+	getContacts := &RouteEntry{ModuleName: "contacts", PathTemplate: "/contacts"}
+	postContacts := &RouteEntry{ModuleName: "contacts", PathTemplate: "/contacts"}
+	getContact := &RouteEntry{ModuleName: "contacts", PathTemplate: "/contacts/{id}"}
+	getOrders := &RouteEntry{ModuleName: "sales", PathTemplate: "/orders"}
+	rt.Register("POST", "/contacts", postContacts)
+	rt.Register("GET", "/contacts", getContacts)
+	rt.Register("GET", "/contacts/{id}", getContact)
+	rt.Register("GET", "/orders", getOrders)
+
+	got := rt.All()
+	if len(got) != 4 {
+		t.Fatalf("len(got) = %d, want 4", len(got))
+	}
+
+	want := []AllRoute{
+		{Method: "GET", Entry: getContacts},
+		{Method: "POST", Entry: postContacts},
+		{Method: "GET", Entry: getContact},
+		{Method: "GET", Entry: getOrders},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestRouteTable_All_EmptyTable(t *testing.T) {
+	rt := New()
+
+	got := rt.All()
+	if len(got) != 0 {
+		t.Fatalf("len(got) = %d, want 0", len(got))
+	}
+}
+
 func TestRouteTable_Lookup_BareRoot(t *testing.T) {
 	rt := New()
 	entry := &RouteEntry{}
