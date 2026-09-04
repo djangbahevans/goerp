@@ -11,7 +11,7 @@ export interface APIClient {
   patch<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
   delete<T>(path: string, options?: RequestOptions): Promise<T>;
   getBlob(path: string, options?: RequestOptions): Promise<Blob>;
-  postFormData<T>(path: string, data: Record<string, unknown>): Promise<T>;
+  postFormData<T>(path: string, data: Record<string, unknown>, options?: RequestOptions): Promise<T>;
 }
 
 export interface RefreshedTokens {
@@ -21,18 +21,15 @@ export interface RefreshedTokens {
 }
 
 export interface APIClientConfig {
-  // "browser" (default) sends cookies (credentials: 'include') and lets
-  // the __Host-access_token/refresh_token cookies carry auth. "cli" sends
-  // X-Client-Type: cli and an Authorization: Bearer header instead — the
-  // token itself is this config's caller's responsibility to store
-  // (auth-internals.md §19 "Token storage strategy": OS keychain,
-  // in-memory — never this client's job).
+  // "browser" (default): credentials: 'include', cookie-based auth.
+  // "cli": X-Client-Type: cli plus an Authorization: Bearer header, per
+  // auth-internals.md §19 — token storage itself is the caller's own.
   clientType?: "browser" | "cli";
   getAccessToken?: () => string | null;
-  // Only consulted for the cli client type's own POST /auth/refresh call
-  // (auth-internals.md §4 "Refresh token rotation" sends the refresh
-  // token, not the access token, as that request's own bearer).
+  // cli only — the /auth/refresh call's own bearer is the refresh token.
   getRefreshToken?: () => string | null;
+  // cli only — resent on every /auth/refresh call (auth-internals.md §19).
+  getDeviceId?: () => string | null;
   onTokensRefreshed?: (tokens: RefreshedTokens) => void;
   // Base delay (ms) between network-error retries, doubling each attempt.
   // Defaults to 300ms — overridable so tests don't wait on real backoff.

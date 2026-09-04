@@ -5,12 +5,7 @@ import type { APIClient, APIClientConfig, RefreshedTokens, RequestOptions } from
 const MAX_NETWORK_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 300;
 
-// Methods erp-design.md §4.4.6 lets a caller de-duplicate via an
-// Idempotency-Key header — generated once per logical call (below) and
-// reused across every network-error retry and the one post-refresh retry
-// of that same call, so a lost response never risks a duplicate side
-// effect (e.g. a duplicate create) the way retrying a bare POST/PUT/PATCH
-// otherwise would.
+// erp-design.md §4.4.6: POST/PUT/PATCH support de-duplication via this header.
 const IDEMPOTENT_KEYED_METHODS = new Set(["POST", "PUT", "PATCH"]);
 
 function delay(ms: number): Promise<void> {
@@ -25,7 +20,8 @@ function buildURL(path: string, params?: Record<string, unknown>): string {
     search.set(key, String(value));
   }
   const query = search.toString();
-  return query ? `${path}?${query}` : path;
+  if (!query) return path;
+  return path.includes("?") ? `${path}&${query}` : `${path}?${query}`;
 }
 
 async function fetchWithNetworkRetry(url: string, init: RequestInit, baseDelayMs: number): Promise<Response> {
@@ -49,8 +45,7 @@ interface ErrorBody {
   traceId: string | undefined;
 }
 
-// Matches erp-design.md §4.4.5's error envelope exactly:
-// { error: { code, message, details?, request_id?, trace_id? } }.
+// Matches erp-design.md §4.4.5's error envelope.
 async function readErrorBody(response: Response): Promise<ErrorBody> {
   try {
     const body = (await response.json()) as {
@@ -70,7 +65,13 @@ async function readErrorBody(response: Response): Promise<ErrorBody> {
       traceId: body.error?.trace_id,
     };
   } catch {
-    return { code: "unknown_error", message: response.statusText || "request failed", details: undefined, requestId: undefined, traceId: undefined };
+    return {
+      code: "unknown_error",
+      message: response.statusText || "request failed",
+      details: undefined,
+      requestId: undefined,
+      traceId: undefined,
+    };
   }
 }
 
@@ -82,65 +83,17 @@ function toAppError(response: Response, body: ErrorBody): AppError {
     details: body.details ?? null,
     requestId: body.requestId ?? null,
     traceId: body.traceId ?? null,
-    // A 422's error.details IS the field-error map on the wire; AppError's
-    // own constructor already nulls this out for every other status.
+    // A 422's error.details IS the field-error map on the wire.
     fieldErrors: (body.details as Record<string, string[]> | undefined) ?? null,
   });
 }
 
-// Coalesces concurrent 401s into a single POST /auth/refresh call.
-// auth-internals.md §4 "Refresh token rotation" makes this a correctness
-// requirement, not just an optimization: two concurrent refresh calls
-// presenting the same not-yet-rotated token race a `SELECT ... FOR
-// UPDATE`, and the loser gets back a bare 401 for that /auth/refresh
-// call itself (same-device race, step 5b) — so firing one independent
-// refresh per racing request would spuriously log the user out on
-// whichever requests lost that race.
-let refreshInFlight: Promise<boolean> | null = null;
-
-function ensureRefreshed(config: APIClientConfig): Promise<boolean> {
-  refreshInFlight ??= performRefresh(config).finally(() => {
-    refreshInFlight = null;
-  });
-  return refreshInFlight;
-}
-
-async function performRefresh(config: APIClientConfig): Promise<boolean> {
-  const isCli = config.clientType === "cli";
-  try {
-    const headers: Record<string, string> = {};
-    if (isCli) {
-      headers["X-Client-Type"] = "cli";
-      const refreshToken = config.getRefreshToken?.();
-      if (refreshToken) headers.Authorization = `Bearer ${refreshToken}`;
-    }
-    const response = await fetch("/auth/refresh", {
-      method: "POST",
-      credentials: isCli ? "omit" : "include",
-      headers,
-    });
-    if (!response.ok) return false;
-
-    if (isCli) {
-      const body = (await response.json()) as {
-        access_token: string;
-        refresh_token: string;
-        expires_in: number;
-      };
-      const tokens: RefreshedTokens = {
-        accessToken: body.access_token,
-        refreshToken: body.refresh_token,
-        expiresIn: body.expires_in,
-      };
-      config.onTokensRefreshed?.(tokens);
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export class FetchAPIClient implements APIClient {
+  // Per-instance, not module-level: two instances (e.g. a browser
+  // instance and a differently-configured one) must never coalesce their
+  // refreshes into each other's.
+  private refreshInFlight: Promise<boolean> | null = null;
+
   constructor(private readonly config: APIClientConfig = {}) {}
 
   get<T>(path: string, options?: RequestOptions): Promise<T> {
@@ -168,13 +121,13 @@ export class FetchAPIClient implements APIClient {
     return response.blob();
   }
 
-  async postFormData<T>(path: string, data: Record<string, unknown>): Promise<T> {
+  async postFormData<T>(path: string, data: Record<string, unknown>, options?: RequestOptions): Promise<T> {
     const formData = new FormData();
     for (const [key, value] of Object.entries(data)) {
       if (value === undefined || value === null) continue;
       formData.append(key, value instanceof Blob ? value : String(value));
     }
-    const response = await this.send("POST", path, formData);
+    const response = await this.send("POST", path, formData, options);
     return parseJSON<T>(response);
   }
 
@@ -220,20 +173,77 @@ export class FetchAPIClient implements APIClient {
 
     // Never trigger the refresh cycle for a 401 from /auth/refresh itself.
     if (response.status === 401 && path !== "/auth/refresh") {
-      const refreshed = await ensureRefreshed(this.config);
+      const refreshed = await this.ensureRefreshed(baseDelayMs);
       if (!refreshed) {
         authMachine.transition({ type: "session_expired" });
         throw toAppError(response, await readErrorBody(response));
       }
-      // Exactly one retry — whatever it returns (even another 401) is
-      // final; this does not loop back into another refresh attempt.
+      // Exactly one retry, no matter its own outcome — this never loops
+      // back into a second refresh attempt.
       response = await fetchWithNetworkRetry(url, buildInit(), baseDelayMs);
+      if (response.status === 401) {
+        authMachine.transition({ type: "session_expired" });
+      }
     }
 
     if (!response.ok) {
       throw toAppError(response, await readErrorBody(response));
     }
     return response;
+  }
+
+  // Coalesces concurrent 401s into one POST /auth/refresh call.
+  // auth-internals.md §4's refresh token rotation makes this a
+  // correctness requirement: two independent refresh calls presenting
+  // the same not-yet-rotated token would race a `SELECT ... FOR UPDATE`,
+  // and the loser gets back a bare 401 for that call itself — an
+  // uncoalesced client would spuriously log out whichever request lost.
+  private ensureRefreshed(baseDelayMs: number): Promise<boolean> {
+    this.refreshInFlight ??= this.performRefresh(baseDelayMs).finally(() => {
+      this.refreshInFlight = null;
+    });
+    return this.refreshInFlight;
+  }
+
+  private async performRefresh(baseDelayMs: number): Promise<boolean> {
+    const isCli = this.config.clientType === "cli";
+    try {
+      const headers: Record<string, string> = {};
+      if (isCli) {
+        headers["X-Client-Type"] = "cli";
+        const refreshToken = this.config.getRefreshToken?.();
+        if (refreshToken) headers.Authorization = `Bearer ${refreshToken}`;
+        // auth-internals.md §19: a non-browser client must resend its own
+        // device_id on every refresh — §4 step 5c treats a mismatched (or
+        // absent) device_id on a raced/replayed token as compromise and
+        // revokes the whole session family, not just this request.
+        const deviceId = this.config.getDeviceId?.();
+        if (deviceId) headers.device_id = deviceId;
+      }
+      const response = await fetchWithNetworkRetry(
+        "/auth/refresh",
+        { method: "POST", credentials: isCli ? "omit" : "include", headers },
+        baseDelayMs,
+      );
+      if (!response.ok) return false;
+
+      if (isCli) {
+        const body = (await response.json()) as {
+          access_token: string;
+          refresh_token: string;
+          expires_in: number;
+        };
+        const tokens: RefreshedTokens = {
+          accessToken: body.access_token,
+          refreshToken: body.refresh_token,
+          expiresIn: body.expires_in,
+        };
+        this.config.onTokensRefreshed?.(tokens);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -242,11 +252,7 @@ async function parseJSON<T>(response: Response): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
-// The browser shell's shared client — zero setup required, matching
-// auth-machine.ts's own singleton (this module fires
-// authMachine.transition({ type: "session_expired" }) directly on an
-// unrecoverable 401, the same "fetch wrapper" shell-architecture.md §7
-// describes). A non-browser consumer (no such caller exists in this repo
-// yet) instantiates its own FetchAPIClient with clientType: "cli" instead
-// of using this instance.
+// The browser shell's shared client — zero setup required. A non-browser
+// consumer (none exists in this repo yet) instantiates its own
+// FetchAPIClient with clientType: "cli" instead of using this instance.
 export const apiClient: APIClient = new FetchAPIClient();

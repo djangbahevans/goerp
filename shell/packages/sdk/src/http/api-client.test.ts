@@ -58,6 +58,17 @@ describe("FetchAPIClient basic requests", () => {
     expect(url).toBe("/contacts?q=acme&limit=10");
   });
 
+  it("uses & instead of a second ? when the path already has a query string", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => jsonResponse(200, []));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FetchAPIClient();
+
+    await client.get("/contacts?sort=name", { params: { limit: 10 } });
+
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/contacts?sort=name&limit=10");
+  });
+
   it("sends POST with a JSON body and Content-Type header", async () => {
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => jsonResponse(201, { id: "1" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -103,6 +114,23 @@ describe("FetchAPIClient basic requests", () => {
     expect(formData.get("file")).toBeInstanceOf(Blob);
     expect(formData.get("note")).toBe("batch 1");
     expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+  });
+
+  it("postFormData forwards options (signal, custom headers)", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => jsonResponse(200, { jobId: "j1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FetchAPIClient();
+    const controller = new AbortController();
+
+    await client.postFormData(
+      "/contacts/import",
+      { file: new Blob(["x"]) },
+      { signal: controller.signal, headers: { "X-Custom": "1" } },
+    );
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init.signal).toBe(controller.signal);
+    expect((init.headers as Record<string, string>)["X-Custom"]).toBe("1");
   });
 });
 
@@ -206,6 +234,73 @@ describe("FetchAPIClient silent refresh on 401", () => {
     expect(a).toEqual({ ok: true });
     expect(b).toEqual({ ok: true });
     expect(refreshCalls).toBe(1);
+  });
+
+  it("does not coalesce refreshes across two different client instances", async () => {
+    let refreshCalls = 0;
+    const firstAttemptDone = new Set<string>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/auth/refresh") {
+          refreshCalls += 1;
+          return jsonResponse(200, { expires_in: 900 });
+        }
+        if (!firstAttemptDone.has(url)) {
+          firstAttemptDone.add(url);
+          return jsonResponse(401, { error: { code: "unauthenticated" } });
+        }
+        return jsonResponse(200, { ok: true });
+      }),
+    );
+    const clientA = new FetchAPIClient();
+    const clientB = new FetchAPIClient();
+
+    await Promise.all([clientA.get("/contacts/1"), clientB.get("/contacts/2")]);
+
+    expect(refreshCalls).toBe(2);
+  });
+
+  it("transitions to unauthenticated when the post-refresh retry still 401s", async () => {
+    const transitionSpy = vi.spyOn(authMachine, "transition");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/auth/refresh") return jsonResponse(200, { expires_in: 900 });
+        return jsonResponse(401, { error: { code: "unauthenticated" } });
+      }),
+    );
+    const client = new FetchAPIClient();
+
+    await expect(client.get("/contacts/1")).rejects.toMatchObject({ httpStatus: 401 });
+
+    expect(transitionSpy).toHaveBeenCalledWith({ type: "session_expired" });
+  });
+
+  it("retries a network error during the refresh call itself", async () => {
+    let refreshAttempts = 0;
+    // /contacts/1 401s once to trigger the refresh path, then succeeds.
+    let originalAttempts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/auth/refresh") {
+          refreshAttempts += 1;
+          if (refreshAttempts < 2) throw new Error("network down");
+          return jsonResponse(200, { expires_in: 900 });
+        }
+        originalAttempts += 1;
+        return originalAttempts === 1
+          ? jsonResponse(401, { error: { code: "unauthenticated" } })
+          : jsonResponse(200, { ok: true });
+      }),
+    );
+    const client = new FetchAPIClient({ retryBaseDelayMs: 1 });
+
+    const result = await client.get("/contacts/1");
+
+    expect(result).toEqual({ ok: true });
+    expect(refreshAttempts).toBe(2);
   });
 
   it("never triggers a refresh cycle for a 401 from /auth/refresh itself", async () => {
@@ -341,5 +436,30 @@ describe("FetchAPIClient cli mode", () => {
       refreshToken: "new-refresh",
       expiresIn: 900,
     });
+  });
+
+  it("sends device_id on the refresh call, per auth-internals.md §19", async () => {
+    let calledOriginalOnce = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/auth/refresh") {
+          expect((init?.headers as Record<string, string>).device_id).toBe("device-1");
+          return jsonResponse(200, { access_token: "a", refresh_token: "r", expires_in: 900 });
+        }
+        if (!calledOriginalOnce) {
+          calledOriginalOnce = true;
+          return jsonResponse(401, { error: { code: "unauthenticated" } });
+        }
+        return jsonResponse(200, { ok: true });
+      }),
+    );
+    const client = new FetchAPIClient({
+      clientType: "cli",
+      getRefreshToken: () => "refresh-tok",
+      getDeviceId: () => "device-1",
+    });
+
+    await client.get("/contacts");
   });
 });
