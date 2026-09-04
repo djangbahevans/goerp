@@ -113,6 +113,37 @@ func SetTokenCookies(w http.ResponseWriter, tokens *authtoken.Tokens) {
 	})
 }
 
+// ClearCookies expires the two session cookies SetTokenCookies sets at
+// login — __Host-access_token and refresh_token — for a browser client's
+// logout. device_id is deliberately left alone: it identifies the
+// physical device across logins (30-day lifetime, reused by
+// ResolveDeviceID on the next login), not the session being ended here —
+// clearing it on every logout would make a returning device look
+// unrecognized on its very next sign-in. Path/Name/Secure/SameSite must
+// match SetTokenCookies' exactly, or the browser treats this as a
+// different cookie and leaves the original one in place instead of
+// clearing it.
+func ClearCookies(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "__Host-access_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/auth/refresh",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
 func setCookies(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh bool) {
 	SetTokenCookies(w, tokens)
 	if deviceIDIsFresh {
