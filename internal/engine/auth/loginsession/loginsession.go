@@ -87,7 +87,12 @@ func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID str
 	writeJSON(w, map[string]any{"expires_in": tokens.ExpiresIn})
 }
 
-func setCookies(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh bool) {
+// SetTokenCookies sets the __Host-access_token/refresh_token cookies
+// every full-session response carries for a browser client — shared by
+// setCookies (a fresh login) and authrefresh's rotation response, so the
+// cookie flags (Path/MaxAge/Secure/SameSite) can't drift between the two
+// call sites the way two independent copies risked.
+func SetTokenCookies(w http.ResponseWriter, tokens *authtoken.Tokens) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "__Host-access_token",
 		Value:    tokens.AccessToken,
@@ -106,6 +111,10 @@ func setCookies(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 	})
+}
+
+func setCookies(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh bool) {
+	SetTokenCookies(w, tokens)
 	if deviceIDIsFresh {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "device_id",

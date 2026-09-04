@@ -79,6 +79,22 @@ type LoginParams struct {
 	MFACredentialID string
 }
 
+// RefreshParams describes the rotating request Refresh is minting a new
+// token pair for. DeviceID is the request's own device_id if it
+// presented one, else "" — never trusted to select which row rotates,
+// only used by session.Store.Rotate to distinguish a same-device
+// double-submit from a genuine cross-device replay. UserAgent/IPAddress/
+// CountryCode are recorded on the new row the same way LoginParams'
+// fields are on a fresh login (auth-internals.md §4 step 7b) — the row
+// tracks where the session is currently being used, not frozen at
+// whatever the original login saw.
+type RefreshParams struct {
+	DeviceID    string
+	UserAgent   string
+	IPAddress   string
+	CountryCode string
+}
+
 // Tokens is one issued access/refresh token pair.
 type Tokens struct {
 	AccessToken  string
@@ -202,6 +218,82 @@ func newRefreshToken() (token, hash string, err error) {
 		return "", "", err
 	}
 	token = base64.RawURLEncoding.EncodeToString(buf)
+	return token, hashRefreshToken(token), nil
+}
+
+// hashRefreshToken hashes an already-generated (or client-presented)
+// refresh token the same way newRefreshToken hashes a freshly minted one
+// — the lookup key Rotate matches a presented token against.
+func hashRefreshToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
-	return token, hex.EncodeToString(sum[:]), nil
+	return hex.EncodeToString(sum[:])
+}
+
+// Refresh rotates presentedRefreshToken inside session.Store's own
+// transactional lookup/rotate/replay-decision sequence (auth-internals.md
+// §4 "Refresh token rotation"), then mints a fresh access/refresh token
+// pair for the rotated session.
+//
+// A non-RotateOK outcome is not an error — it's every caller-facing
+// rejection (not found, already revoked, a same-device double-submit
+// dropped silently, or a cross-device replay that just triggered a
+// family-wide revocation as a side effect). The caller maps every one of
+// them to a 401; Tokens is nil whenever outcome != session.RotateOK.
+//
+// Known gap: i.sessions.Rotate commits its own transaction — marking the
+// old row rotated and inserting the new one — before the tenant/role
+// lookups and access-token signing below run, since which tenant/user to
+// resolve is itself only known once Rotate's own SELECT ... FOR UPDATE
+// has read the presented token's row. Unlike Issue (which resolves both
+// before its own session Insert, because the caller already knows
+// TenantSlug/UserID up front), Refresh cannot reorder this without either
+// threading session.Store's *sql.Tx across the tenant/role package
+// boundary or re-running the lookup/rotate/replay decision as a second,
+// separate transaction — the latter reopening the exact TOCTOU race the
+// single-transaction design (and TestRotate_ConcurrentRequestsForSameTokenDoNotRace)
+// exists to close. A failure in the tenant/role lookup or signing after a
+// successful rotation returns a bare error with the rotation already
+// committed — the presented refresh token is dead and the freshly minted
+// replacement was never returned to the caller, so that session is
+// unreachable until the user logs in again. A narrow, rare-in-practice
+// gap: the tenant/user a just-committed row references failing to
+// resolve moments later implies a concurrent tenant deletion or a
+// DB-level fault that would likely have already surfaced inside Rotate
+// itself.
+func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p RefreshParams) (*Tokens, session.RotateOutcome, error) {
+	presentedHash := hashRefreshToken(presentedRefreshToken)
+
+	newToken, newHash, err := newRefreshToken()
+	if err != nil {
+		return nil, 0, fmt.Errorf("generate refresh token: %w", err)
+	}
+	newSessionID := uuid.NewString()
+
+	result, err := i.sessions.Rotate(ctx, presentedHash, newSessionID, newHash, p.DeviceID, time.Now().Add(refreshTokenTTL), p.UserAgent, p.IPAddress, p.CountryCode)
+	if err != nil {
+		return nil, 0, fmt.Errorf("rotate session: %w", err)
+	}
+	if result.Outcome != session.RotateOK {
+		return nil, result.Outcome, nil
+	}
+
+	t, err := i.tenants.GetByID(ctx, result.TenantID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("resolve tenant %s: %w", result.TenantID, err)
+	}
+	roleNames, err := i.roles.RoleNamesForUser(ctx, t.Slug, result.UserID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("look up roles for user %s: %w", result.UserID, err)
+	}
+
+	accessToken, err := i.signAccessToken(newSessionID, result.TenantID, result.UserID, roleNames, result.MFAMethod, result.MFAVerifiedAt, time.Now())
+	if err != nil {
+		return nil, 0, fmt.Errorf("sign access token: %w", err)
+	}
+
+	return &Tokens{
+		AccessToken:  accessToken,
+		RefreshToken: newToken,
+		ExpiresIn:    int(accessTokenTTL.Seconds()),
+	}, session.RotateOK, nil
 }
