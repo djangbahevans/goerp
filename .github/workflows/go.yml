@@ -137,7 +137,7 @@ jobs:
       # runs internal/module's frontend-build tests, so it's exposed to
       # the same cold-npm-cache flakiness (goerp#585).
       - name: Cache npm packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-${{ hashFiles('internal/module/build_test.go') }}
@@ -190,7 +190,7 @@ jobs:
       # version), which alone can approach these tests' own timeouts; a
       # warm cache serves that from disk instead (goerp#585).
       - name: Cache npm packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-${{ hashFiles('internal/module/build_test.go') }}
