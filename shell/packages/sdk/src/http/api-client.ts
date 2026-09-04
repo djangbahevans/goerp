@@ -1,6 +1,6 @@
 import { authMachine } from "../auth/auth-machine.js";
 import { AppError } from "../error/app-error.js";
-import type { APIClient, APIClientConfig, RefreshedTokens, RequestOptions } from "./types.js";
+import type { APIClient, APIClientConfig, RefreshedTokens, RefreshOutcome, RequestOptions, SessionRefresher } from "./types.js";
 
 const MAX_NETWORK_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 300;
@@ -88,11 +88,11 @@ function toAppError(response: Response, body: ErrorBody): AppError {
   });
 }
 
-export class FetchAPIClient implements APIClient {
+export class FetchAPIClient implements APIClient, SessionRefresher {
   // Per-instance, not module-level: two instances (e.g. a browser
   // instance and a differently-configured one) must never coalesce their
   // refreshes into each other's.
-  private refreshInFlight: Promise<boolean> | null = null;
+  private refreshInFlight: Promise<RefreshOutcome> | null = null;
 
   constructor(private readonly config: APIClientConfig = {}) {}
 
@@ -174,7 +174,7 @@ export class FetchAPIClient implements APIClient {
     // Never trigger the refresh cycle for a 401 from /auth/refresh itself.
     if (response.status === 401 && path !== "/auth/refresh") {
       const refreshed = await this.ensureRefreshed(baseDelayMs);
-      if (!refreshed) {
+      if (!refreshed.ok) {
         authMachine.transition({ type: "session_expired" });
         throw toAppError(response, await readErrorBody(response));
       }
@@ -192,20 +192,28 @@ export class FetchAPIClient implements APIClient {
     return response;
   }
 
-  // Coalesces concurrent 401s into one POST /auth/refresh call.
-  // auth-internals.md §4's refresh token rotation makes this a
-  // correctness requirement: two independent refresh calls presenting
-  // the same not-yet-rotated token would race a `SELECT ... FOR UPDATE`,
-  // and the loser gets back a bare 401 for that call itself — an
-  // uncoalesced client would spuriously log out whichever request lost.
-  private ensureRefreshed(baseDelayMs: number): Promise<boolean> {
+  // Public so other pieces that need a refresh (auth's own
+  // TokenRefreshScheduler) share this exact coalescing instead of firing
+  // an independent /auth/refresh that could race it — see ensureRefreshed.
+  refreshSession(): Promise<RefreshOutcome> {
+    return this.ensureRefreshed(this.config.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS);
+  }
+
+  // Coalesces concurrent 401s (and any other caller, e.g. the proactive
+  // refresh scheduler) into one POST /auth/refresh call. auth-internals.md
+  // §4's refresh token rotation makes this a correctness requirement: two
+  // independent refresh calls presenting the same not-yet-rotated token
+  // would race a `SELECT ... FOR UPDATE`, and the loser gets back a bare
+  // 401 for that call itself — an uncoalesced client would spuriously log
+  // out whichever request lost.
+  private ensureRefreshed(baseDelayMs: number): Promise<RefreshOutcome> {
     this.refreshInFlight ??= this.performRefresh(baseDelayMs).finally(() => {
       this.refreshInFlight = null;
     });
     return this.refreshInFlight;
   }
 
-  private async performRefresh(baseDelayMs: number): Promise<boolean> {
+  private async performRefresh(baseDelayMs: number): Promise<RefreshOutcome> {
     const isCli = this.config.clientType === "cli";
     try {
       const headers: Record<string, string> = {};
@@ -225,14 +233,14 @@ export class FetchAPIClient implements APIClient {
         { method: "POST", credentials: isCli ? "omit" : "include", headers },
         baseDelayMs,
       );
-      if (!response.ok) return false;
+      if (!response.ok) return { ok: false };
 
-      if (isCli) {
-        const body = (await response.json()) as {
-          access_token: string;
-          refresh_token: string;
-          expires_in: number;
-        };
+      const body = (await response.json()) as {
+        access_token?: string;
+        refresh_token?: string;
+        expires_in: number;
+      };
+      if (isCli && body.access_token && body.refresh_token) {
         const tokens: RefreshedTokens = {
           accessToken: body.access_token,
           refreshToken: body.refresh_token,
@@ -240,9 +248,9 @@ export class FetchAPIClient implements APIClient {
         };
         this.config.onTokensRefreshed?.(tokens);
       }
-      return true;
+      return { ok: true, expiresIn: body.expires_in };
     } catch {
-      return false;
+      return { ok: false };
     }
   }
 }
@@ -255,4 +263,4 @@ async function parseJSON<T>(response: Response): Promise<T> {
 // The browser shell's shared client — zero setup required. A non-browser
 // consumer (none exists in this repo yet) instantiates its own
 // FetchAPIClient with clientType: "cli" instead of using this instance.
-export const apiClient: APIClient = new FetchAPIClient();
+export const apiClient: APIClient & SessionRefresher = new FetchAPIClient();

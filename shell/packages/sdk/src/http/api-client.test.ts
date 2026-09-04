@@ -313,6 +313,40 @@ describe("FetchAPIClient silent refresh on 401", () => {
   });
 });
 
+describe("FetchAPIClient.refreshSession (public, shared with TokenRefreshScheduler)", () => {
+  it("returns the response's expires_in on success in browser mode", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { expires_in: 900 })));
+    const client = new FetchAPIClient();
+
+    await expect(client.refreshSession()).resolves.toEqual({ ok: true, expiresIn: 900 });
+  });
+
+  it("returns ok: false on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(401, { error: { code: "invalid_refresh_token" } })));
+    const client = new FetchAPIClient();
+
+    await expect(client.refreshSession()).resolves.toEqual({ ok: false });
+  });
+
+  it("coalesces two concurrent refreshSession() calls into one request", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        return jsonResponse(200, { expires_in: 900 });
+      }),
+    );
+    const client = new FetchAPIClient();
+
+    const [a, b] = await Promise.all([client.refreshSession(), client.refreshSession()]);
+
+    expect(a).toEqual({ ok: true, expiresIn: 900 });
+    expect(b).toEqual({ ok: true, expiresIn: 900 });
+    expect(calls).toBe(1);
+  });
+});
+
 describe("FetchAPIClient network error retry", () => {
   it("retries a network failure up to 3 times before succeeding", async () => {
     let attempts = 0;

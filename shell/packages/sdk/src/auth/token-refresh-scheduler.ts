@@ -1,3 +1,5 @@
+import { apiClient } from "../http/index.js";
+import type { SessionRefresher } from "../http/types.js";
 import { AuthMachine, authMachine } from "./auth-machine.js";
 import type { AuthState } from "./types.js";
 
@@ -11,7 +13,10 @@ const REFRESH_AT_FRACTION = 0.8;
 export class TokenRefreshScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly machine: AuthMachine) {}
+  constructor(
+    private readonly machine: AuthMachine,
+    private readonly refresher: SessionRefresher,
+  ) {}
 
   schedule(expiresInSeconds: number): void {
     this.clear();
@@ -34,17 +39,22 @@ export class TokenRefreshScheduler {
     // timer fired.
     if (!this.machine.transition({ type: "refresh_started" })) return;
 
-    try {
-      const response = await fetch("/auth/refresh", { method: "POST", credentials: "include" });
-      if (!response.ok) {
-        this.machine.transition({ type: "refresh_failed" });
-        return;
-      }
-      const body = (await response.json()) as { expires_in: number };
-      this.machine.transition({ type: "refresh_succeeded" });
-      this.schedule(body.expires_in);
-    } catch {
+    // Goes through the shared APIClient's own coalescing (not an
+    // independent fetch) — a proactive refresh racing a reactive
+    // 401-triggered one would otherwise hit auth-internals.md §4's
+    // rotation lock, and the loser gets back a bare 401.
+    const result = await this.refresher.refreshSession();
+    if (!result.ok) {
       this.machine.transition({ type: "refresh_failed" });
+      return;
+    }
+
+    // Only reschedule if the transition actually applied — logout or an
+    // external session_expired can race this same window (both are valid
+    // from "refreshing"), and rescheduling after either would leave a
+    // stray timer outliving the session.
+    if (this.machine.transition({ type: "refresh_succeeded" })) {
+      this.schedule(result.expiresIn ?? DEFAULT_LIFETIME_SECONDS);
     }
   }
 }
@@ -54,8 +64,8 @@ export class TokenRefreshScheduler {
 // http/api-client.ts's unrecoverable-401 path, entirely outside
 // auth-provider.tsx, so nothing short of watching the machine itself
 // reliably catches every path in and out of "authenticated".
-export function wireAutoRefresh(machine: AuthMachine): TokenRefreshScheduler {
-  const scheduler = new TokenRefreshScheduler(machine);
+export function wireAutoRefresh(machine: AuthMachine, refresher: SessionRefresher): TokenRefreshScheduler {
+  const scheduler = new TokenRefreshScheduler(machine, refresher);
   let previousStatus: AuthState["status"] = machine.getState().status;
 
   machine.subscribe(() => {
@@ -78,4 +88,8 @@ export function wireAutoRefresh(machine: AuthMachine): TokenRefreshScheduler {
   return scheduler;
 }
 
-export const tokenRefreshScheduler = wireAutoRefresh(authMachine);
+// The browser shell's shared scheduler, wired to the browser apiClient's
+// own refresh coalescing. A non-browser consumer (none exists in this
+// repo yet) calls wireAutoRefresh with its own AuthMachine/FetchAPIClient
+// instead of using this one — the same pattern apiClient itself follows.
+export const tokenRefreshScheduler = wireAutoRefresh(authMachine, apiClient);
