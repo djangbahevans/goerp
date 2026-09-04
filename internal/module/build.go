@@ -56,7 +56,29 @@ func BuildFrontend(ctx context.Context, dir string, debug bool) (*FrontendBuildR
 		return nil, fmt.Errorf("frontend.bundle is true but %s does not exist", frontendDir)
 	}
 
-	if err := runNpm(ctx, frontendDir, "install"); err != nil {
+	// --prefer-offline skips npm's registry staleness check entirely for
+	// any package already in its local cache, rather than confirming the
+	// cached copy is current first — a deliberate speed/reliability
+	// tradeoff (the same one many CI setups make) that can occasionally
+	// resolve a semver range against an already-cached-but-not-newest
+	// version instead of the latest publish. Applies to both `goerp
+	// module build` and this function's own tests. Fixes the specific
+	// pattern behind goerp#585: a repeat install against an unchanged
+	// lockfile was paying the same live-registry cost as a first-ever
+	// install for no benefit, and intermittently hanging on it.
+	// --fetch-timeout/--fetch-retries/--fetch-retry-maxtimeout carry no
+	// such tradeoff — they just give a single hanging or slow request a
+	// fast, bounded failure and npm's own retry, instead of blocking
+	// until BuildFrontend's caller (or a test's own context) times the
+	// whole process out.
+	npmInstallArgs := []string{
+		"install",
+		"--prefer-offline",
+		"--fetch-timeout=60000",
+		"--fetch-retries=3",
+		"--fetch-retry-maxtimeout=20000",
+	}
+	if err := runNpm(ctx, frontendDir, npmInstallArgs...); err != nil {
 		return nil, err
 	}
 	buildArgs := []string{"run", "build"}
