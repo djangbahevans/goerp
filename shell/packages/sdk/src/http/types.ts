@@ -20,6 +20,18 @@ export interface RefreshedTokens {
   expiresIn: number;
 }
 
+export interface RefreshOutcome {
+  ok: boolean;
+  expiresIn?: number;
+}
+
+// Lets a caller outside the generated-code surface (auth's own
+// TokenRefreshScheduler) share an APIClient's coalesced refresh instead
+// of firing an independent POST /auth/refresh that could race it.
+export interface SessionRefresher {
+  refreshSession(): Promise<RefreshOutcome>;
+}
+
 export interface APIClientConfig {
   // "browser" (default): credentials: 'include', cookie-based auth.
   // "cli": X-Client-Type: cli plus an Authorization: Bearer header, per
