@@ -44,6 +44,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authrefresh"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareset"
@@ -736,10 +737,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil)
 	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore)
+	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	builtinRoutes := map[string]http.Handler{
 		"GET /_health":                     server.HealthHandler(),
 		"GET /_ready":                      server.ReadyHandler(),
 		"GET /auth/me":                     authMeHandler,
+		"POST /auth/refresh":               authRefreshHandler,
 		"POST /auth/login":                 loginHandler,
 		"POST /auth/mfa/verify":            mfaVerifyHandler,
 		"POST /auth/mfa/reverify":          mfaReverifyHandler,
