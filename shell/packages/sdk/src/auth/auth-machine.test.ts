@@ -110,17 +110,38 @@ describe("AuthMachine", () => {
       notifications += 1;
     });
 
-    machine.transition({ type: "check_session" });
+    expect(machine.transition({ type: "check_session" })).toBe(true);
     expect(machine.getState()).toEqual({ status: "checking" });
     expect(notifications).toBe(1);
 
-    // login_started doesn't apply from "checking" — no-op, no notification.
-    machine.transition({ type: "login_started" });
+    // login_started doesn't apply from "checking" — no-op, no notification,
+    // and transition() reports it wasn't applied.
+    expect(machine.transition({ type: "login_started" })).toBe(false);
     expect(notifications).toBe(1);
 
     unsubscribe();
-    machine.transition({ type: "session_check_failed" });
+    expect(machine.transition({ type: "session_check_failed" })).toBe(true);
     expect(notifications).toBe(1);
     expect(machine.getState()).toEqual({ status: "unauthenticated" });
+  });
+
+  it("rejects a second check_session once the first has already applied", () => {
+    // Mirrors AuthProvider's mount effect gating StrictMode's dev-mode
+    // double-invocation: the second call sees live "checking" state, not
+    // a stale "idle" snapshot, so it's rejected rather than re-fetching.
+    const machine = new AuthMachine();
+    expect(machine.transition({ type: "check_session" })).toBe(true);
+    expect(machine.transition({ type: "check_session" })).toBe(false);
+  });
+
+  it("rejects login_started once another login is already in flight", () => {
+    const machine = new AuthMachine();
+    machine.transition({ type: "check_session" });
+    machine.transition({ type: "session_check_failed" }); // → unauthenticated
+
+    expect(machine.transition({ type: "login_started" })).toBe(true);
+    // A second concurrent login attempt (or one racing the mount-time
+    // check) finds the machine already "checking" and is rejected.
+    expect(machine.transition({ type: "login_started" })).toBe(false);
   });
 });

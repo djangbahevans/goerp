@@ -95,11 +95,16 @@ export class AuthMachine {
     };
   };
 
-  transition(event: AuthEvent): void {
+  // Returns whether event actually changed state. A caller uses this to
+  // detect a rejected "start" transition — e.g. login_started fired while
+  // a mount-time session check still owns the "checking" status — and
+  // bail out immediately instead of racing a second flow against it.
+  transition(event: AuthEvent): boolean {
     const next = authTransition(this.state, event);
-    if (next === this.state) return;
+    if (next === this.state) return false;
     this.state = next;
     for (const listener of this.listeners) listener();
+    return true;
   }
 }
 
