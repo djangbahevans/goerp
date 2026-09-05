@@ -10,6 +10,10 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 // fresh login (via wireWebSocketManager) starts a new connection.
 const AUTH_FAILURE_CLOSE_CODE = 4001;
 const LOGOUT_CLOSE_CODE = 1000;
+// WebSocket.readyState's spec-fixed values (never referenced via the
+// global WebSocket constructor's own static properties, so this doesn't
+// depend on one being present/spec-complete wherever this runs).
+const READY_STATE_OPEN = 1;
 
 export interface RealtimeEnvelope {
   channel: string;
@@ -58,6 +62,12 @@ export class WebSocketManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private loggedOut = false;
 
+  // Set by wireWebSocketManager so a 4001 close can invalidate the shared
+  // auth state — shell-architecture.md §12's own sketch does this
+  // directly against a module-level authMachine; kept as an injectable
+  // callback here instead so this class has no auth dependency of its own.
+  onAuthFailure: (() => void) | null = null;
+
   constructor(
     private readonly createSocket: WebSocketFactory = (url) => new WebSocket(url),
     private readonly url: () => string = defaultWebSocketURL,
@@ -66,6 +76,15 @@ export class WebSocketManager {
   connect(): void {
     this.loggedOut = false;
     this.clearReconnectTimer();
+
+    // Detach before closing: the old socket's onclose otherwise fires
+    // while `this.ws` still points at it (not yet stale by its own
+    // guard's definition), which would run this same connect()'s
+    // scheduleReconnect() a second time right as the new socket is
+    // being created.
+    const oldWs = this.ws;
+    this.ws = null;
+    oldWs?.close();
 
     const ws = this.createSocket(this.url());
     this.ws = ws;
@@ -88,19 +107,27 @@ export class WebSocketManager {
     ws.onclose = (event: CloseEvent) => {
       if (this.ws !== ws) return; // a stale handler from an already-superseded socket
       this.ws = null;
-      if (this.loggedOut || event.code === AUTH_FAILURE_CLOSE_CODE) return;
+      if (event.code === AUTH_FAILURE_CLOSE_CODE) {
+        this.onAuthFailure?.();
+        return;
+      }
+      if (this.loggedOut) return;
       this.scheduleReconnect();
     };
   }
 
   // subscribe returns an unsubscribe function — the same shape
   // shell-architecture.md's own WebSocketManager.subscribe documents.
+  // Sending on the wire only ever happens while the socket is OPEN
+  // (readyState CONNECTING rejects send() with a thrown InvalidStateError);
+  // a channel touched before the connection opens is instead picked up by
+  // connect()'s own onopen resubscribe loop once it does.
   subscribe(channel: string, handler: MessageHandler): () => void {
     let handlers = this.channels.get(channel);
     if (!handlers) {
       handlers = new Set();
       this.channels.set(channel, handlers);
-      this.ws?.send(JSON.stringify({ type: "subscribe", channel }));
+      this.send({ type: "subscribe", channel });
     }
     handlers.add(handler);
 
@@ -109,9 +136,15 @@ export class WebSocketManager {
       if (!current?.delete(handler)) return;
       if (current.size === 0) {
         this.channels.delete(channel);
-        this.ws?.send(JSON.stringify({ type: "unsubscribe", channel }));
+        this.send({ type: "unsubscribe", channel });
       }
     };
+  }
+
+  private send(message: unknown): void {
+    if (this.ws?.readyState === READY_STATE_OPEN) {
+      this.ws.send(JSON.stringify(message));
+    }
   }
 
   disconnect(): void {
@@ -158,6 +191,10 @@ export function wireWebSocketManager(
   machine: AuthMachine,
   manager: WebSocketManager = new WebSocketManager(),
 ): WebSocketManager {
+  manager.onAuthFailure = () => {
+    machine.transition({ type: "session_expired" });
+  };
+
   let previousStatus = machine.getState().status;
 
   machine.subscribe(() => {

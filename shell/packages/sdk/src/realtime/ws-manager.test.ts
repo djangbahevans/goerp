@@ -6,6 +6,10 @@ import { WebSocketManager, wireWebSocketManager } from "./ws-manager.js";
 const user: CurrentUser = { id: "u1", email: "a@example.com", roles: [], amr: ["pwd"], mfaVerifiedAt: null };
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
+const CONNECTING = 0;
+const OPEN = 1;
+const CLOSED = 3;
+
 class FakeSocket {
   static instances: FakeSocket[] = [];
 
@@ -14,22 +18,32 @@ class FakeSocket {
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
   sent: string[] = [];
   closed = false;
+  readyState = CONNECTING;
 
   constructor(public readonly url: string) {
     FakeSocket.instances.push(this);
   }
 
+  // Real WebSocket.send() throws InvalidStateError while CONNECTING —
+  // reproduce that here so a manager bug that sends too early fails the
+  // test instead of silently recording a message that could never have
+  // reached the real server.
   send(data: string): void {
+    if (this.readyState !== OPEN) {
+      throw new Error("InvalidStateError: still in CONNECTING state");
+    }
     this.sent.push(data);
   }
 
   close(code = 1000, reason = ""): void {
     if (this.closed) return;
     this.closed = true;
+    this.readyState = CLOSED;
     this.onclose?.({ code, reason });
   }
 
   open(): void {
+    this.readyState = OPEN;
     this.onopen?.();
   }
 
@@ -40,6 +54,8 @@ class FakeSocket {
   // Simulates the server dropping the connection — unlike close(), this
   // doesn't mark the socket as closed-by-the-caller.
   serverClose(code: number, reason = ""): void {
+    this.closed = true;
+    this.readyState = CLOSED;
     this.onclose?.({ code, reason });
   }
 }
@@ -85,6 +101,7 @@ describe("WebSocketManager", () => {
     const manager = testManager();
     manager.connect();
     const socket = latestSocket();
+    socket.open();
 
     manager.subscribe("notifications", () => {});
     manager.subscribe("notifications", () => {});
@@ -132,6 +149,7 @@ describe("WebSocketManager", () => {
     const manager = testManager();
     manager.connect();
     const socket = latestSocket();
+    socket.open();
 
     const unsubscribeA = manager.subscribe("notifications", () => {});
     const unsubscribeB = manager.subscribe("notifications", () => {});
@@ -230,6 +248,56 @@ describe("WebSocketManager", () => {
     vi.advanceTimersByTime(60_000);
     expect(FakeSocket.instances).toHaveLength(2);
   });
+
+  it("closes a still-open prior connection when connect() is called again, without a spurious reconnect", () => {
+    const manager = testManager();
+    manager.connect();
+    const first = latestSocket();
+    first.open();
+
+    manager.connect();
+
+    expect(first.closed).toBe(true);
+    expect(FakeSocket.instances).toHaveLength(2);
+    // The first socket's own close (triggered by the second connect())
+    // must not have armed a reconnect on top of the second, deliberate
+    // connection.
+    vi.advanceTimersByTime(60_000);
+    expect(FakeSocket.instances).toHaveLength(2);
+  });
+
+  it("does not throw subscribing before the connection has opened, and sends once it does", () => {
+    const manager = testManager();
+    manager.connect();
+
+    expect(() => manager.subscribe("notifications", () => {})).not.toThrow();
+    expect(latestSocket().sent).toHaveLength(0);
+
+    latestSocket().open();
+    const subscribeMessages = latestSocket().sent.filter((s) => JSON.parse(s).type === "subscribe");
+    expect(subscribeMessages).toHaveLength(1);
+  });
+
+  it("does not throw unsubscribing before the connection has opened", () => {
+    const manager = testManager();
+    manager.connect();
+    const unsubscribe = manager.subscribe("notifications", () => {});
+
+    expect(() => unsubscribe()).not.toThrow();
+  });
+
+  it("invokes onAuthFailure on a 4001 close instead of reconnecting", () => {
+    const manager = testManager();
+    const onAuthFailure = vi.fn();
+    manager.onAuthFailure = onAuthFailure;
+    manager.connect();
+
+    latestSocket().serverClose(4001, "session expired");
+
+    expect(onAuthFailure).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(60_000);
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
 });
 
 describe("wireWebSocketManager", () => {
@@ -302,5 +370,13 @@ describe("wireWebSocketManager", () => {
     machine.transition({ type: "refresh_failed" });
 
     expect(socket.closed).toBe(true);
+  });
+
+  it("transitions the auth machine to unauthenticated on a 4001 close", () => {
+    const { machine } = wiredAndAuthenticated();
+
+    latestSocket().serverClose(4001, "session expired");
+
+    expect(machine.getState()).toEqual({ status: "unauthenticated" });
   });
 });
