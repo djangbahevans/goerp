@@ -29,6 +29,12 @@ export function tenantChannel(tenantId: string): string {
   return `tenant:${tenantId}`;
 }
 
+// shell-architecture.md §12's ui:user:{id} channel — the engine-side
+// counterpart is ws.UserChannel (goerp#619).
+export function userChannel(userId: string): string {
+  return `ui:user:${userId}`;
+}
+
 function defaultWebSocketURL(): string {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${location.host}${WS_PATH}`;

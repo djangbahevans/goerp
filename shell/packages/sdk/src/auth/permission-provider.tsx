@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { tenantChannel, wsManager } from "../realtime/index.js";
+import { tenantChannel, userChannel, wsManager } from "../realtime/index.js";
 import { fetchPermissions } from "./permission-client.js";
 import type { PermissionContextValue, PermissionData } from "./permission-types.js";
 import { useAuth } from "./use-auth.js";
@@ -24,15 +24,39 @@ export function createPermissionContextValue(data: PermissionData): PermissionCo
   };
 }
 
+// Refetches via refresh whenever a message of messageType arrives on
+// channel (null skips subscribing). Shared by the tenant- and user-channel
+// live-refresh effects below, which differ only in channel/messageType.
+function useChannelRefresh(
+  enabled: boolean,
+  channel: string | null,
+  messageType: string,
+  refresh: (isCancelled: () => boolean, fallbackToEmptyOnError: boolean) => void,
+) {
+  useEffect(() => {
+    if (!enabled || !channel) return;
+    let cancelled = false;
+    const unsubscribe = wsManager.subscribe(channel, (message) => {
+      if (message.type === messageType) refresh(() => cancelled, false);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [enabled, channel, messageType, refresh]);
+}
+
 // Exported for testing — lets tests drive isAuthenticated/tenantId directly
 // instead of standing up a full AuthProvider/auth machine.
 export function PermissionProviderForUser({
   isAuthenticated,
   tenantId,
+  userId,
   children,
 }: {
   isAuthenticated: boolean;
   tenantId: string | null;
+  userId: string | null;
   children: ReactNode;
 }) {
   const [loadedData, setLoadedData] = useState<PermissionData>(EMPTY_DATA);
@@ -64,20 +88,9 @@ export function PermissionProviderForUser({
     };
   }, [isAuthenticated, refresh]);
 
-  // Live refresh (goerp#614): refetches on tenantChannel(tenantId)'s
-  // module-install broadcast (goerp#621) rather than trusting its payload,
-  // since the message only signals "something changed," not what.
-  useEffect(() => {
-    if (!isAuthenticated || !tenantId) return;
-    let cancelled = false;
-    const unsubscribe = wsManager.subscribe(tenantChannel(tenantId), (message) => {
-      if (message.type === "module.installed") refresh(() => cancelled, false);
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [isAuthenticated, tenantId, refresh]);
+  // Live refresh on module install (goerp#614/#621) and role change (goerp#624/#619).
+  useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "module.installed", refresh);
+  useChannelRefresh(isAuthenticated, userId && userChannel(userId), "role.changed", refresh);
 
   const data = isAuthenticated ? loadedData : EMPTY_DATA;
   const value = useMemo(() => createPermissionContextValue(data), [data]);
@@ -93,6 +106,7 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
       key={user?.id ?? "anonymous"}
       isAuthenticated={isAuthenticated}
       tenantId={tenant?.id ?? null}
+      userId={user?.id ?? null}
     >
       {children}
     </PermissionProviderForUser>
