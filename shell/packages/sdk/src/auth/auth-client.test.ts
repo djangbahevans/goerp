@@ -35,12 +35,18 @@ describe("fetchCurrentSession", () => {
   });
 
   it("returns null on 401", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(401, { error: { code: "unauthenticated" } })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(401, { error: { code: "unauthenticated" } })),
+    );
     expect(await fetchCurrentSession()).toBeNull();
   });
 
   it("returns null on any other non-2xx status", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(500, {})));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(500, {})),
+    );
     expect(await fetchCurrentSession()).toBeNull();
   });
 

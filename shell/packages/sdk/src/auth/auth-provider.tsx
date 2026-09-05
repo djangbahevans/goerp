@@ -1,8 +1,7 @@
-import { createContext, useCallback, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
-
+import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { AppError } from "../error/app-error.js";
 import { fetchCurrentSession, login as loginRequest, logout as logoutRequest, submitMFACode } from "./auth-client.js";
 import { authMachine } from "./auth-machine.js";
-import { AppError } from "../error/app-error.js";
 import type { AuthContextValue, LoginCredentials, MFAMethod } from "./types.js";
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

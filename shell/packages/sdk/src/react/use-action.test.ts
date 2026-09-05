@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
 import { toast } from "../notifications/toast.js";
-import { ActionRegistry } from "./action-registry.js";
+import type { ActionRegistry } from "./action-registry.js";
 import { createActionMutationOptions, splitPathAndBody } from "./use-action.js";
 
 describe("splitPathAndBody", () => {
@@ -61,13 +61,7 @@ describe("createActionMutationOptions", () => {
     const client = { post: vi.fn(async () => ({ id: "order-1", state: "confirmed" })) };
     const queryClient = new QueryClient();
 
-    const opts = createActionMutationOptions(
-      "sales.confirmOrder",
-      {},
-      queryClient,
-      registry,
-      client as never,
-    );
+    const opts = createActionMutationOptions("sales.confirmOrder", {}, queryClient, registry, client as never);
     const result = await opts.mutationFn!("order-1", undefined as never);
 
     expect(client.post).toHaveBeenCalledWith("/orders/order-1/confirm", undefined);
@@ -127,7 +121,12 @@ describe("createActionMutationOptions", () => {
 
     const opts = createActionMutationOptions(
       "sales.confirmOrder",
-      { invalidates: [["sales", "orders"], ["sales", "dashboard"]] },
+      {
+        invalidates: [
+          ["sales", "orders"],
+          ["sales", "dashboard"],
+        ],
+      },
       queryClient,
       registry,
       client as never,

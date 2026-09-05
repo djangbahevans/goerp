@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AppError } from "../error/app-error.js";
 import { authMachine } from "../auth/auth-machine.js";
+import { AppError } from "../error/app-error.js";
 import { FetchAPIClient } from "./api-client.js";
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -315,14 +315,20 @@ describe("FetchAPIClient silent refresh on 401", () => {
 
 describe("FetchAPIClient.refreshSession (public, shared with TokenRefreshScheduler)", () => {
   it("returns the response's expires_in on success in browser mode", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { expires_in: 900 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { expires_in: 900 })),
+    );
     const client = new FetchAPIClient();
 
     await expect(client.refreshSession()).resolves.toEqual({ ok: true, expiresIn: 900 });
   });
 
   it("returns ok: false on a non-2xx response", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(401, { error: { code: "invalid_refresh_token" } })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(401, { error: { code: "invalid_refresh_token" } })),
+    );
     const client = new FetchAPIClient();
 
     await expect(client.refreshSession()).resolves.toEqual({ ok: false });
@@ -434,7 +440,7 @@ describe("FetchAPIClient cli mode", () => {
     const onTokensRefreshed = vi.fn();
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/auth/refresh") {
-        expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer refresh-tok");
+        expect((init!.headers as Record<string, string>).Authorization).toBe("Bearer refresh-tok");
         return jsonResponse(200, {
           access_token: "new-access",
           refresh_token: "new-refresh",
@@ -478,7 +484,7 @@ describe("FetchAPIClient cli mode", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url === "/auth/refresh") {
-          expect((init?.headers as Record<string, string>).device_id).toBe("device-1");
+          expect((init!.headers as Record<string, string>).device_id).toBe("device-1");
           return jsonResponse(200, { access_token: "a", refresh_token: "r", expires_in: 900 });
         }
         if (!calledOriginalOnce) {

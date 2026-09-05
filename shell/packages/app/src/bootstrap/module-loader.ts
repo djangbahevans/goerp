@@ -36,9 +36,7 @@ export async function loadVerifiedModule(
 ): Promise<unknown> {
   const response = await fetch(bundleUrl);
   if (!response.ok) {
-    throw new Error(
-      `failed to fetch module bundle ${bundleUrl}: ${response.status} ${response.statusText}`,
-    );
+    throw new Error(`failed to fetch module bundle ${bundleUrl}: ${response.status} ${response.statusText}`);
   }
 
   const bytes = await response.arrayBuffer();

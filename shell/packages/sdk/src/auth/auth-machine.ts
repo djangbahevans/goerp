@@ -11,9 +11,7 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
       return state.status === "idle" ? { status: "checking" } : state;
 
     case "session_checked":
-      return state.status === "checking"
-        ? { status: "authenticated", user: event.user, tenant: event.tenant }
-        : state;
+      return state.status === "checking" ? { status: "authenticated", user: event.user, tenant: event.tenant } : state;
 
     case "session_check_failed":
       return state.status === "checking" ? { status: "unauthenticated" } : state;
@@ -22,9 +20,7 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
       return state.status === "unauthenticated" ? { status: "checking" } : state;
 
     case "login_succeeded":
-      return state.status === "checking"
-        ? { status: "authenticated", user: event.user, tenant: event.tenant }
-        : state;
+      return state.status === "checking" ? { status: "authenticated", user: event.user, tenant: event.tenant } : state;
 
     case "login_requires_mfa":
       return state.status === "checking"
@@ -60,14 +56,10 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
       return state.status === "refreshing" ? { status: "unauthenticated" } : state;
 
     case "session_expired":
-      return state.status === "authenticated" || state.status === "refreshing"
-        ? { status: "unauthenticated" }
-        : state;
+      return state.status === "authenticated" || state.status === "refreshing" ? { status: "unauthenticated" } : state;
 
     case "logout_started":
-      return state.status === "authenticated" || state.status === "refreshing"
-        ? { status: "logging_out" }
-        : state;
+      return state.status === "authenticated" || state.status === "refreshing" ? { status: "logging_out" } : state;
 
     case "logout_complete":
       return state.status === "logging_out" ? { status: "unauthenticated" } : state;

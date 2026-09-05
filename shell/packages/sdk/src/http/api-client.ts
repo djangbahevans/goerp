@@ -1,6 +1,13 @@
 import { authMachine } from "../auth/auth-machine.js";
 import { AppError } from "../error/app-error.js";
-import type { APIClient, APIClientConfig, RefreshedTokens, RefreshOutcome, RequestOptions, SessionRefresher } from "./types.js";
+import type {
+  APIClient,
+  APIClientConfig,
+  RefreshedTokens,
+  RefreshOutcome,
+  RequestOptions,
+  SessionRefresher,
+} from "./types.js";
 
 const MAX_NETWORK_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 300;
@@ -131,12 +138,7 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
     return parseJSON<T>(response);
   }
 
-  private async requestJSON<T>(
-    method: string,
-    path: string,
-    body: unknown,
-    options?: RequestOptions,
-  ): Promise<T> {
+  private async requestJSON<T>(method: string, path: string, body: unknown, options?: RequestOptions): Promise<T> {
     const response = await this.send(method, path, body, options);
     return parseJSON<T>(response);
   }
@@ -145,9 +147,7 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
     const url = buildURL(path, options?.params);
     const isFormData = body instanceof FormData;
     const idempotencyKey =
-      IDEMPOTENT_KEYED_METHODS.has(method) && !options?.headers?.["Idempotency-Key"]
-        ? crypto.randomUUID()
-        : undefined;
+      IDEMPOTENT_KEYED_METHODS.has(method) && !options?.headers?.["Idempotency-Key"] ? crypto.randomUUID() : undefined;
 
     const buildInit = (): RequestInit => {
       const headers: Record<string, string> = { ...options?.headers };

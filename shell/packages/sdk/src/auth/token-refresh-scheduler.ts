@@ -1,6 +1,6 @@
 import { apiClient } from "../http/index.js";
 import type { SessionRefresher } from "../http/types.js";
-import { AuthMachine, authMachine } from "./auth-machine.js";
+import { type AuthMachine, authMachine } from "./auth-machine.js";
 import type { AuthState } from "./types.js";
 
 // auth-internals.md §4: the access token's lifetime is a fixed
@@ -20,10 +20,13 @@ export class TokenRefreshScheduler {
 
   schedule(expiresInSeconds: number): void {
     this.clear();
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      void this.runRefresh();
-    }, expiresInSeconds * REFRESH_AT_FRACTION * 1000);
+    this.timer = setTimeout(
+      () => {
+        this.timer = null;
+        void this.runRefresh();
+      },
+      expiresInSeconds * REFRESH_AT_FRACTION * 1000,
+    );
   }
 
   clear(): void {

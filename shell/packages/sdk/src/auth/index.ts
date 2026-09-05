@@ -1,6 +1,5 @@
+export { AuthMachine, authMachine, authTransition } from "./auth-machine.js";
 export { AuthProvider } from "./auth-provider.js";
-export { useAuth } from "./use-auth.js";
-export { authMachine, AuthMachine, authTransition } from "./auth-machine.js";
 export { TokenRefreshScheduler, tokenRefreshScheduler, wireAutoRefresh } from "./token-refresh-scheduler.js";
 export type {
   AuthContextValue,
@@ -11,3 +10,4 @@ export type {
   LoginCredentials,
   MFAMethod,
 } from "./types.js";
+export { useAuth } from "./use-auth.js";

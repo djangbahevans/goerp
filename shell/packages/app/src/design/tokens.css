@@ -1,8 +1,8 @@
 @import "tailwindcss";
-@config "./tailwind.config.ts";
 @import "./themes/default.css";
 @import "./themes/dark.css";
 @import "./themes/high-contrast.css";
+@config "./tailwind.config.ts";
 
 @theme {
   --color-bg: var(--goerp-color-bg);
