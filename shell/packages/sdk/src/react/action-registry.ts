@@ -1,24 +1,5 @@
-import { apiClient } from "../http/index.js";
-import type { APIClient } from "../http/types.js";
-
-// A minimal subset of shell-architecture.md §9's MetaSchema/RouteSchema —
-// only the fields action-route resolution needs. The full resource
-// registry (routes, views, models, navigation) is a separate, larger
-// concern (backlog "Shell resource registry") this does not attempt to
-// replace.
-interface MetaSchemaRoute {
-  method: string;
-  path: string;
-  name: string | null;
-}
-
-interface MetaSchemaModule {
-  routes: MetaSchemaRoute[];
-}
-
-interface MetaSchema {
-  modules: Record<string, MetaSchemaModule>;
-}
+import type { SchemaRegistry } from "../schema/index.js";
+import { schemaRegistry } from "../schema/index.js";
 
 export interface ActionRoute {
   method: string;
@@ -27,13 +8,10 @@ export interface ActionRoute {
 
 // Resolves a useAction() route name ({module}.{name}) against
 // GET /_meta/schema, per shell-architecture.md's "How named action
-// routes are resolved". Caches the schema fetch for the process
-// lifetime — module reload invalidation is the resource registry
-// ticket's concern, not this one's.
+// routes are resolved". Shares schemaRegistry's own cached schema fetch
+// rather than fetching independently.
 export class ActionRegistry {
-  private schemaPromise: Promise<MetaSchema> | null = null;
-
-  constructor(private readonly client: Pick<APIClient, "get">) {}
+  constructor(private readonly schema: Pick<SchemaRegistry, "getSchema">) {}
 
   async resolve(routeName: string): Promise<ActionRoute> {
     const dotIndex = routeName.indexOf(".");
@@ -43,7 +21,7 @@ export class ActionRegistry {
     const moduleName = routeName.slice(0, dotIndex);
     const actionName = routeName.slice(dotIndex + 1);
 
-    const schema = await this.fetchSchema();
+    const schema = await this.schema.getSchema();
     const moduleSchema = schema.modules[moduleName];
     if (!moduleSchema) {
       throw new Error(`useAction: unknown module "${moduleName}" in route "${routeName}"`);
@@ -54,14 +32,6 @@ export class ActionRegistry {
     }
     return { method: route.method, path: route.path };
   }
-
-  private fetchSchema(): Promise<MetaSchema> {
-    this.schemaPromise ??= this.client.get<MetaSchema>("/_meta/schema").catch((err: unknown) => {
-      this.schemaPromise = null;
-      throw err;
-    });
-    return this.schemaPromise;
-  }
 }
 
-export const actionRegistry = new ActionRegistry(apiClient);
+export const actionRegistry = new ActionRegistry(schemaRegistry);
