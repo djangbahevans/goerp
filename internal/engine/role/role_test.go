@@ -713,6 +713,42 @@ func TestAssignRole_AlreadyGrantedIsANoOpNotAnError(t *testing.T) {
 	}
 }
 
+func TestAssignRole_ReactivatesAPreviouslyExpiredGrant(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	userID := "00000000-0000-0000-0000-000000000015"
+
+	// A grant that already lapsed — same row shape IsMember/RoleNamesForUser
+	// both already filter out.
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id, expires_at) VALUES ($1, $2, NOW() - interval '1 hour')", schema),
+		userID, roleID,
+	); err != nil {
+		t.Fatalf("insert expired user_roles row: %v", err)
+	}
+
+	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
+		t.Fatalf("AssignRole() on an expired grant error: %v", err)
+	}
+
+	isMember, err := store.IsMember(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("IsMember() error: %v", err)
+	}
+	if !isMember {
+		t.Error("IsMember() = false after re-granting a previously-expired role via AssignRole(), want true")
+	}
+}
+
 func TestRevokeRole_RemovesGrant(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	ctx := context.Background()

@@ -231,11 +231,15 @@ func (s *Store) RoleNamesForUser(ctx context.Context, tenantSlug, userID string)
 	return names, nil
 }
 
-// AssignRole grants roleID to userID in the tenant's schema (goerp#619).
-// Idempotent: granting a role userID already holds is a no-op, not an
-// error, via ON CONFLICT on user_roles' (user_id, role_id) primary key —
-// the same posture SeedBuiltinRoles' own ON CONFLICT already uses.
-// grantedBy is the admin performing the grant, recorded for audit purposes
+// AssignRole grants roleID to userID in the tenant's schema (goerp#619),
+// always leaving the grant active regardless of prior state — including
+// reactivating a grant whose expires_at already lapsed, via ON CONFLICT ...
+// DO UPDATE rather than DO NOTHING. DO NOTHING would leave a stale
+// expires_at in place on user_roles' (user_id, role_id) primary key,
+// silently no-opping a re-grant of a previously-expired role: IsMember/
+// RoleNamesForUser both filter on expires_at, so the row would still read
+// as not-a-member even though AssignRole reported success. grantedBy is
+// the admin performing the grant, recorded for audit purposes
 // (user_roles.granted_by is nullable, but the admin API's own caller
 // identity is always known, unlike the provisioning-time grants that
 // legitimately leave it null).
@@ -244,7 +248,10 @@ func (s *Store) AssignRole(ctx context.Context, tenantSlug, userID, roleID, gran
 	query := fmt.Sprintf(`
 		INSERT INTO %s.user_roles (user_id, role_id, granted_by)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (user_id, role_id) DO NOTHING
+		ON CONFLICT (user_id, role_id) DO UPDATE SET
+			granted_by = EXCLUDED.granted_by,
+			granted_at = NOW(),
+			expires_at = NULL
 	`, schema)
 
 	if _, err := s.db.ExecContext(ctx, query, userID, roleID, grantedBy); err != nil {

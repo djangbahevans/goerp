@@ -497,6 +497,42 @@ func connectUserConn(t *testing.T, hub *ws.Hub, userID string) *websocket.Conn {
 	return conn
 }
 
+// waitForSubscription blocks until hub has actually registered conn's
+// subscription to channel — Hub.Serve's read loop processes the client's
+// "subscribe" frame asynchronously relative to the client-side write
+// completing, so a broadcast fired immediately after connectUserConn
+// returns can otherwise race the subscription landing (this package can't
+// poll hub's own unexported subscriber map the way ws's own tests do, so
+// it confirms delivery the same way dispatch_ws_test.go's
+// TestDispatchWSRoute_AuthenticatedRequestUpgradesAndRegistersWithHub
+// does: retry a real Broadcast on the channel until it actually reaches
+// this connection).
+func waitForSubscription(t *testing.T, hub *ws.Hub, channel string, conn *websocket.Conn) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		reached, err := hub.Broadcast(t.Context(), channel, "test.canary", nil)
+		if err != nil {
+			t.Fatalf("canary Broadcast: %v", err)
+		}
+		if reached > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("subscription never registered with the hub in time")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	readCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var canary map[string]any
+	if err := wsjson.Read(readCtx, conn, &canary); err != nil {
+		t.Fatalf("read canary envelope: %v", err)
+	}
+}
+
 func TestServeAssign_BroadcastsRoleChangedToTargetUserChannel(t *testing.T) {
 	f := newFixture(t)
 	callerID := f.createUserWithRole(t, "admin")
@@ -504,6 +540,7 @@ func TestServeAssign_BroadcastsRoleChangedToTargetUserChannel(t *testing.T) {
 	targetID := f.createUserWithRole(t, "user")
 
 	conn := connectUserConn(t, f.hub, targetID)
+	waitForSubscription(t, f.hub, ws.UserChannel(targetID), conn)
 
 	rec := f.doAssign(t, callerToken, targetID, map[string]any{"role": "admin"})
 	if rec.Code != http.StatusOK {

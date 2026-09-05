@@ -864,7 +864,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	// Added to builtinRoutes here rather than the literal above: unlike
 	// mfaResetHandler, roleAssignHandler needs wsHub, which doesn't exist
 	// until this point.
-	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, nil)
+	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
 	moduleInstallWorker := &moduleinstall.Worker{
