@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthMachine } from "../auth/auth-machine.js";
 import type { CurrentTenant, CurrentUser } from "../auth/types.js";
-import { WebSocketManager, wireWebSocketManager } from "./ws-manager.js";
+import { tenantChannel, WebSocketManager, wireWebSocketManager } from "./ws-manager.js";
 
 const user: CurrentUser = { id: "u1", email: "a@example.com", roles: [], amr: ["pwd"], mfaVerifiedAt: null };
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
@@ -84,6 +84,16 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("tenantChannel", () => {
+  it("formats the engine's tenant:{id} convention", () => {
+    expect(tenantChannel("t1")).toBe("tenant:t1");
+  });
+
+  it("is distinct for distinct tenant ids", () => {
+    expect(tenantChannel("t1")).not.toBe(tenantChannel("t2"));
+  });
 });
 
 describe("WebSocketManager", () => {

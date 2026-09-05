@@ -22,6 +22,13 @@ export type MessageHandler = (message: RealtimeEnvelope) => void;
 
 export type WebSocketFactory = (url: string) => WebSocket;
 
+// The well-known channel every currently-connected client belonging to
+// tenantId can subscribe to for tenant-wide pushes — the engine-side
+// counterpart is ws.TenantChannel (goerp#621).
+export function tenantChannel(tenantId: string): string {
+  return `tenant:${tenantId}`;
+}
+
 function defaultWebSocketURL(): string {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${location.host}${WS_PATH}`;
