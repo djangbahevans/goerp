@@ -2,8 +2,9 @@
 // role_permissions, user_roles — from auth-internals.md §10 "RBAC — roles
 // and permissions". These live in each tenant's own tenant_{slug} schema,
 // one physical copy per tenant, alongside tenant_invitations
-// (internal/engine/invite). Scoped to table creation plus seeding the
-// three built-in roles (admin/user/portal) — permission-bitfield
+// (internal/engine/invite). Covers table creation, seeding the three
+// built-in roles (admin/user/portal), and granting/revoking a role
+// post-provisioning (AssignRole/RevokeRole, goerp#619) — permission-bitfield
 // representation, role inheritance resolution, and reconciling
 // module-declared default grants into existing tenants are separate,
 // larger scope.
@@ -228,6 +229,41 @@ func (s *Store) RoleNamesForUser(ctx context.Context, tenantSlug, userID string)
 	}
 
 	return names, nil
+}
+
+// AssignRole grants roleID to userID in the tenant's schema (goerp#619).
+// Idempotent: granting a role userID already holds is a no-op, not an
+// error, via ON CONFLICT on user_roles' (user_id, role_id) primary key —
+// the same posture SeedBuiltinRoles' own ON CONFLICT already uses.
+// grantedBy is the admin performing the grant, recorded for audit purposes
+// (user_roles.granted_by is nullable, but the admin API's own caller
+// identity is always known, unlike the provisioning-time grants that
+// legitimately leave it null).
+func (s *Store) AssignRole(ctx context.Context, tenantSlug, userID, roleID, grantedBy string) error {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`
+		INSERT INTO %s.user_roles (user_id, role_id, granted_by)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, role_id) DO NOTHING
+	`, schema)
+
+	if _, err := s.db.ExecContext(ctx, query, userID, roleID, grantedBy); err != nil {
+		return fmt.Errorf("assign role: %w", err)
+	}
+	return nil
+}
+
+// RevokeRole revokes roleID from userID in the tenant's schema (goerp#619).
+// Revoking a role userID doesn't hold is a no-op, not an error — same
+// idempotency posture as AssignRole.
+func (s *Store) RevokeRole(ctx context.Context, tenantSlug, userID, roleID string) error {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`DELETE FROM %s.user_roles WHERE user_id = $1 AND role_id = $2`, schema)
+
+	if _, err := s.db.ExecContext(ctx, query, userID, roleID); err != nil {
+		return fmt.Errorf("revoke role: %w", err)
+	}
+	return nil
 }
 
 // IsMember reports whether userID holds any unexpired role grant in the

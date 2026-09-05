@@ -39,6 +39,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"uuid"
+
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
@@ -52,6 +54,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaverify"
+	"github.com/djangbahevans/goerp/internal/engine/auth/roleassign"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
@@ -99,12 +102,12 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/telemetry"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
-	"github.com/djangbahevans/goerp/internal/engine/tenant/export"
-	"github.com/djangbahevans/goerp/internal/engine/tenant/import"
-	"github.com/djangbahevans/goerp/internal/engine/tenant/offboard"
-	"github.com/djangbahevans/goerp/internal/engine/tenant/provision"
-	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
-	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
+	tenantexport "github.com/djangbahevans/goerp/internal/engine/tenant/export"
+	tenantimport "github.com/djangbahevans/goerp/internal/engine/tenant/import"
+	tenantoffboard "github.com/djangbahevans/goerp/internal/engine/tenant/offboard"
+	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	tenantsync "github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
@@ -112,7 +115,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -859,6 +861,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	// construction site) so moduleInstallWorker can be wired with it here,
 	// before the literal exists.
 	wsHub := ws.NewHub()
+	// Added to builtinRoutes here rather than the literal above: unlike
+	// mfaResetHandler, roleAssignHandler needs wsHub, which doesn't exist
+	// until this point.
+	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, nil)
+	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
+	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
 	moduleInstallWorker := &moduleinstall.Worker{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,
@@ -977,7 +985,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Workers:     workflowWorkers,
 	}
 
-	instanceID := uuid.NewString()
+	instanceID := uuid.New().String()
 	hotReloadCoordinator := hotreload.New(cacheClient, moduleRegistry, instanceID, hotreload.Config{
 		ModuleDir: cfg.ModuleDir,
 		LockTTL:   cfg.HotReloadLockTTL,
