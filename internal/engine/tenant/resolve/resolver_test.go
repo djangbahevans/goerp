@@ -141,6 +141,25 @@ func TestResolveByHost_SuspendedTenantReturnsErrTenantSuspended(t *testing.T) {
 	}
 }
 
+func TestResolveByHost_OffboardingTenantReturnsErrTenantOffboarding(t *testing.T) {
+	resolver, store, conn, _, _ := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Offboarding Resolve")
+	domain := created.Slug + ".example.com"
+	insertDomain(t, conn, created.ID, domain)
+
+	if _, err := store.UpdateStatus(context.Background(), created.Slug, tenant.StatusActive, nil); err != nil {
+		t.Fatalf("activate fixture tenant: %v", err)
+	}
+	if _, err := store.BeginOffboarding(context.Background(), created.Slug); err != nil {
+		t.Fatalf("BeginOffboarding() error: %v", err)
+	}
+
+	_, err := resolver.ResolveByHost(context.Background(), domain)
+	if !errors.Is(err, ErrTenantOffboarding) {
+		t.Errorf("ResolveByHost() error = %v, want ErrTenantOffboarding", err)
+	}
+}
+
 func TestResolveByHost_DeletedTenantReturnsErrTenantNotFound(t *testing.T) {
 	resolver, store, conn, _, _ := openTestResolver(t)
 	created := createTenant(t, store, conn, uniqueSlug(t), "Deleted Resolve")

@@ -78,6 +78,8 @@ func tenantResolutionMiddleware(resolver *tenantresolve.Resolver) func(http.Hand
 					writeRouteError(w, http.StatusNotFound, "not_found", "not found")
 				case errors.Is(err, tenantresolve.ErrTenantSuspended):
 					writeRouteError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+				case errors.Is(err, tenantresolve.ErrTenantOffboarding):
+					writeRouteError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 				default:
 					writeRouteError(w, http.StatusInternalServerError, "internal_error", "tenant resolution failed")
 				}

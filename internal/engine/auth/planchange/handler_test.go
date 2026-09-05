@@ -416,6 +416,20 @@ func TestServeHTTP_UnauthenticatedRejected(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_OffboardingTenantRejected(t *testing.T) {
+	f := newFixture(t)
+	callerID := f.createUserWithRole(t, "admin")
+	callerToken := f.issueAccessToken(t, callerID)
+	if _, err := f.tenants.BeginOffboarding(t.Context(), f.tenantSlug); err != nil {
+		t.Fatalf("BeginOffboarding() error: %v", err)
+	}
+
+	rec := f.doChangePlan(t, callerToken, map[string]any{"plan": string(tenant.PlanPro)})
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 // connectTenantConn dials a real WebSocket connection registered with hub
 // under tenantID, subscribes it to TenantChannel(tenantID), and returns
 // the client side for reading broadcasts sent to that channel — mirrors
