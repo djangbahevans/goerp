@@ -8,6 +8,7 @@ require (
 	github.com/alexedwards/argon2id v1.0.0
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/coder/websocket v1.8.15
 	github.com/descope/virtualwebauthn v1.0.5
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-openapi/inflect v0.19.0

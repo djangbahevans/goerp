@@ -97,3 +97,12 @@ func (w *statusRecordingWriter) Write(b []byte) (int, error) {
 	}
 	return w.ResponseWriter.Write(b)
 }
+
+// Unwrap lets http.NewResponseController see through this wrapper to the
+// underlying ResponseWriter's own http.Hijacker — otherwise a WebSocket
+// upgrade (dispatchWSRoute) fails with http.ErrNotSupported on every
+// request, since embedding http.ResponseWriter as an interface value only
+// promotes its own method set, not Hijack.
+func (w *statusRecordingWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
