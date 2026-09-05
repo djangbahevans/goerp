@@ -40,9 +40,10 @@ function permissionWrapper(fieldAccess: Record<string, Record<string, { read: bo
 }
 
 async function renderListRenderer(
-  props: { embedded?: boolean; baseFilter?: Record<string, string> },
+  props: { embedded?: boolean; baseFilter?: Record<string, string>; recordId?: string },
   Wrapper: ({ children }: { children: ReactNode }) => React.JSX.Element,
   initialPath = "/",
+  viewOverride: ListViewDeclaration = view,
 ) {
   const rootRoute = createRootRoute();
   const indexRoute = createRoute({
@@ -50,7 +51,7 @@ async function renderListRenderer(
     path: "/",
     component: () => (
       <Wrapper>
-        <ListRenderer view={view} {...props} />
+        <ListRenderer view={viewOverride} {...props} />
       </Wrapper>
     ),
   });
@@ -72,7 +73,7 @@ describe("ListRenderer", () => {
       data: undefined,
       isLoading: true,
       isError: false,
-      isFetching: true,
+      isFetchingNextPage: true,
       hasNextPage: false,
       fetchNextPage: vi.fn(),
       refetch: vi.fn(),
@@ -90,7 +91,7 @@ describe("ListRenderer", () => {
       data: undefined,
       isLoading: false,
       isError: true,
-      isFetching: false,
+      isFetchingNextPage: false,
       hasNextPage: false,
       fetchNextPage: vi.fn(),
       refetch,
@@ -109,7 +110,7 @@ describe("ListRenderer", () => {
       data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
       isLoading: false,
       isError: false,
-      isFetching: false,
+      isFetchingNextPage: false,
       hasNextPage: false,
       fetchNextPage: vi.fn(),
       refetch: vi.fn(),
@@ -128,7 +129,7 @@ describe("ListRenderer", () => {
       },
       isLoading: false,
       isError: false,
-      isFetching: false,
+      isFetchingNextPage: false,
       hasNextPage: false,
       fetchNextPage: vi.fn(),
       refetch: vi.fn(),
@@ -154,7 +155,7 @@ describe("ListRenderer", () => {
       data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
       isLoading: false,
       isError: false,
-      isFetching: false,
+      isFetchingNextPage: false,
       hasNextPage: false,
       fetchNextPage: vi.fn(),
       refetch: vi.fn(),
@@ -169,12 +170,32 @@ describe("ListRenderer", () => {
     });
   });
 
-  it("embedded mode: merges baseFilter with local state and defaults sort from the view, ignoring the URL", async () => {
+  it("combines default_sort with default_sort_dir into the initial sort string", async () => {
     useInfiniteListMock.mockReturnValue({
       data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
       isLoading: false,
       isError: false,
-      isFetching: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/", { ...view, default_sort: "created_at", default_sort_dir: "desc" });
+
+    expect(useInfiniteListMock).toHaveBeenCalledWith(
+      "contacts.contact",
+      expect.objectContaining({ sort: "-created_at" }),
+    );
+  });
+
+  it("embedded mode: merges baseFilter with local state, defaults sort from the view, ignores the URL, and scopes the cache key to the parent record", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
       hasNextPage: false,
       fetchNextPage: vi.fn(),
       refetch: vi.fn(),
@@ -182,7 +203,7 @@ describe("ListRenderer", () => {
     });
 
     await renderListRenderer(
-      { embedded: true, baseFilter: { parent_id: "42" } },
+      { embedded: true, baseFilter: { parent_id: "42" }, recordId: "contact-1" },
       fullAccess,
       "/?filter[is_active]=true",
     );
@@ -190,6 +211,27 @@ describe("ListRenderer", () => {
     expect(useInfiniteListMock).toHaveBeenCalledWith("contacts.contact", {
       filter: { parent_id: "42" },
       sort: "name",
+      cacheKeyPrefix: "embedded:contact-1:contacts_list",
     });
+  });
+
+  it("the locked base filter always wins over a colliding user-driven filter value", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({ baseFilter: { parent_id: "locked" } }, fullAccess, "/?filter[parent_id]=user-supplied");
+
+    expect(useInfiniteListMock).toHaveBeenCalledWith(
+      "contacts.contact",
+      expect.objectContaining({ filter: { parent_id: "locked" } }),
+    );
   });
 });

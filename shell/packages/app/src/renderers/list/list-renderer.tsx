@@ -4,10 +4,7 @@ import { useListState } from "./use-list-state.js";
 import { useVisibleColumns } from "./use-visible-columns.js";
 
 // shell-architecture.md §20's ListRenderer — mode switching, URL/local
-// state, and field security. Column-type-specific cell rendering,
-// filters, actions, and groups are goerp#575's own scope: this component
-// renders each visible column's raw field value and delegates real
-// row/column content to whatever #575 provides later.
+// state, field security. Column/filter/action rendering is goerp#575's scope.
 export interface ListRendererProps {
   view: ListViewDeclaration;
   recordId?: string;
@@ -17,16 +14,25 @@ export interface ListRendererProps {
 
 type Row = Record<string, unknown>;
 
-export function ListRenderer({ view, embedded, baseFilter }: ListRendererProps) {
-  const listState = useListState(embedded, view.default_sort);
+function defaultSortOf(view: ListViewDeclaration): string | undefined {
+  if (!view.default_sort) return undefined;
+  return view.default_sort_dir === "desc" ? `-${view.default_sort}` : view.default_sort;
+}
+
+export function ListRenderer({ view, recordId, embedded, baseFilter }: ListRendererProps) {
+  const listState = useListState(embedded, defaultSortOf(view));
   const columns = useVisibleColumns(view);
 
-  const filter = { ...baseFilter, ...listState.filter };
+  // view-system.md's embedded-rendering contract: the locked base filter
+  // always wins over user-driven state, never the other way around.
+  const filter = { ...listState.filter, ...baseFilter };
 
-  const { data, fetchNextPage, hasNextPage, isFetching, isLoading, isError, error, refetch } = useInfiniteList<Row>(
-    view.resource,
-    { filter, ...(listState.sort !== undefined ? { sort: listState.sort } : {}) },
-  );
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } =
+    useInfiniteList<Row>(view.resource, {
+      filter,
+      ...(listState.sort !== undefined ? { sort: listState.sort } : {}),
+      ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
+    });
 
   const rows = data?.pages.flatMap((page) => page.data) ?? [];
 
@@ -77,8 +83,8 @@ export function ListRenderer({ view, embedded, baseFilter }: ListRendererProps) 
         </tbody>
       </table>
       {hasNextPage && (
-        <button type="button" onClick={() => fetchNextPage()} disabled={isFetching}>
-          {isFetching ? "Loading…" : "Load more"}
+        <button type="button" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+          {isFetchingNextPage ? "Loading…" : "Load more"}
         </button>
       )}
     </>

@@ -1,14 +1,5 @@
-// The minimal `ListViewDeclaration` shape ListRenderer itself needs —
-// mode switching, URL/local state, field security. Grounded in
-// internal/engine/manifest/manifest.go's View/ListColumn structs (the
-// real /_meta/schema wire shape, goerp repo), kept in wire (snake_case)
-// casing to match RouteSchema/ModuleSchema's own convention.
-//
-// The full column-type union, filter-type catalog, and action rendering
-// are goerp#575's own job (List view manifest schema and column types) —
-// this type carries just enough of each shape for ListRenderer to
-// resolve a resource, apply field security, and pass columns/filters/
-// actions through unmodified to whatever #575 renders them with.
+// Minimal subset of manifest.go's View/ListColumn structs ListRenderer
+// itself needs. The full column-type/filter-type union is goerp#575's job.
 export interface ListColumn {
   field: string;
   label?: string;

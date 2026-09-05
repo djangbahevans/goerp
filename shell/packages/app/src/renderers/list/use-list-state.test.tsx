@@ -85,6 +85,16 @@ describe("useListState", () => {
     expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_active: "true" }));
   });
 
+  it("full-page mode: setFilter preserves unrelated search params already in the URL", async () => {
+    const { router } = await renderListState("/?tab=activity", false, undefined);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("set-filter"));
+    });
+
+    expect(router.state.location.search).toEqual({ tab: "activity", "filter[is_active]": "true" });
+  });
+
   it("embedded mode: keeps state local and never touches the URL", async () => {
     const { router } = await renderListState("/", true, "name");
 

@@ -4,19 +4,19 @@ import type { APIClient, PagedResponse } from "../http/types.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
 
-// typescript-sdk-reference.md §5 `useInfiniteList` — resource-name-keyed
-// cursor pagination shared by every module's list views, resolving where
-// to fetch from via the resource registry (goerp#638) instead of taking
-// a path directly.
+// typescript-sdk-reference.md §5 `useInfiniteList`.
 export interface UseInfiniteListOptions {
   filter?: Record<string, unknown>;
   sort?: string;
   limit?: number;
+  // Extra query-key segments only — never sent as a request param.
+  // view-system.md's embedded-rendering contract needs a cache key
+  // prefixed `embedded:{parentRecordId}:{viewName}` so two embedded
+  // instances of the same resource/filter don't share a cache entry.
+  cacheKeyPrefix?: string;
 }
 
-// `filter: { is_active: true }` becomes `filter[is_active]=true` on the
-// wire — typescript-sdk-reference.md's ListContactsParams bracket-key
-// convention; FetchAPIClient's buildURL sends whatever flat keys it's given.
+// `filter: { is_active: true }` becomes `filter[is_active]=true` on the wire.
 function flattenFilter(filter: Record<string, unknown> | undefined): Record<string, unknown> {
   const flat: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(filter ?? {})) {
@@ -34,6 +34,7 @@ export function createInfiniteListQueryOptions<T>(
   return {
     queryKey: [
       "infinite-list",
+      options.cacheKeyPrefix ?? null,
       resource,
       options.filter ?? null,
       options.sort ?? null,
