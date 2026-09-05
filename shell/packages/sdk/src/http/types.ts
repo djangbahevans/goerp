@@ -14,6 +14,13 @@ export interface APIClient {
   postFormData<T>(path: string, data: Record<string, unknown>, options?: RequestOptions): Promise<T>;
 }
 
+// typescript-sdk-reference.md §4 "Pagination" — the shape every list
+// endpoint returns, generated-code and useInfiniteList alike.
+export interface PagedResponse<T> {
+  data: T[];
+  meta: { cursor: string | null; hasMore: boolean; total?: number };
+}
+
 export interface RefreshedTokens {
   accessToken: string;
   refreshToken: string;
