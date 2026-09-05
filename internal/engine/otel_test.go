@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -11,6 +13,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/coder/websocket"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
@@ -182,6 +185,41 @@ func TestOtelMiddleware_PanicIsRecordedOnSpanThenRePanics(t *testing.T) {
 	if len(spans[0].Events) == 0 {
 		t.Error("expected the panic to be recorded as a span event via RecordError, got none")
 	}
+}
+
+// TestOtelMiddleware_PreservesHijackerForWebSocketUpgrade proves
+// statusRecordingWriter's Unwrap method actually lets a WebSocket upgrade
+// (dispatchWSRoute, goerp#616) succeed through this middleware — without
+// it, http.NewResponseController can't see through the wrapper to the
+// underlying ResponseWriter's http.Hijacker, and every /_ws request in
+// the real chain (which always passes through otelMiddleware) would fail.
+// httptest.NewRecorder can't exercise this — Hijack needs a real network
+// connection — so this dials a real httptest.NewServer.
+func TestOtelMiddleware_PreservesHijackerForWebSocketUpgrade(t *testing.T) {
+	rr := &routeResolution{entry: &route.RouteEntry{PathTemplate: "/_ws"}}
+
+	h := otelMiddleware(noop.NewTracerProvider().Tracer("test"))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("Accept: %v", err)
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ServeHTTP(w, r.WithContext(withRouteResolution(r.Context(), rr)))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String(), nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
 }
 
 func TestOtelMiddleware_NoopTracerDoesNotPanic(t *testing.T) {

@@ -431,6 +431,14 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/schema",
 	})
 
+	// /_ws (goerp#616) — same not-EngineBuiltin posture as
+	// /_meta/permissions above: the WebSocket upgrade needs a resolved
+	// user/tenant from the standard middleware chain before it runs.
+	table.Register("GET", "/_ws", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_ws",
+	})
+
 	// /_meta/shares (goerp#475) — same not-EngineBuiltin posture as
 	// /_meta/permissions above, for the same reason: it rides the
 	// standard tenant/auth/permission middleware chain rather than

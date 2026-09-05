@@ -110,6 +110,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/vaultpki"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -155,6 +156,7 @@ type Engine struct {
 	server            *httpx.Server
 	adminServer       *adminapi.Server
 	readiness         atomic.Bool
+	wsHub             *ws.Hub
 
 	// instanceID identifies this process for hot reload's leader-election
 	// lock value (docs/engine-internals.md §10) — generated once per
@@ -1023,6 +1025,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		systemWorker:      systemWorker,
 		server:            server,
 		adminServer:       adminServer,
+		wsHub:             ws.NewHub(),
 		tracer:            tracer,
 		tracerProvider:    tracerProvider,
 		instanceID:        instanceID,
@@ -1049,6 +1052,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.
 	builtinRoutes["GET /_meta/schema"] = http.HandlerFunc(e.dispatchSchemaRoute)
+
+	// GET /_ws (goerp#616) — same reason as /_meta/permissions above:
+	// dispatchWSRoute is an *Engine method.
+	builtinRoutes["GET /_ws"] = http.HandlerFunc(e.dispatchWSRoute)
 
 	// buildChain needs e (dispatchORMRoute/invokeHandler are *Engine
 	// methods), which doesn't exist until the literal above — this call
@@ -1134,6 +1141,8 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	if err := e.adminServer.Shutdown(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not shut down admin server")
 	}
+
+	e.wsHub.Close(ctx)
 
 	if err := e.jobQueue.Stop(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not stop job queue worker")
