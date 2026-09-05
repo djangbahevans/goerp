@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { APIClient } from "../http/types.js";
+import { SchemaRegistry } from "../schema/index.js";
 import { ActionRegistry } from "./action-registry.js";
 
 function fakeClient(schema: unknown): Pick<APIClient, "get"> {
@@ -20,7 +21,7 @@ const schema = {
 describe("ActionRegistry", () => {
   it("resolves a known action route", async () => {
     const client = fakeClient(schema);
-    const registry = new ActionRegistry(client);
+    const registry = new ActionRegistry(new SchemaRegistry(client));
 
     await expect(registry.resolve("sales.confirm")).resolves.toEqual({
       method: "POST",
@@ -28,9 +29,9 @@ describe("ActionRegistry", () => {
     });
   });
 
-  it("caches the schema fetch across multiple resolve() calls", async () => {
+  it("shares the underlying schema fetch across multiple resolve() calls", async () => {
     const client = fakeClient(schema);
-    const registry = new ActionRegistry(client);
+    const registry = new ActionRegistry(new SchemaRegistry(client));
 
     await registry.resolve("sales.confirm");
     await registry.resolve("sales.confirm");
@@ -39,17 +40,17 @@ describe("ActionRegistry", () => {
   });
 
   it("rejects a route name with no module separator", async () => {
-    const registry = new ActionRegistry(fakeClient(schema));
+    const registry = new ActionRegistry(new SchemaRegistry(fakeClient(schema)));
     await expect(registry.resolve("confirm")).rejects.toThrow(/must be in/);
   });
 
   it("rejects an unknown module", async () => {
-    const registry = new ActionRegistry(fakeClient(schema));
+    const registry = new ActionRegistry(new SchemaRegistry(fakeClient(schema)));
     await expect(registry.resolve("unknown.confirm")).rejects.toThrow(/unknown module/);
   });
 
   it("rejects an unknown action name within a known module", async () => {
-    const registry = new ActionRegistry(fakeClient(schema));
+    const registry = new ActionRegistry(new SchemaRegistry(fakeClient(schema)));
     await expect(registry.resolve("sales.doesNotExist")).rejects.toThrow(/no action named/);
   });
 
@@ -57,7 +58,7 @@ describe("ActionRegistry", () => {
     const client = { get: vi.fn() };
     client.get.mockRejectedValueOnce(new Error("network down"));
     client.get.mockResolvedValueOnce(schema);
-    const registry = new ActionRegistry(client);
+    const registry = new ActionRegistry(new SchemaRegistry(client));
 
     await expect(registry.resolve("sales.confirm")).rejects.toThrow("network down");
     await expect(registry.resolve("sales.confirm")).resolves.toEqual({
