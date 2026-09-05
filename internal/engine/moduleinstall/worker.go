@@ -24,6 +24,7 @@ import (
 	tenantsync "github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -80,6 +81,10 @@ type Worker struct {
 	// Concurrency bounds SyncModule's tenant fan-out; 0 uses
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
+	// Hub broadcasts module-install completion to already-connected /_ws
+	// clients (goerp#621). Nil in tests that don't exercise this — run
+	// treats that the same as "nobody connected yet".
+	Hub *ws.Hub
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
@@ -239,6 +244,20 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	}
 	for _, r := range syncResult.Failed {
 		result.Failed = append(result.Failed, TenantResult{Tenant: r.Tenant.Slug, Error: r.Err.Error()})
+	}
+
+	// Live-session convenience only (goerp#621): a client with no open
+	// /_ws connection sees the new module on its next GET /_meta/permissions
+	// fetch regardless, so a tenant with zero current subscribers to its
+	// channel — the common case until goerp#614 lands — is not an error.
+	if w.Hub != nil {
+		for _, t := range syncResult.Succeeded {
+			payload := map[string]string{"module": m.Manifest.Name}
+			if _, err := w.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "module.installed", payload); err != nil {
+				log.Warn().Err(err).Str("module", m.Manifest.Name).Str("tenant", t.Slug).
+					Msg("module install: broadcast to tenant failed")
+			}
+		}
 	}
 
 	// Trigger data migration dispatch (engine-internals.md §2 Stage 4 step

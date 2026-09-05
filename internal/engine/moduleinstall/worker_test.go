@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -29,8 +34,41 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/google/uuid"
 )
+
+// connectTenantConn dials a real WebSocket connection registered with hub
+// under tenantID (mirroring dispatchWSRoute's own accept-and-serve, which
+// lives in the engine package and can't be called from here), subscribes it
+// to tenantID's TenantChannel, and returns the client side for reading
+// broadcasts sent to that channel.
+func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Conn {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent")
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String(), nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+
+	if err := wsjson.Write(ctx, conn, map[string]string{"type": "subscribe", "channel": ws.TenantChannel(tenantID)}); err != nil {
+		t.Fatalf("subscribe write: %v", err)
+	}
+	return conn
+}
 
 // localPostgresDSN matches internal/engine/tenant/sync's own test
 // convention — the compose.dev.yml Postgres instance.
@@ -826,5 +864,81 @@ func TestWorker_Run_InstallInProgressRejection_RemovesPackageFile(t *testing.T) 
 
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Errorf("expected the persisted package at %q to be removed, stat error = %v", path, statErr)
+	}
+}
+
+func TestWorker_Run_BroadcastsModuleInstalledToSucceededTenant(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	tt := env.activeTenant(t, slug)
+
+	hub := ws.NewHub()
+	conn := connectTenantConn(t, hub, tt.ID)
+
+	wasmBytes := compileFixture(t)
+	name := "widgets_" + slug
+	pkg := buildPackage(t, name, wasmBytes, nil)
+	path := writeTempPackage(t, pkg)
+
+	w, _ := newWorker(t, env, nil)
+	w.Hub = hub
+
+	// Unbounded, matching every other run() call in this file — compile+sync
+	// can legitimately take longer than any fixed bound under -race; only
+	// the WS read below needs a deadline.
+	if _, err := w.run(context.Background(), Args{PackagePath: path}); err != nil {
+		t.Fatalf("run() error: %v", err)
+	}
+
+	readCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var env2 map[string]any
+	if err := wsjson.Read(readCtx, conn, &env2); err != nil {
+		t.Fatalf("read broadcast envelope: %v", err)
+	}
+	if env2["channel"] != ws.TenantChannel(tt.ID) {
+		t.Errorf("channel = %v, want %q", env2["channel"], ws.TenantChannel(tt.ID))
+	}
+	if env2["type"] != "module.installed" {
+		t.Errorf("type = %v, want %q", env2["type"], "module.installed")
+	}
+	payload, _ := env2["payload"].(map[string]any)
+	if payload["module"] != name {
+		t.Errorf("payload[module] = %v, want %q", payload["module"], name)
+	}
+}
+
+func TestWorker_Run_NoBroadcastToUnrelatedTenantChannel(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	env.activeTenant(t, slug)
+
+	hub := ws.NewHub()
+	conn := connectTenantConn(t, hub, "some-other-tenant-id")
+
+	wasmBytes := compileFixture(t)
+	name := "widgets_" + slug
+	pkg := buildPackage(t, name, wasmBytes, nil)
+	path := writeTempPackage(t, pkg)
+
+	w, _ := newWorker(t, env, nil)
+	w.Hub = hub
+
+	// Unbounded, matching every other run() call in this file — compile+sync
+	// can legitimately take longer than any fixed bound under -race.
+	if _, err := w.run(context.Background(), Args{PackagePath: path}); err != nil {
+		t.Fatalf("run() error: %v", err)
+	}
+
+	// This connection is subscribed to a different tenant's channel — it
+	// must never see this install's broadcast. Broadcast to other tenants
+	// (including any left active in the shared dev database by other
+	// tests) may still be racing in the background, so read with a short
+	// timeout rather than asserting on connection close.
+	readCtx, readCancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer readCancel()
+	var env2 map[string]any
+	if err := wsjson.Read(readCtx, conn, &env2); err == nil {
+		t.Errorf("unexpected message on unrelated tenant channel: %+v", env2)
 	}
 }
