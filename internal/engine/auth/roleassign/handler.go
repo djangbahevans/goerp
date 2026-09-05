@@ -112,6 +112,8 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (resolved, boo
 			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
 			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
+			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
 		}

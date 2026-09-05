@@ -39,6 +39,9 @@ var (
 	// ErrTenantSuspended is returned only for a resolved, non-deleted
 	// tenant whose Status is "suspended".
 	ErrTenantSuspended = errors.New("tenant suspended")
+	// ErrTenantOffboarding is returned only for a resolved tenant whose
+	// Status is "offboarding" — same distinct-status-code treatment ErrTenantSuspended already gets.
+	ErrTenantOffboarding = errors.New("tenant offboarding")
 )
 
 const (
@@ -100,9 +103,9 @@ func NewResolver(tenants *tenant.Store, cacheClient *cache.Client, billingStore 
 }
 
 // ResolveByHost resolves host (an http.Request.Host value) to its tenant.
-// Returns ErrTenantNotFound for an unresolved or deleted tenant, and
-// ErrTenantSuspended for a suspended one — the caller maps these to 404
-// and 403 respectively, never 401.
+// Returns ErrTenantNotFound for an unresolved or deleted tenant,
+// ErrTenantSuspended for a suspended one, and ErrTenantOffboarding for one
+// mid-offboarding — the caller maps all three to 404/403/403 respectively, never 401.
 func (r *Resolver) ResolveByHost(ctx context.Context, host string) (*TenantContext, error) {
 	t, err := r.tenantByDomain(ctx, normaliseDomain(host))
 	if err != nil {
@@ -113,6 +116,9 @@ func (r *Resolver) ResolveByHost(ctx context.Context, host string) (*TenantConte
 	}
 	if t.Status == tenant.StatusSuspended {
 		return nil, ErrTenantSuspended
+	}
+	if t.Status == tenant.StatusOffboarding {
+		return nil, ErrTenantOffboarding
 	}
 
 	ents, err := r.LoadEntitlements(ctx, t.ID)

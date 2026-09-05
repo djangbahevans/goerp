@@ -364,6 +364,27 @@ func TestBuildChain_ModuleRouteUnresolvedTenantReturns404(t *testing.T) {
 	}
 }
 
+func TestBuildChain_ModuleRouteOffboardingTenantReturns403(t *testing.T) {
+	f := newChainFixture(t)
+	h := f.chain(nil)
+
+	if _, err := f.conn.Exec(`UPDATE system.tenants SET status = 'offboarding' WHERE id = $1`, f.tenantID); err != nil {
+		t.Fatalf("mark fixture tenant offboarding: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/widgets/items", nil)
+	req.Host = f.domain
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+	if code := decodeErrorCode(t, w); code != "tenant_offboarding" {
+		t.Errorf("error.code = %q, want %q", code, "tenant_offboarding")
+	}
+}
+
 func TestBuildChain_ModuleRouteMissingPermissionReturns403(t *testing.T) {
 	f := newChainFixture(t)
 	h := f.chain(nil)

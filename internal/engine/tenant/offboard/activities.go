@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/rs/zerolog/log"
 )
@@ -62,10 +63,27 @@ func NewActivities(
 }
 
 // MarkOffboarding transitions the tenant from active to offboarding
-// (tenant.Store.BeginOffboarding's own CAS guard).
+// (tenant.Store.BeginOffboarding's own CAS guard), then invalidates the
+// domain cache so tenantresolve.ResolveByHost stops returning the
+// pre-offboarding status immediately rather than waiting out its own TTL
+// — best-effort, logged rather than failed: this activity must stay safe
+// for Temporal to retry, and BeginOffboarding's one-shot CAS guard means a
+// retry after a successful transition would otherwise spuriously fail.
 func (a *Activities) MarkOffboarding(ctx context.Context, slug string) error {
-	if _, err := a.tenantStore.BeginOffboarding(ctx, slug); err != nil {
+	t, err := a.tenantStore.BeginOffboarding(ctx, slug)
+	if err != nil {
 		return fmt.Errorf("mark offboarding: %w", err)
+	}
+
+	domains, err := a.tenantStore.DomainsForTenant(ctx, t.ID)
+	if err != nil {
+		log.Warn().Err(err).Str("slug", slug).Msg("offboard: list domains for cache invalidation failed")
+		return nil
+	}
+	for _, d := range domains {
+		if err := a.cacheClient.Delete(ctx, tenantresolve.DomainCacheKey(d.Domain)); err != nil {
+			log.Warn().Err(err).Str("slug", slug).Str("domain", d.Domain).Msg("offboard: domain cache invalidation failed")
+		}
 	}
 	return nil
 }
