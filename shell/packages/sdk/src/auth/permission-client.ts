@@ -8,11 +8,8 @@ interface MetaPermissionsResponseBody {
   modules_enabled: string[];
 }
 
-// fetchPermissions backs the shell's PermissionContext (auth-internals.md
-// "The /_meta/permissions endpoint"). The response's permissions/
-// field_access pair is the canonical example there; modules_enabled is
-// multitenancy-internals.md §8 "Navigation filtering"'s addition to the
-// same response.
+// Backs PermissionContext's initial load (auth-internals.md "The /_meta/permissions endpoint";
+// modules_enabled is multitenancy-internals.md §8's addition to that response).
 export async function fetchPermissions(client: Pick<APIClient, "get"> = apiClient): Promise<PermissionData> {
   const body = await client.get<MetaPermissionsResponseBody>("/_meta/permissions");
   return {

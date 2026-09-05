@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useEffect, useState } from "react";
+import { createContext, type ReactNode, useEffect, useMemo, useState } from "react";
 import { fetchPermissions } from "./permission-client.js";
 import type { PermissionContextValue, PermissionData } from "./permission-types.js";
 import { useAuth } from "./use-auth.js";
@@ -7,15 +7,9 @@ export const PermissionContext = createContext<PermissionContextValue | null>(nu
 
 const EMPTY_DATA: PermissionData = { permissions: new Set(), fieldAccess: {}, modulesEnabled: new Set() };
 
-// createPermissionContextValue builds the synchronous checks Can/
-// usePermission/useFieldPermission read from. `resourceId` is accepted by
-// `check` for parity with typescript-sdk-reference.md's documented
-// usePermission(permission, resourceId) call shape, but doesn't affect the
-// result: GET /_meta/permissions carries no per-record ABAC data to
-// evaluate it against, and real resource-level ABAC is enforced
-// server-side (host.authz.check, auth-internals.md §13) on the request the
-// gated action actually makes — this check is a UI-only optimization, not
-// the security boundary.
+// `resourceId` is accepted for call-shape parity with typescript-sdk-reference.md but not evaluated:
+// /_meta/permissions carries no per-record ABAC data — real resource-level ABAC is enforced server-side
+// (host.authz.check) on the request the gated action actually makes.
 export function createPermissionContextValue(data: PermissionData): PermissionContextValue {
   return {
     ...data,
@@ -29,8 +23,7 @@ export function createPermissionContextValue(data: PermissionData): PermissionCo
   };
 }
 
-export function PermissionProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+function PermissionProviderForUser({ isAuthenticated, children }: { isAuthenticated: boolean; children: ReactNode }) {
   const [loadedData, setLoadedData] = useState<PermissionData>(EMPTY_DATA);
 
   useEffect(() => {
@@ -42,8 +35,7 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setLoadedData(result);
       })
       .catch(() => {
-        // Deny-by-default: no page-level error slot for this fetch exists
-        // yet, and check()/checkField() must still return a boolean.
+        // Deny-by-default: check()/checkField() must still return a boolean.
         if (!cancelled) setLoadedData(EMPTY_DATA);
       });
     return () => {
@@ -51,10 +43,18 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
     };
   }, [isAuthenticated]);
 
-  // Derived rather than reset from the effect above: an unauthenticated
-  // session reads as empty immediately, with no synchronous setState
-  // inside the effect.
   const data = isAuthenticated ? loadedData : EMPTY_DATA;
-  const value = createPermissionContextValue(data);
+  const value = useMemo(() => createPermissionContextValue(data), [data]);
   return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
+}
+
+// Keyed by user id so switching accounts on the same tab remounts with a fresh EMPTY_DATA instead of
+// exposing the previous user's permissions until the new fetch resolves.
+export function PermissionProvider({ children }: { children: ReactNode }) {
+  const { isAuthenticated, user } = useAuth();
+  return (
+    <PermissionProviderForUser key={user?.id ?? "anonymous"} isAuthenticated={isAuthenticated}>
+      {children}
+    </PermissionProviderForUser>
+  );
 }
