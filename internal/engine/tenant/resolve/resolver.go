@@ -238,6 +238,15 @@ func DomainCacheKey(domain string) string {
 	return domainCacheKeyPrefix + normaliseDomain(domain)
 }
 
+// EntitlementCacheKey returns the Redis key LoadEntitlements caches
+// tenantID's entitlements under — exported so a caller that changes a
+// tenant's plan (billing.Store.ChangeTenantPlan) can invalidate the same
+// key rather than duplicating the format, same convention DomainCacheKey
+// already follows.
+func EntitlementCacheKey(tenantID string) string {
+	return entitlementCacheKeyPrefix + tenantID
+}
+
 // tenantByDomain checks the Redis cache before falling back to Postgres.
 // Any Redis error (read or write) fails open to a direct database lookup
 // rather than blocking resolution on cache availability.

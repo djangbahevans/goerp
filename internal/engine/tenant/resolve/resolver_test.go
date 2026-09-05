@@ -231,6 +231,23 @@ func TestDomainCacheKey_MatchesResolveByHostsCacheKey(t *testing.T) {
 	}
 }
 
+func TestEntitlementCacheKey_MatchesLoadEntitlementsCacheKey(t *testing.T) {
+	resolver, store, conn, cacheClient, _ := openTestResolver(t)
+	created := createTenant(t, store, conn, uniqueSlug(t), "Entitlement Cache Key Match")
+
+	if _, err := resolver.LoadEntitlements(context.Background(), created.ID); err != nil {
+		t.Fatalf("LoadEntitlements() error: %v", err)
+	}
+
+	_, found, err := cacheClient.Get(context.Background(), EntitlementCacheKey(created.ID))
+	if err != nil {
+		t.Fatalf("cacheClient.Get() error: %v", err)
+	}
+	if !found {
+		t.Error("EntitlementCacheKey(tenantID) did not match the key LoadEntitlements cached under")
+	}
+}
+
 func TestEntitlementSet_LimitAndModuleEnabled(t *testing.T) {
 	set := EntitlementSet{
 		Features:  map[string]bool{"module.sales": true},

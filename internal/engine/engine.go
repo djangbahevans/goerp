@@ -54,6 +54,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaverify"
+	"github.com/djangbahevans/goerp/internal/engine/auth/planchange"
 	"github.com/djangbahevans/goerp/internal/engine/auth/roleassign"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
@@ -867,6 +868,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
+	planChangeHandler := planchange.NewHandler(tenantResolver, authChecker, billingStore, tenantStore, cacheClient, wsHub, authAuditStore)
+	builtinRoutes["POST /admin/tenant/plan"] = http.HandlerFunc(planChangeHandler.ServeHTTP)
 	moduleInstallWorker := &moduleinstall.Worker{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,

@@ -3,11 +3,19 @@ package billing
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
+
+// ErrPlanNotFound is returned by GetPlanByName when no plan has the given name.
+var ErrPlanNotFound = errors.New("plan not found")
+
+// ErrNoActiveSubscription is returned by ChangeTenantPlan when tenantID has
+// no trialing/active tenant_subscriptions row to move onto a new plan.
+var ErrNoActiveSubscription = errors.New("no active subscription")
 
 // createPlansTable matches multitenancy-internals.md §2's plans
 // definition.
@@ -173,6 +181,74 @@ func (s *Store) CreateSubscription(ctx context.Context, tenantID, planID string,
 		return nil, fmt.Errorf("insert subscription: %w", err)
 	}
 	return &sub, nil
+}
+
+// GetPlanByName returns the plan named name, or ErrPlanNotFound if none
+// exists or it's been retired (is_active = false — the documented way to
+// retire a plan, per createTenantSubscriptionsTable's own doc comment) —
+// mirrors role.Store.GetRoleByName's pattern.
+func (s *Store) GetPlanByName(ctx context.Context, name string) (*Plan, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, name, display_name, price_monthly, price_yearly, currency, is_active, created_at
+		FROM system.plans
+		WHERE name = $1 AND is_active = TRUE
+	`, name)
+
+	var p Plan
+	if err := row.Scan(&p.ID, &p.Name, &p.DisplayName, &p.PriceMonthly, &p.PriceYearly, &p.Currency, &p.IsActive, &p.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrPlanNotFound
+		}
+		return nil, fmt.Errorf("get plan by name: %w", err)
+	}
+	return &p, nil
+}
+
+// ErrMultipleActiveSubscriptions is returned by ChangeTenantPlan when
+// tenantID has more than one trialing/active tenant_subscriptions row —
+// an invariant violation nothing in this schema enforces at the database
+// level (no unique/partial-unique index backs it), surfaced as an error
+// rather than silently moving every matching row, or moving only one and
+// discarding the rest, either of which would hide the anomaly.
+var ErrMultipleActiveSubscriptions = errors.New("tenant has more than one active subscription")
+
+// ChangeTenantPlan moves tenantID's current subscription onto planID,
+// scoped to status IN ('trialing','active') — the same "at most one such
+// subscription per tenant" invariant PlanEntitlementsForTenant's own join
+// already assumes. Returns ErrNoActiveSubscription if none matches, or
+// ErrMultipleActiveSubscriptions if that assumed invariant doesn't hold.
+func (s *Store) ChangeTenantPlan(ctx context.Context, tenantID, planID string) (*Subscription, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		UPDATE system.tenant_subscriptions
+		SET plan_id = $1, updated_at = NOW()
+		WHERE tenant_id = $2 AND status IN ('trialing', 'active')
+		RETURNING id, tenant_id, plan_id, status, current_period_start, current_period_end, trial_ends_at, cancelled_at, external_id, created_at, updated_at
+	`, planID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("change tenant plan: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var subs []Subscription
+	for rows.Next() {
+		var sub Subscription
+		if err := rows.Scan(&sub.ID, &sub.TenantID, &sub.PlanID, &sub.Status, &sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.TrialEndsAt, &sub.CancelledAt, &sub.ExternalID, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan changed subscription: %w", err)
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate changed subscriptions: %w", err)
+	}
+
+	switch len(subs) {
+	case 0:
+		return nil, ErrNoActiveSubscription
+	case 1:
+		return &subs[0], nil
+	default:
+		return nil, ErrMultipleActiveSubscriptions
+	}
 }
 
 // UpsertEntitlementOverride inserts or replaces tenantID's override for

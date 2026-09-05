@@ -26,6 +26,12 @@ const (
 	PlanInternal   Plan = "internal"
 )
 
+// AllPlans is every value system.tenants.plan's own CHECK constraint
+// accepts — the single source of truth other packages (e.g.
+// planchange's admin-facing plan-change endpoint) validate a requested
+// plan name against, instead of duplicating this enum.
+var AllPlans = []Plan{PlanStarter, PlanPro, PlanEnterprise, PlanInternal}
+
 type Tenant struct {
 	ID            string     `json:"id"`
 	Slug          string     `json:"slug"`
