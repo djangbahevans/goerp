@@ -24,6 +24,7 @@ import (
 	tenantsync "github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -80,6 +81,10 @@ type Worker struct {
 	// Concurrency bounds SyncModule's tenant fan-out; 0 uses
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
+	// Hub broadcasts module-install completion to already-connected /_ws
+	// clients (goerp#621). Nil in tests that don't exercise this — run
+	// treats that the same as "nobody connected yet".
+	Hub *ws.Hub
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[Args]) error {
@@ -254,6 +259,25 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	if err := w.Workers.SpawnAll(ctx, map[string]*module.LoadedModule{m.Manifest.Name: m}); err != nil {
 		log.Error().Err(err).Str("module", m.Manifest.Name).Msg("module install: workflow-worker spawn failed")
 		result.WorkflowWorkers = err.Error()
+	}
+
+	// Live-session convenience only (goerp#621), run last: ctx is the
+	// job's own single, already-tight budget (River's default JobTimeout
+	// is one minute, and neither this Worker nor jobqueue.New overrides
+	// it), so a broadcast to a stalled client must not be able to steal
+	// time from the data-migration dispatch and workflow-worker spawn
+	// above. A client with no open /_ws connection sees the new module on
+	// its next GET /_meta/permissions fetch regardless, so a tenant with
+	// zero current subscribers to its channel — the common case until
+	// goerp#614 lands — is not an error.
+	if w.Hub != nil {
+		payload := map[string]string{"module": m.Manifest.Name}
+		for _, t := range syncResult.Succeeded {
+			if _, err := w.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "module.installed", payload); err != nil {
+				log.Warn().Err(err).Str("module", m.Manifest.Name).Str("tenant", t.Slug).
+					Msg("module install: broadcast to tenant failed")
+			}
+		}
 	}
 
 	return result, nil

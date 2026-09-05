@@ -161,6 +161,13 @@ func (h *Hub) unregister(c *Conn) {
 	h.mu.Unlock()
 }
 
+// TenantChannel is the well-known channel name for messages meant for every
+// currently-connected client belonging to tenantID — the per-tenant analogue
+// of ui:user:{id}/ui:role:{role} (shell-architecture.md §12).
+func TenantChannel(tenantID string) string {
+	return "tenant:" + tenantID
+}
+
 // Broadcast sends {channel, type, payload} to every connection currently
 // subscribed to channel, returning the count actually reached. Writes fan
 // out concurrently so one slow or stalled connection can't hold up

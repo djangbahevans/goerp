@@ -855,6 +855,10 @@ func New(cfg *config.Config) (*Engine, error) {
 		DiffEngine:  diffEngine,
 	}
 	river.AddWorker(jobWorkers, acceptResyncWorker)
+	// Hoisted out of the Engine{...} literal below (still the sole
+	// construction site) so moduleInstallWorker can be wired with it here,
+	// before the literal exists.
+	wsHub := ws.NewHub()
 	moduleInstallWorker := &moduleinstall.Worker{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,
@@ -865,6 +869,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		SyncPool:    syncPool,
 		DiffEngine:  diffEngine,
 		Workers:     workflowWorkers,
+		Hub:         wsHub,
 	}
 	river.AddWorker(jobWorkers, moduleInstallWorker)
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
@@ -1025,7 +1030,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		systemWorker:      systemWorker,
 		server:            server,
 		adminServer:       adminServer,
-		wsHub:             ws.NewHub(),
+		wsHub:             wsHub,
 		tracer:            tracer,
 		tracerProvider:    tracerProvider,
 		instanceID:        instanceID,
