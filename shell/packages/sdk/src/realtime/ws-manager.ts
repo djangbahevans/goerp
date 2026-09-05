@@ -50,14 +50,18 @@ function parseEnvelope(data: unknown): RealtimeEnvelope | null {
 }
 
 // WebSocketManager is the shell's single persistent /_ws connection,
-// shared by every channel subscriber. Each channel's subscriber set
+// shared by every channel subscriber. Each channel's subscriber map
 // doubles as its ref count: the wire subscribe/unsubscribe message is
 // only sent on the first subscriber / last unsubscriber, and channels
 // with at least one subscriber are re-subscribed automatically after a
-// reconnect.
+// reconnect. Subscriptions are keyed by a fresh id per subscribe() call,
+// not by the handler reference itself — two subscriptions that happen to
+// share the identical handler function must stay independent, each with
+// its own unsubscribe, rather than colliding as one Set entry.
 export class WebSocketManager {
   private ws: WebSocket | null = null;
-  private readonly channels = new Map<string, Set<MessageHandler>>();
+  private readonly channels = new Map<string, Map<number, MessageHandler>>();
+  private nextSubscriptionId = 0;
   private reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private loggedOut = false;
@@ -99,7 +103,7 @@ export class WebSocketManager {
     ws.onmessage = (event: MessageEvent) => {
       const message = parseEnvelope(event.data);
       if (!message) return;
-      for (const handler of this.channels.get(message.channel) ?? []) {
+      for (const handler of this.channels.get(message.channel)?.values() ?? []) {
         handler(message);
       }
     };
@@ -123,17 +127,18 @@ export class WebSocketManager {
   // a channel touched before the connection opens is instead picked up by
   // connect()'s own onopen resubscribe loop once it does.
   subscribe(channel: string, handler: MessageHandler): () => void {
-    let handlers = this.channels.get(channel);
-    if (!handlers) {
-      handlers = new Set();
-      this.channels.set(channel, handlers);
+    let subscribers = this.channels.get(channel);
+    if (!subscribers) {
+      subscribers = new Map();
+      this.channels.set(channel, subscribers);
       this.send({ type: "subscribe", channel });
     }
-    handlers.add(handler);
+    const id = this.nextSubscriptionId++;
+    subscribers.set(id, handler);
 
     return () => {
       const current = this.channels.get(channel);
-      if (!current?.delete(handler)) return;
+      if (!current?.delete(id)) return;
       if (current.size === 0) {
         this.channels.delete(channel);
         this.send({ type: "unsubscribe", channel });

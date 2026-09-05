@@ -145,6 +145,24 @@ describe("WebSocketManager", () => {
     expect(received).toEqual([{ who: "b", msg: { channel: "notifications", type: "notification.new" } }]);
   });
 
+  it("keeps two subscriptions independent even when they share the identical handler reference", () => {
+    const manager = testManager();
+    manager.connect();
+    const socket = latestSocket();
+
+    const received: unknown[] = [];
+    const sharedHandler = (msg: unknown) => received.push(msg);
+    const unsubscribeA = manager.subscribe("notifications", sharedHandler);
+    manager.subscribe("notifications", sharedHandler);
+
+    unsubscribeA();
+    const unsubscribeMessages = socket.sent.filter((s) => JSON.parse(s).type === "unsubscribe");
+    expect(unsubscribeMessages).toHaveLength(0); // the second subscription (same handler) is still live
+
+    socket.message({ channel: "notifications", type: "notification.new" });
+    expect(received).toHaveLength(1);
+  });
+
   it("sends an unsubscribe message once the last subscriber leaves", () => {
     const manager = testManager();
     manager.connect();
