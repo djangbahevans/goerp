@@ -18,17 +18,18 @@ vi.mock("./permission-client.js", () => ({
   fetchPermissions: () => fetchPermissionsMock(),
 }));
 
-const { tenantSubscriptions, subscribeMock, unsubscribeMock } = vi.hoisted(() => {
-  const tenantSubscriptions = new Map<string, MessageHandler>();
+const { channelSubscriptions, subscribeMock, unsubscribeMock } = vi.hoisted(() => {
+  const channelSubscriptions = new Map<string, MessageHandler>();
   const unsubscribeMock = vi.fn();
   const subscribeMock = vi.fn((channel: string, handler: MessageHandler) => {
-    tenantSubscriptions.set(channel, handler);
+    channelSubscriptions.set(channel, handler);
     return unsubscribeMock;
   });
-  return { tenantSubscriptions, subscribeMock, unsubscribeMock };
+  return { channelSubscriptions, subscribeMock, unsubscribeMock };
 });
 vi.mock("../realtime/index.js", () => ({
   tenantChannel: (tenantId: string) => `tenant:${tenantId}`,
+  userChannel: (userId: string) => `ui:user:${userId}`,
   wsManager: { subscribe: subscribeMock },
 }));
 
@@ -51,14 +52,14 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
   return { promise, resolve, reject };
 }
 
-function fireTenantMessage(channel: string, message: RealtimeEnvelope): void {
-  const handler = tenantSubscriptions.get(channel);
+function fireChannelMessage(channel: string, message: RealtimeEnvelope): void {
+  const handler = channelSubscriptions.get(channel);
   if (!handler) throw new Error(`no subscriber registered for channel ${channel}`);
   act(() => handler(message));
 }
 
 beforeEach(() => {
-  tenantSubscriptions.clear();
+  channelSubscriptions.clear();
   subscribeMock.mockClear();
   unsubscribeMock.mockClear();
   fetchPermissionsMock.mockReset();
@@ -72,7 +73,7 @@ describe("PermissionProviderForUser live refresh", () => {
   it("subscribes to the current tenant's channel while authenticated", () => {
     fetchPermissionsMock.mockResolvedValue(dataOf([]));
     render(
-      <PermissionProviderForUser isAuthenticated tenantId="t1">
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
         <ModulesProbe />
       </PermissionProviderForUser>,
     );
@@ -82,7 +83,7 @@ describe("PermissionProviderForUser live refresh", () => {
   it("does not subscribe when there is no current tenant", () => {
     fetchPermissionsMock.mockResolvedValue(dataOf([]));
     render(
-      <PermissionProviderForUser isAuthenticated tenantId={null}>
+      <PermissionProviderForUser isAuthenticated tenantId={null} userId={null}>
         <ModulesProbe />
       </PermissionProviderForUser>,
     );
@@ -92,7 +93,7 @@ describe("PermissionProviderForUser live refresh", () => {
   it("unsubscribes on unmount", () => {
     fetchPermissionsMock.mockResolvedValue(dataOf([]));
     const { unmount } = render(
-      <PermissionProviderForUser isAuthenticated tenantId="t1">
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
         <ModulesProbe />
       </PermissionProviderForUser>,
     );
@@ -103,14 +104,14 @@ describe("PermissionProviderForUser live refresh", () => {
   it("refetches and updates modulesEnabled when a module.installed message arrives", async () => {
     fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
     const { getByTestId } = render(
-      <PermissionProviderForUser isAuthenticated tenantId="t1">
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
         <ModulesProbe />
       </PermissionProviderForUser>,
     );
     await waitFor(() => expect(getByTestId("modules").textContent).toBe("sales"));
 
     fetchPermissionsMock.mockResolvedValueOnce(dataOf(["inventory", "sales"]));
-    fireTenantMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
 
     await waitFor(() => expect(getByTestId("modules").textContent).toBe("inventory,sales"));
     expect(fetchPermissionsMock).toHaveBeenCalledTimes(2);
@@ -119,13 +120,13 @@ describe("PermissionProviderForUser live refresh", () => {
   it("ignores messages of any other type on the same channel", async () => {
     fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
     const { getByTestId } = render(
-      <PermissionProviderForUser isAuthenticated tenantId="t1">
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
         <ModulesProbe />
       </PermissionProviderForUser>,
     );
     await waitFor(() => expect(getByTestId("modules").textContent).toBe("sales"));
 
-    fireTenantMessage("tenant:t1", { channel: "tenant:t1", type: "some.other.event" });
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "some.other.event" });
 
     expect(fetchPermissionsMock).toHaveBeenCalledTimes(1);
   });
@@ -133,7 +134,7 @@ describe("PermissionProviderForUser live refresh", () => {
   it("a failed live-refresh keeps the last-known-good data instead of falling back to empty", async () => {
     fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
     const { getByTestId } = render(
-      <PermissionProviderForUser isAuthenticated tenantId="t1">
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
         <ModulesProbe />
       </PermissionProviderForUser>,
     );
@@ -141,7 +142,7 @@ describe("PermissionProviderForUser live refresh", () => {
 
     fetchPermissionsMock.mockRejectedValueOnce(new Error("network error"));
     await act(async () => {
-      fireTenantMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
+      fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
       await Promise.resolve().then(() => Promise.resolve());
     });
 
@@ -154,13 +155,13 @@ describe("PermissionProviderForUser live refresh", () => {
     fetchPermissionsMock.mockReturnValueOnce(initialLoad.promise).mockReturnValueOnce(liveRefresh.promise);
 
     const { getByTestId } = render(
-      <PermissionProviderForUser isAuthenticated tenantId="t1">
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
         <ModulesProbe />
       </PermissionProviderForUser>,
     );
 
     // Trigger the live-refresh fetch while the initial-load fetch is still in flight.
-    fireTenantMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
     expect(fetchPermissionsMock).toHaveBeenCalledTimes(2);
 
     // The later-issued (live-refresh) fetch resolves first, with fresher data.
@@ -171,5 +172,112 @@ describe("PermissionProviderForUser live refresh", () => {
     // response must not clobber the fresher state already applied above.
     await act(async () => initialLoad.resolve(dataOf(["sales"])));
     expect(getByTestId("modules").textContent).toBe("inventory,sales");
+  });
+});
+
+// The request-ordering and failure-handling behavior above is exercised
+// through the tenant channel, but both effects share the same refresh
+// helper — these tests cover only what's new for the user channel: the
+// subscribe/unsubscribe lifecycle and role.changed's own message-type
+// filter, not a duplicate of the generic refresh semantics already
+// covered above.
+describe("PermissionProviderForUser role-change live refresh", () => {
+  it("subscribes to the current user's channel while authenticated", () => {
+    fetchPermissionsMock.mockResolvedValue(dataOf([]));
+    render(
+      <PermissionProviderForUser isAuthenticated tenantId={null} userId="u1">
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    expect(subscribeMock).toHaveBeenCalledWith("ui:user:u1", expect.any(Function));
+  });
+
+  it("does not subscribe when there is no current user", () => {
+    fetchPermissionsMock.mockResolvedValue(dataOf([]));
+    render(
+      <PermissionProviderForUser isAuthenticated tenantId={null} userId={null}>
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    expect(subscribeMock).not.toHaveBeenCalled();
+  });
+
+  it("unsubscribes on unmount", () => {
+    fetchPermissionsMock.mockResolvedValue(dataOf([]));
+    const { unmount } = render(
+      <PermissionProviderForUser isAuthenticated tenantId={null} userId="u1">
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches permissions when a role.changed message arrives", async () => {
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId={null} userId="u1">
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("sales"));
+
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["hr", "sales"]));
+    fireChannelMessage("ui:user:u1", { channel: "ui:user:u1", type: "role.changed" });
+
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("hr,sales"));
+    expect(fetchPermissionsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores ui.push and other message types on the same channel", async () => {
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId={null} userId="u1">
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("sales"));
+
+    fireChannelMessage("ui:user:u1", { channel: "ui:user:u1", type: "ui.push" });
+
+    expect(fetchPermissionsMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The realistic runtime case: an authenticated session always has both a
+// current tenant and a current user, so both channels are subscribed at
+// once. Verifies the two subscriptions stay independent of each other.
+describe("PermissionProviderForUser with both tenant and user channels active", () => {
+  it("subscribes to both channels and reacts to each independently", async () => {
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId="u1">
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("sales"));
+    expect(subscribeMock).toHaveBeenCalledWith("tenant:t1", expect.any(Function));
+    expect(subscribeMock).toHaveBeenCalledWith("ui:user:u1", expect.any(Function));
+
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["inventory", "sales"]));
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("inventory,sales"));
+
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["hr", "inventory", "sales"]));
+    fireChannelMessage("ui:user:u1", { channel: "ui:user:u1", type: "role.changed" });
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("hr,inventory,sales"));
+
+    expect(fetchPermissionsMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("unsubscribes both channels independently on unmount", () => {
+    fetchPermissionsMock.mockResolvedValue(dataOf([]));
+    const { unmount } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId="u1">
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(2);
   });
 });

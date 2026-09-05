@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthMachine } from "../auth/auth-machine.js";
 import type { CurrentTenant, CurrentUser } from "../auth/types.js";
-import { tenantChannel, WebSocketManager, wireWebSocketManager } from "./ws-manager.js";
+import { tenantChannel, userChannel, WebSocketManager, wireWebSocketManager } from "./ws-manager.js";
 
 const user: CurrentUser = { id: "u1", email: "a@example.com", roles: [], amr: ["pwd"], mfaVerifiedAt: null };
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
@@ -93,6 +93,16 @@ describe("tenantChannel", () => {
 
   it("is distinct for distinct tenant ids", () => {
     expect(tenantChannel("t1")).not.toBe(tenantChannel("t2"));
+  });
+});
+
+describe("userChannel", () => {
+  it("formats the engine's ui:user:{id} convention", () => {
+    expect(userChannel("u1")).toBe("ui:user:u1");
+  });
+
+  it("is distinct for distinct user ids", () => {
+    expect(userChannel("u1")).not.toBe(userChannel("u2"));
   });
 });
 
