@@ -409,6 +409,7 @@ type metaSchemaRoute struct {
 	Permissions    []string `json:"permissions"`
 	Model          string   `json:"model,omitempty"`
 	CrudAction     string   `json:"crud_action,omitempty"`
+	Name           string   `json:"name,omitempty"`
 	ResponseIsList bool     `json:"response_is_list"`
 	View           string   `json:"view,omitempty"`
 }
@@ -594,6 +595,7 @@ func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 			Permissions:    mf.Permissions,
 			Model:          mf.Model,
 			CrudAction:     mf.CrudAction,
+			Name:           mf.Name,
 			ResponseIsList: mf.ResponseIsList,
 			View:           metaSchemaViewFor(mod.Views, mf.Model, mf.CrudAction),
 		})

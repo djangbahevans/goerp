@@ -26,6 +26,7 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 			Model:          "sales.order",
 			ResponseIsList: false,
 			CrudAction:     "get",
+			Name:           "get",
 		},
 	})
 	if err != nil {
@@ -50,6 +51,7 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 		Model:          "sales.order",
 		ResponseIsList: false,
 		CrudAction:     "get",
+		Name:           "get",
 	}
 	if !reflect.DeepEqual(entry.Manifest, want) {
 		t.Fatalf("Manifest = %+v, want %+v", entry.Manifest, want)
@@ -73,6 +75,7 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			Model:          "sales.order",
 			ResponseIsList: false,
 			CRUDAction:     "create",
+			Name:           "create",
 		},
 	}
 
@@ -93,10 +96,23 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			Model:          "sales.order",
 			ResponseIsList: false,
 			CrudAction:     "create",
+			Name:           "create",
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestExplicitRoutesFrom_CustomActionNameSurvivesWithNoCrudAction(t *testing.T) {
+	got := ExplicitRoutesFrom([]engine.RouteDeclaration{
+		{Method: "POST", Path: "/orders/{id}/confirm", Model: "sales.order", Name: "confirm"},
+	})
+	if got[0].Name != "confirm" {
+		t.Fatalf("Name = %q, want %q", got[0].Name, "confirm")
+	}
+	if got[0].CrudAction != "" {
+		t.Fatalf("CrudAction = %q, want empty", got[0].CrudAction)
 	}
 }
 

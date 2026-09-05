@@ -11,6 +11,13 @@ type RouteManifest struct {
 	Model          string // "{module}.{resource}"; "" = no model binding
 	ResponseIsList bool
 
+	// Name is the action name an engine.Action-registered route was given
+	// (go-sdk-reference.md §2a) — "" for an EnableOps-auto-generated CRUD
+	// route (route_model.go never sets this field) and for a raw,
+	// non-model route. A hand-registered override of a reserved CRUD name
+	// sets both this and CrudAction to the same value.
+	Name string
+
 	MaxBodyBytes int64
 	RawBody      bool
 

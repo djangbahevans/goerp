@@ -63,6 +63,13 @@ func newSchemaFixtureEngine(t *testing.T) *Engine {
 					Permissions: []string{"widgets:widget:read"},
 					Model:       "widgets.widget",
 				},
+				{
+					Method: "POST",
+					Path:   "/{id}/confirm",
+					Auth:   "required",
+					Model:  "widgets.widget",
+					Name:   "confirm",
+				},
 			},
 			ModelDecls: []model.ModelDeclaration{*widgetModel},
 		},
@@ -168,13 +175,15 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 		t.Errorf("owner field = %+v, want type=many2one related_model=widgets.owner", ownerField)
 	}
 
-	var handWritten, enableOpsRoute *metaSchemaRoute
+	var handWritten, enableOpsRoute, customAction *metaSchemaRoute
 	for i, r := range mod.Routes {
 		switch {
 		case r.Path == "/widgets/ping":
 			handWritten = &mod.Routes[i]
 		case r.Model == "widgets.widget" && r.ResponseIsList:
 			enableOpsRoute = &mod.Routes[i]
+		case r.Name == "confirm":
+			customAction = &mod.Routes[i]
 		}
 	}
 
@@ -202,6 +211,16 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 	}
 	if enableOpsRoute.View != "widgets.list" {
 		t.Errorf("EnableOps route view = %q, want widgets.list", enableOpsRoute.View)
+	}
+
+	if customAction == nil {
+		t.Fatalf("no custom action route named confirm in %+v", mod.Routes)
+	}
+	if customAction.Method != "POST" || customAction.Path != "/widgets/{id}/confirm" {
+		t.Errorf("custom action route = %+v, want POST /widgets/{id}/confirm", customAction)
+	}
+	if customAction.CrudAction != "" {
+		t.Errorf("custom action route crud_action = %q, want empty", customAction.CrudAction)
 	}
 }
 
