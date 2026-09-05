@@ -213,7 +213,7 @@ func TestOtelMiddleware_PreservesHijackerForWebSocketUpgrade(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String(), nil)
 	if err != nil {

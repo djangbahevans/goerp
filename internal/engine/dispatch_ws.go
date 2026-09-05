@@ -2,9 +2,9 @@ package engine
 
 import (
 	"net/http"
+	"uuid"
 
 	"github.com/coder/websocket"
-	"github.com/google/uuid"
 )
 
 // dispatchWSRoute is GET /_ws's handler (goerp#616) — registered
@@ -46,6 +46,6 @@ func (e *Engine) dispatchWSRoute(w http.ResponseWriter, r *http.Request) {
 	// resource cleanup, not a second close attempt.
 	defer func() { _ = conn.CloseNow() }()
 
-	connID := uuid.NewString()
+	connID := uuid.New().String()
 	_ = e.wsHub.Serve(r.Context(), conn, connID, authCtx.UserID, tenantCtx.TenantID, r.UserAgent())
 }

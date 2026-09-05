@@ -41,7 +41,7 @@ func TestDispatchWSRoute_UnresolvedAuthOrTenantRejectsBeforeUpgrade(t *testing.T
 	e := &Engine{wsHub: ws.NewHub()}
 	url := wsTestServer(t, e, nil, nil)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	_, resp, err := websocket.Dial(ctx, url, nil)
 	if err == nil {
@@ -63,7 +63,7 @@ func TestDispatchWSRoute_AuthenticatedRequestUpgradesAndRegistersWithHub(t *test
 	tenantCtx := &tenantresolve.TenantContext{TenantID: "tenant-1"}
 	url := wsTestServer(t, e, authCtx, tenantCtx)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, url, nil)
 	if err != nil {

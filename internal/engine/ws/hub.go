@@ -15,6 +15,8 @@ package ws
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -144,10 +146,7 @@ func (h *Hub) unregister(c *Conn) {
 	h.mu.Unlock()
 
 	c.mu.Lock()
-	channels := make([]string, 0, len(c.channels))
-	for channel := range c.channels {
-		channels = append(channels, channel)
-	}
+	channels := slices.Collect(maps.Keys(c.channels))
 	c.mu.Unlock()
 
 	h.mu.Lock()
@@ -170,24 +169,18 @@ func (h *Hub) unregister(c *Conn) {
 // observe the same failure on its next read and unregister itself.
 func (h *Hub) Broadcast(ctx context.Context, channel, msgType string, payload any) (int, error) {
 	h.mu.RLock()
-	subs := h.subscribers[channel]
-	targets := make([]*Conn, 0, len(subs))
-	for _, c := range subs {
-		targets = append(targets, c)
-	}
+	targets := slices.Collect(maps.Values(h.subscribers[channel]))
 	h.mu.RUnlock()
 
 	env := outboundEnvelope{Channel: channel, Type: msgType, Payload: payload}
 	var reached atomic.Int64
 	var wg sync.WaitGroup
 	for _, c := range targets {
-		wg.Add(1)
-		go func(c *Conn) {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := wsjson.Write(ctx, c.ws, env); err == nil {
 				reached.Add(1)
 			}
-		}(c)
+		})
 	}
 	wg.Wait()
 
@@ -204,19 +197,14 @@ func (h *Hub) Broadcast(ctx context.Context, channel, msgType string, payload an
 // don't outlive the rest of the engine's graceful shutdown.
 func (h *Hub) Close(ctx context.Context) {
 	h.mu.RLock()
-	conns := make([]*Conn, 0, len(h.conns))
-	for _, c := range h.conns {
-		conns = append(conns, c)
-	}
+	conns := slices.Collect(maps.Values(h.conns))
 	h.mu.RUnlock()
 
 	var wg sync.WaitGroup
 	for _, c := range conns {
-		wg.Add(1)
-		go func(c *Conn) {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = c.ws.Close(websocket.StatusGoingAway, "server shutting down")
-		}(c)
+		})
 	}
 
 	done := make(chan struct{})

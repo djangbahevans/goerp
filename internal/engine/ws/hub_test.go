@@ -6,10 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/google/uuid"
 )
 
 // testServer wires a Hub behind a real listening HTTP server, accepting
@@ -24,7 +24,7 @@ func testServer(t *testing.T, hub *Hub) string {
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.NewString(), "user-1", "tenant-1", "test-agent")
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", "tenant-1", "test-agent")
 	}))
 	t.Cleanup(srv.Close)
 	return "ws://" + srv.Listener.Addr().String()
