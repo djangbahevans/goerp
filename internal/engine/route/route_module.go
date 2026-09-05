@@ -25,6 +25,7 @@ type ExplicitRoute struct {
 	Model          string
 	ResponseIsList bool
 	CrudAction     string
+	Name           string
 }
 
 // ExplicitRoutesFrom converts a module's deserialized get_routes output
@@ -58,6 +59,7 @@ func ExplicitRoutesFrom(decls []engine.RouteDeclaration) []ExplicitRoute {
 			Model:          d.Model,
 			ResponseIsList: d.ResponseIsList,
 			CrudAction:     d.CRUDAction,
+			Name:           d.Name,
 		}
 	}
 	return out
@@ -130,6 +132,7 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 				Model:          r.Model,
 				ResponseIsList: r.ResponseIsList,
 				CrudAction:     r.CrudAction,
+				Name:           r.Name,
 			},
 		}
 		scratch.Register(r.Method, expandedPath, entry)
