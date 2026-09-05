@@ -18,12 +18,21 @@ vi.mock("./permission-client.js", () => ({
   fetchPermissions: () => fetchPermissionsMock(),
 }));
 
+// Mirrors ws-manager.ts's own Map<channel, Map<id, handler>> shape — a channel can have multiple subscribers.
 const { channelSubscriptions, subscribeMock, unsubscribeMock } = vi.hoisted(() => {
-  const channelSubscriptions = new Map<string, MessageHandler>();
+  const channelSubscriptions = new Map<string, Set<MessageHandler>>();
   const unsubscribeMock = vi.fn();
   const subscribeMock = vi.fn((channel: string, handler: MessageHandler) => {
-    channelSubscriptions.set(channel, handler);
-    return unsubscribeMock;
+    let handlers = channelSubscriptions.get(channel);
+    if (!handlers) {
+      handlers = new Set();
+      channelSubscriptions.set(channel, handlers);
+    }
+    handlers.add(handler);
+    return () => {
+      handlers?.delete(handler);
+      unsubscribeMock();
+    };
   });
   return { channelSubscriptions, subscribeMock, unsubscribeMock };
 });
@@ -53,9 +62,11 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 }
 
 function fireChannelMessage(channel: string, message: RealtimeEnvelope): void {
-  const handler = channelSubscriptions.get(channel);
-  if (!handler) throw new Error(`no subscriber registered for channel ${channel}`);
-  act(() => handler(message));
+  const handlers = channelSubscriptions.get(channel);
+  if (!handlers || handlers.size === 0) throw new Error(`no subscriber registered for channel ${channel}`);
+  act(() => {
+    for (const handler of handlers) handler(message);
+  });
 }
 
 beforeEach(() => {
@@ -98,7 +109,9 @@ describe("PermissionProviderForUser live refresh", () => {
       </PermissionProviderForUser>,
     );
     unmount();
-    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
+    // Two subscriptions on the tenant channel — module.installed and
+    // plan.changed — each unsubscribes independently.
+    expect(unsubscribeMock).toHaveBeenCalledTimes(2);
   });
 
   it("refetches and updates modulesEnabled when a module.installed message arrives", async () => {
@@ -172,6 +185,43 @@ describe("PermissionProviderForUser live refresh", () => {
     // response must not clobber the fresher state already applied above.
     await act(async () => initialLoad.resolve(dataOf(["sales"])));
     expect(getByTestId("modules").textContent).toBe("inventory,sales");
+  });
+});
+
+// Generic refresh semantics are covered above; this only exercises what's new for plan.changed.
+describe("PermissionProviderForUser plan-change live refresh", () => {
+  it("refetches and updates modulesEnabled when a plan.changed message arrives", async () => {
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("sales"));
+
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["inventory", "sales"]));
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "plan.changed" });
+
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("inventory,sales"));
+    expect(fetchPermissionsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a module.installed message on the shared tenant channel does not double-trigger the plan.changed subscriber", async () => {
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("sales"));
+
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["inventory", "sales"]));
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
+
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("inventory,sales"));
+    // Exactly one refresh — module.installed's own subscriber, not two
+    // (module.installed's and plan.changed's both firing for the same message).
+    expect(fetchPermissionsMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -270,6 +320,26 @@ describe("PermissionProviderForUser with both tenant and user channels active", 
     expect(fetchPermissionsMock).toHaveBeenCalledTimes(3);
   });
 
+  it("reacts to module.installed and plan.changed independently despite sharing the tenant channel", async () => {
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId="u1">
+        <ModulesProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("sales"));
+
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["inventory", "sales"]));
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("inventory,sales"));
+
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["inventory", "sales", "starter-plus"]));
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "plan.changed" });
+    await waitFor(() => expect(getByTestId("modules").textContent).toBe("inventory,sales,starter-plus"));
+
+    expect(fetchPermissionsMock).toHaveBeenCalledTimes(3);
+  });
+
   it("unsubscribes both channels independently on unmount", () => {
     fetchPermissionsMock.mockResolvedValue(dataOf([]));
     const { unmount } = render(
@@ -278,6 +348,8 @@ describe("PermissionProviderForUser with both tenant and user channels active", 
       </PermissionProviderForUser>,
     );
     unmount();
-    expect(unsubscribeMock).toHaveBeenCalledTimes(2);
+    // module.installed + plan.changed on the tenant channel, plus
+    // role.changed on the user channel.
+    expect(unsubscribeMock).toHaveBeenCalledTimes(3);
   });
 });

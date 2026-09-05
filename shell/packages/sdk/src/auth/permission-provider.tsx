@@ -88,8 +88,10 @@ export function PermissionProviderForUser({
     };
   }, [isAuthenticated, refresh]);
 
-  // Live refresh on module install (goerp#614/#621) and role change (goerp#624/#619).
+  // Live refresh on module install (goerp#614/#621), role change (goerp#624/#619),
+  // and tenant plan change (goerp#629/#628).
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "module.installed", refresh);
+  useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "plan.changed", refresh);
   useChannelRefresh(isAuthenticated, userId && userChannel(userId), "role.changed", refresh);
 
   const data = isAuthenticated ? loadedData : EMPTY_DATA;
