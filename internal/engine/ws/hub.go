@@ -168,6 +168,21 @@ func TenantChannel(tenantID string) string {
 	return "tenant:" + tenantID
 }
 
+// UserChannel is shell-architecture.md §12's own ui:user:{id} channel —
+// every currently-connected client belonging to userID, regardless of
+// tenant. Used by internal/engine/auth/roleassign's role-change broadcast
+// (goerp#619), sending a "role.changed" message type alongside whatever
+// "ui.push" messages the shell's own subscribeUIChannels already puts on
+// this same channel — a channel can carry more than one message type
+// (shell-architecture.md §12's own "notifications" channel example mixes
+// notification.new/notification.read_all the same way), each consumer
+// filtering by type. The frontend subscriber for "role.changed" itself is
+// tracked separately (goerp#624), the same split goerp#621/#614 used for
+// the per-tenant module-install broadcast.
+func UserChannel(userID string) string {
+	return "ui:user:" + userID
+}
+
 // Broadcast sends {channel, type, payload} to every connection currently
 // subscribed to channel, returning the count actually reached. Writes fan
 // out concurrently so one slow or stalled connection can't hold up

@@ -649,3 +649,148 @@ func TestAllRolePermissions_UnprovisionedTenantReturnsEmpty(t *testing.T) {
 		t.Errorf("AllRolePermissions() = %v, want empty", byRole)
 	}
 }
+
+func TestAssignRole_GrantsAndIsReflectedInMembership(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	userID := "00000000-0000-0000-0000-000000000010"
+	grantedBy := "00000000-0000-0000-0000-000000000011"
+
+	if err := store.AssignRole(ctx, slug, userID, roleID, grantedBy); err != nil {
+		t.Fatalf("AssignRole() error: %v", err)
+	}
+
+	isMember, err := store.IsMember(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("IsMember() error: %v", err)
+	}
+	if !isMember {
+		t.Error("IsMember() = false after AssignRole(), want true")
+	}
+	names, err := store.RoleNamesForUser(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("RoleNamesForUser() error: %v", err)
+	}
+	if len(names) != 1 || names[0] != "user" {
+		t.Errorf("RoleNamesForUser() = %v, want [user]", names)
+	}
+}
+
+func TestAssignRole_AlreadyGrantedIsANoOpNotAnError(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	userID := "00000000-0000-0000-0000-000000000012"
+
+	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
+		t.Fatalf("first AssignRole() error: %v", err)
+	}
+	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
+		t.Fatalf("second AssignRole() (already granted) error: %v", err)
+	}
+
+	names, err := store.RoleNamesForUser(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("RoleNamesForUser() error: %v", err)
+	}
+	if len(names) != 1 {
+		t.Errorf("RoleNamesForUser() = %v, want exactly one entry (idempotent grant)", names)
+	}
+}
+
+func TestAssignRole_ReactivatesAPreviouslyExpiredGrant(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	userID := "00000000-0000-0000-0000-000000000015"
+
+	// A grant that already lapsed — same row shape IsMember/RoleNamesForUser
+	// both already filter out.
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id, expires_at) VALUES ($1, $2, NOW() - interval '1 hour')", schema),
+		userID, roleID,
+	); err != nil {
+		t.Fatalf("insert expired user_roles row: %v", err)
+	}
+
+	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
+		t.Fatalf("AssignRole() on an expired grant error: %v", err)
+	}
+
+	isMember, err := store.IsMember(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("IsMember() error: %v", err)
+	}
+	if !isMember {
+		t.Error("IsMember() = false after re-granting a previously-expired role via AssignRole(), want true")
+	}
+}
+
+func TestRevokeRole_RemovesGrant(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	userID := "00000000-0000-0000-0000-000000000013"
+	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
+		t.Fatalf("AssignRole() error: %v", err)
+	}
+
+	if err := store.RevokeRole(ctx, slug, userID, roleID); err != nil {
+		t.Fatalf("RevokeRole() error: %v", err)
+	}
+
+	isMember, err := store.IsMember(ctx, slug, userID)
+	if err != nil {
+		t.Fatalf("IsMember() error: %v", err)
+	}
+	if isMember {
+		t.Error("IsMember() = true after RevokeRole(), want false")
+	}
+}
+
+func TestRevokeRole_UngrantedIsANoOpNotAnError(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	ctx := context.Background()
+
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+
+	if err := store.RevokeRole(ctx, slug, "00000000-0000-0000-0000-000000000014", roleID); err != nil {
+		t.Errorf("RevokeRole() on an ungranted role error: %v, want nil", err)
+	}
+}

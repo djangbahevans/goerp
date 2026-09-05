@@ -387,17 +387,19 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 
 // registerBuiltinRoutes registers the engine's own built-in routes into
 // table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
-// /auth/mfa/reverify, /admin/users/{id}/mfa/reset, /_meta/permissions,
-// /_meta/shares, and /_meta/schema resolve through the exact same
-// RouteTable.Lookup module routes do — no second router. Safe against
-// collision by construction: RegisterModuleRoutes already rejects any
-// module route whose top path segment starts with "_", or is exactly
-// "auth" or "admin", as a reserved engine namespace.
+// /auth/mfa/reverify, /admin/users/{id}/mfa/reset,
+// /admin/users/{id}/roles[/{role}], /_meta/permissions, /_meta/shares, and
+// /_meta/schema resolve through the exact same RouteTable.Lookup module
+// routes do — no second router. Safe against collision by construction:
+// RegisterModuleRoutes already rejects any module route whose top path
+// segment starts with "_", or is exactly "auth" or "admin", as a reserved
+// engine namespace.
 //
-// /admin/users/{id}/mfa/reset is a tenant-facing route despite its
-// "/admin/" prefix — see internal/engine/auth/mfareset's own package doc
-// for why that prefix doesn't mean it belongs to the separate
-// internal/engine/adminapi operator surface.
+// /admin/users/{id}/mfa/reset and /admin/users/{id}/roles[/{role}] are
+// tenant-facing routes despite their "/admin/" prefix — see
+// internal/engine/auth/mfareset's own package doc for why that prefix
+// doesn't mean they belong to the separate internal/engine/adminapi
+// operator surface.
 //
 // /_meta/permissions, /_meta/shares, and /_meta/schema are deliberately
 // not EngineBuiltin, unlike every other route registered here —
@@ -413,12 +415,19 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: path,
 		})
 	}
-	for _, path := range []string{"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify", "/admin/users/{id}/mfa/reset"} {
+	for _, path := range []string{"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify", "/admin/users/{id}/mfa/reset", "/admin/users/{id}/roles"} {
 		table.Register("POST", path, &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 			PathTemplate: path,
 		})
 	}
+	// /admin/users/{id}/roles/{role} (goerp#619) — DELETE half of the same
+	// grant/revoke flow the POST route above handles; same tenant-facing,
+	// EngineBuiltin posture as /admin/users/{id}/mfa/reset.
+	table.Register("DELETE", "/admin/users/{id}/roles/{role}", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		PathTemplate: "/admin/users/{id}/roles/{role}",
+	})
 	table.Register("GET", "/_meta/permissions", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
 		PathTemplate: "/_meta/permissions",

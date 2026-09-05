@@ -217,6 +217,18 @@ func TestHub_BroadcastToChannelWithNoSubscribersReachesZero(t *testing.T) {
 	}
 }
 
+func TestTenantChannel_FormatsTenantPrefix(t *testing.T) {
+	if got, want := TenantChannel("t1"), "tenant:t1"; got != want {
+		t.Errorf("TenantChannel(%q) = %q, want %q", "t1", got, want)
+	}
+}
+
+func TestUserChannel_FormatsUIUserPrefix(t *testing.T) {
+	if got, want := UserChannel("u1"), "ui:user:u1"; got != want {
+		t.Errorf("UserChannel(%q) = %q, want %q", "u1", got, want)
+	}
+}
+
 // waitForSubscriberCount polls the hub's internal state until the given
 // channel has exactly n subscribers or the deadline elapses — subscribe/
 // unsubscribe/disconnect are handled by each connection's own read-loop

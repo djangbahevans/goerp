@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"uuid"
+
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/user"
-	"github.com/google/uuid"
 )
 
 const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
@@ -70,9 +71,9 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
 
-	sessionID := uuid.NewString()
+	sessionID := uuid.New().String()
 	if err := sessionStore.Insert(ctx, session.Row{
-		ID: sessionID, UserID: userID, TenantID: tt.ID, DeviceID: uuid.NewString(),
+		ID: sessionID, UserID: userID, TenantID: tt.ID, DeviceID: uuid.New().String(),
 		RefreshHash: "fixture-hash", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
 	}); err != nil {
 		t.Fatalf("Insert() error: %v", err)
@@ -174,6 +175,51 @@ func TestMarkRolesStale_ThenIsRolesStaleReturnsTrue(t *testing.T) {
 	}
 }
 
+func TestMarkRolesStaleForUserInTenant_OnlyMarksThatTenantsSessions(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	// A second session for the same user, in a different tenant — must
+	// stay untouched by a tenant-scoped mark-stale.
+	tenantStore := tenant.NewStore(f.conn)
+	slug2 := fmt.Sprintf("markstaletest2%d", time.Now().UnixNano())
+	tt2, err := tenantStore.CreateTenant(ctx, slug2, "Mark Stale Test Co 2")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt2.ID) })
+
+	otherSessionID := uuid.New().String()
+	sessionStore := session.NewStore(f.conn)
+	if err := sessionStore.Insert(ctx, session.Row{
+		ID: otherSessionID, UserID: f.userID, TenantID: tt2.ID, DeviceID: uuid.New().String(),
+		RefreshHash: "fixture-hash-other-tenant", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("Insert() second session error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, otherSessionID) })
+
+	if err := f.revoker.MarkRolesStaleForUserInTenant(ctx, f.userID, f.tenantID); err != nil {
+		t.Fatalf("MarkRolesStaleForUserInTenant() error: %v", err)
+	}
+
+	stale, err := f.revoker.IsRolesStale(ctx, f.sessionID)
+	if err != nil {
+		t.Fatalf("IsRolesStale() fixture session error: %v", err)
+	}
+	if !stale {
+		t.Error("IsRolesStale() = false for the fixture tenant's session, want true")
+	}
+
+	otherStale, err := f.revoker.IsRolesStale(ctx, otherSessionID)
+	if err != nil {
+		t.Fatalf("IsRolesStale() other-tenant session error: %v", err)
+	}
+	if otherStale {
+		t.Error("IsRolesStale() = true for the other tenant's session, want false — must be tenant-scoped")
+	}
+}
+
 func TestRevokeAllForUserInTenant_OnlyBlocklistsThatTenantsSessions(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -188,10 +234,10 @@ func TestRevokeAllForUserInTenant_OnlyBlocklistsThatTenantsSessions(t *testing.T
 	}
 	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt2.ID) })
 
-	otherSessionID := uuid.NewString()
+	otherSessionID := uuid.New().String()
 	sessionStore := session.NewStore(f.conn)
 	if err := sessionStore.Insert(ctx, session.Row{
-		ID: otherSessionID, UserID: f.userID, TenantID: tt2.ID, DeviceID: uuid.NewString(),
+		ID: otherSessionID, UserID: f.userID, TenantID: tt2.ID, DeviceID: uuid.New().String(),
 		RefreshHash: "fixture-hash-other-tenant", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
 	}); err != nil {
 		t.Fatalf("Insert() second session error: %v", err)

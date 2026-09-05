@@ -4,11 +4,8 @@
 // Redis, 60s TTL) and RolePermissionMap (§14 layer 3, in-process, rebuilt
 // on module load/hot-reload). Both are consumed by
 // internal/engine/authcheck.Checker's permission-context hydration step.
-// RoleCache.Invalidate has no caller yet, though — no role-grant/revoke
-// flow exists anywhere in the engine yet to call it — same "build the
-// primitive, leave the flow that consumes it to the ticket that owns it"
-// pattern internal/engine/tenantresolve's own package doc comment
-// describes for goerp#91's still-unbuilt middleware chain.
+// RoleCache.Invalidate is called by internal/engine/auth/roleassign's
+// grant/revoke flow (goerp#619).
 package permcache
 
 import (
@@ -78,7 +75,8 @@ func (c *RoleCache) Set(ctx context.Context, tenantID, userID string, roleIDs []
 
 // Invalidate deletes the cached entry for (tenantID, userID) —
 // auth-internals.md §14 "Cache invalidation on role change" step 1, called
-// synchronously by whatever future flow grants or revokes a role. Unlike
+// synchronously by internal/engine/auth/roleassign's grant/revoke flow
+// (goerp#619). Unlike
 // Get/Set, the error is returned rather than swallowed: a failed
 // invalidation on a real grant/revoke path means a stale entry may keep
 // serving for up to the remaining TTL, a correctness-relevant signal the
