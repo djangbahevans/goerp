@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authTransition, AuthMachine } from "./auth-machine.js";
+import { AuthMachine, authTransition } from "./auth-machine.js";
 import type { AuthState, CurrentTenant, CurrentUser } from "./types.js";
 
 const user: CurrentUser = { id: "u1", email: "a@example.com", roles: ["admin"], amr: ["pwd"], mfaVerifiedAt: null };

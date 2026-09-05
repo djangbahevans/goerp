@@ -46,6 +46,10 @@ jobs:
         working-directory: shell
         run: npm install
 
+      - name: Lint
+        working-directory: shell
+        run: npm run lint
+
       - name: Typecheck
         working-directory: shell
         run: npm run typecheck

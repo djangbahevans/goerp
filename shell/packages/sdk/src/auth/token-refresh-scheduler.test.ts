@@ -104,9 +104,7 @@ describe("TokenRefreshScheduler", () => {
     // "refreshing") must no-op, and no new timer should be armed.
     const machine = authenticatedMachine();
     let resolveRefresh!: (outcome: RefreshOutcome) => void;
-    const refreshSession = vi.fn(
-      () => new Promise<RefreshOutcome>((resolve) => (resolveRefresh = resolve)),
-    );
+    const refreshSession = vi.fn(() => new Promise<RefreshOutcome>((resolve) => (resolveRefresh = resolve)));
     const scheduler = new TokenRefreshScheduler(machine, { refreshSession });
 
     scheduler.schedule(900);

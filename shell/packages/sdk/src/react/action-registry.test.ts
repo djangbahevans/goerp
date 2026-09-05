@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ActionRegistry } from "./action-registry.js";
 import type { APIClient } from "../http/types.js";
+import { ActionRegistry } from "./action-registry.js";
 
 function fakeClient(schema: unknown): Pick<APIClient, "get"> {
   return { get: vi.fn(async () => schema) as Pick<APIClient, "get">["get"] };

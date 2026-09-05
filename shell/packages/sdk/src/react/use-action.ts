@@ -1,9 +1,15 @@
-import { useMutation, useQueryClient, type QueryClient, type QueryKey, type UseMutationOptions } from "@tanstack/react-query";
-import { AppError } from "../error/app-error.js";
+import {
+  type QueryClient,
+  type QueryKey,
+  type UseMutationOptions,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
+import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
 import { toast } from "../notifications/toast.js";
-import { ActionRegistry, actionRegistry } from "./action-registry.js";
+import { type ActionRegistry, actionRegistry } from "./action-registry.js";
 
 // Scoped down from typescript-sdk-reference.md's full ErrorHandlerContext
 // (navigate, toast, queryClient) — navigate has no hook to source it from
@@ -39,7 +45,12 @@ export interface ActionResult<TResult, TVariables> {
 
 type DispatchClient = Pick<APIClient, "get" | "post" | "put" | "patch" | "delete">;
 
-async function dispatch<TResult>(client: DispatchClient, method: string, path: string, body: unknown): Promise<TResult> {
+async function dispatch<TResult>(
+  client: DispatchClient,
+  method: string,
+  path: string,
+  body: unknown,
+): Promise<TResult> {
   switch (method) {
     case "GET":
       // A GET action has no request body on the wire — a computed body

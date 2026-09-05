@@ -7,10 +7,7 @@ export const Route = createFileRoute("/")({
   component: IndexPage,
 });
 
-function Surface({
-  asChild,
-  ...props
-}: { asChild?: boolean } & ComponentProps<"div">) {
+function Surface({ asChild, ...props }: { asChild?: boolean } & ComponentProps<"div">) {
   const Comp = asChild ? Slot : "div";
   return <Comp {...props} />;
 }

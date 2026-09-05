@@ -48,11 +48,11 @@ describe("loadVerifiedModule", () => {
     stubFetch({ ok: true, bytes });
 
     const importer = vi.fn();
-    const wrongHash = "sha256:" + "0".repeat(64);
+    const wrongHash = `sha256:${"0".repeat(64)}`;
 
-    await expect(
-      loadVerifiedModule("https://example.test/bundle.js", wrongHash, { importer }),
-    ).rejects.toThrow(/integrity verification/);
+    await expect(loadVerifiedModule("https://example.test/bundle.js", wrongHash, { importer })).rejects.toThrow(
+      /integrity verification/,
+    );
 
     expect(importer).not.toHaveBeenCalled();
   });
@@ -63,7 +63,7 @@ describe("loadVerifiedModule", () => {
     const importer = vi.fn();
 
     await expect(
-      loadVerifiedModule("https://example.test/bundle.js", "sha256:" + "0".repeat(64), { importer }),
+      loadVerifiedModule("https://example.test/bundle.js", `sha256:${"0".repeat(64)}`, { importer }),
     ).rejects.toThrow(/404/);
 
     expect(importer).not.toHaveBeenCalled();
