@@ -246,20 +246,6 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 		result.Failed = append(result.Failed, TenantResult{Tenant: r.Tenant.Slug, Error: r.Err.Error()})
 	}
 
-	// Live-session convenience only (goerp#621): a client with no open
-	// /_ws connection sees the new module on its next GET /_meta/permissions
-	// fetch regardless, so a tenant with zero current subscribers to its
-	// channel — the common case until goerp#614 lands — is not an error.
-	if w.Hub != nil {
-		for _, t := range syncResult.Succeeded {
-			payload := map[string]string{"module": m.Manifest.Name}
-			if _, err := w.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "module.installed", payload); err != nil {
-				log.Warn().Err(err).Str("module", m.Manifest.Name).Str("tenant", t.Slug).
-					Msg("module install: broadcast to tenant failed")
-			}
-		}
-	}
-
 	// Trigger data migration dispatch (engine-internals.md §2 Stage 4 step
 	// 26) now that m is live under its name in the registry — same
 	// ordering rationale as modulereload.Leader.Run's identical call.
@@ -273,6 +259,25 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	if err := w.Workers.SpawnAll(ctx, map[string]*module.LoadedModule{m.Manifest.Name: m}); err != nil {
 		log.Error().Err(err).Str("module", m.Manifest.Name).Msg("module install: workflow-worker spawn failed")
 		result.WorkflowWorkers = err.Error()
+	}
+
+	// Live-session convenience only (goerp#621), run last: ctx is the
+	// job's own single, already-tight budget (River's default JobTimeout
+	// is one minute, and neither this Worker nor jobqueue.New overrides
+	// it), so a broadcast to a stalled client must not be able to steal
+	// time from the data-migration dispatch and workflow-worker spawn
+	// above. A client with no open /_ws connection sees the new module on
+	// its next GET /_meta/permissions fetch regardless, so a tenant with
+	// zero current subscribers to its channel — the common case until
+	// goerp#614 lands — is not an error.
+	if w.Hub != nil {
+		payload := map[string]string{"module": m.Manifest.Name}
+		for _, t := range syncResult.Succeeded {
+			if _, err := w.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "module.installed", payload); err != nil {
+				log.Warn().Err(err).Str("module", m.Manifest.Name).Str("tenant", t.Slug).
+					Msg("module install: broadcast to tenant failed")
+			}
+		}
 	}
 
 	return result, nil
