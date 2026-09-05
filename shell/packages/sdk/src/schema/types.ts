@@ -9,7 +9,10 @@ export type CRUDAction = "get" | "list" | "create" | "update" | "delete";
 export interface RouteSchema {
   method: string;
   path: string;
-  permissions: string[];
+  // Genuinely nullable, not just optional: Go's Permissions []string carries
+  // no `omitempty` tag, but an EnableOps-auto-generated CRUD route never
+  // sets it — its zero-value nil slice marshals as JSON `null`, not `[]`.
+  permissions: string[] | null;
   model?: string;
   crud_action?: CRUDAction;
   name?: string;
