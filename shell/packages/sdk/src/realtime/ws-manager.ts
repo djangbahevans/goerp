@@ -5,14 +5,11 @@ import type { AuthState } from "../auth/types.js";
 const WS_PATH = "/_ws";
 const INITIAL_RECONNECT_DELAY_MS = 1000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
-// auth-internals.md's documented close code for "session became invalid" —
-// a WebSocketManager receiving this never reconnects on its own; only a
-// fresh login (via wireWebSocketManager) starts a new connection.
+// shell-architecture.md §12's close-code convention — never reconnects.
 const AUTH_FAILURE_CLOSE_CODE = 4001;
 const LOGOUT_CLOSE_CODE = 1000;
-// WebSocket.readyState's spec-fixed values (never referenced via the
-// global WebSocket constructor's own static properties, so this doesn't
-// depend on one being present/spec-complete wherever this runs).
+// WebSocket.readyState's spec-fixed OPEN value, used as a literal so this
+// doesn't depend on a global WebSocket constructor being present.
 const READY_STATE_OPEN = 1;
 
 export interface RealtimeEnvelope {
@@ -50,14 +47,9 @@ function parseEnvelope(data: unknown): RealtimeEnvelope | null {
 }
 
 // WebSocketManager is the shell's single persistent /_ws connection,
-// shared by every channel subscriber. Each channel's subscriber map
-// doubles as its ref count: the wire subscribe/unsubscribe message is
-// only sent on the first subscriber / last unsubscriber, and channels
-// with at least one subscriber are re-subscribed automatically after a
-// reconnect. Subscriptions are keyed by a fresh id per subscribe() call,
-// not by the handler reference itself — two subscriptions that happen to
-// share the identical handler function must stay independent, each with
-// its own unsubscribe, rather than colliding as one Set entry.
+// shared by every channel subscriber. Subscriptions key by a fresh id per
+// subscribe() call rather than by handler reference, so two subscriptions
+// sharing the same handler function stay independent.
 export class WebSocketManager {
   private ws: WebSocket | null = null;
   private readonly channels = new Map<string, Map<number, MessageHandler>>();
@@ -66,10 +58,9 @@ export class WebSocketManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private loggedOut = false;
 
-  // Set by wireWebSocketManager so a 4001 close can invalidate the shared
-  // auth state — shell-architecture.md §12's own sketch does this
-  // directly against a module-level authMachine; kept as an injectable
-  // callback here instead so this class has no auth dependency of its own.
+  // Set by wireWebSocketManager to invalidate the shared auth state on a
+  // 4001 close — kept as an injectable callback so this class has no auth
+  // dependency of its own.
   onAuthFailure: (() => void) | null = null;
 
   constructor(
@@ -81,11 +72,8 @@ export class WebSocketManager {
     this.loggedOut = false;
     this.clearReconnectTimer();
 
-    // Detach before closing: the old socket's onclose otherwise fires
-    // while `this.ws` still points at it (not yet stale by its own
-    // guard's definition), which would run this same connect()'s
-    // scheduleReconnect() a second time right as the new socket is
-    // being created.
+    // Detach before closing so the old socket's onclose sees itself as
+    // already-stale, instead of triggering a spurious second reconnect.
     const oldWs = this.ws;
     this.ws = null;
     oldWs?.close();
@@ -120,12 +108,9 @@ export class WebSocketManager {
     };
   }
 
-  // subscribe returns an unsubscribe function — the same shape
-  // shell-architecture.md's own WebSocketManager.subscribe documents.
-  // Sending on the wire only ever happens while the socket is OPEN
-  // (readyState CONNECTING rejects send() with a thrown InvalidStateError);
-  // a channel touched before the connection opens is instead picked up by
-  // connect()'s own onopen resubscribe loop once it does.
+  // A channel touched before the connection opens is picked up by
+  // connect()'s own onopen resubscribe loop once it does — send() only
+  // ever writes while OPEN, since CONNECTING throws InvalidStateError.
   subscribe(channel: string, handler: MessageHandler): () => void {
     let subscribers = this.channels.get(channel);
     if (!subscribers) {
@@ -176,22 +161,15 @@ export class WebSocketManager {
   }
 }
 
-// "refreshing" counts as authenticated here — the same definition
-// AuthContextValue.isAuthenticated uses (auth-provider.tsx) — so a token
-// refresh cycle (authenticated -> refreshing -> authenticated) never
-// tears down the live connection. wireAutoRefresh's own narrower literal
-// "authenticated" check doesn't apply here: that check's harmless no-op
-// clear()-during-refresh doesn't have an equivalent here, since a real
-// disconnect()/connect() pair is expensive and user-visible.
+// "refreshing" counts as connected too (matching AuthContextValue.
+// isAuthenticated), so a token refresh cycle never tears down the socket.
 function isConnectedStatus(status: AuthState["status"]): boolean {
   return status === "authenticated" || status === "refreshing";
 }
 
-// Connects/disconnects in reaction to the auth machine's own state —
-// session_expired can fire from http/api-client.ts's unrecoverable-401
-// path, entirely outside auth-provider.tsx, so nothing short of watching
-// the machine itself reliably catches every path in and out of
-// "authenticated".
+// Connects/disconnects in reaction to the auth machine's own state, since
+// session_expired can fire from outside auth-provider.tsx too (e.g. an
+// unrecoverable 401 in http/api-client.ts).
 export function wireWebSocketManager(
   machine: AuthMachine,
   manager: WebSocketManager = new WebSocketManager(),
