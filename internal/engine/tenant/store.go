@@ -376,6 +376,30 @@ func (s *Store) UpdateStatus(ctx context.Context, slug string, status Status, re
 	return t, nil
 }
 
+// UpdatePlan sets the system.tenants.plan display column — the coarse
+// starter/pro/enterprise/internal label surfaced by GET /auth/me and
+// goerp tenant list/status, kept in sync with whatever plan a tenant's
+// current subscription actually moved onto (billing.Store.ChangeTenantPlan),
+// separately from that entitlement-driving relationship itself.
+func (s *Store) UpdatePlan(ctx context.Context, slug string, plan Plan) (*Tenant, error) {
+	row := s.db.QueryRowContext(ctx, `
+		UPDATE system.tenants
+		SET plan = $1, updated_at = NOW()
+		WHERE slug = $2
+		RETURNING `+tenantColumns+`
+	`, string(plan), slug)
+
+	t, err := scanTenant(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTenantNotFound
+		}
+		return nil, fmt.Errorf("update tenant plan: %w", err)
+	}
+
+	return t, nil
+}
+
 // ErrOffboardNotCancellable is returned by CancelOffboarding when the
 // tenant isn't in a state offboarding can be reversed from — either it was
 // never offboarding, or offboard deletion has already started

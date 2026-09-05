@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -387,5 +388,138 @@ func TestDisabledModulesForTenant_ModuleWithNoRowIsNotDisabled(t *testing.T) {
 	}
 	if len(disabled) != 0 {
 		t.Fatalf("DisabledModulesForTenant() = %v, want [] for a tenant with no tenant_module_settings rows", disabled)
+	}
+}
+
+func TestGetPlanByName_Succeeds(t *testing.T) {
+	env := openTestStore(t)
+	p := env.createPlan(t, nil, nil)
+
+	got, err := env.store.GetPlanByName(context.Background(), p.Name)
+	if err != nil {
+		t.Fatalf("GetPlanByName() error: %v", err)
+	}
+	if got.ID != p.ID {
+		t.Errorf("ID = %q, want %q", got.ID, p.ID)
+	}
+}
+
+func TestGetPlanByName_UnknownNameReturnsErrPlanNotFound(t *testing.T) {
+	env := openTestStore(t)
+
+	_, err := env.store.GetPlanByName(context.Background(), uniqueName(t))
+	if !errors.Is(err, ErrPlanNotFound) {
+		t.Fatalf("GetPlanByName() error = %v, want ErrPlanNotFound", err)
+	}
+}
+
+func TestGetPlanByName_RetiredPlanReturnsErrPlanNotFound(t *testing.T) {
+	env := openTestStore(t)
+	ctx := context.Background()
+	p := env.createPlan(t, nil, nil)
+
+	if _, err := env.conn.ExecContext(ctx, "UPDATE system.plans SET is_active = FALSE WHERE id = $1", p.ID); err != nil {
+		t.Fatalf("retire plan: %v", err)
+	}
+
+	_, err := env.store.GetPlanByName(ctx, p.Name)
+	if !errors.Is(err, ErrPlanNotFound) {
+		t.Fatalf("GetPlanByName() error = %v, want ErrPlanNotFound for a retired (is_active = false) plan", err)
+	}
+}
+
+func TestChangeTenantPlan_MovesActiveSubscriptionOntoNewPlan(t *testing.T) {
+	env := openTestStore(t)
+	ctx := context.Background()
+	oldPlan := env.createPlan(t, nil, nil)
+	newPlan := env.createPlan(t, nil, nil)
+	tt := env.createTenant(t)
+	now := time.Now()
+
+	sub, err := env.store.CreateSubscription(ctx, tt.ID, oldPlan.ID, now, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("CreateSubscription() error: %v", err)
+	}
+	if _, err := env.conn.ExecContext(ctx, "UPDATE system.tenant_subscriptions SET status = 'active' WHERE id = $1", sub.ID); err != nil {
+		t.Fatalf("mark subscription active: %v", err)
+	}
+
+	changed, err := env.store.ChangeTenantPlan(ctx, tt.ID, newPlan.ID)
+	if err != nil {
+		t.Fatalf("ChangeTenantPlan() error: %v", err)
+	}
+	if changed.PlanID != newPlan.ID {
+		t.Errorf("PlanID = %q, want %q", changed.PlanID, newPlan.ID)
+	}
+	if changed.ID != sub.ID {
+		t.Errorf("ID = %q, want %q (same subscription row, moved onto the new plan)", changed.ID, sub.ID)
+	}
+}
+
+func TestChangeTenantPlan_NoActiveSubscriptionReturnsErr(t *testing.T) {
+	env := openTestStore(t)
+	newPlan := env.createPlan(t, nil, nil)
+	tt := env.createTenant(t)
+
+	_, err := env.store.ChangeTenantPlan(context.Background(), tt.ID, newPlan.ID)
+	if !errors.Is(err, ErrNoActiveSubscription) {
+		t.Fatalf("ChangeTenantPlan() error = %v, want ErrNoActiveSubscription", err)
+	}
+}
+
+func TestChangeTenantPlan_CancelledSubscriptionIsNotMoved(t *testing.T) {
+	env := openTestStore(t)
+	ctx := context.Background()
+	oldPlan := env.createPlan(t, nil, nil)
+	newPlan := env.createPlan(t, nil, nil)
+	tt := env.createTenant(t)
+	now := time.Now()
+
+	sub, err := env.store.CreateSubscription(ctx, tt.ID, oldPlan.ID, now, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("CreateSubscription() error: %v", err)
+	}
+	if _, err := env.conn.ExecContext(ctx, "UPDATE system.tenant_subscriptions SET status = 'cancelled' WHERE id = $1", sub.ID); err != nil {
+		t.Fatalf("mark subscription cancelled: %v", err)
+	}
+
+	_, err = env.store.ChangeTenantPlan(ctx, tt.ID, newPlan.ID)
+	if !errors.Is(err, ErrNoActiveSubscription) {
+		t.Fatalf("ChangeTenantPlan() error = %v, want ErrNoActiveSubscription for a cancelled subscription", err)
+	}
+}
+
+// TestChangeTenantPlan_MultipleActiveSubscriptionsReturnsErr guards
+// against silently discarding an invariant violation: nothing in this
+// schema's constraints stops a tenant from ending up with more than one
+// trialing/active tenant_subscriptions row, and this is the case
+// PlanEntitlementsForTenant's own join assumes can't happen.
+func TestChangeTenantPlan_MultipleActiveSubscriptionsReturnsErr(t *testing.T) {
+	env := openTestStore(t)
+	ctx := context.Background()
+	planA := env.createPlan(t, nil, nil)
+	planB := env.createPlan(t, nil, nil)
+	newPlan := env.createPlan(t, nil, nil)
+	tt := env.createTenant(t)
+	now := time.Now()
+
+	subA, err := env.store.CreateSubscription(ctx, tt.ID, planA.ID, now, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("CreateSubscription() error: %v", err)
+	}
+	if _, err := env.conn.ExecContext(ctx, "UPDATE system.tenant_subscriptions SET status = 'active' WHERE id = $1", subA.ID); err != nil {
+		t.Fatalf("mark subscription A active: %v", err)
+	}
+	subB, err := env.store.CreateSubscription(ctx, tt.ID, planB.ID, now, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("CreateSubscription() error: %v", err)
+	}
+	if _, err := env.conn.ExecContext(ctx, "UPDATE system.tenant_subscriptions SET status = 'active' WHERE id = $1", subB.ID); err != nil {
+		t.Fatalf("mark subscription B active: %v", err)
+	}
+
+	_, err = env.store.ChangeTenantPlan(ctx, tt.ID, newPlan.ID)
+	if !errors.Is(err, ErrMultipleActiveSubscriptions) {
+		t.Fatalf("ChangeTenantPlan() error = %v, want ErrMultipleActiveSubscriptions", err)
 	}
 }

@@ -347,6 +347,32 @@ func TestUpdateStatus_NotFoundReturnsErrTenantNotFound(t *testing.T) {
 	}
 }
 
+func TestUpdatePlan_ChangesPlanColumn(t *testing.T) {
+	store, conn := openTestStore(t)
+	slug := uniqueSlug(t)
+	created := createTenant(t, store, conn, slug, "Change My Plan")
+	if created.Plan != PlanStarter {
+		t.Fatalf("Plan = %q, want default %q", created.Plan, PlanStarter)
+	}
+
+	got, err := store.UpdatePlan(context.Background(), slug, PlanPro)
+	if err != nil {
+		t.Fatalf("UpdatePlan() error: %v", err)
+	}
+	if got.Plan != PlanPro {
+		t.Errorf("Plan = %q, want %q", got.Plan, PlanPro)
+	}
+}
+
+func TestUpdatePlan_NotFoundReturnsErrTenantNotFound(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	_, err := store.UpdatePlan(context.Background(), uniqueSlug(t), PlanPro)
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Errorf("UpdatePlan() error = %v, want ErrTenantNotFound", err)
+	}
+}
+
 func TestList_FiltersByStatusAndPlan(t *testing.T) {
 	store, conn := openTestStore(t)
 	ctx := context.Background()
