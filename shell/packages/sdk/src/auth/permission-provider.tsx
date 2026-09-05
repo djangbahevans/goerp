@@ -24,7 +24,9 @@ export function createPermissionContextValue(data: PermissionData): PermissionCo
   };
 }
 
-function PermissionProviderForUser({
+// Exported for testing — lets tests drive isAuthenticated/tenantId directly
+// instead of standing up a full AuthProvider/auth machine.
+export function PermissionProviderForUser({
   isAuthenticated,
   tenantId,
   children,
