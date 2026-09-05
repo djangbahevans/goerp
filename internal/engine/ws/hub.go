@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -162,10 +163,11 @@ func (h *Hub) unregister(c *Conn) {
 }
 
 // Broadcast sends {channel, type, payload} to every connection currently
-// subscribed to channel, returning the count actually reached. A send
-// failure to one connection doesn't stop delivery to the rest — that
-// connection's own Serve loop will observe the same failure on its next
-// read and unregister itself.
+// subscribed to channel, returning the count actually reached. Writes fan
+// out concurrently so one slow or stalled connection can't hold up
+// delivery to the rest — a send failure to one connection doesn't stop
+// delivery to others either; that connection's own Serve loop will
+// observe the same failure on its next read and unregister itself.
 func (h *Hub) Broadcast(ctx context.Context, channel, msgType string, payload any) (int, error) {
 	h.mu.RLock()
 	subs := h.subscribers[channel]
@@ -176,15 +178,54 @@ func (h *Hub) Broadcast(ctx context.Context, channel, msgType string, payload an
 	h.mu.RUnlock()
 
 	env := outboundEnvelope{Channel: channel, Type: msgType, Payload: payload}
-	reached := 0
+	var reached atomic.Int64
+	var wg sync.WaitGroup
 	for _, c := range targets {
-		if err := wsjson.Write(ctx, c.ws, env); err != nil {
-			continue
-		}
-		reached++
+		wg.Add(1)
+		go func(c *Conn) {
+			defer wg.Done()
+			if err := wsjson.Write(ctx, c.ws, env); err == nil {
+				reached.Add(1)
+			}
+		}(c)
 	}
-	if reached == 0 && len(targets) > 0 {
+	wg.Wait()
+
+	count := int(reached.Load())
+	if count == 0 && len(targets) > 0 {
 		return 0, fmt.Errorf("broadcast to channel %q: reached none of %d subscriber(s)", channel, len(targets))
 	}
-	return reached, nil
+	return count, nil
+}
+
+// Close closes every currently registered connection with status 1001
+// ("going away"), or until ctx is done — whichever comes first. Call it
+// during engine shutdown so open connections and their Serve goroutines
+// don't outlive the rest of the engine's graceful shutdown.
+func (h *Hub) Close(ctx context.Context) {
+	h.mu.RLock()
+	conns := make([]*Conn, 0, len(h.conns))
+	for _, c := range h.conns {
+		conns = append(conns, c)
+	}
+	h.mu.RUnlock()
+
+	var wg sync.WaitGroup
+	for _, c := range conns {
+		wg.Add(1)
+		go func(c *Conn) {
+			defer wg.Done()
+			_ = c.ws.Close(websocket.StatusGoingAway, "server shutting down")
+		}(c)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }

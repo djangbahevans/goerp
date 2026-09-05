@@ -1142,6 +1142,8 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		log.Warn().Err(err).Msg("could not shut down admin server")
 	}
 
+	e.wsHub.Close(ctx)
+
 	if err := e.jobQueue.Stop(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not stop job queue worker")
 	}

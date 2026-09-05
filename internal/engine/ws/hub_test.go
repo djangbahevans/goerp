@@ -157,6 +157,55 @@ func TestHub_DisconnectRemovesConnectionFromRegistryAndChannels(t *testing.T) {
 	}
 }
 
+func TestHub_CloseClosesEveryRegisteredConnection(t *testing.T) {
+	hub := NewHub()
+	url := testServer(t, hub)
+	connA := dial(t, url)
+	connB := dial(t, url)
+	subscribe(t, connA, "notifications")
+	subscribe(t, connB, "notifications")
+	waitForSubscriberCount(t, hub, "notifications", 2)
+
+	// A real client keeps reading for the life of the connection (the
+	// library's own requirement — otherwise control frames, including
+	// the close handshake Hub.Close initiates, never get handled). Both
+	// connections just discard whatever arrives; readErr records how
+	// each connection's read loop ultimately ended.
+	readErr := make(chan error, 2)
+	for _, c := range []*websocket.Conn{connA, connB} {
+		go func(c *websocket.Conn) {
+			for {
+				if _, _, err := c.Read(context.Background()); err != nil {
+					readErr <- err
+					return
+				}
+			}
+		}(c)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	hub.Close(ctx)
+
+	for range 2 {
+		select {
+		case err := <-readErr:
+			if err == nil {
+				t.Error("expected a close error, got nil")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for both connections to observe the close")
+		}
+	}
+
+	hub.mu.RLock()
+	n := len(hub.conns)
+	hub.mu.RUnlock()
+	if n != 0 {
+		t.Errorf("hub still has %d registered connection(s) after Close, want 0", n)
+	}
+}
+
 func TestHub_BroadcastToChannelWithNoSubscribersReachesZero(t *testing.T) {
 	hub := NewHub()
 	reached, err := hub.Broadcast(t.Context(), "nobody-subscribed", "record.updated", nil)

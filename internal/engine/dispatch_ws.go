@@ -38,11 +38,14 @@ func (e *Engine) dispatchWSRoute(w http.ResponseWriter, r *http.Request) {
 		// Accept already wrote an HTTP error response to w.
 		return
 	}
+	// Serve's only return is a non-nil error from a failed read — a
+	// client-initiated close included, since coder/websocket has no
+	// "closed cleanly" signal distinct from an error. The library itself
+	// already closes the connection with an appropriate reason on that
+	// error (its own documented behavior), so CloseNow here is just
+	// resource cleanup, not a second close attempt.
 	defer func() { _ = conn.CloseNow() }()
 
 	connID := uuid.NewString()
-	if err := e.wsHub.Serve(r.Context(), conn, connID, authCtx.UserID, tenantCtx.TenantID, r.UserAgent()); err != nil {
-		return
-	}
-	_ = conn.Close(websocket.StatusNormalClosure, "")
+	_ = e.wsHub.Serve(r.Context(), conn, connID, authCtx.UserID, tenantCtx.TenantID, r.UserAgent())
 }
