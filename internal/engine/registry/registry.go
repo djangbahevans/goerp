@@ -245,6 +245,7 @@ type schemaHashRoute struct {
 	Permissions    []string
 	Model          string
 	CrudAction     string
+	Name           string
 	ResponseIsList bool
 }
 
@@ -347,6 +348,7 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 			Permissions:    mf.Permissions,
 			Model:          mf.Model,
 			CrudAction:     mf.CrudAction,
+			Name:           mf.Name,
 			ResponseIsList: mf.ResponseIsList,
 		})
 		hashModules[r.Entry.ModuleName] = hm

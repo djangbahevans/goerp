@@ -42,7 +42,9 @@ type DispatchClient = Pick<APIClient, "get" | "post" | "put" | "patch" | "delete
 async function dispatch<TResult>(client: DispatchClient, method: string, path: string, body: unknown): Promise<TResult> {
   switch (method) {
     case "GET":
-      return client.get<TResult>(path);
+      // A GET action has no request body on the wire — a computed body
+      // becomes query params instead of being silently dropped.
+      return client.get<TResult>(path, body !== undefined ? { params: body as Record<string, unknown> } : undefined);
     case "POST":
       return client.post<TResult>(path, body);
     case "PUT":
@@ -50,6 +52,11 @@ async function dispatch<TResult>(client: DispatchClient, method: string, path: s
     case "PATCH":
       return client.patch<TResult>(path, body);
     case "DELETE":
+      // APIClient.delete has no body parameter (matches the documented
+      // interface) — fail loudly rather than silently dropping one.
+      if (body !== undefined) {
+        throw new Error(`useAction: DELETE ${path} resolved a request body, but APIClient.delete cannot send one`);
+      }
       return client.delete<TResult>(path);
     default:
       throw new Error(`useAction: unsupported method "${method}"`);
@@ -64,6 +71,10 @@ async function dispatch<TResult>(client: DispatchClient, method: string, path: s
 // its remaining keys, if there's no `body` field) becomes the payload
 // (update.mutate({ id, body })). A path with no placeholder sends
 // variables as the body unchanged.
+//
+// Response `ui` instructions (shell-architecture.md §12a "Integration
+// with route actions") aren't inspected here — the executor they'd
+// dispatch to doesn't exist anywhere in this repo yet.
 export function splitPathAndBody(path: string, variables: unknown): { path: string; body: unknown } {
   const placeholderMatch = /\{(\w+)\}/.exec(path);
   if (!placeholderMatch) {
@@ -71,7 +82,12 @@ export function splitPathAndBody(path: string, variables: unknown): { path: stri
   }
   const [placeholder, paramName] = placeholderMatch as unknown as [string, string];
 
-  if (variables !== null && typeof variables === "object" && paramName in variables) {
+  if (variables !== null && typeof variables === "object") {
+    if (!(paramName in variables)) {
+      throw new Error(
+        `useAction: route ${path} needs a "${paramName}" variable, but the object passed to mutate() has none`,
+      );
+    }
     const { [paramName]: paramValue, ...rest } = variables as Record<string, unknown>;
     const body = "body" in rest ? rest.body : Object.keys(rest).length > 0 ? rest : undefined;
     return { path: path.replace(placeholder, String(paramValue)), body };

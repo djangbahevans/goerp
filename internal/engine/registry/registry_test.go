@@ -448,6 +448,43 @@ func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnRouteChange(t *testing
 	}
 }
 
+func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnNameChange(t *testing.T) {
+	// Same Method/Path/Model/CrudAction/ResponseIsList — only Name differs,
+	// e.g. an EnableOps-auto-generated "get" route (Name == "") overridden
+	// by a hand-registered engine.Action(model, engine.Get, ...) (Name ==
+	// "get"). The hash must still change, or a cached /_meta/schema
+	// response never learns the action became name-resolvable.
+	r := &ModuleRegistry{}
+	snap1, err := r.Update(map[string]*module.LoadedModule{
+		"contacts": {
+			Status:   module.StatusReady,
+			Manifest: manifest.Manifest{Type: "standard"},
+			ExplicitRoutes: []engine.RouteDeclaration{
+				{Method: "GET", Path: "/{id}", Auth: "required", Model: "contacts.contact", CRUDAction: "get"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	snap2, err := r.Update(map[string]*module.LoadedModule{
+		"contacts": {
+			Status:   module.StatusReady,
+			Manifest: manifest.Manifest{Type: "standard"},
+			ExplicitRoutes: []engine.RouteDeclaration{
+				{Method: "GET", Path: "/{id}", Auth: "required", Model: "contacts.contact", CRUDAction: "get", Name: "get"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if snap1.SchemaHash() == snap2.SchemaHash() {
+		t.Errorf("SchemaHash() unchanged (%s) after Name changed", snap1.SchemaHash())
+	}
+}
+
 func TestModuleRegistry_Update_SnapshotSchemaHashStableAcrossIdenticalRebuilds(t *testing.T) {
 	buildModules := func() map[string]*module.LoadedModule {
 		return map[string]*module.LoadedModule{

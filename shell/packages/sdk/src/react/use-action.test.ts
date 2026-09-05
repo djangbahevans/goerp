@@ -41,11 +41,8 @@ describe("splitPathAndBody", () => {
     });
   });
 
-  it("falls back to bare-scalar behavior when the object doesn't carry the placeholder key", () => {
-    expect(splitPathAndBody("/orders/{id}/confirm", { foo: "bar" })).toEqual({
-      path: "/orders/[object Object]/confirm",
-      body: undefined,
-    });
+  it("throws a clear error when an object variable doesn't carry the placeholder key", () => {
+    expect(() => splitPathAndBody("/orders/{id}/confirm", { foo: "bar" })).toThrow(/needs a "id" variable/);
   });
 });
 
@@ -96,6 +93,30 @@ describe("createActionMutationOptions", () => {
     expect(client.put).toHaveBeenCalledTimes(1);
     expect(client.patch).toHaveBeenCalledTimes(1);
     expect(client.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards a GET action's body as query params instead of dropping it", async () => {
+    const registry = fakeRegistry({ method: "GET", path: "/orders" });
+    const client = { get: vi.fn(async () => []) };
+    const queryClient = new QueryClient();
+
+    const opts = createActionMutationOptions("sales.listOrders", {}, queryClient, registry, client as never);
+    await opts.mutationFn!({ status: "open" }, undefined as never);
+
+    expect(client.get).toHaveBeenCalledWith("/orders", { params: { status: "open" } });
+  });
+
+  it("throws instead of silently dropping a DELETE action's resolved body", async () => {
+    const registry = fakeRegistry({ method: "DELETE", path: "/orders/{id}" });
+    const client = { delete: vi.fn(async () => undefined) };
+    const queryClient = new QueryClient();
+
+    const opts = createActionMutationOptions("sales.deleteOrder", {}, queryClient, registry, client as never);
+
+    await expect(opts.mutationFn!({ id: "o1", body: { reason: "x" } }, undefined as never)).rejects.toThrow(
+      /cannot send one/,
+    );
+    expect(client.delete).not.toHaveBeenCalled();
   });
 
   it("invalidates every listed query key on success", async () => {
