@@ -20,6 +20,27 @@ export interface RouteSchema {
   view?: string;
 }
 
+// shell-architecture.md §9's FieldDef.
+export interface FieldDef {
+  name: string;
+  type: string;
+  required?: boolean;
+  related_model?: string;
+  // "one2many" only — the many2one field on related_model pointing back
+  // at this model.
+  inverse_field?: string;
+}
+
+// shell-architecture.md §9's ModelDef.
+export interface ModelDef {
+  name: string;
+  label: string;
+  label_plural: string;
+  fields: FieldDef[];
+  enabled_ops: string[];
+  shareable: boolean;
+}
+
 export interface ModuleSchema {
   name: string;
   version: string;
@@ -27,7 +48,7 @@ export interface ModuleSchema {
   routes: RouteSchema[];
   views: unknown[];
   navigation: unknown[];
-  models: Record<string, unknown>;
+  models: Record<string, ModelDef>;
   permissions: unknown[];
   frontend: { bundle_url: string; bundle_sha256: string } | null;
   public_config: Record<string, unknown>;
