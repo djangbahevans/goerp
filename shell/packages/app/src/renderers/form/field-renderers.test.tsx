@@ -73,9 +73,12 @@ describe("FieldInput", () => {
     expect(onChange).toHaveBeenCalledWith("Acme Inc");
   });
 
-  it("currency: prefixes the currency code read from currency_field", () => {
-    renderField({ field: "amount", type: "currency", currency_field: "currency" }, 100, { currency: "USD" });
+  it("currency: prefixes the currency code read from currency_field and displays minor units as major-unit decimal", () => {
+    // l10n-guide.md: amounts are stored as integer minor units — 10000 USD
+    // cents displays as 100.
+    renderField({ field: "amount", type: "currency", currency_field: "currency" }, 10000, { currency: "USD" });
     expect(screen.getByText("USD")).toBeTruthy();
+    expect((screen.getByRole("spinbutton") as HTMLInputElement).value).toBe("100");
   });
 
   it("percent: displays as whole points and converts back to a 0-1 decimal on change", () => {
@@ -190,18 +193,26 @@ describe("FieldInput", () => {
       [{ id: "1", name: "VIP" }],
     );
     expect(await screen.findByText("VIP")).toBeTruthy();
-    await screen.findByRole("option", { name: "Lead" }); // options query resolved
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "2" } });
+    fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "Lead" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Lead" })); // options query resolved
     expect(onChange).toHaveBeenCalledWith(["1", "2"]);
     expect(await screen.findByText("Lead")).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText("Remove VIP"));
     expect(onChange).toHaveBeenLastCalledWith(["2"]);
-    // VIP can still legitimately appear in the "add" dropdown's own option
-    // list now that it's no longer selected — only its chip (and thus its
-    // remove button) must be gone.
+    // VIP can still legitimately appear in the "add" list now that it's no
+    // longer selected — only its chip (and thus its remove button) must be
+    // gone.
     expect(screen.queryByLabelText("Remove VIP")).toBeNull();
+  });
+
+  it("tags: the add-input placeholder names the field's configured label, not just its field key", () => {
+    renderField(
+      { field: "tag_ids", type: "tags", label: "Skills", resource: "contacts.tag", resource_label_field: "name" },
+      [],
+    );
+    expect(screen.getByPlaceholderText("Add Skills…")).toBeTruthy();
   });
 
   it("multi_select backed by a resource renders as a multi-select, not a single picker", async () => {
