@@ -318,14 +318,26 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       );
     }
 
-    case "date":
+    case "date": {
+      const dateValue = typeof value === "string" ? new Date(value) : undefined;
       return (
-        <DateField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
+        <DateField
+          value={dateValue && !Number.isNaN(dateValue.getTime()) ? dateValue : undefined}
+          disabled={disabled}
+          onChange={(date) => onChange(date.toISOString().slice(0, 10))}
+        />
       );
-    case "datetime":
+    }
+    case "datetime": {
+      const dateTimeValue = typeof value === "string" ? new Date(value) : undefined;
       return (
-        <DateTimeField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
+        <DateTimeField
+          value={dateTimeValue && !Number.isNaN(dateTimeValue.getTime()) ? dateTimeValue : undefined}
+          disabled={disabled}
+          onChange={(date) => onChange(date.toISOString())}
+        />
       );
+    }
     case "time":
       return (
         <TimeField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
@@ -527,7 +539,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       );
 
     case "signature":
-      return <SignaturePad value={stringValue} onChange={onChange} disabled={disabled} />;
+      return <SignaturePad value={typeof value === "string" ? value : null} onChange={onChange} disabled={disabled} />;
 
     case "barcode":
       // Camera-driven scanning needs a WASM decoder + camera-access

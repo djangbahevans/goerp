@@ -2,12 +2,14 @@ import type { ReactNode } from "react";
 
 export interface BreadcrumbItem {
   label: string;
-  href?: string | undefined;
+  onClick?: (() => void) | undefined;
 }
 
-// A manual breadcrumb trail for content a custom view renders inside itself
-// — distinct from the shell's global header breadcrumb (shell-architecture.md
-// §17), which PageHeader already leaves to the shell, derived from the route.
+// An in-view, hierarchical drill-down trail with nothing to do with routing
+// (e.g. a document library's folder drill-down) — distinct from the shell's
+// route-derived global header breadcrumb (shell-architecture.md §17), which
+// PageHeader already leaves to the shell. `onClick`, not `href`: each level
+// is local component state, not a route, so there's nothing to link to.
 export interface BreadcrumbProps {
   items: BreadcrumbItem[];
 }
@@ -21,8 +23,10 @@ export function Breadcrumb({ items }: BreadcrumbProps): ReactNode {
           return (
             <li key={item.label} className="flex items-center gap-1">
               {i > 0 && <span aria-hidden="true">/</span>}
-              {item.href !== undefined && !isLast ? (
-                <a href={item.href}>{item.label}</a>
+              {item.onClick !== undefined ? (
+                <button type="button" onClick={item.onClick} aria-current={isLast ? "page" : undefined}>
+                  {item.label}
+                </button>
               ) : (
                 <span aria-current={isLast ? "page" : undefined}>{item.label}</span>
               )}

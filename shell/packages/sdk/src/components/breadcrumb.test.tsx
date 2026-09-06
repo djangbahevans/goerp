@@ -1,33 +1,38 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Breadcrumb } from "./breadcrumb.js";
 
 afterEach(cleanup);
 
-const items = [
-  { label: "Contacts", href: "/contacts" },
-  { label: "Companies", href: "/contacts/companies" },
-  { label: "Acme Inc" },
-];
-
 describe("Breadcrumb", () => {
   it("renders every item's label", () => {
+    const items = [
+      { label: "Documents", onClick: () => {} },
+      { label: "2026", onClick: () => {} },
+      { label: "Invoices" },
+    ];
     render(<Breadcrumb items={items} />);
-    expect(screen.getByText("Contacts")).toBeTruthy();
-    expect(screen.getByText("Companies")).toBeTruthy();
-    expect(screen.getByText("Acme Inc")).toBeTruthy();
+    expect(screen.getByText("Documents")).toBeTruthy();
+    expect(screen.getByText("2026")).toBeTruthy();
+    expect(screen.getByText("Invoices")).toBeTruthy();
   });
 
-  it("renders non-final items with an href as links", () => {
-    render(<Breadcrumb items={items} />);
-    expect(screen.getByRole("link", { name: "Contacts" }).getAttribute("href")).toBe("/contacts");
-    expect(screen.getByRole("link", { name: "Companies" }).getAttribute("href")).toBe("/contacts/companies");
+  it("renders items with an onClick as clickable buttons", () => {
+    const onClick = vi.fn();
+    render(<Breadcrumb items={[{ label: "Documents", onClick }, { label: "Invoices" }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+    expect(onClick).toHaveBeenCalled();
   });
 
-  it("renders the last item as plain text marked as the current page, even with an href", () => {
-    const withFinalHref = [...items.slice(0, -1), { label: "Acme Inc", href: "/contacts/acme" }];
-    render(<Breadcrumb items={withFinalHref} />);
-    expect(screen.queryByRole("link", { name: "Acme Inc" })).toBeNull();
-    expect(screen.getByText("Acme Inc").getAttribute("aria-current")).toBe("page");
+  it("renders an item without onClick as plain text, not a link or button", () => {
+    render(<Breadcrumb items={[{ label: "Documents", onClick: () => {} }, { label: "Invoices" }]} />);
+    expect(screen.queryByRole("button", { name: "Invoices" })).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("marks the last item as the current page", () => {
+    render(<Breadcrumb items={[{ label: "Documents", onClick: () => {} }, { label: "Invoices" }]} />);
+    expect(screen.getByText("Invoices").getAttribute("aria-current")).toBe("page");
+    expect(screen.getByText("Documents").getAttribute("aria-current")).toBeNull();
   });
 });

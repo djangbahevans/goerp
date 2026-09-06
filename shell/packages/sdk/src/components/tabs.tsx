@@ -1,8 +1,18 @@
 import type { ReactElement, ReactNode } from "react";
-import { Children, useState } from "react";
+import { Children } from "react";
+
+export interface TabItem {
+  id: string;
+  label: string;
+  // Lucide icon name — surfaced as a data attribute rather than rendered;
+  // no icon library is wired in yet, same posture as ActionButton's icon.
+  icon?: string | undefined;
+  badge?: number | undefined;
+  disabled?: boolean | undefined;
+}
 
 export interface TabPanelProps {
-  label: string;
+  id: string;
   children: ReactNode;
 }
 
@@ -12,29 +22,36 @@ export function TabPanel({ children }: TabPanelProps): ReactNode {
 }
 
 export interface TabsProps {
+  items: TabItem[];
+  activeId: string;
+  onChange: (id: string) => void;
   children: ReactElement<TabPanelProps> | ReactElement<TabPanelProps>[];
 }
 
-// Same role="tablist"/"tab"/"tabpanel" pattern as form-tabs.tsx's
-// manifest-driven FormTab renderer, for a hand-written view's own tabs.
-export function Tabs({ children }: TabsProps): ReactNode {
+// Controlled (activeId/onChange), not internal state — the generic form
+// renderer needs to know the active tab to lazily mount its content and to
+// read/write it from the URL for deep-linking. Same
+// role="tablist"/"tab"/"tabpanel" pattern as form-tabs.tsx's manifest-driven
+// FormTab renderer.
+export function Tabs({ items, activeId, onChange, children }: TabsProps): ReactNode {
   const panels = Children.toArray(children) as ReactElement<TabPanelProps>[];
-  const [active, setActive] = useState(0);
-  const activePanel = panels[active];
+  const activePanel = panels.find((panel) => panel.props.id === activeId);
 
   return (
     <div>
       <div role="tablist" className="flex gap-2 border-border border-b">
-        {panels.map((panel, i) => (
+        {items.map((item) => (
           <button
-            key={panel.props.label}
+            key={item.id}
             type="button"
             role="tab"
-            aria-selected={i === active}
-            data-selected={i === active}
-            onClick={() => setActive(i)}
+            aria-selected={item.id === activeId}
+            data-selected={item.id === activeId}
+            data-icon={item.icon}
+            disabled={item.disabled}
+            onClick={() => onChange(item.id)}
           >
-            {panel.props.label}
+            {item.badge !== undefined ? `${item.label} ${item.badge}` : item.label}
           </button>
         ))}
       </div>

@@ -6,7 +6,7 @@ afterEach(cleanup);
 
 describe("SignaturePad", () => {
   it("renders a blank canvas when there is no value", () => {
-    const { container } = render(<SignaturePad value="" onChange={() => {}} />);
+    const { container } = render(<SignaturePad value={null} onChange={() => {}} />);
     expect(container.querySelector("canvas")).toBeTruthy();
     expect(container.querySelector("img")).toBeNull();
   });
@@ -21,7 +21,7 @@ describe("SignaturePad", () => {
     const onChange = vi.fn();
     render(<SignaturePad value="data:image/png;base64,abc" onChange={onChange} />);
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
-    expect(onChange).toHaveBeenCalledWith("");
+    expect(onChange).toHaveBeenCalledWith(null);
   });
 
   it("disables the Clear button when disabled", () => {

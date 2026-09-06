@@ -2,8 +2,8 @@ import type { ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import { useRef } from "react";
 
 export interface SignaturePadProps {
-  value: string;
-  onChange: (value: string) => void;
+  value: string | null;
+  onChange: (value: string | null) => void;
   disabled?: boolean | undefined;
 }
 
@@ -49,12 +49,12 @@ export function SignaturePad({ value, onChange, disabled = false }: SignaturePad
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-    onChange("");
+    onChange(null);
   };
 
   return (
     <span>
-      {value ? (
+      {value !== null ? (
         <img src={value} alt="Signature" style={{ maxWidth: 200 }} />
       ) : (
         <canvas
