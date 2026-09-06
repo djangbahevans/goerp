@@ -73,6 +73,12 @@ describe("FormRenderer", () => {
     expect(refetch).toHaveBeenCalled();
   });
 
+  it("renders the view's label as the page title via PageHeader", () => {
+    useFormRecordMock.mockReturnValue(handle());
+    renderForm();
+    expect(screen.getByRole("heading", { name: "Contact" })).toBeTruthy();
+  });
+
   it("non-autosave: shows a Save button, disabled until dirty, that calls save() on click", () => {
     const save = vi.fn(async () => {});
     useFormRecordMock.mockReturnValue(handle({ isDirty: true, save }));
