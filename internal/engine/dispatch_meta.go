@@ -430,6 +430,7 @@ type metaSchemaField struct {
 	Type         string `json:"type"`
 	Required     bool   `json:"required,omitempty"`
 	RelatedModel string `json:"related_model,omitempty"`
+	InverseField string `json:"inverse_field,omitempty"`
 }
 
 // metaSchemaPermission is shell-architecture.md §9's PermissionDeclaration
@@ -454,6 +455,7 @@ func metaSchemaModelFrom(md sdkmodel.ModelDeclaration) metaSchemaModel {
 			Type:         f.Def.Kind.String(),
 			Required:     f.Def.IsRequired,
 			RelatedModel: f.Def.RelatedModel,
+			InverseField: f.Def.InverseField,
 		})
 	}
 	ops := make([]string, 0, len(md.EnabledOps))
