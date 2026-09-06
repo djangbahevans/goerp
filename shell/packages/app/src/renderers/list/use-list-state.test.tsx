@@ -12,20 +12,31 @@ import { listStateToSearch, parseListSearch, useListState } from "./use-list-sta
 afterEach(cleanup);
 
 describe("parseListSearch / listStateToSearch", () => {
-  it("extracts bracketed filter keys and the sort key, round-tripping back to the same search object", () => {
-    const search = { "filter[is_active]": "true", "filter[type]": "person", sort: "-created_at", unrelated: 1 };
+  it("extracts bracketed filter keys, sort, and group_by, round-tripping back to the same search object", () => {
+    const search = {
+      "filter[is_active]": "true",
+      "filter[type]": "person",
+      sort: "-created_at",
+      group_by: "state",
+      unrelated: 1,
+    };
     const state = parseListSearch(search);
 
-    expect(state).toEqual({ filter: { is_active: "true", type: "person" }, sort: "-created_at" });
+    expect(state).toEqual({
+      filter: { is_active: "true", type: "person" },
+      sort: "-created_at",
+      groupBy: "state",
+    });
     expect(listStateToSearch(state)).toEqual({
       "filter[is_active]": "true",
       "filter[type]": "person",
       sort: "-created_at",
+      group_by: "state",
     });
   });
 
-  it("omits sort from the search object when unset", () => {
-    expect(listStateToSearch({ filter: {}, sort: undefined })).toEqual({});
+  it("omits sort and group_by from the search object when unset", () => {
+    expect(listStateToSearch({ filter: {}, sort: undefined, groupBy: undefined })).toEqual({});
   });
 });
 
@@ -35,8 +46,12 @@ function Probe({ embedded, defaultSort }: { embedded: boolean; defaultSort: stri
     <div>
       <span data-testid="filter">{JSON.stringify(state.filter)}</span>
       <span data-testid="sort">{state.sort ?? ""}</span>
+      <span data-testid="group-by">{state.groupBy ?? ""}</span>
       <button type="button" onClick={() => state.setFilter("is_active", "true")}>
         set-filter
+      </button>
+      <button type="button" onClick={() => state.setGroupBy("state")}>
+        set-group-by
       </button>
     </div>
   );
@@ -93,6 +108,17 @@ describe("useListState", () => {
     });
 
     expect(router.state.location.search).toEqual({ tab: "activity", "filter[is_active]": "true" });
+  });
+
+  it("full-page mode: setGroupBy navigates, writing group_by into the URL", async () => {
+    const { router } = await renderListState("/", false, undefined);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("set-group-by"));
+    });
+
+    expect(router.state.location.search).toEqual({ group_by: "state" });
+    expect(screen.getByTestId("group-by").textContent).toBe("state");
   });
 
   it("embedded mode: keeps state local and never touches the URL", async () => {

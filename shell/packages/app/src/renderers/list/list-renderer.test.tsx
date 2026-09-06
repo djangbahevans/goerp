@@ -9,15 +9,23 @@ import {
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ListRenderer } from "./list-renderer.js";
+import { groupRows, ListRenderer } from "./list-renderer.js";
 import type { ListViewDeclaration } from "./list-view-types.js";
 
-const { useInfiniteListMock } = vi.hoisted(() => ({ useInfiniteListMock: vi.fn() }));
-vi.mock("@goerp/sdk/react", () => ({ useInfiniteList: useInfiniteListMock }));
+const { useInfiniteListMock, useRelationLabelsMock } = vi.hoisted(() => ({
+  useInfiniteListMock: vi.fn(),
+  useRelationLabelsMock: vi.fn(() => new Map()),
+}));
+vi.mock("@goerp/sdk/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
+  return { ...actual, useInfiniteList: useInfiniteListMock, useRelationLabels: useRelationLabelsMock };
+});
 
 afterEach(() => {
   cleanup();
   useInfiniteListMock.mockReset();
+  useRelationLabelsMock.mockClear();
+  useRelationLabelsMock.mockImplementation(() => new Map());
 });
 
 const view: ListViewDeclaration = {
@@ -40,7 +48,7 @@ function permissionWrapper(fieldAccess: Record<string, Record<string, { read: bo
 }
 
 async function renderListRenderer(
-  props: { embedded?: boolean; baseFilter?: Record<string, string>; recordId?: string },
+  props: { embedded?: boolean; baseFilter?: Record<string, string>; recordId?: string; module?: string },
   Wrapper: ({ children }: { children: ReactNode }) => React.JSX.Element,
   initialPath = "/",
   viewOverride: ListViewDeclaration = view,
@@ -51,7 +59,7 @@ async function renderListRenderer(
     path: "/",
     component: () => (
       <Wrapper>
-        <ListRenderer view={viewOverride} {...props} />
+        <ListRenderer view={viewOverride} module="contacts" {...props} />
       </Wrapper>
     ),
   });
@@ -65,6 +73,25 @@ async function renderListRenderer(
 
 const fullAccess = permissionWrapper({
   "contacts.contact": { name: { read: true, write: true }, ssn: { read: true, write: true } },
+});
+
+describe("groupRows", () => {
+  it("returns a single ungrouped bucket when groupBy is unset", () => {
+    const rows = [{ id: "1" }, { id: "2" }];
+    expect(groupRows(rows, undefined)).toEqual([{ key: "", rows }]);
+  });
+
+  it("buckets rows by the field's value, preserving first-seen order", () => {
+    const rows = [
+      { id: "1", state: "draft" },
+      { id: "2", state: "done" },
+      { id: "3", state: "draft" },
+    ];
+    expect(groupRows(rows, "state")).toEqual([
+      { key: "draft", rows: [rows[0], rows[2]] },
+      { key: "done", rows: [rows[1]] },
+    ]);
+  });
 });
 
 describe("ListRenderer", () => {
@@ -233,5 +260,82 @@ describe("ListRenderer", () => {
       "contacts.contact",
       expect.objectContaining({ filter: { parent_id: "locked" } }),
     );
+  });
+
+  it("renders a group-by select from group_by_options and splits rows into grouped tables on selection", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [
+          {
+            data: [
+              { id: "1", name: "Ada", state: "draft" },
+              { id: "2", name: "Bea", state: "done" },
+            ],
+            meta: { cursor: null, hasMore: false },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/?group_by=state", { ...view, group_by_options: ["state"] });
+
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("state");
+    expect(screen.getAllByRole("table")).toHaveLength(2);
+    expect(screen.getByText("state = draft")).toBeTruthy();
+    expect(screen.getByText("state = done")).toBeTruthy();
+  });
+
+  it("renders in-scope filters and actions from the view declaration", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      filters: [{ field: "is_active", label: "Active", type: "boolean" }],
+      actions: [{ label: "New Contact", type: "create", view: "contacts_form" }],
+    });
+
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("New Contact")).toBeTruthy();
+  });
+
+  it("requests batch-fetched relation labels for a relation column with no display_field", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", customer_id: "c1" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    const wrapper = permissionWrapper({ "contacts.contact": { customer_id: { read: true, write: true } } });
+    await renderListRenderer({}, wrapper, "/", {
+      ...view,
+      columns: [{ field: "customer_id", type: "relation", resource: "sales.customer", resource_label_field: "name" }],
+    });
+
+    expect(useRelationLabelsMock).toHaveBeenCalledWith([
+      { key: "customer_id", resource: "sales.customer", labelField: "name", ids: ["c1"] },
+    ]);
   });
 });
