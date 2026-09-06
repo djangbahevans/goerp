@@ -1,0 +1,23 @@
+import type { ReactNode } from "react";
+
+export interface ProgressBarProps {
+  // 0-100.
+  value: number;
+  label?: string | undefined;
+  showLabel?: boolean | undefined;
+}
+
+export function ProgressBar({ value, label, showLabel = false }: ProgressBarProps): ReactNode {
+  // Falls back to 0 for NaN (e.g. a caller computing `done / total` before
+  // `total` is known) — Math.min/max propagate NaN rather than clamping it.
+  const clamped = Number.isNaN(value) ? 0 : Math.min(100, Math.max(0, value));
+
+  return (
+    <div>
+      <div role="progressbar" aria-valuenow={clamped} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+        <div style={{ width: `${clamped}%` }} />
+      </div>
+      {showLabel && label !== undefined && <span>{label}</span>}
+    </div>
+  );
+}
