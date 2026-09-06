@@ -1,4 +1,6 @@
 import { apiClient } from "@goerp/sdk";
+import type { TagValue } from "@goerp/sdk/components";
+import { DateField, DateTimeField, MoneyField, TagsField, TimeField } from "@goerp/sdk/components";
 import { createInfiniteListQueryOptions } from "@goerp/sdk/react";
 import { resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery } from "@tanstack/react-query";
@@ -7,16 +9,12 @@ import { useEffect, useRef, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
 import type { FieldOption, FormField } from "./form-view-types.js";
 
+export type { TagValue } from "@goerp/sdk/components";
+
 // "tags" writes `{field}` (an `_ids` key) as a UUID array but reads the
 // plural key with `_ids` stripped ("tags"), holding full {id,name,color}.
 function tagsReadKey(field: string): string {
   return field.replace(/_ids$/, "s");
-}
-
-export interface TagValue {
-  id: string;
-  name: string;
-  color?: string;
 }
 
 function isTagValue(value: unknown): value is TagValue {
@@ -118,7 +116,7 @@ function TagsInput({
   disabled: boolean;
 }) {
   const labelField = field.resource_label_field ?? "name";
-  const { data: options } = useResourceOptions(field.resource, labelField, true);
+  const { data: rows } = useResourceOptions(field.resource, labelField, true);
   // `value` (the plural read key) never reflects a pending edit, since
   // writes land under the singular `_ids` key — local state is the
   // display source of truth until the record itself reloads (a fresh
@@ -127,11 +125,15 @@ function TagsInput({
   useEffect(() => {
     setSelected(Array.isArray(value) ? value.filter(isTagValue) : []);
   }, [value]);
-  const selectedIds = new Set(selected.map((t) => t.id));
 
   if (!field.resource) {
     return <span>{selected.map((t) => t.name).join(", ")}</span>;
   }
+
+  const options: TagValue[] = (rows ?? []).map((row) => ({
+    id: String(row.id),
+    name: String(row[labelField] ?? row.id),
+  }));
 
   const commit = (next: TagValue[]) => {
     setSelected(next);
@@ -139,41 +141,13 @@ function TagsInput({
   };
 
   return (
-    <div>
-      <span>
-        {selected.map((tag) => (
-          <span key={tag.id}>
-            {tag.name}{" "}
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => commit(selected.filter((t) => t.id !== tag.id))}
-              aria-label={`Remove ${tag.name}`}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-      </span>
-      <select
-        disabled={disabled}
-        value=""
-        onChange={(event) => {
-          const row = (options ?? []).find((r) => String(r.id) === event.target.value);
-          if (!row) return;
-          commit([...selected, { id: String(row.id), name: String(row[labelField] ?? row.id) }]);
-        }}
-      >
-        <option value="">Add {field.label ?? field.field}…</option>
-        {(options ?? [])
-          .filter((row) => !selectedIds.has(String(row.id)))
-          .map((row) => (
-            <option key={String(row.id)} value={String(row.id)}>
-              {String(row[labelField] ?? row.id)}
-            </option>
-          ))}
-      </select>
-    </div>
+    <TagsField
+      value={selected}
+      onChange={commit}
+      options={options}
+      disabled={disabled}
+      placeholder={`Add ${field.label ?? field.field}…`}
+    />
   );
 }
 
@@ -294,18 +268,14 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "currency": {
       const currency = field.currency_field ? (record[field.currency_field] as string | undefined) : undefined;
       return (
-        <span>
-          {currency && <span>{currency} </span>}
-          <input
-            type="number"
-            step={field.step ?? 0.01}
-            min={field.min}
-            max={field.max}
-            value={stringValue}
-            disabled={disabled}
-            onChange={(e) => onChange(toNumber(e.target.value))}
-          />
-        </span>
+        <MoneyField
+          value={typeof value === "number" ? value : undefined}
+          currency={currency}
+          min={field.min}
+          max={field.max}
+          disabled={disabled}
+          onChange={onChange}
+        />
       );
     }
 
@@ -329,18 +299,17 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     }
 
     case "date":
-      return <input type="date" value={stringValue} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <DateField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
+      );
     case "datetime":
       return (
-        <input
-          type="datetime-local"
-          value={stringValue}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        <DateTimeField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
       );
     case "time":
-      return <input type="time" value={stringValue} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <TimeField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
+      );
 
     case "date_range": {
       const startField = field.range_start_field ?? `${field.field}_start`;
