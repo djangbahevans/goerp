@@ -1,11 +1,20 @@
 import { apiClient } from "@goerp/sdk";
 import type { TagValue } from "@goerp/sdk/components";
-import { DateField, DateTimeField, MoneyField, TagsField, TimeField } from "@goerp/sdk/components";
+import {
+  CodeField,
+  ColorPicker,
+  DateField,
+  DateTimeField,
+  MoneyField,
+  RichTextField,
+  SignaturePad,
+  TagsField,
+  TimeField,
+} from "@goerp/sdk/components";
 import { createInfiniteListQueryOptions } from "@goerp/sdk/react";
 import { resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import type { PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
 import type { FieldOption, FormField } from "./form-view-types.js";
 
@@ -235,19 +244,30 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       );
 
     case "textarea":
-    case "rich_text":
     case "markdown":
-    case "code":
-      // rich_text/markdown/code fall back to a plain textarea — no editor
-      // library chosen yet.
+      // markdown falls back to a plain textarea — no editor library chosen
+      // yet.
       return (
         <textarea
           value={stringValue}
           rows={field.rows ?? 3}
           placeholder={field.placeholder}
           disabled={disabled}
-          style={type === "code" ? { fontFamily: "monospace" } : undefined}
           onChange={(e) => onChange(e.target.value)}
+        />
+      );
+
+    case "rich_text":
+      return <RichTextField value={stringValue} rows={field.rows} disabled={disabled} onChange={onChange} />;
+
+    case "code":
+      return (
+        <CodeField
+          value={stringValue}
+          language={field.language}
+          rows={field.rows}
+          disabled={disabled}
+          onChange={onChange}
         />
       );
 
@@ -464,14 +484,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     }
 
     case "color_picker":
-      return (
-        <input
-          type="color"
-          value={stringValue || "#000000"}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
+      return <ColorPicker value={stringValue} disabled={disabled} onChange={onChange} />;
 
     case "icon_picker":
       // Free-text Lucide icon name — no icon-browsing picker UI yet.
@@ -644,79 +657,4 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     default:
       return <input type="text" value={stringValue} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
   }
-}
-
-function SignaturePad({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  disabled: boolean;
-}) {
-  // Pointer-driven canvas capture, no pressure-sensitivity or undo.
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-
-  const pos = (e: ReactPointerEvent<HTMLCanvasElement>, canvas: HTMLCanvasElement) => {
-    const rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  };
-
-  const start = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (disabled) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-    drawing.current = true;
-    const { x, y } = pos(e, canvas);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  };
-
-  const move = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!drawing.current || !canvas || !ctx) return;
-    const { x, y } = pos(e, canvas);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  const end = () => {
-    if (!drawing.current) return;
-    drawing.current = false;
-    const canvas = canvasRef.current;
-    if (canvas) onChange(canvas.toDataURL("image/png"));
-  };
-
-  const clear = () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-    onChange("");
-  };
-
-  return (
-    <span>
-      {value ? (
-        <img src={value} alt="Signature" style={{ maxWidth: 200 }} />
-      ) : (
-        <canvas
-          ref={canvasRef}
-          width={200}
-          height={80}
-          style={{ border: "1px solid", touchAction: "none" }}
-          onPointerDown={start}
-          onPointerMove={move}
-          onPointerUp={end}
-          onPointerLeave={end}
-        />
-      )}
-      <button type="button" disabled={disabled} onClick={clear}>
-        Clear
-      </button>
-    </span>
-  );
 }
