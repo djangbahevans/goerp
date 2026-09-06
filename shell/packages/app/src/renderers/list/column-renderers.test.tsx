@@ -112,13 +112,15 @@ describe("renderCellContent", () => {
     ).not.toBeNull();
   });
 
-  it("badge: looks up badge_config by the field's value", () => {
+  it("badge: looks up badge_config by the field's value and applies its color", () => {
     const column = {
       field: "state",
       type: "badge" as const,
       badge_config: { draft: { label: "Draft", color: "gray" }, done: { label: "Done", color: "green" } },
     };
-    expect(cell(column, { state: "done" }).textContent).toBe("Done");
+    const html = cell(column, { state: "done" });
+    expect(html.textContent).toBe("Done");
+    expect(html.querySelector("span")?.className).toContain("bg-green-100");
   });
 
   it("badge: falls back to the raw value when it has no badge_config entry", () => {
@@ -135,6 +137,8 @@ describe("renderCellContent", () => {
 
     const withoutImage = cell({ field: "name", type: "avatar", avatar_field: "avatar" }, { name: "Ada Lovelace" });
     expect(withoutImage.textContent).toBe("AL");
+    // Preserves the original inline implementation's fixed h-8 w-8 size.
+    expect(withoutImage.querySelector("span")?.className).toContain("h-8");
   });
 
   it("email/phone/url: render the expected link", () => {
@@ -152,6 +156,7 @@ describe("renderCellContent", () => {
   it("country: renders a flag and the display name", () => {
     const html = cell({ field: "c", type: "country" }, { c: "GH" });
     expect(html.textContent).toContain(new Intl.DisplayNames(undefined, { type: "region" }).of("GH"));
+    expect(html.textContent).toContain("🇬🇭");
   });
 
   it("tags: renders one pill per array entry", () => {
