@@ -58,6 +58,17 @@ describe("FetchAPIClient basic requests", () => {
     expect(url).toBe("/contacts?q=acme&limit=10");
   });
 
+  it("sends an array param as repeated key=value entries", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => jsonResponse(200, []));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FetchAPIClient();
+
+    await client.get("/contacts", { params: { "filter[id][]": ["uuid1", "uuid2"] } });
+
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/contacts?filter%5Bid%5D%5B%5D=uuid1&filter%5Bid%5D%5B%5D=uuid2");
+  });
+
   it("uses & instead of a second ? when the path already has a query string", async () => {
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => jsonResponse(200, []));
     vi.stubGlobal("fetch", fetchMock);

@@ -4,3 +4,5 @@ export type { ActionErrorHandlerContext, ActionOptions, ActionResult, ErrorHandl
 export { useAction } from "./use-action.js";
 export type { UseInfiniteListOptions } from "./use-infinite-list.js";
 export { createInfiniteListQueryOptions, useInfiniteList } from "./use-infinite-list.js";
+export type { RelationBatchSpec } from "./use-relation-labels.js";
+export { createRelationLabelsQueryOptions, mergeLabelsByKey, useRelationLabels } from "./use-relation-labels.js";

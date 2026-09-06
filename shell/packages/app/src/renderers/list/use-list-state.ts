@@ -1,21 +1,23 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";
 
-// Filter/sort state for a list view: full-page mode sources it from URL
-// query params, embedded mode from local React state — never both.
-// A value read back from the URL isn't guaranteed to stay a string —
-// TanStack Router's default parser coerces "true"/"false"/numeric query
-// values into real booleans/numbers.
+// Filter/sort/group-by state for a list view: full-page mode sources it
+// from URL query params, embedded mode from local React state — never
+// both. A value read back from the URL isn't guaranteed to stay a
+// string — TanStack Router's default parser coerces "true"/"false"/
+// numeric query values into real booleans/numbers.
 export type FilterValue = string | number | boolean;
 
 export interface ListState {
   filter: Record<string, FilterValue>;
   sort: string | undefined;
+  groupBy: string | undefined;
 }
 
 export interface ListStateHandle extends ListState {
   setFilter: (field: string, value: FilterValue | undefined) => void;
   setSort: (sort: string | undefined) => void;
+  setGroupBy: (field: string | undefined) => void;
 }
 
 const FILTER_PREFIX = "filter[";
@@ -25,7 +27,7 @@ function isFilterValue(value: unknown): value is FilterValue {
 }
 
 function isListStateKey(key: string): boolean {
-  return key === "sort" || (key.startsWith(FILTER_PREFIX) && key.endsWith("]"));
+  return key === "sort" || key === "group_by" || (key.startsWith(FILTER_PREFIX) && key.endsWith("]"));
 }
 
 export function parseListSearch(search: Record<string, unknown>): ListState {
@@ -35,7 +37,11 @@ export function parseListSearch(search: Record<string, unknown>): ListState {
       filter[key.slice(FILTER_PREFIX.length, -1)] = value;
     }
   }
-  return { filter, sort: typeof search.sort === "string" ? search.sort : undefined };
+  return {
+    filter,
+    sort: typeof search.sort === "string" ? search.sort : undefined,
+    groupBy: typeof search.group_by === "string" ? search.group_by : undefined,
+  };
 }
 
 export function listStateToSearch(state: ListState): Record<string, FilterValue> {
@@ -44,13 +50,14 @@ export function listStateToSearch(state: ListState): Record<string, FilterValue>
     search[`${FILTER_PREFIX}${field}]`] = value;
   }
   if (state.sort !== undefined) search.sort = state.sort;
+  if (state.groupBy !== undefined) search.group_by = state.groupBy;
   return search;
 }
 
-// Replaces only this list's own filter[...]/sort keys in `prev`, keeping
-// every other search param (active tab, another list on the same page,
-// etc.) untouched — TanStack Router's search updater replaces the whole
-// object otherwise.
+// Replaces only this list's own filter[...]/sort/group_by keys in `prev`,
+// keeping every other search param (active tab, another list on the same
+// page, etc.) untouched — TanStack Router's search updater replaces the
+// whole object otherwise.
 function mergeListStateIntoSearch(prev: Record<string, unknown>, state: ListState): Record<string, unknown> {
   const preserved: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(prev)) {
@@ -60,7 +67,7 @@ function mergeListStateIntoSearch(prev: Record<string, unknown>, state: ListStat
 }
 
 function useEmbeddedListState(defaultSort: string | undefined): ListStateHandle {
-  const [state, setState] = useState<ListState>({ filter: {}, sort: defaultSort });
+  const [state, setState] = useState<ListState>({ filter: {}, sort: defaultSort, groupBy: undefined });
 
   const setFilter = useCallback((field: string, value: FilterValue | undefined) => {
     setState((prev) => {
@@ -75,7 +82,11 @@ function useEmbeddedListState(defaultSort: string | undefined): ListStateHandle 
     setState((prev) => ({ ...prev, sort }));
   }, []);
 
-  return { ...state, setFilter, setSort };
+  const setGroupBy = useCallback((groupBy: string | undefined) => {
+    setState((prev) => ({ ...prev, groupBy }));
+  }, []);
+
+  return { ...state, setFilter, setSort, setGroupBy };
 }
 
 // ListRenderer is decoupled from any specific declared route, so there's
@@ -116,7 +127,16 @@ function useFullPageListState(defaultSort: string | undefined): ListStateHandle 
     [navigate],
   );
 
-  return { ...state, setFilter, setSort };
+  const setGroupBy = useCallback(
+    (groupBy: string | undefined) => {
+      void navigate({
+        search: (prev) => mergeListStateIntoSearch(prev, { ...parseListSearch(prev), groupBy }),
+      });
+    },
+    [navigate],
+  );
+
+  return { ...state, setFilter, setSort, setGroupBy };
 }
 
 export function useListState(embedded: boolean | undefined, defaultSort: string | undefined): ListStateHandle {

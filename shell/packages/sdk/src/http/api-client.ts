@@ -24,6 +24,13 @@ function buildURL(path: string, params?: Record<string, unknown>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
+    // An array value becomes repeated `key=v1&key=v2` entries — e.g.
+    // manifest-spec.md's `filter[id][]=uuid1&filter[id][]=uuid2` batch-fetch
+    // convention — rather than a single comma-joined value.
+    if (Array.isArray(value)) {
+      for (const item of value) search.append(key, String(item));
+      continue;
+    }
     search.set(key, String(value));
   }
   const query = search.toString();
