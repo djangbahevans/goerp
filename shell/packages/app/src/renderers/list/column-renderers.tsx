@@ -1,3 +1,4 @@
+import { Badge, type BadgeColor, CountryFlag, UserAvatar } from "@goerp/sdk/components";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
 
@@ -105,19 +106,6 @@ function formatRelativeTime(value: unknown): string {
   return rtf.format(Math.round(duration), "years");
 }
 
-const BADGE_COLOR_CLASSES: Record<string, string> = {
-  gray: "bg-gray-100 text-gray-800",
-  red: "bg-red-100 text-red-800",
-  orange: "bg-orange-100 text-orange-800",
-  yellow: "bg-yellow-100 text-yellow-800",
-  green: "bg-green-100 text-green-800",
-  teal: "bg-teal-100 text-teal-800",
-  blue: "bg-blue-100 text-blue-800",
-  indigo: "bg-indigo-100 text-indigo-800",
-  purple: "bg-purple-100 text-purple-800",
-  pink: "bg-pink-100 text-pink-800",
-};
-
 function Pill({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <span
@@ -126,18 +114,6 @@ function Pill({ className, children }: { className?: string; children: ReactNode
       {children}
     </span>
   );
-}
-
-function countryFlag(code: string): string {
-  return [...code.toUpperCase()].map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join("");
-}
-
-function countryName(code: string): string {
-  try {
-    return new Intl.DisplayNames(undefined, { type: "region" }).of(code.toUpperCase()) ?? code;
-  } catch {
-    return code;
-  }
 }
 
 interface FileFieldValue {
@@ -222,29 +198,16 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       const key = String(value);
       const badge = column.badge_config?.[key];
       if (!badge) return key;
-      return (
-        <Pill className={BADGE_COLOR_CLASSES[badge.color ?? "gray"] ?? "bg-gray-100 text-gray-800"}>{badge.label}</Pill>
-      );
+      // badge.color is a loosely-typed wire string(enum), not statically
+      // checked — Badge itself falls back to gray for an unrecognized one.
+      return <Badge label={badge.label} color={badge.color as BadgeColor | undefined} icon={badge.icon} />;
     }
 
     case "avatar": {
       const avatarValue = column.avatar_field ? row[column.avatar_field] : value;
       const url = fileUrlOf(avatarValue);
       const label = typeof value === "string" ? value : "";
-      const initials = label
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((part) => part[0]?.toUpperCase())
-        .join("");
-      if (url) {
-        return <img src={url} alt={label} className="h-8 w-8 rounded-full object-cover" />;
-      }
-      return (
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-xs font-medium text-gray-700">
-          {initials}
-        </span>
-      );
+      return <UserAvatar name={label} avatarUrl={url} size="md" />;
     }
 
     case "email":
@@ -263,13 +226,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       );
 
     case "country":
-      return typeof value === "string" && value ? (
-        <span>
-          {countryFlag(value)} {countryName(value)}
-        </span>
-      ) : (
-        ""
-      );
+      return typeof value === "string" && value ? <CountryFlag code={value} showName /> : "";
 
     case "tags":
       return Array.isArray(value) ? (
