@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { APIClient, PagedResponse } from "../http/types.js";
 import type { ResourceRegistry, ResourceRegistryEntry } from "../schema/index.js";
-import { createRelationLabelsQueryOptions } from "./use-relation-labels.js";
+import type { RelationBatchSpec } from "./use-relation-labels.js";
+import { createRelationLabelsQueryOptions, mergeLabelsByKey } from "./use-relation-labels.js";
 
 function fakeRegistry(): Pick<ResourceRegistry, "resolve"> {
   return {
@@ -61,5 +62,42 @@ describe("createRelationLabelsQueryOptions", () => {
     });
 
     expect(options.enabled).toBe(false);
+  });
+});
+
+describe("mergeLabelsByKey", () => {
+  it("merges multiple specs sharing the same key instead of overwriting", () => {
+    // list-renderer.tsx builds one spec per (column, already-fetched page) —
+    // a second page's result must not clobber the first page's labels.
+    const specs: RelationBatchSpec[] = [
+      { key: "customer_id", resource: "contacts.contact", labelField: "name", ids: ["a"] },
+      { key: "customer_id", resource: "contacts.contact", labelField: "name", ids: ["b"] },
+    ];
+    const results = [{ a: "Acme Inc" }, { b: "Beta Corp" }];
+
+    expect(mergeLabelsByKey(specs, results)).toEqual(new Map([["customer_id", { a: "Acme Inc", b: "Beta Corp" }]]));
+  });
+
+  it("keeps distinct keys separate", () => {
+    const specs: RelationBatchSpec[] = [
+      { key: "customer_id", resource: "contacts.contact", labelField: "name", ids: ["a"] },
+      { key: "owner_id", resource: "auth.user", labelField: "display_name", ids: ["u1"] },
+    ];
+    const results = [{ a: "Acme Inc" }, { u1: "Ada" }];
+
+    expect(mergeLabelsByKey(specs, results)).toEqual(
+      new Map([
+        ["customer_id", { a: "Acme Inc" }],
+        ["owner_id", { u1: "Ada" }],
+      ]),
+    );
+  });
+
+  it("treats an unresolved (still-loading) result as contributing no labels yet", () => {
+    const specs: RelationBatchSpec[] = [
+      { key: "customer_id", resource: "contacts.contact", labelField: "name", ids: ["a"] },
+    ];
+
+    expect(mergeLabelsByKey(specs, [undefined])).toEqual(new Map([["customer_id", {}]]));
   });
 });

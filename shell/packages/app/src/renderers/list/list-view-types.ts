@@ -1,3 +1,6 @@
+// A fetched record — the shape column rendering and grouping work against.
+export type Row = Record<string, unknown>;
+
 // manifest-spec.md §9.1's List View wire schema — the canonical shape,
 // kept in wire (snake_case) casing to match RouteSchema/ModuleSchema.
 // `condition` fields are typed and passed through but never evaluated —

@@ -292,6 +292,35 @@ describe("ListRenderer", () => {
     expect(screen.getByText("state = done")).toBeTruthy();
   });
 
+  it("still shows a group caption for a bucket whose grouped field is empty/missing", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [
+          {
+            data: [
+              { id: "1", name: "Ada", state: "draft" },
+              { id: "2", name: "Bea" },
+            ],
+            meta: { cursor: null, hasMore: false },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/?group_by=state", { ...view, group_by_options: ["state"] });
+
+    expect(screen.getAllByRole("table")).toHaveLength(2);
+    expect(screen.getByText("state = draft")).toBeTruthy();
+    expect(screen.getByText("state =")).toBeTruthy();
+  });
+
   it("renders in-scope filters and actions from the view declaration", async () => {
     useInfiniteListMock.mockReturnValue({
       data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
@@ -336,6 +365,35 @@ describe("ListRenderer", () => {
 
     expect(useRelationLabelsMock).toHaveBeenCalledWith([
       { key: "customer_id", resource: "sales.customer", labelField: "name", ids: ["c1"] },
+    ]);
+  });
+
+  it("builds one relation-label spec per already-fetched page, so an earlier page's ids are never re-requested", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [
+          { data: [{ id: "1", customer_id: "c1" }], meta: { cursor: "p2", hasMore: true } },
+          { data: [{ id: "2", customer_id: "c2" }], meta: { cursor: null, hasMore: false } },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: true,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    const wrapper = permissionWrapper({ "contacts.contact": { customer_id: { read: true, write: true } } });
+    await renderListRenderer({}, wrapper, "/", {
+      ...view,
+      columns: [{ field: "customer_id", type: "relation", resource: "sales.customer", resource_label_field: "name" }],
+    });
+
+    expect(useRelationLabelsMock).toHaveBeenCalledWith([
+      { key: "customer_id", resource: "sales.customer", labelField: "name", ids: ["c1"] },
+      { key: "customer_id", resource: "sales.customer", labelField: "name", ids: ["c2"] },
     ]);
   });
 });

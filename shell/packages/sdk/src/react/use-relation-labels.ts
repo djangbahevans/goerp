@@ -40,13 +40,29 @@ export function createRelationLabelsQueryOptions(
   };
 }
 
-// Keyed by each spec's own `key` (typically the column field) — a variable
-// number of relation columns without an unstable count of hook calls.
-export function useRelationLabels(specs: RelationBatchSpec[]): Map<string, Record<string, string>> {
-  const results = useQueries({ queries: specs.map((spec) => createRelationLabelsQueryOptions(spec)) });
+// Keyed by each spec's own `key` (typically the column field). Multiple
+// specs may share one `key` (e.g. one per already-fetched page of an
+// infinite list, each with that page's own small, stable id set): their
+// results are merged rather than overwritten, so a spec whose ids never
+// change once fetched (an earlier page) keeps its own cache entry and is
+// never re-requested just because a later page added new, unrelated ids to
+// the same column — see list-renderer.tsx's own per-page spec construction.
+export function mergeLabelsByKey(
+  specs: RelationBatchSpec[],
+  results: (Record<string, string> | undefined)[],
+): Map<string, Record<string, string>> {
   const labelsByKey = new Map<string, Record<string, string>>();
   specs.forEach((spec, index) => {
-    labelsByKey.set(spec.key, results[index]?.data ?? {});
+    labelsByKey.set(spec.key, { ...labelsByKey.get(spec.key), ...results[index] });
   });
   return labelsByKey;
+}
+
+// A variable number of queries without an unstable count of hook calls.
+export function useRelationLabels(specs: RelationBatchSpec[]): Map<string, Record<string, string>> {
+  const results = useQueries({ queries: specs.map((spec) => createRelationLabelsQueryOptions(spec)) });
+  return mergeLabelsByKey(
+    specs,
+    results.map((r) => r.data),
+  );
 }

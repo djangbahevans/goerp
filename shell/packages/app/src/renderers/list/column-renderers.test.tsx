@@ -1,6 +1,6 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { renderCell, renderCellContent, renderHref } from "./column-renderers.js";
+import { columnStyle, renderCell, renderCellContent, renderHref } from "./column-renderers.js";
 import type { ListColumn } from "./list-view-types.js";
 
 afterEach(cleanup);
@@ -17,6 +17,24 @@ describe("renderHref", () => {
 
   it("substitutes a missing field as an empty string", () => {
     expect(renderHref("/contacts/{record.id}", {})).toBe("/contacts/");
+  });
+});
+
+describe("columnStyle", () => {
+  it("applies width/min_width/max_width/align, and truncates by default", () => {
+    expect(columnStyle({ field: "x", width: 100, min_width: 50, max_width: 200, align: "right" })).toEqual({
+      width: 100,
+      minWidth: 50,
+      maxWidth: 200,
+      textAlign: "right",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    });
+  });
+
+  it("omits truncation when truncate is explicitly false", () => {
+    expect(columnStyle({ field: "x", truncate: false })).toEqual({});
   });
 });
 
@@ -38,6 +56,14 @@ describe("renderCellContent", () => {
       { amount: 10, currency: "GHS" },
     );
     expect(html.textContent).toBe(new Intl.NumberFormat(undefined, { style: "currency", currency: "GHS" }).format(10));
+  });
+
+  it("currency: falls back to plain number formatting instead of throwing when currency_field holds an invalid code", () => {
+    const html = cell(
+      { field: "amount", type: "currency", currency_field: "currency" },
+      { amount: 10, currency: "Not A Code" },
+    );
+    expect(html.textContent).toBe(new Intl.NumberFormat(undefined).format(10));
   });
 
   it("currency: falls back to plain number formatting with no currency_field value", () => {

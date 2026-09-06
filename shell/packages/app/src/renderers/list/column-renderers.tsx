@@ -1,11 +1,27 @@
-import type { ReactNode } from "react";
-import type { ListColumn } from "./list-view-types.js";
-
-type Row = Record<string, unknown>;
+import type { CSSProperties, ReactNode } from "react";
+import type { ListColumn, Row } from "./list-view-types.js";
 
 // manifest-spec.md's `href`/`format` template vars: `{record.id}`, `{record.field_name}`.
 export function renderHref(template: string, row: Row): string {
   return template.replace(/\{record\.([\w.]+)\}/g, (_match, field: string) => String(row[field] ?? ""));
+}
+
+// manifest-spec.md §9.1's width/align/truncate ListColumn fields —
+// `truncate` defaults to true, `align` to "left" ("right" for numbers is
+// left to the manifest author to declare explicitly; this doesn't infer
+// it from `type`).
+export function columnStyle(column: ListColumn): CSSProperties {
+  const style: CSSProperties = {};
+  if (column.width !== undefined) style.width = column.width;
+  if (column.min_width !== undefined) style.minWidth = column.min_width;
+  if (column.max_width !== undefined) style.maxWidth = column.max_width;
+  if (column.align) style.textAlign = column.align;
+  if (column.truncate !== false) {
+    style.overflow = "hidden";
+    style.textOverflow = "ellipsis";
+    style.whiteSpace = "nowrap";
+  }
+  return style;
 }
 
 function toDate(value: unknown): Date | null {
@@ -165,8 +181,14 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     case "currency": {
       if (typeof value !== "number") return "";
       const currency = column.currency_field ? (row[column.currency_field] as string | undefined) : undefined;
-      if (!currency) return new Intl.NumberFormat(undefined).format(value);
-      return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value);
+      if (currency) {
+        try {
+          return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value);
+        } catch {
+          // currency_field held something that isn't a valid ISO 4217 code — fall through to plain formatting.
+        }
+      }
+      return new Intl.NumberFormat(undefined).format(value);
     }
 
     case "percent":

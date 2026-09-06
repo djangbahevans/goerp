@@ -1,9 +1,9 @@
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
-import { renderCell } from "./column-renderers.js";
+import { columnStyle, renderCell } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
 import { ListFilters } from "./list-filters.js";
-import type { ListColumn, ListViewDeclaration } from "./list-view-types.js";
+import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js";
 import { useListState } from "./use-list-state.js";
 import { useVisibleColumns } from "./use-visible-columns.js";
 
@@ -17,8 +17,6 @@ export interface ListRendererProps {
   baseFilter?: Record<string, string>;
 }
 
-type Row = Record<string, unknown>;
-
 function defaultSortOf(view: ListViewDeclaration): string | undefined {
   if (!view.default_sort) return undefined;
   return view.default_sort_dir === "desc" ? `-${view.default_sort}` : view.default_sort;
@@ -27,15 +25,25 @@ function defaultSortOf(view: ListViewDeclaration): string | undefined {
 // Relation columns resolved via the batch-fetch fallback (no `display_field`,
 // an explicit `resource_label_field` given) — the auto-default-from-registry
 // case needs the model/view registry goerp#636 deferred to backlog #674.
-function relationBatchSpecs(columns: ListColumn[], rows: Row[]): RelationBatchSpec[] {
-  return columns
-    .filter((c) => c.type === "relation" && !c.display_field && c.resource && c.resource_label_field)
-    .map((c) => ({
+//
+// One spec per (column, already-fetched page), all sharing the column's
+// field as their `key` (useRelationLabels merges same-key results). Each
+// page's own id set never changes once that page is loaded, so its query
+// stays cached forever — fetchNextPage only ever issues a fresh, small
+// query for the new page's ids, never re-fetching labels already resolved
+// for earlier pages.
+function relationBatchSpecs(columns: ListColumn[], pages: Row[][]): RelationBatchSpec[] {
+  const relationColumns = columns.filter(
+    (c) => c.type === "relation" && !c.display_field && c.resource && c.resource_label_field,
+  );
+  return relationColumns.flatMap((c) =>
+    pages.map((pageRows) => ({
       key: c.field,
       resource: c.resource as string,
       labelField: c.resource_label_field as string,
-      ids: rows.map((row) => row[c.field]).filter((value): value is string => typeof value === "string"),
-    }));
+      ids: pageRows.map((row) => row[c.field]).filter((value): value is string => typeof value === "string"),
+    })),
+  );
 }
 
 export interface RowGroup {
@@ -76,8 +84,9 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
       ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
     });
 
-  const rows = data?.pages.flatMap((page) => page.data) ?? [];
-  const relationLabels = useRelationLabels(relationBatchSpecs(columns, rows));
+  const pages = data?.pages.map((page) => page.data) ?? [];
+  const rows = pages.flat();
+  const relationLabels = useRelationLabels(relationBatchSpecs(columns, pages));
 
   if (isLoading) {
     return (
@@ -126,7 +135,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
       ) : (
         groupRows(rows, listState.groupBy).map((group) => (
           <table aria-label={view.label} key={group.key}>
-            {group.key && (
+            {listState.groupBy && (
               <caption>
                 {listState.groupBy} = {group.key}
               </caption>
@@ -134,7 +143,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
             <thead>
               <tr>
                 {columns.map((column) => (
-                  <th scope="col" key={column.field}>
+                  <th scope="col" key={column.field} style={columnStyle(column)}>
                     {column.label ?? column.field}
                   </th>
                 ))}
@@ -148,7 +157,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                     const relationLabel =
                       typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
                     return (
-                      <td key={column.field}>
+                      <td key={column.field} style={columnStyle(column)}>
                         {renderCell(column, row, relationLabel !== undefined ? { relationLabel } : {})}
                       </td>
                     );

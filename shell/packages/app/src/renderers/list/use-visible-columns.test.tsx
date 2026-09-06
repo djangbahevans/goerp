@@ -25,6 +25,11 @@ describe("filterColumnsByFieldAccess", () => {
 
     expect(seen).toEqual(["contacts.contact.name"]);
   });
+
+  it("drops a column marked hidden even when the caller has read access", () => {
+    const columns: ListColumn[] = [{ field: "name" }, { field: "internal_note", hidden: true }];
+    expect(filterColumnsByFieldAccess(columns, "contacts.contact", () => true)).toEqual([{ field: "name" }]);
+  });
 });
 
 function wrapperWithFieldAccess(fieldAccess: Record<string, Record<string, { read: boolean; write: boolean }>>) {

@@ -3,11 +3,16 @@ import { moduleLink } from "@goerp/sdk/nav";
 import { useAction } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
-import { useContext } from "react";
+import { useContext, useState } from "react";
 import type { ListAction } from "./list-view-types.js";
 
 // Only "create"/"route"/"url" — the depth goerp#575's own scope covers.
 // export/import/report/custom action types aren't rendered.
+//
+// Reimplements usePermission's throw-if-missing-provider + check() pattern
+// (@goerp/sdk/auth) rather than calling it directly: a ListAction's
+// `permission` is optional (no permission required renders it unconditionally),
+// but usePermission's own signature requires a non-empty permission string.
 function usePermitted(permission: string | undefined): boolean {
   const permissions = useContext(PermissionContext);
   if (!permissions) {
@@ -19,6 +24,7 @@ function usePermitted(permission: string | undefined): boolean {
 function CreateActionButton({ action, module }: { action: ListAction; module: string }) {
   const permitted = usePermitted(action.permission);
   const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
   const view = action.view;
   if (!permitted || !view) return null;
 
@@ -26,12 +32,18 @@ function CreateActionButton({ action, module }: { action: ListAction; module: st
     <button
       type="button"
       onClick={() => {
-        void viewPathRegistry.resolve(view, module).then((path) => {
-          if (path) void navigate({ to: moduleLink(path) });
-        });
+        setError(null);
+        viewPathRegistry
+          .resolve(view, module)
+          .then((path) => {
+            if (path) void navigate({ to: moduleLink(path) });
+            else setError(`"${view}" doesn't resolve to a route yet.`);
+          })
+          .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
       }}
     >
       {action.label}
+      {error && <span role="alert">{error}</span>}
     </button>
   );
 }

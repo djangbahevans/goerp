@@ -14,7 +14,7 @@ import type { ListAction } from "./list-view-types.js";
 
 const { useActionMock, resolveViewPathMock } = vi.hoisted(() => ({
   useActionMock: vi.fn(),
-  resolveViewPathMock: vi.fn(async () => "/contacts/new"),
+  resolveViewPathMock: vi.fn(async (): Promise<string | null> => "/contacts/new"),
 }));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
@@ -101,6 +101,24 @@ describe("ListActions", () => {
 
     fireEvent.click(screen.getByText("New Contact"));
     await vi.waitFor(() => expect(resolveViewPathMock).toHaveBeenCalledWith("contacts_form", "contacts"));
+  });
+
+  it("create: surfaces an error instead of silently doing nothing when the view name doesn't resolve", async () => {
+    resolveViewPathMock.mockResolvedValueOnce(null);
+    const actions: ListAction[] = [{ label: "New Contact", type: "create", view: "missing_form" }];
+    await renderActions(actions, fullAccess);
+
+    fireEvent.click(screen.getByText("New Contact"));
+    await vi.waitFor(() => expect(screen.getByRole("alert").textContent).toContain("missing_form"));
+  });
+
+  it("create: surfaces an error instead of an unhandled rejection when resolving the view fails", async () => {
+    resolveViewPathMock.mockRejectedValueOnce(new Error("schema fetch failed"));
+    const actions: ListAction[] = [{ label: "New Contact", type: "create", view: "contacts_form" }];
+    await renderActions(actions, fullAccess);
+
+    fireEvent.click(screen.getByText("New Contact"));
+    await vi.waitFor(() => expect(screen.getByRole("alert").textContent).toBe("schema fetch failed"));
   });
 
   it("route: fires the mutation and surfaces its error", async () => {
