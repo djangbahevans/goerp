@@ -15,4 +15,4 @@ export type {
   MFAMethod,
 } from "./types.js";
 export { useAuth } from "./use-auth.js";
-export { useFieldPermission, usePermission } from "./use-permission.js";
+export { useFieldPermission, useOptionalPermission, usePermission } from "./use-permission.js";
