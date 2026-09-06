@@ -95,6 +95,32 @@ describe("ListActions", () => {
     expect(screen.queryByText("New Contact")).toBeNull();
   });
 
+  it("route: hides an action the current user lacks permission for", async () => {
+    const actions: ListAction[] = [
+      { label: "Confirm", type: "route", route: "contacts.confirm", permission: "contacts:contact:write" },
+    ];
+    await renderActions(actions, permissionWrapper([]));
+
+    expect(screen.queryByText("Confirm")).toBeNull();
+  });
+
+  it("url: hides an action the current user lacks permission for", async () => {
+    const actions: ListAction[] = [
+      { label: "Docs", type: "url", url: "https://example.com", permission: "contacts:contact:write" },
+    ];
+    await renderActions(actions, permissionWrapper([]));
+
+    expect(screen.queryByText("Docs")).toBeNull();
+  });
+
+  it("route: disables the button while the mutation is pending", async () => {
+    useActionMock.mockReturnValue({ mutate: vi.fn(), isPending: true, isError: false, error: null });
+    const actions: ListAction[] = [{ label: "Confirm", type: "route", route: "contacts.confirm" }];
+    await renderActions(actions, fullAccess);
+
+    expect(screen.getByRole("button", { name: "Confirm" }).hasAttribute("disabled")).toBe(true);
+  });
+
   it("create: resolves the view name to a path and navigates to its /_m browser link", async () => {
     const actions: ListAction[] = [{ label: "New Contact", type: "create", view: "contacts_form" }];
     await renderActions(actions, fullAccess);
@@ -139,5 +165,28 @@ describe("ListActions", () => {
     const link = screen.getByText("Docs").closest("a");
     expect(link?.getAttribute("href")).toBe("https://example.com");
     expect(link?.getAttribute("target")).toBe("_blank");
+  });
+
+  it("url: requires a PermissionProvider even when the action itself has no `permission` set", () => {
+    // Same fail-fast contract regardless of action type — a url action
+    // with no `permission` field must still throw outside a provider,
+    // matching create/route (which always require one via ActionButton).
+    // Rendered directly (no router) since this doesn't need one and
+    // RouterProvider's own error boundary would otherwise swallow the
+    // throw into route-match state instead of propagating it.
+    const actions: ListAction[] = [{ label: "Docs", type: "url", url: "https://example.com" }];
+    expect(() => render(<ListActions actions={actions} module="contacts" />)).toThrow(
+      /must be used within a PermissionProvider/,
+    );
+  });
+
+  it("route: requires a PermissionProvider even for a malformed action missing its `route` field", () => {
+    // The permission check must fire ahead of the `!action.route` check,
+    // not be skipped by it — a malformed manifest action shouldn't mask a
+    // missing PermissionProvider setup bug.
+    const actions: ListAction[] = [{ label: "Confirm", type: "route" }];
+    expect(() => render(<ListActions actions={actions} module="contacts" />)).toThrow(
+      /must be used within a PermissionProvider/,
+    );
   });
 });
