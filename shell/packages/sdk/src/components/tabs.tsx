@@ -39,21 +39,35 @@ export function Tabs({ items, activeId, onChange, children }: TabsProps): ReactN
 
   return (
     <div>
-      <div role="tablist" className="flex gap-2 border-border border-b">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={item.id === activeId}
-            data-selected={item.id === activeId}
-            data-icon={item.icon}
-            disabled={item.disabled}
-            onClick={() => onChange(item.id)}
-          >
-            {item.badge !== undefined ? `${item.label} ${item.badge}` : item.label}
-          </button>
-        ))}
+      <div role="tablist" className="flex gap-4 border-border border-b">
+        {items.map((item) => {
+          const selected = item.id === activeId;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              data-selected={selected}
+              data-icon={item.icon}
+              disabled={item.disabled}
+              onClick={() => onChange(item.id)}
+              className={`-mb-px flex items-center gap-1.5 border-b-2 font-medium text-sm transition-colors duration-(--duration-fast) ease-out focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50 ${
+                selected ? "border-primary text-text" : "border-transparent text-text-secondary hover:text-text"
+              }`}
+            >
+              {item.label}
+              {item.badge !== undefined && (
+                <>
+                  {" "}
+                  <span className="rounded-full bg-primary-subtle px-1.5 py-0.5 text-primary text-xs">
+                    {item.badge}
+                  </span>
+                </>
+              )}
+            </button>
+          );
+        })}
       </div>
       <div role="tabpanel">{activePanel}</div>
     </div>

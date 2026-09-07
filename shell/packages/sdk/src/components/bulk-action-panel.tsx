@@ -12,7 +12,7 @@ export function BulkActionPanel({ children }: BulkActionPanelProps): ReactNode {
   return (
     <section
       aria-label="Bulk action"
-      className="flex items-center gap-3 rounded-lg border border-border bg-bg p-3 shadow-md"
+      className="flex items-center gap-3 rounded-structural border border-border bg-surface p-6 shadow-lg"
     >
       {children}
     </section>

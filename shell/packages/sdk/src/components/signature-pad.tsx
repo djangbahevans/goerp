@@ -1,5 +1,6 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import { useRef } from "react";
+import { actionButtonClassName } from "./action-button-styles.js";
 
 export interface SignaturePadProps {
   value: string | null;
@@ -24,6 +25,7 @@ export function SignaturePad({ value, onChange, disabled = false }: SignaturePad
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     drawing.current = true;
+    ctx.strokeStyle = getComputedStyle(canvas).getPropertyValue("--color-text");
     const { x, y } = pos(e, canvas);
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -61,14 +63,21 @@ export function SignaturePad({ value, onChange, disabled = false }: SignaturePad
           ref={canvasRef}
           width={200}
           height={80}
-          style={{ border: "1px solid", touchAction: "none" }}
+          className="rounded-control border border-border"
+          style={{ touchAction: "none" }}
           onPointerDown={start}
           onPointerMove={move}
           onPointerUp={end}
           onPointerLeave={end}
         />
       )}
-      <button type="button" disabled={disabled} onClick={clear}>
+      <button
+        type="button"
+        disabled={disabled}
+        data-disabled={disabled ? "true" : undefined}
+        onClick={clear}
+        className={actionButtonClassName("ghost", "sm")}
+      >
         Clear
       </button>
     </span>
