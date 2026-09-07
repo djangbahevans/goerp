@@ -54,7 +54,7 @@ export function SignaturePad({ value, onChange, disabled = false }: SignaturePad
 
   return (
     <span>
-      {value !== null ? (
+      {value ? (
         <img src={value} alt="Signature" style={{ maxWidth: 200 }} />
       ) : (
         <canvas

@@ -34,7 +34,7 @@ const CHANGE_DIRECTION_CLASSES: Record<StatCardChangeDirection, string> = {
 };
 
 const COLOR_CLASSES: Record<StatCardColor, string> = {
-  red: "text-red-700",
+  red: CHANGE_DIRECTION_CLASSES.down,
   orange: "text-orange-700",
 };
 

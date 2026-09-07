@@ -35,4 +35,17 @@ describe("Breadcrumb", () => {
     expect(screen.getByText("Invoices").getAttribute("aria-current")).toBe("page");
     expect(screen.getByText("Documents").getAttribute("aria-current")).toBeNull();
   });
+
+  it("never renders the last item as interactive, even when it has an onClick", () => {
+    render(
+      <Breadcrumb
+        items={[
+          { label: "Documents", onClick: () => {} },
+          { label: "Invoices", onClick: () => {} },
+        ]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Invoices" })).toBeNull();
+    expect(screen.getByText("Invoices").getAttribute("aria-current")).toBe("page");
+  });
 });

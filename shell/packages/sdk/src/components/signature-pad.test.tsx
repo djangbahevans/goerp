@@ -11,6 +11,12 @@ describe("SignaturePad", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
+  it("renders a blank canvas for an empty string too, not a broken image", () => {
+    const { container } = render(<SignaturePad value="" onChange={() => {}} />);
+    expect(container.querySelector("canvas")).toBeTruthy();
+    expect(container.querySelector("img")).toBeNull();
+  });
+
   it("renders the captured signature as an image when a value is set", () => {
     render(<SignaturePad value="data:image/png;base64,abc" onChange={() => {}} />);
     const img = screen.getByAltText("Signature") as HTMLImageElement;

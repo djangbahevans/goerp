@@ -23,7 +23,7 @@ export function Breadcrumb({ items }: BreadcrumbProps): ReactNode {
           return (
             <li key={item.label} className="flex items-center gap-1">
               {i > 0 && <span aria-hidden="true">/</span>}
-              {item.onClick !== undefined ? (
+              {item.onClick !== undefined && !isLast ? (
                 <button type="button" onClick={item.onClick} aria-current={isLast ? "page" : undefined}>
                   {item.label}
                 </button>

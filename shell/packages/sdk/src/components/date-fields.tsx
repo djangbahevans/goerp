@@ -6,12 +6,25 @@ import { useId } from "react";
 // generic form renderer's date/datetime/time split — not a mode flag on
 // one component.
 
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// Date-only strings parse as UTC midnight per ECMA-262, and toISOString()
+// output is UTC — both sides of the date-only round-trip agree, so UTC
+// components are fine here.
 function toDateInputValue(date: Date | undefined): string {
   return date ? date.toISOString().slice(0, 10) : "";
 }
 
+// <input type="datetime-local">'s value string carries no timezone, so the
+// browser (and `new Date(raw)` on the way back in) both treat it as local
+// wall-clock time — formatting via toISOString() here would disagree with
+// that and drift the displayed/stored instant by the local UTC offset on
+// every edit. Local getters keep both directions consistent.
 function toDateTimeInputValue(date: Date | undefined): string {
-  return date ? date.toISOString().slice(0, 16) : "";
+  if (!date) return "";
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
 function parseDate(raw: string): Date | undefined {
@@ -23,13 +36,16 @@ function parseDate(raw: string): Date | undefined {
 export interface DateFieldProps {
   label?: string | undefined;
   value: Date | undefined;
-  onChange: (date: Date) => void;
+  // Called with undefined when the input is cleared, matching `value`'s own
+  // optionality — a caller that doesn't care can ignore that case.
+  onChange: (date: Date | undefined) => void;
   min?: Date | undefined;
+  max?: Date | undefined;
   error?: string | undefined;
   disabled?: boolean | undefined;
 }
 
-export function DateField({ label, value, onChange, min, error, disabled = false }: DateFieldProps): ReactNode {
+export function DateField({ label, value, onChange, min, max, error, disabled = false }: DateFieldProps): ReactNode {
   const id = useId();
   return (
     <div>
@@ -39,12 +55,10 @@ export function DateField({ label, value, onChange, min, error, disabled = false
         type="date"
         value={toDateInputValue(value)}
         min={toDateInputValue(min) || undefined}
+        max={toDateInputValue(max) || undefined}
         disabled={disabled}
         aria-invalid={error !== undefined}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => {
-          const date = parseDate(e.target.value);
-          if (date) onChange(date);
-        }}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(parseDate(e.target.value))}
       />
       {error !== undefined && <span role="alert">{error}</span>}
     </div>
@@ -54,7 +68,7 @@ export function DateField({ label, value, onChange, min, error, disabled = false
 export interface DateTimeFieldProps {
   label?: string | undefined;
   value: Date | undefined;
-  onChange: (date: Date) => void;
+  onChange: (date: Date | undefined) => void;
   min?: Date | undefined;
   max?: Date | undefined;
   error?: string | undefined;
@@ -82,10 +96,7 @@ export function DateTimeField({
         max={toDateTimeInputValue(max) || undefined}
         disabled={disabled}
         aria-invalid={error !== undefined}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => {
-          const date = parseDate(e.target.value);
-          if (date) onChange(date);
-        }}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(parseDate(e.target.value))}
       />
       {error !== undefined && <span role="alert">{error}</span>}
     </div>
