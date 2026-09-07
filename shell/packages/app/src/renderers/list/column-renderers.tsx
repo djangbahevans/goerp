@@ -1,4 +1,11 @@
-import { BADGE_COLOR_CLASSES, Badge, type BadgeColor, CountryFlag, UserAvatar } from "@goerp/sdk/components";
+import {
+  BADGE_COLOR_CLASSES,
+  Badge,
+  type BadgeColor,
+  CountryFlag,
+  formatRelativeTime,
+  UserAvatar,
+} from "@goerp/sdk/components";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
 
@@ -84,28 +91,6 @@ function formatDate(value: unknown, format: string | undefined, options: Intl.Da
   return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
-const RELATIVE_DIVISIONS: [number, Intl.RelativeTimeFormatUnit][] = [
-  [60, "seconds"],
-  [60, "minutes"],
-  [24, "hours"],
-  [7, "days"],
-  [4.34524, "weeks"],
-  [12, "months"],
-  [Number.POSITIVE_INFINITY, "years"],
-];
-
-function formatRelativeTime(value: unknown): string {
-  const date = toDate(value);
-  if (!date) return "";
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-  let duration = (date.getTime() - Date.now()) / 1000;
-  for (const [amount, unit] of RELATIVE_DIVISIONS) {
-    if (Math.abs(duration) < amount) return rtf.format(Math.round(duration), unit);
-    duration /= amount;
-  }
-  return rtf.format(Math.round(duration), "years");
-}
-
 function Pill({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <span
@@ -180,7 +165,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       return formatDate(value, column.format, { timeStyle: "short" });
 
     case "relative_time":
-      return formatRelativeTime(value);
+      return formatRelativeTime(value, "");
 
     case "boolean":
       return value ? (

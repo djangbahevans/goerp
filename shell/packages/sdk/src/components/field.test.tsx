@@ -53,6 +53,51 @@ describe("formatFieldValue", () => {
   it("passes text/email/phone/url through as a plain string", () => {
     expect(formatFieldValue("a@b.com", "email", undefined, "-")).toBe("a@b.com");
   });
+
+  it("formats a past date as a relative time", () => {
+    expect(formatFieldValue(new Date(Date.now() - 60_000), "relative_time", undefined, "-")).toBe(
+      new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-1, "minutes"),
+    );
+  });
+
+  it("formats a raw epoch-ms number as a relative time, not just a Date/ISO string", () => {
+    expect(formatFieldValue(Date.now() - 60_000, "relative_time", undefined, "-")).toBe(
+      new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-1, "minutes"),
+    );
+  });
+
+  it("joins tag names as plain comma-separated text", () => {
+    expect(formatFieldValue([{ name: "VIP" }, { name: "Lead" }], "tags", undefined, "-")).toBe("VIP, Lead");
+  });
+
+  it("falls back to emptyText for an empty tags array", () => {
+    expect(formatFieldValue([], "tags", undefined, "-")).toBe("-");
+  });
+
+  it("skips malformed tag entries with no string name, rather than printing 'undefined'", () => {
+    expect(formatFieldValue([{ id: "1" }, { name: "VIP" }], "tags", undefined, "-")).toBe("VIP");
+  });
+
+  it("renders a relation value's display text", () => {
+    expect(formatFieldValue({ id: "1", display: "Acme Corp" }, "relation", undefined, "-")).toBe("Acme Corp");
+  });
+
+  it("renders a file value's name, falling back to its id", () => {
+    expect(formatFieldValue({ id: "f1", name: "invoice.pdf" }, "file", undefined, "-")).toBe("invoice.pdf");
+    expect(formatFieldValue({ id: "f1" }, "file", undefined, "-")).toBe("f1");
+    expect(formatFieldValue("plain-filename.pdf", "file", undefined, "-")).toBe("plain-filename.pdf");
+  });
+
+  it("stringifies a json value", () => {
+    expect(formatFieldValue({ a: 1 }, "json", undefined, "-")).toBe('{"a":1}');
+  });
+
+  it("falls back to emptyText for a value JSON.stringify can't serialize, e.g. a circular reference", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: building a circular reference for the test needs a mutable any.
+    const circular: any = { a: 1 };
+    circular.self = circular;
+    expect(formatFieldValue(circular, "json", undefined, "-")).toBe("-");
+  });
 });
 
 describe("Field", () => {
@@ -107,5 +152,26 @@ describe("Field", () => {
   it("delegates type='country' to CountryFlag with the country name shown", () => {
     render(<Field label="Country" value="GH" type="country" />);
     expect(screen.getByRole("img")).toBeTruthy();
+  });
+
+  it("renders a color swatch with an unconditional border beside the value text", () => {
+    render(<Field label="Tag color" value="#ff0000" type="color" />);
+    expect(screen.getByText("#ff0000")).toBeTruthy();
+    const swatch = document.querySelector('[aria-hidden="true"]') as HTMLElement;
+    expect(swatch.style.backgroundColor).toBe("rgb(255, 0, 0)");
+    expect(swatch.className).toContain("border");
+  });
+
+  it("truncates a json value with an ellipsis and holds the full string in title", () => {
+    render(<Field label="Metadata" value={{ a: 1, b: 2 }} type="json" />);
+    const value = screen.getByTitle('{"a":1,"b":2}');
+    expect(value.className).toContain("truncate");
+  });
+
+  it("applies the same font-mono/truncate treatment to a linked json value", () => {
+    render(<Field label="Metadata" value={{ a: 1 }} type="json" href="/records/1" />);
+    const link = screen.getByRole("link");
+    expect(link.className).toContain("font-mono");
+    expect(link.className).toContain("truncate");
   });
 });

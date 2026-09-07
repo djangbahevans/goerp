@@ -23,7 +23,7 @@ export { DateField, DateTimeField, TimeField } from "./date-fields.js";
 export type { EmptyStateProps } from "./empty-state.js";
 export { EmptyState } from "./empty-state.js";
 export type { FieldProps, FieldType } from "./field.js";
-export { currencyMinorUnitDigits, Field, formatFieldValue } from "./field.js";
+export { currencyMinorUnitDigits, Field, formatFieldValue, formatRelativeTime } from "./field.js";
 export type { FieldWrapperProps } from "./field-wrapper.js";
 export { FieldWrapper } from "./field-wrapper.js";
 export type { LoadingOverlayProps } from "./loading-overlay.js";
