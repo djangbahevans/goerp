@@ -17,18 +17,32 @@ export interface BreadcrumbProps {
 export function Breadcrumb({ items }: BreadcrumbProps): ReactNode {
   return (
     <nav aria-label="Breadcrumb">
-      <ol className="flex items-center gap-1 text-text text-sm">
+      <ol className="flex items-center gap-1 text-sm">
         {items.map((item, i) => {
           const isLast = i === items.length - 1;
           return (
             <li key={item.label} className="flex items-center gap-1">
-              {i > 0 && <span aria-hidden="true">/</span>}
+              {i > 0 && (
+                <span aria-hidden="true" className="text-text-secondary">
+                  ›
+                </span>
+              )}
               {item.onClick !== undefined && !isLast ? (
-                <button type="button" onClick={item.onClick} aria-current={isLast ? "page" : undefined}>
+                <button
+                  type="button"
+                  onClick={item.onClick}
+                  aria-current={isLast ? "page" : undefined}
+                  className="text-text-secondary hover:text-text"
+                >
                   {item.label}
                 </button>
               ) : (
-                <span aria-current={isLast ? "page" : undefined}>{item.label}</span>
+                <span
+                  aria-current={isLast ? "page" : undefined}
+                  className={isLast ? "text-text" : "text-text-secondary"}
+                >
+                  {item.label}
+                </span>
               )}
             </li>
           );

@@ -14,8 +14,12 @@ export interface ColorPickerProps {
 export function ColorPicker({ label, value, onChange, error, disabled = false }: ColorPickerProps): ReactNode {
   const id = useId();
   return (
-    <div>
-      {label !== undefined && <label htmlFor={id}>{label}</label>}
+    <div className="flex flex-col gap-1">
+      {label !== undefined && (
+        <label htmlFor={id} className="text-sm text-text">
+          {label}
+        </label>
+      )}
       <input
         id={id}
         type="color"
@@ -23,8 +27,15 @@ export function ColorPicker({ label, value, onChange, error, disabled = false }:
         disabled={disabled}
         aria-invalid={error !== undefined}
         onChange={(e) => onChange(e.target.value)}
+        className={`h-8 w-10 rounded-control border transition-colors duration-(--duration-fast) ease-out focus:border-primary focus:shadow-focus disabled:cursor-not-allowed disabled:opacity-50 ${
+          error !== undefined ? "border-danger" : "border-border"
+        }`}
       />
-      {error !== undefined && <span role="alert">{error}</span>}
+      {error !== undefined && (
+        <span role="alert" className="text-sm text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

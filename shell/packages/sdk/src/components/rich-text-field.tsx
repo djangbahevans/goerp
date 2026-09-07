@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useId } from "react";
+import { fieldInputClassName } from "./field-input-styles.js";
 
 export interface RichTextFieldProps {
   label?: string | undefined;
@@ -23,8 +24,12 @@ export function RichTextField({
 }: RichTextFieldProps): ReactNode {
   const id = useId();
   return (
-    <div>
-      {label !== undefined && <label htmlFor={id}>{label}</label>}
+    <div className="flex flex-col gap-1">
+      {label !== undefined && (
+        <label htmlFor={id} className="text-sm text-text">
+          {label}
+        </label>
+      )}
       <textarea
         id={id}
         value={value}
@@ -32,8 +37,13 @@ export function RichTextField({
         disabled={disabled}
         aria-invalid={error !== undefined}
         onChange={(e) => onChange(e.target.value)}
+        className={fieldInputClassName(error !== undefined, "input", "sans")}
       />
-      {error !== undefined && <span role="alert">{error}</span>}
+      {error !== undefined && (
+        <span role="alert" className="text-sm text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
