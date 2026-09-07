@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useOptionalPermission } from "../auth/use-permission.js";
 import { type ActionButtonSize, type ActionButtonVariant, actionButtonClassName } from "./action-button-styles.js";
+import { Spinner } from "./spinner.js";
 
 export type { ActionButtonSize, ActionButtonVariant };
 
@@ -19,24 +20,6 @@ export interface ActionButtonProps {
 }
 
 const SPINNER_DIMENSION: Record<ActionButtonSize, number> = { sm: 14, md: 16 };
-
-function LoadingSpinner({ size }: { size: ActionButtonSize }): ReactNode {
-  const dimension = SPINNER_DIMENSION[size];
-  return (
-    <svg
-      aria-hidden="true"
-      width={dimension}
-      height={dimension}
-      viewBox="0 0 24 24"
-      fill="none"
-      className="animate-spin motion-reduce:animate-none"
-      style={{ animationDuration: "var(--duration-slower)" }}
-    >
-      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
-      <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 export function ActionButton({
   permission,
@@ -67,7 +50,7 @@ export function ActionButton({
       onClick={onClick}
       className={actionButtonClassName(variant, size)}
     >
-      {loading ? <LoadingSpinner size={size} /> : null}
+      {loading ? <Spinner size={SPINNER_DIMENSION[size]} /> : null}
       {children}
     </button>
   );

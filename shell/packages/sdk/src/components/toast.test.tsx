@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastBus } from "../notifications/toast.js";
 import { Toast } from "./toast.js";
@@ -42,15 +42,47 @@ describe("Toast", () => {
     expect(onClick).toHaveBeenCalled();
   });
 
-  it("dismisses a toast via its own dismiss button", () => {
-    const bus = new ToastBus();
-    bus.success("Saved");
-    render(<Toast bus={bus} />);
+  it("dismisses a toast from the bus immediately, but keeps it rendered through its exit animation", () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new ToastBus();
+      bus.success("Saved");
+      render(<Toast bus={bus} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss: Saved" }));
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss: Saved" }));
 
-    expect(screen.queryByText("Saved")).toBeNull();
-    expect(bus.getToasts()).toHaveLength(0);
+      expect(bus.getToasts()).toHaveLength(0);
+      expect(screen.getByText("Saved")).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(screen.queryByText("Saved")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps an auto-dismissed toast rendered through its exit animation too", () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new ToastBus();
+      bus.success("Saved");
+      render(<Toast bus={bus} />);
+
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
+      expect(bus.getToasts()).toHaveLength(0);
+      expect(screen.getByText("Saved")).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(screen.queryByText("Saved")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders no dismiss button for a loading toast — only the caller resolves it", () => {

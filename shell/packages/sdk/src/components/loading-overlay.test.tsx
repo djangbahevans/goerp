@@ -18,13 +18,14 @@ describe("LoadingOverlay", () => {
 
   it("positions itself absolutely to overlay its parent", () => {
     render(<LoadingOverlay />);
-    expect(screen.getByRole("status").style.position).toBe("absolute");
+    expect(screen.getByRole("status").className).toContain("absolute");
   });
 
-  it("renders a visible backdrop, not just floating text, and marks itself busy", () => {
+  it("renders a visible backdrop and a spinner, not just floating text, and marks itself busy", () => {
     render(<LoadingOverlay />);
     const overlay = screen.getByRole("status");
-    expect(overlay.style.background).not.toBe("");
+    expect(overlay.className).toContain("color-mix");
+    expect(overlay.querySelector("svg")).not.toBeNull();
     expect(overlay.getAttribute("aria-busy")).toBe("true");
   });
 });

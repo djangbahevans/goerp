@@ -11,10 +11,10 @@ export interface EmptyStateProps {
 
 export function EmptyState({ icon, title, description, action }: EmptyStateProps): ReactNode {
   return (
-    <div data-icon={icon}>
-      <h3>{title}</h3>
-      {description !== undefined && <p>{description}</p>}
-      {action !== undefined && <div>{action}</div>}
+    <div data-icon={icon} className="flex flex-col items-center py-6 text-center">
+      <h3 className="font-medium text-md text-text">{title}</h3>
+      {description !== undefined && <p className="mt-1 max-w-sm text-sm text-text-secondary">{description}</p>}
+      {action !== undefined && <div className="mt-4">{action}</div>}
     </div>
   );
 }
