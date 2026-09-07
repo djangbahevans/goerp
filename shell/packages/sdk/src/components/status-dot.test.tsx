@@ -34,6 +34,11 @@ describe("StatusDot", () => {
 
   it("falls back to gray for an unrecognized color, e.g. a mistyped manifest value", () => {
     render(<StatusDot color={"chartreuse" as StatusDotColor} />);
-    expect(screen.getByRole("img").className).toContain("bg-gray-400");
+    expect(screen.getByRole("img").className).toContain("bg-text-disabled");
+  });
+
+  it("disables the pulse animation under prefers-reduced-motion", () => {
+    render(<StatusDot color="red" label="Overdue" pulse />);
+    expect(screen.getByRole("img").className).toContain("motion-reduce:animate-none");
   });
 });

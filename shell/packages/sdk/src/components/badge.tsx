@@ -22,20 +22,20 @@ export interface BadgeProps {
   icon?: string | undefined;
 }
 
-// Matches column-renderers.tsx's Pill/BADGE_COLOR_CLASSES exactly, so a
-// custom view's Badge looks identical to the manifest-driven "badge" list
-// column type it also renders from.
+// docs/components/badge.md "Tokens Used" — gray reuses the existing
+// neutral tokens directly; the other 9 are their own dedicated bg/text
+// token pairs, calibrated to >=4.5:1 in both light and dark mode.
 export const BADGE_COLOR_CLASSES: Record<BadgeColor, string> = {
-  gray: "bg-gray-100 text-gray-800",
-  red: "bg-red-100 text-red-800",
-  orange: "bg-orange-100 text-orange-800",
-  yellow: "bg-yellow-100 text-yellow-800",
-  green: "bg-green-100 text-green-800",
-  teal: "bg-teal-100 text-teal-800",
-  blue: "bg-blue-100 text-blue-800",
-  indigo: "bg-indigo-100 text-indigo-800",
-  purple: "bg-purple-100 text-purple-800",
-  pink: "bg-pink-100 text-pink-800",
+  gray: "bg-bg-subtle text-text-secondary",
+  red: "bg-badge-red text-badge-red-text",
+  orange: "bg-badge-orange text-badge-orange-text",
+  yellow: "bg-badge-yellow text-badge-yellow-text",
+  green: "bg-badge-green text-badge-green-text",
+  teal: "bg-badge-teal text-badge-teal-text",
+  blue: "bg-badge-blue text-badge-blue-text",
+  indigo: "bg-badge-indigo text-badge-indigo-text",
+  purple: "bg-badge-purple text-badge-purple-text",
+  pink: "bg-badge-pink text-badge-pink-text",
 };
 
 export function Badge({ label, color = "gray", icon }: BadgeProps): ReactNode {

@@ -36,4 +36,26 @@
 
   --goerp-color-info: #3d6c94;
   --goerp-color-info-subtle: #e1e9f0;
+
+  /* Badge's 10-color decorative palette (docs/components/badge.md) — gray
+     reuses --goerp-color-bg-subtle/-text-secondary above, no dedicated pair.
+     Every bg/text pair verified at >=4.5:1 in this mode. */
+  --goerp-color-badge-red: #f6e4e3;
+  --goerp-color-badge-red-text: #9b3b3b;
+  --goerp-color-badge-orange: #f5e7d6;
+  --goerp-color-badge-orange-text: #97591a;
+  --goerp-color-badge-yellow: #f6efd4;
+  --goerp-color-badge-yellow-text: #7c610f;
+  --goerp-color-badge-green: #e1efe3;
+  --goerp-color-badge-green-text: #357246;
+  --goerp-color-badge-teal: #ddefec;
+  --goerp-color-badge-teal-text: #256359;
+  --goerp-color-badge-blue: #e1eaf2;
+  --goerp-color-badge-blue-text: #3b6b9c;
+  --goerp-color-badge-indigo: #e7e7f5;
+  --goerp-color-badge-indigo-text: #5a5aa8;
+  --goerp-color-badge-purple: #f0e5f5;
+  --goerp-color-badge-purple-text: #7a4a9c;
+  --goerp-color-badge-pink: #f7e4ee;
+  --goerp-color-badge-pink-text: #a8447e;
 }

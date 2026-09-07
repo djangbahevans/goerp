@@ -13,24 +13,28 @@ export interface StatusDotProps {
   pulse?: boolean | undefined;
 }
 
+// docs/components/status-dot.md "Tokens Used" — the four functional status
+// tokens directly, unlike Badge's separate decorative palette.
 const DOT_COLOR_CLASSES: Record<StatusDotColor, string> = {
-  green: "bg-green-500",
-  red: "bg-red-500",
-  orange: "bg-orange-500",
-  blue: "bg-blue-500",
+  green: "bg-success",
+  red: "bg-danger",
+  orange: "bg-warning",
+  blue: "bg-info",
 };
 
 export function StatusDot({ color, label, pulse = false }: StatusDotProps): ReactNode {
   // Same defensiveness as Badge — a manifest-sourced or otherwise
   // untyped-at-the-boundary color isn't statically checked, so fall back
   // to a neutral gray rather than a broken class.
-  const colorClasses = DOT_COLOR_CLASSES[color] ?? "bg-gray-400";
+  const colorClasses = DOT_COLOR_CLASSES[color] ?? "bg-text-disabled";
   return (
     <span className="inline-flex items-center gap-1.5">
       <span
         role="img"
         aria-label={label ?? color}
-        className={`inline-block h-2 w-2 rounded-full ${colorClasses} ${pulse ? "animate-pulse" : ""}`}
+        className={`inline-block h-2 w-2 rounded-full ${colorClasses} ${pulse ? "animate-pulse motion-reduce:animate-none" : ""}`}
+        // Overrides just animate-pulse's fixed 2s duration, same pattern as ActionButton's loading spinner.
+        style={{ animationDuration: pulse ? "var(--duration-slow)" : undefined }}
       />
       {label !== undefined && <span>{label}</span>}
     </span>
