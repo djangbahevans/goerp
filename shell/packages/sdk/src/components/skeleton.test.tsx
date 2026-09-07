@@ -27,8 +27,24 @@ describe("Skeleton", () => {
     expect(container.querySelectorAll("[data-skeleton-cell]")).toHaveLength(20);
   });
 
-  it("is hidden from assistive technology", () => {
+  it("marks the outer container busy, and only the decorative shapes hidden — never the same element", () => {
     const { container } = render(<Skeleton />);
-    expect(container.querySelector('[data-skeleton="lines"]')?.getAttribute("aria-hidden")).toBe("true");
+    const outer = container.querySelector('[data-skeleton="lines"]');
+    expect(outer?.getAttribute("aria-busy")).toBe("true");
+    expect(outer?.getAttribute("aria-hidden")).toBeNull();
+
+    const line = container.querySelector("[data-skeleton-line]");
+    expect(line?.getAttribute("aria-hidden")).toBe("true");
+    expect(line?.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("marks card and table containers busy with hidden inner shapes too", () => {
+    const { container: cardContainer } = render(<Skeleton type="card" />);
+    expect(cardContainer.querySelector('[data-skeleton="card"]')?.getAttribute("aria-busy")).toBe("true");
+    expect(cardContainer.querySelector('[data-skeleton="card"] > [aria-hidden="true"]')).not.toBeNull();
+
+    const { container: tableContainer } = render(<Skeleton type="table" />);
+    expect(tableContainer.querySelector('[data-skeleton="table"]')?.getAttribute("aria-busy")).toBe("true");
+    expect(tableContainer.querySelector("[data-skeleton-cell]")?.getAttribute("aria-hidden")).toBe("true");
   });
 });

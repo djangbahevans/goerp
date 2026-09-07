@@ -14,10 +14,20 @@ export function ProgressBar({ value, label, showLabel = false }: ProgressBarProp
 
   return (
     <div>
-      <div role="progressbar" aria-valuenow={clamped} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
-        <div style={{ width: `${clamped}%` }} />
+      {showLabel && label !== undefined && <span className="mb-1 block text-sm text-text-secondary">{label}</span>}
+      <div
+        role="progressbar"
+        aria-valuenow={clamped}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+        className="h-2 overflow-hidden rounded-full bg-border"
+      >
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-(--duration-base) ease-out motion-reduce:transition-none"
+          style={{ width: `${clamped}%` }}
+        />
       </div>
-      {showLabel && label !== undefined && <span>{label}</span>}
     </div>
   );
 }

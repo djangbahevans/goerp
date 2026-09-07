@@ -165,3 +165,46 @@
   --duration-slow: 400ms;
   --duration-slower: 800ms;
 }
+
+/* Toast's slide-in/out motion (docs/components/toast.md "Tokens Used"),
+   referenced via Tailwind's arbitrary animate-[toast-slide-in_...] syntax.
+   The -fade- pair is the prefers-reduced-motion swap-in, opacity only. */
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toast-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes toast-slide-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+@keyframes toast-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
