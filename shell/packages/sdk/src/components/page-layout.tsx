@@ -5,5 +5,5 @@ export interface PageLayoutProps {
 }
 
 export function PageLayout({ children }: PageLayoutProps): ReactNode {
-  return <div className="bg-bg p-6 text-fg">{children}</div>;
+  return <div className="bg-bg p-6 text-text">{children}</div>;
 }

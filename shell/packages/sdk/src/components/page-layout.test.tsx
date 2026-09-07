@@ -23,6 +23,6 @@ describe("PageLayout", () => {
     const wrapper = container.firstElementChild;
     expect(wrapper?.className).toContain("p-6");
     expect(wrapper?.className).toContain("bg-bg");
-    expect(wrapper?.className).toContain("text-fg");
+    expect(wrapper?.className).toContain("text-text");
   });
 });

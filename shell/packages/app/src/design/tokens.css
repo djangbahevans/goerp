@@ -9,8 +9,109 @@
 @source "../../../sdk/src";
 
 @theme {
+  /* ── Colour roles ──────────────────────────────────────────────────── */
+  /* Indirected through --goerp-color-* so theme files can override per
+     [data-theme]; tenant branding overrides the Tailwind-facing
+     --color-primary/-primary-hover directly (higher-specificity inline
+     style), bypassing this indirection — shell-architecture.md §14. */
   --color-bg: var(--goerp-color-bg);
-  --color-fg: var(--goerp-color-fg);
-  --color-accent: var(--goerp-color-accent);
+  --color-bg-subtle: var(--goerp-color-bg-subtle);
+  --color-bg-muted: var(--goerp-color-bg-muted);
+
+  --color-surface: var(--goerp-color-surface);
+  --color-surface-hover: var(--goerp-color-surface-hover);
+  --color-surface-active: var(--goerp-color-surface-active);
+
   --color-border: var(--goerp-color-border);
+  --color-border-strong: var(--goerp-color-border-strong);
+
+  --color-text: var(--goerp-color-text);
+  --color-text-secondary: var(--goerp-color-text-secondary);
+  --color-text-disabled: var(--goerp-color-text-disabled);
+  --color-text-inverse: var(--goerp-color-text-inverse);
+
+  --color-primary: var(--goerp-color-primary);
+  --color-primary-hover: var(--goerp-color-primary-hover);
+  --color-primary-active: var(--goerp-color-primary-active);
+  --color-primary-subtle: var(--goerp-color-primary-subtle);
+
+  --color-danger: var(--goerp-color-danger);
+  --color-danger-hover: var(--goerp-color-danger-hover);
+  --color-danger-subtle: var(--goerp-color-danger-subtle);
+
+  --color-warning: var(--goerp-color-warning);
+  --color-warning-subtle: var(--goerp-color-warning-subtle);
+
+  --color-success: var(--goerp-color-success);
+  --color-success-subtle: var(--goerp-color-success-subtle);
+
+  --color-info: var(--goerp-color-info);
+  --color-info-subtle: var(--goerp-color-info-subtle);
+
+  /* ── Typography ────────────────────────────────────────────────────── */
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", monospace;
+
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 20px;
+  --text-3xl: 24px;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* ── Radius ────────────────────────────────────────────────────────── */
+  --radius-structural: 2px;
+  --radius-control: 6px;
+  --radius-full: 9999px;
+
+  /* ── Shadow ────────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px 0 rgb(16 20 28 / 0.06);
+  --shadow-md: 0 4px 12px -2px rgb(16 20 28 / 0.12);
+  --shadow-lg: 0 12px 24px -4px rgb(16 20 28 / 0.16);
+}
+
+/* Tokens outside Tailwind's utility-generating theme namespaces — spacing,
+   z-index layers, chrome dimensions, motion durations — referenced directly
+   as CSS custom properties (e.g. `var(--z-modal)`) rather than through
+   generated utility classes. Tailwind's default spacing scale (0.25rem
+   base) already resolves p-4/gap-2/etc. to these same pixel values, so
+   these are named tokens for raw CSS/inline-style consumers, not a
+   Tailwind spacing-scale remap. */
+:root {
+  --space-px: 1px;
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --z-base: 0;
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 56px;
+  --header-height: 52px;
+
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 400ms;
+  --duration-slower: 800ms;
 }

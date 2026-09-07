@@ -14,7 +14,7 @@ function Surface({ asChild, ...props }: { asChild?: boolean } & ComponentProps<"
 
 function IndexPage() {
   return (
-    <Surface className="flex min-h-screen items-center justify-center bg-bg text-fg">
+    <Surface className="flex min-h-screen items-center justify-center bg-bg text-text">
       <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
         GoERP Shell
       </motion.p>

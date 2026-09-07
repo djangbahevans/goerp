@@ -1,6 +1,38 @@
 :root {
-  --goerp-color-bg: #ffffff;
-  --goerp-color-fg: #0f172a;
-  --goerp-color-accent: #2563eb;
-  --goerp-color-border: #e2e8f0;
+  /* Neutral base — shell-visual-design.md §4 */
+  --goerp-color-bg: #f6f7f9;
+  --goerp-color-bg-subtle: #eef0f3;
+  --goerp-color-bg-muted: #e4e7eb;
+
+  --goerp-color-surface: #ffffff;
+  --goerp-color-surface-hover: #f6f7f9;
+  --goerp-color-surface-active: #eef0f3;
+
+  --goerp-color-border: #dfe3e8;
+  --goerp-color-border-strong: #c7ccd3;
+
+  --goerp-color-text: #10141c;
+  --goerp-color-text-secondary: #545b68;
+  --goerp-color-text-disabled: #9aa1ac;
+  --goerp-color-text-inverse: #ffffff;
+
+  /* Default accent — "Ledger" (pre-tenant-brand) */
+  --goerp-color-primary: #1b3a5c;
+  --goerp-color-primary-hover: #14293f;
+  --goerp-color-primary-active: #0f1e30;
+  --goerp-color-primary-subtle: #e4eaf0;
+
+  /* Status colors (functional, not decorative) */
+  --goerp-color-danger: #b23b3b;
+  --goerp-color-danger-hover: #96302f;
+  --goerp-color-danger-subtle: #f5e1e1;
+
+  --goerp-color-warning: #a9660f;
+  --goerp-color-warning-subtle: #f3e6d3;
+
+  --goerp-color-success: #1e7a5c;
+  --goerp-color-success-subtle: #ddeee8;
+
+  --goerp-color-info: #3d6c94;
+  --goerp-color-info-subtle: #e1e9f0;
 }

@@ -13,8 +13,8 @@ export function PageHeader({ title, subtitle, actions }: PageHeaderProps): React
   return (
     <header className="flex items-start justify-between gap-4">
       <div>
-        <h1 className="font-semibold text-fg text-xl">{title}</h1>
-        {subtitle !== undefined && <p className="text-fg text-sm">{subtitle}</p>}
+        <h1 className="font-semibold text-text text-xl">{title}</h1>
+        {subtitle !== undefined && <p className="text-text text-sm">{subtitle}</p>}
       </div>
       {actions !== undefined && <div className="flex items-center gap-2">{actions}</div>}
     </header>
