@@ -29,13 +29,13 @@ export interface StatCardProps {
 }
 
 const CHANGE_DIRECTION_CLASSES: Record<StatCardChangeDirection, string> = {
-  up: "text-green-700",
-  down: "text-red-700",
+  up: "text-success",
+  down: "text-danger",
 };
 
 const COLOR_CLASSES: Record<StatCardColor, string> = {
-  red: CHANGE_DIRECTION_CLASSES.down,
-  orange: "text-orange-700",
+  red: "text-danger",
+  orange: "text-warning",
 };
 
 function formatValue(value: number | string, format: "currency" | undefined, currency: string | undefined): string {
@@ -44,12 +44,19 @@ function formatValue(value: number | string, format: "currency" | undefined, cur
 
 export function StatCard({ label, value, change, icon, color, format, currency, href }: StatCardProps): ReactNode {
   const body = (
-    <div data-icon={icon} className="rounded-lg border border-border bg-bg p-4">
-      <p className="text-text text-sm">{label}</p>
+    <div
+      data-icon={icon}
+      className={`rounded-structural border border-border bg-surface p-4 ${
+        href !== undefined
+          ? "transition-colors duration-(--duration-fast) ease-out hover:border-border-strong group-focus-visible:shadow-focus"
+          : ""
+      }`}
+    >
+      <p className="text-sm text-text-secondary">{label}</p>
       {value === undefined ? (
         <Skeleton lines={1} />
       ) : (
-        <p className={`font-semibold text-2xl ${color ? COLOR_CLASSES[color] : "text-text"}`}>
+        <p className={`font-mono font-semibold text-2xl ${color ? COLOR_CLASSES[color] : "text-text"}`}>
           {formatValue(value, format, currency)}
         </p>
       )}
@@ -62,5 +69,15 @@ export function StatCard({ label, value, change, icon, color, format, currency, 
     </div>
   );
 
-  return href !== undefined ? <a href={href}>{body}</a> : body;
+  // The focus ring lives on the inner div (group-focus-visible:shadow-focus)
+  // since that's the visually-styled card — this anchor is the actual
+  // focusable element, so it's what needs the focus-visible variant to key
+  // off of, and its own native outline is suppressed in favor of that ring.
+  return href !== undefined ? (
+    <a href={href} className="group block focus-visible:outline-none">
+      {body}
+    </a>
+  ) : (
+    body
+  );
 }
