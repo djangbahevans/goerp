@@ -35,4 +35,22 @@ describe("UserAvatar", () => {
     render(<UserAvatar name="Ama Owusu" />);
     expect(screen.getByText("AO").getAttribute("title")).toBeNull();
   });
+
+  it("assigns the same initials-fallback background color to the same user deterministically", () => {
+    render(<UserAvatar name="Ama Owusu" />);
+    const firstClass = screen.getByText("AO").className;
+
+    cleanup();
+    render(<UserAvatar name="Ama Owusu" />);
+    expect(screen.getByText("AO").className).toBe(firstClass);
+  });
+
+  it("prefers userId over name for the background color assignment", () => {
+    render(<UserAvatar userId="user-1" name="Ama Owusu" />);
+    const byUserId = screen.getByText("AO").className;
+
+    cleanup();
+    render(<UserAvatar userId="user-1" name="A Different Name" />);
+    expect(screen.getByText("AD").className).toBe(byUserId);
+  });
 });

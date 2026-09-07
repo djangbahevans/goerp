@@ -25,4 +25,9 @@ describe("CountryFlag", () => {
     render(<CountryFlag code="GH" showName />);
     expect(screen.getByText(countryNameOf("GH"), { exact: false })).toBeTruthy();
   });
+
+  it("falls back to the raw code as plain text for an invalid code, never a broken glyph", () => {
+    render(<CountryFlag code="123" />);
+    expect(screen.getByRole("img").textContent).toBe("123");
+  });
 });

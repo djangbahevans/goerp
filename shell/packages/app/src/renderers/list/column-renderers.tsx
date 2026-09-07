@@ -1,4 +1,4 @@
-import { Badge, type BadgeColor, CountryFlag, UserAvatar } from "@goerp/sdk/components";
+import { Badge, BADGE_COLOR_CLASSES, type BadgeColor, CountryFlag, UserAvatar } from "@goerp/sdk/components";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
 
@@ -109,7 +109,7 @@ function formatRelativeTime(value: unknown): string {
 function Pill({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${className ?? "bg-gray-100 text-gray-800"}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${className ?? BADGE_COLOR_CLASSES.gray}`}
     >
       {children}
     </span>

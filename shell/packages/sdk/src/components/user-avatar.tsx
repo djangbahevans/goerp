@@ -29,6 +29,29 @@ function initialsOf(name: string): string {
     .join("");
 }
 
+// docs/components/user-avatar.md "Tokens Used" — a small string hash of
+// userId ?? name, mod 8, into the fixed --color-avatar-0..7 palette.
+// userId is preferred when present since it's stable even if a display
+// name changes.
+const AVATAR_BG_CLASSES = [
+  "bg-avatar-0",
+  "bg-avatar-1",
+  "bg-avatar-2",
+  "bg-avatar-3",
+  "bg-avatar-4",
+  "bg-avatar-5",
+  "bg-avatar-6",
+  "bg-avatar-7",
+];
+
+function avatarBgClassFor(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  }
+  return AVATAR_BG_CLASSES[Math.abs(hash) % AVATAR_BG_CLASSES.length] as string;
+}
+
 export function UserAvatar({ userId, name, avatarUrl, size = "md", showTooltip = false }: UserAvatarProps): ReactNode {
   const sizeClass = SIZE_CLASSES[size];
   const title = showTooltip ? name : undefined;
@@ -45,11 +68,13 @@ export function UserAvatar({ userId, name, avatarUrl, size = "md", showTooltip =
     );
   }
 
+  const bgClass = avatarBgClassFor(userId || name);
+
   return (
     <span
       title={title}
       data-user-id={userId}
-      className={`inline-flex items-center justify-center rounded-full bg-gray-200 font-medium text-gray-700 ${sizeClass}`}
+      className={`inline-flex items-center justify-center rounded-full font-medium text-avatar-text ${bgClass} ${sizeClass}`}
     >
       {initialsOf(name)}
     </span>

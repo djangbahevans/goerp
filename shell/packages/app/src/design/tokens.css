@@ -49,6 +49,39 @@
   --color-info: var(--goerp-color-info);
   --color-info-subtle: var(--goerp-color-info-subtle);
 
+  /* Badge's 10-color decorative palette (docs/components/badge.md); `gray`
+     reuses --color-bg-subtle/--color-text-secondary, no dedicated pair. */
+  --color-badge-red: var(--goerp-color-badge-red);
+  --color-badge-red-text: var(--goerp-color-badge-red-text);
+  --color-badge-orange: var(--goerp-color-badge-orange);
+  --color-badge-orange-text: var(--goerp-color-badge-orange-text);
+  --color-badge-yellow: var(--goerp-color-badge-yellow);
+  --color-badge-yellow-text: var(--goerp-color-badge-yellow-text);
+  --color-badge-green: var(--goerp-color-badge-green);
+  --color-badge-green-text: var(--goerp-color-badge-green-text);
+  --color-badge-teal: var(--goerp-color-badge-teal);
+  --color-badge-teal-text: var(--goerp-color-badge-teal-text);
+  --color-badge-blue: var(--goerp-color-badge-blue);
+  --color-badge-blue-text: var(--goerp-color-badge-blue-text);
+  --color-badge-indigo: var(--goerp-color-badge-indigo);
+  --color-badge-indigo-text: var(--goerp-color-badge-indigo-text);
+  --color-badge-purple: var(--goerp-color-badge-purple);
+  --color-badge-purple-text: var(--goerp-color-badge-purple-text);
+  --color-badge-pink: var(--goerp-color-badge-pink);
+  --color-badge-pink-text: var(--goerp-color-badge-pink-text);
+
+  /* UserAvatar's 8-color palette (docs/components/user-avatar.md) — fixed
+     across themes by design, so it skips the --goerp-color-* indirection. */
+  --color-avatar-0: #5b6b8c;
+  --color-avatar-1: #6b5b8c;
+  --color-avatar-2: #8c5b6b;
+  --color-avatar-3: #4a7359;
+  --color-avatar-4: #73603f;
+  --color-avatar-5: #497373;
+  --color-avatar-6: #8c5b5b;
+  --color-avatar-7: #6b6b8c;
+  --color-avatar-text: #ffffff;
+
   /* Modal/dialog backdrop — same neutral ink as the shadow tokens below,
      single value across light/dark like shadows (shell-visual-design.md
      §4 "Overlay"), not routed through --goerp-color-* since it never
