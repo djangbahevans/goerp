@@ -59,6 +59,14 @@ describe("DataTable", () => {
     expect(onRowClick).toHaveBeenCalledWith(contacts[1]);
   });
 
+  it("keeps a clickable row's native row role instead of overriding it with role=button", () => {
+    const onRowClick = vi.fn();
+    render(<DataTable columns={columns} data={contacts} keyExtractor={(c) => c.id} onRowClick={onRowClick} />);
+    const row = screen.getByText("Ama Boateng").closest("tr") as HTMLElement;
+    expect(row.getAttribute("role")).toBeNull();
+    expect(row.getAttribute("tabIndex")).toBe("0");
+  });
+
   it("does not make rows focusable or clickable when onRowClick is omitted", () => {
     render(<DataTable columns={columns} data={contacts} keyExtractor={(c) => c.id} />);
     const row = screen.getByText("Ama Boateng").closest("tr") as HTMLElement;

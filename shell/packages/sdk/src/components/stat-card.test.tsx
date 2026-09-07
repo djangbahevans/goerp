@@ -30,6 +30,13 @@ describe("StatCard", () => {
     expect(link.textContent).toContain("Total Contacts");
   });
 
+  it("keys the visible focus ring off the actual focusable link, not an inert inner div", () => {
+    render(<StatCard label="Total Contacts" value={4823} href="/contacts" />);
+    const link = screen.getByRole("link");
+    expect(link.className).toContain("group");
+    expect(link.querySelector("div")?.className).toContain("group-focus-visible:shadow-focus");
+  });
+
   it("does not render a link when href is omitted", () => {
     render(<StatCard label="Total Contacts" value={4823} />);
     expect(screen.queryByRole("link")).toBeNull();
@@ -49,6 +56,6 @@ describe("StatCard", () => {
 
   it("tints the value for an at-risk color", () => {
     render(<StatCard label="Out of Stock" value={3} color="red" />);
-    expect(screen.getByText("3").className).toContain("text-red-700");
+    expect(screen.getByText("3").className).toContain("text-danger");
   });
 });
