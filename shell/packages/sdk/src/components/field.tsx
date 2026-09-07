@@ -1,9 +1,15 @@
 import type { ReactNode } from "react";
+import { Badge, type BadgeColor } from "./badge.js";
+import { CountryFlag } from "./country-flag.js";
+import { UserAvatar } from "./user-avatar.js";
 
 // typescript-sdk-reference.md §13 "Form field components" — read-only
 // display counterpart to the generic form/list renderers' field types
 // (form-view-types.ts's FieldType), for custom views that render a value
-// without going through the manifest-driven renderer.
+// without going through the manifest-driven renderer. badge/avatar/country
+// delegate to their already-styled sibling components (goerp#679); the
+// remaining unimplemented display types (tags/relation/file/color/json/
+// custom) are tracked separately (goerp#683).
 export type FieldType =
   | "text"
   | "email"
@@ -15,7 +21,24 @@ export type FieldType =
   | "boolean"
   | "date"
   | "datetime"
-  | "time";
+  | "time"
+  | "badge"
+  | "avatar"
+  | "country";
+
+// Types formatFieldValue itself turns into a plain string — badge/avatar/
+// country render as real elements instead (see Field below).
+type FormattableFieldType = Exclude<FieldType, "badge" | "avatar" | "country">;
+
+// Same shape as the list renderer's own `badge_config` (BadgeConfig in
+// list-view-types.ts) — keyed by the field's raw value.
+export type FieldBadgeConfig = Record<string, { label: string; color?: BadgeColor }>;
+
+export interface FieldAvatarValue {
+  userId?: string | undefined;
+  name: string;
+  avatarUrl?: string | null | undefined;
+}
 
 export interface FieldProps {
   label?: string | undefined;
@@ -25,6 +48,8 @@ export interface FieldProps {
   // (manifest `currency_field`) — this component only ever sees the
   // resolved string.
   currency?: string | undefined;
+  // Required when type="badge".
+  badgeConfig?: FieldBadgeConfig | undefined;
   emptyText?: string | undefined;
   // Renders the formatted value as a link (documented on the "Manager"
   // field in EmploymentTab).
@@ -48,7 +73,7 @@ export function currencyMinorUnitDigits(currency: string): number {
 
 export function formatFieldValue(
   value: unknown,
-  type: FieldType,
+  type: FormattableFieldType,
   currency: string | undefined,
   emptyText: string,
 ): string {
@@ -84,12 +109,49 @@ export function formatFieldValue(
   }
 }
 
-export function Field({ label, value, type = "text", currency, emptyText = "—", href }: FieldProps): ReactNode {
-  const formatted = formatFieldValue(value, type, currency, emptyText);
+export function Field({
+  label,
+  value,
+  type = "text",
+  currency,
+  badgeConfig,
+  emptyText = "—",
+  href,
+}: FieldProps): ReactNode {
+  let content: ReactNode;
+
+  if (type === "badge") {
+    const key = value === null || value === undefined || value === "" ? undefined : String(value);
+    const config = key !== undefined ? badgeConfig?.[key] : undefined;
+    content = config ? <Badge label={config.label} color={config.color} /> : (key ?? emptyText);
+  } else if (type === "avatar") {
+    const avatar =
+      typeof value === "object" && value !== null && "name" in value && typeof value.name === "string"
+        ? (value as FieldAvatarValue)
+        : undefined;
+    content = avatar ? (
+      <UserAvatar userId={avatar.userId} name={avatar.name} avatarUrl={avatar.avatarUrl} size="sm" />
+    ) : (
+      emptyText
+    );
+  } else if (type === "country") {
+    content = typeof value === "string" && value !== "" ? <CountryFlag code={value} showName /> : emptyText;
+  } else {
+    content = formatFieldValue(value, type, currency, emptyText);
+  }
+
+  const isMono = type === "currency" || type === "number";
+
   return (
-    <span>
-      {label !== undefined && <span>{label}: </span>}
-      {href !== undefined ? <a href={href}>{formatted}</a> : <span>{formatted}</span>}
+    <span className="flex flex-col gap-1">
+      {label !== undefined && <span className="text-sm text-text-secondary">{label}</span>}
+      {href !== undefined ? (
+        <a href={href} className="text-base text-primary hover:underline">
+          {content}
+        </a>
+      ) : (
+        <span className={`text-base text-text ${isMono ? "font-mono" : ""}`}>{content}</span>
+      )}
     </span>
   );
 }

@@ -1,5 +1,6 @@
 import type { ChangeEvent, ReactNode } from "react";
 import { useId } from "react";
+import { fieldInputClassName } from "./field-input-styles.js";
 
 // Native <input type="date"|"datetime-local"|"time"> value formats.
 // Distinct components per form-view-types.ts's FieldType, matching the
@@ -48,8 +49,12 @@ export interface DateFieldProps {
 export function DateField({ label, value, onChange, min, max, error, disabled = false }: DateFieldProps): ReactNode {
   const id = useId();
   return (
-    <div>
-      {label !== undefined && <label htmlFor={id}>{label}</label>}
+    <div className="flex flex-col gap-1">
+      {label !== undefined && (
+        <label htmlFor={id} className="text-sm text-text">
+          {label}
+        </label>
+      )}
       <input
         id={id}
         type="date"
@@ -59,8 +64,13 @@ export function DateField({ label, value, onChange, min, max, error, disabled = 
         disabled={disabled}
         aria-invalid={error !== undefined}
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(parseDate(e.target.value))}
+        className={fieldInputClassName(error !== undefined)}
       />
-      {error !== undefined && <span role="alert">{error}</span>}
+      {error !== undefined && (
+        <span role="alert" className="text-sm text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
@@ -86,8 +96,12 @@ export function DateTimeField({
 }: DateTimeFieldProps): ReactNode {
   const id = useId();
   return (
-    <div>
-      {label !== undefined && <label htmlFor={id}>{label}</label>}
+    <div className="flex flex-col gap-1">
+      {label !== undefined && (
+        <label htmlFor={id} className="text-sm text-text">
+          {label}
+        </label>
+      )}
       <input
         id={id}
         type="datetime-local"
@@ -97,8 +111,13 @@ export function DateTimeField({
         disabled={disabled}
         aria-invalid={error !== undefined}
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(parseDate(e.target.value))}
+        className={fieldInputClassName(error !== undefined)}
       />
-      {error !== undefined && <span role="alert">{error}</span>}
+      {error !== undefined && (
+        <span role="alert" className="text-sm text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
@@ -116,8 +135,12 @@ export interface TimeFieldProps {
 export function TimeField({ label, value, onChange, min, max, error, disabled = false }: TimeFieldProps): ReactNode {
   const id = useId();
   return (
-    <div>
-      {label !== undefined && <label htmlFor={id}>{label}</label>}
+    <div className="flex flex-col gap-1">
+      {label !== undefined && (
+        <label htmlFor={id} className="text-sm text-text">
+          {label}
+        </label>
+      )}
       <input
         id={id}
         type="time"
@@ -127,8 +150,13 @@ export function TimeField({ label, value, onChange, min, max, error, disabled = 
         disabled={disabled}
         aria-invalid={error !== undefined}
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        className={fieldInputClassName(error !== undefined)}
       />
-      {error !== undefined && <span role="alert">{error}</span>}
+      {error !== undefined && (
+        <span role="alert" className="text-sm text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

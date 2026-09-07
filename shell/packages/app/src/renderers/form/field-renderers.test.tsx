@@ -199,12 +199,12 @@ describe("FieldInput", () => {
     expect(onChange).toHaveBeenCalledWith(["1", "2"]);
     expect(await screen.findByText("Lead")).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("Remove VIP"));
+    fireEvent.click(screen.getByLabelText("Remove tag: VIP"));
     expect(onChange).toHaveBeenLastCalledWith(["2"]);
     // VIP can still legitimately appear in the "add" list now that it's no
     // longer selected — only its chip (and thus its remove button) must be
     // gone.
-    expect(screen.queryByLabelText("Remove VIP")).toBeNull();
+    expect(screen.queryByLabelText("Remove tag: VIP")).toBeNull();
   });
 
   it("tags: the add-input placeholder names the field's configured label, not just its field key", () => {
