@@ -70,4 +70,15 @@ describe("Field", () => {
     render(<Field value="a@b.com" type="email" />);
     expect(screen.getByText("a@b.com")).toBeTruthy();
   });
+
+  it("renders the value as a link when href is given", () => {
+    render(<Field label="Manager" value="Kwame Mensah" href="/contacts/1" />);
+    const link = screen.getByRole("link", { name: "Kwame Mensah" });
+    expect(link.getAttribute("href")).toBe("/contacts/1");
+  });
+
+  it("renders plain text when href is omitted", () => {
+    render(<Field label="Manager" value="Kwame Mensah" />);
+    expect(screen.queryByRole("link")).toBeNull();
+  });
 });

@@ -1,4 +1,4 @@
-export type { ActionButtonProps, ActionButtonVariant } from "./action-button.js";
+export type { ActionButtonProps, ActionButtonSize, ActionButtonVariant } from "./action-button.js";
 export { ActionButton } from "./action-button.js";
 export type { ActionMenuItem, ActionMenuProps } from "./action-menu.js";
 export { ActionMenu } from "./action-menu.js";
