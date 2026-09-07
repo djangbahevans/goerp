@@ -195,7 +195,7 @@ describe("FieldInput", () => {
     expect(await screen.findByText("VIP")).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText("Add tag_ids…"), { target: { value: "Lead" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Lead" })); // options query resolved
+    fireEvent.click(await screen.findByRole("option", { name: "Lead" })); // options query resolved
     expect(onChange).toHaveBeenCalledWith(["1", "2"]);
     expect(await screen.findByText("Lead")).toBeTruthy();
 
