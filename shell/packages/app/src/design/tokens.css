@@ -37,6 +37,7 @@
 
   --color-danger: var(--goerp-color-danger);
   --color-danger-hover: var(--goerp-color-danger-hover);
+  --color-danger-active: var(--goerp-color-danger-active);
   --color-danger-subtle: var(--goerp-color-danger-subtle);
 
   --color-warning: var(--goerp-color-warning);
@@ -47,6 +48,12 @@
 
   --color-info: var(--goerp-color-info);
   --color-info-subtle: var(--goerp-color-info-subtle);
+
+  /* Modal/dialog backdrop — same neutral ink as the shadow tokens below,
+     single value across light/dark like shadows (shell-visual-design.md
+     §4 "Overlay"), not routed through --goerp-color-* since it never
+     varies per theme. */
+  --color-overlay: rgb(16 20 28 / 0.5);
 
   /* ── Typography ────────────────────────────────────────────────────── */
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
@@ -74,6 +81,12 @@
   --shadow-sm: 0 1px 2px 0 rgb(16 20 28 / 0.06);
   --shadow-md: 0 4px 12px -2px rgb(16 20 28 / 0.12);
   --shadow-lg: 0 12px 24px -4px rgb(16 20 28 / 0.16);
+
+  /* Double ring — inner --color-bg ring separates it from a variant's own
+     fill, outer --color-primary ring is the visible indicator. Built from
+     --color-primary rather than a fixed hex so it inherits dark mode and
+     tenant brand overrides automatically (shell-visual-design.md §8). */
+  --shadow-focus: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-primary);
 }
 
 /* Tokens outside Tailwind's utility-generating theme namespaces — spacing,

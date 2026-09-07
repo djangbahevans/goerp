@@ -25,6 +25,7 @@
   /* Status colors (functional, not decorative) */
   --goerp-color-danger: #b23b3b;
   --goerp-color-danger-hover: #96302f;
+  --goerp-color-danger-active: #722424;
   --goerp-color-danger-subtle: #f5e1e1;
 
   --goerp-color-warning: #a9660f;

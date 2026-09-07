@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useOptionalPermission } from "../auth/use-permission.js";
+import { actionButtonClassName } from "./action-button-styles.js";
 
 export interface ActionMenuItem {
   type?: "item" | "separator" | undefined;
@@ -19,6 +20,9 @@ export interface ActionMenuProps {
   disabled?: boolean | undefined;
 }
 
+const ITEM_CLASSES =
+  "flex w-full items-center gap-2 truncate px-3 py-2 text-left text-sm text-text hover:bg-surface-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent data-[variant=danger]:text-danger data-[variant=danger]:hover:text-danger-hover";
+
 function ActionMenuItemButton({ item, onSelect }: { item: ActionMenuItem; onSelect: () => void }): ReactNode {
   const allowed = useOptionalPermission(item.permission);
   if (!allowed) return null;
@@ -29,8 +33,15 @@ function ActionMenuItemButton({ item, onSelect }: { item: ActionMenuItem; onSele
       role="menuitem"
       data-variant={item.variant ?? "default"}
       data-icon={item.icon}
-      disabled={item.disabled}
+      // Not the native `disabled` attribute — that would remove the item
+      // from focus entirely, contradicting the ARIA APG's disabled-menuitem
+      // convention this component follows: reachable by keyboard, just
+      // inert on activation.
+      aria-disabled={item.disabled}
+      title={item.label}
+      className={ITEM_CLASSES}
       onClick={() => {
+        if (item.disabled) return;
         item.onClick?.();
         onSelect();
       }}
@@ -44,18 +55,23 @@ export function ActionMenu({ label, items, disabled = false }: ActionMenuProps):
   const [open, setOpen] = useState(false);
 
   return (
-    <span>
+    <span className="relative inline-block">
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        data-disabled={disabled ? "true" : undefined}
         disabled={disabled}
+        className={actionButtonClassName("secondary", "md")}
         onClick={() => setOpen((v) => !v)}
       >
         {label}
       </button>
       {open && (
-        <span role="menu">
+        <span
+          role="menu"
+          className="absolute z-(--z-dropdown) mt-1 min-w-40 max-w-70 rounded-structural border border-border bg-surface py-1 shadow-md"
+        >
           {items.map((item, index) => {
             // items is a static prop array with no unique identifier
             // field on ActionMenuItem (`label` is optional and callers
@@ -63,7 +79,7 @@ export function ActionMenu({ label, items, disabled = false }: ActionMenuProps):
             // permissions) — index is the only stable key available.
             if (item.type === "separator") {
               // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-              return <hr key={index} />;
+              return <hr key={index} className="mx-2 my-1 border-t border-border" />;
             }
             // biome-ignore lint/suspicious/noArrayIndexKey: see above.
             return <ActionMenuItemButton key={index} item={item} onSelect={() => setOpen(false)} />;

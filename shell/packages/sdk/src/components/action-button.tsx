@@ -1,10 +1,8 @@
 import type { ReactNode } from "react";
 import { useOptionalPermission } from "../auth/use-permission.js";
+import { type ActionButtonSize, type ActionButtonVariant, actionButtonClassName } from "./action-button-styles.js";
 
-// manifest-spec.md's Action.style.
-export type ActionButtonVariant = "primary" | "secondary" | "ghost" | "danger";
-
-export type ActionButtonSize = "sm" | "md";
+export type { ActionButtonSize, ActionButtonVariant };
 
 export interface ActionButtonProps {
   permission?: string | undefined;
@@ -18,6 +16,26 @@ export interface ActionButtonProps {
   // posture as field-renderers.tsx's icon_picker field.
   icon?: string | undefined;
   children: ReactNode;
+}
+
+const SPINNER_DIMENSION: Record<ActionButtonSize, number> = { sm: 14, md: 16 };
+
+function LoadingSpinner({ size }: { size: ActionButtonSize }): ReactNode {
+  const dimension = SPINNER_DIMENSION[size];
+  return (
+    <svg
+      aria-hidden="true"
+      width={dimension}
+      height={dimension}
+      viewBox="0 0 24 24"
+      fill="none"
+      className="animate-spin motion-reduce:animate-none"
+      style={{ animationDuration: "var(--duration-slower)" }}
+    >
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+      <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 export function ActionButton({
@@ -39,10 +57,17 @@ export function ActionButton({
       data-variant={variant}
       data-size={size}
       data-icon={icon}
+      // Keys the opacity-dimmed disabled look off the `disabled` prop
+      // specifically, not off the rendered native `disabled` attribute
+      // below (also set while `loading`) — a loading button is busy, not
+      // inactive, and must stay at full contrast while aria-busy is true.
+      data-disabled={disabled ? "true" : undefined}
       disabled={disabled || loading}
       aria-busy={loading}
       onClick={onClick}
+      className={actionButtonClassName(variant, size)}
     >
+      {loading ? <LoadingSpinner size={size} /> : null}
       {children}
     </button>
   );

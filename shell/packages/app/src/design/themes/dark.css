@@ -27,6 +27,7 @@
      --color-surface in both modes. */
   --goerp-color-danger: #d97a7a;
   --goerp-color-danger-hover: #e2938e;
+  --goerp-color-danger-active: #ebaca2;
   --goerp-color-danger-subtle: #3a2426;
 
   --goerp-color-warning: #d9a24d;
