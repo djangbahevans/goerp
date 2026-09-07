@@ -6,7 +6,7 @@ import type { ListColumn } from "./list-view-types.js";
 afterEach(cleanup);
 
 function cell(column: Partial<ListColumn> & { field: string }, row: Record<string, unknown>) {
-  return render(<>{renderCellContent(column as ListColumn, row)}</>).container;
+  return render(renderCellContent(column as ListColumn, row)).container;
 }
 
 describe("renderHref", () => {
@@ -171,9 +171,7 @@ describe("renderCellContent", () => {
 
   it("relation: falls back to the batch-fetched relationLabel option when no display_field is set", () => {
     const column = { field: "customer_id", type: "relation" as const };
-    const html = render(
-      <>{renderCellContent(column, { customer_id: "01j..." }, { relationLabel: "Acme Inc" })}</>,
-    ).container;
+    const html = render(renderCellContent(column, { customer_id: "01j..." }, { relationLabel: "Acme Inc" })).container;
     expect(html.textContent).toBe("Acme Inc");
   });
 
@@ -204,7 +202,7 @@ describe("renderCellContent", () => {
 describe("renderCell", () => {
   it("wraps the cell content in an <a> when href is declared, substituting record fields", () => {
     const html = render(
-      <>{renderCell({ field: "name", href: "/contacts/{record.id}" } as ListColumn, { id: "1", name: "Ada" })}</>,
+      renderCell({ field: "name", href: "/contacts/{record.id}" } as ListColumn, { id: "1", name: "Ada" }),
     ).container;
     const link = html.querySelector("a");
     expect(link?.getAttribute("href")).toBe("/contacts/1");

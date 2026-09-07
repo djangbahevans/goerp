@@ -86,8 +86,7 @@
      fill, outer --color-primary ring is the visible indicator. Built from
      --color-primary rather than a fixed hex so it inherits dark mode and
      tenant brand overrides automatically (shell-visual-design.md §8). */
-  --shadow-focus:
-    0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-primary);
+  --shadow-focus: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-primary);
 }
 
 /* Tokens outside Tailwind's utility-generating theme namespaces — spacing,

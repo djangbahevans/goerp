@@ -1,12 +1,8 @@
 import type { ReactNode } from "react";
 import { useOptionalPermission } from "../auth/use-permission.js";
-import {
-  type ActionButtonSize,
-  type ActionButtonVariant,
-  actionButtonClassName,
-} from "./action-button-styles.js";
+import { type ActionButtonSize, type ActionButtonVariant, actionButtonClassName } from "./action-button-styles.js";
 
-export type { ActionButtonVariant, ActionButtonSize };
+export type { ActionButtonSize, ActionButtonVariant };
 
 export interface ActionButtonProps {
   permission?: string | undefined;
