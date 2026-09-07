@@ -120,7 +120,7 @@ describe("renderCellContent", () => {
     };
     const html = cell(column, { state: "done" });
     expect(html.textContent).toBe("Done");
-    expect(html.querySelector("span")?.className).toContain("bg-green-100");
+    expect(html.querySelector("span")?.className).toContain("bg-badge-green");
   });
 
   it("badge: falls back to the raw value when it has no badge_config entry", () => {
@@ -156,7 +156,7 @@ describe("renderCellContent", () => {
   it("country: renders a flag and the display name", () => {
     const html = cell({ field: "c", type: "country" }, { c: "GH" });
     expect(html.textContent).toContain(new Intl.DisplayNames(undefined, { type: "region" }).of("GH"));
-    expect(html.textContent).toContain("🇬🇭");
+    expect(html.querySelector(".fi-gh")).not.toBeNull();
   });
 
   it("tags: renders one pill per array entry", () => {

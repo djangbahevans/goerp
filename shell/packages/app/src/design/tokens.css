@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* CountryFlag renders real flag SVGs via flag-icons' `fi fi-{code}` classes
+   — Windows' Segoe UI Emoji has no country flag glyphs, so a Unicode
+   regional-indicator approach never shows an actual flag there. */
+@import "flag-icons/css/flag-icons.min.css";
 @import "./themes/default.css";
 @import "./themes/dark.css";
 @import "./themes/high-contrast.css";

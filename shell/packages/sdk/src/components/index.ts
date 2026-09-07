@@ -15,7 +15,7 @@ export { CodeField } from "./code-field.js";
 export type { ColorPickerProps } from "./color-picker.js";
 export { ColorPicker } from "./color-picker.js";
 export type { CountryFlagProps } from "./country-flag.js";
-export { CountryFlag, countryNameOf, flagOf } from "./country-flag.js";
+export { CountryFlag, countryNameOf } from "./country-flag.js";
 export type { DataTableColumn, DataTableProps } from "./data-table.js";
 export { DataTable } from "./data-table.js";
 export type { DateFieldProps, DateTimeFieldProps, TimeFieldProps } from "./date-fields.js";

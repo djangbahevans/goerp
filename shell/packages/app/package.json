@@ -15,6 +15,7 @@
     "@radix-ui/react-slot": "^1.3.3",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-router": "^1.170.31",
+    "flag-icons": "^7.5.0",
     "motion": "^13.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
