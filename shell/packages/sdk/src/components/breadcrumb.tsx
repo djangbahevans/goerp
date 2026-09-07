@@ -17,7 +17,7 @@ export interface BreadcrumbProps {
 export function Breadcrumb({ items }: BreadcrumbProps): ReactNode {
   return (
     <nav aria-label="Breadcrumb">
-      <ol className="flex items-center gap-1 text-fg text-sm">
+      <ol className="flex items-center gap-1 text-text text-sm">
         {items.map((item, i) => {
           const isLast = i === items.length - 1;
           return (

@@ -27,7 +27,7 @@ const withPermissions: Decorator = (Story) => (
 const withTheme: Decorator = (Story, context) => {
   const theme = context.globals.theme === "dark" ? "dark" : "light";
   return (
-    <div data-theme={theme} style={{ background: "var(--color-bg)", color: "var(--color-fg)", padding: "1rem" }}>
+    <div data-theme={theme} style={{ background: "var(--color-bg)", color: "var(--color-text)", padding: "1rem" }}>
       <Story />
     </div>
   );

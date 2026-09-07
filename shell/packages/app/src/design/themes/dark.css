@@ -1,6 +1,40 @@
 [data-theme="dark"] {
-  --goerp-color-bg: #0f172a;
-  --goerp-color-fg: #f1f5f9;
-  --goerp-color-accent: #60a5fa;
-  --goerp-color-border: #1e293b;
+  /* Base lightness shifted, hue relationships preserved — not the light
+     palette inverted (shell-visual-design.md §4). */
+  --goerp-color-bg: #12151b;
+  --goerp-color-bg-subtle: #171b22;
+  --goerp-color-bg-muted: #1d222b;
+
+  --goerp-color-surface: #1a1e26;
+  --goerp-color-surface-hover: #20242e;
+  --goerp-color-surface-active: #262b36;
+
+  --goerp-color-border: #2b303a;
+  --goerp-color-border-strong: #3a4049;
+
+  --goerp-color-text: #e7e9ed;
+  --goerp-color-text-secondary: #9aa1ac;
+  --goerp-color-text-disabled: #6b7280;
+  --goerp-color-text-inverse: #10141c;
+
+  --goerp-color-primary: #6b93be;
+  --goerp-color-primary-hover: #82a5cb;
+  --goerp-color-primary-active: #99b7d8;
+  --goerp-color-primary-subtle: #22314a;
+
+  /* Status colors lift in lightness by roughly the same amount as
+     --color-primary, so badges keep the same relative contrast against
+     --color-surface in both modes. */
+  --goerp-color-danger: #d97a7a;
+  --goerp-color-danger-hover: #e2938e;
+  --goerp-color-danger-subtle: #3a2426;
+
+  --goerp-color-warning: #d9a24d;
+  --goerp-color-warning-subtle: #3a2e1c;
+
+  --goerp-color-success: #4fae8c;
+  --goerp-color-success-subtle: #1e332c;
+
+  --goerp-color-info: #7ca3c4;
+  --goerp-color-info-subtle: #22303d;
 }

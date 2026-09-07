@@ -31,9 +31,9 @@ export function TimelineItem({ icon, title, description, timestamp, user }: Time
     <li className="flex gap-3">
       {icon !== undefined && <span aria-hidden="true">{icon}</span>}
       <div>
-        <p className="font-medium text-fg">{title}</p>
-        {description !== undefined && <p className="text-fg text-sm">{description}</p>}
-        <div className="flex items-center gap-2 text-fg text-xs">
+        <p className="font-medium text-text">{title}</p>
+        {description !== undefined && <p className="text-text text-sm">{description}</p>}
+        <div className="flex items-center gap-2 text-text text-xs">
           <time dateTime={isValidDate ? date.toISOString() : undefined}>
             {formatFieldValue(timestamp, "datetime", undefined, "")}
           </time>

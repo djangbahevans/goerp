@@ -23,7 +23,7 @@ export function SectionCard({
     <section className="rounded-lg border border-border bg-bg p-4">
       {(title !== undefined || collapsible) && (
         <div className="flex items-center justify-between">
-          {title !== undefined && <h2 className="font-medium text-fg">{title}</h2>}
+          {title !== undefined && <h2 className="font-medium text-text">{title}</h2>}
           {collapsible && (
             <button
               type="button"

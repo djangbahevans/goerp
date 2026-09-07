@@ -45,11 +45,11 @@ function formatValue(value: number | string, format: "currency" | undefined, cur
 export function StatCard({ label, value, change, icon, color, format, currency, href }: StatCardProps): ReactNode {
   const body = (
     <div data-icon={icon} className="rounded-lg border border-border bg-bg p-4">
-      <p className="text-fg text-sm">{label}</p>
+      <p className="text-text text-sm">{label}</p>
       {value === undefined ? (
         <Skeleton lines={1} />
       ) : (
-        <p className={`font-semibold text-2xl ${color ? COLOR_CLASSES[color] : "text-fg"}`}>
+        <p className={`font-semibold text-2xl ${color ? COLOR_CLASSES[color] : "text-text"}`}>
           {formatValue(value, format, currency)}
         </p>
       )}
