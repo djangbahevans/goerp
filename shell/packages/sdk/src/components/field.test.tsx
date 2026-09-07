@@ -81,4 +81,31 @@ describe("Field", () => {
     render(<Field label="Manager" value="Kwame Mensah" />);
     expect(screen.queryByRole("link")).toBeNull();
   });
+
+  it("delegates type='badge' to Badge, resolved from badgeConfig by the raw value", () => {
+    render(
+      <Field
+        label="Status"
+        value="done"
+        type="badge"
+        badgeConfig={{ done: { label: "Done", color: "green" }, draft: { label: "Draft", color: "gray" } }}
+      />,
+    );
+    expect(screen.getByText("Done")).toBeTruthy();
+  });
+
+  it("falls back to the raw value for type='badge' when badgeConfig has no matching entry", () => {
+    render(<Field label="Status" value="unknown" type="badge" badgeConfig={{}} />);
+    expect(screen.getByText("unknown")).toBeTruthy();
+  });
+
+  it("delegates type='avatar' to UserAvatar", () => {
+    render(<Field label="Owner" value={{ name: "Ama Owusu" }} type="avatar" />);
+    expect(screen.getByText("AO")).toBeTruthy();
+  });
+
+  it("delegates type='country' to CountryFlag with the country name shown", () => {
+    render(<Field label="Country" value="GH" type="country" />);
+    expect(screen.getByRole("img")).toBeTruthy();
+  });
 });

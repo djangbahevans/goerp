@@ -1,6 +1,7 @@
 import type { ChangeEvent, ReactNode } from "react";
 import { useId } from "react";
 import { currencyMinorUnitDigits } from "./field.js";
+import { fieldInputClassName } from "./field-input-styles.js";
 
 export interface MoneyFieldProps {
   label?: string | undefined;
@@ -47,10 +48,14 @@ export function MoneyField({
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => onChange(toMinorUnits(e.target.value, digits));
 
   return (
-    <div>
-      {label !== undefined && <label htmlFor={id}>{label}</label>}
-      <span>
-        {currency !== undefined && <span>{currency} </span>}
+    <div className="flex flex-col gap-1">
+      {label !== undefined && (
+        <label htmlFor={id} className="text-sm text-text">
+          {label}
+        </label>
+      )}
+      <span className={`inline-flex items-center gap-2 ${fieldInputClassName(error !== undefined, "wrapper")}`}>
+        {currency !== undefined && <span className="font-sans text-sm text-text-secondary">{currency}</span>}
         <input
           id={id}
           type="number"
@@ -61,9 +66,14 @@ export function MoneyField({
           disabled={disabled}
           aria-invalid={error !== undefined}
           onChange={handleChange}
+          className="w-full border-0 bg-transparent p-0 font-mono text-sm focus:outline-none"
         />
       </span>
-      {error !== undefined && <span role="alert">{error}</span>}
+      {error !== undefined && (
+        <span role="alert" className="text-sm text-danger">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

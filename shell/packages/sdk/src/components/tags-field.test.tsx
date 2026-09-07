@@ -21,7 +21,7 @@ describe("TagsField", () => {
   it("removes a selected tag", () => {
     const onChange = vi.fn();
     render(<TagsField value={[{ id: "1", name: "VIP" }]} onChange={onChange} options={options} />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove VIP" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove tag: VIP" }));
     expect(onChange).toHaveBeenCalledWith([]);
   });
 
@@ -50,5 +50,20 @@ describe("TagsField", () => {
   it("uses the placeholder override instead of the default 'Add {label}…' text", () => {
     render(<TagsField value={[]} onChange={vi.fn()} options={options} placeholder="Add Skills…" />);
     expect(screen.getByPlaceholderText("Add Skills…")).toBeTruthy();
+  });
+
+  it("picks a readable text color against a tag's own arbitrary background color", () => {
+    render(
+      <TagsField
+        value={[
+          { id: "1", name: "Dark", color: "#1a1a2e" },
+          { id: "2", name: "Light", color: "#f5f5f5" },
+        ]}
+        onChange={vi.fn()}
+        options={options}
+      />,
+    );
+    expect(screen.getByText("Dark").className).toContain("text-white");
+    expect(screen.getByText("Light").className).toContain("text-black");
   });
 });

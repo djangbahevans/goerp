@@ -14,14 +14,16 @@ export interface RelationFieldProps {
 
 export function RelationField({ label, value, href, emptyText = "—" }: RelationFieldProps): ReactNode {
   return (
-    <span>
-      {label !== undefined && <span>{label}: </span>}
+    <span className="flex flex-col gap-1">
+      {label !== undefined && <span className="text-sm text-text-secondary">{label}</span>}
       {value === undefined ? (
-        <span>{emptyText}</span>
+        <span className="text-base text-text">{emptyText}</span>
       ) : href !== undefined ? (
-        <a href={href}>{value.display}</a>
+        <a href={href} className="text-base text-primary hover:underline">
+          {value.display}
+        </a>
       ) : (
-        <span>{value.display}</span>
+        <span className="text-base text-text">{value.display}</span>
       )}
     </span>
   );
