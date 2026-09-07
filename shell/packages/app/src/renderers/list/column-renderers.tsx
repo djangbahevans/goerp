@@ -1,4 +1,4 @@
-import { Badge, BADGE_COLOR_CLASSES, type BadgeColor, CountryFlag, UserAvatar } from "@goerp/sdk/components";
+import { BADGE_COLOR_CLASSES, Badge, type BadgeColor, CountryFlag, UserAvatar } from "@goerp/sdk/components";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
 
