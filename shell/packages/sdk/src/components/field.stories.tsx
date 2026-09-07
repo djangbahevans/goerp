@@ -42,6 +42,86 @@ export const Datetime: Story = {
   },
 };
 
+export const RelativeTime: Story = {
+  args: {
+    label: "Last activity",
+    value: new Date(Date.now() - 60 * 60 * 1000),
+    type: "relative_time",
+  },
+};
+
+export const Badge: Story = {
+  args: {
+    label: "Status",
+    value: "confirmed",
+    type: "badge",
+    badgeConfig: {
+      confirmed: { label: "Confirmed", color: "green" },
+      draft: { label: "Draft", color: "gray" },
+    },
+  },
+};
+
+export const Avatar: Story = {
+  args: {
+    label: "Owner",
+    value: { name: "Ama Boateng" },
+    type: "avatar",
+  },
+};
+
+export const Country: Story = {
+  args: {
+    label: "Country",
+    value: "GH",
+    type: "country",
+  },
+};
+
+export const Tags: Story = {
+  args: {
+    label: "Tags",
+    value: [
+      { id: "1", name: "VIP" },
+      { id: "2", name: "Lead" },
+    ],
+    type: "tags",
+  },
+};
+
+export const Relation: Story = {
+  args: {
+    label: "Customer",
+    value: { id: "1", display: "Acme Corp" },
+    type: "relation",
+    href: "/contacts/1",
+  },
+};
+
+export const File: Story = {
+  args: {
+    label: "Attachment",
+    value: { id: "f1", name: "invoice.pdf" },
+    type: "file",
+  },
+};
+
+export const Color: Story = {
+  args: {
+    label: "Tag color",
+    value: "#357246",
+    type: "color",
+  },
+};
+
+export const Json: Story = {
+  args: {
+    label: "Metadata",
+    value: { source: "import", batchId: "b-1024", rows: 214 },
+    type: "json",
+  },
+};
+
 export const Linked: Story = {
   args: {
     label: "Manager",
