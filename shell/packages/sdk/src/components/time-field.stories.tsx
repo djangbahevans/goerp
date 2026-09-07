@@ -21,3 +21,19 @@ export const Default: Story = {
     max: "18:00",
   },
 };
+
+export const WithError: Story = {
+  args: {
+    label: "Alarm",
+    value: undefined,
+    error: "Alarm time is required",
+  },
+};
+
+export const Disabled: Story = {
+  args: {
+    label: "Alarm",
+    value: "09:00",
+    disabled: true,
+  },
+};

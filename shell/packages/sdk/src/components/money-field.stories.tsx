@@ -29,3 +29,12 @@ export const WithError: Story = {
     error: "Amount must be greater than zero",
   },
 };
+
+export const Disabled: Story = {
+  args: {
+    label: "Amount",
+    value: 100,
+    currency: "GHS",
+    disabled: true,
+  },
+};

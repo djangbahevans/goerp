@@ -53,3 +53,19 @@ export const Empty: Story = {
     emptyState: <EmptyState title="No contacts" />,
   },
 };
+
+export const EmptyWithoutCustomState: Story = {
+  args: {
+    columns,
+    data: [],
+    keyExtractor: (c) => c.id,
+  },
+};
+
+export const NotClickable: Story = {
+  args: {
+    columns,
+    data: contacts,
+    keyExtractor: (c) => c.id,
+  },
+};

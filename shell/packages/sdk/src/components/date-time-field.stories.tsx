@@ -19,3 +19,19 @@ export const Default: Story = {
     value: new Date(),
   },
 };
+
+export const WithError: Story = {
+  args: {
+    label: "Starts",
+    value: undefined,
+    error: "Start time is required",
+  },
+};
+
+export const Disabled: Story = {
+  args: {
+    label: "Starts",
+    value: new Date(),
+    disabled: true,
+  },
+};

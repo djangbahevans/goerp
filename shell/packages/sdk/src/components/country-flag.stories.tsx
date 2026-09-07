@@ -22,3 +22,13 @@ export const WithName: Story = {
     showName: true,
   },
 };
+
+// "UK" is well-formatted (2 letters) but isn't the flag-icons/ISO 3166-1
+// code for the United Kingdom ("GB") — falls back to the raw code as text
+// rather than a blank or incorrect flag glyph.
+export const InvalidCode: Story = {
+  args: {
+    code: "UK",
+    showName: true,
+  },
+};

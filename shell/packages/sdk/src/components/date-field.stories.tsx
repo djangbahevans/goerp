@@ -27,3 +27,19 @@ export const Empty: Story = {
     value: undefined,
   },
 };
+
+export const WithError: Story = {
+  args: {
+    label: "Due Date",
+    value: undefined,
+    error: "Due date is required",
+  },
+};
+
+export const Disabled: Story = {
+  args: {
+    label: "Due Date",
+    value: new Date(),
+    disabled: true,
+  },
+};

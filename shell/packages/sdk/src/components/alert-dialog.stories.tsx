@@ -43,3 +43,20 @@ export const WithInput: Story = {
     },
   },
 };
+
+export const WithSelectInput: Story = {
+  args: {
+    title: "Change Status",
+    description: "Choose the new status for this order.",
+    input: {
+      label: "New status",
+      type: "select",
+      required: true,
+      options: [
+        { value: "pending", label: "Pending" },
+        { value: "shipped", label: "Shipped" },
+        { value: "cancelled", label: "Cancelled", disabled: true },
+      ],
+    },
+  },
+};
