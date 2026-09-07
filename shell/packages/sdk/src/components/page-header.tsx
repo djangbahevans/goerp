@@ -11,10 +11,10 @@ export interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, actions }: PageHeaderProps): ReactNode {
   return (
-    <header className="flex items-start justify-between gap-4">
-      <div>
+    <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-col gap-1">
         <h1 className="font-semibold text-text text-xl">{title}</h1>
-        {subtitle !== undefined && <p className="text-text text-sm">{subtitle}</p>}
+        {subtitle !== undefined && <p className="text-sm text-text-secondary">{subtitle}</p>}
       </div>
       {actions !== undefined && <div className="flex items-center gap-2">{actions}</div>}
     </header>
