@@ -34,4 +34,21 @@ describe("StatCard", () => {
     render(<StatCard label="Total Contacts" value={4823} />);
     expect(screen.queryByRole("link")).toBeNull();
   });
+
+  it("renders a skeleton in place of the value when value is undefined", () => {
+    const { container } = render(<StatCard label="Total Contacts" value={undefined} />);
+    expect(container.querySelector('[data-skeleton="lines"]')).toBeTruthy();
+    expect(screen.queryByText("4823")).toBeNull();
+  });
+
+  it("formats the value as currency from integer minor units when format is currency", () => {
+    render(<StatCard label="Revenue" value={10000} format="currency" currency="GHS" />);
+    const expected = new Intl.NumberFormat(undefined, { style: "currency", currency: "GHS" }).format(100);
+    expect(screen.getByText("Revenue").nextElementSibling?.textContent).toBe(expected);
+  });
+
+  it("tints the value for an at-risk color", () => {
+    render(<StatCard label="Out of Stock" value={3} color="red" />);
+    expect(screen.getByText("3").className).toContain("text-red-700");
+  });
 });

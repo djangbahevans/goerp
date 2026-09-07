@@ -59,6 +59,23 @@ describe("ActionButton", () => {
     expect(screen.getByRole("button").hasAttribute("disabled")).toBe(true);
   });
 
+  it("defaults to the md size", () => {
+    render(withPermissions([], <ActionButton onClick={vi.fn()}>Confirm Order</ActionButton>));
+    expect(screen.getByRole("button").getAttribute("data-size")).toBe("md");
+  });
+
+  it("applies a sm size", () => {
+    render(
+      withPermissions(
+        [],
+        <ActionButton onClick={vi.fn()} size="sm">
+          Confirm Order
+        </ActionButton>,
+      ),
+    );
+    expect(screen.getByRole("button").getAttribute("data-size")).toBe("sm");
+  });
+
   it("throws when rendered outside a PermissionProvider", () => {
     expect(() => render(<ActionButton onClick={vi.fn()}>Confirm Order</ActionButton>)).toThrow(
       /must be used within a PermissionProvider/,

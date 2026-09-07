@@ -48,6 +48,15 @@ function toNumber(raw: string): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
+// Shared by the "date"/"datetime" cases below — a record field's raw value
+// (an ISO string from the API, or absent) parsed into the Date DateField/
+// DateTimeField expect, or undefined for anything that isn't a valid date.
+function parseFieldDate(value: unknown): Date | undefined {
+  if (typeof value !== "string") return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 // Needs resource+resource_label_field (backlog #674 covers the
 // default-label-field case). Reuses useInfiniteList's query-options
 // factory rather than a parallel fetch; just the first page.
@@ -320,11 +329,19 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
 
     case "date":
       return (
-        <DateField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
+        <DateField
+          value={parseFieldDate(value)}
+          disabled={disabled}
+          onChange={(date) => onChange(date?.toISOString().slice(0, 10))}
+        />
       );
     case "datetime":
       return (
-        <DateTimeField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
+        <DateTimeField
+          value={parseFieldDate(value)}
+          disabled={disabled}
+          onChange={(date) => onChange(date?.toISOString())}
+        />
       );
     case "time":
       return (
@@ -527,7 +544,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       );
 
     case "signature":
-      return <SignaturePad value={stringValue} onChange={onChange} disabled={disabled} />;
+      return <SignaturePad value={typeof value === "string" ? value : null} onChange={onChange} disabled={disabled} />;
 
     case "barcode":
       // Camera-driven scanning needs a WASM decoder + camera-access

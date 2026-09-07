@@ -1,7 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { BadgeColor } from "./badge.js";
-import { StatusDot } from "./status-dot.js";
+import { StatusDot, type StatusDotColor } from "./status-dot.js";
 
 afterEach(cleanup);
 
@@ -25,8 +24,16 @@ describe("StatusDot", () => {
     expect(screen.getByRole("img").getAttribute("aria-label")).toBe("green");
   });
 
+  it("renders each of the four functional status colors", () => {
+    for (const color of ["green", "red", "orange", "blue"] as const) {
+      cleanup();
+      render(<StatusDot color={color} />);
+      expect(screen.getByRole("img").getAttribute("aria-label")).toBe(color);
+    }
+  });
+
   it("falls back to gray for an unrecognized color, e.g. a mistyped manifest value", () => {
-    render(<StatusDot color={"chartreuse" as BadgeColor} />);
+    render(<StatusDot color={"chartreuse" as StatusDotColor} />);
     expect(screen.getByRole("img").className).toContain("bg-gray-400");
   });
 });

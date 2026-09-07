@@ -6,36 +6,46 @@ import { useId } from "react";
 // generic form renderer's date/datetime/time split — not a mode flag on
 // one component.
 
-function normalizeDateBound(bound: Date | string | undefined, kind: "date" | "datetime-local"): string | undefined {
-  if (bound === undefined) return undefined;
-  const date = bound instanceof Date ? bound : new Date(bound);
-  if (Number.isNaN(date.getTime())) return typeof bound === "string" ? bound : undefined;
-  const iso = date.toISOString();
-  return kind === "date" ? iso.slice(0, 10) : iso.slice(0, 16);
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
-interface DateLikeFieldProps {
+// Date-only strings parse as UTC midnight per ECMA-262, and toISOString()
+// output is UTC — both sides of the date-only round-trip agree, so UTC
+// components are fine here.
+function toDateInputValue(date: Date | undefined): string {
+  return date ? date.toISOString().slice(0, 10) : "";
+}
+
+// <input type="datetime-local">'s value string carries no timezone, so the
+// browser (and `new Date(raw)` on the way back in) both treat it as local
+// wall-clock time — formatting via toISOString() here would disagree with
+// that and drift the displayed/stored instant by the local UTC offset on
+// every edit. Local getters keep both directions consistent.
+function toDateTimeInputValue(date: Date | undefined): string {
+  if (!date) return "";
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function parseDate(raw: string): Date | undefined {
+  if (raw === "") return undefined;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+export interface DateFieldProps {
   label?: string | undefined;
-  value: string | undefined;
-  onChange: (value: string | undefined) => void;
+  value: Date | undefined;
+  // Called with undefined when the input is cleared, matching `value`'s own
+  // optionality — a caller that doesn't care can ignore that case.
+  onChange: (date: Date | undefined) => void;
+  min?: Date | undefined;
+  max?: Date | undefined;
   error?: string | undefined;
   disabled?: boolean | undefined;
 }
 
-export interface DateFieldProps extends DateLikeFieldProps {
-  min?: Date | string | undefined;
-  max?: Date | string | undefined;
-}
-
-export type DateTimeFieldProps = DateLikeFieldProps;
-
-export type TimeFieldProps = DateLikeFieldProps;
-
-function handleInputChange(onChange: (value: string | undefined) => void) {
-  return (e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value === "" ? undefined : e.target.value);
-}
-
-export function DateField({ label, value, onChange, error, disabled = false, min, max }: DateFieldProps): ReactNode {
+export function DateField({ label, value, onChange, min, max, error, disabled = false }: DateFieldProps): ReactNode {
   const id = useId();
   return (
     <div>
@@ -43,19 +53,37 @@ export function DateField({ label, value, onChange, error, disabled = false, min
       <input
         id={id}
         type="date"
-        value={value ?? ""}
-        min={normalizeDateBound(min, "date")}
-        max={normalizeDateBound(max, "date")}
+        value={toDateInputValue(value)}
+        min={toDateInputValue(min) || undefined}
+        max={toDateInputValue(max) || undefined}
         disabled={disabled}
         aria-invalid={error !== undefined}
-        onChange={handleInputChange(onChange)}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(parseDate(e.target.value))}
       />
       {error !== undefined && <span role="alert">{error}</span>}
     </div>
   );
 }
 
-export function DateTimeField({ label, value, onChange, error, disabled = false }: DateTimeFieldProps): ReactNode {
+export interface DateTimeFieldProps {
+  label?: string | undefined;
+  value: Date | undefined;
+  onChange: (date: Date | undefined) => void;
+  min?: Date | undefined;
+  max?: Date | undefined;
+  error?: string | undefined;
+  disabled?: boolean | undefined;
+}
+
+export function DateTimeField({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  error,
+  disabled = false,
+}: DateTimeFieldProps): ReactNode {
   const id = useId();
   return (
     <div>
@@ -63,17 +91,29 @@ export function DateTimeField({ label, value, onChange, error, disabled = false 
       <input
         id={id}
         type="datetime-local"
-        value={value ?? ""}
+        value={toDateTimeInputValue(value)}
+        min={toDateTimeInputValue(min) || undefined}
+        max={toDateTimeInputValue(max) || undefined}
         disabled={disabled}
         aria-invalid={error !== undefined}
-        onChange={handleInputChange(onChange)}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(parseDate(e.target.value))}
       />
       {error !== undefined && <span role="alert">{error}</span>}
     </div>
   );
 }
 
-export function TimeField({ label, value, onChange, error, disabled = false }: TimeFieldProps): ReactNode {
+export interface TimeFieldProps {
+  label?: string | undefined;
+  value: string | undefined;
+  onChange: (value: string) => void;
+  min?: string | undefined;
+  max?: string | undefined;
+  error?: string | undefined;
+  disabled?: boolean | undefined;
+}
+
+export function TimeField({ label, value, onChange, min, max, error, disabled = false }: TimeFieldProps): ReactNode {
   const id = useId();
   return (
     <div>
@@ -82,9 +122,11 @@ export function TimeField({ label, value, onChange, error, disabled = false }: T
         id={id}
         type="time"
         value={value ?? ""}
+        min={min}
+        max={max}
         disabled={disabled}
         aria-invalid={error !== undefined}
-        onChange={handleInputChange(onChange)}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
       />
       {error !== undefined && <span role="alert">{error}</span>}
     </div>

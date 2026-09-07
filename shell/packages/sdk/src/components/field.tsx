@@ -26,6 +26,9 @@ export interface FieldProps {
   // resolved string.
   currency?: string | undefined;
   emptyText?: string | undefined;
+  // Renders the formatted value as a link (documented on the "Manager"
+  // field in EmploymentTab).
+  href?: string | undefined;
 }
 
 function formatDateLike(value: unknown, options: Intl.DateTimeFormatOptions, emptyText: string): string {
@@ -81,12 +84,12 @@ export function formatFieldValue(
   }
 }
 
-export function Field({ label, value, type = "text", currency, emptyText = "—" }: FieldProps): ReactNode {
+export function Field({ label, value, type = "text", currency, emptyText = "—", href }: FieldProps): ReactNode {
   const formatted = formatFieldValue(value, type, currency, emptyText);
   return (
     <span>
       {label !== undefined && <span>{label}: </span>}
-      <span>{formatted}</span>
+      {href !== undefined ? <a href={href}>{formatted}</a> : <span>{formatted}</span>}
     </span>
   );
 }
