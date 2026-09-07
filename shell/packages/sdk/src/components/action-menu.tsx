@@ -21,7 +21,7 @@ export interface ActionMenuProps {
 }
 
 const ITEM_CLASSES =
-  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-text hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50 data-[variant=danger]:text-danger data-[variant=danger]:hover:text-danger-hover";
+  "flex w-full items-center gap-2 truncate px-3 py-2 text-left text-sm text-text hover:bg-surface-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent data-[variant=danger]:text-danger data-[variant=danger]:hover:text-danger-hover";
 
 function ActionMenuItemButton({ item, onSelect }: { item: ActionMenuItem; onSelect: () => void }): ReactNode {
   const allowed = useOptionalPermission(item.permission);
@@ -33,10 +33,15 @@ function ActionMenuItemButton({ item, onSelect }: { item: ActionMenuItem; onSele
       role="menuitem"
       data-variant={item.variant ?? "default"}
       data-icon={item.icon}
-      disabled={item.disabled}
+      // Not the native `disabled` attribute — that would remove the item
+      // from focus entirely, contradicting the ARIA APG's disabled-menuitem
+      // convention this component follows: reachable by keyboard, just
+      // inert on activation.
       aria-disabled={item.disabled}
+      title={item.label}
       className={ITEM_CLASSES}
       onClick={() => {
+        if (item.disabled) return;
         item.onClick?.();
         onSelect();
       }}
@@ -55,6 +60,7 @@ export function ActionMenu({ label, items, disabled = false }: ActionMenuProps):
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        data-disabled={disabled ? "true" : undefined}
         disabled={disabled}
         className={actionButtonClassName("secondary", "md")}
         onClick={() => setOpen((v) => !v)}

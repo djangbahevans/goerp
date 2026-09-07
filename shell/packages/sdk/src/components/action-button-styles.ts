@@ -23,7 +23,7 @@ const VARIANT_CLASSES: Record<ActionButtonVariant, string> = {
 export function actionButtonClassName(variant: ActionButtonVariant, size: ActionButtonSize): string {
   return [
     "inline-flex items-center justify-center gap-2 rounded-control font-medium",
-    "transition-colors ease-out duration-(--duration-fast)",
+    "transition-colors ease-out duration-(--duration-fast) motion-reduce:transition-none",
     "focus-visible:outline-none focus-visible:shadow-focus",
     "disabled:cursor-not-allowed data-[disabled=true]:opacity-50",
     SIZE_CLASSES[size],
