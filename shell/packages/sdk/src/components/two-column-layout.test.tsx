@@ -17,4 +17,11 @@ describe("TwoColumnLayout", () => {
     expect(main?.className).toContain("w-2/3");
     expect(sidebar?.className).toContain("w-1/3");
   });
+
+  it("renders children at full width with no reserved column when sidebar is falsy", () => {
+    const { container } = render(<TwoColumnLayout sidebar={false}>Main content</TwoColumnLayout>);
+    expect(screen.getByText("Main content")).toBeTruthy();
+    expect(container.querySelectorAll("div").length).toBe(1);
+    expect(container.firstElementChild?.className).not.toContain("w-2/3");
+  });
 });
