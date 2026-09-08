@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AlertDialog } from "./alert-dialog.js";
 
@@ -130,5 +131,63 @@ describe("AlertDialog", () => {
       />,
     );
     expect((screen.getByLabelText("Reason") as HTMLInputElement).value).toBe("");
+  });
+
+  it("triggers onCancel when Escape is pressed", async () => {
+    const onCancel = vi.fn();
+    render(<AlertDialog open title="Archive Contact" description="..." onConfirm={vi.fn()} onCancel={onCancel} />);
+    fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
+    await vi.waitFor(() => expect(onCancel).toHaveBeenCalled());
+  });
+
+  it("does not dismiss when the overlay backdrop is clicked", () => {
+    const onCancel = vi.fn();
+    render(<AlertDialog open title="Archive Contact" description="..." onConfirm={vi.fn()} onCancel={onCancel} />);
+    // The overlay backdrop is everything outside the dialog panel, e.g. body.
+    fireEvent.pointerDown(document.body);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+  });
+
+  it("auto-focuses the Cancel button when opened", async () => {
+    render(
+      <AlertDialog
+        open
+        title="Archive Contact"
+        description="..."
+        confirmLabel="Archive"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" })));
+  });
+
+  it("returns focus to the triggering element on close", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Archive
+          </button>
+          <AlertDialog
+            open={open}
+            title="Archive Contact"
+            description="..."
+            onConfirm={vi.fn()}
+            onCancel={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Archive" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    await vi.waitFor(() => expect(screen.getByRole("alertdialog")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });

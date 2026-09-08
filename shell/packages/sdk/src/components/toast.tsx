@@ -91,8 +91,8 @@ export function Toast({ bus = toastBus }: ToastProps): ReactNode {
           data-variant={t.variant}
           className={`flex w-full max-w-sm items-start gap-3 rounded-control border-l-4 bg-surface px-4 py-3 shadow-md ${
             isLeaving
-              ? "animate-[toast-slide-out_var(--duration-fast)_ease-in] motion-reduce:animate-[toast-fade-out_var(--duration-fast)_ease-in]"
-              : "animate-[toast-slide-in_var(--duration-base)_ease-out] motion-reduce:animate-[toast-fade-in_var(--duration-base)_ease-out]"
+              ? "animate-[toast-slide-out_var(--duration-fast)_ease-in] motion-reduce:animate-[fade-out_var(--duration-fast)_ease-in]"
+              : "animate-[toast-slide-in_var(--duration-base)_ease-out] motion-reduce:animate-[fade-in_var(--duration-base)_ease-out]"
           } ${VARIANT_BORDER_CLASSES[t.variant]}`}
         >
           {t.variant === "loading" && (
