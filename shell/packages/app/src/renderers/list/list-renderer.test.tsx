@@ -6,7 +6,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { groupRows, ListRenderer } from "./list-renderer.js";
@@ -175,6 +175,66 @@ describe("ListRenderer", () => {
     expect(within(table).queryByText("SSN")).toBeNull();
     expect(within(table).getByText("Ada")).toBeTruthy();
     expect(within(table).queryByText("000-00-0000")).toBeNull();
+  });
+
+  it("has no checkbox column when the view declares no bulk_actions", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", name: "Ada", ssn: "000-00-0000" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess);
+
+    expect(screen.queryAllByRole("checkbox").length).toBe(0);
+  });
+
+  it("renders a checkbox column and toggles row selection when bulk_actions are declared", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [
+          {
+            data: [
+              { id: "1", name: "Ada", ssn: "000-00-0000" },
+              { id: "2", name: "Bea", ssn: "111-11-1111" },
+            ],
+            meta: { cursor: null, hasMore: false },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      bulk_actions: [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }],
+    });
+
+    const rowCheckboxes = screen.getAllByRole("checkbox", { name: "Select row" });
+    expect(rowCheckboxes).toHaveLength(2);
+    expect(screen.queryByText("1 selected")).toBeNull();
+
+    fireEvent.click(rowCheckboxes[0] as HTMLInputElement);
+    expect(screen.getByText("1 selected")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select all/ }));
+    expect(screen.getByText("2 selected")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select all/ }));
+    expect(screen.queryByText(/selected/)).toBeNull();
   });
 
   it("full-page mode: passes the URL-derived filter/sort into useInfiniteList", async () => {

@@ -1,7 +1,11 @@
 export type { ActionRoute } from "./action-registry.js";
 export { ActionRegistry, actionRegistry } from "./action-registry.js";
+export type { BulkActionContextValue } from "./bulk-action-context.js";
+export { BulkActionContext, useBulkAction } from "./bulk-action-context.js";
 export type { ActionErrorHandlerContext, ActionOptions, ActionResult, ErrorHandler } from "./use-action.js";
 export { useAction } from "./use-action.js";
+export type { UseExportResult } from "./use-export.js";
+export { useExport } from "./use-export.js";
 export type { UseInfiniteListOptions } from "./use-infinite-list.js";
 export { createInfiniteListQueryOptions, useInfiniteList } from "./use-infinite-list.js";
 export type { UseRecordOptions, UseRecordResult } from "./use-record.js";

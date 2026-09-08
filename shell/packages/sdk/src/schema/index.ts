@@ -1,10 +1,13 @@
 import { apiClient } from "../http/index.js";
+import { ComponentRegistry } from "./component-registry.js";
 import { ModelRegistry } from "./model-registry.js";
 import { ViewDeclarationRegistry } from "./resolve-view-declaration.js";
 import { ViewPathRegistry } from "./resolve-view-path.js";
 import { ResourceRegistry } from "./resource-registry.js";
 import { SchemaRegistry } from "./schema-registry.js";
 
+export type { RegisteredComponent } from "./component-registry.js";
+export { ComponentRegistry } from "./component-registry.js";
 export { buildModelRegistry, ModelRegistry } from "./model-registry.js";
 export type { ViewDeclaration } from "./resolve-view-declaration.js";
 export { resolveViewDeclaration, ViewDeclarationRegistry } from "./resolve-view-declaration.js";
@@ -20,3 +23,4 @@ export const resourceRegistry = new ResourceRegistry(schemaRegistry);
 export const viewPathRegistry = new ViewPathRegistry(schemaRegistry);
 export const modelRegistry = new ModelRegistry(schemaRegistry);
 export const viewDeclarationRegistry = new ViewDeclarationRegistry(schemaRegistry);
+export const componentRegistry = new ComponentRegistry();

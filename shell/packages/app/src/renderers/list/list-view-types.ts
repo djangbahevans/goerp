@@ -1,3 +1,5 @@
+import type { AlertDialogInput } from "@goerp/sdk/components";
+
 // A fetched record — the shape column rendering and grouping work against.
 export type Row = Record<string, unknown>;
 
@@ -114,6 +116,42 @@ export interface ListAction {
   component?: string;
 }
 
+// manifest-spec.md's ConfirmInput object — AlertDialogInput (the SDK's own
+// rendering of this same manifest object, per alert-dialog.tsx) plus the
+// `field` key ConfirmInput carries and AlertDialogInput doesn't need,
+// since AlertDialog itself never sends the collected value anywhere.
+export type BulkActionConfirmInput = AlertDialogInput & { field: string };
+
+// manifest-spec.md's ConfirmDialog object.
+export interface BulkActionConfirm {
+  title: string;
+  message: string;
+  confirm_label?: string;
+  cancel_label?: string;
+  destructive?: boolean;
+  input?: BulkActionConfirmInput;
+}
+
+// manifest-spec.md's BulkAction object — Action's fields (unlike ListAction,
+// this includes `confirm`, since goerp#575's out-of-scope note doesn't
+// apply to bulk actions) plus min_selected/max_selected.
+export interface BulkAction {
+  label: string;
+  type: ActionType;
+  icon?: string;
+  style?: "primary" | "secondary" | "ghost" | "danger";
+  permission?: string;
+  condition?: string;
+  route?: string;
+  route_params?: Record<string, unknown>;
+  format?: string;
+  component?: string;
+  confirm?: BulkActionConfirm;
+  // Default: 1.
+  min_selected?: number;
+  max_selected?: number;
+}
+
 export interface EmptyStateAction {
   label: string;
   type: string;
@@ -145,8 +183,7 @@ export interface ListViewDeclaration {
   selectable?: boolean;
   filters?: ListFilter[];
   actions?: ListAction[];
-  // goerp#595's own scope — carried on the type, not rendered here.
-  bulk_actions?: unknown[];
+  bulk_actions?: BulkAction[];
   group_by_options?: string[];
   page_sizes?: number[];
   default_page_size?: number;
