@@ -35,3 +35,31 @@ export const Creatable: Story = {
     onCreate: (name: string) => ({ id: crypto.randomUUID(), name }),
   },
 };
+
+export const WithError: Story = {
+  args: {
+    label: "Tags",
+    value: [],
+    error: "At least one tag is required",
+  },
+};
+
+export const Disabled: Story = {
+  args: {
+    label: "Tags",
+    value: [{ id: "1", name: "VIP" }],
+    disabled: true,
+  },
+};
+
+// Exercises pillTextClassFor's WCAG luminance computation: a light hex picks
+// black text, a dark hex picks white text.
+export const ColoredTags: Story = {
+  args: {
+    label: "Tags",
+    value: [
+      { id: "1", name: "VIP", color: "#FFFF00" },
+      { id: "2", name: "Wholesale", color: "#000080" },
+    ],
+  },
+};

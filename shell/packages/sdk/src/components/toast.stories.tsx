@@ -40,6 +40,18 @@ export const ErrorWithAction: Story = {
   },
 };
 
+export const Warning: Story = {
+  args: {
+    bus: busWith((bus) => bus.warning("This record was recently changed by someone else")),
+  },
+};
+
+export const Info: Story = {
+  args: {
+    bus: busWith((bus) => bus.info("This module is in beta")),
+  },
+};
+
 export const Loading: Story = {
   args: {
     bus: busWith((bus) => bus.loading("Uploading attachment…")),

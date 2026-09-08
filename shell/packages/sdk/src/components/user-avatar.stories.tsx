@@ -23,6 +23,14 @@ export const WithTooltip: Story = {
   },
 };
 
+export const WithAvatarUrl: Story = {
+  args: {
+    name: "Ama Boateng",
+    avatarUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  },
+};
+
 export const Sizes: Story = {
   render: () => (
     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>

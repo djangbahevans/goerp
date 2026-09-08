@@ -27,3 +27,11 @@ export const WithError: Story = {
     error: "Notes are required",
   },
 };
+
+export const Disabled: Story = {
+  args: {
+    label: "Notes",
+    value: "Follow up next week about the renewal.",
+    disabled: true,
+  },
+};
