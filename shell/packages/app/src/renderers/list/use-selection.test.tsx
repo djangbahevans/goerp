@@ -33,6 +33,17 @@ describe("useSelection", () => {
     expect(result.current.selectedIds.size).toBe(0);
   });
 
+  it("toggleAll only affects the given ids, leaving an unrelated group's selection untouched", () => {
+    const { result } = renderHook(() => useSelection());
+
+    act(() => result.current.toggleAll(["a1", "a2"]));
+    act(() => result.current.toggleAll(["b1", "b2"]));
+    expect([...result.current.selectedIds].sort()).toEqual(["a1", "a2", "b1", "b2"]);
+
+    act(() => result.current.toggleAll(["b1", "b2"]));
+    expect([...result.current.selectedIds].sort()).toEqual(["a1", "a2"]);
+  });
+
   it("clear empties the selection", () => {
     const { result } = renderHook(() => useSelection());
 

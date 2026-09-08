@@ -6,10 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BulkActions } from "./bulk-actions.js";
 import type { BulkAction } from "./list-view-types.js";
 
-const { useActionMock, useExportMock, resolveComponentMock } = vi.hoisted(() => ({
+const { useActionMock, useExportMock, resolveComponentMock, hasComponentMock } = vi.hoisted(() => ({
   useActionMock: vi.fn(),
   useExportMock: vi.fn(),
   resolveComponentMock: vi.fn(),
+  hasComponentMock: vi.fn(() => true),
 }));
 
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
@@ -18,12 +19,13 @@ vi.mock("@goerp/sdk/react", async (importOriginal) => {
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
-  return { ...actual, componentRegistry: { resolve: resolveComponentMock } };
+  return { ...actual, componentRegistry: { resolve: resolveComponentMock, has: hasComponentMock } };
 });
 
 beforeEach(() => {
   useActionMock.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false, error: null });
   useExportMock.mockReturnValue({ trigger: vi.fn(async () => {}), isPending: false, isError: false, error: null });
+  hasComponentMock.mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -31,6 +33,7 @@ afterEach(() => {
   useActionMock.mockReset();
   useExportMock.mockReset();
   resolveComponentMock.mockReset();
+  hasComponentMock.mockReset();
 });
 
 function permissionWrapper(permissions: string[]) {
@@ -100,6 +103,13 @@ describe("BulkActions", () => {
     expect(screen.queryByText("Add Tag")).toBeNull();
   });
 
+  it("hides a custom action whose component was never registered, instead of crashing", () => {
+    hasComponentMock.mockReturnValue(false);
+    const actions: BulkAction[] = [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }];
+    expect(() => renderBulkActions(actions, ["1"])).not.toThrow();
+    expect(screen.queryByText("Add Tag")).toBeNull();
+  });
+
   describe("custom", () => {
     function TestPanel() {
       const { selectedIds, selectedCount, onComplete, onCancel } = useBulkAction();
@@ -154,6 +164,26 @@ describe("BulkActions", () => {
       expect(clearSelection).not.toHaveBeenCalled();
       expect(screen.getByText("Add Tag")).toBeTruthy();
     });
+
+    it("stays open when the selection drops to zero while the panel is active", () => {
+      resolveComponentMock.mockReturnValue(TestPanel);
+      const clearSelection = vi.fn();
+      const actions: BulkAction[] = [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }];
+      const { rerender } = renderBulkActions(actions, ["1"], clearSelection);
+
+      fireEvent.click(screen.getByText("Add Tag"));
+      expect(screen.getByText("Complete")).toBeTruthy();
+
+      const Wrapper = fullAccess;
+      rerender(
+        <Wrapper>
+          <BulkActions actions={actions} selectedIds={[]} clearSelection={clearSelection} />
+        </Wrapper>,
+      );
+
+      expect(screen.getByText("Complete")).toBeTruthy();
+      expect(screen.queryByText("Add Tag")).toBeNull();
+    });
   });
 
   describe("route", () => {
@@ -165,6 +195,18 @@ describe("BulkActions", () => {
 
       fireEvent.click(screen.getByText("Archive"));
       expect(mutate).toHaveBeenCalledWith({ ids: ["1", "2"] });
+    });
+
+    it("merges the manifest's static route_params alongside the selected ids", () => {
+      const mutate = vi.fn();
+      useActionMock.mockReturnValue({ mutate, isPending: false, isError: false, error: null });
+      const actions: BulkAction[] = [
+        { label: "Archive", type: "route", route: "contacts.archive", route_params: { reason: "bulk_cleanup" } },
+      ];
+      renderBulkActions(actions, ["1"]);
+
+      fireEvent.click(screen.getByText("Archive"));
+      expect(mutate).toHaveBeenCalledWith({ reason: "bulk_cleanup", ids: ["1"] });
     });
 
     it("gates a destructive action behind AlertDialog when `confirm` is set", () => {

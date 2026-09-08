@@ -27,12 +27,20 @@ export function useSelection(): SelectionHandle {
   }, []);
 
   // Selects every given id when any is currently unselected, otherwise
-  // clears them all — the standard "select all" checkbox tri-state
-  // collapse (indeterminate -> all selected; all selected -> none).
+  // removes exactly those ids — the standard "select all" checkbox
+  // tri-state collapse, merged into (not replacing) `prev` so this stays
+  // correct when several independent "select all" checkboxes (one per
+  // group, when the list is grouped) share the same selection instance —
+  // toggling one group's checkbox must never touch another group's rows.
   const toggleAll = useCallback((ids: string[]) => {
     setSelectedIds((prev) => {
       const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
-      return allSelected ? new Set() : new Set(ids);
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
     });
   }, []);
 

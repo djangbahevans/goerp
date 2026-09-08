@@ -17,6 +17,16 @@ describe("ComponentRegistry", () => {
     expect(() => registry.resolve("Missing")).toThrow(/unknown component "Missing"/);
   });
 
+  it("throws on a name collision instead of silently overwriting", () => {
+    const registry = new ComponentRegistry();
+    registry.register("BulkTagAction", Stub);
+    function Other() {
+      return null;
+    }
+    expect(() => registry.register("BulkTagAction", Other)).toThrow(/"BulkTagAction" is already registered/);
+    expect(registry.resolve("BulkTagAction")).toBe(Stub);
+  });
+
   it("has() reports registration without throwing", () => {
     const registry = new ComponentRegistry();
     expect(registry.has("BulkTagAction")).toBe(false);

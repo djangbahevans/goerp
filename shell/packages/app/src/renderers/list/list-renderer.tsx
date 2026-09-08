@@ -1,5 +1,6 @@
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
+import { useEffect, useMemo } from "react";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
@@ -83,6 +84,19 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
   // view-system.md's embedded-rendering contract: the locked base filter
   // always wins over user-driven state, never the other way around.
   const filter = { ...listState.filter, ...baseFilter };
+  const filterKey = JSON.stringify(filter);
+
+  // A selection is scoped to the currently-visible rows — once the filter
+  // changes the dataset out from under it, a stale id could still fire a
+  // bulk action against a record the user can no longer see or intended
+  // to include. Sort changes reorder the same rows, so they're excluded.
+  const { clear: clearSelection } = selection;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: filterKey is a deliberate change-trigger, not read inside the effect.
+  useEffect(() => {
+    clearSelection();
+  }, [filterKey, clearSelection]);
+
+  const selectedIds = useMemo(() => [...selection.selectedIds], [selection.selectedIds]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } =
     useInfiniteList<Row>(view.resource, {
@@ -121,9 +135,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
     <>
       <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
       <ListActions actions={view.actions ?? []} module={module} />
-      {showSelection && (
-        <BulkActions actions={bulkActions} selectedIds={[...selection.selectedIds]} clearSelection={selection.clear} />
-      )}
+      {showSelection && <BulkActions actions={bulkActions} selectedIds={selectedIds} clearSelection={clearSelection} />}
       {groupByOptions.length > 0 && (
         <label>
           Group by
@@ -143,69 +155,67 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
       {rows.length === 0 ? (
         <div role="status">No {view.label.toLowerCase()} found.</div>
       ) : (
-        groupRows(rows, listState.groupBy).map((group) => (
-          <table aria-label={view.label} key={group.key}>
-            {listState.groupBy && (
-              <caption>
-                {listState.groupBy} = {group.key}
-              </caption>
-            )}
-            <thead>
-              <tr>
-                {showSelection && (
-                  <th scope="col">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select all ${view.label.toLowerCase()}`}
-                      checked={
-                        group.rows.length > 0 &&
-                        group.rows.every((row) => typeof row.id === "string" && selection.selectedIds.has(row.id))
-                      }
-                      onChange={() =>
-                        selection.toggleAll(
-                          group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string"),
-                        )
-                      }
-                    />
-                  </th>
-                )}
-                {columns.map((column) => (
-                  <th scope="col" key={column.field} style={columnStyle(column)}>
-                    {column.label ?? column.field}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {group.rows.map((row, index) => (
-                <tr key={(row.id as string | undefined) ?? index}>
+        groupRows(rows, listState.groupBy).map((group) => {
+          const selectableIds = group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+          return (
+            <table aria-label={view.label} key={group.key}>
+              {listState.groupBy && (
+                <caption>
+                  {listState.groupBy} = {group.key}
+                </caption>
+              )}
+              <thead>
+                <tr>
                   {showSelection && (
-                    <td>
-                      {typeof row.id === "string" && (
-                        <input
-                          type="checkbox"
-                          aria-label="Select row"
-                          checked={selection.selectedIds.has(row.id)}
-                          onChange={() => selection.toggle(row.id as string)}
-                        />
-                      )}
-                    </td>
+                    <th scope="col">
+                      <input
+                        type="checkbox"
+                        aria-label={
+                          listState.groupBy ? `Select all in ${group.key}` : `Select all ${view.label.toLowerCase()}`
+                        }
+                        checked={selectableIds.length > 0 && selectableIds.every((id) => selection.selectedIds.has(id))}
+                        onChange={() => selection.toggleAll(selectableIds)}
+                      />
+                    </th>
                   )}
-                  {columns.map((column) => {
-                    const rawValue = row[column.field];
-                    const relationLabel =
-                      typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
-                    return (
-                      <td key={column.field} style={columnStyle(column)}>
-                        {renderCell(column, row, relationLabel !== undefined ? { relationLabel } : {})}
-                      </td>
-                    );
-                  })}
+                  {columns.map((column) => (
+                    <th scope="col" key={column.field} style={columnStyle(column)}>
+                      {column.label ?? column.field}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        ))
+              </thead>
+              <tbody>
+                {group.rows.map((row, index) => (
+                  <tr key={(row.id as string | undefined) ?? index}>
+                    {showSelection && (
+                      <td>
+                        {typeof row.id === "string" && (
+                          <input
+                            type="checkbox"
+                            aria-label="Select row"
+                            checked={selection.selectedIds.has(row.id)}
+                            onChange={() => selection.toggle(row.id as string)}
+                          />
+                        )}
+                      </td>
+                    )}
+                    {columns.map((column) => {
+                      const rawValue = row[column.field];
+                      const relationLabel =
+                        typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
+                      return (
+                        <td key={column.field} style={columnStyle(column)}>
+                          {renderCell(column, row, relationLabel !== undefined ? { relationLabel } : {})}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          );
+        })
       )}
       {hasNextPage && (
         <button type="button" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>

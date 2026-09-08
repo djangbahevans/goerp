@@ -3,17 +3,25 @@ import { ActionButton, AlertDialog } from "@goerp/sdk/components";
 import type { BulkActionContextValue } from "@goerp/sdk/react";
 import { BulkActionContext, useAction, useExport } from "@goerp/sdk/react";
 import { componentRegistry } from "@goerp/sdk/schema";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { BulkAction } from "./list-view-types.js";
 
 // view-system.md's "Bulk actions" — only "custom"/"route"/"export" are
 // rendered, matching the header_actions ListActions convention (list-actions.tsx)
 // of leaving create/import/report unimplemented rather than half-building them.
 
-function withinSelectedRange(action: BulkAction, count: number): boolean {
+// Shared visibility gate for every bulk action button: permission, the
+// action's own min_selected/max_selected range, and (custom actions only)
+// that the named component actually resolves — extracted after the
+// permission+range pair showed up identically in all three button
+// components below, keeping the middle field-specific check the only
+// thing each call site supplies.
+function useBulkActionGate(action: BulkAction, selectedCount: number, hasRequiredField: boolean): boolean {
+  const allowed = useOptionalPermission(action.permission);
+  if (!allowed || !hasRequiredField) return false;
   const min = action.min_selected ?? 1;
-  if (count < min) return false;
-  if (action.max_selected !== undefined && count > action.max_selected) return false;
+  if (selectedCount < min) return false;
+  if (action.max_selected !== undefined && selectedCount > action.max_selected) return false;
   return true;
 }
 
@@ -27,8 +35,12 @@ function CustomBulkActionButton({
   selectedCount,
   onActivate,
 }: BulkActionButtonProps & { onActivate: () => void }) {
-  const allowed = useOptionalPermission(action.permission);
-  if (!allowed || !action.component || !withinSelectedRange(action, selectedCount)) return null;
+  const visible = useBulkActionGate(
+    action,
+    selectedCount,
+    action.component !== undefined && componentRegistry.has(action.component),
+  );
+  if (!visible) return null;
 
   return (
     <ActionButton variant={action.style} icon={action.icon} onClick={onActivate}>
@@ -43,7 +55,7 @@ function RouteBulkActionButton({
   selectedIds,
   onSuccess,
 }: BulkActionButtonProps & { selectedIds: string[]; onSuccess: () => void }) {
-  const allowed = useOptionalPermission(action.permission);
+  const visible = useBulkActionGate(action, selectedCount, action.route !== undefined);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const routeAction = useAction<unknown, Record<string, unknown>>(action.route ?? "", {
     onSuccess: () => {
@@ -51,11 +63,11 @@ function RouteBulkActionButton({
       onSuccess();
     },
   });
-  if (!allowed || !action.route || !withinSelectedRange(action, selectedCount)) return null;
+  if (!visible) return null;
 
   const confirm = action.confirm;
   const fire = (inputValue?: string) => {
-    const variables: Record<string, unknown> = { ids: selectedIds };
+    const variables: Record<string, unknown> = { ...action.route_params, ids: selectedIds };
     if (confirm?.input && inputValue !== undefined) {
       variables[confirm.input.field] = inputValue;
     }
@@ -81,7 +93,7 @@ function RouteBulkActionButton({
           confirmLabel={confirm.confirm_label}
           cancelLabel={confirm.cancel_label}
           confirmVariant={confirm.destructive ? "danger" : "primary"}
-          {...(confirm.input ? { input: { ...confirm.input } } : {})}
+          {...(confirm.input ? { input: confirm.input } : {})}
           onConfirm={(inputValue) => fire(inputValue)}
           onCancel={() => setConfirmOpen(false)}
         />
@@ -95,10 +107,10 @@ function ExportBulkActionButton({
   selectedCount,
   selectedIds,
 }: BulkActionButtonProps & { selectedIds: string[] }) {
-  const allowed = useOptionalPermission(action.permission);
+  const visible = useBulkActionGate(action, selectedCount, action.route !== undefined);
   const format = action.format ?? "csv";
   const exportAction = useExport(action.route ?? "", `export.${format}`);
-  if (!allowed || !action.route || !withinSelectedRange(action, selectedCount)) return null;
+  if (!visible) return null;
 
   return (
     <ActionButton
@@ -119,38 +131,76 @@ export interface BulkActionsProps {
   clearSelection: () => void;
 }
 
+function ActiveCustomPanel({
+  action,
+  selectedIds,
+  isLoading,
+  setLoading,
+  onComplete,
+  onCancel,
+}: {
+  action: BulkAction;
+  selectedIds: string[];
+  isLoading: boolean;
+  setLoading: (loading: boolean) => void;
+  onComplete: () => void;
+  onCancel: () => void;
+}) {
+  const contextValue = useMemo<BulkActionContextValue>(
+    () => ({ selectedIds, selectedCount: selectedIds.length, onComplete, onCancel, isLoading, setLoading }),
+    [selectedIds, isLoading, setLoading, onComplete, onCancel],
+  );
+
+  // CustomBulkActionButton only activates an action once componentRegistry.has()
+  // already confirmed this name resolves — resolve() itself never throws on
+  // that path, but a name unregistered between render and click (or a
+  // registry cleared mid-session, e.g. hot reload) shouldn't crash the
+  // whole list view over one stale bulk-action reference.
+  if (!action.component || !componentRegistry.has(action.component)) {
+    return <div role="alert">"{action.component}" isn't a registered component — this bulk action can't be shown.</div>;
+  }
+  const Component = componentRegistry.resolve(action.component);
+
+  return (
+    <BulkActionContext.Provider value={contextValue}>
+      <Component />
+    </BulkActionContext.Provider>
+  );
+}
+
 export function BulkActions({ actions, selectedIds, clearSelection }: BulkActionsProps) {
   const [activeCustom, setActiveCustom] = useState<BulkAction | null>(null);
   const [isLoading, setLoading] = useState(false);
 
-  if (selectedIds.length === 0) return null;
+  const onComplete = useCallback(() => {
+    setActiveCustom(null);
+    setLoading(false);
+    clearSelection();
+  }, [clearSelection]);
 
+  const onCancel = useCallback(() => {
+    setActiveCustom(null);
+    setLoading(false);
+  }, []);
+
+  // Checked ahead of the "nothing selected" branch below: row checkboxes
+  // stay live while a custom panel is open, so deselecting every row must
+  // not silently drop the panel out from under the user mid-flow — only
+  // onComplete/onCancel (the panel's own lifecycle) closes it.
   if (activeCustom) {
-    // Guarded by the same `!action.component` check CustomBulkActionButton
-    // uses to hide the button in the first place — activeCustom can only
-    // be set to an action that already passed it.
-    const Component = componentRegistry.resolve(activeCustom.component as string);
-    const contextValue: BulkActionContextValue = {
-      selectedIds,
-      selectedCount: selectedIds.length,
-      onComplete: () => {
-        setActiveCustom(null);
-        setLoading(false);
-        clearSelection();
-      },
-      onCancel: () => {
-        setActiveCustom(null);
-        setLoading(false);
-      },
-      isLoading,
-      setLoading,
-    };
     return (
-      <BulkActionContext.Provider value={contextValue}>
-        <Component />
-      </BulkActionContext.Provider>
+      <ActiveCustomPanel
+        action={activeCustom}
+        selectedIds={selectedIds}
+        isLoading={isLoading}
+        setLoading={setLoading}
+        onComplete={onComplete}
+        onCancel={onCancel}
+      />
     );
   }
+
+  if (selectedIds.length === 0) return null;
 
   return (
     <div role="toolbar" aria-label="Bulk actions">

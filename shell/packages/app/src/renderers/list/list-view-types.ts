@@ -1,3 +1,5 @@
+import type { AlertDialogInput } from "@goerp/sdk/components";
+
 // A fetched record — the shape column rendering and grouping work against.
 export type Row = Record<string, unknown>;
 
@@ -114,21 +116,11 @@ export interface ListAction {
   component?: string;
 }
 
-// manifest-spec.md's ConfirmInput object — reused by BulkAction.confirm.
-export interface BulkActionConfirmOption {
-  value: string;
-  label: string;
-  disabled?: boolean;
-}
-
-export interface BulkActionConfirmInput {
-  field: string;
-  label: string;
-  type: "text" | "select";
-  required?: boolean;
-  placeholder?: string;
-  options?: BulkActionConfirmOption[];
-}
+// manifest-spec.md's ConfirmInput object — AlertDialogInput (the SDK's own
+// rendering of this same manifest object, per alert-dialog.tsx) plus the
+// `field` key ConfirmInput carries and AlertDialogInput doesn't need,
+// since AlertDialog itself never sends the collected value anywhere.
+export type BulkActionConfirmInput = AlertDialogInput & { field: string };
 
 // manifest-spec.md's ConfirmDialog object.
 export interface BulkActionConfirm {

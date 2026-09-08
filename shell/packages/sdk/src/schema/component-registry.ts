@@ -11,7 +11,14 @@ export type RegisteredComponent = ComponentType<any>;
 export class ComponentRegistry {
   private readonly components = new Map<string, RegisteredComponent>();
 
+  // Throws on a name collision rather than silently letting the second
+  // registration win — two modules independently registering the same
+  // component name is a real cross-module conflict, not something this
+  // provisional, unnamespaced registry should paper over.
   register(name: string, component: RegisteredComponent): void {
+    if (this.components.has(name)) {
+      throw new Error(`ComponentRegistry: "${name}" is already registered`);
+    }
     this.components.set(name, component);
   }
 
