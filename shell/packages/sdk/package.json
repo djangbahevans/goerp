@@ -48,6 +48,12 @@
     "vitest": "^5.0.0"
   },
   "dependencies": {
-    "@radix-ui/react-alert-dialog": "^1.1.23"
+    "@radix-ui/react-alert-dialog": "^1.1.23",
+    "@radix-ui/react-popover": "^1.1.23",
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "lucide-react": "^1.42.0"
   }
 }
