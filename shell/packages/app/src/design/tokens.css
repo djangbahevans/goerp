@@ -166,9 +166,32 @@
   --duration-slower: 800ms;
 }
 
+/* A plain opacity fade, shared by every component that needs one — Toast's
+   prefers-reduced-motion swap-in and AlertDialog's overlay backdrop and
+   reduced-motion content swap-in all reference this pair by name rather than
+   each declaring their own identical keyframes. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 /* Toast's slide-in/out motion (docs/components/toast.md "Tokens Used"),
    referenced via Tailwind's arbitrary animate-[toast-slide-in_...] syntax.
-   The -fade- pair is the prefers-reduced-motion swap-in, opacity only. */
+   Falls back to the shared fade-in/fade-out pair under
+   prefers-reduced-motion. */
 @keyframes toast-slide-in {
   from {
     opacity: 0;
@@ -177,15 +200,6 @@
   to {
     opacity: 1;
     transform: translateX(0);
-  }
-}
-
-@keyframes toast-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
   }
 }
 
@@ -200,11 +214,30 @@
   }
 }
 
-@keyframes toast-fade-out {
+/* AlertDialog's fade+scale entrance/exit (docs/components/alert-dialog.md
+   "Content and Edge Cases"), keyed off Radix's own data-state="open"|"closed"
+   attribute rather than hand-rolled mount/unmount timing. The overlay uses
+   the shared fade-in/fade-out pair directly (a plain opacity fade, same as
+   the content pair's own prefers-reduced-motion swap-in, which drops the
+   scale component). */
+@keyframes alert-dialog-content-show {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes alert-dialog-content-hide {
   from {
     opacity: 1;
+    transform: scale(1);
   }
   to {
     opacity: 0;
+    transform: scale(0.95);
   }
 }
