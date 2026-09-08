@@ -29,6 +29,29 @@ export const Formatted: Story = {
   },
 };
 
+export const WithHeading: Story = {
+  args: {
+    label: "Email template",
+    value: "<h2>Renewal reminder</h2><p>Your plan renews on the 1st — no action needed.</p>",
+  },
+};
+
+// Toggles a toolbar command first (rather than requiring a manual keystroke
+// in Storybook's UI) so Undo renders enabled, then undoes it so Redo does
+// too — a button click is a more reliable scripted edit here than typing
+// into the contenteditable region, matching this file's own test suite.
+export const WithUndoRedoAvailable: Story = {
+  args: {
+    label: "Notes",
+    value: "<p>Follow up next week about the renewal.</p>",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Bulleted list" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Undo" }));
+  },
+};
+
 // Opens on load (rather than requiring a manual click in Storybook's UI) so
 // the link popover — pre-filled with the existing href, plus its "open in a
 // new tab" and "remove link" actions — is visible in the sidebar preview.
