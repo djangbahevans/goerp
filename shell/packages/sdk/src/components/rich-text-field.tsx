@@ -1,7 +1,21 @@
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Bold, ExternalLink, Italic, Link as LinkIcon, List, Quote, Trash2, Underline } from "lucide-react";
+import {
+  Bold,
+  ExternalLink,
+  Heading1,
+  Heading2,
+  Heading3,
+  Italic,
+  Link as LinkIcon,
+  List,
+  Quote,
+  Redo2,
+  Trash2,
+  Underline,
+  Undo2,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { actionButtonClassName } from "./action-button-styles.js";
@@ -30,6 +44,9 @@ const EXTENSIONS = [StarterKit.configure({ link: { openOnClick: false } })];
 
 const TOOLBAR_ICON_SIZE = 16;
 const TOOLBAR_BUTTON_CLASSES = actionButtonClassName("ghost", "sm");
+
+const HEADING_LEVELS = [1, 2, 3] as const;
+const HEADING_ICONS = { 1: Heading1, 2: Heading2, 3: Heading3 } as const;
 
 function toolbarButtonClassName(active: boolean): string {
   return `${TOOLBAR_BUTTON_CLASSES} ${active ? "bg-surface-active text-primary" : ""}`;
@@ -60,6 +77,24 @@ function ToolbarButton({ label, active, disabled, onClick, children }: ToolbarBu
 
 function ToolbarDivider(): ReactNode {
   return <div aria-hidden="true" className="mx-1 h-5 w-px bg-border" />;
+}
+
+interface MomentaryToolbarButtonProps {
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}
+
+// Undo/Redo, unlike ToolbarButton's other callers, are momentary actions
+// with no persistent "on" state — no aria-pressed, since their disabled
+// state is the whole affordance (matching a native app's undo/redo).
+function MomentaryToolbarButton({ label, disabled, onClick, children }: MomentaryToolbarButtonProps): ReactNode {
+  return (
+    <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className={TOOLBAR_BUTTON_CLASSES}>
+      {children}
+    </button>
+  );
 }
 
 export function RichTextField({
@@ -113,9 +148,14 @@ export function RichTextField({
       underline: e?.isActive("underline") ?? false,
       bulletList: e?.isActive("bulletList") ?? false,
       blockquote: e?.isActive("blockquote") ?? false,
+      heading1: e?.isActive("heading", { level: 1 }) ?? false,
+      heading2: e?.isActive("heading", { level: 2 }) ?? false,
+      heading3: e?.isActive("heading", { level: 3 }) ?? false,
       link: e?.isActive("link") ?? false,
       linkHref: (e?.getAttributes("link").href as string | undefined) ?? "",
       selectionEmpty: e?.state.selection.empty ?? true,
+      canUndo: e?.can().undo() ?? false,
+      canRedo: e?.can().redo() ?? false,
     }),
   });
 
@@ -162,6 +202,12 @@ export function RichTextField({
     setLinkPopoverOpen(false);
   };
 
+  const headingActive: Record<(typeof HEADING_LEVELS)[number], boolean> = {
+    1: activeMarks.heading1,
+    2: activeMarks.heading2,
+    3: activeMarks.heading3,
+  };
+
   // Applying a link to a collapsed selection is a silent no-op (nothing to
   // wrap in an <a>) — disabled here instead of letting a user type a URL
   // that visibly does nothing on submit, unless a link is already active
@@ -181,6 +227,36 @@ export function RichTextField({
           aria-label="Formatting"
           className="flex flex-wrap items-center gap-1 border-border border-b pb-2"
         >
+          <MomentaryToolbarButton
+            label="Undo"
+            disabled={disabled || !activeMarks.canUndo}
+            onClick={() => editor.chain().focus().undo().run()}
+          >
+            <Undo2 size={TOOLBAR_ICON_SIZE} />
+          </MomentaryToolbarButton>
+          <MomentaryToolbarButton
+            label="Redo"
+            disabled={disabled || !activeMarks.canRedo}
+            onClick={() => editor.chain().focus().redo().run()}
+          >
+            <Redo2 size={TOOLBAR_ICON_SIZE} />
+          </MomentaryToolbarButton>
+          <ToolbarDivider />
+          {HEADING_LEVELS.map((level) => {
+            const HeadingIcon = HEADING_ICONS[level];
+            return (
+              <ToolbarButton
+                key={level}
+                label={`Heading ${level}`}
+                active={headingActive[level]}
+                disabled={disabled}
+                onClick={() => editor.chain().focus().toggleHeading({ level }).run()}
+              >
+                <HeadingIcon size={TOOLBAR_ICON_SIZE} />
+              </ToolbarButton>
+            );
+          })}
+          <ToolbarDivider />
           <ToolbarButton
             label="Bold"
             active={activeMarks.bold}

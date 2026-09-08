@@ -14,9 +14,62 @@ describe("RichTextField", () => {
   it("renders a real toolbar with accessibly-labeled formatting buttons", () => {
     render(<RichTextField value="" onChange={() => {}} />);
     expect(screen.getByRole("toolbar", { name: "Formatting" })).toBeTruthy();
-    for (const name of ["Bold", "Italic", "Underline", "Bulleted list", "Blockquote", "Link"]) {
+    for (const name of [
+      "Undo",
+      "Redo",
+      "Heading 1",
+      "Heading 2",
+      "Heading 3",
+      "Bold",
+      "Italic",
+      "Underline",
+      "Bulleted list",
+      "Blockquote",
+      "Link",
+    ]) {
       expect(screen.getByRole("button", { name })).toBeTruthy();
     }
+  });
+
+  it.each([1, 2, 3] as const)("toggles heading level %i and reflects it via aria-pressed", (level) => {
+    const onChange = vi.fn();
+    render(<RichTextField value="<p>Section</p>" onChange={onChange} />);
+    const headingButton = screen.getByRole("button", { name: `Heading ${level}` });
+    expect(headingButton.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(headingButton);
+    expect(headingButton.getAttribute("aria-pressed")).toBe("true");
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain(`<h${level}>`);
+    // The other two heading levels must stay unpressed — catches a mixed-up
+    // level in HEADING_ICONS/headingActive as well as the level just set.
+    for (const otherLevel of [1, 2, 3] as const) {
+      if (otherLevel !== level) {
+        expect(screen.getByRole("button", { name: `Heading ${otherLevel}` }).getAttribute("aria-pressed")).toBe(
+          "false",
+        );
+      }
+    }
+    fireEvent.click(headingButton);
+    expect(headingButton.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("disables Undo/Redo until there's history to act on, and uses it correctly", () => {
+    const onChange = vi.fn();
+    render(<RichTextField value="<p>Hello</p>" onChange={onChange} />);
+    const undoButton = screen.getByRole("button", { name: "Undo" });
+    const redoButton = screen.getByRole("button", { name: "Redo" });
+    expect(undoButton.hasAttribute("disabled")).toBe(true);
+    expect(redoButton.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Bulleted list" }));
+    expect(undoButton.hasAttribute("disabled")).toBe(false);
+    expect(redoButton.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(undoButton);
+    expect(onChange.mock.calls.at(-1)?.[0]).not.toContain("<ul>");
+    expect(redoButton.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(redoButton);
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain("<ul>");
   });
 
   it("calls onChange with the updated HTML when a toolbar command changes the document", () => {
@@ -79,7 +132,19 @@ describe("RichTextField", () => {
 
   it("disables the toolbar buttons and the editor when disabled", () => {
     render(<RichTextField value="" onChange={() => {}} disabled />);
-    for (const name of ["Bold", "Italic", "Underline", "Bulleted list", "Blockquote", "Link"]) {
+    for (const name of [
+      "Undo",
+      "Redo",
+      "Heading 1",
+      "Heading 2",
+      "Heading 3",
+      "Bold",
+      "Italic",
+      "Underline",
+      "Bulleted list",
+      "Blockquote",
+      "Link",
+    ]) {
       expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
     }
     expect(screen.getByRole("textbox").getAttribute("contenteditable")).toBe("false");
