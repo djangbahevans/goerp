@@ -11,6 +11,9 @@ import { fieldInputClassName } from "./field-input-styles.js";
 
 export interface CodeFieldProps {
   label?: string | undefined;
+  // External label target — contentEditable isn't natively labelable, so
+  // <label htmlFor> can't reach it (goerp#698).
+  ariaLabelledBy?: string | undefined;
   value: string;
   onChange: (value: string) => void;
   // manifest-spec.md's FormField.language ("Use language for syntax
@@ -56,6 +59,7 @@ const externalValueSync = Annotation.define<boolean>();
 
 export function CodeField({
   label,
+  ariaLabelledBy,
   value,
   onChange,
   language,
@@ -64,6 +68,7 @@ export function CodeField({
   disabled = false,
 }: CodeFieldProps): ReactNode {
   const id = useId();
+  const labelledById = ariaLabelledBy ?? (label !== undefined ? id : undefined);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -109,7 +114,7 @@ export function CodeField({
           editableCompartment.of([EditorView.editable.of(!disabled), EditorState.readOnly.of(disabled)]),
           attributesCompartment.of(
             EditorView.contentAttributes.of({
-              ...(label !== undefined ? { "aria-labelledby": id } : {}),
+              ...(labelledById !== undefined ? { "aria-labelledby": labelledById } : {}),
               "aria-invalid": String(error !== undefined),
             }),
           ),
@@ -154,12 +159,12 @@ export function CodeField({
     view.dispatch({
       effects: attributesCompartment.reconfigure(
         EditorView.contentAttributes.of({
-          ...(label !== undefined ? { "aria-labelledby": id } : {}),
+          ...(labelledById !== undefined ? { "aria-labelledby": labelledById } : {}),
           "aria-invalid": String(error !== undefined),
         }),
       ),
     });
-  }, [label, error, id, attributesCompartment]);
+  }, [labelledById, error, attributesCompartment]);
 
   useEffect(() => {
     const view = viewRef.current;

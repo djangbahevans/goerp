@@ -70,11 +70,13 @@ function useResourceOptions(resource: string | undefined, labelField: string | u
 
 function ResourceSelect({
   field,
+  id,
   value,
   onChange,
   disabled,
 }: {
   field: FormField;
+  id?: string | undefined;
   value: unknown;
   onChange: (value: unknown) => void;
   disabled: boolean;
@@ -92,6 +94,7 @@ function ResourceSelect({
     const selected = new Set(Array.isArray(value) ? value.map(String) : []);
     return (
       <select
+        id={id}
         multiple
         disabled={disabled || isLoading}
         value={[...selected]}
@@ -108,6 +111,7 @@ function ResourceSelect({
 
   return (
     <select
+      id={id}
       disabled={disabled || isLoading}
       value={typeof value === "string" ? value : ""}
       onChange={(event) => onChange(event.target.value || undefined)}
@@ -124,11 +128,13 @@ function ResourceSelect({
 
 function TagsInput({
   field,
+  id,
   value,
   onChange,
   disabled,
 }: {
   field: FormField;
+  id?: string | undefined;
   value: unknown;
   onChange: (value: unknown) => void;
   disabled: boolean;
@@ -160,6 +166,7 @@ function TagsInput({
 
   return (
     <TagsField
+      id={id}
       value={selected}
       onChange={commit}
       options={options}
@@ -171,12 +178,14 @@ function TagsInput({
 
 function OptionsSelect({
   field,
+  id,
   options,
   value,
   onChange,
   disabled,
 }: {
   field: FormField;
+  id?: string | undefined;
   options: FieldOption[];
   value: unknown;
   onChange: (value: unknown) => void;
@@ -186,6 +195,7 @@ function OptionsSelect({
     const selected = new Set(Array.isArray(value) ? value.map(String) : []);
     return (
       <select
+        id={id}
         multiple
         disabled={disabled}
         value={[...selected]}
@@ -201,6 +211,7 @@ function OptionsSelect({
   }
   return (
     <select
+      id={id}
       disabled={disabled}
       value={typeof value === "string" ? value : ""}
       onChange={(event) => onChange(event.target.value || undefined)}
@@ -231,9 +242,12 @@ export interface FieldInputProps {
   onChange: (value: unknown) => void;
   record: Row;
   disabled?: boolean;
+  // FormFieldRow's label target (goerp#698) — omitted for types with no
+  // single primary control (compound, self-labeled group/canvas, none).
+  id?: string | undefined;
 }
 
-export function FieldInput({ field, value, onChange, record, disabled = false }: FieldInputProps) {
+export function FieldInput({ field, value, onChange, record, disabled = false, id }: FieldInputProps) {
   const type = field.type ?? "text";
   const stringValue = typeof value === "string" ? value : value == null ? "" : String(value);
 
@@ -244,6 +258,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "url":
       return (
         <input
+          id={id}
           type={type === "text" ? "text" : type === "phone" ? "tel" : type}
           value={stringValue}
           placeholder={field.placeholder}
@@ -258,6 +273,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       // yet.
       return (
         <textarea
+          id={id}
           value={stringValue}
           rows={field.rows ?? 3}
           placeholder={field.placeholder}
@@ -267,11 +283,20 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       );
 
     case "rich_text":
-      return <RichTextField value={stringValue} rows={field.rows} disabled={disabled} onChange={onChange} />;
+      return (
+        <RichTextField
+          ariaLabelledBy={id}
+          value={stringValue}
+          rows={field.rows}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
 
     case "code":
       return (
         <CodeField
+          ariaLabelledBy={id}
           value={stringValue}
           language={field.language}
           rows={field.rows}
@@ -284,6 +309,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "integer":
       return (
         <input
+          id={id}
           type="number"
           value={stringValue}
           min={field.min}
@@ -298,6 +324,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       const currency = field.currency_field ? (record[field.currency_field] as string | undefined) : undefined;
       return (
         <MoneyField
+          id={id}
           value={typeof value === "number" ? value : undefined}
           currency={currency}
           min={field.min}
@@ -314,6 +341,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       const percentValue = typeof value === "number" ? value * 100 : "";
       return (
         <input
+          id={id}
           type="number"
           min={field.min ?? 0}
           max={field.max ?? 100}
@@ -330,6 +358,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "date":
       return (
         <DateField
+          id={id}
           value={parseFieldDate(value)}
           disabled={disabled}
           onChange={(date) => onChange(date?.toISOString().slice(0, 10))}
@@ -338,6 +367,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "datetime":
       return (
         <DateTimeField
+          id={id}
           value={parseFieldDate(value)}
           disabled={disabled}
           onChange={(date) => onChange(date?.toISOString())}
@@ -345,7 +375,12 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       );
     case "time":
       return (
-        <TimeField value={typeof value === "string" ? value : undefined} disabled={disabled} onChange={onChange} />
+        <TimeField
+          id={id}
+          value={typeof value === "string" ? value : undefined}
+          disabled={disabled}
+          onChange={onChange}
+        />
       );
 
     case "date_range": {
@@ -403,6 +438,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "toggle":
       return (
         <input
+          id={id}
           type="checkbox"
           role={type === "toggle" ? "switch" : undefined}
           checked={value === true}
@@ -417,6 +453,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
         return (
           <ResourceSelect
             field={{ ...field, multiple: field.multiple || type === "multi_select" }}
+            id={id}
             value={value}
             onChange={onChange}
             disabled={disabled}
@@ -425,6 +462,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       return (
         <OptionsSelect
           field={{ ...field, multiple: field.multiple || type === "multi_select" }}
+          id={id}
           options={field.options ?? []}
           value={value}
           onChange={onChange}
@@ -456,6 +494,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       return (
         <ResourceSelect
           field={{ ...field, multiple: field.multiple || type === "many2many" }}
+          id={id}
           value={value}
           onChange={onChange}
           disabled={disabled}
@@ -463,10 +502,10 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       );
 
     case "tags":
-      return <TagsInput field={field} value={value} onChange={onChange} disabled={disabled} />;
+      return <TagsInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "user_select":
-      return <ResourceSelect field={field} value={value} onChange={onChange} disabled={disabled} />;
+      return <ResourceSelect field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "country_select":
     case "language_select":
@@ -474,6 +513,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       // entry until a real dataset is wired in.
       return (
         <input
+          id={id}
           type="text"
           value={stringValue}
           placeholder={type === "country_select" ? "ISO 3166-1 code" : "BCP 47 tag"}
@@ -486,10 +526,18 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "currency_select": {
       const values = supportedValuesOrEmpty(type === "timezone_select" ? "timeZone" : "currency");
       if (values.length === 0) {
-        return <input type="text" value={stringValue} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
+        return (
+          <input
+            id={id}
+            type="text"
+            value={stringValue}
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        );
       }
       return (
-        <select disabled={disabled} value={stringValue} onChange={(e) => onChange(e.target.value)}>
+        <select id={id} disabled={disabled} value={stringValue} onChange={(e) => onChange(e.target.value)}>
           <option value="">—</option>
           {values.map((v) => (
             <option key={v} value={v}>
@@ -501,12 +549,13 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     }
 
     case "color_picker":
-      return <ColorPicker value={stringValue} disabled={disabled} onChange={onChange} />;
+      return <ColorPicker id={id} value={stringValue} disabled={disabled} onChange={onChange} />;
 
     case "icon_picker":
       // Free-text Lucide icon name — no icon-browsing picker UI yet.
       return (
         <input
+          id={id}
           type="text"
           value={stringValue}
           placeholder="lucide icon name"
@@ -524,6 +573,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
         <span>
           {stringValue && <span>{stringValue}</span>}
           <input
+            id={id}
             type="file"
             accept={field.accept}
             disabled={disabled}
@@ -535,6 +585,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "file_multi":
       return (
         <input
+          id={id}
           type="file"
           accept={field.accept}
           multiple
@@ -544,13 +595,21 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       );
 
     case "signature":
-      return <SignaturePad value={typeof value === "string" ? value : null} onChange={onChange} disabled={disabled} />;
+      return (
+        <SignaturePad
+          ariaLabel={field.label ?? field.field}
+          value={typeof value === "string" ? value : null}
+          onChange={onChange}
+          disabled={disabled}
+        />
+      );
 
     case "barcode":
       // Camera-driven scanning needs a WASM decoder + camera-access
       // library, neither chosen yet — manual code entry stands in.
       return (
         <input
+          id={id}
           type="text"
           value={stringValue}
           placeholder="Scan or enter code"
@@ -586,6 +645,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "slider":
       return (
         <input
+          id={id}
           type="range"
           min={field.min ?? 0}
           max={field.max ?? 100}
@@ -599,6 +659,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
     case "json":
       return (
         <textarea
+          id={id}
           value={value === undefined ? "" : JSON.stringify(value, null, 2)}
           rows={field.rows ?? 6}
           disabled={disabled}
@@ -672,6 +733,8 @@ export function FieldInput({ field, value, onChange, record, disabled = false }:
       return <span>{stringValue}</span>;
 
     default:
-      return <input type="text" value={stringValue} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <input id={id} type="text" value={stringValue} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+      );
   }
 }

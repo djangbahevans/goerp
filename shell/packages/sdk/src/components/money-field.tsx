@@ -5,6 +5,8 @@ import { fieldInputClassName } from "./field-input-styles.js";
 
 export interface MoneyFieldProps {
   label?: string | undefined;
+  // Lets an external <label htmlFor> target the <input> directly (goerp#698).
+  id?: string | undefined;
   // l10n-guide.md: monetary amounts are always integer minor units (e.g.
   // GHS pesewas) — 10000 here is GHS 100.00, never a decimal major-unit
   // amount. `min`/`max` are minor units too, same as `value`.
@@ -33,6 +35,7 @@ function toMinorUnits(raw: string, digits: number): number | undefined {
 
 export function MoneyField({
   label,
+  id: idProp,
   value,
   currency,
   onChange,
@@ -41,7 +44,8 @@ export function MoneyField({
   min,
   max,
 }: MoneyFieldProps): ReactNode {
-  const id = useId();
+  const generatedId = useId();
+  const id = idProp ?? generatedId;
   // ISO 4217 decimal places vary (XOF 0, USD 2, KWD 3); default to 2 when
   // no currency has been resolved yet so the input still has a sane step.
   const digits = currency ? currencyMinorUnitDigits(currency) : 2;

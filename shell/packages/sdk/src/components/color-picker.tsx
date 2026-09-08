@@ -3,6 +3,8 @@ import { useId } from "react";
 
 export interface ColorPickerProps {
   label?: string | undefined;
+  // Lets an external <label htmlFor> target the <input> directly (goerp#698).
+  id?: string | undefined;
   value?: string | undefined;
   onChange: (value: string) => void;
   error?: string | undefined;
@@ -11,8 +13,16 @@ export interface ColorPickerProps {
 
 // Matches field-renderers.tsx's "color_picker" field type exactly: a native
 // <input type="color">, defaulting to black when unset.
-export function ColorPicker({ label, value, onChange, error, disabled = false }: ColorPickerProps): ReactNode {
-  const id = useId();
+export function ColorPicker({
+  label,
+  id: idProp,
+  value,
+  onChange,
+  error,
+  disabled = false,
+}: ColorPickerProps): ReactNode {
+  const generatedId = useId();
+  const id = idProp ?? generatedId;
   return (
     <div className="flex flex-col gap-1">
       {label !== undefined && (
