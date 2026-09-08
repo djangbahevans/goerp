@@ -1,10 +1,12 @@
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
+import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
 import { ListFilters } from "./list-filters.js";
 import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js";
 import { useListState } from "./use-list-state.js";
+import { useSelection } from "./use-selection.js";
 import { useVisibleColumns } from "./use-visible-columns.js";
 
 // shell-architecture.md §20's ListRenderer — mode switching, URL/local
@@ -72,6 +74,11 @@ export function groupRows(rows: Row[], groupBy: string | undefined): RowGroup[] 
 export function ListRenderer({ view, module, recordId, embedded, baseFilter }: ListRendererProps) {
   const listState = useListState(embedded, defaultSortOf(view));
   const columns = useVisibleColumns(view);
+  const selection = useSelection();
+  const bulkActions = view.bulk_actions ?? [];
+  // manifest-spec.md: `selectable` defaults true, but a checkbox column
+  // with nothing to bulk-act on is just clutter.
+  const showSelection = view.selectable !== false && bulkActions.length > 0;
 
   // view-system.md's embedded-rendering contract: the locked base filter
   // always wins over user-driven state, never the other way around.
@@ -114,6 +121,9 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
     <>
       <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
       <ListActions actions={view.actions ?? []} module={module} />
+      {showSelection && (
+        <BulkActions actions={bulkActions} selectedIds={[...selection.selectedIds]} clearSelection={selection.clear} />
+      )}
       {groupByOptions.length > 0 && (
         <label>
           Group by
@@ -142,6 +152,23 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
             )}
             <thead>
               <tr>
+                {showSelection && (
+                  <th scope="col">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select all ${view.label.toLowerCase()}`}
+                      checked={
+                        group.rows.length > 0 &&
+                        group.rows.every((row) => typeof row.id === "string" && selection.selectedIds.has(row.id))
+                      }
+                      onChange={() =>
+                        selection.toggleAll(
+                          group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string"),
+                        )
+                      }
+                    />
+                  </th>
+                )}
                 {columns.map((column) => (
                   <th scope="col" key={column.field} style={columnStyle(column)}>
                     {column.label ?? column.field}
@@ -152,6 +179,18 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
             <tbody>
               {group.rows.map((row, index) => (
                 <tr key={(row.id as string | undefined) ?? index}>
+                  {showSelection && (
+                    <td>
+                      {typeof row.id === "string" && (
+                        <input
+                          type="checkbox"
+                          aria-label="Select row"
+                          checked={selection.selectedIds.has(row.id)}
+                          onChange={() => selection.toggle(row.id as string)}
+                        />
+                      )}
+                    </td>
+                  )}
                   {columns.map((column) => {
                     const rawValue = row[column.field];
                     const relationLabel =
