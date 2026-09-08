@@ -60,4 +60,13 @@
   --goerp-color-badge-purple-text: #c99fe0;
   --goerp-color-badge-pink: #3f2733;
   --goerp-color-badge-pink-text: #e0a0c4;
+
+  /* CodeField's syntax-highlighting palette (docs/components/code-field.md)
+     — every color verified at >=4.5:1 against --goerp-color-surface. */
+  --goerp-color-syntax-keyword: #d2a8ff;
+  --goerp-color-syntax-string: #7ee787;
+  --goerp-color-syntax-comment: #9198a1;
+  --goerp-color-syntax-number: #79c0ff;
+  --goerp-color-syntax-function: #ffb86c;
+  --goerp-color-syntax-type: #56d4dd;
 }

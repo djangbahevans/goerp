@@ -21,6 +21,22 @@ export const Default: Story = {
   },
 };
 
+export const PythonHighlighting: Story = {
+  args: {
+    label: "Handler",
+    value: 'def on_webhook(event):\n    # Forward the payload untouched\n    return event["payload"]',
+    language: "python",
+  },
+};
+
+export const UnknownLanguage: Story = {
+  args: {
+    label: "Handler",
+    value: "This renders as plain text: no @codemirror/language-data entry matches.",
+    language: "not-a-real-language",
+  },
+};
+
 export const WithError: Story = {
   args: {
     label: "Handler",
