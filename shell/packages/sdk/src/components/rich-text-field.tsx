@@ -23,6 +23,9 @@ import { fieldInputClassName } from "./field-input-styles.js";
 
 export interface RichTextFieldProps {
   label?: string | undefined;
+  // External label target — contentEditable isn't natively labelable, so
+  // <label htmlFor> can't reach it (goerp#698).
+  ariaLabelledBy?: string | undefined;
   // HTML string, per rich-text-field.md's resolved storage-format question
   // (not Markdown — a separate manifest field type — and not a structured
   // document tree, which would be the only field in this library not
@@ -99,6 +102,7 @@ function MomentaryToolbarButton({ label, disabled, onClick, children }: Momentar
 
 export function RichTextField({
   label,
+  ariaLabelledBy,
   value,
   onChange,
   rows = 3,
@@ -107,6 +111,7 @@ export function RichTextField({
 }: RichTextFieldProps): ReactNode {
   const id = useId();
   const linkInputId = `${id}-link-url`;
+  const labelledById = ariaLabelledBy ?? (label !== undefined ? id : undefined);
   const [linkPopoverOpen, setLinkPopoverOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkUrlInvalid, setLinkUrlInvalid] = useState(false);
@@ -120,11 +125,11 @@ export function RichTextField({
       attributes: {
         role: "textbox",
         "aria-multiline": "true",
-        ...(label !== undefined ? { "aria-labelledby": id } : {}),
+        ...(labelledById !== undefined ? { "aria-labelledby": labelledById } : {}),
         "aria-invalid": String(error !== undefined),
       },
     }),
-    [id, label, error],
+    [labelledById, error],
   );
 
   const editor = useEditor({

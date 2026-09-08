@@ -27,6 +27,10 @@ function pillTextClassFor(color: string | undefined): string {
 
 export interface TagsFieldProps {
   label?: string | undefined;
+  // Applied to the combobox <input>, not the "Remove tag" pill buttons that
+  // render ahead of it — lets an external <label htmlFor> target it directly
+  // (goerp#698).
+  id?: string | undefined;
   value: TagValue[];
   onChange: (value: TagValue[]) => void;
   options: TagValue[];
@@ -43,6 +47,7 @@ export interface TagsFieldProps {
 
 export function TagsField({
   label,
+  id,
   value,
   onChange,
   options,
@@ -182,6 +187,7 @@ export function TagsField({
         </span>
       )}
       <input
+        id={id}
         type="text"
         role="combobox"
         aria-expanded={isOpen}

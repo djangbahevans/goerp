@@ -34,4 +34,16 @@ describe("SignaturePad", () => {
     render(<SignaturePad value="data:image/png;base64,abc" onChange={() => {}} disabled />);
     expect(screen.getByRole("button", { name: "Clear" }).hasAttribute("disabled")).toBe(true);
   });
+
+  it("defaults to 'Signature' as the canvas's accessible name", () => {
+    render(<SignaturePad value={null} onChange={() => {}} />);
+    expect(screen.getByLabelText("Signature").tagName).toBe("CANVAS");
+  });
+
+  it("uses ariaLabel as the canvas's accessible name, and the captured image's alt text, when given", () => {
+    const { rerender } = render(<SignaturePad value={null} onChange={() => {}} ariaLabel="Approval signature" />);
+    expect(screen.getByLabelText("Approval signature").tagName).toBe("CANVAS");
+    rerender(<SignaturePad value="data:image/png;base64,abc" onChange={() => {}} ariaLabel="Approval signature" />);
+    expect(screen.getByAltText("Approval signature")).toBeTruthy();
+  });
 });

@@ -6,11 +6,14 @@ export interface SignaturePadProps {
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean | undefined;
+  // Canvas isn't natively labelable, so this is the only way it gets an
+  // accessible name (also used as the captured image's alt text).
+  ariaLabel?: string | undefined;
 }
 
 // Pointer-driven canvas capture, no pressure-sensitivity or undo. Renders
 // the captured PNG data URL once drawn; "Clear" resets to a blank canvas.
-export function SignaturePad({ value, onChange, disabled = false }: SignaturePadProps): ReactNode {
+export function SignaturePad({ value, onChange, disabled = false, ariaLabel }: SignaturePadProps): ReactNode {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
 
@@ -57,10 +60,11 @@ export function SignaturePad({ value, onChange, disabled = false }: SignaturePad
   return (
     <span>
       {value ? (
-        <img src={value} alt="Signature" style={{ maxWidth: 200 }} />
+        <img src={value} alt={ariaLabel ?? "Signature"} style={{ maxWidth: 200 }} />
       ) : (
         <canvas
           ref={canvasRef}
+          aria-label={ariaLabel ?? "Signature"}
           width={200}
           height={80}
           className="rounded-control border border-border"

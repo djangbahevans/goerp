@@ -36,6 +36,8 @@ function parseDate(raw: string): Date | undefined {
 
 export interface DateFieldProps {
   label?: string | undefined;
+  // Lets an external <label htmlFor> target the <input> directly (goerp#698).
+  id?: string | undefined;
   value: Date | undefined;
   // Called with undefined when the input is cleared, matching `value`'s own
   // optionality — a caller that doesn't care can ignore that case.
@@ -46,8 +48,18 @@ export interface DateFieldProps {
   disabled?: boolean | undefined;
 }
 
-export function DateField({ label, value, onChange, min, max, error, disabled = false }: DateFieldProps): ReactNode {
-  const id = useId();
+export function DateField({
+  label,
+  id: idProp,
+  value,
+  onChange,
+  min,
+  max,
+  error,
+  disabled = false,
+}: DateFieldProps): ReactNode {
+  const generatedId = useId();
+  const id = idProp ?? generatedId;
   return (
     <div className="flex flex-col gap-1">
       {label !== undefined && (
@@ -77,6 +89,8 @@ export function DateField({ label, value, onChange, min, max, error, disabled = 
 
 export interface DateTimeFieldProps {
   label?: string | undefined;
+  // Lets an external <label htmlFor> target the <input> directly (goerp#698).
+  id?: string | undefined;
   value: Date | undefined;
   onChange: (date: Date | undefined) => void;
   min?: Date | undefined;
@@ -87,6 +101,7 @@ export interface DateTimeFieldProps {
 
 export function DateTimeField({
   label,
+  id: idProp,
   value,
   onChange,
   min,
@@ -94,7 +109,8 @@ export function DateTimeField({
   error,
   disabled = false,
 }: DateTimeFieldProps): ReactNode {
-  const id = useId();
+  const generatedId = useId();
+  const id = idProp ?? generatedId;
   return (
     <div className="flex flex-col gap-1">
       {label !== undefined && (
@@ -124,6 +140,8 @@ export function DateTimeField({
 
 export interface TimeFieldProps {
   label?: string | undefined;
+  // Lets an external <label htmlFor> target the <input> directly (goerp#698).
+  id?: string | undefined;
   value: string | undefined;
   onChange: (value: string) => void;
   min?: string | undefined;
@@ -132,8 +150,18 @@ export interface TimeFieldProps {
   disabled?: boolean | undefined;
 }
 
-export function TimeField({ label, value, onChange, min, max, error, disabled = false }: TimeFieldProps): ReactNode {
-  const id = useId();
+export function TimeField({
+  label,
+  id: idProp,
+  value,
+  onChange,
+  min,
+  max,
+  error,
+  disabled = false,
+}: TimeFieldProps): ReactNode {
+  const generatedId = useId();
+  const id = idProp ?? generatedId;
   return (
     <div className="flex flex-col gap-1">
       {label !== undefined && (
