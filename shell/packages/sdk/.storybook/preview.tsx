@@ -1,4 +1,5 @@
 import type { Decorator, Preview } from "@storybook/react-vite";
+import { useEffect } from "react";
 import { PermissionContext } from "../src/auth/permission-provider.js";
 import "../../app/src/design/tokens.css";
 
@@ -21,13 +22,23 @@ const withPermissions: Decorator = (Story) => (
   </PermissionContext.Provider>
 );
 
-// Toggles data-theme on a wrapper element — [data-theme="dark"] is already
-// defined by shell/packages/app/src/design/themes/dark.css, so this needs
-// no dependency on a full app-wide theme system (none exists yet).
+// Sets data-theme on the iframe's own <html> (document.documentElement),
+// not on a wrapper div: tailwind.config.ts's `@theme` block resolves
+// --color-bg/-primary/etc. to `var(--goerp-color-bg)` once, on `:root`
+// (Tailwind always emits `@theme` output there). A CSS custom property
+// inherits its parent's already-resolved value rather than re-evaluating
+// var() references locally, so overriding --goerp-color-* below :root
+// never reaches the Tailwind-facing --color-* names components actually
+// consume — [data-theme="dark"] has to land on the same element as :root
+// for the override to take effect, matching shell-architecture.md's
+// documented `document.documentElement.setAttribute('data-theme', ...)`.
 const withTheme: Decorator = (Story, context) => {
   const theme = context.globals.theme === "dark" ? "dark" : "light";
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
   return (
-    <div data-theme={theme} style={{ background: "var(--color-bg)", color: "var(--color-text)", padding: "1rem" }}>
+    <div style={{ background: "var(--color-bg)", color: "var(--color-text)", padding: "1rem" }}>
       <Story />
     </div>
   );
