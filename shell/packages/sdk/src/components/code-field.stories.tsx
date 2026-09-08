@@ -20,3 +20,20 @@ export const Default: Story = {
     language: "javascript",
   },
 };
+
+export const WithError: Story = {
+  args: {
+    label: "Handler",
+    value: "",
+    error: "Handler code is required",
+  },
+};
+
+export const Disabled: Story = {
+  args: {
+    label: "Handler",
+    value: "function onWebhook(event) {\n  return event.payload;\n}",
+    language: "javascript",
+    disabled: true,
+  },
+};

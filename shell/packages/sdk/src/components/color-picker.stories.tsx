@@ -19,3 +19,19 @@ export const Default: Story = {
     value: "#2563eb",
   },
 };
+
+export const WithError: Story = {
+  args: {
+    label: "Brand color",
+    value: "#2563eb",
+    error: "Choose a color with sufficient contrast",
+  },
+};
+
+export const Disabled: Story = {
+  args: {
+    label: "Brand color",
+    value: "#2563eb",
+    disabled: true,
+  },
+};
