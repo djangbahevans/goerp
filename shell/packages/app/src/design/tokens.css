@@ -74,6 +74,18 @@
   --color-badge-pink: var(--goerp-color-badge-pink);
   --color-badge-pink-text: var(--goerp-color-badge-pink-text);
 
+  /* CodeField's syntax-highlighting palette (docs/components/code-field.md
+     "Tokens Used") — language-aware categories, not derived from the four
+     functional status colors above (--color-danger et al.); `invalid` is
+     the one category that does reuse --color-danger directly, since it
+     flags genuinely broken syntax rather than categorizing valid code. */
+  --color-syntax-keyword: var(--goerp-color-syntax-keyword);
+  --color-syntax-string: var(--goerp-color-syntax-string);
+  --color-syntax-comment: var(--goerp-color-syntax-comment);
+  --color-syntax-number: var(--goerp-color-syntax-number);
+  --color-syntax-function: var(--goerp-color-syntax-function);
+  --color-syntax-type: var(--goerp-color-syntax-type);
+
   /* UserAvatar's 8-color palette (docs/components/user-avatar.md) — fixed
      across themes by design, so it skips the --goerp-color-* indirection. */
   --color-avatar-0: #5b6b8c;
