@@ -1,4 +1,5 @@
 import { PermissionContext } from "@goerp/sdk/auth";
+import { MODAL_OVERLAY_CLASSES } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,9 +12,6 @@ import { commandRegistry } from "./command-registry.js";
 import { searchCommands } from "./command-search.js";
 import type { Command, CommandContext } from "./command-types.js";
 import { useRecentCommands } from "./use-recent-commands.js";
-
-const OVERLAY_CLASSES =
-  "fixed inset-0 z-(--z-modal) bg-overlay data-[state=open]:animate-[fade-in_var(--duration-slow)_ease-out] data-[state=closed]:animate-[fade-out_var(--duration-slow)_ease-in]";
 
 // Same full-viewport-boundary/inner-panel split as AlertDialog's CONTENT_CLASSES.
 const CONTENT_CLASSES =
@@ -145,7 +143,7 @@ export function CommandPalette(): ReactNode {
       }}
     >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className={OVERLAY_CLASSES} />
+        <DialogPrimitive.Overlay className={MODAL_OVERLAY_CLASSES} />
         <DialogPrimitive.Content
           aria-label="Command palette"
           className={CONTENT_CLASSES}

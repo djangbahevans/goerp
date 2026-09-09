@@ -2,6 +2,7 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { actionButtonClassName } from "./action-button-styles.js";
+import { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
 
 // manifest-spec.md's SelectOption, as used by ConfirmInput.
 export interface AlertDialogSelectOption {
@@ -36,9 +37,6 @@ export interface AlertDialogProps {
 
 const INPUT_CLASSES =
   "mt-1 w-full rounded-control border border-border px-3 py-2 text-sm text-text focus-visible:outline-none focus-visible:shadow-focus";
-
-const OVERLAY_CLASSES =
-  "fixed inset-0 z-(--z-modal) bg-overlay data-[state=open]:animate-[fade-in_var(--duration-slow)_ease-out] data-[state=closed]:animate-[fade-out_var(--duration-slow)_ease-in]";
 
 // Content is the full-viewport flex-centering/focus-trap boundary; the
 // visible panel is a plain inner div, so the boundary can size to the whole
@@ -92,7 +90,7 @@ export function AlertDialog({
       }}
     >
       <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className={OVERLAY_CLASSES} />
+        <AlertDialogPrimitive.Overlay className={MODAL_OVERLAY_CLASSES} />
         <AlertDialogPrimitive.Content
           aria-modal="true"
           className={CONTENT_CLASSES}
