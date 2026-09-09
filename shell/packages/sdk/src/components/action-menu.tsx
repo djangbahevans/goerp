@@ -1,4 +1,5 @@
-import type { KeyboardEvent, ReactNode } from "react";
+import { Check } from "lucide-react";
+import type { KeyboardEvent, ReactNode, Ref } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useOptionalPermission } from "../auth/use-permission.js";
 import { actionButtonClassName } from "./action-button-styles.js";
@@ -12,12 +13,28 @@ export interface ActionMenuItem {
   variant?: "default" | "danger" | undefined;
   permission?: string | undefined;
   disabled?: boolean | undefined;
+  // chrome-header.md's UserMenu theme-toggle item: an extension of this
+  // shape, not a new component. Present (boolean, not undefined) switches
+  // the item to role="menuitemcheckbox" with a trailing checkmark.
+  checked?: boolean | undefined;
+}
+
+// Renders the trigger button when a caller needs a different visual (e.g.
+// UserMenu's avatar+chevron) than the default labeled button — every
+// keyboard/open-state mechanic below is unchanged either way.
+export interface ActionMenuTriggerProps {
+  ref: Ref<HTMLButtonElement>;
+  open: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }
 
 export interface ActionMenuProps {
   label: string;
   items: ActionMenuItem[];
   disabled?: boolean | undefined;
+  trigger?: ((props: ActionMenuTriggerProps) => ReactNode) | undefined;
 }
 
 const ITEM_CLASSES =
@@ -61,6 +78,37 @@ function ActionMenuItemButton({
   const allowed = useOptionalPermission(item.permission);
   if (!allowed) return null;
 
+  const handleClick = () => {
+    if (item.disabled) return;
+    item.onClick?.();
+    onSelect();
+  };
+
+  // Two literal branches, not one role={checkable ? ... : ...} — role and
+  // aria-checked must move together (aria-checked is invalid on a plain
+  // menuitem), which is clearer as two fixed shapes than one dynamically
+  // correlated pair.
+  if (item.checked !== undefined) {
+    return (
+      <button
+        ref={itemRef}
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={item.checked}
+        tabIndex={tabIndex}
+        data-variant={item.variant ?? "default"}
+        data-icon={item.icon}
+        aria-disabled={item.disabled}
+        title={item.label}
+        className={`${ITEM_CLASSES} justify-between`}
+        onClick={handleClick}
+      >
+        {item.label}
+        {item.checked && <Check size={14} aria-hidden="true" className="flex-none" />}
+      </button>
+    );
+  }
+
   return (
     <button
       ref={itemRef}
@@ -76,18 +124,14 @@ function ActionMenuItemButton({
       aria-disabled={item.disabled}
       title={item.label}
       className={ITEM_CLASSES}
-      onClick={() => {
-        if (item.disabled) return;
-        item.onClick?.();
-        onSelect();
-      }}
+      onClick={handleClick}
     >
       {item.label}
     </button>
   );
 }
 
-export function ActionMenu({ label, items, disabled = false }: ActionMenuProps): ReactNode {
+export function ActionMenu({ label, items, disabled = false, trigger }: ActionMenuProps): ReactNode {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -177,19 +221,36 @@ export function ActionMenu({ label, items, disabled = false }: ActionMenuProps):
 
   return (
     <span className="relative inline-block">
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        data-disabled={disabled ? "true" : undefined}
-        disabled={disabled}
-        className={actionButtonClassName("secondary", "md")}
-        onClick={() => (open ? setOpen(false) : openMenu(1))}
-        onKeyDown={handleTriggerKeyDown}
-      >
-        {label}
-      </button>
+      {trigger ? (
+        trigger({
+          ref: triggerRef,
+          open,
+          disabled,
+          // Guarded here, not left to each custom trigger to apply itself.
+          onClick: () => {
+            if (disabled) return;
+            open ? setOpen(false) : openMenu(1);
+          },
+          onKeyDown: (event) => {
+            if (disabled) return;
+            handleTriggerKeyDown(event);
+          },
+        })
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          data-disabled={disabled ? "true" : undefined}
+          disabled={disabled}
+          className={actionButtonClassName("secondary", "md")}
+          onClick={() => (open ? setOpen(false) : openMenu(1))}
+          onKeyDown={handleTriggerKeyDown}
+        >
+          {label}
+        </button>
+      )}
       {open && (
         <span
           role="menu"

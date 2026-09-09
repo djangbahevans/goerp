@@ -339,4 +339,90 @@ describe("ActionMenu", () => {
       expect(screen.getByRole("menuitem", { name: "Archive" }).tabIndex).toBe(0);
     });
   });
+
+  describe("checked items (chrome-header.md's UserMenu theme toggle)", () => {
+    it("renders a checkable item as menuitemcheckbox with the right aria-checked", () => {
+      render(
+        withPermissions(
+          [],
+          <ActionMenu label="Actions" items={[{ label: "Dark mode", onClick: vi.fn(), checked: true }]} />,
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      const item = screen.getByRole("menuitemcheckbox", { name: "Dark mode" });
+      expect(item.getAttribute("aria-checked")).toBe("true");
+    });
+
+    it("an unchecked checkable item has aria-checked false and no visible checkmark", () => {
+      render(
+        withPermissions(
+          [],
+          <ActionMenu label="Actions" items={[{ label: "Dark mode", onClick: vi.fn(), checked: false }]} />,
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      const item = screen.getByRole("menuitemcheckbox", { name: "Dark mode" });
+      expect(item.getAttribute("aria-checked")).toBe("false");
+    });
+
+    it("an item with no checked field stays a plain menuitem", () => {
+      render(withPermissions([], <ActionMenu label="Actions" items={[{ label: "Edit", onClick: vi.fn() }]} />));
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
+      expect(screen.queryByRole("menuitemcheckbox")).toBeNull();
+    });
+  });
+
+  describe("custom trigger", () => {
+    it("renders the caller's trigger instead of the default button, wired to the same open state", () => {
+      render(
+        withPermissions(
+          [],
+          <ActionMenu
+            label="Account"
+            items={[{ label: "Sign out", onClick: vi.fn() }]}
+            trigger={({ ref, open, onClick, onKeyDown }) => (
+              <button ref={ref} type="button" aria-label="Account menu" onClick={onClick} onKeyDown={onKeyDown}>
+                {open ? "open" : "closed"}
+              </button>
+            )}
+          />,
+        ),
+      );
+      expect(screen.queryByRole("button", { name: "Account" })).toBeNull();
+      const trigger = screen.getByRole("button", { name: "Account menu" });
+      expect(trigger.textContent).toBe("closed");
+      fireEvent.click(trigger);
+      expect(trigger.textContent).toBe("open");
+      expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
+    });
+
+    it("disabled={true} still blocks a custom trigger's click and ArrowDown, even one that ignores the disabled prop it's handed", () => {
+      render(
+        withPermissions(
+          [],
+          <ActionMenu
+            label="Account"
+            disabled
+            items={[{ label: "Sign out", onClick: vi.fn() }]}
+            trigger={({ ref, open, onClick, onKeyDown }) => (
+              // Deliberately never applies `disabled` itself — the point
+              // of this test is that ActionMenu doesn't rely on it doing so.
+              <button ref={ref} type="button" aria-label="Account menu" onClick={onClick} onKeyDown={onKeyDown}>
+                {open ? "open" : "closed"}
+              </button>
+            )}
+          />,
+        ),
+      );
+      const trigger = screen.getByRole("button", { name: "Account menu" });
+
+      fireEvent.click(trigger);
+      expect(trigger.textContent).toBe("closed");
+      expect(screen.queryByRole("menuitem", { name: "Sign out" })).toBeNull();
+
+      fireEvent.keyDown(trigger, { key: "ArrowDown" });
+      expect(trigger.textContent).toBe("closed");
+    });
+  });
 });

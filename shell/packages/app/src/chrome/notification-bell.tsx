@@ -4,10 +4,15 @@ import type { CSSProperties, ReactNode } from "react";
 import { useState } from "react";
 import { NotificationSheet } from "./notification-sheet.js";
 
-// Individual top/right offsets generate no CSS at all in this project's
-// @tailwindcss/vite setup (confirmed empirically — see notification-sheet.tsx),
-// so the badge's position is inline style instead of -top-0.5 -right-0.5.
-const BADGE_STYLE: CSSProperties = { top: "-2px", right: "-2px" };
+// Several utilities generate no CSS at all in this build (goerp#729) —
+// inline styles instead.
+const BADGE_STYLE: CSSProperties = {
+  top: "-2px",
+  right: "-2px",
+  width: "16px",
+  fontSize: "9px",
+};
+const BUTTON_STYLE: CSSProperties = { padding: "6px" };
 
 // §19's badge hardcodes text-white; corrected to --color-text-inverse
 // (ActionButton's 4.5:1 contrast rule fails white-on-danger in dark mode).
@@ -22,7 +27,8 @@ export function NotificationBell(): ReactNode {
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-label={count > 0 ? `Notifications (${count} unread)` : "Notifications"}
-        className="relative rounded-control p-1.5 hover:bg-surface-hover aria-expanded:bg-surface-hover"
+        style={BUTTON_STYLE}
+        className="relative rounded-control hover:bg-surface-hover aria-expanded:bg-surface-hover"
         aria-expanded={open}
       >
         <Bell size={18} aria-hidden="true" />
@@ -30,7 +36,7 @@ export function NotificationBell(): ReactNode {
           <span
             aria-hidden="true"
             style={BADGE_STYLE}
-            className="absolute flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-text-inverse"
+            className="absolute flex h-4 items-center justify-center rounded-full bg-danger font-bold text-text-inverse"
           >
             {capped}
           </span>

@@ -7,6 +7,18 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- shell-architecture.md's dark-mode section: applied before the React
+         bundle runs, preventing a flash of the wrong theme. Also checks
+         prefers-color-scheme (not in the doc's own simpler example) to
+         match ThemeStore's real fallback (use-theme.ts) when nothing's
+         stored yet. -->
+    <script>
+      (() => {
+        var stored = localStorage.getItem("goerp-theme");
+        var theme = stored === "light" || stored === "dark" ? stored : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

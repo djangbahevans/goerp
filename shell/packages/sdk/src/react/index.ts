@@ -12,3 +12,5 @@ export type { UseRecordOptions, UseRecordResult } from "./use-record.js";
 export { createRecordQueryOptions, deleteRecord, recordQueryKey, saveRecord, useRecord } from "./use-record.js";
 export type { RelationBatchSpec } from "./use-relation-labels.js";
 export { createRelationLabelsQueryOptions, mergeLabelsByKey, useRelationLabels } from "./use-relation-labels.js";
+export type { Theme, UseThemeResult } from "./use-theme.js";
+export { themeStore, useTheme } from "./use-theme.js";

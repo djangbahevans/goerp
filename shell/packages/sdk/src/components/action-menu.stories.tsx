@@ -41,3 +41,36 @@ export const Closed: Story = {
     ],
   },
 };
+
+// chrome-header.md's UserMenu: a checked item (theme toggle) and a custom
+// avatar-shaped trigger instead of the default labeled button.
+export const CheckedItemAndCustomTrigger: Story = {
+  args: {
+    label: "Account",
+    items: [
+      { label: "Light mode", checked: false, onClick: () => {} },
+      { label: "Dark mode", checked: true, onClick: () => {} },
+      { type: "separator" },
+      { label: "Sign out", onClick: () => {} },
+    ],
+    trigger: ({ ref, open, onClick, onKeyDown }) => (
+      <button
+        ref={ref}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Account menu"
+        onClick={onClick}
+        onKeyDown={onKeyDown}
+        className="rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-text hover:bg-surface-hover"
+      >
+        JD
+      </button>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Account menu" }));
+    await expect(canvas.getByRole("menuitemcheckbox", { name: "Dark mode" })).toHaveAttribute("aria-checked", "true");
+  },
+};

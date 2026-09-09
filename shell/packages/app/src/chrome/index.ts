@@ -1,3 +1,4 @@
+export { ChromeHeader } from "./chrome-header.js";
 export { CommandPalette } from "./command-palette.js";
 export { openCommandPalette } from "./command-palette-control.js";
 export { commandRegistry } from "./command-registry.js";
