@@ -1,0 +1,31 @@
+{
+  "name": "@goerp/storybook",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Unified Storybook catalog for @goerp/sdk and @goerp/shell-app's components.",
+  "scripts": {
+    "prestorybook": "npm run build -w @goerp/sdk",
+    "storybook": "storybook dev -p 6006",
+    "prebuild-storybook": "npm run build -w @goerp/sdk",
+    "build-storybook": "storybook build",
+    "pretypecheck": "npm run build -w @goerp/sdk",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@goerp/sdk": "*",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@storybook/react-vite": "^10.6.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.101.4",
+    "@tanstack/react-router": "^1.170.31",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "storybook": "^10.6.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "7.0.2",
+    "vite": "^8.2.1"
+  }
+}
