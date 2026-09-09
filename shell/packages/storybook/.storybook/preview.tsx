@@ -1,6 +1,6 @@
+import { PermissionContext } from "@goerp/sdk/auth";
 import type { Decorator, Preview } from "@storybook/react-vite";
 import { useEffect } from "react";
-import { PermissionContext } from "../../sdk/src/auth/permission-provider.js";
 import "../../app/src/design/tokens.css";
 
 // Always-allow: permission gating itself is unit-tested, not story-tested,
