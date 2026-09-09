@@ -278,3 +278,28 @@
     transform: scale(0.95);
   }
 }
+
+/* notification-sheet.md's edge-slide entrance/exit — LTR only, since
+   translateX is a physical transform and no dir-aware infra exists yet to
+   flip it for RTL (notification-sheet.tsx's CONTENT_CLASSES comment). */
+@keyframes notification-sheet-content-show {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes notification-sheet-content-hide {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
