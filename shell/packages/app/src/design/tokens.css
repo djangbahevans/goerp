@@ -253,3 +253,28 @@
     transform: scale(0.95);
   }
 }
+
+/* command-palette.md's entrance/exit: same fade+scale shape as AlertDialog's
+   pair above (same modal-weight tier), kept as its own named pair per this
+   file's per-component convention rather than renaming AlertDialog's. */
+@keyframes command-palette-content-show {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes command-palette-content-hide {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
