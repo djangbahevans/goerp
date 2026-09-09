@@ -28,6 +28,7 @@ export type { FieldWrapperProps } from "./field-wrapper.js";
 export { FieldWrapper } from "./field-wrapper.js";
 export type { LoadingOverlayProps } from "./loading-overlay.js";
 export { LoadingOverlay } from "./loading-overlay.js";
+export { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
 export type { MoneyFieldProps } from "./money-field.js";
 export { MoneyField } from "./money-field.js";
 export type { PageHeaderProps } from "./page-header.js";

@@ -1,5 +1,5 @@
 export { AuthMachine, authMachine, authTransition } from "./auth-machine.js";
-export { AuthProvider } from "./auth-provider.js";
+export { AuthContext, AuthProvider } from "./auth-provider.js";
 export { Can, type CanProps } from "./can.js";
 export { fetchPermissions } from "./permission-client.js";
 export { createPermissionContextValue, PermissionContext, PermissionProvider } from "./permission-provider.js";
