@@ -3,15 +3,14 @@ import { useContext } from "react";
 import type { NavigationGroup } from "./navigation-types.js";
 
 // shell-architecture.md §9/§16: the real tree is `viewRegistry.navigationTree`,
-// built by `buildViewRegistry`/`buildNavTree` (§9 "Building the registry")
-// from every loaded module's manifest `navigation` declarations, merged with
-// moduleRegistry overrides. That registry doesn't exist in code yet —
-// schema-registry.ts's own comment already tracks the full view registry as
-// backlog #674 (unfiled); goerp#575 is its navigation-tree counterpart, filed
-// alongside this ticket. Until one of those lands, no module contributes to
-// this tree, so it starts empty rather than guessing at placeholder product
-// content. ChromeSidebar renders correctly either way (an empty `<nav>`) and
-// needs no changes once real data lands here.
+// built by `buildViewRegistry` (§9 "Building the registry") from every
+// loaded module's manifest `navigation` declarations. That registry doesn't
+// exist in code yet — tracked as goerp#671 ("View registry: dynamic module
+// routing, nav tree, capability filtering"), open and unblocked. Until it
+// lands, no module contributes to this tree, so it starts empty rather than
+// guessing at placeholder product content. ChromeSidebar renders correctly
+// either way (an empty `<nav>`) and needs no changes once real data lands
+// here.
 const SOURCE_TREE: NavigationGroup[] = [];
 
 // `tree` defaults to the (currently empty) real source but takes an

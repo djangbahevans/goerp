@@ -14,7 +14,7 @@ import type { NavigationGroup } from "./navigation-types.js";
 import type { SidebarStoreLike } from "./sidebar-store.js";
 
 // A mocked navigation-tree fixture standing in for viewRegistry.navigationTree
-// (unbuilt, goerp#575/#674 — see use-navigation-tree.ts) — the real per-module
+// (unbuilt, goerp#671 — see use-navigation-tree.ts) — the real per-module
 // data this component will eventually consume unchanged.
 const FIXTURE_TREE: NavigationGroup[] = [
   {
