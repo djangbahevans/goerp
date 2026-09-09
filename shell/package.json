@@ -7,14 +7,18 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @goerp/shell-app",
+    "storybook": "npm run storybook -w @goerp/storybook",
+    "build-storybook": "npm run build-storybook -w @goerp/storybook",
     "build": "npm run build -w @goerp/sdk && npm run build -w @goerp/shell-app",
-    "typecheck": "npm run typecheck -w @goerp/sdk && npm run build -w @goerp/sdk && npm run typecheck -w @goerp/shell-app",
+    "typecheck": "npm run typecheck -w @goerp/sdk && npm run build -w @goerp/sdk && npm run typecheck -w @goerp/shell-app && npm run typecheck -w @goerp/storybook",
     "test": "npm run test -w @goerp/sdk && npm run test -w @goerp/shell-app",
     "lint": "biome check .",
     "format": "biome check --write ."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",
+    "@storybook/react-vite": "^10.6.0",
+    "storybook": "^10.6.0",
     "typescript": "7.0.2"
   }
 }
