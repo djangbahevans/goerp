@@ -31,3 +31,12 @@ export const Complete: Story = {
     showLabel: true,
   },
 };
+
+export const Failed: Story = {
+  args: {
+    value: 40,
+    label: "Upload failed",
+    showLabel: true,
+    status: "danger",
+  },
+};

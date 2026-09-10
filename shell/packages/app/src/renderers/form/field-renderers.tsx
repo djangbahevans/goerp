@@ -1,11 +1,12 @@
 import { apiClient } from "@goerp/sdk";
-import type { RelationValue, TagValue } from "@goerp/sdk/components";
+import type { FileValue, RelationValue, TagValue } from "@goerp/sdk/components";
 import {
   CodeField,
   ColorPicker,
   CountrySelect,
   DateField,
   DateTimeField,
+  FileField,
   LanguageSelect,
   MoneyField,
   RelationPicker,
@@ -64,6 +65,27 @@ function isRelationValue(value: unknown): value is RelationValue {
   return typeof value === "object" && value !== null && "id" in value && "display" in value;
 }
 
+const FILE_LIKE_TYPES = new Set<FieldType>(["file", "image", "avatar_upload", "file_multi"]);
+
+// object-storage-guide.md §3/§8: model.File()/model.FileMulti() derive
+// their read key the same way Many2One/Many2Many do (relationReadKey,
+// above) — "signed_pdf_id" -> "signed_pdf", "attachment_ids" ->
+// "attachments" — holding {id, name, content_type, size_bytes, url,
+// url_expires_at}, or an array of those for file_multi.
+function toFileValue(row: unknown): FileValue | null {
+  if (typeof row !== "object" || row === null) return null;
+  const record = row as Record<string, unknown>;
+  const { id, name, content_type: contentType, size_bytes: sizeBytes, url } = record;
+  if (
+    typeof id !== "string" ||
+    typeof name !== "string" ||
+    typeof contentType !== "string" ||
+    typeof sizeBytes !== "number"
+  )
+    return null;
+  return { fileId: id, name, contentType, sizeBytes, url: typeof url === "string" ? url : undefined };
+}
+
 // manifest-spec.md's field-type table documents many2many as inherently a
 // "Multi-select relation picker" — the type itself implies multiplicity,
 // the same way FieldInput's own render switch already computes it
@@ -82,6 +104,13 @@ export function readFieldValue(field: FormField, record: Row): unknown {
       return Array.isArray(raw) ? raw.map(toRelationValue).filter((v): v is RelationValue => v !== null) : [];
     }
     return toRelationValue(raw);
+  }
+  if (field.type && FILE_LIKE_TYPES.has(field.type)) {
+    const raw = record[relationReadKey(field.field)];
+    if (field.type === "file_multi") {
+      return Array.isArray(raw) ? raw.map(toFileValue).filter((v): v is FileValue => v !== null) : [];
+    }
+    return toFileValue(raw);
   }
   return record[field.field];
 }
@@ -218,6 +247,50 @@ function RelationInput({
       // mock via vi.mock("@goerp/sdk", ...)).
       client={apiClient}
       registry={resourceRegistry}
+    />
+  );
+}
+
+function isFileValue(value: unknown): value is FileValue {
+  return typeof value === "object" && value !== null && "fileId" in value && "name" in value;
+}
+
+function FileInput({
+  field,
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  field: FormField;
+  id?: string | undefined;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+}) {
+  const multiple = field.type === "file_multi";
+  const fieldValue: FileValue | FileValue[] | null = multiple
+    ? Array.isArray(value)
+      ? value.filter(isFileValue)
+      : []
+    : isFileValue(value)
+      ? value
+      : null;
+
+  const handleChange = (next: FileValue | FileValue[] | null) => {
+    onChange(Array.isArray(next) ? next.map((v) => v.fileId) : (next?.fileId ?? null));
+  };
+
+  return (
+    <FileField
+      id={id}
+      variant={field.type === "image" ? "image" : field.type === "avatar_upload" ? "avatar" : "file"}
+      multiple={multiple}
+      value={fieldValue}
+      onChange={handleChange}
+      accept={field.accept}
+      maxFileSizeMb={field.max_file_size_mb}
+      disabled={disabled}
     />
   );
 }
@@ -623,32 +696,8 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
     case "file":
     case "image":
     case "avatar_upload":
-      // The presigned-upload flow isn't wired up — this only shows the
-      // stored file and accepts a replacement locally.
-      return (
-        <span>
-          {stringValue && <span>{stringValue}</span>}
-          <input
-            id={id}
-            type="file"
-            accept={field.accept}
-            disabled={disabled}
-            onChange={(e) => onChange(e.target.files?.[0] ?? null)}
-          />
-        </span>
-      );
-
     case "file_multi":
-      return (
-        <input
-          id={id}
-          type="file"
-          accept={field.accept}
-          multiple
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.files ? [...e.target.files] : [])}
-        />
-      );
+      return <FileInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "signature":
       return (

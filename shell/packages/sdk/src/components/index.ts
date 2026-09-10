@@ -28,6 +28,8 @@ export type { FieldProps, FieldType } from "./field.js";
 export { currencyMinorUnitDigits, Field, formatFieldValue, formatRelativeTime } from "./field.js";
 export type { FieldWrapperProps } from "./field-wrapper.js";
 export { FieldWrapper } from "./field-wrapper.js";
+export type { FileFieldProps, FileValue } from "./file-field.js";
+export { FileField } from "./file-field.js";
 export type { LanguageSelectProps } from "./language-select.js";
 export { LanguageSelect } from "./language-select.js";
 export type { LoadingOverlayProps } from "./loading-overlay.js";
