@@ -302,6 +302,26 @@ describe("ActionMenu", () => {
       expect(ancestorEscape).not.toHaveBeenCalled();
     });
 
+    it("a mousedown outside the trigger and panel closes the menu", () => {
+      render(
+        <div>
+          {withPermissions([], <ActionMenu label="Actions" items={[{ label: "Edit", onClick: vi.fn() }]} />)}
+          <button type="button">Elsewhere</button>
+        </div>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      expect(screen.getByRole("menu")).toBeTruthy();
+      fireEvent.mouseDown(screen.getByRole("button", { name: "Elsewhere" }));
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    it("a mousedown inside the panel, not on an item, doesn't close the menu", () => {
+      render(withPermissions([], <ActionMenu label="Actions" items={[{ label: "Edit", onClick: vi.fn() }]} />));
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.mouseDown(screen.getByRole("menu"));
+      expect(screen.getByRole("menu")).toBeTruthy();
+    });
+
     it("Tab closes the menu after letting focus move on, rather than staying stuck open", async () => {
       render(withPermissions([], <ActionMenu label="Actions" items={[{ label: "Edit", onClick: vi.fn() }]} />));
       fireEvent.click(screen.getByRole("button", { name: "Actions" }));
