@@ -365,8 +365,14 @@ export function FileField({
                     disabled={disabled}
                     onClick={() => removeCompleted(fileValue.fileId)}
                     aria-label={`Remove ${fileValue.name}`}
-                    style={{ top: "var(--space-1)", insetInlineEnd: "var(--space-1)", position: "absolute" }}
-                    className="rounded-full bg-surface p-1 text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      top: "var(--space-1)",
+                      insetInlineEnd: "var(--space-1)",
+                      position: "absolute",
+                      width: "var(--space-6)",
+                      height: "var(--space-6)",
+                    }}
+                    className="inline-flex items-center justify-center rounded-full bg-surface text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ×
                   </button>
@@ -389,8 +395,14 @@ export function FileField({
                     disabled={disabled}
                     onClick={() => removeCompleted(fileValue.fileId)}
                     aria-label={`Remove ${fileValue.name}`}
-                    style={{ top: "var(--space-1)", insetInlineEnd: "var(--space-1)", position: "absolute" }}
-                    className="rounded-full bg-surface p-1 text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      top: "var(--space-1)",
+                      insetInlineEnd: "var(--space-1)",
+                      position: "absolute",
+                      width: "var(--space-6)",
+                      height: "var(--space-6)",
+                    }}
+                    className="inline-flex items-center justify-center rounded-full bg-surface text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ×
                   </button>
