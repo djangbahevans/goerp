@@ -22,7 +22,7 @@ export function SegmentedField({ options, value, onChange, disabled = false }: S
         <label
           key={option.value}
           data-selected={option.value === value}
-          className="cursor-pointer px-3 py-2 text-sm transition-colors duration-(--duration-fast) ease-out has-[:focus-visible]:shadow-focus has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 data-[selected=true]:bg-primary data-[selected=true]:text-text-inverse data-[selected=false]:bg-surface data-[selected=false]:text-text-secondary"
+          className="cursor-pointer px-3 py-2 text-sm transition-colors duration-(--duration-fast) ease-out has-focus-visible:shadow-focus has-disabled:cursor-not-allowed has-disabled:opacity-50 data-[selected=true]:bg-primary data-[selected=true]:text-text-inverse data-[selected=false]:bg-surface data-[selected=false]:text-text-secondary"
         >
           <input
             type="radio"

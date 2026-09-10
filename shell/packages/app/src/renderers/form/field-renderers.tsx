@@ -14,6 +14,7 @@ import {
   SignaturePad,
   TagsField,
   TimeField,
+  ToggleField,
 } from "@goerp/sdk/components";
 import { createInfiniteListQueryOptions } from "@goerp/sdk/react";
 import { resourceRegistry } from "@goerp/sdk/schema";
@@ -481,17 +482,18 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
     }
 
     case "boolean":
-    case "toggle":
       return (
         <input
           id={id}
           type="checkbox"
-          role={type === "toggle" ? "switch" : undefined}
           checked={value === true}
           disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}
         />
       );
+
+    case "toggle":
+      return <ToggleField id={id} value={value === true} onChange={onChange} disabled={disabled} />;
 
     case "select":
     case "multi_select":

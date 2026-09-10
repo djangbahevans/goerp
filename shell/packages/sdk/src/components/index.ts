@@ -73,6 +73,8 @@ export type { TimelineItemProps, TimelineItemUser, TimelineProps } from "./timel
 export { Timeline, TimelineItem } from "./timeline.js";
 export type { ToastProps } from "./toast.js";
 export { Toast } from "./toast.js";
+export type { ToggleFieldProps } from "./toggle-field.js";
+export { ToggleField } from "./toggle-field.js";
 export type { TwoColumnLayoutProps } from "./two-column-layout.js";
 export { TwoColumnLayout } from "./two-column-layout.js";
 export type { UserAvatarProps, UserAvatarSize } from "./user-avatar.js";
