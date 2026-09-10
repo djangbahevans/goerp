@@ -6,10 +6,10 @@
 @import "./themes/default.css";
 @import "./themes/dark.css";
 @import "./themes/high-contrast.css";
-@config "./tailwind.config.ts";
-/* @goerp/sdk/components (Badge, StatusDot, UserAvatar, CountryFlag) ships
-   Tailwind utility classes directly — without scanning its source too,
-   those classes never generate here. */
+/* goerp#729's root cause: @goerp/storybook's own Vite root doesn't
+   auto-detect a sibling package's classes, this app package included —
+   same reason the sdk line below was already needed. */
+@source "../../../app/src";
 @source "../../../sdk/src";
 
 @theme {
