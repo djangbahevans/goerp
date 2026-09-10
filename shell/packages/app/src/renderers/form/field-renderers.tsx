@@ -3,8 +3,10 @@ import type { RelationValue, TagValue } from "@goerp/sdk/components";
 import {
   CodeField,
   ColorPicker,
+  CountrySelect,
   DateField,
   DateTimeField,
+  LanguageSelect,
   MoneyField,
   RelationPicker,
   RichTextField,
@@ -553,17 +555,24 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       return <RelationInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "country_select":
-    case "language_select":
-      // No Intl enumeration API for regions/languages — free-text code
-      // entry until a real dataset is wired in.
       return (
-        <input
+        <CountrySelect
           id={id}
-          type="text"
           value={stringValue}
-          placeholder={type === "country_select" ? "ISO 3166-1 code" : "BCP 47 tag"}
+          onChange={(code) => onChange(code === "" ? undefined : code)}
+          placeholder="Select a country…"
           disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+
+    case "language_select":
+      return (
+        <LanguageSelect
+          id={id}
+          value={stringValue}
+          onChange={(tag) => onChange(tag === "" ? undefined : tag)}
+          placeholder="Select a language…"
+          disabled={disabled}
         />
       );
 
