@@ -1,4 +1,5 @@
 import { PermissionContext } from "@goerp/sdk/auth";
+import { themeStore } from "@goerp/sdk/react";
 import type { Decorator, Preview } from "@storybook/react-vite";
 import { useEffect } from "react";
 import "../../app/src/design/tokens.css";
@@ -20,13 +21,13 @@ const withPermissions: Decorator = (Story) => (
   </PermissionContext.Provider>
 );
 
-// Sets data-theme on document.documentElement, not a wrapper div: Tailwind's
-// @theme block resolves --color-* to var(--goerp-color-*) once on :root, so
-// an override below :root never reaches it.
+// Goes through themeStore.setTheme, not a raw data-theme attribute write:
+// any component reading useTheme() needs the shared store itself to
+// reflect the story's theme toggle, not just the resulting CSS.
 const withTheme: Decorator = (Story, context) => {
   const theme = context.globals.theme === "dark" ? "dark" : "light";
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
+    themeStore.setTheme(theme);
   }, [theme]);
   return (
     <div style={{ background: "var(--color-bg)", color: "var(--color-text)", padding: "1rem" }}>
