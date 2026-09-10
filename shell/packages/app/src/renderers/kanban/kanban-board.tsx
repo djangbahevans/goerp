@@ -235,8 +235,7 @@ export function KanbanBoard({
       <span aria-live="polite" className="sr-only">
         {announcement}
       </span>
-      {/* style={{ overflowX: "auto" }} instead of the `overflow-x-auto` utility: goerp#729 — that class generates no CSS in this build. */}
-      <div className="flex gap-4 pb-2" style={{ overflowX: "auto" }}>
+      <div className="flex gap-4 overflow-x-auto pb-2">
         {groups.map((group) => (
           <KanbanColumn
             key={group.id}

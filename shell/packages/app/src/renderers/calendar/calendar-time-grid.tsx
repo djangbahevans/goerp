@@ -214,10 +214,7 @@ export function CalendarTimeGrid({
           so they render as a separate absolutely-positioned overlay below
           rather than living inside individual <td> cells. */}
       <div className="relative">
-        {/* style={{ tableLayout: "fixed" }}, not `table-fixed`: goerp#729 —
-            that class generates no CSS here, and the pixel-aligned overlay
-            needs the real fixed layout. */}
-        <table aria-label="Schedule" style={{ tableLayout: "fixed" }} className="w-full border-collapse">
+        <table aria-label="Schedule" className="w-full table-fixed border-collapse">
           <colgroup>
             <col style={{ width: "4rem" }} />
             {days.map((day) => (
@@ -228,9 +225,8 @@ export function CalendarTimeGrid({
             {HOURS.map((hour) => (
               <tr key={hour}>
                 <td
-                  // goerp#729: `align-top` generates no CSS in this build.
-                  style={{ height: ROW_HEIGHT_PX, verticalAlign: "top" }}
-                  className="border-border border-b pr-2 text-right text-text-secondary text-xs"
+                  style={{ height: ROW_HEIGHT_PX }}
+                  className="border-border border-b pr-2 text-right text-text-secondary text-xs align-top"
                 >
                   {HOUR_FORMAT.format(new Date(2026, 0, 1, hour))}
                 </td>
