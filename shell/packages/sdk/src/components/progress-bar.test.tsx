@@ -38,4 +38,16 @@ describe("ProgressBar", () => {
     render(<ProgressBar value={75} label="75% complete" showLabel />);
     expect(screen.getByText("75% complete")).toBeTruthy();
   });
+
+  it("fills with the primary color by default", () => {
+    const { container } = render(<ProgressBar value={50} />);
+    expect(container.querySelector(".bg-primary")).toBeTruthy();
+    expect(container.querySelector(".bg-danger")).toBeNull();
+  });
+
+  it("fills with the danger color when status is danger", () => {
+    const { container } = render(<ProgressBar value={50} status="danger" />);
+    expect(container.querySelector(".bg-danger")).toBeTruthy();
+    expect(container.querySelector(".bg-primary")).toBeNull();
+  });
 });

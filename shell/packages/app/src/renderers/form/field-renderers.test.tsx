@@ -114,6 +114,52 @@ describe("readFieldValue/writeFieldValue", () => {
     });
     expect(writeFieldValue({ field: "tag_ids", type: "many2many" }, ["1", "2"])).toEqual({ tag_ids: ["1", "2"] });
   });
+
+  it("file: reads the embedded, _id-stripped companion object as a FileValue", () => {
+    const field: FormField = { field: "signed_pdf_id", type: "file" };
+    const record: Row = {
+      signed_pdf_id: "01j...",
+      signed_pdf: { id: "01j...", name: "Contract.pdf", content_type: "application/pdf", size_bytes: 245760 },
+    };
+    expect(readFieldValue(field, record)).toEqual({
+      fileId: "01j...",
+      name: "Contract.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 245760,
+      url: undefined,
+    });
+  });
+
+  it("file: reads null when the embedded companion is absent", () => {
+    const field: FormField = { field: "signed_pdf_id", type: "file" };
+    expect(readFieldValue(field, { signed_pdf_id: "01j..." })).toBeNull();
+  });
+
+  it("file_multi: reads the embedded, _ids-stripped companion array as FileValue[]", () => {
+    const field: FormField = { field: "attachment_ids", type: "file_multi" };
+    const record: Row = {
+      attachment_ids: ["1", "2"],
+      attachments: [
+        { id: "1", name: "Quote.pdf", content_type: "application/pdf", size_bytes: 128000 },
+        { id: "2", name: "Spec.docx", content_type: "application/vnd.openxmlformats", size_bytes: 54000 },
+      ],
+    };
+    expect(readFieldValue(field, record)).toEqual([
+      { fileId: "1", name: "Quote.pdf", contentType: "application/pdf", sizeBytes: 128000, url: undefined },
+      {
+        fileId: "2",
+        name: "Spec.docx",
+        contentType: "application/vnd.openxmlformats",
+        sizeBytes: 54000,
+        url: undefined,
+      },
+    ]);
+  });
+
+  it("file_multi: reads an empty array when the embedded companion is absent", () => {
+    const field: FormField = { field: "attachment_ids", type: "file_multi" };
+    expect(readFieldValue(field, { attachment_ids: [] })).toEqual([]);
+  });
 });
 
 describe("FieldInput", () => {
@@ -313,5 +359,31 @@ describe("FieldInput", () => {
     fireEvent.focus(screen.getByRole("combobox"));
     fireEvent.click(await screen.findByRole("option", { name: "Lead" }));
     expect(onChange).toHaveBeenCalledWith(["1", "2"]);
+  });
+
+  it("file: shows the current FileValue's chip and writes back only the raw file id on removal", () => {
+    const onChange = renderField(
+      { field: "signed_pdf_id", type: "file" },
+      {
+        fileId: "01j...",
+        name: "Contract.pdf",
+        contentType: "application/pdf",
+        sizeBytes: 245760,
+      },
+    );
+    expect(screen.getByText("Contract.pdf")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Contract.pdf" }));
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("file_multi: renders every chip and writes back an id array on removal", () => {
+    const onChange = renderField({ field: "attachment_ids", type: "file_multi" }, [
+      { fileId: "1", name: "Quote.pdf", contentType: "application/pdf", sizeBytes: 128000 },
+      { fileId: "2", name: "Spec.docx", contentType: "application/vnd.openxmlformats", sizeBytes: 54000 },
+    ]);
+    expect(screen.getByText("Quote.pdf")).toBeTruthy();
+    expect(screen.getByText("Spec.docx")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Quote.pdf" }));
+    expect(onChange).toHaveBeenCalledWith(["2"]);
   });
 });
