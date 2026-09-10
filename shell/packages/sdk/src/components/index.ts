@@ -47,6 +47,8 @@ export type { SectionCardProps } from "./section-card.js";
 export { SectionCard } from "./section-card.js";
 export type { SegmentedFieldOption, SegmentedFieldProps } from "./segmented-field.js";
 export { SegmentedField } from "./segmented-field.js";
+export type { SelectOption, SelectProps } from "./select.js";
+export { Select } from "./select.js";
 export type { SidebarProps } from "./sidebar.js";
 export { Sidebar } from "./sidebar.js";
 export type { SignaturePadProps } from "./signature-pad.js";
