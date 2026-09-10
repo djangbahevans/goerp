@@ -1,11 +1,12 @@
 import { apiClient } from "@goerp/sdk";
-import type { TagValue } from "@goerp/sdk/components";
+import type { RelationValue, TagValue } from "@goerp/sdk/components";
 import {
   CodeField,
   ColorPicker,
   DateField,
   DateTimeField,
   MoneyField,
+  RelationPicker,
   RichTextField,
   SignaturePad,
   TagsField,
@@ -13,10 +14,10 @@ import {
 } from "@goerp/sdk/components";
 import { createInfiniteListQueryOptions } from "@goerp/sdk/react";
 import { resourceRegistry } from "@goerp/sdk/schema";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
-import type { FieldOption, FormField } from "./form-view-types.js";
+import type { FieldOption, FieldType, FormField } from "./form-view-types.js";
 
 export type { TagValue } from "@goerp/sdk/components";
 
@@ -30,8 +31,54 @@ function isTagValue(value: unknown): value is TagValue {
   return typeof value === "object" && value !== null && "id" in value && "name" in value;
 }
 
+const RELATION_LIKE_TYPES = new Set<FieldType>(["relation", "many2many", "user_select"]);
+
+// go-sdk-reference.md §22 Many2One/Many2Many: the API embeds a companion
+// object under the field name with its own _id/_ids suffix stripped
+// ("customer_id" -> "customer", "tag_ids" -> "tags"), holding
+// {id, display_name} — or an array of those for many2many/user_select with
+// `multiple` set.
+function relationReadKey(field: string): string {
+  if (field.endsWith("_ids")) return `${field.slice(0, -4)}s`;
+  if (field.endsWith("_id")) return field.slice(0, -3);
+  return field;
+}
+
+function toRelationValue(row: unknown): RelationValue | null {
+  if (typeof row !== "object" || row === null) return null;
+  const record = row as Record<string, unknown>;
+  const id = record.id;
+  if (typeof id !== "string") return null;
+  // A companion row with no display_name yet (e.g. not computed for this
+  // record) still names a real relation — fall back to the id rather than
+  // dropping the relation (and its id) entirely.
+  const display = record.display_name;
+  return { id, display: typeof display === "string" ? display : id };
+}
+
+function isRelationValue(value: unknown): value is RelationValue {
+  return typeof value === "object" && value !== null && "id" in value && "display" in value;
+}
+
+// manifest-spec.md's field-type table documents many2many as inherently a
+// "Multi-select relation picker" — the type itself implies multiplicity,
+// the same way FieldInput's own render switch already computes it
+// (`field.multiple || type === "many2many"`) below. readFieldValue must
+// agree: a many2many field declared without an explicit `multiple: true`
+// still holds an array under its embedded companion key.
+function isMultipleRelation(field: FormField): boolean {
+  return field.multiple === true || field.type === "many2many";
+}
+
 export function readFieldValue(field: FormField, record: Row): unknown {
   if (field.type === "tags") return record[tagsReadKey(field.field)];
+  if (field.type && RELATION_LIKE_TYPES.has(field.type)) {
+    const raw = record[relationReadKey(field.field)];
+    if (isMultipleRelation(field)) {
+      return Array.isArray(raw) ? raw.map(toRelationValue).filter((v): v is RelationValue => v !== null) : [];
+    }
+    return toRelationValue(raw);
+  }
   return record[field.field];
 }
 
@@ -68,7 +115,39 @@ function useResourceOptions(resource: string | undefined, labelField: string | u
   return { data: query.data?.pages[0]?.data, isLoading: query.isLoading };
 }
 
-function ResourceSelect({
+// select/multi_select-with-resource fields store a bare id (or id array)
+// directly under the field's own name — unlike relation/many2many/
+// user_select, there's no embedded display companion (they're Selection
+// fields, not Many2One/Many2Many ORM relations). manifest-spec.md §8b's
+// "Strategy 3 — Automatic batch fetch" is the documented fallback: resolve
+// display text for a known set of ids via one filter[id][]=... query.
+function useResolveByIds(
+  resource: string | undefined,
+  labelField: string | undefined,
+  ids: string[],
+  enabled: boolean,
+): Map<string, string> {
+  const idsKey = [...ids].sort().join(",");
+  const query = useQuery({
+    queryKey: ["resolve-relation-values", resource, idsKey],
+    queryFn: async () => {
+      const entry = await resourceRegistry.resolve(resource as string);
+      const response = await apiClient.get<{ data: Row[] }>(entry.listPath, {
+        params: { "filter[id][]": ids, limit: ids.length },
+      });
+      return response.data;
+    },
+    enabled: enabled && Boolean(resource) && Boolean(labelField) && ids.length > 0,
+  });
+
+  const map = new Map<string, string>();
+  for (const row of query.data ?? []) {
+    map.set(String(row.id), String(row[labelField as string] ?? row.id));
+  }
+  return map;
+}
+
+function RelationInput({
   field,
   id,
   value,
@@ -82,47 +161,60 @@ function ResourceSelect({
   disabled: boolean;
 }) {
   const labelField = field.resource_label_field;
-  const { data: options, isLoading } = useResourceOptions(field.resource, labelField, true);
+  const needsResolve = field.type === "select" || field.type === "multi_select";
+  const rawIds: string[] = !needsResolve
+    ? []
+    : field.multiple
+      ? Array.isArray(value)
+        ? value.map(String)
+        : []
+      : value == null
+        ? []
+        : [String(value)];
+  const resolved = useResolveByIds(field.resource, labelField, rawIds, needsResolve && rawIds.length > 0);
 
   if (!field.resource || !labelField) {
     // Deferred, same as list-renderer.tsx's relation-column fallback:
-    // no default-label-field resolution from the registry yet (backlog #674).
+    // no default-label-field resolution from the registry yet (backlog #674/goerp#671).
     return <span>{value == null ? "" : String(value)}</span>;
   }
 
-  if (field.multiple) {
-    const selected = new Set(Array.isArray(value) ? value.map(String) : []);
-    return (
-      <select
-        id={id}
-        multiple
-        disabled={disabled || isLoading}
-        value={[...selected]}
-        onChange={(event) => onChange([...event.target.selectedOptions].map((o) => o.value))}
-      >
-        {(options ?? []).map((row) => (
-          <option key={String(row.id)} value={String(row.id)}>
-            {String(row[labelField] ?? row.id)}
-          </option>
-        ))}
-      </select>
-    );
-  }
+  const pickerValue: RelationValue | RelationValue[] | null = needsResolve
+    ? field.multiple
+      ? rawIds.map((rid) => ({ id: rid, display: resolved.get(rid) ?? rid }))
+      : rawIds[0] !== undefined
+        ? { id: rawIds[0], display: resolved.get(rawIds[0]) ?? rawIds[0] }
+        : null
+    : field.multiple
+      ? Array.isArray(value)
+        ? value.filter(isRelationValue)
+        : []
+      : isRelationValue(value)
+        ? value
+        : null;
+
+  const handleChange = (next: RelationValue | RelationValue[] | null) => {
+    onChange(Array.isArray(next) ? next.map((v) => v.id) : (next?.id ?? null));
+  };
 
   return (
-    <select
+    <RelationPicker
       id={id}
-      disabled={disabled || isLoading}
-      value={typeof value === "string" ? value : ""}
-      onChange={(event) => onChange(event.target.value || undefined)}
-    >
-      <option value="">—</option>
-      {(options ?? []).map((row) => (
-        <option key={String(row.id)} value={String(row.id)}>
-          {String(row[labelField] ?? row.id)}
-        </option>
-      ))}
-    </select>
+      resource={field.resource}
+      labelField={labelField}
+      resourceFilter={field.resource_filter}
+      value={pickerValue}
+      onChange={handleChange}
+      multiple={field.multiple ?? false}
+      disabled={disabled}
+      placeholder={`Search ${field.label ?? field.field}…`}
+      // Explicit, not RelationPicker's own default params — keeps this on
+      // the same apiClient/resourceRegistry singleton instance every other
+      // field renderer in this file already uses (and the same one tests
+      // mock via vi.mock("@goerp/sdk", ...)).
+      client={apiClient}
+      registry={resourceRegistry}
+    />
   );
 }
 
@@ -451,7 +543,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
     case "multi_select":
       if (field.resource)
         return (
-          <ResourceSelect
+          <RelationInput
             field={{ ...field, multiple: field.multiple || type === "multi_select" }}
             id={id}
             value={value}
@@ -492,8 +584,8 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
     case "relation":
     case "many2many":
       return (
-        <ResourceSelect
-          field={{ ...field, multiple: field.multiple || type === "many2many" }}
+        <RelationInput
+          field={{ ...field, multiple: isMultipleRelation(field) }}
           id={id}
           value={value}
           onChange={onChange}
@@ -505,7 +597,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       return <TagsInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "user_select":
-      return <ResourceSelect field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
+      return <RelationInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "country_select":
     case "language_select":
