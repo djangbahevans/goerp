@@ -3,14 +3,8 @@ import { ActionMenu, UserAvatar } from "@goerp/sdk/components";
 import { useTheme } from "@goerp/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { titleCaseWords } from "./title-case-words.js";
-
-// rotate-180 generates no CSS in this project's @tailwindcss/vite setup
-// (confirmed empirically, goerp#729) — inline style instead.
-function chevronStyle(open: boolean): CSSProperties {
-  return { transform: open ? "rotate(180deg)" : undefined };
-}
 
 // CurrentUser has no `name` field, only `email` — UserAvatar's `name` is
 // required, so this derives a presentable value ("jane.doe" -> "Jane Doe").
@@ -60,8 +54,7 @@ export function UserMenu(): ReactNode {
           <ChevronDown
             size={14}
             aria-hidden="true"
-            style={chevronStyle(open)}
-            className="text-text-secondary transition-transform duration-(--duration-fast)"
+            className={`text-text-secondary transition-transform duration-(--duration-fast) ${open ? "rotate-180" : ""}`}
           />
         </button>
       )}

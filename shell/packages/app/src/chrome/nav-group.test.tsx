@@ -71,12 +71,12 @@ describe("NavGroupSection", () => {
     const link = screen.getByRole("link");
     // link's parent is NavItem's own "relative" wrapper; the indent guide
     // wraps that.
-    expect(link.parentElement?.parentElement?.style.marginInlineStart).toBe("var(--space-4)");
+    expect(link.parentElement?.parentElement?.className).toContain("ms-4");
   });
 
   it("drops the child-indent guide when the rail is collapsed — no room for it at 56px", async () => {
     await renderGroup({ expanded: true, collapsed: true });
     const link = screen.getByRole("link");
-    expect(link.parentElement?.parentElement?.style.marginInlineStart).toBe("");
+    expect(link.parentElement?.parentElement?.className).toBe("");
   });
 });

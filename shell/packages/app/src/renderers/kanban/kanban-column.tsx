@@ -68,9 +68,7 @@ export function KanbanColumn({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      // width: "18rem" instead of the `w-72` utility: goerp#729 — that class generates no CSS in this build.
-      style={{ width: "18rem" }}
-      className={`flex flex-none flex-col gap-2 rounded-structural border p-2 transition-colors duration-(--duration-fast) ease-out ${
+      className={`flex w-72 flex-none flex-col gap-2 rounded-structural border p-2 transition-colors duration-(--duration-fast) ease-out ${
         isDropTarget ? "border-primary border-dashed bg-primary-subtle" : "border-transparent bg-bg-subtle"
       }`}
     >

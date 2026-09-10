@@ -182,9 +182,7 @@ export function CalendarMonthGrid({
     // A real <table>: biome's a11y linter refuses role="grid" on it (a
     // non-interactive element with an interactive role), so <td> buttons
     // stay individually-focusable and arrow-key-navigable without that role.
-    // style={{ tableLayout: "fixed" }} instead of the `table-fixed`
-    // utility: goerp#729 — that class generates no CSS in this build.
-    <table aria-label="Month" style={{ tableLayout: "fixed" }} className="w-full border-collapse">
+    <table aria-label="Month" className="w-full table-fixed border-collapse">
       <colgroup>
         {WEEKDAY_LABELS.map((label) => (
           <col key={label} />
@@ -218,16 +216,7 @@ export function CalendarMonthGrid({
               const isToday = isSameDay(day, today);
 
               return (
-                <td
-                  key={key}
-                  // goerp#729: `align-top` silently generates no CSS in
-                  // this build (computed vertical-align stays "middle"),
-                  // so a short cell (no events) visually centers its day
-                  // number against a taller neighboring row instead of
-                  // aligning to the top like every other cell.
-                  style={{ verticalAlign: "top" }}
-                  className="relative min-h-24 border-border border-b p-1"
-                >
+                <td key={key} className="relative min-h-24 border-border border-b p-1 align-top">
                   <button
                     type="button"
                     ref={(el) => {

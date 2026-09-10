@@ -5,10 +5,11 @@ import type { SidebarStoreLike } from "./sidebar-store.js";
 import { useSidebar } from "./sidebar-store.js";
 import { useNavigationTree } from "./use-navigation-tree.js";
 
-// var(--sidebar-width)/var(--sidebar-collapsed-width) generate no CSS as
-// Tailwind width utilities in this project's @tailwindcss/vite setup
-// (w-4 already confirmed broken, goerp#729) — inline style instead, same
-// treatment as chrome-header.tsx's HEADER_STYLE.
+// w-(--sidebar-width)/w-(--sidebar-collapsed-width) — the arbitrary
+// custom-property form of the width utility — generate no CSS in this
+// project's @tailwindcss/vite setup (goerp#729; bare w-4/w-72 etc. work
+// fine, this is specific to the w-(--var) syntax) — inline style instead,
+// same treatment as chrome-header.tsx's HEADER_STYLE.
 function railStyle(collapsed: boolean): CSSProperties {
   return { width: collapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-width)" };
 }

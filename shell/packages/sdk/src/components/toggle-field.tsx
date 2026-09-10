@@ -8,9 +8,7 @@ export interface ToggleFieldProps {
 }
 
 // Stated pixel width, not derived from the spacing scale — same precedent
-// Sidebar.width/NotificationSheet's width already set. Also sidesteps
-// goerp#729 (w-* utilities silently generate no CSS in this build) — only
-// width needs this; h-5 (the matching height) is confirmed to work.
+// Sidebar.width/NotificationSheet's width already set.
 const TRACK_STYLE: CSSProperties = { width: "36px" };
 const THUMB_STYLE: CSSProperties = { width: "var(--space-4)" };
 // Track content box: 36px - 2*1px border - 2*2px padding = 30px. Thumb is
