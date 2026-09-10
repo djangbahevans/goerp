@@ -30,6 +30,11 @@ afterEach(() => {
   getMock.mockClear();
 });
 
+// jsdom doesn't implement scrollIntoView (jsdom/jsdom#1695) — @goerp/sdk's
+// Select (Radix-based for its single-select mode) calls it internally
+// whenever the panel opens.
+Element.prototype.scrollIntoView = vi.fn();
+
 function renderField(field: FormField, value: unknown, record: Row = {}) {
   const onChange = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -146,7 +151,7 @@ describe("FieldInput", () => {
     expect(screen.getByRole("switch")).toBeTruthy();
   });
 
-  it("select: static options render, with a stable empty option, and report the chosen value", () => {
+  it("select: static options render and report the chosen value", async () => {
     const onChange = renderField(
       {
         field: "state",
@@ -158,7 +163,10 @@ describe("FieldInput", () => {
       },
       "draft",
     );
-    fireEvent.change(screen.getByDisplayValue("Draft"), { target: { value: "done" } });
+    const trigger = screen.getByRole("combobox");
+    expect(trigger.textContent).toContain("Draft");
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Done" }));
     expect(onChange).toHaveBeenCalledWith("done");
   });
 

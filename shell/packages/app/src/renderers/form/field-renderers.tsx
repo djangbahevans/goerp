@@ -8,6 +8,7 @@ import {
   MoneyField,
   RelationPicker,
   RichTextField,
+  Select,
   SignaturePad,
   TagsField,
   TimeField,
@@ -17,7 +18,7 @@ import { resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
-import type { FieldOption, FieldType, FormField } from "./form-view-types.js";
+import type { FieldType, FormField } from "./form-view-types.js";
 
 export type { TagValue } from "@goerp/sdk/components";
 
@@ -268,56 +269,6 @@ function TagsInput({
   );
 }
 
-function OptionsSelect({
-  field,
-  id,
-  options,
-  value,
-  onChange,
-  disabled,
-}: {
-  field: FormField;
-  id?: string | undefined;
-  options: FieldOption[];
-  value: unknown;
-  onChange: (value: unknown) => void;
-  disabled: boolean;
-}) {
-  if (field.multiple) {
-    const selected = new Set(Array.isArray(value) ? value.map(String) : []);
-    return (
-      <select
-        id={id}
-        multiple
-        disabled={disabled}
-        value={[...selected]}
-        onChange={(event) => onChange([...event.target.selectedOptions].map((o) => o.value))}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value} disabled={option.disabled}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  return (
-    <select
-      id={id}
-      disabled={disabled}
-      value={typeof value === "string" ? value : ""}
-      onChange={(event) => onChange(event.target.value || undefined)}
-    >
-      <option value="">—</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value} disabled={option.disabled}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 // Intl.supportedValuesOf covers timezone/currency; no enumeration API
 // exists for country/language, so those fall back to free-text input.
 function supportedValuesOrEmpty(key: "currency" | "timeZone"): string[] {
@@ -342,6 +293,7 @@ export interface FieldInputProps {
 export function FieldInput({ field, value, onChange, record, disabled = false, id }: FieldInputProps) {
   const type = field.type ?? "text";
   const stringValue = typeof value === "string" ? value : value == null ? "" : String(value);
+  const selectValue: string | string[] = Array.isArray(value) ? value.map(String) : stringValue;
 
   switch (type) {
     case "text":
@@ -552,12 +504,13 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           />
         );
       return (
-        <OptionsSelect
-          field={{ ...field, multiple: field.multiple || type === "multi_select" }}
+        <Select
           id={id}
           options={field.options ?? []}
-          value={value}
-          onChange={onChange}
+          value={selectValue}
+          onChange={(next) => onChange(next === "" ? undefined : next)}
+          multiple={field.multiple || type === "multi_select"}
+          placeholder={`Select ${field.label ?? field.field}…`}
           disabled={disabled}
         />
       );
