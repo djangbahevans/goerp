@@ -24,6 +24,8 @@ export type { DateFieldProps, DateTimeFieldProps, TimeFieldProps } from "./date-
 export { DateField, DateTimeField, TimeField } from "./date-fields.js";
 export type { EmptyStateProps } from "./empty-state.js";
 export { EmptyState } from "./empty-state.js";
+export type { ErrorBoundaryProps } from "./error-boundary.js";
+export { ErrorBoundary } from "./error-boundary.js";
 export type { FieldProps, FieldType } from "./field.js";
 export { currencyMinorUnitDigits, Field, formatFieldValue, formatRelativeTime } from "./field.js";
 export type { FieldWrapperProps } from "./field-wrapper.js";
