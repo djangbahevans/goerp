@@ -64,6 +64,51 @@ describe("readFieldValue/writeFieldValue", () => {
       street: "123 Main St",
     });
   });
+
+  it("relation: reads the embedded, _id-stripped companion object as a RelationValue", () => {
+    const field: FormField = { field: "customer_id", type: "relation" };
+    const record: Row = { customer_id: "01j8...", customer: { id: "01j8...", display_name: "Acme Corp" } };
+    expect(readFieldValue(field, record)).toEqual({ id: "01j8...", display: "Acme Corp" });
+  });
+
+  it("relation: reads null when the embedded companion is absent", () => {
+    const field: FormField = { field: "customer_id", type: "relation" };
+    expect(readFieldValue(field, { customer_id: "01j8..." })).toBeNull();
+  });
+
+  it("many2many/user_select with multiple: reads the embedded, _ids-stripped companion array as RelationValue[]", () => {
+    const field: FormField = { field: "tag_ids", type: "many2many", multiple: true };
+    const record: Row = {
+      tag_ids: ["1", "2"],
+      tags: [
+        { id: "1", display_name: "VIP" },
+        { id: "2", display_name: "Lead" },
+      ],
+    };
+    expect(readFieldValue(field, record)).toEqual([
+      { id: "1", display: "VIP" },
+      { id: "2", display: "Lead" },
+    ]);
+  });
+
+  it("many2many reads as an array even without an explicit multiple:true — the type itself implies it", () => {
+    const field: FormField = { field: "tag_ids", type: "many2many" };
+    const record: Row = { tag_ids: ["1"], tags: [{ id: "1", display_name: "VIP" }] };
+    expect(readFieldValue(field, record)).toEqual([{ id: "1", display: "VIP" }]);
+  });
+
+  it("relation: falls back to the id as display text when the companion's display_name isn't set", () => {
+    const field: FormField = { field: "customer_id", type: "relation" };
+    const record: Row = { customer_id: "01j8...", customer: { id: "01j8...", display_name: null } };
+    expect(readFieldValue(field, record)).toEqual({ id: "01j8...", display: "01j8..." });
+  });
+
+  it("relation/many2many/user_select: writeFieldValue writes the raw id(s) under the field's own name (unchanged, default behavior)", () => {
+    expect(writeFieldValue({ field: "customer_id", type: "relation" }, "01j8...")).toEqual({
+      customer_id: "01j8...",
+    });
+    expect(writeFieldValue({ field: "tag_ids", type: "many2many" }, ["1", "2"])).toEqual({ tag_ids: ["1", "2"] });
+  });
 });
 
 describe("FieldInput", () => {
@@ -215,9 +260,47 @@ describe("FieldInput", () => {
     expect(screen.getByPlaceholderText("Add Skills…")).toBeTruthy();
   });
 
-  it("multi_select backed by a resource renders as a multi-select, not a single picker", async () => {
-    renderField({ field: "tag_ids", type: "multi_select", resource: "contacts.tag", resource_label_field: "name" }, []);
-    const select = await screen.findByRole("listbox");
-    expect((select as HTMLSelectElement).multiple).toBe(true);
+  it("multi_select backed by a resource renders as a real (multi-select) RelationPicker, not a single picker", async () => {
+    const onChange = renderField(
+      { field: "tag_ids", type: "multi_select", resource: "contacts.tag", resource_label_field: "name" },
+      [],
+    );
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    fireEvent.click(await screen.findByRole("option", { name: "VIP" }));
+    expect(onChange).toHaveBeenCalledWith(["1"]);
+    // Multi-select stays open for further selection, unlike single-select.
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("select backed by a resource: resolves an existing raw id's display text via a filter[id][] batch-fetch", async () => {
+    renderField({ field: "state", type: "select", resource: "contacts.tag", resource_label_field: "name" }, "1");
+    expect(await screen.findByDisplayValue("VIP")).toBeTruthy();
+    expect(getMock).toHaveBeenCalledWith(
+      "/tags",
+      expect.objectContaining({ params: expect.objectContaining({ "filter[id][]": ["1"] }) }),
+    );
+  });
+
+  it("relation: shows the current RelationValue's display text and writes back only the raw id", async () => {
+    const onChange = renderField(
+      { field: "customer_id", type: "relation", resource: "contacts.contact", resource_label_field: "name" },
+      { id: "1", display: "Acme Corp" },
+    );
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("Acme Corp");
+    fireEvent.focus(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByRole("option", { name: "Lead" }));
+    expect(onChange).toHaveBeenCalledWith("2");
+  });
+
+  it("many2many: renders selected pills and writes back an id array", async () => {
+    const onChange = renderField(
+      { field: "tag_ids", type: "many2many", resource: "contacts.tag", resource_label_field: "name" },
+      [{ id: "1", display: "VIP" }],
+    );
+    expect(screen.getByText("VIP")).toBeTruthy();
+    fireEvent.focus(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByRole("option", { name: "Lead" }));
+    expect(onChange).toHaveBeenCalledWith(["1", "2"]);
   });
 });

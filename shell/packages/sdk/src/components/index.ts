@@ -39,6 +39,8 @@ export type { ProgressBarProps } from "./progress-bar.js";
 export { ProgressBar } from "./progress-bar.js";
 export type { RelationFieldProps, RelationValue } from "./relation-field.js";
 export { RelationField } from "./relation-field.js";
+export type { RelationPickerProps } from "./relation-picker.js";
+export { RelationPicker } from "./relation-picker.js";
 export type { RichTextFieldProps } from "./rich-text-field.js";
 export { RichTextField } from "./rich-text-field.js";
 export type { SectionCardProps } from "./section-card.js";
