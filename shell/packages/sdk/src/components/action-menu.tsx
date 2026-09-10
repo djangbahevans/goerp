@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useOptionalPermission } from "../auth/use-permission.js";
 import { actionButtonClassName } from "./action-button-styles.js";
 
@@ -135,6 +136,11 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLSpanElement | null>(null);
+  // Portaled to document.body, position: fixed — so a trigger nested in a
+  // scrolling ancestor doesn't get its panel clipped. Null until measured,
+  // so it renders hidden for one frame rather than flashing at (0, 0).
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // One stable callback per index, so a re-render (e.g. every arrow-key
   // press) doesn't churn every item's ref via a fresh inline closure.
@@ -162,6 +168,42 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
     const first = nextFocusableIndex(itemRefs.current, openFocusDirection.current);
     setActiveIndex(first);
     itemRefs.current[first]?.focus();
+  }, [open]);
+
+  // Runs before paint, positioned once on open — not re-tracked on
+  // scroll/resize, since the menu closes on Escape/selection well before
+  // either would matter.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    const triggerEl = triggerRef.current;
+    const panelEl = panelRef.current;
+    if (!triggerEl || !panelEl) return;
+    const triggerRect = triggerEl.getBoundingClientRect();
+    const panelRect = panelEl.getBoundingClientRect();
+    const maxLeft = window.innerWidth - panelRect.width - 8;
+    const left = Math.max(8, Math.min(triggerRect.left, maxLeft));
+    // Opens upward instead when there isn't room below for the panel's own
+    // measured height, same collision-avoidance idea as the left clamp.
+    const fitsBelow = triggerRect.bottom + 4 + panelRect.height <= window.innerHeight - 8;
+    const top = fitsBelow ? triggerRect.bottom + 4 : Math.max(8, triggerRect.top - 4 - panelRect.height);
+    setPosition({ top, left });
+  }, [open]);
+
+  // Closes on a click outside both the trigger and the panel — mousedown,
+  // not click, so it commits before any outside element's own click
+  // handler fires. Never existed pre-portal either; not just a portal gap.
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: MouseEvent): void {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [open]);
 
   const move = (direction: 1 | -1) => {
@@ -251,37 +293,45 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
           {label}
         </button>
       )}
-      {open && (
-        <span
-          role="menu"
-          onKeyDown={handleMenuKeyDown}
-          className="absolute z-(--z-dropdown) mt-1 min-w-40 max-w-70 rounded-structural border border-border bg-surface py-1 shadow-md"
-        >
-          {items.map((item, index) => {
-            // items is a static prop array with no unique identifier
-            // field on ActionMenuItem (`label` is optional and callers
-            // may repeat it, e.g. the same label gated by different
-            // permissions) — index is the only stable key available.
-            if (item.type === "separator") {
-              // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-              return <hr key={index} className="mx-2 my-1 border-t border-border" />;
+      {open &&
+        createPortal(
+          <span
+            ref={panelRef}
+            role="menu"
+            onKeyDown={handleMenuKeyDown}
+            style={
+              position
+                ? { position: "fixed", top: position.top, left: position.left }
+                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
             }
-            return (
-              <ActionMenuItemButton
+            className="z-(--z-dropdown) min-w-40 max-w-70 rounded-structural border border-border bg-surface py-1 shadow-md"
+          >
+            {items.map((item, index) => {
+              // items is a static prop array with no unique identifier
+              // field on ActionMenuItem (`label` is optional and callers
+              // may repeat it, e.g. the same label gated by different
+              // permissions) — index is the only stable key available.
+              if (item.type === "separator") {
                 // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-                key={index}
-                item={item}
-                tabIndex={index === activeIndex ? 0 : -1}
-                itemRef={getItemRefCallback(index)}
-                onSelect={() => {
-                  setOpen(false);
-                  triggerRef.current?.focus();
-                }}
-              />
-            );
-          })}
-        </span>
-      )}
+                return <hr key={index} className="mx-2 my-1 border-t border-border" />;
+              }
+              return (
+                <ActionMenuItemButton
+                  // biome-ignore lint/suspicious/noArrayIndexKey: see above.
+                  key={index}
+                  item={item}
+                  tabIndex={index === activeIndex ? 0 : -1}
+                  itemRef={getItemRefCallback(index)}
+                  onSelect={() => {
+                    setOpen(false);
+                    triggerRef.current?.focus();
+                  }}
+                />
+              );
+            })}
+          </span>,
+          document.body,
+        )}
     </span>
   );
 }
