@@ -146,9 +146,12 @@ describe("FieldInput", () => {
     expect(onChange).toHaveBeenCalledWith(false);
   });
 
-  it("toggle: renders as a switch role", () => {
-    renderField({ field: "enabled", type: "toggle" }, false);
-    expect(screen.getByRole("switch")).toBeTruthy();
+  it("toggle: renders as a switch role and reports the toggled value", () => {
+    const onChange = renderField({ field: "enabled", type: "toggle" }, false);
+    const toggle = screen.getByRole("switch") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith(true);
   });
 
   it("select: static options render and report the chosen value", async () => {
