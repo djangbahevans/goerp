@@ -28,7 +28,8 @@ export const Default: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Actions" }));
-    await expect(canvas.getByRole("menu")).toBeInTheDocument();
+    // The panel portals to document.body, not canvasElement.
+    await expect(within(document.body).getByRole("menu")).toBeInTheDocument();
   },
 };
 
@@ -71,6 +72,10 @@ export const CheckedItemAndCustomTrigger: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Account menu" }));
-    await expect(canvas.getByRole("menuitemcheckbox", { name: "Dark mode" })).toHaveAttribute("aria-checked", "true");
+    // The panel portals to document.body, not canvasElement.
+    await expect(within(document.body).getByRole("menuitemcheckbox", { name: "Dark mode" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   },
 };
