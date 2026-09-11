@@ -1,5 +1,12 @@
 export type { ActionButtonProps, ActionButtonSize, ActionButtonVariant } from "./action-button.js";
 export { ActionButton } from "./action-button.js";
+// A trigger needing ActionButton's exact visual treatment but with DOM
+// attributes ActionButtonProps doesn't pass through (e.g. aria-haspopup/
+// aria-expanded on a disclosure trigger) — action-button-styles.ts's own
+// comment: "as a className builder rather than mounting <ActionButton>
+// itself." AlertDialog already relies on this internally; exported here so
+// call sites outside the sdk package (form-share-action.tsx) can too.
+export { actionButtonClassName } from "./action-button-styles.js";
 export type { ActionMenuItem, ActionMenuProps } from "./action-menu.js";
 export { ActionMenu } from "./action-menu.js";
 export type { AlertDialogInput, AlertDialogProps, AlertDialogSelectOption } from "./alert-dialog.js";

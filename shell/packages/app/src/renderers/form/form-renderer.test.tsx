@@ -1,9 +1,16 @@
+import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FormRenderer } from "./form-renderer.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
 import type { FormRecordHandle } from "./use-form-record.js";
+
+const permissionValue = createPermissionContextValue({
+  permissions: new Set(),
+  fieldAccess: {},
+  modulesEnabled: new Set(),
+});
 
 const { useFormRecordMock, resolveModelMock } = vi.hoisted(() => ({
   useFormRecordMock: vi.fn(),
@@ -52,7 +59,9 @@ function renderForm(v: FormViewDeclaration = view) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <FormRenderer view={v} module="contacts" recordId="01j" />
+      <PermissionContext.Provider value={permissionValue}>
+        <FormRenderer view={v} module="contacts" recordId="01j" />
+      </PermissionContext.Provider>
     </QueryClientProvider>,
   );
 }
@@ -60,8 +69,8 @@ function renderForm(v: FormViewDeclaration = view) {
 describe("FormRenderer", () => {
   it("shows a loading state", () => {
     useFormRecordMock.mockReturnValue(handle({ isLoading: true }));
-    renderForm();
-    expect(screen.getByRole("status", { name: /Loading Contact/ })).toBeTruthy();
+    const { container } = renderForm();
+    expect(container.querySelector('[data-skeleton="lines"]')).toBeTruthy();
   });
 
   it("shows an error state with a retry that calls refetch", () => {

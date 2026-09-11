@@ -204,6 +204,11 @@ describe("FieldInput", () => {
     expect(onChange).toHaveBeenCalledWith(false);
   });
 
+  it("boolean: opts out of FieldWrapper's flex-col stretch, which would otherwise center its native glyph across the full field width", () => {
+    renderField({ field: "active", type: "boolean" }, true);
+    expect(screen.getByRole("checkbox").className).toContain("self-start");
+  });
+
   it("toggle: renders as a switch role and reports the toggled value", () => {
     const onChange = renderField({ field: "enabled", type: "toggle" }, false);
     const toggle = screen.getByRole("switch") as HTMLInputElement;

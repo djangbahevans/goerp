@@ -164,7 +164,14 @@ function pageOf(rows: Row[]): InfiniteData<{ data: Row[]; meta: { cursor: null; 
 }
 
 function seededClient(): QueryClient {
-  return new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } } });
+  return new QueryClient({
+    // retryOnMount defaults true independent of `retry` — without it, a
+    // component mounting onto a query this file already settled to an
+    // error (errorClient, below) triggers a real refetch against
+    // Storybook's own (absent) backend, silently overwriting the seeded
+    // message with whatever that fetch's own error happens to be.
+    defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Number.POSITIVE_INFINITY } },
+  });
 }
 
 // Wraps in both QueryClientProvider (react-query cache the hooks read) and

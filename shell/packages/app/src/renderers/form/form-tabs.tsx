@@ -140,7 +140,10 @@ function FieldsTabContent({
   formReadonly: boolean;
 }) {
   return (
-    <>
+    // Same space-y-4 form-renderer.tsx's own top-level sections list uses
+    // (section-card.md's Existing Patterns table) — without it, stacked
+    // SectionCards here render border-to-border with no gap.
+    <div className="space-y-4">
       {(tab.sections ?? []).map((section, i) => (
         // No stable `name` guaranteed; safe since this only reorders on reload.
         <FormSectionRenderer
@@ -154,7 +157,7 @@ function FieldsTabContent({
           formReadonly={formReadonly}
         />
       ))}
-    </>
+    </div>
   );
 }
 

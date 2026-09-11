@@ -94,13 +94,22 @@ describe("FormSectionRenderer", () => {
     });
   });
 
-  it('"fields": renders a labeled field per FormField', async () => {
+  it('"fields": renders a labeled field per FormField, wrapped in a SectionCard heading', async () => {
     await renderSection(
       { type: "fields", label: "Contact Info", fields: [{ field: "email", type: "email" }] },
       { email: "a@b.com" },
     );
-    expect(screen.getByText("Contact Info")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Contact Info" })).toBeTruthy();
     expect(screen.getByDisplayValue("a@b.com")).toBeTruthy();
+  });
+
+  it('"header": renders the field grid directly, with no SectionCard wrapper', async () => {
+    await renderSection(
+      { type: "header", label: "Identity", fields: [{ field: "email", type: "email" }] },
+      { email: "a@b.com" },
+    );
+    expect(screen.getByDisplayValue("a@b.com")).toBeTruthy();
+    expect(screen.queryByRole("heading")).toBeNull();
   });
 
   it('"sub_list" with inline_key: renders the parent response\'s already-inline rows, no fetch', async () => {
@@ -111,6 +120,15 @@ describe("FormSectionRenderer", () => {
     expect(screen.getByText("Accra")).toBeTruthy();
     expect(screen.getByText("Kumasi")).toBeTruthy();
     expect(useInfiniteListMock).not.toHaveBeenCalled();
+  });
+
+  it('"sub_list" with inline_key, empty array: renders an EmptyState instead of a bare table', async () => {
+    await renderSection(
+      { type: "sub_list", label: "Addresses", inline_key: "addresses", columns: [{ field: "city" }] },
+      { addresses: [] },
+    );
+    expect(screen.getByText("No Addresses yet")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it('"sub_list" without inline_key: resolves the One2Many target from the model registry and embeds a list', async () => {
