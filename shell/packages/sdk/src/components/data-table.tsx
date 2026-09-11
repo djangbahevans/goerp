@@ -34,49 +34,51 @@ export function DataTable<T>({
   }
 
   return (
-    <table className="w-full border-collapse">
-      <thead>
-        <tr className="border-border border-b bg-surface">
-          {columns.map((column) => (
-            <th scope="col" key={column.key} className="p-3 text-left font-medium text-sm text-text-secondary">
-              {column.header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((row) => {
-          const key = keyExtractor(row);
-          const handleActivate = onRowClick ? () => onRowClick(row) : undefined;
-          return (
-            <tr
-              key={key}
-              onClick={handleActivate}
-              tabIndex={handleActivate ? 0 : undefined}
-              onKeyDown={
-                handleActivate
-                  ? (event: KeyboardEvent<HTMLTableRowElement>) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      handleActivate();
-                    }
-                  : undefined
-              }
-              className={`border-border border-b bg-surface ${
-                handleActivate
-                  ? "cursor-pointer hover:bg-surface-hover focus-visible:[outline:2px_solid_var(--color-primary)] focus-visible:-outline-offset-2"
-                  : ""
-              }`}
-            >
-              {columns.map((column) => (
-                <td key={column.key} className="p-3 text-base text-text">
-                  {column.render(row)}
-                </td>
-              ))}
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-border border-b bg-surface">
+            {columns.map((column) => (
+              <th scope="col" key={column.key} className="p-3 text-left font-medium text-sm text-text-secondary">
+                {column.header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row) => {
+            const key = keyExtractor(row);
+            const handleActivate = onRowClick ? () => onRowClick(row) : undefined;
+            return (
+              <tr
+                key={key}
+                onClick={handleActivate}
+                tabIndex={handleActivate ? 0 : undefined}
+                onKeyDown={
+                  handleActivate
+                    ? (event: KeyboardEvent<HTMLTableRowElement>) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        handleActivate();
+                      }
+                    : undefined
+                }
+                className={`border-border border-b bg-surface ${
+                  handleActivate
+                    ? "cursor-pointer hover:bg-surface-hover focus-visible:[outline:2px_solid_var(--color-primary)] focus-visible:-outline-offset-2"
+                    : ""
+                }`}
+              >
+                {columns.map((column) => (
+                  <td key={column.key} className="p-3 text-base text-text">
+                    {column.render(row)}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
