@@ -216,7 +216,7 @@ export function CalendarTimeGrid({
       <div className="relative">
         <table aria-label="Schedule" className="w-full table-fixed border-collapse">
           <colgroup>
-            <col style={{ width: "4rem" }} />
+            <col className="w-16" />
             {days.map((day) => (
               <col key={dateKey(day)} />
             ))}
