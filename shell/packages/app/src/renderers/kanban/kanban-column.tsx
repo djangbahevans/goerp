@@ -35,8 +35,7 @@ export interface KanbanColumnProps {
 
 // Thin insertion-line marker for where a dragged card would land.
 function DropIndicator(): ReactNode {
-  // height: "2px" instead of the `h-0.5` utility: goerp#729 — that class generates no CSS in this build.
-  return <div aria-hidden="true" style={{ height: "2px" }} className="rounded-full bg-primary" />;
+  return <div aria-hidden="true" className="h-0.5 rounded-full bg-primary" />;
 }
 
 export function KanbanColumn({

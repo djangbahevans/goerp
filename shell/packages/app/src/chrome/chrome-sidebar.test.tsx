@@ -41,12 +41,12 @@ describe("ChromeSidebar", () => {
   it("renders at the expanded width by default", async () => {
     sidebarState = { collapsed: false, expandedGroups: new Set() };
     await renderSidebar();
-    expect(screen.getByRole("navigation", { name: "Main" }).style.width).toBe("var(--sidebar-width)");
+    expect(screen.getByRole("navigation", { name: "Main" }).className).toContain("w-(--sidebar-width)");
   });
 
   it("renders at the collapsed width when the store reports collapsed", async () => {
     sidebarState = { collapsed: true, expandedGroups: new Set() };
     await renderSidebar();
-    expect(screen.getByRole("navigation", { name: "Main" }).style.width).toBe("var(--sidebar-collapsed-width)");
+    expect(screen.getByRole("navigation", { name: "Main" }).className).toContain("w-(--sidebar-collapsed-width)");
   });
 });
