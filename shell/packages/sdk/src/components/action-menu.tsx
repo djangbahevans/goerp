@@ -4,12 +4,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOptionalPermission } from "../auth/use-permission.js";
 import { actionButtonClassName } from "./action-button-styles.js";
+import { Icon, type IconNameLike } from "./icon.js";
 
 export interface ActionMenuItem {
   type?: "item" | "separator" | undefined;
   // Required for "item"; absent (and unused) for "separator".
   label?: string | undefined;
-  icon?: string | undefined;
+  // Lucide icon name, shown before the label.
+  icon?: IconNameLike | undefined;
   onClick?: (() => void) | undefined;
   variant?: "default" | "danger" | undefined;
   permission?: string | undefined;
@@ -98,13 +100,15 @@ function ActionMenuItemButton({
         aria-checked={item.checked}
         tabIndex={tabIndex}
         data-variant={item.variant ?? "default"}
-        data-icon={item.icon}
         aria-disabled={item.disabled}
         title={item.label}
         className={`${ITEM_CLASSES} justify-between`}
         onClick={handleClick}
       >
-        {item.label}
+        <span className="flex items-center gap-2">
+          {item.icon && <Icon name={item.icon} size={14} className="flex-none" aria-hidden="true" />}
+          {item.label}
+        </span>
         {item.checked && <Check size={14} aria-hidden="true" className="flex-none" />}
       </button>
     );
@@ -117,7 +121,6 @@ function ActionMenuItemButton({
       role="menuitem"
       tabIndex={tabIndex}
       data-variant={item.variant ?? "default"}
-      data-icon={item.icon}
       // Not the native `disabled` attribute — that would remove the item
       // from focus entirely, contradicting the ARIA APG's disabled-menuitem
       // convention this component follows: reachable by keyboard, just
@@ -127,6 +130,7 @@ function ActionMenuItemButton({
       className={ITEM_CLASSES}
       onClick={handleClick}
     >
+      {item.icon && <Icon name={item.icon} size={14} className="flex-none" aria-hidden="true" />}
       {item.label}
     </button>
   );

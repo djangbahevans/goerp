@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Icon, type IconNameLike } from "./icon.js";
 
 // typescript-sdk-reference.md §13 / manifest-spec.md's BadgeConfig.color
 // (same 10 values, both places).
@@ -17,9 +18,8 @@ export type BadgeColor =
 export interface BadgeProps {
   label: string;
   color?: BadgeColor | undefined;
-  // Lucide icon name — surfaced as a data attribute rather than rendered;
-  // no icon library is wired in yet, same posture as ActionButton's icon.
-  icon?: string | undefined;
+  // Lucide icon name, shown before the label.
+  icon?: IconNameLike | undefined;
 }
 
 // docs/components/badge.md "Tokens Used" — gray reuses the existing
@@ -44,10 +44,8 @@ export function Badge({ label, color = "gray", icon }: BadgeProps): ReactNode {
   // color — fall back to gray rather than rendering a broken className.
   const colorClasses = BADGE_COLOR_CLASSES[color] ?? BADGE_COLOR_CLASSES.gray;
   return (
-    <span
-      data-icon={icon}
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colorClasses}`}
-    >
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${colorClasses}`}>
+      {icon && <Icon name={icon} size={12} className="shrink-0" aria-hidden="true" />}
       {label}
     </span>
   );
