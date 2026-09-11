@@ -10,14 +10,23 @@ export function renderHref(template: string, row: Row): string {
 // manifest-spec.md §9.1's width/align/truncate ListColumn fields —
 // `truncate` defaults to true, `align` to "left" ("right" for numbers is
 // left to the manifest author to declare explicitly; this doesn't infer
-// it from `type`).
+// it from `type`). "json" is excluded regardless of `truncate`: its cell
+// renders a <details> expando (see "json" below) that needs room to grow
+// open, which any ancestor's overflow: hidden — this function's own, or
+// list-renderer.tsx's inner-wrapper equivalent — would clip shut. One
+// predicate shared by both call sites, so they can't drift apart on which
+// columns truncate.
+export function shouldTruncate(column: ListColumn): boolean {
+  return column.truncate !== false && column.type !== "json";
+}
+
 export function columnStyle(column: ListColumn): CSSProperties {
   const style: CSSProperties = {};
   if (column.width !== undefined) style.width = column.width;
   if (column.min_width !== undefined) style.minWidth = column.min_width;
   if (column.max_width !== undefined) style.maxWidth = column.max_width;
   if (column.align) style.textAlign = column.align;
-  if (column.truncate !== false) {
+  if (shouldTruncate(column)) {
     style.overflow = "hidden";
     style.textOverflow = "ellipsis";
     style.whiteSpace = "nowrap";
@@ -119,24 +128,39 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     case "text":
       return value == null ? "" : String(value);
 
+    // shell-visual-design.md §5's tabular-numeral rule: --font-mono
+    // appears in exactly one place, numeral columns, so digits line up
+    // vertically for fast scanning — not on labels/headers/other text.
     case "number":
-      return typeof value === "number" ? new Intl.NumberFormat(undefined).format(value) : "";
+      return typeof value === "number" ? (
+        <span className="font-mono">{new Intl.NumberFormat(undefined).format(value)}</span>
+      ) : (
+        ""
+      );
 
     case "currency": {
       if (typeof value !== "number") return "";
       const currency = column.currency_field ? (row[column.currency_field] as string | undefined) : undefined;
       if (currency) {
         try {
-          return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value);
+          return (
+            <span className="font-mono">
+              {new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value)}
+            </span>
+          );
         } catch {
           // currency_field held something that isn't a valid ISO 4217 code — fall through to plain formatting.
         }
       }
-      return new Intl.NumberFormat(undefined).format(value);
+      return <span className="font-mono">{new Intl.NumberFormat(undefined).format(value)}</span>;
     }
 
     case "percent":
-      return typeof value === "number" ? new Intl.NumberFormat(undefined, { style: "percent" }).format(value) : "";
+      return typeof value === "number" ? (
+        <span className="font-mono">{new Intl.NumberFormat(undefined, { style: "percent" }).format(value)}</span>
+      ) : (
+        ""
+      );
 
     case "date":
       return formatDate(value, column.format, { dateStyle: "medium" });

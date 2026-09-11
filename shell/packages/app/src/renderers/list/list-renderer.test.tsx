@@ -661,6 +661,42 @@ describe("ListRenderer", () => {
     expect(router.state.location.search).toEqual({ "filter[type]": "company" });
   });
 
+  it("Load more: disabled with ActionButton's own loading treatment while isFetchingNextPage", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: "p2", hasMore: true } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: true,
+      hasNextPage: true,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess);
+
+    expect(screen.getByRole("button", { name: "Load more" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("Load more: calls fetchNextPage on click once no longer fetching", async () => {
+    const fetchNextPage = vi.fn();
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: "p2", hasMore: true } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: true,
+      fetchNextPage,
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess);
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(fetchNextPage).toHaveBeenCalled();
+  });
+
   it("sortable header: clicking cycles asc -> desc -> unsorted, updating aria-sort each time", async () => {
     useInfiniteListMock.mockReturnValue({
       data: { pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: null, hasMore: false } }] },

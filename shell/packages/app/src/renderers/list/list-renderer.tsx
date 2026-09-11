@@ -6,10 +6,10 @@ import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import type { KeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { BulkActions } from "./bulk-actions.js";
-import { columnStyle, renderCell } from "./column-renderers.js";
+import { columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
 import { isMultiValueFilter, ListFilters } from "./list-filters.js";
 import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
@@ -178,6 +178,35 @@ export function columnRendersOwnLink(column: ListColumn): boolean {
   );
 }
 
+// text-overflow: ellipsis doesn't reliably clip on a display: table-cell
+// box (columnStyle's own overflow/ellipsis/white-space trio, applied
+// directly to a <th>/<td>) across browsers — it needs a block-level
+// element to actually establish the overflow context. Applied to an
+// inner wrapper around the cell's content instead of the cell itself.
+// shouldTruncate (column-renderers.tsx) is the one place that decides
+// which columns truncate at all — kept out of sync with columnStyle's own
+// overflow-hidden and this would clip a "json" cell's <details> expando
+// shut from one side while leaving it open from the other.
+function truncationStyle(column: ListColumn): CSSProperties {
+  if (!shouldTruncate(column)) return {};
+  return { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+}
+
+// list-renderer.md's own edge case: a truncated cell carries a native
+// title with its full value. Measured lazily on hover (scrollWidth vs.
+// clientWidth against the element's own live textContent) rather than
+// once at mount: a mount-time measurement would go stale the moment
+// content resolves asynchronously after the initial render (e.g. a
+// relation column's id-to-label resolution, use-relation-labels.ts) since
+// React only re-invokes a stable-identity ref callback on mount/unmount,
+// not on every update — and reading layout for every cell on every mount
+// forces a reflow per cell, which a rarely-triggered hover handler avoids
+// entirely until a user actually points at one.
+function handleTruncationHover(event: ReactMouseEvent<HTMLElement>) {
+  const el = event.currentTarget;
+  el.title = el.scrollWidth > el.clientWidth ? (el.textContent ?? "") : "";
+}
+
 // A column with no declared manifest width would otherwise get whatever
 // width its own group's row content happens to produce — each group
 // renders as its own independent <table> (list-renderer.md's own
@@ -328,6 +357,9 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
   ];
 
   const stickyCheckboxClassName = "sticky left-0 z-10";
+  const tableWidth =
+    (showSelection ? CHECKBOX_COLUMN_WIDTH : 0) +
+    columns.reduce((sum, column) => sum + (column.width ?? DEFAULT_COLUMN_WIDTH), 0);
 
   function navigateToRow(row: Row) {
     const href = rowClickHref(rowClickPath, row, rowClickParam);
@@ -363,7 +395,17 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
           {groupRows(rows, listState.groupBy).map((group) => {
             const selectableIds = group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
             return (
-              <table aria-label={view.label} key={group.key} className="table-fixed border-collapse">
+              <table
+                aria-label={view.label}
+                key={group.key}
+                className="table-fixed border-collapse"
+                style={{ width: tableWidth }}
+              >
+                {/* Pinning width to the colgroup's own sum (vs. leaving it
+                    "auto") stops an unbreakable long value in one group's
+                    rows from widening that group's table past its
+                    <colgroup>, which desyncs cross-group column alignment
+                    under the shared scroll container above. */}
                 {listState.groupBy && (
                   <caption className="bg-bg-subtle p-3 text-left text-sm font-medium text-text-secondary">
                     {listState.groupBy} = {group.key}
@@ -425,12 +467,18 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                               className="flex w-full items-center gap-2 hover:bg-surface-hover"
                               onClick={() => listState.setSort(nextSortValue(listState.sort, column.field))}
                             >
-                              {column.label ?? column.field}
+                              {/* biome-ignore lint/a11y/noStaticElementInteractions: onMouseEnter only lazily computes a native title for the browser's own tooltip — a passive read, not new interactive behavior. */}
+                              <span onMouseEnter={handleTruncationHover} style={truncationStyle(column)}>
+                                {column.label ?? column.field}
+                              </span>
                               {sortDirection === "asc" && <ChevronUp size={14} aria-hidden="true" />}
                               {sortDirection === "desc" && <ChevronDown size={14} aria-hidden="true" />}
                             </button>
                           ) : (
-                            (column.label ?? column.field)
+                            // biome-ignore lint/a11y/noStaticElementInteractions: onMouseEnter only lazily computes a native title for the browser's own tooltip — a passive read, not new interactive behavior.
+                            <span onMouseEnter={handleTruncationHover} style={truncationStyle(column)}>
+                              {column.label ?? column.field}
+                            </span>
                           )}
                         </th>
                       );
@@ -486,7 +534,10 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                           const href = asRowLink ? rowClickHref(rowClickPath, row, rowClickParam) : undefined;
                           return (
                             <td key={column.field} style={columnStyle(column)} className="p-3 text-base text-text">
-                              {href ? <a href={href}>{content}</a> : content}
+                              {/* biome-ignore lint/a11y/noStaticElementInteractions: onMouseEnter only lazily computes a native title for the browser's own tooltip — a passive read, not new interactive behavior. */}
+                              <span onMouseEnter={handleTruncationHover} style={truncationStyle(column)}>
+                                {href ? <a href={href}>{content}</a> : content}
+                              </span>
                             </td>
                           );
                         })}
@@ -500,15 +551,17 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
         </div>
       )}
       {hasNextPage && (
-        <ActionButton
-          variant="secondary"
-          loading={isFetchingNextPage}
-          onClick={() => {
-            void fetchNextPage();
-          }}
-        >
-          Load more
-        </ActionButton>
+        <div className="flex justify-center p-3">
+          <ActionButton
+            variant="secondary"
+            loading={isFetchingNextPage}
+            onClick={() => {
+              void fetchNextPage();
+            }}
+          >
+            Load more
+          </ActionButton>
+        </div>
       )}
     </>
   );

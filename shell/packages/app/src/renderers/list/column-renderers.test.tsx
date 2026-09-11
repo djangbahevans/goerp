@@ -36,6 +36,11 @@ describe("columnStyle", () => {
   it("omits truncation when truncate is explicitly false", () => {
     expect(columnStyle({ field: "x", truncate: false })).toEqual({});
   });
+
+  it("omits truncation for a json column even with truncate left at its true default", () => {
+    // Its <details> expando needs room to grow open — an ancestor overflow: hidden would clip it shut.
+    expect(columnStyle({ field: "x", type: "json" })).toEqual({});
+  });
 });
 
 describe("renderCellContent", () => {
@@ -76,6 +81,12 @@ describe("renderCellContent", () => {
     expect(cell({ field: "rate", type: "percent" }, { rate: 0.42 }).textContent).toBe(
       new Intl.NumberFormat(undefined, { style: "percent" }).format(0.42),
     );
+  });
+
+  it("number/currency/percent: carry font-mono, shell-visual-design.md §5's tabular-numeral rule", () => {
+    expect(cell({ field: "n", type: "number" }, { n: 1 }).querySelector(".font-mono")).not.toBeNull();
+    expect(cell({ field: "amount", type: "currency" }, { amount: 1 }).querySelector(".font-mono")).not.toBeNull();
+    expect(cell({ field: "rate", type: "percent" }, { rate: 0.1 }).querySelector(".font-mono")).not.toBeNull();
   });
 
   it("date/datetime/time: applies a CLDR format pattern when given", () => {
