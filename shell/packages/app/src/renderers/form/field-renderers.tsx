@@ -768,7 +768,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           value={value === undefined ? "" : JSON.stringify(value, null, 2)}
           rows={field.rows ?? 6}
           disabled={disabled}
-          style={{ fontFamily: "monospace" }}
+          className="font-mono"
           onChange={(e) => {
             try {
               onChange(JSON.parse(e.target.value));

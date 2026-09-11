@@ -34,6 +34,6 @@ describe("NavBadge", () => {
   it("renders as a small absolutely-positioned corner overlay when collapsed", async () => {
     renderBadge(3, true);
     const badge = await screen.findByText("3");
-    expect(badge.style.position).toBe("absolute");
+    expect(badge.className).toContain("absolute");
   });
 });

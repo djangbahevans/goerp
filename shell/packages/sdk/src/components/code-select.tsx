@@ -161,11 +161,9 @@ export function CodeSelect({
           else setHighlightedIndex(0);
         }}
         onKeyDown={handleKeyDown}
-        style={{
-          ...(hasOverlayIcon ? { paddingInlineStart: "var(--space-8)" } : undefined),
-          ...(!isOpen && selected ? { paddingInlineEnd: "var(--space-8)" } : undefined),
-        }}
-        className={`w-full truncate ${fieldInputClassName(false, "input", "sans")}`}
+        className={`w-full truncate ${fieldInputClassName(false, "input", "sans")} ${hasOverlayIcon ? "ps-8" : ""} ${
+          !isOpen && selected ? "pe-8" : ""
+        }`}
       />
       {hasOverlayIcon && selected && leadingIcon && (
         <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center pl-3">

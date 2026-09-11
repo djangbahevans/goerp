@@ -255,7 +255,7 @@ function SelectMultiple({
               {selectedSet.has(option.value) ? (
                 <Check size={16} className="shrink-0 text-primary" aria-hidden />
               ) : (
-                <span aria-hidden style={{ display: "inline-block", width: 16 }} />
+                <span aria-hidden className="inline-block w-4" />
               )}
               <OptionLabel option={option} />
             </div>

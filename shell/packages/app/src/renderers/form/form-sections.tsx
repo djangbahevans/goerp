@@ -11,6 +11,15 @@ export function sectionLayoutColumns(section: FormSection): 1 | 2 | 3 | 4 {
   return typeof section.columns === "number" ? section.columns : 2;
 }
 
+// A lookup rather than a template literal (`grid-cols-${n}`) — Tailwind's
+// source scanner needs each full class name to appear literally.
+const GRID_COLS_CLASS_NAME: Record<1 | 2 | 3 | 4, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-4",
+};
+
 export function sectionListColumns(section: FormSection): ListColumn[] {
   return Array.isArray(section.columns) ? section.columns : [];
 }
@@ -34,9 +43,7 @@ function FieldsSection({
   formReadonly,
 }: Omit<FormSectionRendererProps, "module">) {
   return (
-    <fieldset
-      style={{ display: "grid", gridTemplateColumns: `repeat(${sectionLayoutColumns(section)}, 1fr)`, gap: "1rem" }}
-    >
+    <fieldset className={`grid gap-4 ${GRID_COLS_CLASS_NAME[sectionLayoutColumns(section)]}`}>
       {section.label && <legend>{section.label}</legend>}
       {(section.fields ?? []).map((field) => (
         // Keyed by record identity so a field's own local state (e.g.

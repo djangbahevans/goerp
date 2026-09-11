@@ -1,18 +1,9 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { NavGroupSection } from "./nav-group.js";
 import type { NavigationGroup } from "./navigation-types.js";
 import type { SidebarStoreLike } from "./sidebar-store.js";
 import { useSidebar } from "./sidebar-store.js";
 import { useNavigationTree } from "./use-navigation-tree.js";
-
-// w-(--sidebar-width)/w-(--sidebar-collapsed-width) — the arbitrary
-// custom-property form of the width utility — generate no CSS in this
-// project's @tailwindcss/vite setup (goerp#729; bare w-4/w-72 etc. work
-// fine, this is specific to the w-(--var) syntax) — inline style instead,
-// same treatment as chrome-header.tsx's HEADER_STYLE.
-function railStyle(collapsed: boolean): CSSProperties {
-  return { width: collapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-width)" };
-}
 
 // shell-architecture.md §15/§16: the shell's persistent left-edge
 // navigation rail, mounted once by ChromeLayout (unbuilt, a later ticket,
@@ -39,8 +30,9 @@ export function ChromeSidebar({
   return (
     <nav
       aria-label="Main"
-      style={{ ...railStyle(collapsed), borderInlineEnd: "1px solid var(--color-border)" }}
-      className="flex h-full flex-col overflow-y-auto bg-surface transition-[width] duration-(--duration-base) ease-out motion-reduce:transition-none"
+      className={`flex h-full flex-col overflow-y-auto border-border border-e bg-surface transition-[width] duration-(--duration-base) ease-out motion-reduce:transition-none ${
+        collapsed ? "w-(--sidebar-collapsed-width)" : "w-(--sidebar-width)"
+      }`}
     >
       {tree.map((group) => (
         <NavGroupSection

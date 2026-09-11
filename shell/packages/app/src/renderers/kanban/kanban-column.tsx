@@ -35,8 +35,7 @@ export interface KanbanColumnProps {
 
 // Thin insertion-line marker for where a dragged card would land.
 function DropIndicator(): ReactNode {
-  // height: "2px" instead of the `h-0.5` utility: goerp#729 — that class generates no CSS in this build.
-  return <div aria-hidden="true" style={{ height: "2px" }} className="rounded-full bg-primary" />;
+  return <div aria-hidden="true" className="h-0.5 rounded-full bg-primary" />;
 }
 
 export function KanbanColumn({
@@ -85,7 +84,7 @@ export function KanbanColumn({
       </div>
 
       {/* overflow-x explicit "hidden": the CSS spec force-computes a "visible" x-axis to "auto" next to overflow-y-auto, which turned an open card's ActionMenu into an unwanted horizontal scrollbar. */}
-      <div className="flex max-h-full flex-col gap-2 overflow-y-auto" style={{ overflowX: "hidden" }}>
+      <div className="flex max-h-full flex-col gap-2 overflow-x-hidden overflow-y-auto">
         {group.cards.length === 0 ? (
           <EmptyState title={emptyMessage} size="compact" />
         ) : (
