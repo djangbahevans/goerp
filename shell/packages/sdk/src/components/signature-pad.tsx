@@ -60,15 +60,14 @@ export function SignaturePad({ value, onChange, disabled = false, ariaLabel }: S
   return (
     <span>
       {value ? (
-        <img src={value} alt={ariaLabel ?? "Signature"} style={{ maxWidth: 200 }} />
+        <img src={value} alt={ariaLabel ?? "Signature"} className="max-w-50" />
       ) : (
         <canvas
           ref={canvasRef}
           aria-label={ariaLabel ?? "Signature"}
           width={200}
           height={80}
-          className="rounded-control border border-border"
-          style={{ touchAction: "none" }}
+          className="touch-none rounded-control border border-border"
           onPointerDown={start}
           onPointerMove={move}
           onPointerUp={end}

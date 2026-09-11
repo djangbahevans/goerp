@@ -30,8 +30,7 @@ export function ChromeSidebar({
   return (
     <nav
       aria-label="Main"
-      style={{ borderInlineEnd: "1px solid var(--color-border)" }}
-      className={`flex h-full flex-col overflow-y-auto bg-surface transition-[width] duration-(--duration-base) ease-out motion-reduce:transition-none ${
+      className={`flex h-full flex-col overflow-y-auto border-border border-e bg-surface transition-[width] duration-(--duration-base) ease-out motion-reduce:transition-none ${
         collapsed ? "w-(--sidebar-collapsed-width)" : "w-(--sidebar-width)"
       }`}
     >

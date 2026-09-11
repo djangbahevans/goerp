@@ -351,28 +351,16 @@ export function FileField({
             const previewUrl = fileValue.url ?? previewUrlsRef.current.get(fileValue.fileId);
             if (variant === "avatar") {
               return (
-                <span key={fileValue.fileId} className="relative inline-flex" style={{ width: 96, height: 96 }}>
+                <span key={fileValue.fileId} className="relative inline-flex h-24 w-24">
                   {previewUrl && (
-                    <img
-                      src={previewUrl}
-                      alt={fileValue.name}
-                      style={{ width: 96, height: 96 }}
-                      className="rounded-full object-cover"
-                    />
+                    <img src={previewUrl} alt={fileValue.name} className="h-24 w-24 rounded-full object-cover" />
                   )}
                   <button
                     type="button"
                     disabled={disabled}
                     onClick={() => removeCompleted(fileValue.fileId)}
                     aria-label={`Remove ${fileValue.name}`}
-                    style={{
-                      top: "var(--space-1)",
-                      insetInlineEnd: "var(--space-1)",
-                      position: "absolute",
-                      width: "var(--space-6)",
-                      height: "var(--space-6)",
-                    }}
-                    className="inline-flex items-center justify-center rounded-full bg-surface text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
+                    className="absolute top-1 inset-e-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-surface text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ×
                   </button>
@@ -381,28 +369,16 @@ export function FileField({
             }
             if (variant === "image") {
               return (
-                <span key={fileValue.fileId} className="relative inline-flex" style={{ width: 128, height: 128 }}>
+                <span key={fileValue.fileId} className="relative inline-flex h-32 w-32">
                   {previewUrl && (
-                    <img
-                      src={previewUrl}
-                      alt={fileValue.name}
-                      style={{ width: 128, height: 128 }}
-                      className="rounded-control object-cover"
-                    />
+                    <img src={previewUrl} alt={fileValue.name} className="h-32 w-32 rounded-control object-cover" />
                   )}
                   <button
                     type="button"
                     disabled={disabled}
                     onClick={() => removeCompleted(fileValue.fileId)}
                     aria-label={`Remove ${fileValue.name}`}
-                    style={{
-                      top: "var(--space-1)",
-                      insetInlineEnd: "var(--space-1)",
-                      position: "absolute",
-                      width: "var(--space-6)",
-                      height: "var(--space-6)",
-                    }}
-                    className="inline-flex items-center justify-center rounded-full bg-surface text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
+                    className="absolute top-1 inset-e-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-surface text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ×
                   </button>
@@ -416,7 +392,7 @@ export function FileField({
               >
                 <FileTypeIcon contentType={fileValue.contentType} />
                 <span className="flex flex-col">
-                  <span className="truncate text-sm text-text" style={{ maxWidth: 200 }} title={fileValue.name}>
+                  <span className="max-w-50 truncate text-sm text-text" title={fileValue.name}>
                     {fileValue.name}
                   </span>
                   <span className="text-xs text-text-secondary">{formatFileSize(fileValue.sizeBytes)}</span>

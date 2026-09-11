@@ -52,10 +52,7 @@ export function NavBadge({
     );
   }
   return (
-    <span
-      className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-text-inverse"
-      style={{ marginInlineStart: "auto" }}
-    >
+    <span className="ms-auto rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-text-inverse">
       {data.count > BADGE_CAP ? `${BADGE_CAP}+` : data.count}
     </span>
   );
