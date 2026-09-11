@@ -4,6 +4,7 @@ import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { useId, useState } from "react";
 import { Badge, type BadgeColor } from "./badge.js";
 import { fieldInputClassName } from "./field-input-styles.js";
+import { Icon } from "./icon.js";
 
 // manifest-spec.md's FieldOption object (§10), redefined locally since
 // packages/sdk must not depend on packages/app.
@@ -46,11 +47,15 @@ const CLEAR_BUTTON_STYLE: CSSProperties = {
 // FieldOption.color (manifest-spec.md §10) is a loosely-typed wire string,
 // not a statically-checked BadgeColor — Badge's own gray-fallback handles
 // an unrecognized value.
+// `className` (only ever "truncate", from the closed trigger's single-line
+// label — panel rows never pass one) applies to the label text alone, not
+// this wrapper, since "truncate" on a flex container doesn't ellipsize.
 function OptionLabel({ option, className }: { option: SelectOption; className?: string | undefined }): ReactNode {
   if (option.color) return <Badge label={option.label} color={option.color as BadgeColor} icon={option.icon} />;
   return (
-    <span data-icon={option.icon} className={className}>
-      {option.label}
+    <span className="flex min-w-0 items-center gap-2">
+      {option.icon && <Icon name={option.icon} size={14} className="shrink-0" aria-hidden="true" />}
+      <span className={className}>{option.label}</span>
     </span>
   );
 }
