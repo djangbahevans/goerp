@@ -6,7 +6,7 @@ import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import type { KeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell } from "./column-renderers.js";
@@ -178,6 +178,27 @@ export function columnRendersOwnLink(column: ListColumn): boolean {
   );
 }
 
+// A column with no declared manifest width would otherwise get whatever
+// width its own group's row content happens to produce — with
+// table-layout: fixed (needed so every group's independently-rendered
+// <table> aligns to the same column widths, not just its own content)
+// an undeclared width just divides the table's own width evenly, which
+// only overflows into data-table.md's horizontal-scroll treatment if the
+// table has some other width constraint pushing it wider than its
+// container. A fixed per-column default keeps both properties true:
+// every group's table sizes identically, and a manifest with enough
+// columns still grows past its container and scrolls, rather than being
+// squeezed to fit.
+const DEFAULT_COLUMN_WIDTH = 160;
+// A checkbox never needs a data column's width — a fixed, narrow width of
+// its own (same reasoning as DEFAULT_COLUMN_WIDTH above, just sized for a
+// single checkbox plus padding instead of arbitrary cell content).
+const CHECKBOX_COLUMN_WIDTH = 44;
+
+function cellStyle(column: ListColumn): CSSProperties {
+  return { width: DEFAULT_COLUMN_WIDTH, ...columnStyle(column) };
+}
+
 export function ListRenderer({ view, module, recordId, embedded, baseFilter }: ListRendererProps) {
   const listState = useListState(embedded, defaultSortOf(view));
   const columns = useVisibleColumns(view);
@@ -347,7 +368,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
           {groupRows(rows, listState.groupBy).map((group) => {
             const selectableIds = group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
             return (
-              <table aria-label={view.label} key={group.key} className="w-full table-fixed border-collapse">
+              <table aria-label={view.label} key={group.key} className="table-fixed border-collapse">
                 {listState.groupBy && (
                   <caption className="bg-bg-subtle p-3 text-left text-sm font-medium text-text-secondary">
                     {listState.groupBy} = {group.key}
@@ -358,7 +379,8 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                     {showSelection && (
                       <th
                         scope="col"
-                        className={`p-3 bg-surface ${stickyCheckboxClassName} ${scrolled ? "shadow-sm" : ""}`}
+                        style={{ width: CHECKBOX_COLUMN_WIDTH }}
+                        className={`p-3 text-left bg-surface ${stickyCheckboxClassName} ${scrolled ? "shadow-sm" : ""}`}
                       >
                         <input
                           type="checkbox"
@@ -379,7 +401,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                         <th
                           scope="col"
                           key={column.field}
-                          style={columnStyle(column)}
+                          style={cellStyle(column)}
                           className="p-3 text-left text-sm font-medium text-text-secondary"
                           aria-sort={
                             !column.sortable
@@ -435,6 +457,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                       >
                         {showSelection && (
                           <td
+                            style={{ width: CHECKBOX_COLUMN_WIDTH }}
                             className={`p-3 ${stickyCheckboxClassName} ${selected ? "bg-primary-subtle" : "bg-surface"} ${scrolled ? "shadow-sm" : ""}`}
                           >
                             {typeof row.id === "string" && (
@@ -457,7 +480,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                             showSelection && column.field === primaryColumnField && !columnRendersOwnLink(column);
                           const href = asRowLink ? rowClickHref(rowClickPath, row, rowClickParam) : undefined;
                           return (
-                            <td key={column.field} style={columnStyle(column)} className="p-3 text-base text-text">
+                            <td key={column.field} style={cellStyle(column)} className="p-3 text-base text-text">
                               {href ? <a href={href}>{content}</a> : content}
                             </td>
                           );
