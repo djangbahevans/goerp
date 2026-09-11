@@ -1,4 +1,8 @@
 :root {
+  /* Lets native form-control chrome (date/time picker icons, popovers)
+     follow the app's own theme instead of just OS prefers-color-scheme. */
+  color-scheme: light;
+
   /* Neutral base — shell-visual-design.md §4 */
   --goerp-color-bg: #f6f7f9;
   --goerp-color-bg-subtle: #eef0f3;
