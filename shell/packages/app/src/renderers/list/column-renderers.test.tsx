@@ -103,7 +103,7 @@ describe("renderCellContent", () => {
     expect(html.textContent).toBe(new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-1, "hours"));
   });
 
-  it("boolean: renders a check or cross with an accessible label", () => {
+  it("boolean: renders a StatusDot with an accessible label", () => {
     expect(
       cell({ field: "active", type: "boolean" }, { active: true }).querySelector("[aria-label='Yes']"),
     ).not.toBeNull();
@@ -159,7 +159,7 @@ describe("renderCellContent", () => {
     expect(html.querySelector(".fi-gh")).not.toBeNull();
   });
 
-  it("tags: renders one pill per array entry", () => {
+  it("tags: renders one gray Badge per array entry", () => {
     const html = cell({ field: "tags", type: "tags" }, { tags: ["vip", "eu"] });
     expect(html.textContent).toBe("vipeu");
   });

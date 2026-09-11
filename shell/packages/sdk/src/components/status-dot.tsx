@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 
 // Maps to the four functional status tokens (--color-success/-danger/
-// -warning/-info), not Badge's full 10-value decorative BadgeColor palette
-// — StatusDot signals status/liveness specifically, never a decorative
-// choice like Badge's 'teal'/'indigo'/'pink'.
-export type StatusDotColor = "green" | "red" | "orange" | "blue";
+// -warning/-info) plus a neutral "off"/false state, not Badge's full
+// 10-value decorative BadgeColor palette — StatusDot signals
+// status/liveness specifically, never a decorative choice like Badge's
+// 'teal'/'indigo'/'pink'.
+export type StatusDotColor = "green" | "red" | "orange" | "blue" | "gray";
 
 export interface StatusDotProps {
   color: StatusDotColor;
@@ -14,12 +15,17 @@ export interface StatusDotProps {
 }
 
 // docs/components/status-dot.md "Tokens Used" — the four functional status
-// tokens directly, unlike Badge's separate decorative palette.
+// tokens directly, unlike Badge's separate decorative palette, plus
+// --color-text-secondary for the neutral "gray" state (list-renderer.md's
+// `"boolean"` column type: a dot signaling "false" isn't itself a status,
+// so it takes the same neutral token the rest of the library uses for
+// secondary/inactive text rather than one of the four functional colors).
 const DOT_COLOR_CLASSES: Record<StatusDotColor, string> = {
   green: "bg-success",
   red: "bg-danger",
   orange: "bg-warning",
   blue: "bg-info",
+  gray: "bg-text-secondary",
 };
 
 export function StatusDot({ color, label, pulse = false }: StatusDotProps): ReactNode {

@@ -1,11 +1,4 @@
-import {
-  BADGE_COLOR_CLASSES,
-  Badge,
-  type BadgeColor,
-  CountryFlag,
-  formatRelativeTime,
-  UserAvatar,
-} from "@goerp/sdk/components";
+import { Badge, type BadgeColor, CountryFlag, formatRelativeTime, StatusDot, UserAvatar } from "@goerp/sdk/components";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
 
@@ -91,16 +84,6 @@ function formatDate(value: unknown, format: string | undefined, options: Intl.Da
   return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
-function Pill({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${className ?? BADGE_COLOR_CLASSES.gray}`}
-    >
-      {children}
-    </span>
-  );
-}
-
 interface FileFieldValue {
   url: string;
   id?: string;
@@ -168,15 +151,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       return formatRelativeTime(value, "");
 
     case "boolean":
-      return value ? (
-        <span role="img" aria-label="Yes">
-          ✓
-        </span>
-      ) : (
-        <span role="img" aria-label="No">
-          ✗
-        </span>
-      );
+      return value ? <StatusDot color="green" label="Yes" /> : <StatusDot color="gray" label="No" />;
 
     case "badge": {
       if (typeof value !== "string" && typeof value !== "number") return "";
@@ -214,10 +189,12 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       return typeof value === "string" && value ? <CountryFlag code={value} showName /> : "";
 
     case "tags":
+      // A plain string-array tag carries no per-tag color the way
+      // TagsField's resource-backed tags do — every Badge is 'gray'.
       return Array.isArray(value) ? (
         <span className="inline-flex flex-wrap gap-1">
           {value.map((tag) => (
-            <Pill key={String(tag)}>{String(tag)}</Pill>
+            <Badge key={String(tag)} label={String(tag)} color="gray" />
           ))}
         </span>
       ) : (
@@ -245,7 +222,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
         <span
           role="img"
           aria-label={value}
-          className="inline-block h-4 w-4 rounded border border-gray-300"
+          className="inline-block h-4 w-4 rounded border border-border"
           style={{ backgroundColor: value }}
         />
       ) : (

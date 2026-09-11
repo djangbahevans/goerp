@@ -19,6 +19,18 @@ import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js"
 // react-query cache entries those hooks read, the same way
 // notification-sheet.stories.tsx does, rather than mocking @goerp/sdk (not
 // possible in a real browser the way list-renderer.test.tsx's vi.mock is).
+//
+// row_click has no story of its own for the same reason: it resolves via
+// the real viewPathRegistry -> schemaRegistry.getSchema() -> a live
+// GET /_meta/schema fetch, with no prop-level seam to inject a fake schema
+// the way RelationPicker's client/registry props allow elsewhere in this
+// library. In Storybook's own environment that resolve() call fails
+// (no real backend), which ListRenderer already degrades gracefully from
+// (rowClickPath stays null, same as row_click being unset) — but that
+// means a row_click story here would only show an inert, non-clickable
+// row, indistinguishable from not having row_click at all. The real
+// resolve-and-navigate behavior is covered by list-renderer.test.tsx's
+// mocked viewPathRegistry instead.
 
 const MODULE = "sales";
 
@@ -139,8 +151,12 @@ const RELATION_LABELS_KEY: QueryKey = [
   ["c1", "c2"],
 ];
 
-function infiniteListKey(filter: Record<string, unknown>, cacheKeyPrefix: string | null = null): QueryKey {
-  return ["infinite-list", cacheKeyPrefix, "sales.order", filter, null, null];
+function infiniteListKey(
+  filter: Record<string, unknown>,
+  cacheKeyPrefix: string | null = null,
+  sort: string | null = null,
+): QueryKey {
+  return ["infinite-list", cacheKeyPrefix, "sales.order", filter, sort, null];
 }
 
 function pageOf(rows: Row[]): InfiniteData<{ data: Row[]; meta: { cursor: null; hasMore: false } }> {
@@ -218,11 +234,13 @@ export const Default: Story = {
     await expect(canvas.getByText("Active")).toBeInTheDocument(); // the boolean filter
     await expect(canvas.getByRole("button", { name: "New Order" })).toBeInTheDocument();
 
-    // BulkActions integration: selecting a row surfaces the export action.
+    // BulkActions integration: selecting a row surfaces the export action
+    // and the row itself picks up the --color-primary-subtle selected fill.
     const rowCheckboxes = canvas.getAllByRole("checkbox", { name: "Select row" });
     await userEvent.click(rowCheckboxes[0] as HTMLElement);
     await expect(canvas.getByText("1 selected")).toBeInTheDocument();
     await expect(canvas.getByRole("button", { name: "Export Selected" })).toBeInTheDocument();
+    await expect((rowCheckboxes[0] as HTMLElement).closest("tr")?.className).toContain("bg-primary-subtle");
   },
 };
 
@@ -245,8 +263,32 @@ function loadingClient(): QueryClient {
 export const Loading: Story = {
   decorators: [withListProviders(loadingClient(), "/")],
   play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('[data-skeleton="table"]')).toBeInTheDocument();
+  },
+};
+
+// A prefetch whose queryFn rejects settles the query to an error state —
+// same in-flight-query-dedup trick as loadingClient, but resolved instead
+// of left pending.
+function errorClient(): QueryClient {
+  const client = seededClient();
+  void client.prefetchInfiniteQuery({
+    queryKey: infiniteListKey({}),
+    queryFn: () => Promise.reject(new Error("Couldn't reach the server.")),
+    initialPageParam: undefined,
+    getNextPageParam: () => undefined,
+  });
+  return client;
+}
+
+export const ErrorState: Story = {
+  name: "load error, with a working Retry action",
+  decorators: [withListProviders(errorClient(), "/")],
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("status", { name: "Loading Orders" })).toBeInTheDocument();
+    const alert = await waitFor(() => canvas.getByRole("alert"));
+    await expect(within(alert).getByText("Couldn't reach the server.")).toBeInTheDocument();
+    await expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   },
 };
 
@@ -269,11 +311,45 @@ export const GroupedByState: Story = {
   decorators: [withListProviders(defaultClient(), "/?group_by=state")],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect((canvas.getByRole("combobox", { name: "Group by" }) as HTMLSelectElement).value).toBe("state");
+    // Select (select.tsx) is a Radix combobox trigger, not a native
+    // <select> — its current value shows as the trigger's own text.
+    await expect(canvas.getByRole("combobox", { name: "Group by" }).textContent).toBe("state");
     const tables = await waitFor(() => canvas.getAllByRole("table"));
     await expect(tables).toHaveLength(2);
     await expect(canvas.getByText("state = confirmed")).toBeInTheDocument();
     await expect(canvas.getByText("state = done")).toBeInTheDocument();
+  },
+};
+
+// Same fixture rows under every sort key the click cycle can reach, so
+// clicking through asc -> desc -> unsorted never gets stuck waiting on an
+// uncached (real, unmocked) network fetch.
+function sortableClient(): QueryClient {
+  const client = defaultClient();
+  client.setQueryData(infiniteListKey({}, null, "reference"), pageOf(ROWS));
+  client.setQueryData(infiniteListKey({}, null, "-reference"), pageOf(ROWS));
+  return client;
+}
+
+export const SortedHeader: Story = {
+  name: "sortable header: click cycles asc -> desc -> unsorted",
+  decorators: [withListProviders(sortableClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => canvas.getByRole("table", { name: "Orders" }));
+
+    const header = canvas.getByRole("columnheader", { name: "Reference" });
+    await expect(header.getAttribute("aria-sort")).toBe("none");
+
+    const sortButton = canvas.getByRole("button", { name: "Reference" });
+    await userEvent.click(sortButton);
+    await waitFor(() => expect(header.getAttribute("aria-sort")).toBe("ascending"));
+
+    await userEvent.click(sortButton);
+    await waitFor(() => expect(header.getAttribute("aria-sort")).toBe("descending"));
+
+    await userEvent.click(sortButton);
+    await waitFor(() => expect(header.getAttribute("aria-sort")).toBe("none"));
   },
 };
 

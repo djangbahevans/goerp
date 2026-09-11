@@ -6,19 +6,31 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { computeDefaultFilters, groupRows, ListRenderer } from "./list-renderer.js";
+import {
+  computeDefaultFilters,
+  groupRows,
+  ListRenderer,
+  nextSortValue,
+  rowClickHref,
+  sortDirectionOf,
+} from "./list-renderer.js";
 import type { ListViewDeclaration } from "./list-view-types.js";
 
-const { useInfiniteListMock, useRelationLabelsMock } = vi.hoisted(() => ({
+const { useInfiniteListMock, useRelationLabelsMock, resolveViewPathMock } = vi.hoisted(() => ({
   useInfiniteListMock: vi.fn(),
   useRelationLabelsMock: vi.fn(() => new Map()),
+  resolveViewPathMock: vi.fn(async (): Promise<string | null> => "/contacts/{id}"),
 }));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
   return { ...actual, useInfiniteList: useInfiniteListMock, useRelationLabels: useRelationLabelsMock };
+});
+vi.mock("@goerp/sdk/schema", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
+  return { ...actual, viewPathRegistry: { resolve: resolveViewPathMock } };
 });
 
 afterEach(() => {
@@ -26,6 +38,7 @@ afterEach(() => {
   useInfiniteListMock.mockReset();
   useRelationLabelsMock.mockClear();
   useRelationLabelsMock.mockImplementation(() => new Map());
+  resolveViewPathMock.mockClear();
 });
 
 const view: ListViewDeclaration = {
@@ -74,6 +87,47 @@ async function renderListRenderer(
 
 const fullAccess = permissionWrapper({
   "contacts.contact": { name: { read: true, write: true }, ssn: { read: true, write: true } },
+});
+
+describe("sortDirectionOf / nextSortValue", () => {
+  it("reports undefined for an unsorted or differently-sorted column", () => {
+    expect(sortDirectionOf(undefined, "name")).toBeUndefined();
+    expect(sortDirectionOf("other", "name")).toBeUndefined();
+  });
+
+  it("reports asc for the bare field name, desc for the '-'-prefixed one", () => {
+    expect(sortDirectionOf("name", "name")).toBe("asc");
+    expect(sortDirectionOf("-name", "name")).toBe("desc");
+  });
+
+  it("cycles asc -> desc -> unsorted", () => {
+    expect(nextSortValue(undefined, "name")).toBe("name");
+    expect(nextSortValue("name", "name")).toBe("-name");
+    expect(nextSortValue("-name", "name")).toBeUndefined();
+  });
+
+  it("starting a new column's sort doesn't matter what another column was sorted by", () => {
+    expect(nextSortValue("-other", "name")).toBe("name");
+  });
+});
+
+describe("rowClickHref", () => {
+  it("returns undefined when there's no resolved path", () => {
+    expect(rowClickHref(null, { id: "1" }, "id")).toBeUndefined();
+  });
+
+  it("substitutes the {id} token with the row's row_click_param field, module-linked", () => {
+    expect(rowClickHref("/contacts/{id}", { id: "01j" }, "id")).toBe("/_m/contacts/01j");
+  });
+
+  it("reads the record id from a non-default row_click_param field", () => {
+    expect(rowClickHref("/contacts/{id}", { id: "01j", uuid: "abc" }, "uuid")).toBe("/_m/contacts/abc");
+  });
+
+  it("returns undefined when the row_click_param field is missing or non-scalar", () => {
+    expect(rowClickHref("/contacts/{id}", { name: "Ada" }, "id")).toBeUndefined();
+    expect(rowClickHref("/contacts/{id}", { id: { nested: true } }, "id")).toBeUndefined();
+  });
 });
 
 describe("groupRows", () => {
@@ -170,7 +224,7 @@ describe("ListRenderer", () => {
 
     await renderListRenderer({}, fullAccess);
 
-    expect(screen.getByRole("status").textContent).toContain("Loading");
+    expect(document.querySelector('[data-skeleton="table"]')).toBeTruthy();
   });
 
   it("shows an error state with a retry action", async () => {
@@ -207,7 +261,7 @@ describe("ListRenderer", () => {
 
     await renderListRenderer({}, fullAccess);
 
-    expect(screen.getByRole("status").textContent).toContain("No contacts found");
+    expect(screen.getByRole("heading", { name: "No contacts found." })).toBeTruthy();
   });
 
   it("renders rows and hides a column the user lacks field-level read access to", async () => {
@@ -407,7 +461,9 @@ describe("ListRenderer", () => {
 
     await renderListRenderer({}, fullAccess, "/?group_by=state", { ...view, group_by_options: ["state"] });
 
-    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("state");
+    // Select (select.tsx) is a Radix combobox trigger, not a native
+    // <select> — its current value shows as the trigger's own text.
+    expect(screen.getByRole("combobox").textContent).toBe("state");
     expect(screen.getAllByRole("table")).toHaveLength(2);
     expect(screen.getByText("state = draft")).toBeTruthy();
     expect(screen.getByText("state = done")).toBeTruthy();
@@ -603,5 +659,186 @@ describe("ListRenderer", () => {
     });
 
     expect(router.state.location.search).toEqual({ "filter[type]": "company" });
+  });
+
+  it("sortable header: clicking cycles asc -> desc -> unsorted, updating aria-sort each time", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/", {
+      name: view.name,
+      type: view.type,
+      resource: view.resource,
+      label: view.label,
+      columns: [{ field: "name", label: "Name", sortable: true }],
+    });
+
+    expect(screen.getByRole("columnheader").getAttribute("aria-sort")).toBe("none");
+
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+    await waitFor(() =>
+      expect(useInfiniteListMock).toHaveBeenLastCalledWith(
+        "contacts.contact",
+        expect.objectContaining({ sort: "name" }),
+      ),
+    );
+    expect(screen.getByRole("columnheader").getAttribute("aria-sort")).toBe("ascending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+    await waitFor(() =>
+      expect(useInfiniteListMock).toHaveBeenLastCalledWith(
+        "contacts.contact",
+        expect.objectContaining({ sort: "-name" }),
+      ),
+    );
+    expect(screen.getByRole("columnheader").getAttribute("aria-sort")).toBe("descending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+    await waitFor(() => expect(screen.getByRole("columnheader").getAttribute("aria-sort")).toBe("none"));
+  });
+
+  it("row_click: clicking a row with no selection checkbox navigates to the resolved, id-substituted path", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    const { router } = await renderListRenderer({}, fullAccess, "/", { ...view, row_click: "contacts_form" });
+
+    await waitFor(() => expect(resolveViewPathMock).toHaveBeenCalledWith("contacts_form", "contacts"));
+
+    const row = await screen.findByRole("row", { name: /Ada/ });
+    expect(row.getAttribute("tabindex")).toBe("0");
+    fireEvent.click(row);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/_m/contacts/1"));
+  });
+
+  it("row_click: with a selection checkbox present, the primary column becomes the link instead of a row-level click target", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      row_click: "contacts_form",
+      columns: [{ field: "name", label: "Name", primary: true }],
+      bulk_actions: [{ label: "Export", type: "export", route: "contacts.exportContacts" }],
+    });
+
+    const link = await screen.findByRole("link", { name: "Ada" });
+    expect(link.getAttribute("href")).toBe("/_m/contacts/1");
+
+    const row = screen.getByRole("row", { name: /Ada/ });
+    expect(row.getAttribute("tabindex")).toBeNull();
+  });
+
+  it("selected row: bg-primary-subtle wins, not layered alongside the default bg-surface", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      bulk_actions: [{ label: "Export", type: "export", route: "contacts.exportContacts" }],
+    });
+
+    const row = screen.getByRole("row", { name: /Ada/ });
+    expect(row.className).toContain("bg-surface");
+    expect(row.className).not.toContain("bg-primary-subtle");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select row" }));
+
+    expect(row.className).toContain("bg-primary-subtle");
+    expect(row.className).not.toContain("bg-surface");
+  });
+
+  it("row_click: a primary column that already renders its own link (e.g. email) isn't wrapped in a second, nesting <a>", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", email: "ada@example.com" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer(
+      {},
+      permissionWrapper({ "contacts.contact": { email: { read: true, write: true } } }),
+      "/",
+      {
+        ...view,
+        row_click: "contacts_form",
+        columns: [{ field: "email", label: "Email", type: "email", primary: true }],
+        bulk_actions: [{ label: "Export", type: "export", route: "contacts.exportContacts" }],
+      },
+    );
+
+    await waitFor(() => expect(resolveViewPathMock).toHaveBeenCalled());
+
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe("mailto:ada@example.com");
+  });
+
+  it("row_click: warns when a selection checkbox is present but no column is marked primary", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      row_click: "contacts_form",
+      columns: [{ field: "name", label: "Name" }],
+      bulk_actions: [{ label: "Export", type: "export", route: "contacts.exportContacts" }],
+    });
+
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining("no column marked primary: true")));
+    expect(screen.queryByRole("link", { name: "Ada" })).toBeNull();
+
+    warn.mockRestore();
   });
 });

@@ -1,7 +1,13 @@
 import type { FilterRange } from "@goerp/sdk";
+import { ActionButton, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
+import { moduleLink } from "@goerp/sdk/nav";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
-import { useEffect, useMemo, useRef } from "react";
+import { viewPathRegistry } from "@goerp/sdk/schema";
+import { useNavigate } from "@tanstack/react-router";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import type { KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
@@ -124,10 +130,91 @@ export function groupRows(rows: Row[], groupBy: string | undefined): RowGroup[] 
   return order.map((key) => ({ key, rows: byKey.get(key) ?? [] }));
 }
 
+export type SortDirection = "asc" | "desc";
+
+// listState.sort is a single "field" (asc) or "-field" (desc) string —
+// only one column can be the active sort at a time.
+export function sortDirectionOf(sort: string | undefined, field: string): SortDirection | undefined {
+  if (sort === field) return "asc";
+  if (sort === `-${field}`) return "desc";
+  return undefined;
+}
+
+// asc -> desc -> unsorted, the conventional three-state cycle for a
+// sortable column header.
+export function nextSortValue(sort: string | undefined, field: string): string | undefined {
+  const direction = sortDirectionOf(sort, field);
+  if (direction === undefined) return field;
+  if (direction === "asc") return `-${field}`;
+  return undefined;
+}
+
+// manifest-spec.md's row_click/row_click_param: `row_click` resolves via
+// viewPathRegistry to a RouteSchema path (shell-architecture.md's
+// expanded-path convention, e.g. "/contacts/{id}") — a bare `{id}` token,
+// not the `{record.field}` templating column.href/renderHref use for a
+// different purpose (manifest-driven href/format strings). `row_click_param`
+// only says which row field supplies that id value, default "id".
+export function rowClickHref(resolvedPath: string | null, row: Row, param: string): string | undefined {
+  if (!resolvedPath) return undefined;
+  const idValue = row[param];
+  if (typeof idValue !== "string" && typeof idValue !== "number") return undefined;
+  return moduleLink(resolvedPath.replace("{id}", String(idValue)));
+}
+
+// column-renderers.tsx's renderCellContent already wraps these types (or
+// any column with `href` set) in their own <a> — wrapping the primary
+// column's cell in a second, row-click <a> on top would nest anchors,
+// which browsers parse by implicitly closing the outer one where the
+// inner starts, breaking both links. The primary column stays a plain
+// cell in this case; row_click has no link to attach to for that row.
+export function columnRendersOwnLink(column: ListColumn): boolean {
+  return (
+    column.href !== undefined ||
+    column.type === "email" ||
+    column.type === "phone" ||
+    column.type === "url" ||
+    column.type === "file"
+  );
+}
+
 export function ListRenderer({ view, module, recordId, embedded, baseFilter }: ListRendererProps) {
   const listState = useListState(embedded, defaultSortOf(view));
   const columns = useVisibleColumns(view);
   const selection = useSelection();
+  const navigate = useNavigate();
+  const groupBySelectId = useId();
+  // data-table.md's horizontal-scroll treatment, extended here so every
+  // group's <table> shares one scroll position instead of each scrolling
+  // independently — plus a sticky, shadowed selection-checkbox column
+  // (list-renderer.md's own extension) so selecting rows doesn't require
+  // scrolling back to the start.
+  const [scrolled, setScrolled] = useState(false);
+
+  const rowClickView = view.row_click;
+  const [rowClickPath, setRowClickPath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!rowClickView) {
+      setRowClickPath(null);
+      return;
+    }
+    let cancelled = false;
+    viewPathRegistry
+      .resolve(rowClickView, module)
+      .then((path) => {
+        if (!cancelled) setRowClickPath(path);
+      })
+      .catch(() => {
+        // row_click degrades to "no navigation" rather than crashing the
+        // whole list over a schema fetch failure — same posture as an
+        // unregistered relation resource elsewhere in this renderer.
+        if (!cancelled) setRowClickPath(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rowClickView, module]);
+  const rowClickParam = view.row_click_param ?? "id";
 
   // Applied once, only when the view opens with no filter[...] params
   // already present — a later, user-driven clear-to-empty must not
@@ -147,6 +234,26 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
   // manifest-spec.md: `selectable` defaults true, but a checkbox column
   // with nothing to bulk-act on is just clutter.
   const showSelection = view.selectable !== false && bulkActions.length > 0;
+
+  // A row that also carries a selection checkbox can't claim its own
+  // tabIndex={0} click target too (the checkbox and the row-navigate
+  // action would compete for the same Enter/Space press) — the
+  // `primary: true` column's cell becomes the real link instead. See
+  // docs/components/list-renderer.md's row-interaction States entry.
+  const primaryColumnField = columns.find((column) => column.primary)?.field;
+  const wholeRowClickable = Boolean(rowClickPath) && !showSelection;
+  // manifest-spec.md documents `primary` and `row_click` independently,
+  // with no stated dependency between them — but with a selection
+  // checkbox present, row_click has no cell to attach a link to without a
+  // primary column, and silently doing nothing over a manifest oversight
+  // like that is worth a dev-time signal rather than staying invisible.
+  useEffect(() => {
+    if (showSelection && rowClickPath && primaryColumnField === undefined) {
+      console.warn(
+        `ListRenderer: view "${view.name}" declares row_click but has no column marked primary: true — with a selection checkbox present, there's no cell for row_click to navigate from.`,
+      );
+    }
+  }, [showSelection, rowClickPath, primaryColumnField, view.name]);
 
   // view-system.md's embedded-rendering contract: the locked base filter
   // always wins over user-driven state, never the other way around.
@@ -177,26 +284,39 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
   const relationLabels = useRelationLabels(relationBatchSpecs(`${module}.${view.name}`, columns, pages));
 
   if (isLoading) {
-    return (
-      <div role="status" aria-label={`Loading ${view.label}`}>
-        Loading…
-      </div>
-    );
+    return <Skeleton type="table" columns={columns.length} />;
   }
 
   if (isError) {
     return (
-      <div role="alert">
-        <p>Couldn't load {view.label}.</p>
-        {error && <p>{error.message}</p>}
-        <button type="button" onClick={() => refetch()}>
+      <div role="alert" className="flex flex-col items-center gap-2 py-6 text-center">
+        <Icon name="circle-alert" size={20} className="text-danger" aria-hidden="true" />
+        <p className="text-text">Couldn't load {view.label}.</p>
+        {error && <p className="text-sm text-text-secondary">{error.message}</p>}
+        <ActionButton
+          variant="secondary"
+          onClick={() => {
+            void refetch();
+          }}
+        >
           Retry
-        </button>
+        </ActionButton>
       </div>
     );
   }
 
   const groupByOptions = view.group_by_options ?? [];
+  const groupBySelectOptions = [
+    { value: "", label: "None" },
+    ...groupByOptions.map((field) => ({ value: field, label: field })),
+  ];
+
+  const stickyCheckboxClassName = "sticky left-0 z-10";
+
+  function navigateToRow(row: Row) {
+    const href = rowClickHref(rowClickPath, row, rowClickParam);
+    if (href) void navigate({ to: href });
+  }
 
   return (
     <>
@@ -204,90 +324,163 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
       <ListActions actions={view.actions ?? []} module={module} />
       {showSelection && <BulkActions actions={bulkActions} selectedIds={selectedIds} clearSelection={clearSelection} />}
       {groupByOptions.length > 0 && (
-        <label>
+        <label htmlFor={groupBySelectId} className="flex items-center gap-2 text-sm text-text-secondary">
           Group by
-          <select
+          <Select
+            id={groupBySelectId}
+            options={groupBySelectOptions}
             value={listState.groupBy ?? ""}
-            onChange={(event) => listState.setGroupBy(event.target.value || undefined)}
-          >
-            <option value="">None</option>
-            {groupByOptions.map((field) => (
-              <option key={field} value={field}>
-                {field}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => {
+              const next = Array.isArray(value) ? value[0] : value;
+              listState.setGroupBy(next !== undefined && next !== "" ? next : undefined);
+            }}
+          />
         </label>
       )}
       {rows.length === 0 ? (
-        <div role="status">No {view.label.toLowerCase()} found.</div>
+        <EmptyState
+          title={view.empty_state?.title ?? `No ${view.label.toLowerCase()} found.`}
+          {...(view.empty_state?.description !== undefined ? { description: view.empty_state.description } : {})}
+        />
       ) : (
-        groupRows(rows, listState.groupBy).map((group) => {
-          const selectableIds = group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
-          return (
-            <table aria-label={view.label} key={group.key}>
-              {listState.groupBy && (
-                <caption>
-                  {listState.groupBy} = {group.key}
-                </caption>
-              )}
-              <thead>
-                <tr>
-                  {showSelection && (
-                    <th scope="col">
-                      <input
-                        type="checkbox"
-                        aria-label={
-                          listState.groupBy ? `Select all in ${group.key}` : `Select all ${view.label.toLowerCase()}`
-                        }
-                        checked={selectableIds.length > 0 && selectableIds.every((id) => selection.selectedIds.has(id))}
-                        onChange={() => selection.toggleAll(selectableIds)}
-                      />
-                    </th>
-                  )}
-                  {columns.map((column) => (
-                    <th scope="col" key={column.field} style={columnStyle(column)}>
-                      {column.label ?? column.field}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {group.rows.map((row, index) => (
-                  <tr key={(row.id as string | undefined) ?? index}>
+        <div className="overflow-x-auto" onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}>
+          {groupRows(rows, listState.groupBy).map((group) => {
+            const selectableIds = group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+            return (
+              <table aria-label={view.label} key={group.key} className="w-full border-collapse">
+                {listState.groupBy && (
+                  <caption className="bg-bg-subtle p-3 text-left text-sm font-medium text-text-secondary">
+                    {listState.groupBy} = {group.key}
+                  </caption>
+                )}
+                <thead>
+                  <tr className="border-b border-border bg-surface">
                     {showSelection && (
-                      <td>
-                        {typeof row.id === "string" && (
-                          <input
-                            type="checkbox"
-                            aria-label="Select row"
-                            checked={selection.selectedIds.has(row.id)}
-                            onChange={() => selection.toggle(row.id as string)}
-                          />
-                        )}
-                      </td>
+                      <th
+                        scope="col"
+                        className={`p-3 bg-surface ${stickyCheckboxClassName} ${scrolled ? "shadow-sm" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={
+                            listState.groupBy ? `Select all in ${group.key}` : `Select all ${view.label.toLowerCase()}`
+                          }
+                          checked={
+                            selectableIds.length > 0 && selectableIds.every((id) => selection.selectedIds.has(id))
+                          }
+                          onChange={() => selection.toggleAll(selectableIds)}
+                          style={{ accentColor: "var(--color-primary)" }}
+                        />
+                      </th>
                     )}
                     {columns.map((column) => {
-                      const rawValue = row[column.field];
-                      const relationLabel =
-                        typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
+                      const sortDirection = column.sortable ? sortDirectionOf(listState.sort, column.field) : undefined;
                       return (
-                        <td key={column.field} style={columnStyle(column)}>
-                          {renderCell(column, row, relationLabel !== undefined ? { relationLabel } : {})}
-                        </td>
+                        <th
+                          scope="col"
+                          key={column.field}
+                          style={columnStyle(column)}
+                          className="p-3 text-left text-sm font-medium text-text-secondary"
+                          aria-sort={
+                            !column.sortable
+                              ? undefined
+                              : sortDirection === undefined
+                                ? "none"
+                                : sortDirection === "asc"
+                                  ? "ascending"
+                                  : "descending"
+                          }
+                        >
+                          {column.sortable ? (
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 hover:bg-surface-hover"
+                              onClick={() => listState.setSort(nextSortValue(listState.sort, column.field))}
+                            >
+                              {column.label ?? column.field}
+                              {sortDirection === "asc" && <ChevronUp size={14} aria-hidden="true" />}
+                              {sortDirection === "desc" && <ChevronDown size={14} aria-hidden="true" />}
+                            </button>
+                          ) : (
+                            (column.label ?? column.field)
+                          )}
+                        </th>
                       );
                     })}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          );
-        })
+                </thead>
+                <tbody>
+                  {group.rows.map((row, index) => {
+                    const selected = typeof row.id === "string" && selection.selectedIds.has(row.id);
+                    const rowHandleActivate = wholeRowClickable ? () => navigateToRow(row) : undefined;
+                    return (
+                      <tr
+                        key={(row.id as string | undefined) ?? index}
+                        className={`border-b border-border ${selected ? "bg-primary-subtle" : "bg-surface"} ${
+                          rowHandleActivate
+                            ? "cursor-pointer hover:bg-surface-hover focus-visible:[outline:2px_solid_var(--color-primary)] focus-visible:-outline-offset-2"
+                            : ""
+                        }`}
+                        tabIndex={rowHandleActivate ? 0 : undefined}
+                        onClick={rowHandleActivate}
+                        onKeyDown={
+                          rowHandleActivate
+                            ? (event: KeyboardEvent<HTMLTableRowElement>) => {
+                                if (event.key !== "Enter" && event.key !== " ") return;
+                                event.preventDefault();
+                                rowHandleActivate();
+                              }
+                            : undefined
+                        }
+                      >
+                        {showSelection && (
+                          <td
+                            className={`p-3 ${stickyCheckboxClassName} ${selected ? "bg-primary-subtle" : "bg-surface"} ${scrolled ? "shadow-sm" : ""}`}
+                          >
+                            {typeof row.id === "string" && (
+                              <input
+                                type="checkbox"
+                                aria-label="Select row"
+                                checked={selection.selectedIds.has(row.id)}
+                                onChange={() => selection.toggle(row.id as string)}
+                                style={{ accentColor: "var(--color-primary)" }}
+                              />
+                            )}
+                          </td>
+                        )}
+                        {columns.map((column) => {
+                          const rawValue = row[column.field];
+                          const relationLabel =
+                            typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
+                          const content = renderCell(column, row, relationLabel !== undefined ? { relationLabel } : {});
+                          const asRowLink =
+                            showSelection && column.field === primaryColumnField && !columnRendersOwnLink(column);
+                          const href = asRowLink ? rowClickHref(rowClickPath, row, rowClickParam) : undefined;
+                          return (
+                            <td key={column.field} style={columnStyle(column)} className="p-3 text-base text-text">
+                              {href ? <a href={href}>{content}</a> : content}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            );
+          })}
+        </div>
       )}
       {hasNextPage && (
-        <button type="button" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
-          {isFetchingNextPage ? "Loading…" : "Load more"}
-        </button>
+        <ActionButton
+          variant="secondary"
+          loading={isFetchingNextPage}
+          onClick={() => {
+            void fetchNextPage();
+          }}
+        >
+          Load more
+        </ActionButton>
       )}
     </>
   );
