@@ -84,7 +84,7 @@ export function KanbanColumn({
       </div>
 
       {/* overflow-x explicit "hidden": the CSS spec force-computes a "visible" x-axis to "auto" next to overflow-y-auto, which turned an open card's ActionMenu into an unwanted horizontal scrollbar. */}
-      <div className="flex max-h-full flex-col gap-2 overflow-y-auto" style={{ overflowX: "hidden" }}>
+      <div className="flex max-h-full flex-col gap-2 overflow-x-hidden overflow-y-auto">
         {group.cards.length === 0 ? (
           <EmptyState title={emptyMessage} size="compact" />
         ) : (
