@@ -347,7 +347,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
           {groupRows(rows, listState.groupBy).map((group) => {
             const selectableIds = group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
             return (
-              <table aria-label={view.label} key={group.key} className="w-full border-collapse">
+              <table aria-label={view.label} key={group.key} className="w-full table-fixed border-collapse">
                 {listState.groupBy && (
                   <caption className="bg-bg-subtle p-3 text-left text-sm font-medium text-text-secondary">
                     {listState.groupBy} = {group.key}
