@@ -28,6 +28,11 @@ describe("DataTable", () => {
     expect(screen.getByText("kwame@example.com")).toBeTruthy();
   });
 
+  it("wraps the table in its own horizontal-scroll container", () => {
+    const { container } = render(<DataTable columns={columns} data={contacts} keyExtractor={(c) => c.id} />);
+    expect(container.querySelector(".overflow-x-auto > table")).toBeTruthy();
+  });
+
   it("shows a skeleton sized to the column count while loading", () => {
     render(<DataTable columns={columns} data={contacts} keyExtractor={(c) => c.id} isLoading />);
     expect(screen.queryByText("Ama Boateng")).toBeNull();
