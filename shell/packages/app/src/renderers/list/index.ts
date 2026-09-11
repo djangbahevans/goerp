@@ -2,7 +2,7 @@ export type { RenderCellOptions } from "./column-renderers.js";
 export { renderCell, renderCellContent, renderHref } from "./column-renderers.js";
 export type { ListActionsProps } from "./list-actions.js";
 export { ListActions } from "./list-actions.js";
-export type { BooleanFilterInputProps, ListFiltersProps } from "./list-filters.js";
+export type { ListFiltersProps } from "./list-filters.js";
 export { BooleanFilterInput, booleanFilterState, ListFilters } from "./list-filters.js";
 export type { ListRendererProps, RowGroup } from "./list-renderer.js";
 export { groupRows, ListRenderer } from "./list-renderer.js";
