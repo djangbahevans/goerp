@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
-import type { ResourceRegistryEntry } from "../schema/index.js";
+import type { ResourceMetadataEntry } from "../schema/index.js";
 import { RelationPicker } from "./relation-picker.js";
 
 const ROWS = [
@@ -13,10 +13,14 @@ function client(rows = ROWS) {
   return { get: async <T,>() => ({ data: rows }) as T };
 }
 
-// Only listPath is read by RelationPicker — the rest of ResourceRegistryEntry
-// is irrelevant here, so this stands in for the real registry's resolve().
-function registry(listPath = "/contacts") {
-  return { resolve: async () => ({ listPath }) as unknown as ResourceRegistryEntry };
+// Only listRoute/labelField/searchParam are read by RelationPicker — the
+// rest of ResourceMetadataEntry is irrelevant here, so this stands in for
+// the real registry's resolve().
+function registry(listRoute = "GET /contacts") {
+  return {
+    resolve: async () =>
+      ({ listRoute, labelField: "display_name", searchParam: "q" }) as unknown as ResourceMetadataEntry,
+  };
 }
 
 const meta: Meta<typeof RelationPicker> = {
@@ -115,14 +119,14 @@ export const NoResults: Story = {
 };
 
 // manifest-spec.md §8b: an unloaded target module degrades to this state
-// rather than erroring — resourceRegistry.resolve() rejects for an unknown
-// resource.
+// rather than erroring — resourceMetadataRegistry.resolve() resolves
+// `undefined` for an unregistered resource.
 export const UnregisteredResource: Story = {
   args: {
     resource: "uninstalled.module",
     value: null,
     registry: {
-      resolve: (): Promise<ResourceRegistryEntry> => Promise.reject(new Error('unknown resource "uninstalled.module"')),
+      resolve: (): Promise<ResourceMetadataEntry | undefined> => Promise.resolve(undefined),
     },
   },
   play: async ({ canvasElement }) => {

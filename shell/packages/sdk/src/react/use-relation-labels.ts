@@ -1,38 +1,49 @@
 import { useQueries } from "@tanstack/react-query";
 import { apiClient } from "../http/index.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
-import type { ResourceRegistry } from "../schema/index.js";
-import { resourceRegistry } from "../schema/index.js";
+import type { BatchLoaderRegistry, ResourceMetadataRegistry } from "../schema/index.js";
+import { batchLoaderRegistry, resourceListPath, resourceMetadataRegistry } from "../schema/index.js";
 
-// manifest-spec.md's relation-column batch-fetch fallback (used when no
-// `display_field` is set): one request per distinct resource/labelField
-// pair, `filter[id][]=...`, resolving the display label for each id.
-// Scoped to an explicit `labelField` only — auto-resolving the resource's
-// own default label field needs the model/view registry goerp#636 already
-// deferred to backlog #674.
+// manifest-spec.md §8b strategies 2/3. `view`, when set, is looked up in
+// BatchLoaderRegistry as `${view}.${key}` — scoped per column, since a view
+// can have several relation columns each needing a different loader.
+// `labelField` overrides the registry default, matching
+// ListColumn.resource_label_field.
 export interface RelationBatchSpec {
   key: string;
   resource: string;
-  labelField: string;
+  labelField?: string;
+  view?: string;
   ids: string[];
 }
 
 export function createRelationLabelsQueryOptions(
   spec: RelationBatchSpec,
-  registry: Pick<ResourceRegistry, "resolve"> = resourceRegistry,
+  registry: Pick<ResourceMetadataRegistry, "resolve"> = resourceMetadataRegistry,
   client: Pick<APIClient, "get"> = apiClient,
+  batchLoaders: Pick<BatchLoaderRegistry, "has" | "resolve"> = batchLoaderRegistry,
 ) {
   const uniqueIds = [...new Set(spec.ids)].filter(Boolean).sort();
+  const loaderKey = spec.view ? `${spec.view}.${spec.key}` : undefined;
   return {
-    queryKey: ["relation-labels", spec.resource, spec.labelField, uniqueIds] as const,
+    queryKey: ["relation-labels", spec.resource, spec.labelField ?? "", loaderKey ?? "", uniqueIds] as const,
     queryFn: async (): Promise<Record<string, string>> => {
+      if (loaderKey && batchLoaders.has(loaderKey)) {
+        const labels = await batchLoaders.resolve(loaderKey)(uniqueIds);
+        return Object.fromEntries(labels);
+      }
+
       const entry = await registry.resolve(spec.resource);
-      const response = await client.get<PagedResponse<Record<string, unknown>>>(entry.listPath, {
-        params: { "filter[id][]": uniqueIds, limit: uniqueIds.length },
+      const path = entry && resourceListPath(entry);
+      if (!entry || !path) return {}; // unregistered/unloaded module — caller falls back to the raw value.
+
+      const labelField = spec.labelField ?? entry.labelField;
+      const response = await client.get<PagedResponse<Record<string, unknown>>>(path, {
+        params: { "filter[id][in]": uniqueIds.join(","), limit: uniqueIds.length },
       });
       const labels: Record<string, string> = {};
       for (const row of response.data) {
-        if (typeof row.id === "string") labels[row.id] = String(row[spec.labelField] ?? "");
+        if (typeof row.id === "string") labels[row.id] = String(row[labelField] ?? "");
       }
       return labels;
     },

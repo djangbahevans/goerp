@@ -2,8 +2,8 @@ import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { APIClient } from "../http/index.js";
 import { apiClient } from "../http/index.js";
-import type { ResourceRegistry } from "../schema/index.js";
-import { resourceRegistry } from "../schema/index.js";
+import type { ResourceMetadataRegistry } from "../schema/index.js";
+import { resourceListPath, resourceMetadataRegistry } from "../schema/index.js";
 import { EmptyState } from "./empty-state.js";
 import { fieldInputClassName } from "./field-input-styles.js";
 import type { RelationValue } from "./relation-field.js";
@@ -11,11 +11,6 @@ import { Skeleton } from "./skeleton.js";
 
 export type { RelationValue } from "./relation-field.js";
 
-// manifest-spec.md §8b: "The search_param (default 'q')" — no registry
-// mechanism resolves a per-resource override today (ResourceRegistryEntry
-// in code has no searchParam field yet, unlike the doc's aspirational
-// shape), so this is the one value ever sent.
-const SEARCH_PARAM = "q";
 const PAGE_SIZE = 100;
 // relation-picker.md's own Open Question #1: no debounce timing is
 // specified anywhere — this is a standard short debounce, not a
@@ -39,15 +34,15 @@ interface Row {
 }
 
 type PickerClient = Pick<APIClient, "get">;
-type PickerRegistry = Pick<ResourceRegistry, "resolve">;
+type PickerRegistry = Pick<ResourceMetadataRegistry, "resolve">;
 
 export interface RelationPickerProps {
   id?: string | undefined;
   resource: string;
-  // No default resolved from the registry yet — ResourceRegistryEntry
-  // doesn't carry a labelField today (same gap field-renderers.tsx's
-  // ResourceSelect already defers to goerp#671), so callers must supply it.
-  labelField: string;
+  // Overrides the registry's resolved labelField for this picker
+  // specifically (matches ListColumn.resource_label_field's override
+  // semantics) — omit to use the resource's registry default.
+  labelField?: string | undefined;
   resourceFilter?: Record<string, unknown> | undefined;
   value: RelationValue | RelationValue[] | null;
   onChange: (value: RelationValue | RelationValue[] | null) => void;
@@ -60,10 +55,16 @@ export interface RelationPickerProps {
   registry?: PickerRegistry | undefined;
 }
 
+// view-system.md §4: a scalar value is `filter[key]=v`; a non-empty array
+// comma-joins under `[in]` instead of repeating the key.
 function flattenResourceFilter(filter: Record<string, unknown> | undefined): Record<string, unknown> {
   const flat: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(filter ?? {})) {
-    flat[`filter[${key}]`] = value;
+    if (Array.isArray(value)) {
+      if (value.length > 0) flat[`filter[${key}][in]`] = value.join(",");
+    } else {
+      flat[`filter[${key}]`] = value;
+    }
   }
   return flat;
 }
@@ -75,6 +76,7 @@ function toRelationValue(row: Row, labelField: string): RelationValue {
 interface QueryResult {
   status: "loading" | "error" | "success";
   rows: Row[];
+  labelField: string;
 }
 
 // No shared debounce hook exists in this codebase — use-record.ts's
@@ -93,13 +95,18 @@ function useDebouncedValue(value: string, delayMs: number): string {
 // with async data — TagsField's options — takes them as a prop instead).
 function useSearchQuery(
   resource: string,
+  labelFieldOverride: string | undefined,
   query: string,
   resourceFilter: Record<string, unknown> | undefined,
   enabled: boolean,
   client: PickerClient,
   registry: PickerRegistry,
 ): QueryResult {
-  const [result, setResult] = useState<QueryResult>({ status: "loading", rows: [] });
+  const [result, setResult] = useState<QueryResult>({
+    status: "loading",
+    rows: [],
+    labelField: labelFieldOverride ?? "",
+  });
   const requestId = useRef(0);
   // A caller passing an inline object literal (`resourceFilter={{...}}`)
   // gets a new reference every render — memoizing on its serialized value
@@ -112,24 +119,27 @@ function useSearchQuery(
   useEffect(() => {
     if (!enabled) return;
     const thisRequest = ++requestId.current;
-    setResult((prev) => ({ status: "loading", rows: prev.rows }));
+    setResult((prev) => ({ status: "loading", rows: prev.rows, labelField: prev.labelField }));
 
     (async () => {
       try {
         const entry = await registry.resolve(resource);
-        const response = await client.get<{ data: Row[] }>(entry.listPath, {
+        const path = entry && resourceListPath(entry);
+        if (!entry || !path) throw new Error(`RelationPicker: unregistered resource "${resource}"`);
+        const labelField = labelFieldOverride ?? entry.labelField;
+        const response = await client.get<{ data: Row[] }>(path, {
           params: {
-            [SEARCH_PARAM]: query === "" ? undefined : query,
+            [entry.searchParam]: query === "" ? undefined : query,
             ...flattenResourceFilter(stableResourceFilter),
             limit: PAGE_SIZE,
           },
         });
-        if (requestId.current === thisRequest) setResult({ status: "success", rows: response.data });
+        if (requestId.current === thisRequest) setResult({ status: "success", rows: response.data, labelField });
       } catch {
-        if (requestId.current === thisRequest) setResult({ status: "error", rows: [] });
+        if (requestId.current === thisRequest) setResult((prev) => ({ ...prev, status: "error", rows: [] }));
       }
     })();
-  }, [enabled, resource, query, stableResourceFilter, client, registry]);
+  }, [enabled, resource, labelFieldOverride, query, stableResourceFilter, client, registry]);
 
   return result;
 }
@@ -139,7 +149,7 @@ type Entry = { kind: "option"; row: Row } | { kind: "create" };
 export function RelationPicker({
   id,
   resource,
-  labelField,
+  labelField: labelFieldOverride,
   resourceFilter,
   value,
   onChange,
@@ -149,7 +159,7 @@ export function RelationPicker({
   disabled = false,
   placeholder,
   client = apiClient,
-  registry = resourceRegistry,
+  registry = resourceMetadataRegistry,
 }: RelationPickerProps): ReactNode {
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
@@ -161,7 +171,15 @@ export function RelationPicker({
   const singleValue: RelationValue | null = multiple ? null : ((value as RelationValue | null) ?? null);
   const selectedIds = new Set(selected.map((v) => v.id));
 
-  const { status, rows } = useSearchQuery(resource, debouncedQuery, resourceFilter, isOpen, client, registry);
+  const { status, rows, labelField } = useSearchQuery(
+    resource,
+    labelFieldOverride,
+    debouncedQuery,
+    resourceFilter,
+    isOpen,
+    client,
+    registry,
+  );
 
   const matches = rows.filter((row) => !selectedIds.has(row.id));
   const normalizedQuery = debouncedQuery.trim().toLowerCase();

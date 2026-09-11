@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildResourceMetadataRegistry, ResourceMetadataRegistry } from "./resource-metadata-registry.js";
+import type { ResourceMetadataEntry } from "./resource-metadata-registry.js";
+import {
+  buildResourceMetadataRegistry,
+  ResourceMetadataRegistry,
+  resourceListPath,
+} from "./resource-metadata-registry.js";
 import type { MetaSchema, ModelDef } from "./types.js";
 
 function model(overrides: Partial<ModelDef>): ModelDef {
@@ -184,5 +189,33 @@ describe("ResourceMetadataRegistry", () => {
     await registry.resolve("contacts.tag");
 
     expect(schemaSource.getSchema).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("resourceListPath", () => {
+  function entry(listRoute: string): ResourceMetadataEntry {
+    return {
+      module: "contacts",
+      resource: "contacts.contact",
+      listRoute,
+      getRoute: "",
+      defaultListView: "",
+      defaultFormView: "",
+      labelField: "display_name",
+      searchParam: "q",
+      fields: [],
+    };
+  }
+
+  it("strips a GET prefix", () => {
+    expect(resourceListPath(entry("GET /contacts"))).toBe("/contacts");
+  });
+
+  it("strips whatever method is actually present, not just GET", () => {
+    expect(resourceListPath(entry("POST /contacts/search"))).toBe("/contacts/search");
+  });
+
+  it("returns undefined for a resource with no matching list route", () => {
+    expect(resourceListPath(entry(""))).toBeUndefined();
   });
 });
