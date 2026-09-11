@@ -1,4 +1,6 @@
 [data-theme="dark"] {
+  color-scheme: dark;
+
   /* Base lightness shifted, hue relationships preserved — not the light
      palette inverted (shell-visual-design.md §4). */
   --goerp-color-bg: #12151b;
