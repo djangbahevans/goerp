@@ -4,14 +4,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOptionalPermission } from "../auth/use-permission.js";
 import { actionButtonClassName } from "./action-button-styles.js";
-import { Icon } from "./icon.js";
+import { Icon, type IconNameLike } from "./icon.js";
 
 export interface ActionMenuItem {
   type?: "item" | "separator" | undefined;
   // Required for "item"; absent (and unused) for "separator".
   label?: string | undefined;
   // Lucide icon name, shown before the label.
-  icon?: string | undefined;
+  icon?: IconNameLike | undefined;
   onClick?: (() => void) | undefined;
   variant?: "default" | "danger" | undefined;
   permission?: string | undefined;

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Icon } from "./icon.js";
+import { Icon, type IconNameLike } from "./icon.js";
 
 // typescript-sdk-reference.md §13 / manifest-spec.md's BadgeConfig.color
 // (same 10 values, both places).
@@ -19,7 +19,7 @@ export interface BadgeProps {
   label: string;
   color?: BadgeColor | undefined;
   // Lucide icon name, shown before the label.
-  icon?: string | undefined;
+  icon?: IconNameLike | undefined;
 }
 
 // docs/components/badge.md "Tokens Used" — gray reuses the existing

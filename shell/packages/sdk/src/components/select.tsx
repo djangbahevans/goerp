@@ -4,14 +4,14 @@ import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { useId, useState } from "react";
 import { Badge, type BadgeColor } from "./badge.js";
 import { fieldInputClassName } from "./field-input-styles.js";
-import { Icon } from "./icon.js";
+import { Icon, type IconNameLike } from "./icon.js";
 
 // manifest-spec.md's FieldOption object (§10), redefined locally since
 // packages/sdk must not depend on packages/app.
 export interface SelectOption {
   value: string;
   label: string;
-  icon?: string | undefined;
+  icon?: IconNameLike | undefined;
   color?: string | undefined;
   disabled?: boolean | undefined;
 }

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useOptionalPermission } from "../auth/use-permission.js";
 import { type ActionButtonSize, type ActionButtonVariant, actionButtonClassName } from "./action-button-styles.js";
-import { Icon } from "./icon.js";
+import { Icon, type IconNameLike } from "./icon.js";
 import { Spinner } from "./spinner.js";
 
 export type { ActionButtonSize, ActionButtonVariant };
@@ -15,7 +15,7 @@ export interface ActionButtonProps {
   size?: ActionButtonSize | undefined;
   // Lucide icon name (manifest-spec.md's Action.icon), shown before
   // `children` — replaced by the loading spinner while `loading`.
-  icon?: string | undefined;
+  icon?: IconNameLike | undefined;
   children: ReactNode;
 }
 

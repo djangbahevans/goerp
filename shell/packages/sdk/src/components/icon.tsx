@@ -4,6 +4,12 @@ import type { ReactNode } from "react";
 
 export type IconName = keyof typeof dynamicIconImports;
 
+// Editor autocomplete/typo-catching for a hardcoded name (e.g. a story's
+// icon: "check") without rejecting a manifest-sourced string absent from
+// this list at compile time — `& {}` keeps the union's literals in
+// completions while still widening to plain `string`.
+export type IconNameLike = IconName | (string & {});
+
 export function isKnownIconName(name: string): name is IconName {
   return name in dynamicIconImports;
 }
@@ -11,7 +17,7 @@ export function isKnownIconName(name: string): name is IconName {
 export interface IconProps extends LucideProps {
   // Lucide icon name, e.g. "shopping-cart" (manifest-spec.md's kebab-case
   // convention). An unrecognized name renders nothing rather than throwing.
-  name: string;
+  name: IconNameLike;
 }
 
 // Resolves a manifest-sourced icon name to its real glyph, code-split per
