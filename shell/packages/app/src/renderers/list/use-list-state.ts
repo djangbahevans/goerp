@@ -1,12 +1,16 @@
+import type { FilterParamValue, FilterRange } from "@goerp/sdk";
+import { flattenFilterParams } from "@goerp/sdk";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";
 
 // Filter/sort/group-by state for a list view: full-page mode sources it
 // from URL query params, embedded mode from local React state — never
-// both. A value read back from the URL isn't guaranteed to stay a
+// both. A scalar value read back from the URL isn't guaranteed to stay a
 // string — TanStack Router's default parser coerces "true"/"false"/
-// numeric query values into real booleans/numbers.
-export type FilterValue = string | number | boolean;
+// numeric query values into real booleans/numbers. Reuses
+// @goerp/sdk's FilterParamValue so URL round-tripping and the actual
+// request (useInfiniteList) serialize filters identically.
+export type FilterValue = FilterParamValue;
 
 export interface ListState {
   filter: Record<string, FilterValue>;
@@ -16,27 +20,57 @@ export interface ListState {
 
 export interface ListStateHandle extends ListState {
   setFilter: (field: string, value: FilterValue | undefined) => void;
+  setFilters: (values: Record<string, FilterValue | undefined>) => void;
   setSort: (sort: string | undefined) => void;
   setGroupBy: (field: string | undefined) => void;
 }
 
-const FILTER_PREFIX = "filter[";
+// erp-design.md §11.4: `filter[field]` (implicit eq) or `filter[field][op]`.
+const FILTER_KEY_PATTERN = /^filter\[([^[\]]+)\](?:\[([^[\]]+)\])?$/;
 
-function isFilterValue(value: unknown): value is FilterValue {
+function isScalarFilterValue(value: unknown): value is string | number | boolean {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
 function isListStateKey(key: string): boolean {
-  return key === "sort" || key === "group_by" || (key.startsWith(FILTER_PREFIX) && key.endsWith("]"));
+  return key === "sort" || key === "group_by" || FILTER_KEY_PATTERN.test(key);
 }
 
 export function parseListSearch(search: Record<string, unknown>): ListState {
   const filter: Record<string, FilterValue> = {};
+  const ranges: Record<string, FilterRange> = {};
+
   for (const [key, value] of Object.entries(search)) {
-    if (key.startsWith(FILTER_PREFIX) && key.endsWith("]") && isFilterValue(value)) {
-      filter[key.slice(FILTER_PREFIX.length, -1)] = value;
+    const match = FILTER_KEY_PATTERN.exec(key);
+    if (!match) continue;
+    const field = match[1] as string;
+    const op = match[2];
+
+    if (op === "in") {
+      // A single-value `in` list isn't distinguishable from a lone scalar
+      // once TanStack Router's parser has coerced it — normalize through
+      // String() so a numeric or boolean value doesn't vanish.
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        const raw = String(value);
+        if (raw !== "") filter[field] = raw.split(",");
+      }
+    } else if (op === "gte" || op === "lte") {
+      if (typeof value === "string" || typeof value === "number") {
+        ranges[field] = { ...ranges[field], [op]: String(value) };
+      }
+    } else if (op === "like") {
+      if (typeof value === "string" || typeof value === "number") {
+        filter[field] = { like: String(value).replace(/^%|%$/g, "") };
+      }
+    } else if (!op && isScalarFilterValue(value)) {
+      filter[field] = value;
     }
   }
+
+  for (const [field, range] of Object.entries(ranges)) {
+    filter[field] = range;
+  }
+
   return {
     filter,
     sort: typeof search.sort === "string" ? search.sort : undefined,
@@ -44,11 +78,8 @@ export function parseListSearch(search: Record<string, unknown>): ListState {
   };
 }
 
-export function listStateToSearch(state: ListState): Record<string, FilterValue> {
-  const search: Record<string, FilterValue> = {};
-  for (const [field, value] of Object.entries(state.filter)) {
-    search[`${FILTER_PREFIX}${field}]`] = value;
-  }
+export function listStateToSearch(state: ListState): Record<string, string | number | boolean> {
+  const search = flattenFilterParams(state.filter);
   if (state.sort !== undefined) search.sort = state.sort;
   if (state.groupBy !== undefined) search.group_by = state.groupBy;
   return search;
@@ -66,17 +97,29 @@ function mergeListStateIntoSearch(prev: Record<string, unknown>, state: ListStat
   return { ...preserved, ...listStateToSearch(state) };
 }
 
+function applyFilterUpdates(
+  filter: Record<string, FilterValue>,
+  updates: Record<string, FilterValue | undefined>,
+): Record<string, FilterValue> {
+  const next = { ...filter };
+  for (const [field, value] of Object.entries(updates)) {
+    if (value === undefined) delete next[field];
+    else next[field] = value;
+  }
+  return next;
+}
+
 function useEmbeddedListState(defaultSort: string | undefined): ListStateHandle {
   const [state, setState] = useState<ListState>({ filter: {}, sort: defaultSort, groupBy: undefined });
 
-  const setFilter = useCallback((field: string, value: FilterValue | undefined) => {
-    setState((prev) => {
-      const filter = { ...prev.filter };
-      if (value === undefined) delete filter[field];
-      else filter[field] = value;
-      return { ...prev, filter };
-    });
+  const setFilters = useCallback((updates: Record<string, FilterValue | undefined>) => {
+    setState((prev) => ({ ...prev, filter: applyFilterUpdates(prev.filter, updates) }));
   }, []);
+
+  const setFilter = useCallback(
+    (field: string, value: FilterValue | undefined) => setFilters({ [field]: value }),
+    [setFilters],
+  );
 
   const setSort = useCallback((sort: string | undefined) => {
     setState((prev) => ({ ...prev, sort }));
@@ -86,7 +129,7 @@ function useEmbeddedListState(defaultSort: string | undefined): ListStateHandle 
     setState((prev) => ({ ...prev, groupBy }));
   }, []);
 
-  return { ...state, setFilter, setSort, setGroupBy };
+  return { ...state, setFilter, setFilters, setSort, setGroupBy };
 }
 
 // ListRenderer is decoupled from any specific declared route, so there's
@@ -103,19 +146,22 @@ function useFullPageListState(defaultSort: string | undefined): ListStateHandle 
     return parsed.sort === undefined ? { ...parsed, sort: defaultSort } : parsed;
   }, [search, defaultSort]);
 
-  const setFilter = useCallback(
-    (field: string, value: FilterValue | undefined) => {
+  const setFilters = useCallback(
+    (updates: Record<string, FilterValue | undefined>) => {
       void navigate({
         search: (prev) => {
           const next = parseListSearch(prev);
-          const filter = { ...next.filter };
-          if (value === undefined) delete filter[field];
-          else filter[field] = value;
+          const filter = applyFilterUpdates(next.filter, updates);
           return mergeListStateIntoSearch(prev, { ...next, filter });
         },
       });
     },
     [navigate],
+  );
+
+  const setFilter = useCallback(
+    (field: string, value: FilterValue | undefined) => setFilters({ [field]: value }),
+    [setFilters],
   );
 
   const setSort = useCallback(
@@ -136,7 +182,7 @@ function useFullPageListState(defaultSort: string | undefined): ListStateHandle 
     [navigate],
   );
 
-  return { ...state, setFilter, setSort, setGroupBy };
+  return { ...state, setFilter, setFilters, setSort, setGroupBy };
 }
 
 export function useListState(embedded: boolean | undefined, defaultSort: string | undefined): ListStateHandle {

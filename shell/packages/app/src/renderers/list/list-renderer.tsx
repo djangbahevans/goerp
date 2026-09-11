@@ -1,11 +1,13 @@
+import type { FilterRange } from "@goerp/sdk";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
-import { ListFilters } from "./list-filters.js";
-import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js";
+import { isMultiValueFilter, ListFilters } from "./list-filters.js";
+import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
+import type { FilterValue } from "./use-list-state.js";
 import { useListState } from "./use-list-state.js";
 import { useSelection } from "./use-selection.js";
 import { useVisibleColumns } from "./use-visible-columns.js";
@@ -23,6 +25,58 @@ export interface ListRendererProps {
 function defaultSortOf(view: ListViewDeclaration): string | undefined {
   if (!view.default_sort) return undefined;
   return view.default_sort_dir === "desc" ? `-${view.default_sort}` : view.default_sort;
+}
+
+// Accepts numeric bounds too — manifest-spec.md types `default`/
+// `default_filters` as `any`, and a number_range filter's natural default
+// is numeric, not pre-stringified.
+function coerceRangeBounds(raw: unknown): FilterRange | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const { gte, lte } = raw as { gte?: unknown; lte?: unknown };
+  const range: FilterRange = {};
+  if (typeof gte === "string" || typeof gte === "number") range.gte = String(gte);
+  if (typeof lte === "string" || typeof lte === "number") range.lte = String(lte);
+  return Object.keys(range).length > 0 ? range : undefined;
+}
+
+// A `Filter.default`'s raw JSON value, wrapped to match how its type
+// serializes (manifest-spec.md's `default` field carries no shape info of
+// its own).
+function coerceFilterDefault(filter: ListFilter, raw: unknown): FilterValue | undefined {
+  if (filter.type === "text") return typeof raw === "string" ? { like: raw } : undefined;
+  if (filter.type === "daterange" || filter.type === "number_range") return coerceRangeBounds(raw);
+  if (isMultiValueFilter(filter)) return Array.isArray(raw) ? raw.map(String) : undefined;
+  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") return raw;
+  return undefined;
+}
+
+// `default_filters` values have no per-field type context the way a
+// Filter object's own `default` does — a range-shaped object is inferred
+// from its own {gte,lte} shape rather than a declared filter type.
+function coerceDefaultFiltersValue(raw: unknown): FilterValue | undefined {
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") return raw;
+  return coerceRangeBounds(raw);
+}
+
+// manifest-spec.md §9.1: default_filters wins over a Filter's own default
+// on the same field, applied only when the view first loads with no
+// filter[...] params already present.
+export function computeDefaultFilters(view: ListViewDeclaration): Record<string, FilterValue> {
+  const defaults: Record<string, FilterValue> = {};
+
+  for (const [field, raw] of Object.entries(view.default_filters ?? {})) {
+    const value = coerceDefaultFiltersValue(raw);
+    if (value !== undefined) defaults[field] = value;
+  }
+
+  for (const filter of view.filters ?? []) {
+    if (filter.default === undefined || filter.field in defaults) continue;
+    const value = coerceFilterDefault(filter, filter.default);
+    if (value !== undefined) defaults[filter.field] = value;
+  }
+
+  return defaults;
 }
 
 // Every relation column without `display_field` resolves via
@@ -74,6 +128,21 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
   const listState = useListState(embedded, defaultSortOf(view));
   const columns = useVisibleColumns(view);
   const selection = useSelection();
+
+  // Applied once, only when the view opens with no filter[...] params
+  // already present — a later, user-driven clear-to-empty must not
+  // re-trigger this.
+  const defaultsApplied = useRef(false);
+  const { setFilters } = listState;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once on mount, guarded by defaultsApplied — view/listState.filter/setFilters are deliberately read only at that first run, not tracked as change-triggers.
+  useEffect(() => {
+    if (defaultsApplied.current) return;
+    defaultsApplied.current = true;
+    if (Object.keys(listState.filter).length > 0) return;
+    const defaults = computeDefaultFilters(view);
+    if (Object.keys(defaults).length > 0) setFilters(defaults);
+  }, []);
+
   const bulkActions = view.bulk_actions ?? [];
   // manifest-spec.md: `selectable` defaults true, but a checkbox column
   // with nothing to bulk-act on is just clutter.

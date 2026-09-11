@@ -9,7 +9,7 @@ import {
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { groupRows, ListRenderer } from "./list-renderer.js";
+import { computeDefaultFilters, groupRows, ListRenderer } from "./list-renderer.js";
 import type { ListViewDeclaration } from "./list-view-types.js";
 
 const { useInfiniteListMock, useRelationLabelsMock } = vi.hoisted(() => ({
@@ -69,6 +69,7 @@ async function renderListRenderer(
   });
   await router.load();
   render(<RouterProvider router={router} />);
+  return { router };
 }
 
 const fullAccess = permissionWrapper({
@@ -91,6 +92,66 @@ describe("groupRows", () => {
       { key: "draft", rows: [rows[0], rows[2]] },
       { key: "done", rows: [rows[1]] },
     ]);
+  });
+});
+
+describe("computeDefaultFilters", () => {
+  it("coerces default_filters' plain values, arrays becoming string arrays", () => {
+    const defaults = computeDefaultFilters({
+      ...view,
+      default_filters: { is_active: true, count: 3, tag_ids: [1, 2] },
+    });
+    expect(defaults).toEqual({ is_active: true, count: 3, tag_ids: ["1", "2"] });
+  });
+
+  it("wraps a text filter's default in {like}", () => {
+    const defaults = computeDefaultFilters({
+      ...view,
+      filters: [{ field: "name", label: "Name", type: "text", default: "acme" }],
+    });
+    expect(defaults).toEqual({ name: { like: "acme" } });
+  });
+
+  it("passes a daterange/number_range filter's default through as {gte,lte}", () => {
+    const defaults = computeDefaultFilters({
+      ...view,
+      filters: [{ field: "created_at", label: "Created", type: "daterange", default: { gte: "2026-01-01" } }],
+    });
+    expect(defaults).toEqual({ created_at: { gte: "2026-01-01" } });
+  });
+
+  it("stringifies a number_range filter's numeric default bounds", () => {
+    const defaults = computeDefaultFilters({
+      ...view,
+      filters: [{ field: "amount", label: "Amount", type: "number_range", default: { gte: 10, lte: 100 } }],
+    });
+    expect(defaults).toEqual({ amount: { gte: "10", lte: "100" } });
+  });
+
+  it("accepts a range-shaped default_filters value even with no per-field type context", () => {
+    const defaults = computeDefaultFilters({ ...view, default_filters: { created_at: { gte: "2026-01-01" } } });
+    expect(defaults).toEqual({ created_at: { gte: "2026-01-01" } });
+  });
+
+  it("coerces a multi_select/tags filter's array default to a string array", () => {
+    const defaults = computeDefaultFilters({
+      ...view,
+      filters: [{ field: "tag_ids", label: "Tags", type: "tags", default: ["a", "b"] }],
+    });
+    expect(defaults).toEqual({ tag_ids: ["a", "b"] });
+  });
+
+  it("default_filters wins over a filter's own default for the same field", () => {
+    const defaults = computeDefaultFilters({
+      ...view,
+      default_filters: { type: "company" },
+      filters: [{ field: "type", label: "Type", type: "select", default: "person" }],
+    });
+    expect(defaults).toEqual({ type: "company" });
+  });
+
+  it("returns an empty object when neither default_filters nor any filter declares a default", () => {
+    expect(computeDefaultFilters({ ...view, filters: [{ field: "type", label: "Type", type: "select" }] })).toEqual({});
   });
 });
 
@@ -498,5 +559,49 @@ describe("ListRenderer", () => {
         ids: ["c2"],
       },
     ]);
+  });
+
+  it("applies default_filters and each filter's own default when the URL has no filter[...] params", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    const { router } = await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      default_filters: { is_active: true },
+      filters: [{ field: "type", label: "Type", type: "select", default: "person" }],
+    });
+
+    expect(router.state.location.search).toEqual({
+      "filter[is_active]": true,
+      "filter[type]": "person",
+    });
+  });
+
+  it("does not override filters already present in the URL with declared defaults", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    const { router } = await renderListRenderer({}, fullAccess, "/?filter[type]=company", {
+      ...view,
+      filters: [{ field: "type", label: "Type", type: "select", default: "person" }],
+    });
+
+    expect(router.state.location.search).toEqual({ "filter[type]": "company" });
   });
 });
