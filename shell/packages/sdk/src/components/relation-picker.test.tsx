@@ -13,8 +13,15 @@ function fakeClient(rows = ROWS) {
   return { get: vi.fn().mockResolvedValue({ data: rows }) };
 }
 
-function fakeRegistry(listPath = "/contacts") {
-  return { resolve: vi.fn().mockResolvedValue({ listPath }) };
+function fakeRegistry(overrides: Record<string, unknown> = {}) {
+  return {
+    resolve: vi.fn().mockResolvedValue({
+      listRoute: "GET /contacts",
+      labelField: "display_name",
+      searchParam: "q",
+      ...overrides,
+    }),
+  };
 }
 
 describe("RelationPicker", () => {
@@ -226,7 +233,7 @@ describe("RelationPicker", () => {
   });
 
   it("shows an EmptyState when the target resource is unregistered", async () => {
-    const registry = { resolve: vi.fn().mockRejectedValue(new Error('unknown resource "x.y"')) };
+    const registry = { resolve: vi.fn().mockResolvedValue(undefined) };
     render(
       <RelationPicker
         resource="x.y"
@@ -239,6 +246,83 @@ describe("RelationPicker", () => {
     );
     fireEvent.focus(screen.getByRole("combobox"));
     expect(await screen.findByText("Module not installed")).toBeTruthy();
+  });
+
+  it("resolves labelField from the registry when the prop is omitted", async () => {
+    render(
+      <RelationPicker
+        resource="contacts.contact"
+        value={null}
+        onChange={vi.fn()}
+        client={fakeClient()}
+        registry={fakeRegistry({ labelField: "display_name" })}
+      />,
+    );
+    fireEvent.focus(screen.getByRole("combobox"));
+    expect(await screen.findByRole("option", { name: "Acme Corp" })).toBeTruthy();
+  });
+
+  it("queries under the registry's searchParam, not a hardcoded 'q'", async () => {
+    const client = fakeClient();
+    render(
+      <RelationPicker
+        resource="contacts.contact"
+        value={null}
+        onChange={vi.fn()}
+        client={client}
+        registry={fakeRegistry({ labelField: "display_name", searchParam: "search" })}
+      />,
+    );
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Acme" } });
+    await waitFor(() =>
+      expect(client.get).toHaveBeenCalledWith(
+        "/contacts",
+        expect.objectContaining({ params: expect.objectContaining({ search: "Acme" }) }),
+      ),
+    );
+  });
+
+  it("sends a multi-value resourceFilter entry as a comma-joined filter[key][in] param", async () => {
+    const client = fakeClient();
+    render(
+      <RelationPicker
+        resource="contacts.contact"
+        labelField="display_name"
+        resourceFilter={{ type: ["person", "company"] }}
+        value={null}
+        onChange={vi.fn()}
+        client={client}
+        registry={fakeRegistry()}
+      />,
+    );
+    fireEvent.focus(screen.getByRole("combobox"));
+    await waitFor(() =>
+      expect(client.get).toHaveBeenCalledWith(
+        "/contacts",
+        expect.objectContaining({ params: expect.objectContaining({ "filter[type][in]": "person,company" }) }),
+      ),
+    );
+  });
+
+  it("omits an empty-array resourceFilter entry instead of sending a literal empty filter[key][in]", async () => {
+    const client = fakeClient();
+    render(
+      <RelationPicker
+        resource="contacts.contact"
+        labelField="display_name"
+        resourceFilter={{ type: [] }}
+        value={null}
+        onChange={vi.fn()}
+        client={client}
+        registry={fakeRegistry()}
+      />,
+    );
+    fireEvent.focus(screen.getByRole("combobox"));
+    await waitFor(() => expect(client.get).toHaveBeenCalled());
+    const params = client.get.mock.calls[0]?.[1]?.params as Record<string, unknown>;
+    expect(params).not.toHaveProperty("filter[type][in]");
   });
 
   it("creatable: offers a create row and calls onCreate when there's no exact match", async () => {

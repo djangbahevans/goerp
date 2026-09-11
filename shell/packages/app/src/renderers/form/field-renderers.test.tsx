@@ -5,8 +5,15 @@ import type { Row } from "../list/list-view-types.js";
 import { FieldInput, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
-const { resolveResourceMock, getMock } = vi.hoisted(() => ({
+const { resolveResourceMock, resolveMetadataMock, getMock } = vi.hoisted(() => ({
   resolveResourceMock: vi.fn(async () => ({ listPath: "/tags" })),
+  resolveMetadataMock: vi.fn(
+    async (): Promise<{ listRoute: string; labelField: string; searchParam: string } | undefined> => ({
+      listRoute: "GET /tags",
+      labelField: "name",
+      searchParam: "q",
+    }),
+  ),
   getMock: vi.fn(async () => ({
     data: [
       { id: "1", name: "VIP" },
@@ -21,12 +28,17 @@ vi.mock("@goerp/sdk", async (importOriginal) => {
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
-  return { ...actual, resourceRegistry: { resolve: resolveResourceMock } };
+  return {
+    ...actual,
+    resourceRegistry: { resolve: resolveResourceMock },
+    resourceMetadataRegistry: { resolve: resolveMetadataMock },
+  };
 });
 
 afterEach(() => {
   cleanup();
   resolveResourceMock.mockClear();
+  resolveMetadataMock.mockClear();
   getMock.mockClear();
 });
 
@@ -283,10 +295,24 @@ describe("FieldInput", () => {
     expect(screen.getByText("raw-value")).toBeTruthy();
   });
 
-  it("relation/tags/user_select with no resource_label_field: falls back to the raw value instead of a picker", () => {
-    renderField({ field: "owner_id", type: "relation", resource: "auth.user" }, "01j-owner");
+  it("relation with no resource, i.e. a plain field: falls back to the raw value instead of a picker", () => {
+    renderField({ field: "owner_id", type: "relation" }, "01j-owner");
     expect(screen.getByText("01j-owner")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("relation with no resource_label_field: opens a picker using the registry's default labelField", async () => {
+    renderField({ field: "owner_id", type: "relation", resource: "auth.user" }, null);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    expect(await screen.findByRole("option", { name: "VIP" })).toBeTruthy();
+  });
+
+  it("relation targeting an unregistered/unloaded module: the picker shows a 'module not installed' state", async () => {
+    resolveMetadataMock.mockResolvedValueOnce(undefined);
+    renderField({ field: "owner_id", type: "relation", resource: "uninstalled.module" }, null);
+    fireEvent.focus(screen.getByRole("combobox"));
+    expect(await screen.findByText("Module not installed")).toBeTruthy();
   });
 
   it("tags: adding an option updates the displayed chips immediately and reports only the id array", async () => {
@@ -330,13 +356,18 @@ describe("FieldInput", () => {
     expect(input.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("select backed by a resource: resolves an existing raw id's display text via a filter[id][] batch-fetch", async () => {
+  it("select backed by a resource: resolves an existing raw id's display text via a filter[id][in] batch-fetch", async () => {
     renderField({ field: "state", type: "select", resource: "contacts.tag", resource_label_field: "name" }, "1");
     expect(await screen.findByDisplayValue("VIP")).toBeTruthy();
     expect(getMock).toHaveBeenCalledWith(
       "/tags",
-      expect.objectContaining({ params: expect.objectContaining({ "filter[id][]": ["1"] }) }),
+      expect.objectContaining({ params: expect.objectContaining({ "filter[id][in]": "1" }) }),
     );
+  });
+
+  it("select backed by a resource with no resource_label_field: resolves display text via the registry's default labelField", async () => {
+    renderField({ field: "state", type: "select", resource: "contacts.tag" }, "1");
+    expect(await screen.findByDisplayValue("VIP")).toBeTruthy();
   });
 
   it("relation: shows the current RelationValue's display text and writes back only the raw id", async () => {

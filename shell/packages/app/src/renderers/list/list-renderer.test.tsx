@@ -424,7 +424,38 @@ describe("ListRenderer", () => {
     });
 
     expect(useRelationLabelsMock).toHaveBeenCalledWith([
-      { key: "customer_id", resource: "sales.customer", labelField: "name", ids: ["c1"] },
+      {
+        key: "customer_id",
+        resource: "sales.customer",
+        labelField: "name",
+        view: "contacts.contacts_list",
+        ids: ["c1"],
+      },
+    ]);
+  });
+
+  it("requests batch-fetched relation labels for a relation column with no resource_label_field (registry resolves the default)", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", customer_id: "c1" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    const wrapper = permissionWrapper({ "contacts.contact": { customer_id: { read: true, write: true } } });
+    await renderListRenderer({}, wrapper, "/", {
+      ...view,
+      columns: [{ field: "customer_id", type: "relation", resource: "sales.customer" }],
+    });
+
+    expect(useRelationLabelsMock).toHaveBeenCalledWith([
+      { key: "customer_id", resource: "sales.customer", view: "contacts.contacts_list", ids: ["c1"] },
     ]);
   });
 
@@ -452,8 +483,20 @@ describe("ListRenderer", () => {
     });
 
     expect(useRelationLabelsMock).toHaveBeenCalledWith([
-      { key: "customer_id", resource: "sales.customer", labelField: "name", ids: ["c1"] },
-      { key: "customer_id", resource: "sales.customer", labelField: "name", ids: ["c2"] },
+      {
+        key: "customer_id",
+        resource: "sales.customer",
+        labelField: "name",
+        view: "contacts.contacts_list",
+        ids: ["c1"],
+      },
+      {
+        key: "customer_id",
+        resource: "sales.customer",
+        labelField: "name",
+        view: "contacts.contacts_list",
+        ids: ["c2"],
+      },
     ]);
   });
 });

@@ -38,6 +38,15 @@ export interface ResourceMetadataEntry {
   fields: FieldDef[];
 }
 
+// A nav-registered resource with no matching list route (listRoute "")
+// has nothing to query — callers treat undefined the same as an
+// unregistered resource, not as a request to GET an empty path. Strips
+// whatever method token is actually present, not a hardcoded "GET " —
+// a hand-registered list route isn't guaranteed to use that method.
+export function resourceListPath(entry: ResourceMetadataEntry): string | undefined {
+  return entry.listRoute ? entry.listRoute.replace(/^\S+ /, "") : undefined;
+}
+
 const LABEL_FIELD_FALLBACKS = ["display_name", "name", "title"];
 const DEFAULT_SEARCH_PARAM = "q";
 

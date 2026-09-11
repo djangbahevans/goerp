@@ -175,6 +175,11 @@ describe("renderCellContent", () => {
     expect(html.textContent).toBe("Acme Inc");
   });
 
+  it("relation: shows the raw FK value when no relationLabel resolved (e.g. target module not loaded)", () => {
+    const column = { field: "customer_id", type: "relation" as const };
+    expect(cell(column, { customer_id: "01j..." }).textContent).toBe("01j...");
+  });
+
   it("file: renders a download link with the file name", () => {
     const html = cell({ field: "doc", type: "file" }, { doc: { url: "https://x.com/f.pdf", name: "contract.pdf" } });
     const link = html.querySelector("a");

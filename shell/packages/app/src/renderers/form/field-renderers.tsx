@@ -17,8 +17,8 @@ import {
   TimeField,
   ToggleField,
 } from "@goerp/sdk/components";
-import { createInfiniteListQueryOptions } from "@goerp/sdk/react";
-import { resourceRegistry } from "@goerp/sdk/schema";
+import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions } from "@goerp/sdk/react";
+import { resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
@@ -137,47 +137,52 @@ function parseFieldDate(value: unknown): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-// Needs resource+resource_label_field (backlog #674 covers the
-// default-label-field case). Reuses useInfiniteList's query-options
-// factory rather than a parallel fetch; just the first page.
-function useResourceOptions(resource: string | undefined, labelField: string | undefined, enabled: boolean) {
+// `resourceRegistry` (goerp#638, CRUD-routes only) drives the fetch; the
+// label field shown per option is a separate, caller-supplied concern.
+function useResourceOptions(resource: string | undefined, enabled: boolean) {
   const query = useInfiniteQuery({
     ...createInfiniteListQueryOptions<Row>(resource ?? "", { limit: 100 }, resourceRegistry, apiClient),
-    enabled: enabled && Boolean(resource) && Boolean(labelField),
+    enabled: enabled && Boolean(resource),
   });
   return { data: query.data?.pages[0]?.data, isLoading: query.isLoading };
 }
 
-// select/multi_select-with-resource fields store a bare id (or id array)
-// directly under the field's own name — unlike relation/many2many/
-// user_select, there's no embedded display companion (they're Selection
-// fields, not Many2One/Many2Many ORM relations). manifest-spec.md §8b's
-// "Strategy 3 — Automatic batch fetch" is the documented fallback: resolve
-// display text for a known set of ids via one filter[id][]=... query.
+// "name" is a last-resort placeholder for the brief window before the
+// registry resolves, or if the resource isn't nav-registered at all.
+function useDefaultLabelField(resource: string | undefined, override: string | undefined): string {
+  const query = useQuery({
+    queryKey: ["resource-metadata-label-field", resource],
+    queryFn: () => resourceMetadataRegistry.resolve(resource as string),
+    enabled: Boolean(resource) && !override,
+  });
+  return override ?? query.data?.labelField ?? "name";
+}
+
+// select/multi_select-with-resource fields store a bare id (or id array),
+// unlike relation/many2many/user_select's embedded display companion —
+// manifest-spec.md §8b Strategy 3 resolves display text via batch fetch,
+// reusing use-relation-labels.ts's shared query-options factory.
 function useResolveByIds(
   resource: string | undefined,
-  labelField: string | undefined,
+  labelFieldOverride: string | undefined,
   ids: string[],
   enabled: boolean,
 ): Map<string, string> {
-  const idsKey = [...ids].sort().join(",");
-  const query = useQuery({
-    queryKey: ["resolve-relation-values", resource, idsKey],
-    queryFn: async () => {
-      const entry = await resourceRegistry.resolve(resource as string);
-      const response = await apiClient.get<{ data: Row[] }>(entry.listPath, {
-        params: { "filter[id][]": ids, limit: ids.length },
-      });
-      return response.data;
+  const options = createRelationLabelsQueryOptions(
+    {
+      key: "value",
+      resource: resource ?? "",
+      ...(labelFieldOverride ? { labelField: labelFieldOverride } : {}),
+      ids,
     },
-    enabled: enabled && Boolean(resource) && Boolean(labelField) && ids.length > 0,
-  });
-
-  const map = new Map<string, string>();
-  for (const row of query.data ?? []) {
-    map.set(String(row.id), String(row[labelField as string] ?? row.id));
-  }
-  return map;
+    // Explicit, not the factory's own default params — same singleton
+    // instances every other field renderer in this file uses (and the
+    // same ones tests mock via vi.mock("@goerp/sdk", ...)).
+    resourceMetadataRegistry,
+    apiClient,
+  );
+  const query = useQuery({ ...options, enabled: enabled && Boolean(resource) && options.enabled });
+  return new Map(Object.entries(query.data ?? {}));
 }
 
 function RelationInput({
@@ -193,7 +198,6 @@ function RelationInput({
   onChange: (value: unknown) => void;
   disabled: boolean;
 }) {
-  const labelField = field.resource_label_field;
   const needsResolve = field.type === "select" || field.type === "multi_select";
   const rawIds: string[] = !needsResolve
     ? []
@@ -204,11 +208,14 @@ function RelationInput({
       : value == null
         ? []
         : [String(value)];
-  const resolved = useResolveByIds(field.resource, labelField, rawIds, needsResolve && rawIds.length > 0);
+  const resolved = useResolveByIds(
+    field.resource,
+    field.resource_label_field,
+    rawIds,
+    needsResolve && rawIds.length > 0,
+  );
 
-  if (!field.resource || !labelField) {
-    // Deferred, same as list-renderer.tsx's relation-column fallback:
-    // no default-label-field resolution from the registry yet (backlog #674/goerp#671).
+  if (!field.resource) {
     return <span>{value == null ? "" : String(value)}</span>;
   }
 
@@ -234,7 +241,7 @@ function RelationInput({
     <RelationPicker
       id={id}
       resource={field.resource}
-      labelField={labelField}
+      labelField={field.resource_label_field}
       resourceFilter={field.resource_filter}
       value={pickerValue}
       onChange={handleChange}
@@ -242,11 +249,11 @@ function RelationInput({
       disabled={disabled}
       placeholder={`Search ${field.label ?? field.field}…`}
       // Explicit, not RelationPicker's own default params — keeps this on
-      // the same apiClient/resourceRegistry singleton instance every other
-      // field renderer in this file already uses (and the same one tests
-      // mock via vi.mock("@goerp/sdk", ...)).
+      // the same apiClient/resourceMetadataRegistry singleton instance
+      // every other field renderer in this file already uses (and the
+      // same one tests mock via vi.mock("@goerp/sdk", ...)).
       client={apiClient}
-      registry={resourceRegistry}
+      registry={resourceMetadataRegistry}
     />
   );
 }
@@ -308,8 +315,8 @@ function TagsInput({
   onChange: (value: unknown) => void;
   disabled: boolean;
 }) {
-  const labelField = field.resource_label_field ?? "name";
-  const { data: rows } = useResourceOptions(field.resource, labelField, true);
+  const labelField = useDefaultLabelField(field.resource, field.resource_label_field);
+  const { data: rows } = useResourceOptions(field.resource, true);
   // `value` (the plural read key) never reflects a pending edit, since
   // writes land under the singular `_ids` key — local state is the
   // display source of truth until the record itself reloads (a fresh

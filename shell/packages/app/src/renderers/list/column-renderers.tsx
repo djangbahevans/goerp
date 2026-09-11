@@ -123,8 +123,8 @@ function fileUrlOf(value: unknown): string | null {
 }
 
 export interface RenderCellOptions {
-  // Resolved separately, since it needs an async batch-fetch when
-  // `display_field` isn't set — see use-relation-labels.ts.
+  // Resolved async when `display_field` isn't set — see use-relation-labels.ts.
+  // Undefined falls back to the raw FK id, whether loading or unresolvable.
   relationLabel?: string;
 }
 
@@ -225,7 +225,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       );
 
     case "relation": {
-      const display = column.display_field ? row[column.display_field] : options.relationLabel;
+      const display = column.display_field ? row[column.display_field] : (options.relationLabel ?? value);
       return display == null ? "" : String(display);
     }
 

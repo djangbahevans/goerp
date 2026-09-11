@@ -25,9 +25,8 @@ function defaultSortOf(view: ListViewDeclaration): string | undefined {
   return view.default_sort_dir === "desc" ? `-${view.default_sort}` : view.default_sort;
 }
 
-// Relation columns resolved via the batch-fetch fallback (no `display_field`,
-// an explicit `resource_label_field` given) — the auto-default-from-registry
-// case needs the model/view registry goerp#636 deferred to backlog #674.
+// Every relation column without `display_field` resolves via
+// useRelationLabels (batch loader, else registry auto-fetch — manifest-spec.md §8b).
 //
 // One spec per (column, already-fetched page), all sharing the column's
 // field as their `key` (useRelationLabels merges same-key results). Each
@@ -35,15 +34,14 @@ function defaultSortOf(view: ListViewDeclaration): string | undefined {
 // stays cached forever — fetchNextPage only ever issues a fresh, small
 // query for the new page's ids, never re-fetching labels already resolved
 // for earlier pages.
-function relationBatchSpecs(columns: ListColumn[], pages: Row[][]): RelationBatchSpec[] {
-  const relationColumns = columns.filter(
-    (c) => c.type === "relation" && !c.display_field && c.resource && c.resource_label_field,
-  );
+function relationBatchSpecs(viewName: string, columns: ListColumn[], pages: Row[][]): RelationBatchSpec[] {
+  const relationColumns = columns.filter((c) => c.type === "relation" && !c.display_field && c.resource);
   return relationColumns.flatMap((c) =>
     pages.map((pageRows) => ({
       key: c.field,
       resource: c.resource as string,
-      labelField: c.resource_label_field as string,
+      ...(c.resource_label_field ? { labelField: c.resource_label_field } : {}),
+      view: viewName,
       ids: pageRows.map((row) => row[c.field]).filter((value): value is string => typeof value === "string"),
     })),
   );
@@ -107,7 +105,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
 
   const pages = data?.pages.map((page) => page.data) ?? [];
   const rows = pages.flat();
-  const relationLabels = useRelationLabels(relationBatchSpecs(columns, pages));
+  const relationLabels = useRelationLabels(relationBatchSpecs(`${module}.${view.name}`, columns, pages));
 
   if (isLoading) {
     return (
