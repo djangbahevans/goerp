@@ -203,8 +203,10 @@ export function BulkActions({ actions, selectedIds, clearSelection }: BulkAction
   if (selectedIds.length === 0) return null;
 
   return (
-    <div role="toolbar" aria-label="Bulk actions">
-      <span>{selectedIds.length} selected</span>
+    <div role="toolbar" aria-label="Bulk actions" className="flex items-center gap-2">
+      <span aria-live="polite" className="text-sm text-text-secondary">
+        {selectedIds.length} selected
+      </span>
       {actions.map((action) => {
         switch (action.type) {
           case "custom":

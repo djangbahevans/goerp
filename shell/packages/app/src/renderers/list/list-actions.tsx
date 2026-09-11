@@ -82,7 +82,7 @@ export interface ListActionsProps {
 
 export function ListActions({ actions, module }: ListActionsProps) {
   return (
-    <div>
+    <div className="flex items-center gap-2">
       {actions.map((action) => {
         switch (action.type) {
           case "create":

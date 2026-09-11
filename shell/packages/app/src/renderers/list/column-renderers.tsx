@@ -1,11 +1,4 @@
-import {
-  BADGE_COLOR_CLASSES,
-  Badge,
-  type BadgeColor,
-  CountryFlag,
-  formatRelativeTime,
-  UserAvatar,
-} from "@goerp/sdk/components";
+import { Badge, type BadgeColor, CountryFlag, formatRelativeTime, StatusDot, UserAvatar } from "@goerp/sdk/components";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
 
@@ -17,14 +10,23 @@ export function renderHref(template: string, row: Row): string {
 // manifest-spec.md §9.1's width/align/truncate ListColumn fields —
 // `truncate` defaults to true, `align` to "left" ("right" for numbers is
 // left to the manifest author to declare explicitly; this doesn't infer
-// it from `type`).
+// it from `type`). "json" is excluded regardless of `truncate`: its cell
+// renders a <details> expando (see "json" below) that needs room to grow
+// open, which any ancestor's overflow: hidden — this function's own, or
+// list-renderer.tsx's inner-wrapper equivalent — would clip shut. One
+// predicate shared by both call sites, so they can't drift apart on which
+// columns truncate.
+export function shouldTruncate(column: ListColumn): boolean {
+  return column.truncate !== false && column.type !== "json";
+}
+
 export function columnStyle(column: ListColumn): CSSProperties {
   const style: CSSProperties = {};
   if (column.width !== undefined) style.width = column.width;
   if (column.min_width !== undefined) style.minWidth = column.min_width;
   if (column.max_width !== undefined) style.maxWidth = column.max_width;
   if (column.align) style.textAlign = column.align;
-  if (column.truncate !== false) {
+  if (shouldTruncate(column)) {
     style.overflow = "hidden";
     style.textOverflow = "ellipsis";
     style.whiteSpace = "nowrap";
@@ -91,16 +93,6 @@ function formatDate(value: unknown, format: string | undefined, options: Intl.Da
   return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
-function Pill({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${className ?? BADGE_COLOR_CLASSES.gray}`}
-    >
-      {children}
-    </span>
-  );
-}
-
 interface FileFieldValue {
   url: string;
   id?: string;
@@ -136,24 +128,39 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     case "text":
       return value == null ? "" : String(value);
 
+    // shell-visual-design.md §5's tabular-numeral rule: --font-mono
+    // appears in exactly one place, numeral columns, so digits line up
+    // vertically for fast scanning — not on labels/headers/other text.
     case "number":
-      return typeof value === "number" ? new Intl.NumberFormat(undefined).format(value) : "";
+      return typeof value === "number" ? (
+        <span className="font-mono">{new Intl.NumberFormat(undefined).format(value)}</span>
+      ) : (
+        ""
+      );
 
     case "currency": {
       if (typeof value !== "number") return "";
       const currency = column.currency_field ? (row[column.currency_field] as string | undefined) : undefined;
       if (currency) {
         try {
-          return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value);
+          return (
+            <span className="font-mono">
+              {new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value)}
+            </span>
+          );
         } catch {
           // currency_field held something that isn't a valid ISO 4217 code — fall through to plain formatting.
         }
       }
-      return new Intl.NumberFormat(undefined).format(value);
+      return <span className="font-mono">{new Intl.NumberFormat(undefined).format(value)}</span>;
     }
 
     case "percent":
-      return typeof value === "number" ? new Intl.NumberFormat(undefined, { style: "percent" }).format(value) : "";
+      return typeof value === "number" ? (
+        <span className="font-mono">{new Intl.NumberFormat(undefined, { style: "percent" }).format(value)}</span>
+      ) : (
+        ""
+      );
 
     case "date":
       return formatDate(value, column.format, { dateStyle: "medium" });
@@ -168,15 +175,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       return formatRelativeTime(value, "");
 
     case "boolean":
-      return value ? (
-        <span role="img" aria-label="Yes">
-          ✓
-        </span>
-      ) : (
-        <span role="img" aria-label="No">
-          ✗
-        </span>
-      );
+      return value ? <StatusDot color="green" label="Yes" /> : <StatusDot color="gray" label="No" />;
 
     case "badge": {
       if (typeof value !== "string" && typeof value !== "number") return "";
@@ -214,10 +213,12 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       return typeof value === "string" && value ? <CountryFlag code={value} showName /> : "";
 
     case "tags":
+      // A plain string-array tag carries no per-tag color the way
+      // TagsField's resource-backed tags do — every Badge is 'gray'.
       return Array.isArray(value) ? (
         <span className="inline-flex flex-wrap gap-1">
           {value.map((tag) => (
-            <Pill key={String(tag)}>{String(tag)}</Pill>
+            <Badge key={String(tag)} label={String(tag)} color="gray" />
           ))}
         </span>
       ) : (
@@ -245,7 +246,7 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
         <span
           role="img"
           aria-label={value}
-          className="inline-block h-4 w-4 rounded border border-gray-300"
+          className="inline-block h-4 w-4 rounded border border-border"
           style={{ backgroundColor: value }}
         />
       ) : (

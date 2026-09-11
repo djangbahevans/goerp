@@ -124,9 +124,12 @@ describe("FormTabsRenderer", () => {
     ]);
     // The visible (and now default-active) tab is "Orders" — its own
     // content, not the restricted tab's, since the restricted tab was
-    // filtered out before index 0 was ever assigned.
+    // filtered out before index 0 was ever assigned. The mocked
+    // useInfiniteList resolves an empty page, so ListRenderer's own empty
+    // state (EmptyState, list-renderer.md) is what confirms it actually
+    // mounted and rendered "Orders"' content specifically.
     expect(screen.queryByText("Restricted")).toBeNull();
-    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(await screen.findByText("No orders found.")).toBeTruthy();
   });
 
   it("switches the visible tab content on click", async () => {

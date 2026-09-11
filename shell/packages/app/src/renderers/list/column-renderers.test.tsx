@@ -36,6 +36,11 @@ describe("columnStyle", () => {
   it("omits truncation when truncate is explicitly false", () => {
     expect(columnStyle({ field: "x", truncate: false })).toEqual({});
   });
+
+  it("omits truncation for a json column even with truncate left at its true default", () => {
+    // Its <details> expando needs room to grow open — an ancestor overflow: hidden would clip it shut.
+    expect(columnStyle({ field: "x", type: "json" })).toEqual({});
+  });
 });
 
 describe("renderCellContent", () => {
@@ -78,6 +83,12 @@ describe("renderCellContent", () => {
     );
   });
 
+  it("number/currency/percent: carry font-mono, shell-visual-design.md §5's tabular-numeral rule", () => {
+    expect(cell({ field: "n", type: "number" }, { n: 1 }).querySelector(".font-mono")).not.toBeNull();
+    expect(cell({ field: "amount", type: "currency" }, { amount: 1 }).querySelector(".font-mono")).not.toBeNull();
+    expect(cell({ field: "rate", type: "percent" }, { rate: 0.1 }).querySelector(".font-mono")).not.toBeNull();
+  });
+
   it("date/datetime/time: applies a CLDR format pattern when given", () => {
     const row = { d: "2026-03-05T14:30:00Z" };
     const html = cell({ field: "d", type: "date", format: "dd MMM yyyy" }, row);
@@ -103,7 +114,7 @@ describe("renderCellContent", () => {
     expect(html.textContent).toBe(new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-1, "hours"));
   });
 
-  it("boolean: renders a check or cross with an accessible label", () => {
+  it("boolean: renders a StatusDot with an accessible label", () => {
     expect(
       cell({ field: "active", type: "boolean" }, { active: true }).querySelector("[aria-label='Yes']"),
     ).not.toBeNull();
@@ -159,7 +170,7 @@ describe("renderCellContent", () => {
     expect(html.querySelector(".fi-gh")).not.toBeNull();
   });
 
-  it("tags: renders one pill per array entry", () => {
+  it("tags: renders one gray Badge per array entry", () => {
     const html = cell({ field: "tags", type: "tags" }, { tags: ["vip", "eu"] });
     expect(html.textContent).toBe("vipeu");
   });
