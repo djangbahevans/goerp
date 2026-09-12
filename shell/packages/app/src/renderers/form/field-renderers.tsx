@@ -7,6 +7,7 @@ import {
   DateField,
   DateTimeField,
   FileField,
+  fieldInputClassName,
   LanguageSelect,
   MoneyField,
   RelationPicker,
@@ -25,6 +26,12 @@ import type { Row } from "../list/list-view-types.js";
 import type { FieldType, FormField } from "./form-view-types.js";
 
 export type { TagValue } from "@goerp/sdk/components";
+
+// Shared by every plain native fallback below (goerp#743) — no per-field
+// error state reaches FieldInput yet (FormFieldRow never passes one
+// through to FieldWrapper either), so `hasError` stays `false` until that
+// exists.
+const PLAIN_INPUT_CLASS_NAME = fieldInputClassName(false, "input", "sans");
 
 // "tags" writes `{field}` (an `_ids` key) as a UUID array but reads the
 // plural key with `_ids` stripped ("tags"), holding full {id,name,color}.
@@ -390,6 +397,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           value={stringValue}
           placeholder={field.placeholder}
           disabled={disabled}
+          className={PLAIN_INPUT_CLASS_NAME}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -405,6 +413,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           rows={field.rows ?? 3}
           placeholder={field.placeholder}
           disabled={disabled}
+          className={PLAIN_INPUT_CLASS_NAME}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -443,6 +452,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           max={field.max}
           step={type === "integer" ? 1 : field.step}
           disabled={disabled}
+          className={PLAIN_INPUT_CLASS_NAME}
           onChange={(e) => onChange(toNumber(e.target.value))}
         />
       );
@@ -474,6 +484,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           max={field.max ?? 100}
           value={percentValue}
           disabled={disabled}
+          className={PLAIN_INPUT_CLASS_NAME}
           onChange={(e) => {
             const n = toNumber(e.target.value);
             onChange(n === undefined ? undefined : n / 100);
@@ -539,13 +550,14 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       const hours = Math.floor(totalMinutes / 60);
       const minutes = totalMinutes % 60;
       return (
-        <span>
+        <span className="flex items-center gap-2">
           <input
             type="number"
             min={0}
             aria-label={`${field.label ?? field.field} hours`}
             value={hours}
             disabled={disabled}
+            className={PLAIN_INPUT_CLASS_NAME}
             onChange={(e) => onChange((toNumber(e.target.value) ?? 0) * 60 + minutes)}
           />
           <input
@@ -555,6 +567,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
             aria-label={`${field.label ?? field.field} minutes`}
             value={minutes}
             disabled={disabled}
+            className={PLAIN_INPUT_CLASS_NAME}
             onChange={(e) => onChange(hours * 60 + (toNumber(e.target.value) ?? 0))}
           />
         </span>
@@ -701,6 +714,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           value={stringValue}
           placeholder="lucide icon name"
           disabled={disabled}
+          className={PLAIN_INPUT_CLASS_NAME}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -731,6 +745,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           value={stringValue}
           placeholder="Scan or enter code"
           disabled={disabled}
+          className={PLAIN_INPUT_CLASS_NAME}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -794,7 +809,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
     case "address": {
       const mapping = field.address_fields ?? {};
       return (
-        <span>
+        <span className="flex flex-wrap items-center gap-2">
           {Object.entries(mapping).map(([part, addrField]) => (
             <input
               key={part}
@@ -803,6 +818,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
               placeholder={part}
               disabled={disabled}
               value={typeof record[addrField] === "string" ? (record[addrField] as string) : ""}
+              className={PLAIN_INPUT_CLASS_NAME}
               onChange={(e) => onChange({ [addrField]: e.target.value })}
             />
           ))}
@@ -851,7 +867,14 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
 
     default:
       return (
-        <input id={id} type="text" value={stringValue} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+        <input
+          id={id}
+          type="text"
+          value={stringValue}
+          disabled={disabled}
+          className={PLAIN_INPUT_CLASS_NAME}
+          onChange={(e) => onChange(e.target.value)}
+        />
       );
   }
 }
