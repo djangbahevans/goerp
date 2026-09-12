@@ -202,7 +202,7 @@ describe("RelationPicker", () => {
 
   it("shows a loading skeleton while the query is in flight", async () => {
     const client = { get: <T,>() => new Promise<T>(() => {}) }; // never resolves
-    const { container } = render(
+    render(
       <RelationPicker
         resource="contacts.contact"
         labelField="display_name"
@@ -213,7 +213,9 @@ describe("RelationPicker", () => {
       />,
     );
     fireEvent.focus(screen.getByRole("combobox"));
-    await waitFor(() => expect(container.querySelector("[data-skeleton='lines']")).toBeTruthy());
+    // The listbox is portaled to document.body (escaping any overflow:
+    // hidden ancestor), so it's outside this render's own container.
+    await waitFor(() => expect(document.querySelector("[data-skeleton='lines']")).toBeTruthy());
   });
 
   it("shows a 'no results' row, announced via aria-live, when the query matches nothing", async () => {
@@ -404,5 +406,42 @@ describe("RelationPicker", () => {
     fireEvent.keyDown(input, { key: "Backspace" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("closes on a click outside the input and the dropdown", async () => {
+    render(
+      <RelationPicker
+        resource="contacts.contact"
+        labelField="display_name"
+        value={null}
+        onChange={vi.fn()}
+        client={fakeClient()}
+        registry={fakeRegistry()}
+      />,
+    );
+    fireEvent.focus(screen.getByRole("combobox"));
+    expect(await screen.findByRole("listbox")).toBeTruthy();
+
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+  });
+
+  it("portals the dropdown to document.body, escaping an overflow: hidden ancestor", async () => {
+    const { container } = render(
+      <div style={{ overflow: "hidden", height: "10px" }}>
+        <RelationPicker
+          resource="contacts.contact"
+          labelField="display_name"
+          value={null}
+          onChange={vi.fn()}
+          client={fakeClient()}
+          registry={fakeRegistry()}
+        />
+      </div>,
+    );
+    fireEvent.focus(screen.getByRole("combobox"));
+    const listbox = await screen.findByRole("listbox");
+    expect(container.contains(listbox)).toBe(false);
+    expect(document.body.contains(listbox)).toBe(true);
   });
 });
