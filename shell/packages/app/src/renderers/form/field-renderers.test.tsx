@@ -58,6 +58,14 @@ function renderField(field: FormField, value: unknown, record: Row = {}) {
   return onChange;
 }
 
+// Mirrors code-field.test.tsx's own paste() helper — CodeMirror's paste
+// handling reads clipboardData.getData("text/plain") specifically, not any
+// arbitrary MIME type, so this only serves text for that one type the same
+// way a real paste event would.
+function paste(target: Element, text: string): void {
+  fireEvent.paste(target, { clipboardData: { getData: (type: string) => (type === "text/plain" ? text : "") } });
+}
+
 describe("readFieldValue/writeFieldValue", () => {
   it("reads a tags field from the pluralized, _ids-stripped key and writes back the _ids key", () => {
     const field: FormField = { field: "tag_ids", type: "tags" };
@@ -276,12 +284,18 @@ describe("FieldInput", () => {
     expect(onChange).toHaveBeenCalledWith(3);
   });
 
-  it("json: parses valid input and silently ignores invalid input mid-edit", () => {
-    const onChange = renderField({ field: "meta", type: "json" }, { a: 1 });
-    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: "not json" } });
+  // paste() inserts at the cursor rather than replacing existing content,
+  // so each case below starts from an empty field rather than editing one
+  // value into another.
+  it("json: silently ignores invalid input, leaving onChange uncalled", () => {
+    const onChange = renderField({ field: "meta", type: "json" }, undefined);
+    paste(screen.getByRole("textbox"), "not json");
     expect(onChange).not.toHaveBeenCalled();
-    fireEvent.change(textarea, { target: { value: '{"a":2}' } });
+  });
+
+  it("json: parses valid input and reports the parsed value", () => {
+    const onChange = renderField({ field: "meta", type: "json" }, undefined);
+    paste(screen.getByRole("textbox"), '{"a":2}');
     expect(onChange).toHaveBeenCalledWith({ a: 2 });
   });
 

@@ -525,20 +525,18 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       const startField = field.range_start_field ?? `${field.field}_start`;
       const endField = field.range_end_field ?? `${field.field}_end`;
       return (
-        <span>
-          <input
-            type="date"
+        <span className="flex items-center gap-2">
+          <DateField
             aria-label={`${field.label ?? field.field} start`}
-            value={typeof record[startField] === "string" ? (record[startField] as string) : ""}
+            value={parseFieldDate(record[startField])}
             disabled={disabled}
-            onChange={(e) => onChange({ [startField]: e.target.value })}
+            onChange={(date) => onChange({ [startField]: date?.toISOString().slice(0, 10) })}
           />
-          <input
-            type="date"
+          <DateField
             aria-label={`${field.label ?? field.field} end`}
-            value={typeof record[endField] === "string" ? (record[endField] as string) : ""}
+            value={parseFieldDate(record[endField])}
             disabled={disabled}
-            onChange={(e) => onChange({ [endField]: e.target.value })}
+            onChange={(date) => onChange({ [endField]: date?.toISOString().slice(0, 10) })}
           />
         </span>
       );
@@ -790,15 +788,15 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
 
     case "json":
       return (
-        <textarea
-          id={id}
+        <CodeField
+          ariaLabelledBy={id}
           value={value === undefined ? "" : JSON.stringify(value, null, 2)}
+          language="json"
           rows={field.rows ?? 6}
           disabled={disabled}
-          className="font-mono"
-          onChange={(e) => {
+          onChange={(next) => {
             try {
-              onChange(JSON.parse(e.target.value));
+              onChange(JSON.parse(next));
             } catch {
               // Invalid JSON mid-edit — ignored until it parses again.
             }
