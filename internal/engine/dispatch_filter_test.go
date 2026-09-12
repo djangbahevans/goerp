@@ -112,6 +112,57 @@ func TestCompileListFilter_InOperatorProducesInExpr(t *testing.T) {
 	}
 }
 
+func TestCompileListFilter_IsNullTrueCompilesToIsNull(t *testing.T) {
+	q, _ := url.ParseQuery("filter[state][isnull]=true")
+	expr, hostErr := compileListFilter(q, "testmodule.widget", widgetFilterTestModel())
+	if hostErr != nil {
+		t.Fatalf("compileListFilter error: %v", hostErr)
+	}
+	want := "record.state IS NULL"
+	if expr != want {
+		t.Errorf("expr = %q, want %q", expr, want)
+	}
+
+	frag, args := compilesToSQL(t, expr)
+	if frag != `("state" IS NULL)` {
+		t.Errorf("frag = %s, want (\"state\" IS NULL)", frag)
+	}
+	if len(args) != 0 {
+		t.Errorf("args = %#v, want none", args)
+	}
+}
+
+func TestCompileListFilter_IsNullFalseCompilesToIsNotNull(t *testing.T) {
+	q, _ := url.ParseQuery("filter[state][isnull]=false")
+	expr, hostErr := compileListFilter(q, "testmodule.widget", widgetFilterTestModel())
+	if hostErr != nil {
+		t.Fatalf("compileListFilter error: %v", hostErr)
+	}
+	want := "record.state IS NOT NULL"
+	if expr != want {
+		t.Errorf("expr = %q, want %q", expr, want)
+	}
+
+	frag, args := compilesToSQL(t, expr)
+	if frag != `("state" IS NOT NULL)` {
+		t.Errorf("frag = %s, want (\"state\" IS NOT NULL)", frag)
+	}
+	if len(args) != 0 {
+		t.Errorf("args = %#v, want none", args)
+	}
+}
+
+func TestCompileListFilter_IsNullNonBooleanValueReturnsDomainInvalid(t *testing.T) {
+	q, _ := url.ParseQuery("filter[state][isnull]=yes")
+	_, hostErr := compileListFilter(q, "testmodule.widget", widgetFilterTestModel())
+	if hostErr == nil {
+		t.Fatal("expected an error for a non-boolean isnull value")
+	}
+	if hostErr.Code != abi.ErrCodeDomainInvalid {
+		t.Errorf("code = %q, want %q", hostErr.Code, abi.ErrCodeDomainInvalid)
+	}
+}
+
 func TestCompileListFilter_UndeclaredFieldReturnsFieldUnknown(t *testing.T) {
 	q, _ := url.ParseQuery("filter[nonexistent]=x")
 	_, hostErr := compileListFilter(q, "testmodule.widget", widgetFilterTestModel())
