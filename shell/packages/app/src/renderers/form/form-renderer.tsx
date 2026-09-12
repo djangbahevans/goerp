@@ -73,7 +73,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
       {/* Not TwoColumnLayout — FormSidebar.width is per-view configurable,
           incompatible with its fixed 2/3+1/3 ratio; gap-8 (2rem) kept in sync with it. */}
       <div className="flex gap-8">
-        <div className="flex-1">
+        <div className="flex-1 space-y-4">
           {/* view-system.md §9's EmploymentTab convention for grouping
               multiple SectionCards (section-card.md's own Existing
               Patterns table). */}
