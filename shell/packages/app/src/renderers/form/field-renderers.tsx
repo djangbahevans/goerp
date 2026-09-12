@@ -563,9 +563,14 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
 
     case "boolean":
       return (
+        // self-start: FieldWrapper's own <label> is flex flex-col — a bare
+        // checkbox has no intrinsic width to resist the default cross-axis
+        // stretch, so without this it renders full column width with the
+        // native glyph centered inside that box, far from its own label.
         <input
           id={id}
           type="checkbox"
+          className="self-start"
           checked={value === true}
           disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}

@@ -143,6 +143,22 @@ describe("FormFieldRow", () => {
       expect(screen.getByLabelText("Email")).toBe(screen.getByDisplayValue("a@b.com"));
     });
 
+    it("email: implicit-label-safe types go through FieldWrapper, whose required asterisk is danger-colored", () => {
+      const Wrapper = withFieldAccess({ email: { read: true, write: true } });
+      render(
+        <Wrapper>
+          <FormFieldRow
+            field={{ ...field, required: true }}
+            resource="contacts.contact"
+            record={{ email: "a@b.com" }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      expect(screen.getByText("*").className).toContain("text-danger");
+    });
+
     it("boolean: clicking the visible label still toggles the checkbox via native htmlFor click-forwarding", () => {
       const Wrapper = withFieldAccess({ active: { read: true, write: true } });
       const onChange = vi.fn();
@@ -217,6 +233,74 @@ describe("FormFieldRow", () => {
       // descendant was this pill's own "Remove tag" button, not the input.
       expect(screen.getByLabelText("Skills")).toBe(screen.getByRole("combobox"));
       expect(screen.getByLabelText("Skills")).not.toBe(screen.getByLabelText("Remove tag: VIP"));
+    });
+
+    it("relation (single, already holding a value): safely goes through FieldWrapper — the value renders inside the input itself, no chip ahead of it", () => {
+      const Wrapper = withFieldAccess({ customer_id: { read: true, write: true } });
+      renderWithQueryClient(
+        <Wrapper>
+          <FormFieldRow
+            field={{ field: "customer_id", type: "relation", label: "Customer", resource: "sales.customer" }}
+            resource="contacts.contact"
+            record={{ customer: { id: "c1", display_name: "Acme Corp" } }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      // relation-picker.tsx: `selected` (the chip array) is only populated
+      // when `multiple` — a single value renders as the input's own value
+      // instead, so implicit wrapping is safe here (unlike the multiple
+      // case right below).
+      expect(screen.getByLabelText("Customer")).toBe(screen.getByRole("combobox"));
+      expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("Acme Corp");
+    });
+
+    it("many2many (already holding a value): associates the visible label with the combobox input, not the selected value's remove button", () => {
+      const Wrapper = withFieldAccess({ tag_ids: { read: true, write: true } });
+      renderWithQueryClient(
+        <Wrapper>
+          <FormFieldRow
+            field={{ field: "tag_ids", type: "many2many", label: "Tags", resource: "contacts.tag" }}
+            resource="contacts.contact"
+            record={{ tags: [{ id: "1", display_name: "VIP" }] }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      // many2many always resolves to RelationPicker's `multiple` mode
+      // (isMultipleRelation), which renders each selected value's own
+      // "Remove" button ahead of the <input> — same hazard as tags above.
+      expect(screen.getByLabelText("Tags")).toBe(screen.getByRole("combobox"));
+      expect(screen.getByLabelText("Tags")).not.toBe(screen.getByLabelText("Remove VIP"));
+    });
+
+    it("multi_select without a resource (plain Select, not RelationPicker): safely goes through FieldWrapper", () => {
+      const Wrapper = withFieldAccess({ categories: { read: true, write: true } });
+      render(
+        <Wrapper>
+          <FormFieldRow
+            field={{
+              field: "categories",
+              type: "multi_select",
+              label: "Categories",
+              options: [
+                { value: "a", label: "Alpha" },
+                { value: "b", label: "Beta" },
+              ],
+            }}
+            resource="contacts.contact"
+            record={{ categories: ["a"] }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      // No `resource` set — FieldInput's own case block sends this to the
+      // plain Select component instead of RelationPicker, which has no
+      // remove-chip-before-trigger hazard at any multiplicity.
+      expect(screen.getByLabelText("Categories")).toBe(screen.getByRole("combobox"));
     });
 
     it("signature: the visible label isn't wired to the Clear button, and the canvas gets its own accessible name", () => {

@@ -54,6 +54,12 @@ export interface UseFormRecordOptions {
   autoSave?: boolean;
   autoSaveDelay?: number;
   onSaved?: (record: Row) => void;
+  // Same injection seam createRecordQueryOptions/saveRecord already expose
+  // one level down — threaded through here so a caller (form-renderer.stories.tsx)
+  // can exercise a real save mutation's isSaving/saveError states without a
+  // live backend, the same way useInfiniteList's story seeds its query cache.
+  registry?: Pick<ResourceRegistry, "resolve">;
+  client?: Pick<APIClient, "get" | "post" | "put" | "patch">;
 }
 
 export interface FormRecordHandle {
@@ -75,7 +81,9 @@ export function useFormRecord(
   options: UseFormRecordOptions = {},
 ): FormRecordHandle {
   const queryClient = useQueryClient();
-  const { data, isLoading, isError, error, refetch } = useQuery(createRecordQueryOptions(resource, id));
+  const { data, isLoading, isError, error, refetch } = useQuery(
+    createRecordQueryOptions(resource, id, options.registry, options.client),
+  );
   const [edits, setEdits] = useState<Row>({});
   const record = { ...(data ?? {}), ...edits };
   const isDirty = Object.keys(edits).length > 0;
@@ -88,7 +96,7 @@ export function useFormRecord(
   }, [resource, id]);
 
   const mutation = useMutation({
-    mutationFn: () => saveRecord(resource, id, edits),
+    mutationFn: () => saveRecord(resource, id, edits, options.registry, options.client),
     onSuccess: (saved) => {
       queryClient.setQueryData(recordQueryKey(resource, id), saved);
       setEdits({});
