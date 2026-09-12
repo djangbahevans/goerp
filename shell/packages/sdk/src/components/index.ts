@@ -73,6 +73,8 @@ export type { SignaturePadProps } from "./signature-pad.js";
 export { SignaturePad } from "./signature-pad.js";
 export type { SkeletonProps, SkeletonType } from "./skeleton.js";
 export { Skeleton } from "./skeleton.js";
+export type { SliderFieldProps } from "./slider-field.js";
+export { SliderField } from "./slider-field.js";
 export type { SpinnerProps } from "./spinner.js";
 export { Spinner } from "./spinner.js";
 export type { StatCardChange, StatCardChangeDirection, StatCardColor, StatCardProps } from "./stat-card.js";
