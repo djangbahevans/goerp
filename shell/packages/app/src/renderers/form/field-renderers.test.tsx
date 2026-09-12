@@ -260,6 +260,14 @@ describe("FieldInput", () => {
     expect(onChange).toHaveBeenCalledWith("high");
   });
 
+  it("slider: renders at the current value and reports the new value on change", () => {
+    const onChange = renderField({ field: "volume", type: "slider", min: 0, max: 100, step: 5 }, 30);
+    const slider = screen.getByRole("slider") as HTMLInputElement;
+    expect(slider.value).toBe("30");
+    fireEvent.change(slider, { target: { value: "60" } });
+    expect(onChange).toHaveBeenCalledWith(60);
+  });
+
   it("date_range: two inputs bound to range_start_field/range_end_field, not the field's own name", () => {
     const onChange = renderField(
       { field: "range", type: "date_range", range_start_field: "starts_on", range_end_field: "ends_on" },

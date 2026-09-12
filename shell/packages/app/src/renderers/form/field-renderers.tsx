@@ -14,6 +14,7 @@ import {
   RichTextField,
   Select,
   SignaturePad,
+  SliderField,
   TagsField,
   TimeField,
   ToggleField,
@@ -779,15 +780,14 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
 
     case "slider":
       return (
-        <input
+        <SliderField
           id={id}
-          type="range"
           min={field.min ?? 0}
           max={field.max ?? 100}
           step={field.step ?? 1}
           value={typeof value === "number" ? value : (field.min ?? 0)}
           disabled={disabled}
-          onChange={(e) => onChange(Number(e.target.value))}
+          onChange={onChange}
         />
       );
 
