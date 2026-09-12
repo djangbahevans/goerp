@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -17,20 +18,39 @@ import {
   rowClickHref,
   sortDirectionOf,
 } from "./list-renderer.js";
-import type { ListViewDeclaration } from "./list-view-types.js";
+import type { ListViewDeclaration, Row } from "./list-view-types.js";
 
-const { useInfiniteListMock, useRelationLabelsMock, resolveViewPathMock } = vi.hoisted(() => ({
-  useInfiniteListMock: vi.fn(),
-  useRelationLabelsMock: vi.fn(() => new Map()),
-  resolveViewPathMock: vi.fn(async (): Promise<string | null> => "/contacts/{id}"),
-}));
+const { useInfiniteListMock, useRelationLabelsMock, resolveViewPathMock, resolveResourceMock, getMock } = vi.hoisted(
+  () => ({
+    useInfiniteListMock: vi.fn(),
+    useRelationLabelsMock: vi.fn((_specs: { ids: string[] }[]) => new Map()),
+    resolveViewPathMock: vi.fn(async (): Promise<string | null> => "/contacts/{id}"),
+    // use-tree-rows.ts's own real (unmocked) data-fetching for children —
+    // only exercised by tree_field tests, which set these explicitly.
+    resolveResourceMock: vi.fn(async () => ({ listPath: "/contacts" })),
+    getMock: vi.fn(
+      async (): Promise<{ data: Row[]; meta: { cursor: null; hasMore: boolean } }> => ({
+        data: [],
+        meta: { cursor: null, hasMore: false },
+      }),
+    ),
+  }),
+);
+vi.mock("@goerp/sdk", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goerp/sdk")>();
+  return { ...actual, apiClient: { ...actual.apiClient, get: getMock } };
+});
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
   return { ...actual, useInfiniteList: useInfiniteListMock, useRelationLabels: useRelationLabelsMock };
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
-  return { ...actual, viewPathRegistry: { resolve: resolveViewPathMock } };
+  return {
+    ...actual,
+    viewPathRegistry: { resolve: resolveViewPathMock },
+    resourceRegistry: { ...actual.resourceRegistry, resolve: resolveResourceMock },
+  };
 });
 
 afterEach(() => {
@@ -39,6 +59,9 @@ afterEach(() => {
   useRelationLabelsMock.mockClear();
   useRelationLabelsMock.mockImplementation(() => new Map());
   resolveViewPathMock.mockClear();
+  resolveResourceMock.mockClear();
+  getMock.mockReset();
+  getMock.mockResolvedValue({ data: [], meta: { cursor: null, hasMore: false } });
 });
 
 const view: ListViewDeclaration = {
@@ -66,14 +89,19 @@ async function renderListRenderer(
   initialPath = "/",
   viewOverride: ListViewDeclaration = view,
 ) {
+  // useTreeRows calls the real useQueries unconditionally, so ListRenderer
+  // needs a real QueryClient even with useInfiniteList/useRelationLabels mocked.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const rootRoute = createRootRoute();
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <Wrapper>
-        <ListRenderer view={viewOverride} module="contacts" {...props} />
-      </Wrapper>
+      <QueryClientProvider client={queryClient}>
+        <Wrapper>
+          <ListRenderer view={viewOverride} module="contacts" {...props} />
+        </Wrapper>
+      </QueryClientProvider>
     ),
   });
   const router = createRouter({
@@ -911,6 +939,194 @@ describe("ListRenderer", () => {
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
     expect(links[0]?.getAttribute("href")).toBe("mailto:ada@example.com");
+  });
+
+  describe("tree_field", () => {
+    const treeView: ListViewDeclaration = {
+      ...view,
+      columns: [{ field: "name", label: "Name" }],
+      tree_field: "parent_id",
+    };
+
+    it("fetches root rows with an isnull filter on the tree field", async () => {
+      useInfiniteListMock.mockReturnValue({
+        data: { pages: [{ data: [{ id: "r1", name: "Root" }], meta: { cursor: null, hasMore: false } }] },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+
+      await renderListRenderer({}, fullAccess, "/", treeView);
+
+      expect(useInfiniteListMock).toHaveBeenCalledWith(
+        "contacts.contact",
+        expect.objectContaining({ filter: { parent_id: { isnull: true } } }),
+      );
+    });
+
+    it("keeps root pages as separate relation-label specs, not merged with expanded children", async () => {
+      useInfiniteListMock.mockReturnValue({
+        data: {
+          pages: [
+            { data: [{ id: "r1", customer_id: "c1" }], meta: { cursor: "p2", hasMore: true } },
+            { data: [{ id: "r2", customer_id: "c2" }], meta: { cursor: null, hasMore: false } },
+          ],
+        },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: true,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+      getMock.mockResolvedValue({ data: [{ id: "c1a", customer_id: "c3" }], meta: { cursor: null, hasMore: false } });
+
+      const wrapper = permissionWrapper({ "contacts.contact": { customer_id: { read: true, write: true } } });
+      await renderListRenderer({}, wrapper, "/", {
+        ...treeView,
+        columns: [{ field: "customer_id", type: "relation", resource: "sales.customer", resource_label_field: "name" }],
+      });
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Expand" })[0] as HTMLButtonElement);
+      await waitFor(() => expect(getMock).toHaveBeenCalled());
+
+      const specs = useRelationLabelsMock.mock.calls.at(-1)?.[0] ?? [];
+      // One spec per root page (["c1"], ["c2"]) plus one for the expanded
+      // node's own children ("c3") — never one spec merging all three, which
+      // would re-request "c1"/"c2" every time expansion elsewhere changes.
+      expect(specs.map((s) => s.ids)).toEqual([["c1"], ["c2"], ["c3"]]);
+    });
+
+    it("respects an embedded baseFilter that already scopes the tree field, instead of forcing isnull", async () => {
+      useInfiniteListMock.mockReturnValue({
+        data: { pages: [{ data: [{ id: "c1", name: "Child" }], meta: { cursor: null, hasMore: false } }] },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+
+      // view-system.md's embedded-rendering contract: a locked baseFilter
+      // always wins — here it scopes the tree to a specific parent's
+      // subtree rather than the resource's true roots.
+      await renderListRenderer({ embedded: true, baseFilter: { parent_id: "r1" } }, fullAccess, "/", treeView);
+
+      expect(useInfiniteListMock).toHaveBeenCalledWith(
+        "contacts.contact",
+        expect.objectContaining({ filter: { parent_id: "r1" } }),
+      );
+    });
+
+    it("shows an expand chevron for a root row, and reveals its children on click", async () => {
+      useInfiniteListMock.mockReturnValue({
+        data: { pages: [{ data: [{ id: "r1", name: "Root" }], meta: { cursor: null, hasMore: false } }] },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+      getMock.mockResolvedValue({ data: [{ id: "c1", name: "Child" }], meta: { cursor: null, hasMore: false } });
+
+      await renderListRenderer({}, fullAccess, "/", treeView);
+
+      // role="treegrid" (list-renderer.md's Accessibility section), not
+      // "table" — a tree_field view's table carries a different accessible
+      // role than a flat list's.
+      const table = screen.getByRole("treegrid", { name: "Contacts" });
+      expect(within(table).queryByText("Child")).toBeNull();
+
+      const rootRow = screen.getByText("Root").closest("tr") as HTMLTableRowElement;
+      expect(rootRow.getAttribute("aria-level")).toBe("1");
+      expect(rootRow.getAttribute("aria-expanded")).toBe("false");
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+      await waitFor(() => expect(within(table).getByText("Child")).toBeTruthy());
+      // treeView's base sort (view.default_sort: "name") applies to the
+      // children fetch too, same as any other filter/sort a flat list on
+      // this view would already send.
+      expect(getMock).toHaveBeenCalledWith("/contacts", { params: { "filter[parent_id]": "r1", sort: "name" } });
+      expect(rootRow.getAttribute("aria-expanded")).toBe("true");
+      expect(screen.getByText("Child").closest("tr")?.getAttribute("aria-level")).toBe("2");
+    });
+
+    it("shows no expand affordance once a row is confirmed to have no children", async () => {
+      useInfiniteListMock.mockReturnValue({
+        data: { pages: [{ data: [{ id: "r1", name: "Root" }], meta: { cursor: null, hasMore: false } }] },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+      getMock.mockResolvedValue({ data: [], meta: { cursor: null, hasMore: false } });
+
+      await renderListRenderer({}, fullAccess, "/", { ...treeView, default_expanded_depth: 1 });
+
+      await waitFor(() => expect(getMock).toHaveBeenCalled());
+      expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Collapse" })).toBeNull();
+    });
+
+    it("shows a retry affordance when a row's children fetch fails, and re-fetches on click", async () => {
+      useInfiniteListMock.mockReturnValue({
+        data: { pages: [{ data: [{ id: "r1", name: "Root" }], meta: { cursor: null, hasMore: false } }] },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+      getMock.mockRejectedValueOnce(new Error("network error"));
+
+      await renderListRenderer({}, fullAccess, "/", treeView);
+      fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+      await waitFor(() => expect(screen.getByText("Couldn't load these rows.")).toBeTruthy());
+
+      getMock.mockResolvedValueOnce({ data: [{ id: "c1", name: "Child" }], meta: { cursor: null, hasMore: false } });
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(screen.getByText("Child")).toBeTruthy());
+    });
+
+    it("warns when both tree_field and group_by_options are declared on the same view", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      useInfiniteListMock.mockReturnValue({
+        data: { pages: [{ data: [{ id: "r1", name: "Root" }], meta: { cursor: null, hasMore: false } }] },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+
+      await renderListRenderer({}, fullAccess, "/", { ...treeView, group_by_options: ["state"] });
+
+      await waitFor(() =>
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("tree_field and group_by_options")),
+      );
+      expect(screen.queryByText("Group by")).toBeNull();
+
+      warn.mockRestore();
+    });
   });
 
   it("row_click: warns when a selection checkbox is present but no column is marked primary", async () => {

@@ -1,7 +1,7 @@
 export { apiClient, FetchAPIClient } from "./api-client.js";
 export { downloadBlob } from "./download-blob.js";
-export type { FilterLike, FilterParamValue, FilterRange } from "./filter-params.js";
-export { flattenFilterParams } from "./filter-params.js";
+export type { FilterIsNull, FilterLike, FilterParamValue, FilterRange } from "./filter-params.js";
+export { flattenFilterParams, isFilterIsNull, isFilterLike, isFilterRange } from "./filter-params.js";
 export type {
   APIClient,
   APIClientConfig,

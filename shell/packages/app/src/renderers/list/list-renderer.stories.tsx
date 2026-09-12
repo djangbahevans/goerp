@@ -12,6 +12,7 @@ import {
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { ListRenderer } from "./list-renderer.js";
 import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js";
+import { createTreeChildrenQueryOptions } from "./use-tree-rows.js";
 
 // shell-architecture.md §20's ListRenderer does real data-fetching
 // internally (useInfiniteList/useRelationLabels) and reads route state via
@@ -158,8 +159,15 @@ function infiniteListKey(
   filter: Record<string, unknown>,
   cacheKeyPrefix: string | null = null,
   sort: string | null = null,
+  resource = "sales.order",
 ): QueryKey {
-  return ["infinite-list", cacheKeyPrefix, "sales.order", filter, sort, null];
+  return ["infinite-list", cacheKeyPrefix, resource, filter, sort, null];
+}
+
+// Reuses the real createTreeChildrenQueryOptions for its queryKey, rather
+// than hand-duplicating that shape here where it could silently drift.
+function treeChildrenKey(resource: string, treeField: string, parentId: string): QueryKey {
+  return [...createTreeChildrenQueryOptions({ parentId, resource, treeField, filter: {}, sort: undefined }).queryKey];
 }
 
 function pageOf(rows: Row[]): InfiniteData<{ data: Row[]; meta: { cursor: null; hasMore: false } }> {
@@ -204,6 +212,39 @@ function defaultClient(): QueryClient {
   const client = seededClient();
   client.setQueryData(infiniteListKey({}), pageOf(ROWS));
   client.setQueryData(RELATION_LABELS_KEY, { c1: "Acme Corp", c2: "Globex Inc" });
+  return client;
+}
+
+// A separate, self-referential resource — ROWS/COLUMNS above has no
+// parent-pointer field to hang a tree off of.
+const TREE_RESOURCE = "sales.category";
+const TREE_VIEW: ListViewDeclaration = {
+  name: "categories_list",
+  type: "list",
+  resource: TREE_RESOURCE,
+  label: "Categories",
+  columns: [{ field: "name", label: "Name", primary: true, sortable: true }],
+  tree_field: "parent_id",
+  default_expanded_depth: 1,
+};
+const TREE_ROOT_ROWS: Row[] = [
+  { id: "cat-1", name: "Electronics" },
+  { id: "cat-2", name: "Furniture" },
+];
+const TREE_CHILD_ROWS: Row[] = [
+  { id: "cat-1a", name: "Phones" },
+  { id: "cat-1b", name: "Laptops" },
+];
+
+function treeClient(): QueryClient {
+  const client = seededClient();
+  client.setQueryData(
+    infiniteListKey({ parent_id: { isnull: true } }, null, null, TREE_RESOURCE),
+    pageOf(TREE_ROOT_ROWS),
+  );
+  // cat-2's seeded-empty response confirms it childless, hiding its chevron.
+  client.setQueryData(treeChildrenKey(TREE_RESOURCE, "parent_id", "cat-1"), TREE_CHILD_ROWS);
+  client.setQueryData(treeChildrenKey(TREE_RESOURCE, "parent_id", "cat-2"), []);
   return client;
 }
 
@@ -437,5 +478,25 @@ export const Embedded: Story = {
     const canvas = within(canvasElement);
     const table = await waitFor(() => canvas.getByRole("table", { name: "Orders" }));
     await expect(within(table).getByText("SO-1042")).toBeInTheDocument();
+  },
+};
+
+export const HierarchicalTree: Story = {
+  name: "tree_field: default_expanded_depth auto-expands roots, chevron toggles further levels",
+  args: { view: TREE_VIEW },
+  decorators: [withListProviders(treeClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const table = await waitFor(() => canvas.getByRole("treegrid", { name: "Categories" }));
+
+    // default_expanded_depth: 1 auto-reveals Electronics' children.
+    await waitFor(() => expect(within(table).getByText("Phones")).toBeInTheDocument());
+    await expect(within(table).getByText("Laptops")).toBeInTheDocument();
+    // Furniture's seeded-empty response confirmed it childless — no chevron.
+    await expect(canvas.getByRole("button", { name: "Collapse" })).toBeInTheDocument();
+    await expect(canvas.getAllByRole("button", { name: "Expand" })).toHaveLength(2);
+
+    await userEvent.click(canvas.getByRole("button", { name: "Collapse" }));
+    await waitFor(() => expect(within(table).queryByText("Phones")).not.toBeInTheDocument());
   },
 };

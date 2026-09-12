@@ -62,6 +62,12 @@ export function parseListSearch(search: Record<string, unknown>): ListState {
       if (typeof value === "string" || typeof value === "number") {
         filter[field] = { like: String(value).replace(/^%|%$/g, "") };
       }
+    } else if (op === "isnull") {
+      // TanStack Router's parser already coerces "true"/"false" to real
+      // booleans (this file's own top comment) — the string fallback below
+      // just matches every other branch's defensive style.
+      if (value === true || value === "true") filter[field] = { isnull: true };
+      else if (value === false || value === "false") filter[field] = { isnull: false };
     } else if (!op && isScalarFilterValue(value)) {
       filter[field] = value;
     }

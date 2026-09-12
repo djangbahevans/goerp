@@ -75,6 +75,18 @@ describe("parseListSearch / listStateToSearch", () => {
     expect(listStateToSearch(state)).toEqual({ "filter[created_at][gte]": "2026-01-01" });
   });
 
+  it("round-trips an isnull filter (goerp#791)", () => {
+    const state = parseListSearch({ "filter[parent_id][isnull]": true });
+    expect(state.filter).toEqual({ parent_id: { isnull: true } });
+    expect(listStateToSearch(state)).toEqual({ "filter[parent_id][isnull]": true });
+  });
+
+  it("round-trips isnull: false", () => {
+    const state = parseListSearch({ "filter[parent_id][isnull]": false });
+    expect(state.filter).toEqual({ parent_id: { isnull: false } });
+    expect(listStateToSearch(state)).toEqual({ "filter[parent_id][isnull]": false });
+  });
+
   it("round-trips a text filter through the %-wrapped [like] param, unwrapping for display", () => {
     const search = { "filter[name][like]": "%acme%" };
     const state = parseListSearch(search);

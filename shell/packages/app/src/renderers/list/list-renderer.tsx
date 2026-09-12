@@ -5,9 +5,9 @@ import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
@@ -16,6 +16,8 @@ import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-vi
 import type { FilterValue } from "./use-list-state.js";
 import { useListState } from "./use-list-state.js";
 import { useSelection } from "./use-selection.js";
+import type { TreeRow } from "./use-tree-rows.js";
+import { useTreeRows } from "./use-tree-rows.js";
 import { useVisibleColumns } from "./use-visible-columns.js";
 
 // shell-architecture.md §20's ListRenderer — mode switching, URL/local
@@ -128,6 +130,20 @@ export function groupRows(rows: Row[], groupBy: string | undefined): RowGroup[] 
     byKey.get(key)?.push(row);
   }
   return order.map((key) => ({ key, rows: byKey.get(key) ?? [] }));
+}
+
+// Wraps a flat view's rows in TreeRow's shape so the table body below has
+// one rendering path for both cases.
+function toFlatTreeRows(rows: Row[]): TreeRow[] {
+  return rows.map((row) => ({
+    row,
+    depth: 0,
+    isExpanded: false,
+    isLoadingChildren: false,
+    hasChildrenUnknown: false,
+    hasChildren: false,
+    hasError: false,
+  }));
 }
 
 export type SortDirection = "asc" | "desc";
@@ -279,31 +295,55 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
   // manifest-spec.md: `selectable` defaults true, but a checkbox column
   // with nothing to bulk-act on is just clutter.
   const showSelection = view.selectable !== false && bulkActions.length > 0;
+  // view-system.md §4 "Hierarchical lists (tree_field)" — mutually
+  // exclusive with group_by_options in practice.
+  const isTree = view.tree_field !== undefined;
 
-  // A row that also carries a selection checkbox can't claim its own
-  // tabIndex={0} click target too (the checkbox and the row-navigate
-  // action would compete for the same Enter/Space press) — the
-  // `primary: true` column's cell becomes the real link instead. See
+  // A row that also carries a selection checkbox or a tree expand/collapse
+  // chevron can't claim its own tabIndex={0} click target too (either one
+  // competes with the row-navigate action for the same Enter/Space press)
+  // — the `primary: true` column's cell becomes the real link instead. See
   // docs/components/list-renderer.md's row-interaction States entry.
   const primaryColumnField = columns.find((column) => column.primary)?.field;
-  const wholeRowClickable = Boolean(rowClickPath) && !showSelection;
+  const wholeRowClickable = Boolean(rowClickPath) && !showSelection && !isTree;
   // manifest-spec.md documents `primary` and `row_click` independently,
-  // with no stated dependency between them — but with a selection
-  // checkbox present, row_click has no cell to attach a link to without a
-  // primary column, and silently doing nothing over a manifest oversight
-  // like that is worth a dev-time signal rather than staying invisible.
+  // with no stated dependency between them — but with a selection checkbox
+  // or tree chevron present, row_click has no cell to attach a link to
+  // without a primary column, and silently doing nothing over a manifest
+  // oversight like that is worth a dev-time signal rather than staying
+  // invisible.
   useEffect(() => {
-    if (showSelection && rowClickPath && primaryColumnField === undefined) {
+    if ((showSelection || isTree) && rowClickPath && primaryColumnField === undefined) {
       console.warn(
-        `ListRenderer: view "${view.name}" declares row_click but has no column marked primary: true — with a selection checkbox present, there's no cell for row_click to navigate from.`,
+        `ListRenderer: view "${view.name}" declares row_click but has no column marked primary: true — with a selection checkbox or tree chevron present, there's no cell for row_click to navigate from.`,
       );
     }
-  }, [showSelection, rowClickPath, primaryColumnField, view.name]);
+  }, [showSelection, isTree, rowClickPath, primaryColumnField, view.name]);
+
+  // Both fields are independently optional on ListViewDeclaration, but
+  // tree_field always wins and group_by_options is silently ignored — a
+  // manifest declaring both is worth a dev-time signal, the same posture
+  // as the row_click warning above.
+  useEffect(() => {
+    if (isTree && (view.group_by_options?.length ?? 0) > 0) {
+      console.warn(
+        `ListRenderer: view "${view.name}" declares both tree_field and group_by_options — tree_field wins, group_by_options is ignored.`,
+      );
+    }
+  }, [isTree, view.group_by_options, view.name]);
 
   // view-system.md's embedded-rendering contract: the locked base filter
   // always wins over user-driven state, never the other way around.
   const filter = { ...listState.filter, ...baseFilter };
   const filterKey = JSON.stringify(filter);
+
+  // goerp#791's isnull operator fetches root rows only — but not when a
+  // baseFilter already constrains the tree field (an embedded subtree),
+  // since a locked baseFilter always wins per the contract above.
+  const rootFilter =
+    view.tree_field !== undefined && !(view.tree_field in filter)
+      ? { ...filter, [view.tree_field]: { isnull: true } }
+      : filter;
 
   // A selection is scoped to the currently-visible rows — once the filter
   // changes the dataset out from under it, a stale id could still fire a
@@ -319,14 +359,32 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } =
     useInfiniteList<Row>(view.resource, {
-      filter,
+      filter: rootFilter,
       ...(listState.sort !== undefined ? { sort: listState.sort } : {}),
       ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
     });
 
   const pages = data?.pages.map((page) => page.data) ?? [];
-  const rows = pages.flat();
-  const relationLabels = useRelationLabels(relationBatchSpecs(`${module}.${view.name}`, columns, pages));
+  // Memoized on `data` itself, not `pages` — otherwise useTreeRows' auto-
+  // expand effect re-runs its tree walk on every render, not just when the
+  // row set changes.
+  const rootRows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);
+  const { treeRows, toggleExpand, retryChildren, fetchedPages } = useTreeRows(
+    view.resource,
+    view.tree_field ?? "",
+    view.default_expanded_depth ?? 0,
+    isTree ? rootRows : [],
+    filter,
+    listState.sort,
+  );
+  const visibleRows = isTree ? treeRows : toFlatTreeRows(rootRows);
+  // Root pages (unflattened, so "Load more" doesn't invalidate an earlier
+  // page's already-resolved labels) plus each expanded node's own children
+  // fetch — see fetchedPages' own doc comment for why each needs to stay
+  // its own stable-id-set page.
+  const relationLabels = useRelationLabels(
+    relationBatchSpecs(`${module}.${view.name}`, columns, isTree ? [...pages, ...fetchedPages] : pages),
+  );
 
   if (isLoading) {
     return <Skeleton type="table" columns={columns.length} />;
@@ -361,6 +419,14 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
     (showSelection ? CHECKBOX_COLUMN_WIDTH : 0) +
     columns.reduce((sum, column) => sum + (column.width ?? DEFAULT_COLUMN_WIDTH), 0);
 
+  // A tree_field view always renders as one hierarchy — group_by_options
+  // and tree_field are mutually exclusive in practice (list-view-types.ts's
+  // own comment), so tree mode skips groupRows entirely rather than trying
+  // to combine the two bucketings of the same rows.
+  const rowGroups = isTree
+    ? [{ key: "", rows: treeRows }]
+    : groupRows(rootRows, listState.groupBy).map((group) => ({ key: group.key, rows: toFlatTreeRows(group.rows) }));
+
   function navigateToRow(row: Row) {
     const href = rowClickHref(rowClickPath, row, rowClickParam);
     if (href) void navigate({ to: href });
@@ -383,7 +449,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
         )}
       </div>
       {showSelection && <BulkActions actions={bulkActions} selectedIds={selectedIds} clearSelection={clearSelection} />}
-      {groupByOptions.length > 0 && (
+      {!isTree && groupByOptions.length > 0 && (
         <label htmlFor={groupBySelectId} className="flex items-center gap-2 text-sm text-text-secondary">
           Group by
           <Select
@@ -397,18 +463,22 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
           />
         </label>
       )}
-      {rows.length === 0 ? (
+      {visibleRows.length === 0 ? (
         <EmptyState
           title={view.empty_state?.title ?? `No ${view.label.toLowerCase()} found.`}
           {...(view.empty_state?.description !== undefined ? { description: view.empty_state.description } : {})}
         />
       ) : (
         <div className="overflow-x-auto" onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}>
-          {groupRows(rows, listState.groupBy).map((group) => {
-            const selectableIds = group.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+          {rowGroups.map((group) => {
+            const selectableIds = group.rows
+              .map((treeRow) => treeRow.row.id)
+              .filter((id): id is string => typeof id === "string");
             return (
               <table
                 aria-label={view.label}
+                // WAI-ARIA treegrid pattern for hierarchical data.
+                role={isTree ? "treegrid" : undefined}
                 key={group.key}
                 className="table-fixed border-collapse"
                 style={{ width: tableWidth }}
@@ -418,7 +488,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                     rows from widening that group's table past its
                     <colgroup>, which desyncs cross-group column alignment
                     under the shared scroll container above. */}
-                {listState.groupBy && (
+                {!isTree && listState.groupBy && (
                   <caption className="bg-bg-subtle p-3 text-left text-sm font-medium text-text-secondary">
                     {listState.groupBy} = {group.key}
                   </caption>
@@ -498,62 +568,139 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
                   </tr>
                 </thead>
                 <tbody>
-                  {group.rows.map((row, index) => {
+                  {group.rows.map((treeRow, index) => {
+                    const row = treeRow.row;
                     const selected = typeof row.id === "string" && selection.selectedIds.has(row.id);
                     const rowHandleActivate = wholeRowClickable ? () => navigateToRow(row) : undefined;
+                    // Requires a string id — toggleExpand/the children fetch
+                    // both need one, and aria-expanded shouldn't announce an
+                    // expandable row with nothing to expand it.
+                    const showChevron =
+                      isTree && typeof row.id === "string" && (treeRow.hasChildrenUnknown || treeRow.hasChildren);
+                    const rowKey = (row.id as string | undefined) ?? index;
                     return (
-                      <tr
-                        key={(row.id as string | undefined) ?? index}
-                        className={`border-b border-border ${selected ? "bg-primary-subtle" : "bg-surface"} ${
-                          rowHandleActivate
-                            ? "cursor-pointer hover:bg-surface-hover focus-visible:[outline:2px_solid_var(--color-primary)] focus-visible:-outline-offset-2"
-                            : ""
-                        }`}
-                        tabIndex={rowHandleActivate ? 0 : undefined}
-                        onClick={rowHandleActivate}
-                        onKeyDown={
-                          rowHandleActivate
-                            ? (event: KeyboardEvent<HTMLTableRowElement>) => {
-                                if (event.key !== "Enter" && event.key !== " ") return;
-                                event.preventDefault();
-                                rowHandleActivate();
-                              }
-                            : undefined
-                        }
-                      >
-                        {showSelection && (
-                          <td
-                            className={`p-3 ${stickyCheckboxClassName} ${selected ? "bg-primary-subtle" : "bg-surface"} ${scrolled ? "shadow-sm" : ""}`}
-                          >
-                            {typeof row.id === "string" && (
-                              <input
-                                type="checkbox"
-                                aria-label="Select row"
-                                checked={selection.selectedIds.has(row.id)}
-                                onChange={() => selection.toggle(row.id as string)}
-                                style={{ accentColor: "var(--color-primary)" }}
-                              />
-                            )}
-                          </td>
-                        )}
-                        {columns.map((column) => {
-                          const rawValue = row[column.field];
-                          const relationLabel =
-                            typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
-                          const content = renderCell(column, row, relationLabel !== undefined ? { relationLabel } : {});
-                          const asRowLink =
-                            showSelection && column.field === primaryColumnField && !columnRendersOwnLink(column);
-                          const href = asRowLink ? rowClickHref(rowClickPath, row, rowClickParam) : undefined;
-                          return (
-                            <td key={column.field} style={columnStyle(column)} className="p-3 text-base text-text">
-                              {/* biome-ignore lint/a11y/noStaticElementInteractions: onMouseEnter only lazily computes a native title for the browser's own tooltip — a passive read, not new interactive behavior. */}
-                              <span onMouseEnter={handleTruncationHover} style={truncationStyle(column)}>
-                                {href ? <a href={href}>{content}</a> : content}
+                      <Fragment key={rowKey}>
+                        <tr
+                          className={`border-b border-border ${selected ? "bg-primary-subtle" : "bg-surface"} ${
+                            rowHandleActivate
+                              ? "cursor-pointer hover:bg-surface-hover focus-visible:[outline:2px_solid_var(--color-primary)] focus-visible:-outline-offset-2"
+                              : ""
+                          }`}
+                          aria-level={isTree ? treeRow.depth + 1 : undefined}
+                          aria-expanded={isTree && showChevron ? treeRow.isExpanded : undefined}
+                          tabIndex={rowHandleActivate ? 0 : undefined}
+                          onClick={rowHandleActivate}
+                          onKeyDown={
+                            rowHandleActivate
+                              ? (event: KeyboardEvent<HTMLTableRowElement>) => {
+                                  if (event.key !== "Enter" && event.key !== " ") return;
+                                  event.preventDefault();
+                                  rowHandleActivate();
+                                }
+                              : undefined
+                          }
+                        >
+                          {showSelection && (
+                            <td
+                              className={`p-3 ${stickyCheckboxClassName} ${selected ? "bg-primary-subtle" : "bg-surface"} ${scrolled ? "shadow-sm" : ""}`}
+                            >
+                              {typeof row.id === "string" && (
+                                <input
+                                  type="checkbox"
+                                  aria-label="Select row"
+                                  checked={selection.selectedIds.has(row.id)}
+                                  onChange={() => selection.toggle(row.id as string)}
+                                  style={{ accentColor: "var(--color-primary)" }}
+                                />
+                              )}
+                            </td>
+                          )}
+                          {columns.map((column, columnIndex) => {
+                            const rawValue = row[column.field];
+                            const relationLabel =
+                              typeof rawValue === "string" ? relationLabels.get(column.field)?.[rawValue] : undefined;
+                            const content = renderCell(
+                              column,
+                              row,
+                              relationLabel !== undefined ? { relationLabel } : {},
+                            );
+                            const asRowLink =
+                              (showSelection || isTree) &&
+                              column.field === primaryColumnField &&
+                              !columnRendersOwnLink(column);
+                            const href = asRowLink ? rowClickHref(rowClickPath, row, rowClickParam) : undefined;
+                            return (
+                              <td key={column.field} style={columnStyle(column)} className="p-3 text-base text-text">
+                                <span className="flex items-center gap-1">
+                                  {isTree && columnIndex === 0 && (
+                                    <span
+                                      className="inline-flex shrink-0 items-center"
+                                      style={{ paddingInlineStart: `calc(var(--space-4) * ${treeRow.depth})` }}
+                                    >
+                                      {showChevron && typeof row.id === "string" ? (
+                                        <button
+                                          type="button"
+                                          aria-label={treeRow.isExpanded ? "Collapse" : "Expand"}
+                                          aria-expanded={treeRow.isExpanded}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            toggleExpand(row.id as string);
+                                          }}
+                                          className="inline-flex items-center justify-center rounded-control hover:bg-surface-hover"
+                                        >
+                                          <ChevronRight
+                                            size={14}
+                                            aria-hidden="true"
+                                            className={`transition-transform duration-(--duration-base) ${treeRow.isExpanded ? "rotate-90" : ""}`}
+                                          />
+                                        </button>
+                                      ) : (
+                                        <span aria-hidden="true" className="inline-block size-3.5" />
+                                      )}
+                                    </span>
+                                  )}
+                                  {/* biome-ignore lint/a11y/noStaticElementInteractions: onMouseEnter only lazily computes a native title for the browser's own tooltip — a passive read, not new interactive behavior. */}
+                                  <span onMouseEnter={handleTruncationHover} style={truncationStyle(column)}>
+                                    {href ? <a href={href}>{content}</a> : content}
+                                  </span>
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        {isTree && treeRow.isLoadingChildren && (
+                          <tr className="bg-surface">
+                            <td colSpan={(showSelection ? 1 : 0) + columns.length} className="p-3">
+                              <span
+                                className="block"
+                                style={{ paddingInlineStart: `calc(var(--space-4) * ${treeRow.depth + 1})` }}
+                              >
+                                <Skeleton lines={1} />
                               </span>
                             </td>
-                          );
-                        })}
-                      </tr>
+                          </tr>
+                        )}
+                        {isTree && treeRow.hasError && !treeRow.isLoadingChildren && (
+                          <tr className="bg-surface">
+                            <td colSpan={(showSelection ? 1 : 0) + columns.length} className="p-3">
+                              <span
+                                className="flex items-center gap-2 text-sm text-danger"
+                                style={{ paddingInlineStart: `calc(var(--space-4) * ${treeRow.depth + 1})` }}
+                              >
+                                <Icon name="circle-alert" size={14} aria-hidden="true" />
+                                Couldn't load these rows.
+                                <button
+                                  type="button"
+                                  className="font-medium underline hover:no-underline"
+                                  onClick={() => typeof row.id === "string" && retryChildren(row.id)}
+                                >
+                                  Retry
+                                </button>
+                              </span>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
