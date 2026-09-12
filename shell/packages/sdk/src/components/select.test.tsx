@@ -61,6 +61,21 @@ describe("Select", () => {
       render(<Select options={OPTIONS} value="" onChange={vi.fn()} />);
       expect(screen.queryByRole("button")).toBeNull();
     });
+
+    it("emptyValue treats a real, matching option as unset — no clear button, no extra trigger padding", () => {
+      const anyOption = { value: "any", label: "Any" };
+      render(<Select options={[anyOption, ...OPTIONS]} value="any" emptyValue="any" onChange={vi.fn()} />);
+      expect(screen.queryByRole("button")).toBeNull();
+      expect(screen.getByRole("combobox").textContent).toContain("Any");
+    });
+
+    it("emptyValue: a clear button appears for any other selected value, and clearing reports emptyValue", () => {
+      const anyOption = { value: "any", label: "Any" };
+      const onChange = vi.fn();
+      render(<Select options={[anyOption, ...OPTIONS]} value="draft" emptyValue="any" onChange={onChange} />);
+      fireEvent.click(screen.getByRole("button", { name: "Clear Draft" }));
+      expect(onChange).toHaveBeenCalledWith("any");
+    });
   });
 
   describe("multi-select", () => {
