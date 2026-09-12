@@ -73,9 +73,13 @@ export const CheckedItemAndCustomTrigger: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Account menu" }));
     // The panel portals to document.body, not canvasElement.
-    await expect(within(document.body).getByRole("menuitemcheckbox", { name: "Dark mode" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const darkMode = within(document.body).getByRole("menuitemcheckbox", { name: "Dark mode" });
+    await expect(darkMode).toHaveAttribute("aria-checked", "true");
+
+    // Clicking a checked item toggles it but leaves the menu open — unlike a
+    // plain item, which closes on click — so a checklist of several checked
+    // items (list-renderer.md's Columns toggle) can be flipped in one open.
+    await userEvent.click(darkMode);
+    await expect(within(document.body).getByRole("menu")).toBeInTheDocument();
   },
 };
