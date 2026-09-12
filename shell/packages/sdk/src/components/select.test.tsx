@@ -134,5 +134,26 @@ describe("Select", () => {
       render(<Select options={OPTIONS} value={[]} onChange={vi.fn()} multiple disabled />);
       expect((screen.getByRole("combobox") as HTMLButtonElement).disabled).toBe(true);
     });
+
+    it("closes on a click outside the trigger and the dropdown", async () => {
+      render(<Select options={OPTIONS} value={[]} onChange={vi.fn()} multiple />);
+      fireEvent.click(screen.getByRole("combobox"));
+      expect(await screen.findByRole("listbox")).toBeTruthy();
+
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole("listbox")).toBeNull();
+    });
+
+    it("portals the dropdown to document.body, escaping an overflow: hidden ancestor", async () => {
+      const { container } = render(
+        <div style={{ overflow: "hidden", height: "10px" }}>
+          <Select options={OPTIONS} value={[]} onChange={vi.fn()} multiple />
+        </div>,
+      );
+      fireEvent.click(screen.getByRole("combobox"));
+      const listbox = await screen.findByRole("listbox");
+      expect(container.contains(listbox)).toBe(false);
+      expect(document.body.contains(listbox)).toBe(true);
+    });
   });
 });

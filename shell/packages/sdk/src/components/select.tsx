@@ -1,7 +1,8 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
-import { useId, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Badge, type BadgeColor } from "./badge.js";
 import { fieldInputClassName } from "./field-input-styles.js";
 import { Icon, type IconNameLike } from "./icon.js";
@@ -166,6 +167,14 @@ function SelectMultiple({
   const listboxId = useId();
   const activeIndex = Math.max(0, Math.min(highlightedIndex, options.length - 1));
 
+  // Portaled to document.body, position: fixed — same reasoning as
+  // ActionMenu's/RelationPicker's own panels: an ancestor with overflow:
+  // hidden (SectionCard's own collapse-transition wrapper, e.g.) would
+  // otherwise clip the dropdown instead of letting it float above the page.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLSpanElement | null>(null);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+
   function open(): void {
     if (disabled) return;
     setIsOpen(true);
@@ -182,6 +191,43 @@ function SelectMultiple({
   function close(): void {
     setIsOpen(false);
   }
+
+  // Runs before paint, positioned once on open — not re-tracked on
+  // scroll/resize, since the panel closes on Escape/selection/outside-click
+  // well before either would matter (same simplification ActionMenu's own
+  // panel makes).
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPosition(null);
+      return;
+    }
+    const triggerEl = triggerRef.current;
+    if (!triggerEl) return;
+    const triggerRect = triggerEl.getBoundingClientRect();
+    const panelHeight = panelRef.current?.getBoundingClientRect().height ?? 0;
+    const fitsBelow = triggerRect.bottom + 4 + panelHeight <= window.innerHeight - 8;
+    const top = fitsBelow ? triggerRect.bottom + 4 : Math.max(8, triggerRect.top - 4 - panelHeight);
+    setPosition({ top, left: triggerRect.left });
+  }, [isOpen]);
+
+  // Closes on a click outside both the trigger and the portaled panel —
+  // mousedown, not click, so it commits before any outside element's own
+  // click handler fires. Doesn't rely on blur/relatedTarget the way this
+  // component's pre-portal version did: the panel is no longer a DOM
+  // descendant of the trigger once portaled, so a plain
+  // event.currentTarget.contains(event.relatedTarget) check would
+  // incorrectly treat every click inside the panel as "outside" too.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: close is a plain function recreated every render, not a reactive dependency — only isOpen should re-arm this listener.
+  useEffect(() => {
+    if (!isOpen) return;
+    function handlePointerDown(event: MouseEvent): void {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      close();
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isOpen]);
 
   function toggle(option: SelectOption): void {
     if (option.disabled) return;
@@ -243,14 +289,9 @@ function SelectMultiple({
     );
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: focus-out boundary only — closes the panel when focus leaves the trigger+listbox pair, not a user-facing interactive element itself.
-    <div
-      className="relative"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setIsOpen(false);
-      }}
-    >
+    <div className="relative">
       <button
+        ref={triggerRef}
         id={id}
         type="button"
         disabled={disabled}
@@ -267,38 +308,46 @@ function SelectMultiple({
         {triggerContent}
         <ChevronDown size={16} className="shrink-0 text-text-secondary" aria-hidden />
       </button>
-      {isOpen && (
-        <span
-          id={listboxId}
-          role="listbox"
-          aria-multiselectable="true"
-          className={`absolute top-full mt-1 ${PANEL_CLASSES}`}
-        >
-          {options.map((option, index) => (
-            // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG listbox-button pattern — options are never independently focusable, only virtually "focused" via aria-activedescendant on the trigger button.
-            // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the trigger button's own onKeyDown.
-            <div
-              key={option.value}
-              id={`${listboxId}-option-${index}`}
-              role="option"
-              aria-selected={selectedSet.has(option.value)}
-              aria-disabled={option.disabled}
-              onMouseEnter={option.disabled ? undefined : () => setHighlightedIndex(index)}
-              onClick={option.disabled ? undefined : () => toggle(option)}
-              className={`${ROW_CLASSES} ${option.disabled ? "cursor-not-allowed opacity-50" : ""} ${
-                index === activeIndex ? "bg-surface-hover" : ""
-              }`}
-            >
-              {selectedSet.has(option.value) ? (
-                <Check size={16} className="shrink-0 text-primary" aria-hidden />
-              ) : (
-                <span aria-hidden className="inline-block w-4" />
-              )}
-              <OptionLabel option={option} />
-            </div>
-          ))}
-        </span>
-      )}
+      {isOpen &&
+        createPortal(
+          <span
+            ref={panelRef}
+            id={listboxId}
+            role="listbox"
+            aria-multiselectable="true"
+            style={
+              position
+                ? { position: "fixed", top: position.top, left: position.left }
+                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
+            }
+            className={PANEL_CLASSES}
+          >
+            {options.map((option, index) => (
+              // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG listbox-button pattern — options are never independently focusable, only virtually "focused" via aria-activedescendant on the trigger button.
+              // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the trigger button's own onKeyDown.
+              <div
+                key={option.value}
+                id={`${listboxId}-option-${index}`}
+                role="option"
+                aria-selected={selectedSet.has(option.value)}
+                aria-disabled={option.disabled}
+                onMouseEnter={option.disabled ? undefined : () => setHighlightedIndex(index)}
+                onClick={option.disabled ? undefined : () => toggle(option)}
+                className={`${ROW_CLASSES} ${option.disabled ? "cursor-not-allowed opacity-50" : ""} ${
+                  index === activeIndex ? "bg-surface-hover" : ""
+                }`}
+              >
+                {selectedSet.has(option.value) ? (
+                  <Check size={16} className="shrink-0 text-primary" aria-hidden />
+                ) : (
+                  <span aria-hidden className="inline-block w-4" />
+                )}
+                <OptionLabel option={option} />
+              </div>
+            ))}
+          </span>,
+          document.body,
+        )}
     </div>
   );
 }

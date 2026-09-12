@@ -71,13 +71,25 @@ describe("LanguageSelect", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
-  it("closes when focus leaves the widget without a selection", () => {
+  it("closes on a click outside the input and the dropdown", () => {
     render(<LanguageSelect value="" onChange={vi.fn()} />);
     const input = screen.getByRole("combobox");
     fireEvent.focus(input);
     expect(input.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.blur(input);
+    fireEvent.mouseDown(document.body);
     expect(input.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("portals the dropdown to document.body, escaping an overflow: hidden ancestor", () => {
+    const { container } = render(
+      <div style={{ overflow: "hidden", height: "10px" }}>
+        <LanguageSelect value="" onChange={vi.fn()} />
+      </div>,
+    );
+    fireEvent.focus(screen.getByRole("combobox"));
+    const listbox = screen.getByRole("listbox");
+    expect(container.contains(listbox)).toBe(false);
+    expect(document.body.contains(listbox)).toBe(true);
   });
 
   it("disables the input when disabled", () => {

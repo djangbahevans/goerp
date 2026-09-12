@@ -111,6 +111,17 @@ describe("TagsField", () => {
     expect((input as HTMLInputElement).value).toBe("VIP");
   });
 
+  it("closes the suggestion list on a click outside the field, same as Escape — without clearing the input", () => {
+    render(<TagsField value={[]} onChange={vi.fn()} options={options} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "VIP" } });
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.mouseDown(document.body);
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect((input as HTMLInputElement).value).toBe("VIP");
+  });
+
   it("reopens the suggestion list on ArrowDown after Escape dismissed it, without editing the query", () => {
     render(<TagsField value={[]} onChange={vi.fn()} options={options} />);
     const input = screen.getByRole("combobox");

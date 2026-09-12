@@ -1,5 +1,5 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { fieldInputClassName } from "./field-input-styles.js";
 
 export interface TagValue {
@@ -61,6 +61,7 @@ export function TagsField({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [closed, setClosed] = useState(false);
   const listboxId = useId();
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const selectedIds = new Set(value.map((t) => t.id));
   const normalizedQuery = query.trim().toLowerCase();
   const matches = options.filter((o) => !selectedIds.has(o.id) && o.name.toLowerCase().includes(normalizedQuery));
@@ -69,6 +70,22 @@ export function TagsField({
   const optionCount = matches.length + (showCreate ? 1 : 0);
   const isOpen = query !== "" && !closed && optionCount > 0;
   const activeIndex = Math.max(0, Math.min(highlightedIndex, optionCount - 1));
+
+  // Unlike RelationPicker/CodeSelect, this listbox isn't absolutely
+  // positioned (so no portal/clipping concern) — but with no dismissal
+  // mechanism at all, a click outside the field left the suggestion list
+  // (and its typed query) open indefinitely. Mirrors Escape's own
+  // behavior (setClosed, not clearing the query) rather than inventing a
+  // second dismissal shape.
+  useEffect(() => {
+    if (!isOpen) return;
+    function handlePointerDown(event: MouseEvent): void {
+      if (containerRef.current?.contains(event.target as Node)) return;
+      setClosed(true);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isOpen]);
 
   const add = (tag: TagValue) => {
     onChange([...value, tag]);
@@ -160,7 +177,7 @@ export function TagsField({
   );
 
   return (
-    <div className="flex flex-col gap-1">
+    <div ref={containerRef} className="flex flex-col gap-1">
       {label !== undefined && <span className="text-sm text-text">{label}</span>}
       {value.length > 0 && (
         <span className="flex flex-wrap gap-1">
