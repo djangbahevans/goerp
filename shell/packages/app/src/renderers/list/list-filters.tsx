@@ -1,5 +1,5 @@
 import type { FilterRange } from "@goerp/sdk";
-import { apiClient } from "@goerp/sdk";
+import { apiClient, isFilterLike, isFilterRange } from "@goerp/sdk";
 import type { RelationValue } from "@goerp/sdk/components";
 import { CountrySelect, DateField, fieldInputClassName, RelationPicker, Select } from "@goerp/sdk/components";
 import { createRelationLabelsQueryOptions } from "@goerp/sdk/react";
@@ -47,11 +47,11 @@ function asStringArray(value: FilterValue | undefined): string[] {
 }
 
 function asRange(value: FilterValue | undefined): FilterRange {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && !("like" in value) ? value : {};
+  return value !== undefined && isFilterRange(value) ? value : {};
 }
 
 function asLike(value: FilterValue | undefined): string {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && "like" in value ? value.like : "";
+  return value !== undefined && isFilterLike(value) ? value.like : "";
 }
 
 function asScalarString(value: FilterValue | undefined): string {

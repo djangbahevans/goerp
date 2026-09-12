@@ -185,6 +185,12 @@ export interface ListViewDeclaration {
   actions?: ListAction[];
   bulk_actions?: BulkAction[];
   group_by_options?: string[];
+  // view-system.md §4 "Hierarchical lists (tree_field)". Mutually exclusive
+  // with group_by_options in practice — ListRenderer renders a tree_field
+  // view as a single hierarchy, never combined with a group-by bucketing of
+  // the same rows.
+  tree_field?: string;
+  default_expanded_depth?: number;
   page_sizes?: number[];
   default_page_size?: number;
   density?: "compact" | "normal" | "comfortable";
