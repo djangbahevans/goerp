@@ -617,9 +617,12 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
 
     case "radio":
       return (
-        <span role="radiogroup" aria-label={field.label ?? field.field}>
+        <div role="radiogroup" aria-label={field.label ?? field.field} className="flex flex-col gap-2">
           {(field.options ?? []).map((option) => (
-            <label key={option.value}>
+            <label
+              key={option.value}
+              className="flex items-center gap-2 text-sm text-text has-disabled:cursor-not-allowed has-disabled:opacity-50"
+            >
               <input
                 type="radio"
                 name={field.field}
@@ -627,11 +630,13 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
                 disabled={disabled || option.disabled}
                 checked={stringValue === option.value}
                 onChange={() => onChange(option.value)}
+                className="focus-visible:shadow-focus focus-visible:outline-none"
+                style={{ accentColor: "var(--color-primary)" }}
               />
               {option.label}
             </label>
           ))}
-        </span>
+        </div>
       );
 
     case "relation":
