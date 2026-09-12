@@ -391,6 +391,18 @@ describe("ActionMenu", () => {
       expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
       expect(screen.queryByRole("menuitemcheckbox")).toBeNull();
     });
+
+    it("clicking a checked item calls onClick but leaves the menu open, unlike a plain item", () => {
+      const onClick = vi.fn();
+      render(
+        withPermissions([], <ActionMenu label="Actions" items={[{ label: "Dark mode", onClick, checked: false }]} />),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Dark mode" }));
+
+      expect(onClick).toHaveBeenCalledOnce();
+      expect(screen.getByRole("menu")).toBeTruthy();
+    });
   });
 
   describe("custom trigger", () => {

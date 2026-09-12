@@ -1,5 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import type { ListColumn } from "./list-view-types.js";
@@ -29,6 +29,18 @@ describe("filterColumnsByFieldAccess", () => {
   it("drops a column marked hidden even when the caller has read access", () => {
     const columns: ListColumn[] = [{ field: "name" }, { field: "internal_note", hidden: true }];
     expect(filterColumnsByFieldAccess(columns, "contacts.contact", () => true)).toEqual([{ field: "name" }]);
+  });
+
+  it("includes a hidden column once its field is in revealedFields", () => {
+    const columns: ListColumn[] = [{ field: "name" }, { field: "internal_note", hidden: true }];
+    const revealed = new Set(["internal_note"]);
+    expect(filterColumnsByFieldAccess(columns, "contacts.contact", () => true, revealed)).toEqual(columns);
+  });
+
+  it("still drops a revealed hidden column the caller lacks read access to", () => {
+    const columns: ListColumn[] = [{ field: "internal_note", hidden: true }];
+    const revealed = new Set(["internal_note"]);
+    expect(filterColumnsByFieldAccess(columns, "contacts.contact", () => false, revealed)).toEqual([]);
   });
 });
 
@@ -66,6 +78,55 @@ describe("useVisibleColumns", () => {
       }),
     });
 
-    expect(result.current).toEqual([{ field: "name" }]);
+    expect(result.current.columns).toEqual([{ field: "name" }]);
+  });
+
+  it("lists readable hidden columns as toggle candidates, excluded from columns until revealed", () => {
+    const view = {
+      name: "v",
+      type: "list" as const,
+      resource: "contacts.contact",
+      label: "Contacts",
+      columns: [{ field: "name" }, { field: "internal_note", hidden: true }, { field: "ssn", hidden: true }],
+    };
+    const { result } = renderHook(() => useVisibleColumns(view), {
+      wrapper: wrapperWithFieldAccess({
+        "contacts.contact": {
+          name: { read: true, write: true },
+          internal_note: { read: true, write: true },
+          ssn: { read: false, write: false },
+        },
+      }),
+    });
+
+    expect(result.current.columns).toEqual([{ field: "name" }]);
+    expect(result.current.hiddenColumns).toEqual([{ field: "internal_note", hidden: true }]);
+    expect(result.current.revealedFields.size).toBe(0);
+  });
+
+  it("toggleColumn reveals, then re-hides, a hidden column's field", () => {
+    const view = {
+      name: "v",
+      type: "list" as const,
+      resource: "contacts.contact",
+      label: "Contacts",
+      columns: [{ field: "name" }, { field: "internal_note", hidden: true }],
+    };
+    const { result } = renderHook(() => useVisibleColumns(view), {
+      wrapper: wrapperWithFieldAccess({
+        "contacts.contact": {
+          name: { read: true, write: true },
+          internal_note: { read: true, write: true },
+        },
+      }),
+    });
+
+    act(() => result.current.toggleColumn("internal_note"));
+    expect(result.current.columns).toEqual([{ field: "name" }, { field: "internal_note", hidden: true }]);
+    expect(result.current.revealedFields.has("internal_note")).toBe(true);
+
+    act(() => result.current.toggleColumn("internal_note"));
+    expect(result.current.columns).toEqual([{ field: "name" }]);
+    expect(result.current.revealedFields.has("internal_note")).toBe(false);
   });
 });

@@ -84,7 +84,11 @@ function ActionMenuItemButton({
   const handleClick = () => {
     if (item.disabled) return;
     item.onClick?.();
-    onSelect();
+    // A checkable item is a toggle to flip and re-inspect, not a one-shot
+    // action to commit and dismiss from — action-menu.md's States entry for
+    // checked items. Keeping the menu open lets a checklist-style caller
+    // (list-renderer.md's Columns toggle) flip several items in one open.
+    if (item.checked === undefined) onSelect();
   };
 
   // Two literal branches, not one role={checkable ? ... : ...} — role and

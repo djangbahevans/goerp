@@ -74,6 +74,7 @@ const COLUMNS: ListColumn[] = [
   { field: "label_color", label: "Color", type: "color" },
   { field: "metadata", label: "Metadata", type: "json" },
   { field: "internal_note", label: "Note", type: "custom" },
+  { field: "warehouse_notes", label: "Warehouse Notes", type: "text", hidden: true },
 ];
 
 const view: ListViewDeclaration = {
@@ -114,6 +115,7 @@ const ROWS: Row[] = [
     label_color: "#3B82F6",
     metadata: { source: "web", campaign: "summer-sale" },
     internal_note: "Called customer to confirm address.",
+    warehouse_notes: "Fragile — pack with extra padding.",
   },
   {
     id: "order-2",
@@ -140,6 +142,7 @@ const ROWS: Row[] = [
     label_color: "#10B981",
     metadata: { source: "pos" },
     internal_note: "",
+    warehouse_notes: "",
   },
 ];
 
@@ -395,6 +398,24 @@ export const FieldPermissionRedaction: Story = {
     await expect(body.getByText("Reference")).toBeInTheDocument();
     await expect(body.queryByText("Note")).not.toBeInTheDocument();
     await expect(body.queryByText("Called customer to confirm address.")).not.toBeInTheDocument();
+  },
+};
+
+export const HiddenColumnToggle: Story = {
+  name: "Columns toggle reveals a hidden: true column",
+  decorators: [withListProviders(defaultClient(), "/")],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const table = await waitFor(() => canvas.getByRole("table", { name: "Orders" }));
+    await expect(within(table).queryByText("Warehouse Notes")).not.toBeInTheDocument();
+
+    await userEvent.click(canvas.getByRole("button", { name: "Columns" }));
+    const menuItem = await within(document.body).findByRole("menuitemcheckbox", { name: "Warehouse Notes" });
+    await expect(menuItem).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(menuItem);
+
+    await expect(within(table).getByText("Warehouse Notes")).toBeInTheDocument();
+    await expect(within(table).getByText("Fragile — pack with extra padding.")).toBeInTheDocument();
   },
 };
 

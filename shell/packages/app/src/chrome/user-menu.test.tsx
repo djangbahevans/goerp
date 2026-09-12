@@ -74,12 +74,11 @@ describe("UserMenu", () => {
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
   });
 
-  it("toggling Dark mode flips its checked state", async () => {
+  it("toggling Dark mode flips its checked state without closing the menu", async () => {
     await renderUserMenu();
     fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Dark mode" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
     expect(screen.getByRole("menuitemcheckbox", { name: "Dark mode" }).getAttribute("aria-checked")).toBe("true");
   });
 

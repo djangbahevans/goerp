@@ -292,6 +292,67 @@ describe("ListRenderer", () => {
     expect(within(table).queryByText("000-00-0000")).toBeNull();
   });
 
+  it("has no Columns toggle when the view declares no hidden columns", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", name: "Ada", ssn: "000-00-0000" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess);
+
+    expect(screen.queryByRole("button", { name: "Columns" })).toBeNull();
+  });
+
+  it("Columns toggle reveals a hidden: true column into the table", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", name: "Ada", internal_note: "VIP" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer(
+      {},
+      permissionWrapper({
+        "contacts.contact": {
+          name: { read: true, write: true },
+          ssn: { read: true, write: true },
+          internal_note: { read: true, write: true },
+        },
+      }),
+      "/",
+      {
+        ...view,
+        columns: [...(view.columns ?? []), { field: "internal_note", label: "Internal Note", hidden: true }],
+      },
+    );
+
+    const table = screen.getByRole("table", { name: "Contacts" });
+    expect(within(table).queryByText("Internal Note")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    const menuItem = screen.getByRole("menuitemcheckbox", { name: "Internal Note" });
+    expect(menuItem.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(menuItem);
+
+    expect(within(table).getByText("Internal Note")).toBeTruthy();
+    expect(within(table).getByText("VIP")).toBeTruthy();
+  });
+
   it("has no checkbox column when the view declares no bulk_actions", async () => {
     useInfiniteListMock.mockReturnValue({
       data: {

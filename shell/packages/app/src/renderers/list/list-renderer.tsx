@@ -1,5 +1,5 @@
 import type { FilterRange } from "@goerp/sdk";
-import { ActionButton, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
+import { ActionButton, ActionMenu, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
@@ -225,7 +225,7 @@ const CHECKBOX_COLUMN_WIDTH = 44;
 
 export function ListRenderer({ view, module, recordId, embedded, baseFilter }: ListRendererProps) {
   const listState = useListState(embedded, defaultSortOf(view));
-  const columns = useVisibleColumns(view);
+  const { columns, hiddenColumns, revealedFields, toggleColumn } = useVisibleColumns(view);
   const selection = useSelection();
   const navigate = useNavigate();
   const groupBySelectId = useId();
@@ -369,7 +369,19 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
   return (
     <>
       <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
-      <ListActions actions={view.actions ?? []} module={module} />
+      <div className="flex items-center justify-between gap-2">
+        <ListActions actions={view.actions ?? []} module={module} />
+        {hiddenColumns.length > 0 && (
+          <ActionMenu
+            label="Columns"
+            items={hiddenColumns.map((column) => ({
+              label: column.label ?? column.field,
+              checked: revealedFields.has(column.field),
+              onClick: () => toggleColumn(column.field),
+            }))}
+          />
+        )}
+      </div>
       {showSelection && <BulkActions actions={bulkActions} selectedIds={selectedIds} clearSelection={clearSelection} />}
       {groupByOptions.length > 0 && (
         <label htmlFor={groupBySelectId} className="flex items-center gap-2 text-sm text-text-secondary">
