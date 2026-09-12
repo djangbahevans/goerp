@@ -1,6 +1,6 @@
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { expect, fireEvent, fn, within } from "storybook/test";
+import { expect, fireEvent, fn, screen, within } from "storybook/test";
 import { ListFilters } from "./list-filters.js";
 import type { ListFilter } from "./list-view-types.js";
 
@@ -90,22 +90,74 @@ export const AllFilterTypes: Story = {
   },
 };
 
+// Select's own listbox renders through a Radix Portal to document.body,
+// outside canvasElement (select.stories.tsx's "Plain" story) — option
+// queries go through the document-scoped `screen`, not `canvas`.
 export const BooleanFilterToggle: Story = {
-  name: "boolean: Any/Yes/No reports true/false/undefined",
+  name: "boolean: filled (Yes) picks No or clears back to Any",
   args: {
     filters: [{ field: "is_active", label: "Active", type: "boolean" }],
     values: { is_active: true },
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    const select = canvas.getByRole("combobox");
-    await expect((select as HTMLSelectElement).value).toBe("true");
+    const trigger = canvas.getByRole("combobox");
+    await expect(trigger.textContent).toContain("Yes");
 
-    fireEvent.change(select, { target: { value: "false" } });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("option", { name: "No" }));
     await expect(args.onChange).toHaveBeenCalledWith("is_active", false);
 
-    fireEvent.change(select, { target: { value: "any" } });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Any" }));
     await expect(args.onChange).toHaveBeenCalledWith("is_active", undefined);
+  },
+};
+
+export const TextAndNumberFilled: Story = {
+  name: "text/number: filled value clears to undefined on empty",
+  args: {
+    filters: [
+      { field: "name", label: "Name", type: "text" },
+      { field: "quantity", label: "Quantity", type: "number" },
+    ],
+    values: { name: { like: "acme" }, quantity: 42 },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const nameInput = canvas.getByLabelText("Name") as HTMLInputElement;
+    await expect(nameInput.value).toBe("acme");
+    fireEvent.change(nameInput, { target: { value: "" } });
+    await expect(args.onChange).toHaveBeenCalledWith("name", undefined);
+
+    const quantityInput = canvas.getByLabelText("Quantity") as HTMLInputElement;
+    await expect(quantityInput.value).toBe("42");
+    fireEvent.change(quantityInput, { target: { value: "" } });
+    await expect(args.onChange).toHaveBeenCalledWith("quantity", undefined);
+  },
+};
+
+export const RadioFilterStates: Story = {
+  name: "radio: filled selection clears via the Any option",
+  args: {
+    filters: [
+      {
+        field: "state",
+        label: "State",
+        type: "radio",
+        options: [
+          { value: "draft", label: "Draft" },
+          { value: "done", label: "Done" },
+        ],
+      },
+    ],
+    values: { state: "done" },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect((canvas.getByRole("radio", { name: "Done" }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(canvas.getByRole("radio", { name: "Any" }));
+    await expect(args.onChange).toHaveBeenCalledWith("state", undefined);
   },
 };
 
@@ -125,6 +177,25 @@ export const DateAndNumberRanges: Story = {
 
     fireEvent.change(canvas.getByLabelText("Created to"), { target: { value: "2026-02-01" } });
     await expect(args.onChange).toHaveBeenCalledWith("created_at", { gte: "2026-01-01", lte: "2026-02-01" });
+  },
+};
+
+export const RangesCleared: Story = {
+  name: "daterange/number_range: clearing every bound reports undefined",
+  args: {
+    filters: [
+      { field: "created_at", label: "Created", type: "daterange" },
+      { field: "amount", label: "Amount", type: "number_range" },
+    ],
+    values: { created_at: { gte: "2026-01-01" }, amount: { gte: "10" } },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    fireEvent.change(canvas.getByLabelText("Created from"), { target: { value: "" } });
+    await expect(args.onChange).toHaveBeenCalledWith("created_at", undefined);
+
+    fireEvent.change(canvas.getByLabelText("Amount min"), { target: { value: "" } });
+    await expect(args.onChange).toHaveBeenCalledWith("amount", undefined);
   },
 };
 

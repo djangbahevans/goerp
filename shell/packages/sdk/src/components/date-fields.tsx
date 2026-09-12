@@ -38,6 +38,10 @@ export interface DateFieldProps {
   label?: string | undefined;
   // Lets an external <label htmlFor> target the <input> directly (goerp#698).
   id?: string | undefined;
+  // For a caller that groups the field under its own <fieldset>/<legend>
+  // and needs the input individually labeled without a second visible
+  // <label> (goerp#772's DateRangeFilterInput).
+  "aria-label"?: string | undefined;
   value: Date | undefined;
   // Called with undefined when the input is cleared, matching `value`'s own
   // optionality — a caller that doesn't care can ignore that case.
@@ -51,6 +55,7 @@ export interface DateFieldProps {
 export function DateField({
   label,
   id: idProp,
+  "aria-label": ariaLabel,
   value,
   onChange,
   min,
@@ -70,6 +75,7 @@ export function DateField({
       <input
         id={id}
         type="date"
+        aria-label={ariaLabel}
         value={toDateInputValue(value)}
         min={toDateInputValue(min) || undefined}
         max={toDateInputValue(max) || undefined}

@@ -25,6 +25,11 @@ describe("DateField", () => {
     expect((screen.getByLabelText("Due") as HTMLInputElement).value).toBe("");
   });
 
+  it("labels via aria-label when no visible `label` is given", () => {
+    render(<DateField aria-label="Created from" value={undefined} onChange={vi.fn()} />);
+    expect(screen.getByLabelText("Created from")).toBeTruthy();
+  });
+
   it("normalizes a Date `min`/`max` to the input's YYYY-MM-DD format", () => {
     render(
       <DateField

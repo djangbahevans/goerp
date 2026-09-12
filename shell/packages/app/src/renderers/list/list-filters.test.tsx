@@ -5,6 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { booleanFilterState, ListFilters } from "./list-filters.js";
 import type { ListFilter } from "./list-view-types.js";
 
+// jsdom doesn't implement scrollIntoView (jsdom/jsdom#1695) — Radix
+// Select's own highlight-into-view effect calls it whenever a panel opens
+// (select.test.tsx stubs the same thing).
+Element.prototype.scrollIntoView = vi.fn();
+
 // RelationFilterInput's label resolution uses react-query — every render
 // needs a provider, not just the relation/tags/user_select-specific ones.
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -86,10 +91,22 @@ describe("ListFilters", () => {
     );
 
     expect(screen.getByText("Active")).toBeTruthy();
-    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("true");
+    expect(screen.getByRole("combobox").textContent).toContain("Yes");
   });
 
-  it("boolean: calls onChange with true/false/undefined when the select changes", () => {
+  it("boolean: no clear button in the default (Any) state, since Any isn't a real selection", () => {
+    const filters: ListFilter[] = [{ field: "is_active", label: "Active", type: "boolean" }];
+    render(
+      <Providers>
+        <ListFilters filters={filters} values={{}} onChange={vi.fn()} />
+      </Providers>,
+    );
+
+    expect(screen.getByRole("combobox").textContent).toContain("Any");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("boolean: picking Yes from the Any state reports true", async () => {
     const filters: ListFilter[] = [{ field: "is_active", label: "Active", type: "boolean" }];
     const onChange = vi.fn();
     render(
@@ -98,13 +115,49 @@ describe("ListFilters", () => {
       </Providers>,
     );
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "true" } });
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByRole("option", { name: "Yes" }));
     expect(onChange).toHaveBeenCalledWith("is_active", true);
+  });
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "false" } });
+  it("boolean: picking No from the Yes state reports false", async () => {
+    const filters: ListFilter[] = [{ field: "is_active", label: "Active", type: "boolean" }];
+    const onChange = vi.fn();
+    render(
+      <Providers>
+        <ListFilters filters={filters} values={{ is_active: true }} onChange={onChange} />
+      </Providers>,
+    );
+
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByRole("option", { name: "No" }));
     expect(onChange).toHaveBeenCalledWith("is_active", false);
+  });
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "any" } });
+  it("boolean: picking Any from the Yes state reports undefined", async () => {
+    const filters: ListFilter[] = [{ field: "is_active", label: "Active", type: "boolean" }];
+    const onChange = vi.fn();
+    render(
+      <Providers>
+        <ListFilters filters={filters} values={{ is_active: true }} onChange={onChange} />
+      </Providers>,
+    );
+
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByRole("option", { name: "Any" }));
+    expect(onChange).toHaveBeenCalledWith("is_active", undefined);
+  });
+
+  it("boolean: the trigger's own clear button also reports undefined", () => {
+    const filters: ListFilter[] = [{ field: "is_active", label: "Active", type: "boolean" }];
+    const onChange = vi.fn();
+    render(
+      <Providers>
+        <ListFilters filters={filters} values={{ is_active: true }} onChange={onChange} />
+      </Providers>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear Yes" }));
     expect(onChange).toHaveBeenCalledWith("is_active", undefined);
   });
 

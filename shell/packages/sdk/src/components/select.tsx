@@ -24,6 +24,12 @@ export interface SelectProps {
   multiple?: boolean | undefined;
   placeholder?: string | undefined;
   disabled?: boolean | undefined;
+  // Single-select only: the value that counts as "nothing selected" for the
+  // trigger's own clear button, when that value is itself a real, matching
+  // option (e.g. a synthetic "Any" choice) rather than the usual empty
+  // string — otherwise the clear button always shows, since Radix disallows
+  // an empty-string option value and so a caller can't use "" for that.
+  emptyValue?: string | undefined;
 }
 
 const TRIGGER_CLASSES = `flex w-full items-center justify-between gap-2 text-left ${fieldInputClassName(false, "input", "sans")}`;
@@ -32,14 +38,31 @@ const TRIGGER_CLASSES = `flex w-full items-center justify-between gap-2 text-lef
 const PANEL_CLASSES = "z-(--z-dropdown) w-max rounded-structural border border-border bg-surface p-2 shadow-md";
 const ROW_CLASSES =
   "flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-control px-2 py-1 text-sm text-text outline-none";
-// Extra trailing room for the overlaid clear button (below) once a value
-// is selected, past the chevron the trigger already reserves space for.
-const TRIGGER_WITH_VALUE_STYLE: CSSProperties = { paddingInlineEnd: "var(--space-9)" };
+// The chevron is pinned here (not a normal flex child) so its position never
+// depends on how much end-padding a given state reserves — otherwise the
+// clear button below (which does need that padding to grow, to stay clear
+// of the value text) would drag the chevron inward past it every time a
+// value is picked.
+const CHEVRON_STYLE: CSSProperties = {
+  position: "absolute",
+  insetInlineEnd: "var(--space-3)",
+  top: "50%",
+  transform: "translateY(-50%)",
+  pointerEvents: "none",
+};
+// Reserves room for the pinned chevron above, past its own width — applied
+// whether or not a value (and thus the clear button) is present, so the
+// chevron never overlaps the value text.
+const TRIGGER_PADDING_DEFAULT: CSSProperties = { paddingInlineEnd: "var(--space-10)" };
+// Once a value is selected, the clear button (below) sits between the value
+// and the chevron, so the trigger needs enough room to clear both.
+const TRIGGER_PADDING_WITH_VALUE: CSSProperties = { paddingInlineEnd: "var(--space-16)" };
 // Overlays a clear control on the trigger, matching relation-picker.tsx's
-// own single-select clear button.
+// own single-select clear button — inset past the default padding above so
+// it lands between the value and the pinned chevron, not on top of either.
 const CLEAR_BUTTON_STYLE: CSSProperties = {
   position: "absolute",
-  insetInlineEnd: "var(--space-6)",
+  insetInlineEnd: "var(--space-10)",
   top: "50%",
   transform: "translateY(-50%)",
 };
@@ -60,20 +83,29 @@ function OptionLabel({ option, className }: { option: SelectOption; className?: 
   );
 }
 
-function SelectSingle({ id, options, value, onChange, placeholder, disabled = false }: Omit<SelectProps, "multiple">) {
+function SelectSingle({
+  id,
+  options,
+  value,
+  onChange,
+  placeholder,
+  disabled = false,
+  emptyValue = "",
+}: Omit<SelectProps, "multiple">) {
   const selected = options.find((option) => option.value === value);
+  const clearable = selected !== undefined && value !== emptyValue;
   return (
     <div className="relative">
       <SelectPrimitive.Root value={typeof value === "string" ? value : ""} onValueChange={onChange} disabled={disabled}>
         <SelectPrimitive.Trigger
           id={id}
-          style={selected ? TRIGGER_WITH_VALUE_STYLE : undefined}
+          style={clearable ? TRIGGER_PADDING_WITH_VALUE : TRIGGER_PADDING_DEFAULT}
           className={TRIGGER_CLASSES}
         >
           <SelectPrimitive.Value placeholder={placeholder}>
             {selected ? <OptionLabel option={selected} className="truncate" /> : undefined}
           </SelectPrimitive.Value>
-          <SelectPrimitive.Icon>
+          <SelectPrimitive.Icon style={CHEVRON_STYLE}>
             <ChevronDown size={16} className="shrink-0 text-text-secondary" aria-hidden />
           </SelectPrimitive.Icon>
         </SelectPrimitive.Trigger>
@@ -100,10 +132,10 @@ function SelectSingle({ id, options, value, onChange, placeholder, disabled = fa
           </SelectPrimitive.Content>
         </SelectPrimitive.Portal>
       </SelectPrimitive.Root>
-      {selected && !disabled && (
+      {selected !== undefined && clearable && !disabled && (
         <button
           type="button"
-          onClick={() => onChange("")}
+          onClick={() => onChange(emptyValue)}
           aria-label={`Clear ${selected.label}`}
           style={CLEAR_BUTTON_STYLE}
           className="rounded-control p-1 text-text-secondary hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus"
