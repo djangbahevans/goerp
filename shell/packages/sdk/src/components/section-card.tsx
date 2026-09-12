@@ -48,7 +48,14 @@ export function SectionCard({
         hidden={collapsed}
         className="mt-3 grid grid-rows-[1fr] transition-[grid-template-rows,display] transition-discrete duration-(--duration-base) ease-out starting:grid-rows-[0fr] [[hidden]]:grid-rows-[0fr] [[hidden]]:ease-in motion-reduce:transition-none"
       >
-        <div className="overflow-hidden">{children}</div>
+        {/* -m-1 p-1 (canceling out, so children land at the same visual
+            position) pushes the actual clip boundary 4px past the content
+            box on every side — exactly --shadow-focus's own spread — so a
+            focused control flush against this section's own edge (a
+            rightmost-column field, the last row) keeps its full focus ring
+            instead of this wrapper (needed only to hide mid-transition
+            overflow while collapsing/expanding) clipping it at rest. */}
+        <div className="-m-1 overflow-hidden p-1">{children}</div>
       </div>
     </section>
   );

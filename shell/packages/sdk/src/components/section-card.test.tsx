@@ -67,4 +67,21 @@ describe("SectionCard", () => {
     expect(controlsId).not.toBeNull();
     expect(document.getElementById(controlsId ?? "")).not.toBeNull();
   });
+
+  it("gives the overflow: hidden content wrapper a 4px clip buffer, matching --shadow-focus's own spread", () => {
+    render(
+      <SectionCard title="Contact Information">
+        <p>Fields go here</p>
+      </SectionCard>,
+    );
+    // -m-1/p-1 cancel out visually (children land at the same position) but
+    // push the actual overflow: hidden boundary 4px past the content box,
+    // so a focused control flush against this edge (a rightmost-column
+    // field, the last row) keeps its full focus ring instead of this
+    // wrapper clipping it at rest.
+    const wrapper = screen.getByText("Fields go here").parentElement;
+    expect(wrapper?.className).toContain("-m-1");
+    expect(wrapper?.className).toContain("p-1");
+    expect(wrapper?.className).toContain("overflow-hidden");
+  });
 });
