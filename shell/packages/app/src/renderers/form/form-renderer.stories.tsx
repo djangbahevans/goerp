@@ -93,6 +93,15 @@ const view: FormViewDeclaration = {
       ],
     },
   ],
+  tabs: [
+    { label: "Notes", type: "fields", sections: [{ type: "fields", fields: [{ field: "notes", label: "Notes" }] }] },
+    {
+      label: "Billing",
+      type: "fields",
+      sections: [{ type: "fields", fields: [{ field: "billing_email", label: "Billing Email", type: "email" }] }],
+    },
+  ],
+  sidebar: { width: 240, sections: [{ label: "Overview", fields: ["status", "phone"] }] },
   chatter: false,
 };
 
@@ -113,6 +122,8 @@ const RECORD: Row = {
     { city: "Accra", country: "Ghana" },
     { city: "Kumasi", country: "Ghana" },
   ],
+  notes: "Called customer to confirm renewal.",
+  billing_email: "billing@acme.example",
 };
 
 function seededClient(): QueryClient {
@@ -248,6 +259,18 @@ export const Default: Story = {
     expect(canvas.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
     await userEvent.click(canvas.getByRole("button", { name: "Expand" }));
     expect(canvas.getByRole("textbox", { name: "Email" })).toBeInTheDocument();
+
+    // FormSidebarRenderer -> Sidebar/SectionCard/Field (goerp#774).
+    expect(canvas.getByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(canvas.getByText("Active")).toBeInTheDocument();
+
+    // FormTabsRenderer -> Tabs/TabPanel (goerp#774): starts on the first
+    // tab, switches on click, and the other tab's content isn't mounted.
+    expect(canvas.getByDisplayValue("Called customer to confirm renewal.")).toBeInTheDocument();
+    expect(canvas.queryByLabelText("Billing Email")).not.toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("tab", { name: "Billing" }));
+    expect(canvas.getByLabelText("Billing Email")).toBeInTheDocument();
+    expect(canvas.queryByDisplayValue("Called customer to confirm renewal.")).not.toBeInTheDocument();
   },
 };
 

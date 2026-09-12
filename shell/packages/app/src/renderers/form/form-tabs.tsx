@@ -1,4 +1,5 @@
 import { PermissionContext } from "@goerp/sdk/auth";
+import { TabPanel, Tabs } from "@goerp/sdk/components";
 import type { ViewDeclaration } from "@goerp/sdk/schema";
 import { viewDeclarationRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
@@ -185,53 +186,43 @@ export function FormTabsRenderer({
     throw new Error("FormTabsRenderer must be used within a PermissionProvider");
   }
   // Filtered once: a restricted tab can neither show a button nor become
-  // `active` (hiding just the button would still let tabs[active] render it).
+  // active (hiding just the button would still let a stale activeId render it).
   const visibleTabs = tabs.filter((tab) => !tab.permission || permissions.check(tab.permission));
 
-  const [active, setActive] = useState(0);
+  // No stable id on FormTab — label is what key/TabPanel id already used.
+  const [activeId, setActiveId] = useState<string | undefined>(() => visibleTabs[0]?.label);
   if (visibleTabs.length === 0) return null;
 
+  // tab.badge_count_route isn't fetched/rendered — no badge yet.
+  const items = visibleTabs.map((tab) => ({ id: tab.label, label: tab.label }));
+  const firstId = items[0]?.id ?? "";
+  const currentActiveId = items.some((item) => item.id === activeId) ? (activeId as string) : firstId;
+
   return (
-    <div>
-      <div role="tablist">
-        {/* tab.badge_count_route isn't fetched/rendered — no badge yet. */}
-        {visibleTabs.map((tab, i) => (
-          <button key={tab.label} type="button" role="tab" aria-selected={i === active} onClick={() => setActive(i)}>
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel">
-        {(() => {
-          const tab = visibleTabs[active];
-          if (!tab) return null;
-          switch (tab.type) {
-            case "sub_list":
-              return (
-                <SubListTabContent tab={tab} resource={resource} module={module} record={record} recordId={recordId} />
-              );
-            case "view":
-              return <ViewTabContent tab={tab} module={module} record={record} recordId={recordId} />;
-            case "fields":
-              return (
-                <FieldsTabContent
-                  tab={tab}
-                  resource={resource}
-                  module={module}
-                  record={record}
-                  recordId={recordId}
-                  onChange={onChange}
-                  formReadonly={formReadonly}
-                />
-              );
-            case "component":
-              // No module component registry exists yet.
-              return <p>Custom tab "{tab.component}" — no component registry to resolve it from yet.</p>;
-            default:
-              return null;
-          }
-        })()}
-      </div>
-    </div>
+    <Tabs items={items} activeId={currentActiveId} onChange={setActiveId}>
+      {visibleTabs.map((tab) => (
+        <TabPanel key={tab.label} id={tab.label}>
+          {tab.type === "sub_list" && (
+            <SubListTabContent tab={tab} resource={resource} module={module} record={record} recordId={recordId} />
+          )}
+          {tab.type === "view" && <ViewTabContent tab={tab} module={module} record={record} recordId={recordId} />}
+          {tab.type === "fields" && (
+            <FieldsTabContent
+              tab={tab}
+              resource={resource}
+              module={module}
+              record={record}
+              recordId={recordId}
+              onChange={onChange}
+              formReadonly={formReadonly}
+            />
+          )}
+          {tab.type === "component" && (
+            // No module component registry exists yet.
+            <p>Custom tab "{tab.component}" — no component registry to resolve it from yet.</p>
+          )}
+        </TabPanel>
+      ))}
+    </Tabs>
   );
 }
