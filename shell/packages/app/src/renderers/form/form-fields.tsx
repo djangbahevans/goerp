@@ -97,7 +97,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
 
   if (usesImplicitLabelWrap(field)) {
     return (
-      <div style={field.span ? { gridColumn: `span ${field.span}` } : undefined}>
+      <div className="flex flex-col gap-1" style={field.span ? { gridColumn: `span ${field.span}` } : undefined}>
         {/* field-wrapper.md: required only marks the label visually —
             required/aria-required on the control itself isn't wired
             through FieldInput yet, a pre-existing gap this doesn't newly
@@ -110,19 +110,34 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
     );
   }
 
+  // field-wrapper.md's own label typography/spacing, reproduced here (not
+  // FieldWrapper itself — that's the implicit-wrap component this path
+  // exists to avoid) so a field that can't safely use FieldWrapper still
+  // looks like every other one instead of falling back to an unstyled
+  // browser-default label.
   const labelText = (
     <>
       {field.label ?? field.field}
-      {field.required && <span aria-hidden="true"> *</span>}
+      {field.required && (
+        <span aria-hidden="true" className="text-danger">
+          {" "}
+          *
+        </span>
+      )}
     </>
   );
+  const labelClassName = "text-sm font-medium text-text";
 
   return (
-    <div style={field.span ? { gridColumn: `span ${field.span}` } : undefined}>
+    <div className="flex flex-col gap-1" style={field.span ? { gridColumn: `span ${field.span}` } : undefined}>
       {ARIA_LABELLEDBY_FIELD_TYPES.has(type) ? (
-        <span id={id}>{labelText}</span>
+        <span id={id} className={labelClassName}>
+          {labelText}
+        </span>
       ) : (
-        <label htmlFor={id}>{labelText}</label>
+        <label htmlFor={id} className={labelClassName}>
+          {labelText}
+        </label>
       )}
       {input}
       {helpText}

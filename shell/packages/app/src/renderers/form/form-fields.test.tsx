@@ -235,6 +235,24 @@ describe("FormFieldRow", () => {
       expect(screen.getByLabelText("Skills")).not.toBe(screen.getByLabelText("Remove tag: VIP"));
     });
 
+    it("tags: the explicit-label path still gets FieldWrapper's own label typography, not an unstyled default", async () => {
+      const Wrapper = withFieldAccess({ tag_ids: { read: true, write: true } });
+      renderWithQueryClient(
+        <Wrapper>
+          <FormFieldRow
+            field={{ field: "tag_ids", type: "tags", label: "Skills", resource: "contacts.tag" }}
+            resource="contacts.contact"
+            record={{ tags: [] }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      const label = screen.getByText("Skills").closest("label");
+      expect(label?.className).toContain("text-sm");
+      expect(label?.className).toContain("font-medium");
+    });
+
     it("relation (single, already holding a value): safely goes through FieldWrapper — the value renders inside the input itself, no chip ahead of it", () => {
       const Wrapper = withFieldAccess({ customer_id: { read: true, write: true } });
       renderWithQueryClient(
