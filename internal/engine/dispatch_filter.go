@@ -21,8 +21,8 @@ var filterParamPattern = regexp.MustCompile(`^filter\[([^\[\]]+)\](?:\[([^\[\]]+
 // erp-design.md §11.4 documents only "gte" by example — the rest of this
 // set is a deliberate, minimal choice matching the comparison operators
 // internal/engine/domain's own grammar supports (ast.go's BinaryExpr Op
-// set); "in" is handled separately below since it targets InExpr, not a
-// BinaryExpr.
+// set); "in" and "isnull" are handled separately below since they target
+// InExpr/IsNullExpr, not a BinaryExpr.
 var filterOperators = map[string]string{
 	"eq":   "=",
 	"ne":   "!=",
@@ -63,13 +63,15 @@ func escapeDomainLiteral(value string) string {
 // compileListFilter parses ?filter[field]=value / ?filter[field][op]=value
 // query parameters (erp-design.md §11.4) into a single domain-expression
 // string, ANDed together — the form internal/engine/domain.Parse accepts,
-// ready to pass as ORMSearchReadInput.Domain. Every filter value is
-// compiled as a quoted string literal (matching both of erp-design.md
-// §11.4's own examples, including a date value) — the domain-expression
-// compiler's own SQL layer already parameterizes string literals and lets
-// Postgres apply its normal implicit cast against a non-text column, so
-// this compiler doesn't need to introspect each field's declared type
-// just to decide how to quote it.
+// ready to pass as ORMSearchReadInput.Domain. Every filter value taking a
+// comparison operand is compiled as a quoted string literal (matching both
+// of erp-design.md §11.4's own examples, including a date value) — the
+// domain-expression compiler's own SQL layer already parameterizes string
+// literals and lets Postgres apply its normal implicit cast against a
+// non-text column, so this compiler doesn't need to introspect each
+// field's declared type just to decide how to quote it. "isnull" is the
+// one operator with no comparison operand at all — its filter[...] value
+// selects IS NULL vs. IS NOT NULL rather than supplying a literal.
 //
 // An unknown field or operator is a *abi.HostError (orm.field_unknown /
 // orm.domain_invalid) — never a silently-dropped filter. A query with no
@@ -110,6 +112,18 @@ func compileListFilter(q url.Values, qualifiedModel string, md model.ModelDeclar
 				quoted[i] = escapeDomainLiteral(p)
 			}
 			clauses = append(clauses, clause{key: key, expr: fmt.Sprintf("record.%s IN (%s)", field, strings.Join(quoted, ", "))})
+			continue
+		}
+
+		if op == "isnull" {
+			switch value {
+			case "true":
+				clauses = append(clauses, clause{key: key, expr: fmt.Sprintf("record.%s IS NULL", field)})
+			case "false":
+				clauses = append(clauses, clause{key: key, expr: fmt.Sprintf("record.%s IS NOT NULL", field)})
+			default:
+				return "", &abi.HostError{Code: abi.ErrCodeDomainInvalid, Message: "filter[" + field + "][isnull] must be true or false"}
+			}
 			continue
 		}
 
