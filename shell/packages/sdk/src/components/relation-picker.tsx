@@ -1,5 +1,6 @@
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { APIClient } from "../http/index.js";
 import { apiClient } from "../http/index.js";
 import type { ResourceMetadataRegistry } from "../schema/index.js";
@@ -167,6 +168,16 @@ export function RelationPicker({
   const listboxId = useId();
   const debouncedQuery = useDebouncedValue(query, DEBOUNCE_MS);
 
+  // Portaled to document.body, position: fixed — same reasoning as
+  // ActionMenu's own panel: an ancestor with overflow: hidden (SectionCard's
+  // own collapse-transition wrapper, e.g.) would otherwise clip the
+  // dropdown instead of letting it float above the page. Null until
+  // measured, so it renders hidden for one frame rather than flashing at
+  // (0, 0).
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLSpanElement | null>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+
   const selected: RelationValue[] = multiple ? (Array.isArray(value) ? value : []) : [];
   const singleValue: RelationValue | null = multiple ? null : ((value as RelationValue | null) ?? null);
   const selectedIds = new Set(selected.map((v) => v.id));
@@ -200,6 +211,14 @@ export function RelationPicker({
   function close(): void {
     setIsOpen(false);
     setQuery("");
+  }
+
+  // Escape and an outside click both dismiss without committing anything —
+  // unlike close() (used only after a single-select commits), a multi-select
+  // query stays as typed rather than being wiped by an incidental dismissal.
+  function dismiss(): void {
+    setIsOpen(false);
+    if (!multiple) setQuery("");
   }
 
   function selectRow(row: Row): void {
@@ -278,18 +297,51 @@ export function RelationPicker({
       }
       case "Escape":
         event.preventDefault();
-        setIsOpen(false);
-        if (!multiple) setQuery("");
+        dismiss();
         break;
       default:
         break;
     }
   }
 
+  // Runs before paint, positioned once on open — not re-tracked on
+  // scroll/resize, since the panel closes on Escape/selection/outside-click
+  // well before either would matter (same simplification ActionMenu's own
+  // panel makes).
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPosition(null);
+      return;
+    }
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+    const containerRect = containerEl.getBoundingClientRect();
+    const panelHeight = panelRef.current?.getBoundingClientRect().height ?? 0;
+    const fitsBelow = containerRect.bottom + 4 + panelHeight <= window.innerHeight - 8;
+    const top = fitsBelow ? containerRect.bottom + 4 : Math.max(8, containerRect.top - 4 - panelHeight);
+    setPosition({ top, left: containerRect.left, width: containerRect.width });
+  }, [isOpen]);
+
+  // Closes on a click outside both the input/pills area and the portaled
+  // panel — mousedown, not click, so it commits before any outside
+  // element's own click handler fires (same reasoning ActionMenu's own
+  // dismissal uses).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dismiss is a plain function recreated every render, not a reactive dependency — only isOpen should re-arm this listener.
+  useEffect(() => {
+    if (!isOpen) return;
+    function handlePointerDown(event: MouseEvent): void {
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      dismiss();
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isOpen]);
+
   const triggerValue = isOpen ? query : (singleValue?.display ?? query);
 
   return (
-    <div className="relative flex flex-col gap-1">
+    <div ref={containerRef} className="relative flex flex-col gap-1">
       {selected.length > 0 && (
         <span className="flex flex-wrap gap-1">
           {selected.map((item) => (
@@ -343,48 +395,56 @@ export function RelationPicker({
           ×
         </button>
       )}
-      {isOpen && (
-        <span
-          id={listboxId}
-          role="listbox"
-          className="absolute top-full z-(--z-dropdown) mt-1 w-full min-w-60 rounded-structural border border-border bg-surface p-2 shadow-md"
-        >
-          {status === "error" ? (
-            <EmptyState
-              title="Module not installed"
-              description={`The module providing "${resource}" isn't installed, so this field can't search it.`}
-            />
-          ) : status === "loading" ? (
-            <Skeleton lines={3} />
-          ) : entries.length === 0 ? (
-            <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
-              No results for &quot;{debouncedQuery}&quot;
-            </span>
-          ) : (
-            entries.map((entry, index) => (
-              // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG combobox-with-listbox — options are never independently focusable, only virtually "focused" via aria-activedescendant.
-              // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
-              <div
-                key={entry.kind === "option" ? entry.row.id : "create"}
-                id={`${listboxId}-option-${index}`}
-                role="option"
-                aria-selected={index === activeIndex}
-                aria-disabled={disabled}
-                onMouseEnter={disabled ? undefined : () => setHighlightedIndex(index)}
-                onClick={
-                  disabled ? undefined : () => (entry.kind === "option" ? selectRow(entry.row) : createFromQuery())
-                }
-                title={entry.kind === "option" ? String(entry.row[labelField] ?? entry.row.id) : undefined}
-                className={`truncate rounded-control px-2 py-1 text-left text-sm text-text ${
-                  disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                } ${index === activeIndex ? "bg-surface-hover" : ""}`}
-              >
-                {entry.kind === "option" ? String(entry.row[labelField] ?? entry.row.id) : `Create "${query.trim()}"`}
-              </div>
-            ))
-          )}
-        </span>
-      )}
+      {isOpen &&
+        createPortal(
+          <span
+            ref={panelRef}
+            id={listboxId}
+            role="listbox"
+            style={
+              position
+                ? { position: "fixed", top: position.top, left: position.left, width: position.width }
+                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
+            }
+            className="z-(--z-dropdown) min-w-60 rounded-structural border border-border bg-surface p-2 shadow-md"
+          >
+            {status === "error" ? (
+              <EmptyState
+                title="Module not installed"
+                description={`The module providing "${resource}" isn't installed, so this field can't search it.`}
+              />
+            ) : status === "loading" ? (
+              <Skeleton lines={3} />
+            ) : entries.length === 0 ? (
+              <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
+                No results for &quot;{debouncedQuery}&quot;
+              </span>
+            ) : (
+              entries.map((entry, index) => (
+                // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG combobox-with-listbox — options are never independently focusable, only virtually "focused" via aria-activedescendant.
+                // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
+                <div
+                  key={entry.kind === "option" ? entry.row.id : "create"}
+                  id={`${listboxId}-option-${index}`}
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  aria-disabled={disabled}
+                  onMouseEnter={disabled ? undefined : () => setHighlightedIndex(index)}
+                  onClick={
+                    disabled ? undefined : () => (entry.kind === "option" ? selectRow(entry.row) : createFromQuery())
+                  }
+                  title={entry.kind === "option" ? String(entry.row[labelField] ?? entry.row.id) : undefined}
+                  className={`truncate rounded-control px-2 py-1 text-left text-sm text-text ${
+                    disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                  } ${index === activeIndex ? "bg-surface-hover" : ""}`}
+                >
+                  {entry.kind === "option" ? String(entry.row[labelField] ?? entry.row.id) : `Create "${query.trim()}"`}
+                </div>
+              ))
+            )}
+          </span>,
+          document.body,
+        )}
     </div>
   );
 }
