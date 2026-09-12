@@ -7,6 +7,7 @@ import {
   DateField,
   DateTimeField,
   FileField,
+  fieldInputClassName,
   LanguageSelect,
   MoneyField,
   RelationPicker,
@@ -390,6 +391,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           value={stringValue}
           placeholder={field.placeholder}
           disabled={disabled}
+          className={fieldInputClassName(false, "input", "sans")}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -405,6 +407,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           rows={field.rows ?? 3}
           placeholder={field.placeholder}
           disabled={disabled}
+          className={fieldInputClassName(false, "input", "sans")}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -443,6 +446,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           max={field.max}
           step={type === "integer" ? 1 : field.step}
           disabled={disabled}
+          className={fieldInputClassName(false, "input", "sans")}
           onChange={(e) => onChange(toNumber(e.target.value))}
         />
       );
@@ -474,6 +478,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           max={field.max ?? 100}
           value={percentValue}
           disabled={disabled}
+          className={fieldInputClassName(false, "input", "sans")}
           onChange={(e) => {
             const n = toNumber(e.target.value);
             onChange(n === undefined ? undefined : n / 100);
@@ -539,13 +544,14 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       const hours = Math.floor(totalMinutes / 60);
       const minutes = totalMinutes % 60;
       return (
-        <span>
+        <span className="flex items-center gap-2">
           <input
             type="number"
             min={0}
             aria-label={`${field.label ?? field.field} hours`}
             value={hours}
             disabled={disabled}
+            className={fieldInputClassName(false, "input", "sans")}
             onChange={(e) => onChange((toNumber(e.target.value) ?? 0) * 60 + minutes)}
           />
           <input
@@ -555,6 +561,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
             aria-label={`${field.label ?? field.field} minutes`}
             value={minutes}
             disabled={disabled}
+            className={fieldInputClassName(false, "input", "sans")}
             onChange={(e) => onChange(hours * 60 + (toNumber(e.target.value) ?? 0))}
           />
         </span>
@@ -701,6 +708,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           value={stringValue}
           placeholder="lucide icon name"
           disabled={disabled}
+          className={fieldInputClassName(false, "input", "sans")}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -731,6 +739,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           value={stringValue}
           placeholder="Scan or enter code"
           disabled={disabled}
+          className={fieldInputClassName(false, "input", "sans")}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -794,7 +803,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
     case "address": {
       const mapping = field.address_fields ?? {};
       return (
-        <span>
+        <span className="flex flex-wrap items-center gap-2">
           {Object.entries(mapping).map(([part, addrField]) => (
             <input
               key={part}
@@ -803,6 +812,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
               placeholder={part}
               disabled={disabled}
               value={typeof record[addrField] === "string" ? (record[addrField] as string) : ""}
+              className={fieldInputClassName(false, "input", "sans")}
               onChange={(e) => onChange({ [addrField]: e.target.value })}
             />
           ))}
@@ -851,7 +861,14 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
 
     default:
       return (
-        <input id={id} type="text" value={stringValue} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+        <input
+          id={id}
+          type="text"
+          value={stringValue}
+          disabled={disabled}
+          className={fieldInputClassName(false, "input", "sans")}
+          onChange={(e) => onChange(e.target.value)}
+        />
       );
   }
 }
