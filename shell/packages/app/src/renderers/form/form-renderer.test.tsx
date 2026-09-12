@@ -2,6 +2,7 @@ import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { FormRendererProps } from "./form-renderer.js";
 import { FormRenderer } from "./form-renderer.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
 import type { FormRecordHandle } from "./use-form-record.js";
@@ -55,12 +56,12 @@ function handle(overrides: Partial<FormRecordHandle> = {}): FormRecordHandle {
   };
 }
 
-function renderForm(v: FormViewDeclaration = view) {
+function renderForm(v: FormViewDeclaration = view, props: Partial<FormRendererProps> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <PermissionContext.Provider value={permissionValue}>
-        <FormRenderer view={v} module="contacts" recordId="01j" />
+        <FormRenderer view={v} module="contacts" recordId="01j" {...props} />
       </PermissionContext.Provider>
     </QueryClientProvider>,
   );
@@ -115,5 +116,20 @@ describe("FormRenderer", () => {
     useFormRecordMock.mockReturnValue(handle({ saveError: new Error("conflict") }));
     renderForm();
     expect(screen.getByText("conflict")).toBeTruthy();
+  });
+
+  // Test-only seam (form-renderer.stories.tsx's manual-save-saving/-error
+  // and autosave-saving stories) — verifies it actually reaches
+  // useFormRecord rather than assuming the prop threading is correct.
+  it("threads testFormRecordOptions through to useFormRecord", () => {
+    useFormRecordMock.mockReturnValue(handle());
+    const registry = { resolve: vi.fn() };
+    const client = { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn() };
+    renderForm(view, { testFormRecordOptions: { registry, client, autoSaveDelay: 10 } });
+    expect(useFormRecordMock).toHaveBeenCalledWith(
+      "contacts.contact",
+      "01j",
+      expect.objectContaining({ registry, client, autoSaveDelay: 10 }),
+    );
   });
 });

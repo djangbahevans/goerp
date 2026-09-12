@@ -1,3 +1,5 @@
+import type { APIClient } from "@goerp/sdk";
+import type { ResourceRegistry } from "@goerp/sdk/schema";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -19,15 +21,46 @@ import { recordQueryKey } from "./use-form-record.js";
 // react-query cache entry useFormRecord's own useQuery reads, the same way
 // list-renderer.stories.tsx does, rather than mocking @goerp/sdk.
 //
-// The manual-save "saving"/"error" and autosave "saving" sub-states have no
-// story of their own for the same reason list-renderer.stories.tsx's
-// row_click doesn't: they resolve via the real resourceRegistry/apiClient
-// singletons, with no prop-level seam on FormRendererProps to inject a fake
-// client the way useFormRecord's own UseFormRecordOptions now allows
-// (adding one to FormRenderer's real, manifest-driven props for
-// story-only reach would be a test-only seam leaking into its public
-// contract). That wiring is covered by use-form-record.test.tsx's own
-// renderHook-based tests instead.
+// The manual-save "saving"/"error" and autosave "saving" stories below are
+// the one exception to that: a save mutation has no query-cache key to
+// seed the way a query does, so they instead go through
+// testFormRecordOptions — FormRendererProps' own test-only seam onto
+// useFormRecord's registry/client/autoSaveDelay injection.
+
+// A resolvable registry entry is enough for saveRecord to compute a path —
+// which path/method doesn't matter to any story here, since the fake
+// `client` below is what actually observes the call.
+function fakeRegistry(): Pick<ResourceRegistry, "resolve"> {
+  return {
+    resolve: async () => ({
+      module: MODULE,
+      resource: view.resource,
+      listPath: "/contacts",
+      getPath: "/contacts/{id}",
+      createPath: "/contacts",
+      updatePath: "/contacts/{id}",
+      deletePath: null,
+      listMethod: "GET",
+      createMethod: "POST",
+      updateMethod: "PUT",
+      deleteMethod: null,
+    }),
+  };
+}
+
+// `get` is never actually called by these stories — the record comes from
+// defaultClient()'s already-seeded query cache — but useFormRecord's
+// `client` option replaces the whole client, query included, so the full
+// shape is still required.
+function fakeClient(overrides: Record<string, unknown>): Pick<APIClient, "get" | "post" | "put" | "patch"> {
+  return {
+    get: async () => ({}),
+    post: async () => ({}),
+    put: async () => ({}),
+    patch: async () => ({}),
+    ...overrides,
+  } as unknown as Pick<APIClient, "get" | "post" | "put" | "patch">;
+}
 
 const MODULE = "contacts";
 const RECORD_ID = "c1";
@@ -275,7 +308,7 @@ export const Default: Story = {
 };
 
 export const ManualSaveDirty: Story = {
-  name: "manual save: dirty enables Save (no submit — see this file's own top comment)",
+  name: "manual save: dirty enables Save",
   decorators: [withFormProviders(defaultClient())],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -289,6 +322,50 @@ export const ManualSaveDirty: Story = {
   },
 };
 
+export const ManualSaveSaving: Story = {
+  name: "manual save: Save shows a loading state while the mutation is in flight",
+  decorators: [withFormProviders(defaultClient())],
+  args: {
+    testFormRecordOptions: {
+      registry: fakeRegistry(),
+      client: fakeClient({ put: () => new Promise<never>(() => {}) }),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
+    await userEvent.type(canvas.getByLabelText("Phone"), "9");
+
+    const saveButton = canvas.getByRole("button", { name: "Save" });
+    await userEvent.click(saveButton);
+    await waitFor(() => expect(saveButton).toHaveAttribute("aria-busy", "true"));
+  },
+};
+
+export const ManualSaveError: Story = {
+  name: "manual save: a rejected mutation surfaces saveError",
+  decorators: [withFormProviders(defaultClient())],
+  args: {
+    testFormRecordOptions: {
+      registry: fakeRegistry(),
+      client: fakeClient({
+        put: async () => {
+          throw new Error("Couldn't save — conflict.");
+        },
+      }),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
+    await userEvent.type(canvas.getByLabelText("Phone"), "9");
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+
+    const alert = await waitFor(() => canvas.getByRole("alert"));
+    await expect(within(alert).getByText("Couldn't save — conflict.")).toBeInTheDocument();
+  },
+};
+
 export const Autosave: Story = {
   name: "autosave: no Save button rendered at all",
   args: { view: { ...view, autosave: true } },
@@ -297,5 +374,27 @@ export const Autosave: Story = {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
     expect(canvas.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  },
+};
+
+export const AutosaveSaving: Story = {
+  name: "autosave: shows a saving indicator while a save is in flight",
+  decorators: [withFormProviders(defaultClient())],
+  args: {
+    view: { ...view, autosave: true },
+    testFormRecordOptions: {
+      registry: fakeRegistry(),
+      client: fakeClient({ put: () => new Promise<never>(() => {}) }),
+      // Real default (2000ms) would make this play function slow and,
+      // worse, flaky under CI load — the debounce itself isn't what's
+      // under test here, just the "Saving…" indicator it eventually fires.
+      autoSaveDelay: 10,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
+    await userEvent.type(canvas.getByLabelText("Phone"), "9");
+    await waitFor(() => expect(canvas.getByRole("status")).toHaveTextContent("Saving…"));
   },
 };

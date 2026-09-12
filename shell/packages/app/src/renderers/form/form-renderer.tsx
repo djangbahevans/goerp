@@ -5,6 +5,7 @@ import { ShareHeaderAction } from "./form-share-action.js";
 import { FormSidebarRenderer } from "./form-sidebar.js";
 import { FormTabsRenderer } from "./form-tabs.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
+import type { UseFormRecordOptions } from "./use-form-record.js";
 import { useFormRecord } from "./use-form-record.js";
 
 // shell-architecture.md §20's FormRenderer.
@@ -12,13 +13,18 @@ export interface FormRendererProps {
   view: FormViewDeclaration;
   module: string;
   recordId?: string;
+  // Test-only: threads through to useFormRecord's own registry/client/
+  // autoSaveDelay seam, so a story can exercise a real save mutation's
+  // isSaving/saveError states without a live backend or a real multi-
+  // second autosave debounce. Never set at a real call site.
+  testFormRecordOptions?: Pick<UseFormRecordOptions, "registry" | "client" | "autoSaveDelay">;
 }
 
-export function FormRenderer({ view, module, recordId }: FormRendererProps) {
+export function FormRenderer({ view, module, recordId, testFormRecordOptions }: FormRendererProps) {
   const { record, isLoading, isError, error, refetch, isDirty, setField, save, isSaving, saveError } = useFormRecord(
     view.resource,
     recordId,
-    { autoSave: view.autosave ?? false },
+    { autoSave: view.autosave ?? false, ...testFormRecordOptions },
   );
 
   if (isLoading) {
