@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useContext, useState } from "react";
 import { ListRenderer } from "../list/list-renderer.js";
 import type { ListViewDeclaration, Row } from "../list/list-view-types.js";
+import type { PivotViewDeclaration } from "../pivot/pivot-manifest-types.js";
+import { PivotRenderer } from "../pivot/pivot-renderer.js";
 import { FormSectionRenderer } from "./form-sections.js";
 import type { FormTab } from "./form-view-types.js";
 
@@ -61,8 +63,8 @@ function ViewTabContent({
   );
 }
 
-// Only "list" exists today — kanban/calendar/pivot/timeline/custom are
-// separate, not-yet-built tickets (goerp#644/#645/#646/#648/#647).
+// "list" and "pivot" exist today — kanban/calendar/timeline/custom are
+// separate, not-yet-built tickets (goerp#644/#645/#648/#647).
 function EmbeddedView({
   view,
   module,
@@ -80,6 +82,16 @@ function EmbeddedView({
       return (
         <ListRenderer
           view={view as unknown as ListViewDeclaration}
+          module={module}
+          embedded
+          baseFilter={baseFilter}
+          {...(recordId !== undefined ? { recordId } : {})}
+        />
+      );
+    case "pivot":
+      return (
+        <PivotRenderer
+          view={view as unknown as PivotViewDeclaration}
           module={module}
           embedded
           baseFilter={baseFilter}

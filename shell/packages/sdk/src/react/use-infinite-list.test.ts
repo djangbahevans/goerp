@@ -13,6 +13,7 @@ function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<Resource
       createPath: "/contacts",
       updatePath: "/contacts/{id}",
       deletePath: null,
+      pivotPath: null,
       listMethod: "GET",
       createMethod: "POST",
       updateMethod: "PUT",

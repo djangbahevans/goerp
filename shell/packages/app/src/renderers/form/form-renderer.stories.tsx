@@ -40,6 +40,7 @@ function fakeRegistry(): Pick<ResourceRegistry, "resolve"> {
       createPath: "/contacts",
       updatePath: "/contacts/{id}",
       deletePath: null,
+      pivotPath: null,
       listMethod: "GET",
       createMethod: "POST",
       updateMethod: "PUT",

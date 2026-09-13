@@ -15,6 +15,7 @@ export type {
 } from "./http/index.js";
 export {
   apiClient,
+  downloadBlob,
   FetchAPIClient,
   flattenFilterParams,
   isFilterIsNull,
