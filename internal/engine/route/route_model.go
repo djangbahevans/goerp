@@ -82,7 +82,7 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 
 // deriveCRUDPath derives the method and module-relative path for one
 // model op, mirroring sdk/go/engine/action.go's actionPath exactly for
-// the six reserved ops. Unlike that SDK-side function — which only has a
+// the seven reserved ops. Unlike that SDK-side function — which only has a
 // bare model-name string, no model registry, and so can never reach
 // LabelPlural — this has the full ModelDeclaration and implements the
 // documented rule in full (go-sdk-reference.md §2a "Path and plural
@@ -108,8 +108,10 @@ func deriveCRUDPath(md model.ModelDeclaration, op model.Op) (method, path string
 		return "DELETE", plural + "/{id}"
 	case model.Preview.Name:
 		return "POST", plural + "/preview"
+	case model.Pivot.Name:
+		return "GET", plural + "/pivot"
 	default:
-		// EnabledOps is only ever populated from the six reserved model.Op
+		// EnabledOps is only ever populated from the seven reserved model.Op
 		// values (model.go's EnableOps doc comment) — no custom-action
 		// shape exists at the model-declaration level the way
 		// sdk/go/engine.Action's default case handles one.

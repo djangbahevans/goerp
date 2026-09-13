@@ -27,7 +27,7 @@ type RouteManifest struct {
 	Websocket  bool
 	PathParams map[string]string // param name -> declared kind ("uuid"|"slug"|"int")
 
-	CrudAction string // "get"|"list"|"create"|"update"|"delete"|"preview"|""
+	CrudAction string // "get"|"list"|"create"|"update"|"delete"|"preview"|"pivot"|""
 
 	// EngineNative marks a route the dispatch handler serves without
 	// borrowing/invoking a WASM instance — the builtins map lookup

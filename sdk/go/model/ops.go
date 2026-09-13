@@ -1,6 +1,6 @@
 package model
 
-// Op represents one of EnableOps' six reserved CRUD/list operations,
+// Op represents one of EnableOps' seven reserved CRUD/list operations,
 // optionally carrying a per-op ABAC domain condition. Mirrors
 // engine.ActionName's reserved names (sdk/go/engine) — kept as its own
 // type here rather than reused from there, since engine imports model,
@@ -27,4 +27,5 @@ var (
 	Update  = Op{Name: "update"}
 	Delete  = Op{Name: "delete"}
 	Preview = Op{Name: "preview"}
+	Pivot   = Op{Name: "pivot"}
 )
