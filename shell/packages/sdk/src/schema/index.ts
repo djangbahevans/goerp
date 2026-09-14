@@ -13,6 +13,9 @@ export { BatchLoaderRegistry } from "./batch-loader-registry.js";
 export type { RegisteredComponent } from "./component-registry.js";
 export { ComponentRegistry } from "./component-registry.js";
 export { buildModelRegistry, ModelRegistry } from "./model-registry.js";
+export { optionalNullable } from "./optional-nullable.js";
+export type { ParseManifestResult } from "./parse-manifest-value.js";
+export { parseManifestValue } from "./parse-manifest-value.js";
 export type { ViewDeclaration } from "./resolve-view-declaration.js";
 export { resolveViewDeclaration, ViewDeclarationRegistry } from "./resolve-view-declaration.js";
 export { resolveViewPath, ViewPathRegistry } from "./resolve-view-path.js";
@@ -25,6 +28,7 @@ export {
 export type { ResourceRegistryEntry } from "./resource-registry.js";
 export { ResourceRegistry } from "./resource-registry.js";
 export { SchemaRegistry } from "./schema-registry.js";
+export { summarizeIssues } from "./summarize-issues.js";
 export type { CRUDAction, FieldDef, MetaSchema, ModelDef, ModuleSchema, RouteSchema } from "./types.js";
 
 // Shared singletons — one schema fetch, agreed on by every consumer.

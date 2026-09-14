@@ -10,7 +10,7 @@ export { actionButtonClassName } from "./action-button-styles.js";
 export type { ActionMenuItem, ActionMenuProps } from "./action-menu.js";
 export { ActionMenu } from "./action-menu.js";
 export type { AlertDialogInput, AlertDialogProps, AlertDialogSelectOption } from "./alert-dialog.js";
-export { AlertDialog } from "./alert-dialog.js";
+export { AlertDialog, AlertDialogInputSchema, AlertDialogSelectOptionSchema } from "./alert-dialog.js";
 export type { BadgeColor, BadgeProps } from "./badge.js";
 export { BADGE_COLOR_CLASSES, Badge } from "./badge.js";
 export type { BreadcrumbItem, BreadcrumbProps } from "./breadcrumb.js";
