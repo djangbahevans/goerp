@@ -47,17 +47,39 @@ const RESPONSE: PivotResponse = {
   ],
 };
 
-function pivotDataKey(filter: Record<string, FilterParamValue> = {}, cacheKeyPrefix: string | null = null): QueryKey {
+function pivotDataKey(
+  filter: Record<string, FilterParamValue> = {},
+  cacheKeyPrefix: string | null = null,
+  viewOverride: PivotViewDeclaration = view,
+): QueryKey {
   return [
     ...createPivotDataQueryOptions("sales.order", {
-      rows: view.rows,
-      columns: view.columns,
-      values: view.values,
+      rows: viewOverride.rows,
+      columns: viewOverride.columns,
+      values: viewOverride.values,
       filter,
       ...(cacheKeyPrefix !== null ? { cacheKeyPrefix } : {}),
     }).queryKey,
   ];
 }
+
+// goerp#794's known limitation: a manifest declaring zero fields on an
+// axis ("total revenue by customer, no column breakdown") used to render
+// as PivotGrid's empty state, since an empty rowHeaders/columnHeaders
+// array reads as "no data" there — mapPivotResponse now synthesizes a
+// single implicit Total node for a declared-empty axis instead.
+const rowsOnlyView: PivotViewDeclaration = {
+  ...view,
+  name: "sales_pivot_rows_only",
+  columns: [],
+};
+
+const ROWS_ONLY_RESPONSE: PivotResponse = {
+  cells: [
+    { row: ["Acme Corp"], column: [], values: { amount_total_sum: 570050, id_count: 4 } },
+    { row: ["Globex Inc"], column: [], values: { amount_total_sum: 89000, id_count: 2 } },
+  ],
+};
 
 function seededClient(): QueryClient {
   return new QueryClient({
@@ -161,6 +183,30 @@ export const Empty: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("No sales analysis data found.")).toBeInTheDocument();
+  },
+};
+
+export const RowsOnly: Story = {
+  name: "no column breakdown declared — renders under an implicit Total column",
+  args: { view: rowsOnlyView },
+  decorators: [
+    withPivotProviders(
+      (() => {
+        const client = seededClient();
+        client.setQueryData(pivotDataKey({}, null, rowsOnlyView), ROWS_ONLY_RESPONSE);
+        return client;
+      })(),
+      "/",
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const table = await waitFor(() => canvas.getByRole("table"));
+    const body = within(table);
+
+    await expect(body.getByText("Acme Corp")).toBeInTheDocument();
+    await expect(body.getByText("Globex Inc")).toBeInTheDocument();
+    await expect(canvas.getByText("Total")).toBeInTheDocument();
   },
 };
 
