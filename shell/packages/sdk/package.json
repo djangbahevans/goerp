@@ -55,6 +55,7 @@
     "@tiptap/pm": "^3.31.3",
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
-    "lucide-react": "^1.42.0"
+    "lucide-react": "^1.42.0",
+    "valibot": "^1.5.0"
   }
 }

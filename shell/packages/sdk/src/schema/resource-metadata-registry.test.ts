@@ -30,7 +30,7 @@ function route(overrides: Partial<MetaSchema["modules"][string]["routes"][number
 }
 
 function view(overrides: Record<string, unknown>) {
-  return { name: "", type: "list", resource: "", ...overrides };
+  return { name: "", type: "list", resource: "", label: "", ...overrides };
 }
 
 function navGroup(children: Record<string, unknown>[], overrides: Record<string, unknown> = {}) {

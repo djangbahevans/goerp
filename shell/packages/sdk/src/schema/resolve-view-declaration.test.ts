@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveViewDeclaration, ViewDeclarationRegistry } from "./resolve-view-declaration.js";
 import type { MetaSchema } from "./types.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function schemaWith(modules: MetaSchema["modules"]): MetaSchema {
   return { modules, engine_version: "1", schema_hash: "h" };
@@ -48,6 +52,7 @@ describe("resolveViewDeclaration", () => {
   });
 
   it("returns null for an unknown module, an unmatched view name, or a malformed entry", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     const schema = schemaWith({
       contacts: {
         name: "contacts",
@@ -66,6 +71,46 @@ describe("resolveViewDeclaration", () => {
     expect(resolveViewDeclaration(schema, "missing.view", "contacts")).toBe(null);
     expect(resolveViewDeclaration(schema, "contacts_list", "contacts")).toBe(null);
     expect(resolveViewDeclaration(schemaWith({}), "contacts_list", "contacts")).toBe(null);
+  });
+
+  it("warns (rather than silently vanishing) for an entry found by name but missing a common field", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const schema = schemaWith({
+      contacts: {
+        name: "contacts",
+        version: "1",
+        display_name: "Contacts",
+        routes: [],
+        views: [{ name: "broken_view", type: "list" }],
+        navigation: [],
+        models: {},
+        permissions: [],
+        frontend: null,
+        public_config: {},
+      },
+    });
+
+    expect(resolveViewDeclaration(schema, "broken_view", "contacts")).toBe(null);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("broken_view"));
+  });
+
+  it("keeps a view type's own extra fields intact alongside the validated common ones", () => {
+    const schema = schemaWith({
+      crm: {
+        name: "crm",
+        version: "1",
+        display_name: "CRM",
+        routes: [],
+        views: [{ name: "leads_kanban", type: "kanban", resource: "crm.lead", label: "Leads", group_by: "stage" }],
+        navigation: [],
+        models: {},
+        permissions: [],
+        frontend: null,
+        public_config: {},
+      },
+    });
+
+    expect(resolveViewDeclaration(schema, "leads_kanban", "crm")).toMatchObject({ group_by: "stage" });
   });
 });
 

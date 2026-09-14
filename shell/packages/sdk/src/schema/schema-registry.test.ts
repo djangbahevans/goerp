@@ -43,4 +43,21 @@ describe("SchemaRegistry", () => {
 
     expect(client.get).toHaveBeenCalledWith("/_meta/schema");
   });
+
+  it("rejects with a clear error instead of returning a malformed response", async () => {
+    const malformed = { modules: { sales: { name: "sales" } }, engine_version: "test", schema_hash: "abc" };
+    const registry = new SchemaRegistry(fakeClient(malformed));
+
+    await expect(registry.getSchema()).rejects.toThrow(/malformed response.*modules\.sales\.version/s);
+  });
+
+  it("doesn't cache a malformed response as if it were valid", async () => {
+    const client = { get: vi.fn() };
+    client.get.mockResolvedValueOnce({ modules: { sales: {} }, engine_version: "test", schema_hash: "abc" });
+    client.get.mockResolvedValueOnce(schema);
+    const registry = new SchemaRegistry(client);
+
+    await expect(registry.getSchema()).rejects.toThrow();
+    await expect(registry.getSchema()).resolves.toEqual(schema);
+  });
 });
