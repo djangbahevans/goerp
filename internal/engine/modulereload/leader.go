@@ -35,6 +35,7 @@ import (
 	tenantsync "github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -74,6 +75,12 @@ type Leader struct {
 	// Concurrency bounds SyncModule's tenant fan-out; 0 uses
 	// tenantsync.DefaultConcurrency.
 	Concurrency int
+	// Hub broadcasts schema.updated to already-connected /_ws clients once
+	// this reload is live, the same live-session convenience
+	// moduleinstall.Worker.Hub already provides for module.installed. Nil
+	// in tests that don't exercise this — Run treats that the same as
+	// "nobody connected yet".
+	Hub *ws.Hub
 }
 
 // Run implements hotreload.LeaderFunc. Coordinator already guarantees only
@@ -265,6 +272,22 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	// special case (hotreload.Coordinator.OnReloadAnnouncement).
 	if err := l.Cache.Publish(ctx, "engine:reload:"+moduleName, m.Version+":"+objectKey); err != nil {
 		log.Error().Err(err).Str("module", moduleName).Msg("hot reload: failed to publish reload announcement")
+	}
+
+	// Live-session convenience only, same as moduleinstall.Worker's own
+	// module.installed broadcast: a client with no open /_ws connection
+	// sees the reloaded schema on its next GET /_meta/schema regardless.
+	// Scoped to syncResult.Succeeded — a tenant whose schema sync just
+	// failed isn't at mod.Manifest.Version yet, so its clients would be
+	// told to refetch a schema their own tenant hasn't actually adopted.
+	if l.Hub != nil {
+		payload := map[string]string{"module": moduleName}
+		for _, t := range syncResult.Succeeded {
+			if _, err := l.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "schema.updated", payload); err != nil {
+				log.Warn().Err(err).Str("module", moduleName).Str("tenant", t.Slug).
+					Msg("hot reload: broadcast schema.updated to tenant failed")
+			}
+		}
 	}
 
 	return nil

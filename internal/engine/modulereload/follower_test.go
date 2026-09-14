@@ -9,12 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket/wsjson"
+
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
 
 // newFollower builds a Follower wired against env and backend (the same
@@ -92,6 +95,54 @@ func TestFollower_Run_AdoptsLeaderPublishedModule(t *testing.T) {
 	// SyncPool/DiffEngine to run it with at all).
 	if !tableExists(t, env.conn, "tenant_"+slug, "widgets_widget") {
 		t.Error("expected the widget table the leader synced to still exist")
+	}
+}
+
+// TestFollower_Run_BroadcastsSchemaUpdatedToActiveTenant mirrors
+// TestLeader_Run_BroadcastsSchemaUpdatedToSucceededTenant, but scoped to
+// TenantStore.ActiveTenants rather than a per-run sync result — a follower
+// never runs its own tenant schema sync (see Follower.Hub's own doc
+// comment), so it has no narrower success list of its own to broadcast to.
+func TestFollower_Run_BroadcastsSchemaUpdatedToActiveTenant(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	tt := env.activeTenant(t, slug)
+
+	name := "widgets_" + slug
+	src, mf := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
+
+	l, _ := newLeader(t, env, nil)
+	if err := l.Run(context.Background(), name, src, mf); err != nil {
+		t.Fatalf("leader Run() error: %v", err)
+	}
+
+	hub := ws.NewHub()
+	conn := connectTenantConn(t, hub, tt.ID)
+
+	f, followerReg := newFollower(t, env, l.Storage)
+	f.Hub = hub
+	if err := f.Run(context.Background(), name, mf.Version, mf.Checksum); err != nil {
+		t.Fatalf("follower Run() error: %v", err)
+	}
+	if _, ok := followerReg.Snapshot().Modules()[name]; !ok {
+		t.Fatalf("module %q not present in follower's registry after Run", name)
+	}
+
+	readCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var envelope map[string]any
+	if err := wsjson.Read(readCtx, conn, &envelope); err != nil {
+		t.Fatalf("read broadcast envelope: %v", err)
+	}
+	if envelope["channel"] != ws.TenantChannel(tt.ID) {
+		t.Errorf("channel = %v, want %q", envelope["channel"], ws.TenantChannel(tt.ID))
+	}
+	if envelope["type"] != "schema.updated" {
+		t.Errorf("type = %v, want %q", envelope["type"], "schema.updated")
+	}
+	payload, _ := envelope["payload"].(map[string]any)
+	if payload["module"] != name {
+		t.Errorf("payload[module] = %v, want %q", payload["module"], name)
 	}
 }
 

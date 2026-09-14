@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/rs/zerolog/log"
 )
 
@@ -41,6 +42,13 @@ type Follower struct {
 	RoleStore   *role.Store
 	Storage     storage.Backend
 	Workers     *workflowworker.Manager
+	// Hub broadcasts schema.updated to this instance's own /_ws clients
+	// once the reload is live locally. A follower has no syncResult (it
+	// never runs tenant schema sync itself — the leader already did),
+	// so unlike Leader.Run this reads TenantStore.ActiveTenants directly
+	// rather than a per-run success list. Nil in tests that don't
+	// exercise this — Run treats that the same as "nobody connected yet".
+	Hub *ws.Hub
 }
 
 // Run implements hotreload.FollowerFunc. Coordinator only invokes this
@@ -148,6 +156,29 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 				Str("old_version", oldMod.Manifest.Version).Str("new_version", version).
 				Msg("hot reload (follower) complete")
 		}()
+	}
+
+	// Live-session convenience only, same as Leader.Run's own broadcast —
+	// this instance's WS connections are local to it, so the leader's
+	// broadcast (on its own instance) never reaches clients connected here.
+	// Every active tenant, not a per-run success list: a follower never
+	// runs its own tenant schema sync (the leader already did, against the
+	// same shared Postgres every instance points at), so it has no
+	// per-tenant outcome of its own to scope this to.
+	if f.Hub != nil {
+		tenants, err := f.TenantStore.ActiveTenants(ctx)
+		if err != nil {
+			log.Warn().Err(err).Str("module", moduleName).
+				Msg("hot reload (follower): failed to list active tenants for schema.updated broadcast")
+		} else {
+			payload := map[string]string{"module": moduleName}
+			for _, t := range tenants {
+				if _, err := f.Hub.Broadcast(ctx, ws.TenantChannel(t.ID), "schema.updated", payload); err != nil {
+					log.Warn().Err(err).Str("module", moduleName).Str("tenant", t.Slug).
+						Msg("hot reload (follower): broadcast schema.updated to tenant failed")
+				}
+			}
+		}
 	}
 
 	// Never publishes engine:reload:{module} — that is the leader's own
