@@ -3,8 +3,11 @@ export type { KanbanCardProps } from "./kanban-card.js";
 export { KanbanCard } from "./kanban-card.js";
 export type { KanbanColumnProps } from "./kanban-column.js";
 export { KanbanColumn } from "./kanban-column.js";
+export type { KanbanViewDeclaration } from "./kanban-manifest-types.js";
 export type { KanbanQuickCreateRowProps } from "./kanban-quick-create-row.js";
 export { KanbanQuickCreateRow } from "./kanban-quick-create-row.js";
+export type { KanbanRendererProps } from "./kanban-renderer.js";
+export { KanbanRenderer } from "./kanban-renderer.js";
 export type {
   KanbanBoardProps,
   KanbanCardAvatar,

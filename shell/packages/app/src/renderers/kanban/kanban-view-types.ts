@@ -36,6 +36,10 @@ export interface KanbanGroup {
   label: string;
   color?: string | undefined;
   cards: KanbanCardData[];
+  actions?: ActionMenuItem[] | undefined;
+  // manifest-spec.md §9.3's max_cards_per_column: true when this group has
+  // more matching records than `cards` currently shows.
+  hasMore?: boolean | undefined;
 }
 
 export interface KanbanQuickCreateField {
@@ -58,4 +62,8 @@ export interface KanbanBoardProps {
   quickCreateFields?: KanbanQuickCreateField[] | undefined;
   onQuickCreate?: ((groupId: string, values: Record<string, string>) => void) | undefined;
   emptyColumnMessage?: ((group: KanbanGroup) => string) | undefined;
+  onLoadMore?: ((groupId: string) => void) | undefined;
+  // manifest-spec.md §9.3's allow_drag (default true) — disables pick-up
+  // entirely rather than just rejecting the resulting onMoveCard call.
+  allowDrag?: boolean | undefined;
 }
