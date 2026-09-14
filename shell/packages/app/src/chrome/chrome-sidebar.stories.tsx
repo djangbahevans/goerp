@@ -8,27 +8,27 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { Package, ShoppingCart, Users } from "lucide-react";
 import { ChromeSidebar } from "./chrome-sidebar.js";
 import type { NavigationGroup } from "./navigation-types.js";
 import type { SidebarStoreLike } from "./sidebar-store.js";
 
 // A mocked navigation-tree fixture standing in for viewRegistry.navigationTree
-// (unbuilt, goerp#671 — see use-navigation-tree.ts) — the real per-module
-// data this component will eventually consume unchanged.
+// (packages/sdk/src/schema/view-registry.ts) — the real per-module data this
+// component consumes unchanged. `icon` is a name string (<Icon name={...}>),
+// not a component reference — see NavigationItem's own doc comment.
 const FIXTURE_TREE: NavigationGroup[] = [
   {
     key: "sales",
     label: "Sales",
-    icon: ShoppingCart,
+    icon: "shopping-cart",
     module: "sales",
     children: [
-      { key: "orders", label: "Orders", path: "/sales/orders", icon: ShoppingCart },
+      { key: "orders", label: "Orders", path: "/sales/orders", icon: "shopping-cart" },
       {
         key: "invoices",
         label: "Invoices",
         path: "/sales/invoices",
-        icon: ShoppingCart,
+        icon: "shopping-cart",
         badgeCountRoute: "/sales/invoices/pending-count",
       },
     ],
@@ -36,16 +36,16 @@ const FIXTURE_TREE: NavigationGroup[] = [
   {
     key: "inventory",
     label: "Inventory",
-    icon: Package,
+    icon: "package",
     module: "inventory",
-    children: [{ key: "products", label: "Products", path: "/inventory/products", icon: Package }],
+    children: [{ key: "products", label: "Products", path: "/inventory/products", icon: "package" }],
   },
   {
     key: "hr",
     label: "HR",
-    icon: Users,
+    icon: "users",
     module: "hr",
-    children: [{ key: "employees", label: "Employees", path: "/hr/employees", icon: Users }],
+    children: [{ key: "employees", label: "Employees", path: "/hr/employees", icon: "users" }],
   },
 ];
 
