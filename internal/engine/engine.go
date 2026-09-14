@@ -976,6 +976,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Cache:       cacheClient,
 		Workers:     workflowWorkers,
 		RiverClient: jobQueueClient,
+		Hub:         wsHub,
 	}
 	reloadFollower := &modulereload.Follower{
 		Runtime:     runtime,
@@ -986,6 +987,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		RoleStore:   roleStore,
 		Storage:     storageBackend,
 		Workers:     workflowWorkers,
+		Hub:         wsHub,
 	}
 
 	instanceID := uuid.New().String()

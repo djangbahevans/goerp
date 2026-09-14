@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
@@ -33,8 +38,43 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/google/uuid"
 )
+
+// connectTenantConn dials a real WebSocket connection registered with hub
+// under tenantID (mirroring dispatchWSRoute's own accept-and-serve, which
+// lives in the engine package and can't be called from here), subscribes it
+// to tenantID's TenantChannel, and returns the client side for reading
+// broadcasts sent to that channel. Mirrors moduleinstall/worker_test.go's
+// own copy — each package that tests a Hub broadcast keeps its own, matching
+// the existing convention (also duplicated in auth/planchange/handler_test.go).
+func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Conn {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", tenantID, "test-agent")
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Listener.Addr().String(), nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+
+	if err := wsjson.Write(ctx, conn, map[string]string{"type": "subscribe", "channel": ws.TenantChannel(tenantID)}); err != nil {
+		t.Fatalf("subscribe write: %v", err)
+	}
+	return conn
+}
 
 // localPostgresDSN matches internal/engine/moduleinstall's own test
 // convention — the compose.dev.yml Postgres instance.
@@ -342,6 +382,44 @@ func TestLeader_Run_FreshReloadSucceeds(t *testing.T) {
 	}
 	if !tableExists(t, env.conn, "tenant_"+slug, "widgets_widget") {
 		t.Error("expected the widget table to have been created")
+	}
+}
+
+func TestLeader_Run_BroadcastsSchemaUpdatedToSucceededTenant(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	tt := env.activeTenant(t, slug)
+
+	hub := ws.NewHub()
+	conn := connectTenantConn(t, hub, tt.ID)
+
+	name := "widgets_" + slug
+	src, mf := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
+
+	l, reg := newLeader(t, env, nil)
+	l.Hub = hub
+	if err := l.Run(context.Background(), name, src, mf); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if _, ok := reg.Snapshot().Modules()[name]; !ok {
+		t.Fatalf("module %q not present in registry after reload", name)
+	}
+
+	readCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var envelope map[string]any
+	if err := wsjson.Read(readCtx, conn, &envelope); err != nil {
+		t.Fatalf("read broadcast envelope: %v", err)
+	}
+	if envelope["channel"] != ws.TenantChannel(tt.ID) {
+		t.Errorf("channel = %v, want %q", envelope["channel"], ws.TenantChannel(tt.ID))
+	}
+	if envelope["type"] != "schema.updated" {
+		t.Errorf("type = %v, want %q", envelope["type"], "schema.updated")
+	}
+	payload, _ := envelope["payload"].(map[string]any)
+	if payload["module"] != name {
+		t.Errorf("payload[module] = %v, want %q", payload["module"], name)
 	}
 }
 
