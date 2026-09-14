@@ -8,6 +8,7 @@ import {
   isSameDay,
   monthGridDays,
   startOfWeek,
+  visibleRange,
   weekDays,
 } from "./calendar-date-utils.js";
 
@@ -84,6 +85,32 @@ describe("calendar-date-utils", () => {
     it("falls back a week when the same week-of-month position would spill into the next month", () => {
       // 2026-03-29 is a Sunday, the 5th Sunday of March; April has only 4 full Sundays before spilling into May.
       expect(dateKey(addMonthsKeepingWeekday(new Date(2026, 2, 29), 1))).toBe("2026-04-26");
+    });
+  });
+
+  describe("visibleRange", () => {
+    const focused = new Date(2026, 4, 13); // Wednesday, May 13 2026
+
+    it("day mode is a single day", () => {
+      const range = visibleRange(focused, "day");
+      expect(dateKey(range.start)).toBe("2026-05-13");
+      expect(dateKey(range.end)).toBe("2026-05-13");
+    });
+
+    it("week mode spans the containing Sunday-to-Saturday week", () => {
+      const range = visibleRange(focused, "week");
+      expect(dateKey(range.start)).toBe("2026-05-10");
+      expect(dateKey(range.end)).toBe("2026-05-16");
+    });
+
+    it("month mode spans the full 42-day grid, including adjacent-month padding", () => {
+      const range = visibleRange(focused, "month");
+      expect(dateKey(range.start)).toBe("2026-04-26");
+      expect(dateKey(range.end)).toBe("2026-06-06");
+    });
+
+    it("agenda mode reuses month's range, since it has no windowing of its own", () => {
+      expect(visibleRange(focused, "agenda")).toEqual(visibleRange(focused, "month"));
     });
   });
 });
