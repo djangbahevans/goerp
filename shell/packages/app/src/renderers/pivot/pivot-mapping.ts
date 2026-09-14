@@ -75,6 +75,19 @@ function toCellValue(raw: number | string | null): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+// A manifest declaring zero fields on an axis ("total by row, no column
+// breakdown") means every cell's prefix on that axis is always the empty
+// path — buildHeaderTree never sees a leaf path to build a node from, so
+// rowHeaders/columnHeaders would come back genuinely empty. PivotGrid
+// treats an empty axis as "no data" (pivot-grid.tsx's own empty-state
+// check), not "no breakdown requested" — a real difference PivotView has
+// no other way to tell apart, so a single implicit Total node stands in
+// for the declared-empty axis instead, keyed identically to how every
+// cell on that axis already resolves its own key (pathKey([]) === "[]").
+function totalNode(): PivotHeaderNode {
+  return { key: "[]", label: "Total", accessibleLabel: "Total" };
+}
+
 export interface MappedPivotData {
   rowHeaders: PivotHeaderNode[];
   columnHeaders: PivotHeaderNode[];
@@ -103,8 +116,8 @@ export function mapPivotResponse(response: PivotResponse, rows: string[], column
     cellEntries.push({ rowKey: pathKey(rowPrefix), columnKey: pathKey(columnPrefix), values: cell.values });
   }
 
-  const rowHeaders = buildHeaderTree(rowLeafPaths);
-  const columnHeaders = buildHeaderTree(columnLeafPaths);
+  const rowHeaders = rows.length === 0 ? [totalNode()] : buildHeaderTree(rowLeafPaths);
+  const columnHeaders = columns.length === 0 ? [totalNode()] : buildHeaderTree(columnLeafPaths);
 
   const cells: PivotCell[] = cellEntries.flatMap(({ rowKey, columnKey, values }) =>
     Object.entries(values).map(([valueKey, raw]) => ({ rowKey, columnKey, valueKey, value: toCellValue(raw) })),

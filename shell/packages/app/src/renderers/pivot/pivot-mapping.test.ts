@@ -82,14 +82,21 @@ describe("mapPivotResponse", () => {
     });
   });
 
-  it("uses a constant row key when no row dimension is declared", () => {
+  it("synthesizes a single Total node for a declared-empty axis, keyed to match every cell's own key", () => {
     const result = mapPivotResponse(
       { cells: [{ row: [], column: ["confirmed"], values: { amount_sum: 10 } }] },
       [],
       ["state"],
     );
-    expect(result.rowHeaders).toEqual([]);
+    expect(result.rowHeaders).toEqual([{ key: "[]", label: "Total", accessibleLabel: "Total" }]);
     expect(result.cells).toEqual([{ rowKey: "[]", columnKey: '["confirmed"]', valueKey: "amount_sum", value: 10 }]);
+  });
+
+  it("synthesizes a Total node on both axes for a totals-only (no rows, no columns) pivot", () => {
+    const result = mapPivotResponse({ cells: [{ row: [], column: [], values: { amount_sum: 999 } }] }, [], []);
+    expect(result.rowHeaders).toEqual([{ key: "[]", label: "Total", accessibleLabel: "Total" }]);
+    expect(result.columnHeaders).toEqual([{ key: "[]", label: "Total", accessibleLabel: "Total" }]);
+    expect(result.cells).toEqual([{ rowKey: "[]", columnKey: "[]", valueKey: "amount_sum", value: 999 }]);
   });
 });
 
