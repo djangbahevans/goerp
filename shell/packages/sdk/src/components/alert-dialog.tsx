@@ -1,25 +1,30 @@
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import * as v from "valibot";
+import { optionalNullable } from "../schema/optional-nullable.js";
 import { actionButtonClassName } from "./action-button-styles.js";
 import { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
 
-// manifest-spec.md's SelectOption, as used by ConfirmInput.
-export interface AlertDialogSelectOption {
-  value: string;
-  label: string;
-  disabled?: boolean;
-}
+// manifest-spec.md's SelectOption, as used by ConfirmInput — a schema, not
+// just a type, so BulkActionConfirmInputSchema can extend it directly.
+export const AlertDialogSelectOptionSchema = v.looseObject({
+  value: v.string(),
+  label: v.string(),
+  disabled: optionalNullable(v.boolean()),
+});
+export type AlertDialogSelectOption = v.InferOutput<typeof AlertDialogSelectOptionSchema>;
 
 // manifest-spec.md's ConfirmInput object.
-export interface AlertDialogInput {
-  label: string;
-  type: "text" | "select";
-  required?: boolean;
-  placeholder?: string;
+export const AlertDialogInputSchema = v.looseObject({
+  label: v.string(),
+  type: v.picklist(["text", "select"] as const),
+  required: optionalNullable(v.boolean()),
+  placeholder: optionalNullable(v.string()),
   // Required when type is "select".
-  options?: AlertDialogSelectOption[];
-}
+  options: optionalNullable(v.array(AlertDialogSelectOptionSchema)),
+});
+export type AlertDialogInput = v.InferOutput<typeof AlertDialogInputSchema>;
 
 export interface AlertDialogProps {
   open: boolean;

@@ -221,4 +221,22 @@ describe("FormTabsRenderer", () => {
     await renderTabs([{ label: "Activities", type: "view", view: "sales.activities_calendar" }]);
     expect(await screen.findByText("Call Acme")).toBeTruthy();
   });
+
+  it("view tab: shows a validation error and logs it, instead of crashing, when a resolved kanban view is missing a required field", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    resolveViewMock.mockResolvedValue({
+      name: "orders_kanban",
+      type: "kanban",
+      resource: "sales.order",
+      label: "Orders",
+      // group_by and card_fields, both required by manifest-spec.md §9.3,
+      // are missing here.
+    });
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_kanban" }]);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("orders_kanban");
+    expect(alert.textContent).toContain("kanban");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("orders_kanban"));
+    warnSpy.mockRestore();
+  });
 });

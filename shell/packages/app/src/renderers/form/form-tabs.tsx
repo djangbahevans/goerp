@@ -1,16 +1,18 @@
 import { PermissionContext } from "@goerp/sdk/auth";
 import { TabPanel, Tabs } from "@goerp/sdk/components";
 import type { ViewDeclaration } from "@goerp/sdk/schema";
-import { viewDeclarationRegistry } from "@goerp/sdk/schema";
+import { parseManifestValue, viewDeclarationRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
-import { useContext, useState } from "react";
-import type { CalendarViewDeclaration } from "../calendar/calendar-manifest-types.js";
+import { useContext, useMemo, useState } from "react";
+import * as v from "valibot";
+import { CalendarViewDeclarationSchema } from "../calendar/calendar-manifest-types.js";
 import { CalendarRenderer } from "../calendar/calendar-renderer.js";
-import type { KanbanViewDeclaration } from "../kanban/kanban-manifest-types.js";
+import { KanbanViewDeclarationSchema } from "../kanban/kanban-manifest-types.js";
 import { KanbanRenderer } from "../kanban/kanban-renderer.js";
 import { ListRenderer } from "../list/list-renderer.js";
-import type { ListViewDeclaration, Row } from "../list/list-view-types.js";
-import type { PivotViewDeclaration } from "../pivot/pivot-manifest-types.js";
+import type { Row } from "../list/list-view-types.js";
+import { ListViewDeclarationSchema } from "../list/list-view-types.js";
+import { PivotViewDeclarationSchema } from "../pivot/pivot-manifest-types.js";
 import { PivotRenderer } from "../pivot/pivot-renderer.js";
 import { FormSectionRenderer } from "./form-sections.js";
 import type { FormTab } from "./form-view-types.js";
@@ -69,6 +71,14 @@ function ViewTabContent({
 
 // "list", "pivot", "kanban" and "calendar" exist today — timeline is a
 // separate, not-yet-built ticket (goerp#647).
+const KNOWN_VIEW_TYPES = new Set(["list", "pivot", "kanban", "calendar"]);
+const AnyViewDeclarationSchema = v.variant("type", [
+  ListViewDeclarationSchema,
+  PivotViewDeclarationSchema,
+  KanbanViewDeclarationSchema,
+  CalendarViewDeclarationSchema,
+]);
+
 function EmbeddedView({
   view,
   module,
@@ -81,49 +91,43 @@ function EmbeddedView({
   recordId?: string | undefined;
   baseFilter: Record<string, string>;
 }) {
-  switch (view.type) {
+  // Memoized on `view` — re-parsing the full nested schema on every
+  // unrelated re-render (a keystroke elsewhere in the form) is wasted work.
+  const result = useMemo(
+    () => (KNOWN_VIEW_TYPES.has(view.type) ? parseManifestValue(AnyViewDeclarationSchema, view) : null),
+    [view],
+  );
+
+  if (!result) return <p>"{view.type}" view renderer isn't implemented yet.</p>;
+
+  if (!result.success) {
+    // Logged, not just rendered — an uncaught crash from the old unchecked cast would have reached error monitoring.
+    console.warn(
+      `EmbeddedView: "${view.name}" doesn't match the ${view.type} view schema (manifest-spec.md §9) — ${result.message}`,
+    );
+    return (
+      <p role="alert">
+        "{view.name}" doesn't match the {view.type} view schema (manifest-spec.md §9) — {result.message}
+      </p>
+    );
+  }
+
+  const validated = result.output;
+  const rendererProps = {
+    module,
+    embedded: true as const,
+    baseFilter,
+    ...(recordId !== undefined ? { recordId } : {}),
+  };
+  switch (validated.type) {
     case "list":
-      return (
-        <ListRenderer
-          view={view as unknown as ListViewDeclaration}
-          module={module}
-          embedded
-          baseFilter={baseFilter}
-          {...(recordId !== undefined ? { recordId } : {})}
-        />
-      );
+      return <ListRenderer view={validated} {...rendererProps} />;
     case "pivot":
-      return (
-        <PivotRenderer
-          view={view as unknown as PivotViewDeclaration}
-          module={module}
-          embedded
-          baseFilter={baseFilter}
-          {...(recordId !== undefined ? { recordId } : {})}
-        />
-      );
+      return <PivotRenderer view={validated} {...rendererProps} />;
     case "kanban":
-      return (
-        <KanbanRenderer
-          view={view as unknown as KanbanViewDeclaration}
-          module={module}
-          embedded
-          baseFilter={baseFilter}
-          {...(recordId !== undefined ? { recordId } : {})}
-        />
-      );
+      return <KanbanRenderer view={validated} {...rendererProps} />;
     case "calendar":
-      return (
-        <CalendarRenderer
-          view={view as unknown as CalendarViewDeclaration}
-          module={module}
-          embedded
-          baseFilter={baseFilter}
-          {...(recordId !== undefined ? { recordId } : {})}
-        />
-      );
-    default:
-      return <p>"{view.type}" view renderer isn't implemented yet.</p>;
+      return <CalendarRenderer view={validated} {...rendererProps} />;
   }
 }
 

@@ -1,31 +1,32 @@
-import type { ListFilter } from "../list/list-view-types.js";
+import { optionalNullable as opt } from "@goerp/sdk/schema";
+import * as v from "valibot";
+import { ListFilterSchema } from "../list/list-view-types.js";
 
-export type PivotAggregation = "sum" | "count" | "avg" | "min" | "max" | "count_distinct";
+const PIVOT_AGGREGATIONS = ["sum", "count", "avg", "min", "max", "count_distinct"] as const;
+export type PivotAggregation = (typeof PIVOT_AGGREGATIONS)[number];
 
-export interface PivotValue {
-  field: string;
-  aggregation: PivotAggregation;
-  label?: string;
-  format?: "currency" | "percent" | "number";
-}
+export const PivotValueSchema = v.looseObject({
+  field: v.string(),
+  aggregation: v.picklist(PIVOT_AGGREGATIONS),
+  label: opt(v.string()),
+  format: opt(v.picklist(["currency", "percent", "number"] as const)),
+});
+export type PivotValue = v.InferOutput<typeof PivotValueSchema>;
 
-// manifest-spec.md §9.5's Pivot View wire schema — the manifest fields
-// PivotRenderer resolves into PivotViewProps (pivot-view-types.ts), the
-// concern pivot-view-types.ts's own top comment explicitly defers to here.
-// default_filters/filters reuse ListViewDeclaration's exact shape (same
-// boolean-slice filter primitives, list-renderer.tsx's computeDefaultFilters
-// and list-filters.tsx's ListFilters).
-export interface PivotViewDeclaration {
-  name: string;
-  type: "pivot";
-  resource: string;
-  label: string;
-  permission?: string;
-  rows: string[];
-  columns: string[];
-  values: PivotValue[];
-  default_filters?: Record<string, unknown>;
-  filters?: ListFilter[];
-  allow_download?: boolean;
-  use_wasm?: boolean;
-}
+// manifest-spec.md §9.5's Pivot View wire schema, resolved by
+// pivot-renderer.tsx into PivotViewProps (pivot-view-types.ts).
+export const PivotViewDeclarationSchema = v.looseObject({
+  name: v.string(),
+  type: v.literal("pivot"),
+  resource: v.string(),
+  label: v.string(),
+  permission: opt(v.string()),
+  rows: v.array(v.string()),
+  columns: v.array(v.string()),
+  values: v.array(PivotValueSchema),
+  default_filters: opt(v.record(v.string(), v.unknown())),
+  filters: opt(v.array(ListFilterSchema)),
+  allow_download: opt(v.boolean()),
+  use_wasm: opt(v.boolean()),
+});
+export type PivotViewDeclaration = v.InferOutput<typeof PivotViewDeclarationSchema>;
