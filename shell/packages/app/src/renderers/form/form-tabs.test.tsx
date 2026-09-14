@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import type { ResourceRegistryEntry } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -7,21 +8,43 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../list/list-view-types.js";
 import { FormTabsRenderer, resolveRecordExpression } from "./form-tabs.js";
 import type { FormTab } from "./form-view-types.js";
 
-const { resolveViewMock, useInfiniteListMock, useRelationLabelsMock } = vi.hoisted(() => ({
+const { resolveViewMock, resolveResourceMock, useInfiniteListMock, useRelationLabelsMock } = vi.hoisted(() => ({
   resolveViewMock: vi.fn(),
+  // Every CRUD path present by default — a no-op for filterViewByCapability,
+  // preserving this file's existing assertions about unfiltered view
+  // content. Capability filtering itself is form-tabs.test.tsx's own
+  // concern to cover, not every other test in this file's.
+  resolveResourceMock: vi.fn<() => Promise<ResourceRegistryEntry | undefined>>(async () => ({
+    module: "sales",
+    resource: "sales.order",
+    listPath: "/orders",
+    getPath: "/orders/{id}",
+    createPath: "/orders",
+    updatePath: "/orders/{id}",
+    deletePath: "/orders/{id}",
+    pivotPath: null,
+    listMethod: "GET",
+    createMethod: "POST",
+    updateMethod: "PUT",
+    deleteMethod: "DELETE",
+  })),
   useInfiniteListMock: vi.fn(),
   useRelationLabelsMock: vi.fn(() => new Map()),
 }));
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
-  return { ...actual, viewDeclarationRegistry: { resolve: resolveViewMock } };
+  return {
+    ...actual,
+    viewDeclarationRegistry: { resolve: resolveViewMock },
+    resourceRegistry: { resolve: resolveResourceMock },
+  };
 });
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
@@ -31,6 +54,7 @@ vi.mock("@goerp/sdk/react", async (importOriginal) => {
 afterEach(() => {
   cleanup();
   resolveViewMock.mockReset();
+  resolveResourceMock.mockClear();
   useInfiniteListMock.mockReset();
 });
 
@@ -161,6 +185,23 @@ describe("FormTabsRenderer", () => {
     });
     await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_list" }]);
     expect(await screen.findByRole("table", { name: "Orders" })).toBeTruthy();
+  });
+
+  it("view tab: applies capability gating (filterViewByCapability) the same as a full-page view — no List route means no table", async () => {
+    resolveResourceMock.mockResolvedValueOnce(undefined); // resource unknown to the registry — no CRUD routes at all
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [{ id: "o1", state: "confirmed" }], meta: { cursor: null, hasMore: false } }] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_list" }]);
+    await waitFor(() => expect(resolveResourceMock).toHaveBeenCalledWith("sales.order"));
+    expect(screen.queryByRole("table", { name: "Orders" })).toBeNull();
   });
 
   it("view tab: shows a not-implemented message for a view type with no renderer yet", async () => {

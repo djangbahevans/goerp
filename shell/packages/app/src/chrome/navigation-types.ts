@@ -1,22 +1,6 @@
-import type { LucideIcon } from "lucide-react";
-
 // shell-architecture.md §9/§16: the shape a module manifest's `navigation`
-// array declares, and what `viewRegistry.navigationTree` (unbuilt, goerp#671
-// — see use-navigation-tree.ts) will eventually merge across modules.
-export interface NavigationItem {
-  key: string;
-  label: string;
-  path: string;
-  icon: LucideIcon;
-  permission?: string;
-  badgeCountRoute?: string;
-}
-
-export interface NavigationGroup {
-  key: string;
-  label: string;
-  icon: LucideIcon;
-  module: string;
-  permission?: string;
-  children: NavigationItem[];
-}
+// array declares, merged across modules by `viewRegistry.navigationTree`.
+// SDK-owned (packages/sdk/src/schema/view-registry.ts) like every other
+// schema-derived type — re-exported here so chrome/* call sites don't need
+// to know that.
+export type { NavigationGroup, NavigationItem } from "@goerp/sdk/schema";

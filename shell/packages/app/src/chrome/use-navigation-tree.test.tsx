@@ -1,6 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { renderHook } from "@testing-library/react";
-import { Home, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import type { NavigationGroup } from "./navigation-types.js";
@@ -21,20 +20,20 @@ const FIXTURE_TREE: NavigationGroup[] = [
   {
     key: "sales",
     label: "Sales",
-    icon: Home,
+    icon: "home",
     module: "sales",
     children: [
-      { key: "orders", label: "Orders", path: "/sales/orders", icon: Home },
-      { key: "reports", label: "Reports", path: "/sales/reports", icon: Home, permission: "sales.reports.view" },
+      { key: "orders", label: "Orders", path: "/sales/orders", icon: "home" },
+      { key: "reports", label: "Reports", path: "/sales/reports", icon: "home", permission: "sales.reports.view" },
     ],
   },
   {
     key: "hr",
     label: "HR",
-    icon: Users,
+    icon: "users",
     module: "hr",
     permission: "hr.view",
-    children: [{ key: "employees", label: "Employees", path: "/hr/employees", icon: Users }],
+    children: [{ key: "employees", label: "Employees", path: "/hr/employees", icon: "users" }],
   },
 ];
 

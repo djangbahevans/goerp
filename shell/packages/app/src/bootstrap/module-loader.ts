@@ -53,3 +53,36 @@ export async function loadVerifiedModule(
   const importer = options?.importer ?? defaultImporter;
   return importer(bytes);
 }
+
+// Deduplicates concurrent/repeat loads of the same module bundle for the
+// process lifetime — the catch-all route's own loader (goerp#671) calls
+// this once per navigation, and a module with no custom frontend (bundleUrl
+// null, the documented valid case until goerp#588 ships real bundle values)
+// has nothing to load: generic renderers cover the whole module in that
+// case. Keyed by moduleName+bundleUrl+bundleSha256, not moduleName alone —
+// a hot-reloaded module (goerp#671's own schema.updated wiring) gets a new
+// bundle_url/bundle_sha256, and a stale bundle cached under the bare module
+// name would otherwise never be replaced. A rejected load clears its own
+// entry rather than sticking forever, so a transient fetch failure doesn't
+// permanently wedge every later navigation to the same module.
+const loaded = new Map<string, Promise<unknown>>();
+
+export async function ensureLoaded(
+  moduleName: string,
+  bundleUrl: string | null,
+  bundleSha256: string | null,
+  options?: LoadVerifiedModuleOptions,
+): Promise<unknown | null> {
+  if (!bundleUrl || !bundleSha256) return null;
+
+  const key = `${moduleName}:${bundleUrl}:${bundleSha256}`;
+  const existing = loaded.get(key);
+  if (existing) return existing;
+
+  const promise = loadVerifiedModule(bundleUrl, bundleSha256, options).catch((err: unknown) => {
+    loaded.delete(key);
+    throw err;
+  });
+  loaded.set(key, promise);
+  return promise;
+}

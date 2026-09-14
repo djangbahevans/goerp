@@ -6,7 +6,6 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { Home } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NavGroupSection } from "./nav-group.js";
 import type { NavigationGroup } from "./navigation-types.js";
@@ -14,9 +13,9 @@ import type { NavigationGroup } from "./navigation-types.js";
 const GROUP: NavigationGroup = {
   key: "sales",
   label: "Sales",
-  icon: Home,
+  icon: "home",
   module: "sales",
-  children: [{ key: "orders", label: "Orders", path: "/sales/orders", icon: Home }],
+  children: [{ key: "orders", label: "Orders", path: "/sales/orders", icon: "home" }],
 };
 
 afterEach(cleanup);

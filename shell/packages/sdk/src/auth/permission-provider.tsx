@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { tenantChannel, userChannel, wsManager } from "../realtime/index.js";
+import { tenantChannel, useChannelRefresh, userChannel } from "../realtime/index.js";
 import { fetchPermissions } from "./permission-client.js";
 import type { PermissionContextValue, PermissionData } from "./permission-types.js";
 import { useAuth } from "./use-auth.js";
@@ -7,6 +7,14 @@ import { useAuth } from "./use-auth.js";
 export const PermissionContext = createContext<PermissionContextValue | null>(null);
 
 const EMPTY_DATA: PermissionData = { permissions: new Set(), fieldAccess: {}, modulesEnabled: new Set() };
+
+// Mirrors `data`/`value` below for the one consumer that can't use
+// `useContext` — TanStack Router's `beforeLoad`/`loader` run outside the
+// React tree entirely (goerp#671's `/_m/$` catch-all route). Kept in sync
+// by the same `refresh` that calls `setLoadedData` below, so it's never
+// more than one WS round trip behind what `PermissionContext` itself
+// reports.
+export const permissionDataRef: { current: PermissionData } = { current: EMPTY_DATA };
 
 // `resourceId` is accepted for call-shape parity with typescript-sdk-reference.md but not evaluated:
 // /_meta/permissions carries no per-record ABAC data — real resource-level ABAC is enforced server-side
@@ -22,28 +30,6 @@ export function createPermissionContextValue(data: PermissionData): PermissionCo
     },
     moduleEnabled: (moduleName) => data.modulesEnabled.has(moduleName),
   };
-}
-
-// Refetches via refresh whenever a message of messageType arrives on
-// channel (null skips subscribing). Shared by the tenant- and user-channel
-// live-refresh effects below, which differ only in channel/messageType.
-function useChannelRefresh(
-  enabled: boolean,
-  channel: string | null,
-  messageType: string,
-  refresh: (isCancelled: () => boolean, fallbackToEmptyOnError: boolean) => void,
-) {
-  useEffect(() => {
-    if (!enabled || !channel) return;
-    let cancelled = false;
-    const unsubscribe = wsManager.subscribe(channel, (message) => {
-      if (message.type === messageType) refresh(() => cancelled, false);
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [enabled, channel, messageType, refresh]);
 }
 
 // Exported for testing — lets tests drive isAuthenticated/tenantId directly
@@ -95,6 +81,13 @@ export function PermissionProviderForUser({
   useChannelRefresh(isAuthenticated, userId && userChannel(userId), "role.changed", refresh);
 
   const data = isAuthenticated ? loadedData : EMPTY_DATA;
+  // Keeps permissionDataRef in lockstep with `data` for every transition
+  // (login, logout, refetch, account switch via the key= remount above) —
+  // a single effect here is simpler and harder to get wrong than mirroring
+  // the assignment at every place `data` can change.
+  useEffect(() => {
+    permissionDataRef.current = data;
+  }, [data]);
   const value = useMemo(() => createPermissionContextValue(data), [data]);
   return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
 }

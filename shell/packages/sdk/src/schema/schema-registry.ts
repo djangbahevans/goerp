@@ -1,6 +1,7 @@
 import * as v from "valibot";
+import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
-import { cacheUntilRejected } from "./cached-promise.js";
+import { type CachedPromise, cacheUntilRejected } from "./cached-promise.js";
 import { summarizeIssues } from "./summarize-issues.js";
 import { type MetaSchema, MetaSchemaSchema } from "./types.js";
 
@@ -17,7 +18,7 @@ import { type MetaSchema, MetaSchemaSchema } from "./types.js";
 // is the full view registry's concern (backlog #674, unfiled), not
 // this one's.
 export class SchemaRegistry {
-  private readonly fetchSchema: () => Promise<MetaSchema>;
+  private readonly fetchSchema: CachedPromise<MetaSchema>;
 
   constructor(client: Pick<APIClient, "get">) {
     this.fetchSchema = cacheUntilRejected(async () => {
@@ -35,4 +36,19 @@ export class SchemaRegistry {
   getSchema(): Promise<MetaSchema> {
     return this.fetchSchema();
   }
+
+  // Forces the next getSchema() call to actually re-fetch — see
+  // CachedPromise.invalidate's own doc comment for why this exists.
+  invalidate(): void {
+    this.fetchSchema.invalidate();
+  }
 }
+
+// Instantiated here rather than only in index.ts (every sibling registry
+// class's own instance still is) — view-registry-provider.tsx needs the
+// shared singleton directly, and index.ts importing that provider to
+// re-export it would make index.ts → view-registry-provider.ts →
+// schemaRegistry-from-index.ts a real import cycle. Defining the one
+// singleton every other registry ultimately depends on here instead
+// breaks that cycle at its root.
+export const schemaRegistry = new SchemaRegistry(apiClient);

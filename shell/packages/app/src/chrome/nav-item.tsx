@@ -1,3 +1,4 @@
+import { Icon } from "@goerp/sdk/components";
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -61,46 +62,64 @@ export function NavItem({ item, collapsed }: { item: NavigationItem; collapsed: 
   // an unmounted component.
   useEffect(() => () => clearTimeout(timeoutRef.current), []);
 
-  const Icon = item.icon;
+  const rowContent = (isActive: boolean): ReactNode => (
+    <>
+      {isActive && <span aria-hidden="true" style={ACTIVE_BAR_STYLE} />}
+      {collapsed ? (
+        // The badge overlays the icon's own corner, so it needs a
+        // relative ancestor sized to the icon — not the full-width
+        // row (which would anchor it to the row's edge instead).
+        <span className="relative inline-flex">
+          <Icon name={item.icon} size={16} aria-hidden="true" />
+          {item.badgeCountRoute && <NavBadge route={item.badgeCountRoute} collapsed />}
+        </span>
+      ) : (
+        <>
+          <Icon name={item.icon} size={16} aria-hidden="true" />
+          <span className="flex-1">{item.label}</span>
+          {item.badgeCountRoute && <NavBadge route={item.badgeCountRoute} />}
+        </>
+      )}
+    </>
+  );
 
   return (
     <div className="relative">
-      {/* Link computes active/current state from real router state (its
-          own STATIC_ACTIVE_PROPS sets aria-current/data-status internally)
-          — activeProps/inactiveProps are mutually exclusive per render, so
-          the default/active color pair never fights over one className. */}
-      <Link
-        to={item.path}
-        aria-label={collapsed ? item.label : undefined}
-        onMouseEnter={scheduleTooltip}
-        onMouseLeave={cancelTooltip}
-        onFocus={scheduleTooltip}
-        onBlur={cancelTooltip}
-        className={BASE_CLASSES}
-        inactiveProps={{ className: "text-text-secondary hover:bg-surface-hover" }}
-        activeProps={{ className: "bg-primary-subtle font-medium text-primary" }}
-      >
-        {({ isActive }) => (
-          <>
-            {isActive && <span aria-hidden="true" style={ACTIVE_BAR_STYLE} />}
-            {collapsed ? (
-              // The badge overlays the icon's own corner, so it needs a
-              // relative ancestor sized to the icon — not the full-width
-              // row (which would anchor it to the row's edge instead).
-              <span className="relative inline-flex">
-                <Icon size={16} aria-hidden="true" />
-                {item.badgeCountRoute && <NavBadge route={item.badgeCountRoute} collapsed />}
-              </span>
-            ) : (
-              <>
-                <Icon size={16} aria-hidden="true" />
-                <span className="flex-1">{item.label}</span>
-                {item.badgeCountRoute && <NavBadge route={item.badgeCountRoute} />}
-              </>
-            )}
-          </>
-        )}
-      </Link>
+      {item.external ? (
+        // manifest-spec.md §12 NavItem.external — an external URL has no
+        // router "active" concept, so isActive is always false here.
+        <a
+          href={item.path}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={collapsed ? item.label : undefined}
+          onMouseEnter={scheduleTooltip}
+          onMouseLeave={cancelTooltip}
+          onFocus={scheduleTooltip}
+          onBlur={cancelTooltip}
+          className={`${BASE_CLASSES} text-text-secondary hover:bg-surface-hover`}
+        >
+          {rowContent(false)}
+        </a>
+      ) : (
+        // Link computes active/current state from real router state (its
+        // own STATIC_ACTIVE_PROPS sets aria-current/data-status internally)
+        // — activeProps/inactiveProps are mutually exclusive per render, so
+        // the default/active color pair never fights over one className.
+        <Link
+          to={item.path}
+          aria-label={collapsed ? item.label : undefined}
+          onMouseEnter={scheduleTooltip}
+          onMouseLeave={cancelTooltip}
+          onFocus={scheduleTooltip}
+          onBlur={cancelTooltip}
+          className={BASE_CLASSES}
+          inactiveProps={{ className: "text-text-secondary hover:bg-surface-hover" }}
+          activeProps={{ className: "bg-primary-subtle font-medium text-primary" }}
+        >
+          {({ isActive }) => rowContent(isActive)}
+        </Link>
+      )}
       {collapsed && tooltipVisible && (
         <span role="tooltip" style={TOOLTIP_STYLE}>
           {item.label}
