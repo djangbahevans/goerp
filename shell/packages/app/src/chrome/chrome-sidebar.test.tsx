@@ -1,13 +1,12 @@
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { cleanup, render, screen } from "@testing-library/react";
-import { Home } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChromeSidebar } from "./chrome-sidebar.js";
 import type { NavigationGroup } from "./navigation-types.js";
 
 const FIXTURE_TREE: NavigationGroup[] = [
-  { key: "sales", label: "Sales", icon: Home, module: "sales", children: [] },
-  { key: "hr", label: "HR", icon: Home, module: "hr", children: [] },
+  { key: "sales", label: "Sales", icon: "home", module: "sales", children: [] },
+  { key: "hr", label: "HR", icon: "home", module: "hr", children: [] },
 ];
 
 let sidebarState = { collapsed: false, expandedGroups: new Set<string>() };

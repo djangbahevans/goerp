@@ -7,7 +7,6 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { Home } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NavItem } from "./nav-item.js";
 import type { NavigationItem } from "./navigation-types.js";
@@ -18,8 +17,13 @@ vi.mock("@goerp/sdk", async (importOriginal) => {
   return { ...actual, apiClient: { ...actual.apiClient, get: getMock } };
 });
 
-const ITEM: NavigationItem = { key: "orders", label: "Orders", path: "/sales/orders", icon: Home };
-const OTHER_ITEM: NavigationItem = { key: "invoices", label: "Invoices", path: "/sales/invoices", icon: Home };
+const ITEM: NavigationItem = { key: "orders", label: "Orders", path: "/sales/orders", icon: "home" };
+const OTHER_ITEM: NavigationItem = {
+  key: "invoices",
+  label: "Invoices",
+  path: "/sales/invoices",
+  icon: "home",
+};
 
 afterEach(cleanup);
 
@@ -107,7 +111,11 @@ describe("NavItem", () => {
   it("collapsed: nests the icon and its badge in a shared wrapper, not the full-width row", async () => {
     await renderAt(ITEM.path, { ...ITEM, badgeCountRoute: "/sales/orders/pending-count" }, true);
     const badge = await screen.findByText("5");
-    const icon = screen.getByRole("link").querySelector("svg");
+    const icon = await waitFor(() => {
+      const svg = screen.getByRole("link").querySelector("svg");
+      expect(svg).toBeTruthy();
+      return svg;
+    });
     // The badge's absolute positioning is relative to its nearest
     // "relative" ancestor — it must be the small icon+badge wrapper, not
     // the full-row Link/outer div, or it anchors to the row's edge instead

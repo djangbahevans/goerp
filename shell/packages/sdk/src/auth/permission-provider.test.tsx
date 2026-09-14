@@ -36,7 +36,11 @@ const { channelSubscriptions, subscribeMock, unsubscribeMock } = vi.hoisted(() =
   });
   return { channelSubscriptions, subscribeMock, unsubscribeMock };
 });
-vi.mock("../realtime/index.js", () => ({
+// Mocks ws-manager.js itself, not the ../realtime/index.js barrel: the real
+// useChannelRefresh (imported via the barrel, unmocked) internally imports
+// wsManager straight from ./ws-manager.js, so that's the boundary that has
+// to be mocked for subscribeMock to actually observe its calls.
+vi.mock("../realtime/ws-manager.js", () => ({
   tenantChannel: (tenantId: string) => `tenant:${tenantId}`,
   userChannel: (userId: string) => `ui:user:${userId}`,
   wsManager: { subscribe: subscribeMock },

@@ -1,3 +1,4 @@
+import { Icon } from "@goerp/sdk/components";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavItem } from "./nav-item.js";
@@ -18,8 +19,6 @@ export function NavGroupSection({
   expanded: boolean;
   onToggle: (key: string) => void;
 }): ReactNode {
-  const Icon = group.icon;
-
   return (
     // biome-ignore lint/a11y/useSemanticElements: role="group" labels a nav section, not a form's field grouping — <fieldset> would be the wrong element here.
     <div role="group" aria-labelledby={`nav-group-${group.key}`}>
@@ -31,7 +30,7 @@ export function NavGroupSection({
         aria-label={collapsed ? group.label : undefined}
         className="flex w-full items-center gap-2 rounded-control px-3 py-2 text-sm text-text-secondary hover:bg-surface-hover"
       >
-        <Icon size={16} aria-hidden="true" />
+        <Icon name={group.icon} size={16} aria-hidden="true" />
         {!collapsed && (
           <>
             <span className="flex-1">{group.label}</span>

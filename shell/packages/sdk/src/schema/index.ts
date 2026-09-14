@@ -1,4 +1,3 @@
-import { apiClient } from "../http/index.js";
 import { BatchLoaderRegistry } from "./batch-loader-registry.js";
 import { ComponentRegistry } from "./component-registry.js";
 import { ModelRegistry } from "./model-registry.js";
@@ -6,7 +5,7 @@ import { ViewDeclarationRegistry } from "./resolve-view-declaration.js";
 import { ViewPathRegistry } from "./resolve-view-path.js";
 import { ResourceMetadataRegistry } from "./resource-metadata-registry.js";
 import { ResourceRegistry } from "./resource-registry.js";
-import { SchemaRegistry } from "./schema-registry.js";
+import { schemaRegistry } from "./schema-registry.js";
 
 export type { BatchLoader } from "./batch-loader-registry.js";
 export { BatchLoaderRegistry } from "./batch-loader-registry.js";
@@ -27,12 +26,21 @@ export {
 } from "./resource-metadata-registry.js";
 export type { ResourceRegistryEntry } from "./resource-registry.js";
 export { ResourceRegistry } from "./resource-registry.js";
-export { SchemaRegistry } from "./schema-registry.js";
+export { SchemaRegistry, schemaRegistry } from "./schema-registry.js";
 export { summarizeIssues } from "./summarize-issues.js";
 export type { CRUDAction, FieldDef, MetaSchema, ModelDef, ModuleSchema, RouteSchema } from "./types.js";
+export type { NavigationGroup, NavigationItem, ResolvedView, ViewRegistry } from "./view-registry.js";
+export { buildEmptyViewRegistry, buildViewRegistry, filterViewByCapability } from "./view-registry.js";
+export {
+  ViewRegistryContext,
+  ViewRegistryProvider,
+  ViewRegistryProviderForTenant,
+  viewRegistryRef,
+} from "./view-registry-provider.js";
 
 // Shared singletons — one schema fetch, agreed on by every consumer.
-export const schemaRegistry = new SchemaRegistry(apiClient);
+// schemaRegistry itself is instantiated in schema-registry.ts, not here —
+// see that file's own comment on why.
 export const resourceRegistry = new ResourceRegistry(schemaRegistry);
 export const resourceMetadataRegistry = new ResourceMetadataRegistry(schemaRegistry);
 export const viewPathRegistry = new ViewPathRegistry(schemaRegistry);
