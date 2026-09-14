@@ -10,6 +10,8 @@ export type { UseInfiniteListOptions } from "./use-infinite-list.js";
 export { createInfiniteListQueryOptions, useInfiniteList } from "./use-infinite-list.js";
 export type { KanbanCardContextValue, KanbanCardProviderProps } from "./use-kanban-card.js";
 export { KanbanCardProvider, useKanbanCard } from "./use-kanban-card.js";
+export type { PivotCellResponse, PivotResponse, PivotValueSpec, UsePivotDataOptions } from "./use-pivot-data.js";
+export { createPivotDataQueryOptions, usePivotData } from "./use-pivot-data.js";
 export type { UseRecordOptions, UseRecordResult } from "./use-record.js";
 export { createRecordQueryOptions, deleteRecord, recordQueryKey, saveRecord, useRecord } from "./use-record.js";
 export type { RelationBatchSpec } from "./use-relation-labels.js";

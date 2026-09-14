@@ -96,6 +96,8 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		e.dispatchORMDelete(ctx, w, rr.pathParams, entry, modCtx, insertClient)
 	case "preview":
 		e.dispatchORMPreview(ctx, w, r, entry, modCtx)
+	case "pivot":
+		e.dispatchORMPivot(ctx, w, r, entry, modCtx)
 	default:
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "unknown crud action: "+entry.Manifest.CrudAction)
 	}
@@ -167,6 +169,79 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 			"total":    nil,
 		},
 	})
+}
+
+// dispatchORMPivot handles a Pivot-enabled model's GET {resource}/pivot
+// route (view-system.md §8 "use_wasm: false"): ?rows=a,b&columns=c&
+// values=field:agg,... plus the same filter[...] query params dispatchORMList
+// accepts, reusing compileListFilter as-is. The actual GROUP BY ROLLUP
+// aggregation is wasm.ORMAggregate's job — this only parses the wire format.
+func (e *Engine) dispatchORMPivot(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext) {
+	q := r.URL.Query()
+
+	rows := splitNonEmpty(q.Get("rows"))
+	columns := splitNonEmpty(q.Get("columns"))
+
+	values, hostErr := parsePivotValues(q.Get("values"))
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+
+	md, ok := resolveModelDecl(modCtx, entry.Manifest.Model)
+	if !ok {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
+		return
+	}
+	domainExpr, hostErr := compileListFilter(q, entry.Manifest.Model, md)
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+
+	out, hostErr := wasm.ORMAggregate(ctx, e.primaryDB, modCtx, wasm.ORMAggregateInput{
+		Model:   entry.Manifest.Model,
+		Domain:  domainExpr,
+		Rows:    rows,
+		Columns: columns,
+		Values:  values,
+	})
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"cells": out.Cells})
+}
+
+// splitNonEmpty splits a comma-separated query param into its fields,
+// returning nil (not [""]) for an absent/empty param.
+func splitNonEmpty(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, ",")
+}
+
+// parsePivotValues parses ?values=field:agg,field:agg,... (view-system.md
+// §8) into structured pairs — malformed syntax (no ":", or an empty
+// field/aggregation) is orm.validation_failed, the same code ORMAggregate
+// uses for an unrecognized aggregation name, since both are caller input
+// errors rather than a specific-field lookup failure.
+func parsePivotValues(raw string) ([]wasm.ORMAggregateValue, *abi.HostError) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]wasm.ORMAggregateValue, 0, len(parts))
+	for _, part := range parts {
+		field, agg, ok := strings.Cut(part, ":")
+		if !ok || field == "" || agg == "" {
+			return nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "values entry " + part + " must be field:aggregation"}
+		}
+		values = append(values, wasm.ORMAggregateValue{Field: field, Aggregation: agg})
+	}
+	return values, nil
 }
 
 func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *http.Request, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext) {
@@ -341,7 +416,7 @@ func ormErrorStatus(code string) int {
 		return http.StatusConflict
 	case abi.ErrCodeValidationFailed, abi.ErrCodeFieldUnknown, abi.ErrCodeDomainInvalid, abi.ErrCodeTransientNotListable:
 		return http.StatusBadRequest
-	case abi.ErrCodeCapabilityDenied, abi.ErrCodeFieldWriteDenied:
+	case abi.ErrCodeCapabilityDenied, abi.ErrCodeFieldWriteDenied, abi.ErrCodeFieldReadDenied:
 		return http.StatusForbidden
 	case abi.ErrCodeUnavailable:
 		return http.StatusServiceUnavailable

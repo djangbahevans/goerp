@@ -4,7 +4,7 @@
 // `navigation`, `models`, `permissions`, and `frontend` stay loosely
 // typed — goerp#575/#674's own jobs, not this module's.
 
-export type CRUDAction = "get" | "list" | "create" | "update" | "delete";
+export type CRUDAction = "get" | "list" | "create" | "update" | "delete" | "pivot";
 
 export interface RouteSchema {
   method: string;

@@ -92,6 +92,10 @@ const (
 	ErrCodeFieldNotSearchable = "orm.field_not_searchable"
 	ErrCodeFieldUnknown       = "orm.field_unknown"
 	ErrCodeNotFound           = "orm.not_found"
+	// ErrCodeFieldReadDenied rejects a whole aggregate/pivot request when
+	// a rows/columns/values field has a read rule the caller fails —
+	// aggregation has no per-record mask/nullify/omit fallback to use.
+	ErrCodeFieldReadDenied = "orm.field_read_denied"
 )
 
 // host.orm write error codes (host-abi-reference.md §5a "host.orm.create"/

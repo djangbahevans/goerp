@@ -292,6 +292,212 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	return ORMSearchReadOutput{Records: records, NextCursor: nextCursor}, nil
 }
 
+// aggregateSQLFuncs maps a PivotValue.aggregation name (manifest-spec.md
+// §9.5) to the SQL aggregate function it compiles to. "count_distinct"
+// isn't here — it needs a DISTINCT keyword inside the call, not just a
+// different function name, so ORMAggregate special-cases it.
+var aggregateSQLFuncs = map[string]string{
+	"sum":   "SUM",
+	"count": "COUNT",
+	"avg":   "AVG",
+	"min":   "MIN",
+	"max":   "MAX",
+}
+
+type ORMAggregateValue struct {
+	Field       string
+	Aggregation string
+}
+
+type ORMAggregateInput struct {
+	Model   string
+	Domain  string
+	Rows    []string
+	Columns []string
+	Values  []ORMAggregateValue
+}
+
+type ORMAggregateOutput struct {
+	// Cells mirror the wire shape verbatim (view-system.md §8) — each is
+	// {"row": []any, "column": []any, "values": map[string]any}, with a
+	// nil entry marking a GROUP BY ROLLUP subtotal above that axis
+	// position rather than a real grouped value.
+	Cells []map[string]any
+}
+
+// ORMAggregate is the engine-native counterpart to ORMSearchRead for a
+// Pivot-enabled model's GET {resource}/pivot route (dispatchORMPivot) —
+// there is no WASM-guest-callable host.orm import for this, unlike every
+// other function in this file: a module has no way to run a real
+// Postgres-side GROUP BY today (sdk/go/orm only exposes row-shaped
+// Search/SearchRead/Read), so aggregation is engine-native only, gated
+// behind EnableOps(model.Pivot) the same way List/Get already are.
+//
+// One query produces every row/column subtotal a collapsed PivotGrid
+// group needs: GROUP BY ROLLUP(rows...), ROLLUP(columns...) generates the
+// finest-grain groups plus every coarser rollup (including the grand
+// total) in a single pass, and GROUPING() on each dimension column
+// disambiguates "rolled up" from "genuinely NULL in the data".
+func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMAggregateInput) (ORMAggregateOutput, *abi.HostError) {
+	if !modCtx.Capabilities().Has(abi.CapDBRead) {
+		return ORMAggregateOutput{}, abi.CapabilityDenied("db.read")
+	}
+
+	md, ok := resolveModel(modCtx, input.Model)
+	if !ok {
+		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+	if md.Backend == model.BackendTransient {
+		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to aggregate"}
+	}
+
+	if len(input.Rows) == 0 && len(input.Columns) == 0 {
+		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "pivot requires at least one rows or columns field"}
+	}
+	if len(input.Values) == 0 {
+		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "pivot requires at least one values entry"}
+	}
+
+	declared := make(map[string]model.FieldDef, len(md.Fields))
+	for _, f := range md.Fields {
+		declared[f.Name] = f.Def
+	}
+	fieldSecReg := modCtx.FieldSecRegistry()
+	permReg := modCtx.PermissionRegistry()
+
+	checkField := func(name string) *abi.HostError {
+		def, ok := declared[name]
+		if !ok {
+			return &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + name + " is not declared on " + input.Model, Details: map[string]any{"field": name}}
+		}
+		if def.Kind == model.KindOne2Many {
+			return &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + name + " is a One2Many relation and cannot be aggregated", Details: map[string]any{"field": name}}
+		}
+		if fieldSecReg == nil {
+			return nil
+		}
+		if rule, ok := fieldSecReg.Rule(input.Model, name); ok && rule.ReadPermission != "" && !callerHasPermission(modCtx, permReg, rule.ReadPermission) {
+			return &abi.HostError{Code: abi.ErrCodeFieldReadDenied, Message: "field " + name + " requires permission " + rule.ReadPermission, Details: map[string]any{"field": name}}
+		}
+		return nil
+	}
+
+	dimFields := make([]string, 0, len(input.Rows)+len(input.Columns))
+	dimFields = append(dimFields, input.Rows...)
+	dimFields = append(dimFields, input.Columns...)
+	for _, f := range dimFields {
+		if hostErr := checkField(f); hostErr != nil {
+			return ORMAggregateOutput{}, hostErr
+		}
+	}
+	for _, v := range input.Values {
+		if hostErr := checkField(v.Field); hostErr != nil {
+			return ORMAggregateOutput{}, hostErr
+		}
+		if v.Aggregation != "count_distinct" {
+			if _, ok := aggregateSQLFuncs[v.Aggregation]; !ok {
+				return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unknown aggregation " + v.Aggregation, Details: map[string]any{"aggregation": v.Aggregation}}
+			}
+		}
+	}
+
+	whereFrag, args, hostErr := compileDomain(input.Domain)
+	if hostErr != nil {
+		return ORMAggregateOutput{}, hostErr
+	}
+
+	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, "")
+	if hostErr != nil {
+		return ORMAggregateOutput{}, hostErr
+	}
+	defer finish()
+
+	table := quoteIdentORM(tableNameForORM(md))
+
+	selectExprs := make([]string, 0, len(dimFields)+len(input.Values)+len(dimFields))
+	for _, f := range dimFields {
+		selectExprs = append(selectExprs, quoteIdentORM(f))
+	}
+	valueAliases := make([]string, len(input.Values))
+	for i, v := range input.Values {
+		alias := v.Field + "_" + v.Aggregation
+		valueAliases[i] = alias
+		var expr string
+		if v.Aggregation == "count_distinct" {
+			expr = fmt.Sprintf("COUNT(DISTINCT %s)", quoteIdentORM(v.Field))
+		} else {
+			expr = fmt.Sprintf("%s(%s)", aggregateSQLFuncs[v.Aggregation], quoteIdentORM(v.Field))
+		}
+		selectExprs = append(selectExprs, fmt.Sprintf("%s AS %s", expr, quoteIdentORM(alias)))
+	}
+	groupingAliases := make(map[string]string, len(dimFields))
+	for _, f := range dimFields {
+		groupingAlias := "__grouping_" + f
+		groupingAliases[f] = groupingAlias
+		selectExprs = append(selectExprs, fmt.Sprintf("(GROUPING(%s) = 1) AS %s", quoteIdentORM(f), quoteIdentORM(groupingAlias)))
+	}
+
+	var groupByClause string
+	switch {
+	case len(input.Rows) > 0 && len(input.Columns) > 0:
+		groupByClause = fmt.Sprintf("GROUP BY ROLLUP(%s), ROLLUP(%s)", quoteIdentListORM(input.Rows), quoteIdentListORM(input.Columns))
+	case len(input.Rows) > 0:
+		groupByClause = fmt.Sprintf("GROUP BY ROLLUP(%s)", quoteIdentListORM(input.Rows))
+	default:
+		groupByClause = fmt.Sprintf("GROUP BY ROLLUP(%s)", quoteIdentListORM(input.Columns))
+	}
+
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s %s",
+		strings.Join(selectExprs, ", "), table, whereFrag, groupByClause)
+	sqlRows, err := tx.QueryContext(ctx, sqlStr, args...)
+	if err != nil {
+		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+	defer sqlRows.Close()
+
+	records, err := scanRowsToMaps(sqlRows)
+	if err != nil {
+		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	cells := make([]map[string]any, 0, len(records))
+	for _, rec := range records {
+		rowVals := dimensionValues(rec, input.Rows, groupingAliases)
+		colVals := dimensionValues(rec, input.Columns, groupingAliases)
+		valuesOut := make(map[string]any, len(valueAliases))
+		for _, alias := range valueAliases {
+			valuesOut[alias] = rec[alias]
+		}
+		cells = append(cells, map[string]any{"row": rowVals, "column": colVals, "values": valuesOut})
+	}
+
+	return ORMAggregateOutput{Cells: cells}, nil
+}
+
+// dimensionValues reads fields' grouped values out of one aggregation
+// result row, replacing a ROLLUP-collapsed position with nil per its
+// GROUPING() flag rather than the SQL NULL GROUP BY ROLLUP itself emits
+// there (which would be indistinguishable from a genuinely NULL value).
+func dimensionValues(rec map[string]any, fields []string, groupingAliases map[string]string) []any {
+	vals := make([]any, len(fields))
+	for i, f := range fields {
+		if rolledUp, _ := rec[groupingAliases[f]].(bool); rolledUp {
+			vals[i] = nil
+		} else {
+			vals[i] = rec[f]
+		}
+	}
+	return vals
+}
+
+func quoteIdentListORM(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = quoteIdentORM(n)
+	}
+	return strings.Join(quoted, ", ")
+}
+
 func makeORMRead(r *Runtime, db *sql.DB, cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)

@@ -13,6 +13,7 @@ export interface ResourceRegistryEntry {
   createPath: string;
   updatePath: string;
   deletePath: string | null;
+  pivotPath: string | null;
   listMethod: string;
   createMethod: string;
   updateMethod: string;
@@ -39,7 +40,7 @@ export function buildResourceRegistry(schema: MetaSchema): Map<string, ResourceR
     }
 
     for (const [modelName, crudRoutes] of byModel) {
-      const { list, get, create, update, delete: del } = crudRoutes;
+      const { list, get, create, update, delete: del, pivot } = crudRoutes;
       if (!list && !get) continue; // no usable routes — skip
 
       registry.set(modelName, {
@@ -50,6 +51,7 @@ export function buildResourceRegistry(schema: MetaSchema): Map<string, ResourceR
         createPath: create?.path ?? "",
         updatePath: update?.path ?? "",
         deletePath: del?.path ?? null,
+        pivotPath: pivot?.path ?? null,
         listMethod: list?.method ?? "GET",
         createMethod: create?.method ?? "POST",
         updateMethod: update?.method ?? "PUT",

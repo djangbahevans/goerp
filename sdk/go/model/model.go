@@ -124,7 +124,7 @@ func (d *ModelDeclaration) Index(name string, def IndexDef) *ModelDeclaration {
 	return d
 }
 
-// EnableOps allowlists which of the six reserved CRUD/list operations
+// EnableOps allowlists which of the seven reserved CRUD/list operations
 // this model exposes — an allowlist, not a default: a model with no
 // EnableOps call has no operations enabled. Route derivation, response
 // envelopes, and collision handling against a hand-registered

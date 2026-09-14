@@ -18,7 +18,13 @@ func TestStart_JobQueueWorkerProcessesJobs(t *testing.T) {
 	skipIfInfraUnreachable(t, err)
 	t.Cleanup(func() { _ = e.primaryDB.Close() })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 20s, not the 5s most other Start()-timeout tests in this package use
+	// (engine_test.go, ratelimit_test.go) — this is the one test whose
+	// Start() path also waits on a real Temporal WaitForPollers round trip
+	// (systemworker.Worker.Start), which has been observed timing out under
+	// CI resource contention (many packages' test binaries hitting the same
+	// shared Postgres/Temporal instances concurrently) well short of a hang.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	if err := e.Start(ctx); err != nil {
@@ -43,7 +49,7 @@ func TestStart_JobQueueWorkerProcessesJobs(t *testing.T) {
 	// only delivers events this client instance itself worked) stays
 	// correct even if another concurrently running test's client races in
 	// and processes the job first.
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		job, err := client.JobGet(context.Background(), row.Job.ID)
 		if err != nil {

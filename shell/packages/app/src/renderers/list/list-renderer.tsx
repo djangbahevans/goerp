@@ -69,8 +69,13 @@ function coerceDefaultFiltersValue(raw: unknown): FilterValue | undefined {
 
 // manifest-spec.md §9.1: default_filters wins over a Filter's own default
 // on the same field, applied only when the view first loads with no
-// filter[...] params already present.
-export function computeDefaultFilters(view: ListViewDeclaration): Record<string, FilterValue> {
+// filter[...] params already present. Takes only the two fields it
+// touches (not the full ListViewDeclaration) so PivotViewDeclaration,
+// which declares the same default_filters/filters shape (manifest-spec.md
+// §9.5), can reuse this directly.
+export function computeDefaultFilters(
+  view: Pick<ListViewDeclaration, "default_filters" | "filters">,
+): Record<string, FilterValue> {
   const defaults: Record<string, FilterValue> = {};
 
   for (const [field, raw] of Object.entries(view.default_filters ?? {})) {

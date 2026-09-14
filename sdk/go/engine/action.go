@@ -19,11 +19,12 @@ const (
 	Update  ActionName = "update"
 	Delete  ActionName = "delete"
 	Preview ActionName = "preview"
+	Pivot   ActionName = "pivot"
 )
 
 // Action registers a named action on a model. The wire path is never
 // author-specified — it's derived from (model, name) the same way
-// EnableOps derives paths for the six reserved names (go-sdk-reference.md
+// EnableOps derives paths for the seven reserved names (go-sdk-reference.md
 // §2a "Path derivation").
 func Action(model string, name ActionName, handler Handler) {
 	method, path := actionPath(model, name)
@@ -46,6 +47,8 @@ func actionPath(model string, name ActionName) (method, path string) {
 		return "DELETE", "/" + plural + "/{id}"
 	case Preview:
 		return "POST", "/" + plural + "/preview"
+	case Pivot:
+		return "GET", "/" + plural + "/pivot"
 	default:
 		// Any other name: a custom, record-scoped action (§2a's default
 		// scope) — POST /{plural}/{id}/{name}.
@@ -55,7 +58,7 @@ func actionPath(model string, name ActionName) (method, path string) {
 
 func crudActionOf(name ActionName) string {
 	switch name {
-	case List, Get, Create, Update, Delete, Preview:
+	case List, Get, Create, Update, Delete, Preview, Pivot:
 		return string(name)
 	default:
 		return ""
