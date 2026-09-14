@@ -165,13 +165,13 @@ describe("FormTabsRenderer", () => {
 
   it("view tab: shows a not-implemented message for a view type with no renderer yet", async () => {
     resolveViewMock.mockResolvedValue({
-      name: "orders_calendar",
-      type: "calendar",
+      name: "orders_timeline",
+      type: "timeline",
       resource: "sales.order",
       label: "Orders",
     });
-    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_calendar" }]);
-    expect(await screen.findByText(/calendar.*isn't implemented yet/)).toBeTruthy();
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_timeline" }]);
+    expect(await screen.findByText(/timeline.*isn't implemented yet/)).toBeTruthy();
   });
 
   it("view tab: dispatches a resolved kanban-type view to KanbanRenderer", async () => {
@@ -187,5 +187,38 @@ describe("FormTabsRenderer", () => {
     await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_kanban" }]);
     expect(await screen.findByText("new")).toBeTruthy();
     expect(screen.getByText("done")).toBeTruthy();
+  });
+
+  it("view tab: dispatches a resolved calendar-type view to CalendarRenderer", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [
+          {
+            data: [{ id: "act-1", scheduled_at: "2026-05-13", subject: "Call Acme" }],
+            meta: { cursor: null, hasMore: false },
+          },
+        ],
+      },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    resolveViewMock.mockResolvedValue({
+      name: "activities_calendar",
+      type: "calendar",
+      resource: "sales.activity",
+      label: "Activities",
+      date_field: "scheduled_at",
+      title_field: "subject",
+      // Agenda ignores focusedDate/month windowing entirely, so the
+      // mocked event renders regardless of what "today" happens to be.
+      default_view: "agenda",
+    });
+    await renderTabs([{ label: "Activities", type: "view", view: "sales.activities_calendar" }]);
+    expect(await screen.findByText("Call Acme")).toBeTruthy();
   });
 });

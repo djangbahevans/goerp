@@ -2,6 +2,8 @@
 // convention. All calculations are local wall-clock time (not UTC), since
 // a calendar grid should show days as the viewer's own clock sees them.
 
+import type { CalendarViewMode } from "./calendar-view-types.js";
+
 const EVENT_TIME_FORMAT: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
 
 export function formatEventTime(start: Date, end: Date | null): string {
@@ -87,4 +89,22 @@ export function weekDays(weekStart: Date): Date[] {
 
 export function isInMonth(date: Date, monthStart: Date): boolean {
   return date.getFullYear() === monthStart.getFullYear() && date.getMonth() === monthStart.getMonth();
+}
+
+// The date range a mode actually renders, given its focused date — shared
+// by CalendarView (reporting it via onVisibleRangeChange) and the renderer
+// resolving the manifest (computing the same range up front, before
+// CalendarView's own effect has a chance to report it). Agenda has no
+// windowing of its own, so it reuses month's range as its fetch window.
+export function visibleRange(focusedDate: Date, mode: CalendarViewMode): { start: Date; end: Date } {
+  if (mode === "day") {
+    const day = startOfDay(focusedDate);
+    return { start: day, end: day };
+  }
+  if (mode === "week") {
+    const days = weekDays(startOfWeek(focusedDate));
+    return { start: days[0] as Date, end: days[days.length - 1] as Date };
+  }
+  const days = monthGridDays(startOfMonth(focusedDate));
+  return { start: days[0] as Date, end: days[days.length - 1] as Date };
 }

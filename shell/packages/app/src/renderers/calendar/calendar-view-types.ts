@@ -4,6 +4,10 @@
 
 export type CalendarViewMode = "month" | "week" | "day" | "agenda";
 
+// The one shared source for "every supported mode" — CalendarView's own
+// default and calendar-events.ts's initialViewMode both fall back to this.
+export const ALL_CALENDAR_VIEWS: CalendarViewMode[] = ["month", "week", "day", "agenda"];
+
 export interface CalendarEvent {
   id: string;
   title: string;
@@ -28,4 +32,8 @@ export interface CalendarViewProps {
   // Fixes "today" and the initially-visible range for deterministic
   // stories/tests; defaults to the real current date.
   initialDate?: Date | undefined;
+  // Fires on mount and whenever the actually-rendered date range changes
+  // (view switch, keyboard/click navigation) — a manifest-driven caller
+  // uses this to refetch events for the new range.
+  onVisibleRangeChange?: ((range: { start: Date; end: Date }) => void) | undefined;
 }

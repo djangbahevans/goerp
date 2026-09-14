@@ -4,6 +4,8 @@ import type { ViewDeclaration } from "@goerp/sdk/schema";
 import { viewDeclarationRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { useContext, useState } from "react";
+import type { CalendarViewDeclaration } from "../calendar/calendar-manifest-types.js";
+import { CalendarRenderer } from "../calendar/calendar-renderer.js";
 import type { KanbanViewDeclaration } from "../kanban/kanban-manifest-types.js";
 import { KanbanRenderer } from "../kanban/kanban-renderer.js";
 import { ListRenderer } from "../list/list-renderer.js";
@@ -65,8 +67,8 @@ function ViewTabContent({
   );
 }
 
-// "list", "pivot" and "kanban" exist today — calendar/timeline/custom are
-// separate, not-yet-built tickets (goerp#645/#648/#647).
+// "list", "pivot", "kanban" and "calendar" exist today — timeline is a
+// separate, not-yet-built ticket (goerp#647).
 function EmbeddedView({
   view,
   module,
@@ -104,6 +106,16 @@ function EmbeddedView({
       return (
         <KanbanRenderer
           view={view as unknown as KanbanViewDeclaration}
+          module={module}
+          embedded
+          baseFilter={baseFilter}
+          {...(recordId !== undefined ? { recordId } : {})}
+        />
+      );
+    case "calendar":
+      return (
+        <CalendarRenderer
+          view={view as unknown as CalendarViewDeclaration}
           module={module}
           embedded
           baseFilter={baseFilter}

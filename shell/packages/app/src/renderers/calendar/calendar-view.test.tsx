@@ -49,4 +49,14 @@ describe("CalendarView", () => {
     fireEvent.click(screen.getByText("Event"));
     expect(onEventClick).toHaveBeenCalledWith(event);
   });
+
+  it("reports the visible range on mount, and again when switching views", () => {
+    const onVisibleRangeChange = vi.fn();
+    render(<CalendarView events={[]} initialDate={INITIAL_DATE} onVisibleRangeChange={onVisibleRangeChange} />);
+    expect(onVisibleRangeChange).toHaveBeenCalledWith({ start: new Date(2026, 3, 26), end: new Date(2026, 5, 6) });
+
+    onVisibleRangeChange.mockClear();
+    fireEvent.click(screen.getByRole("tab", { name: "Day" }));
+    expect(onVisibleRangeChange).toHaveBeenCalledWith({ start: new Date(2026, 4, 13), end: new Date(2026, 4, 13) });
+  });
 });
