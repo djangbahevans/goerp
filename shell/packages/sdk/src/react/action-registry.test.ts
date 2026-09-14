@@ -1,19 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
 import type { APIClient } from "../http/types.js";
 import { SchemaRegistry } from "../schema/index.js";
+import type { MetaSchema } from "../schema/types.js";
 import { ActionRegistry } from "./action-registry.js";
 
 function fakeClient(schema: unknown): Pick<APIClient, "get"> {
   return { get: vi.fn(async () => schema) as Pick<APIClient, "get">["get"] };
 }
 
-const schema = {
+const schema: MetaSchema = {
+  engine_version: "test",
+  schema_hash: "abc",
   modules: {
     sales: {
+      name: "sales",
+      version: "1.0.0",
+      display_name: "Sales",
       routes: [
-        { method: "POST", path: "/orders/{id}/confirm", name: "confirm" },
-        { method: "GET", path: "/orders", name: null, crud_action: "list" },
+        { method: "POST", path: "/orders/{id}/confirm", name: "confirm", permissions: [], response_is_list: false },
+        // A CRUD-auto-generated route carries no `name` — the field is
+        // absent, not null; nothing in this module's own type comment
+        // documents it as nullable the way `permissions` is.
+        { method: "GET", path: "/orders", crud_action: "list", permissions: [], response_is_list: true },
       ],
+      views: [],
+      navigation: [],
+      models: {},
+      permissions: [],
+      frontend: null,
+      public_config: {},
     },
   },
 };
