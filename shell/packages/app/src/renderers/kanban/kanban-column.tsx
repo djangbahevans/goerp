@@ -1,12 +1,14 @@
 import { EmptyState } from "@goerp/sdk/components";
 import type { DragEvent, ReactNode } from "react";
 import { Fragment } from "react";
+import { KanbanActionsMenu } from "./kanban-actions-menu.js";
 import { KanbanCard } from "./kanban-card.js";
 import { KanbanQuickCreateRow } from "./kanban-quick-create-row.js";
 import type { KanbanDropTarget, KanbanGroup, KanbanQuickCreateField } from "./kanban-view-types.js";
 
 export interface KanbanColumnProps {
   group: KanbanGroup;
+  allowDrag: boolean;
   // The card currently being moved (mouse drag or keyboard pick-up), if any.
   draggingCardId: string | null;
   // True while a dragged/picked-up card is currently targeting this column.
@@ -31,6 +33,8 @@ export interface KanbanColumnProps {
   quickCreate: boolean;
   quickCreateFields: KanbanQuickCreateField[];
   onQuickCreateSubmit: (values: Record<string, string>) => void;
+  hasMore: boolean;
+  onLoadMore: () => void;
 }
 
 // Thin insertion-line marker for where a dragged card would land.
@@ -40,6 +44,7 @@ function DropIndicator(): ReactNode {
 
 export function KanbanColumn({
   group,
+  allowDrag,
   draggingCardId,
   isDropTarget,
   onDragOver,
@@ -60,6 +65,8 @@ export function KanbanColumn({
   quickCreate,
   quickCreateFields,
   onQuickCreateSubmit,
+  hasMore,
+  onLoadMore,
 }: KanbanColumnProps): ReactNode {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: mouse-drop target only — the keyboard-operable equivalent is entirely the card's own Space/Arrow/Escape handling, not this container.
@@ -80,7 +87,20 @@ export function KanbanColumn({
           />
         )}
         <h3 className="truncate font-medium text-sm text-text">{group.label}</h3>
-        <span className="ml-auto flex-none text-text-secondary text-xs">{group.cards.length}</span>
+        <span
+          className={
+            group.actions && group.actions.length > 0
+              ? "text-text-secondary text-xs"
+              : "ml-auto text-text-secondary text-xs"
+          }
+        >
+          {group.cards.length}
+        </span>
+        {group.actions && group.actions.length > 0 && (
+          <span className="ml-auto">
+            <KanbanActionsMenu actions={group.actions} label="Column actions" />
+          </span>
+        )}
       </div>
 
       {/* overflow-x explicit "hidden": the CSS spec force-computes a "visible" x-axis to "auto" next to overflow-y-auto, which turned an open card's ActionMenu into an unwanted horizontal scrollbar. */}
@@ -93,6 +113,7 @@ export function KanbanColumn({
               {dropTarget?.cardId === card.id && dropTarget.position === "before" && <DropIndicator />}
               <KanbanCard
                 card={card}
+                allowDrag={allowDrag}
                 isDragging={draggingCardId === card.id}
                 tabIndex={focusedCardId === card.id ? 0 : -1}
                 onFocus={() => onFocusCard(card.id)}
@@ -110,6 +131,16 @@ export function KanbanColumn({
           ))
         )}
       </div>
+
+      {hasMore && (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          className="w-full rounded-control p-2 text-center text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
+        >
+          Load more
+        </button>
+      )}
 
       {quickCreate && (
         <KanbanQuickCreateRow groupId={group.id} fields={quickCreateFields} onSubmit={onQuickCreateSubmit} />

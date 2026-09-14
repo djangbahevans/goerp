@@ -3,7 +3,7 @@ export { ActionRegistry, actionRegistry } from "./action-registry.js";
 export type { BulkActionContextValue } from "./bulk-action-context.js";
 export { BulkActionContext, useBulkAction } from "./bulk-action-context.js";
 export type { ActionErrorHandlerContext, ActionOptions, ActionResult, ErrorHandler } from "./use-action.js";
-export { useAction } from "./use-action.js";
+export { dispatch, splitPathAndBody, useAction } from "./use-action.js";
 export type { UseExportResult } from "./use-export.js";
 export { useExport } from "./use-export.js";
 export type { UseInfiniteListOptions } from "./use-infinite-list.js";

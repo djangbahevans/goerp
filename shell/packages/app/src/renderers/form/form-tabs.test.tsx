@@ -165,12 +165,27 @@ describe("FormTabsRenderer", () => {
 
   it("view tab: shows a not-implemented message for a view type with no renderer yet", async () => {
     resolveViewMock.mockResolvedValue({
+      name: "orders_calendar",
+      type: "calendar",
+      resource: "sales.order",
+      label: "Orders",
+    });
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_calendar" }]);
+    expect(await screen.findByText(/calendar.*isn't implemented yet/)).toBeTruthy();
+  });
+
+  it("view tab: dispatches a resolved kanban-type view to KanbanRenderer", async () => {
+    resolveViewMock.mockResolvedValue({
       name: "orders_kanban",
       type: "kanban",
       resource: "sales.order",
       label: "Orders",
+      group_by: "state",
+      group_values: ["new", "done"],
+      card_fields: ["reference"],
     });
     await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_kanban" }]);
-    expect(await screen.findByText(/kanban.*isn't implemented yet/)).toBeTruthy();
+    expect(await screen.findByText("new")).toBeTruthy();
+    expect(screen.getByText("done")).toBeTruthy();
   });
 });

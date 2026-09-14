@@ -71,6 +71,8 @@ export function KanbanBoard({
   quickCreateFields = DEFAULT_QUICK_CREATE_FIELDS,
   onQuickCreate,
   emptyColumnMessage,
+  allowDrag = true,
+  onLoadMore,
 }: KanbanBoardProps): ReactNode {
   const [prevGroupsProp, setPrevGroupsProp] = useState(groupsProp);
   const [groups, setGroups] = useState(groupsProp);
@@ -124,6 +126,7 @@ export function KanbanBoard({
   }
 
   function handlePickUp(cardId: string): void {
+    if (!allowDrag) return;
     const fromGroupId = findGroupIdForCard(groups, cardId);
     if (!fromGroupId) return;
     setPickedUp({ cardId, fromGroupId, targetGroupId: fromGroupId });
@@ -240,6 +243,7 @@ export function KanbanBoard({
           <KanbanColumn
             key={group.id}
             group={group}
+            allowDrag={allowDrag}
             draggingCardId={draggingCardId}
             isDropTarget={dragOverGroupId === group.id || pickedUp?.targetGroupId === group.id}
             onDragOver={(event) => handleColumnDragOver(group.id, event)}
@@ -260,6 +264,8 @@ export function KanbanBoard({
             quickCreate={quickCreate}
             quickCreateFields={quickCreateFields}
             onQuickCreateSubmit={(values) => onQuickCreate?.(group.id, values)}
+            hasMore={group.hasMore ?? false}
+            onLoadMore={() => onLoadMore?.(group.id)}
           />
         ))}
       </div>

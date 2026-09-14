@@ -1,3 +1,4 @@
+import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { toast } from "@goerp/sdk/notifications";
 import { useKanbanCard } from "@goerp/sdk/react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -167,6 +168,32 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("not dragging")).toBeTruthy();
   });
 
+  it("still exposes card_actions to a custom card_component override via useKanbanCard()", () => {
+    const onMarkWon = vi.fn();
+    function CustomCard(): ReactNode {
+      const { actions } = useKanbanCard();
+      return (
+        <>
+          {actions.map((action) => (
+            <button key={action.label} type="button" onClick={action.onClick}>
+              {action.label}
+            </button>
+          ))}
+        </>
+      );
+    }
+    const groups = makeGroups();
+    const firstCard = groups[0]?.cards[0];
+    if (firstCard) {
+      firstCard.render = () => <CustomCard />;
+      firstCard.actions = [{ label: "Mark Won", onClick: onMarkWon }];
+    }
+
+    render(<KanbanBoard groups={groups} onMoveCard={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Mark Won" }));
+    expect(onMarkWon).toHaveBeenCalled();
+  });
+
   it("opens the inline quick-create row and submits entered values", () => {
     const onQuickCreate = vi.fn();
     render(<KanbanBoard groups={makeGroups()} onMoveCard={vi.fn()} quickCreate onQuickCreate={onQuickCreate} />);
@@ -177,5 +204,45 @@ describe("KanbanBoard", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0] as HTMLElement);
 
     expect(onQuickCreate).toHaveBeenCalledWith("new", { title: "New Lead" });
+  });
+
+  it("disables both keyboard pick-up and native drag when allowDrag is false", () => {
+    const onMoveCard = vi.fn();
+    render(<KanbanBoard groups={makeGroups()} onMoveCard={onMoveCard} allowDrag={false} />);
+    const card = screen.getByRole("button", { name: "Acme Corp" });
+    expect(card).toHaveProperty("draggable", false);
+
+    card.focus();
+    fireEvent.keyDown(card, { key: " " });
+    expect(screen.queryByText(/picked up/)).toBeNull();
+
+    const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue("lead-1"), effectAllowed: "" };
+    fireEvent.dragStart(card, { dataTransfer });
+    expect(onMoveCard).not.toHaveBeenCalled();
+  });
+
+  it("renders a column's actions as an overflow menu in its header", () => {
+    const onEdit = vi.fn();
+    const groups = makeGroups();
+    const won = groups.find((g) => g.id === "won");
+    if (won)
+      won.actions = [
+        { label: "Rename", onClick: onEdit },
+        { label: "Archive", onClick: vi.fn() },
+      ];
+    const permissionValue = createPermissionContextValue({
+      permissions: new Set(),
+      fieldAccess: {},
+      modulesEnabled: new Set(),
+    });
+
+    render(
+      <PermissionContext.Provider value={permissionValue}>
+        <KanbanBoard groups={groups} onMoveCard={vi.fn()} />
+      </PermissionContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Column actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(onEdit).toHaveBeenCalled();
   });
 });

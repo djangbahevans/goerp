@@ -1,0 +1,57 @@
+import { useOptionalPermission } from "@goerp/sdk/auth";
+import { ActionMenu, type ActionMenuItem } from "@goerp/sdk/components";
+import { MoreVertical } from "lucide-react";
+import type { ReactNode } from "react";
+
+export interface KanbanActionsMenuProps {
+  actions: ActionMenuItem[];
+  // Accessible name for the overflow trigger and the ActionMenu itself —
+  // "Card actions" / "Column actions" depending on caller.
+  label: string;
+}
+
+// Shared by kanban-card.tsx and kanban-column.tsx's own overflow menus.
+export function KanbanActionsMenu({ actions, label }: KanbanActionsMenuProps): ReactNode {
+  // Called unconditionally (hooks can't be conditional) — ActionMenu
+  // performs this same per-item permission check for the >1-action path
+  // via useOptionalPermission inside ActionMenuItemButton; the lone-action
+  // path must gate itself the same way rather than skipping it.
+  const soleAction = actions.length === 1 ? actions[0] : undefined;
+  const soleActionAllowed = useOptionalPermission(soleAction?.permission);
+
+  if (actions.length === 0) return null;
+  if (soleAction) {
+    if (!soleActionAllowed) return null;
+    return (
+      <button
+        type="button"
+        onClick={soleAction.onClick}
+        disabled={soleAction.disabled}
+        title={soleAction.label}
+        className="rounded-control px-1.5 py-0.5 text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
+      >
+        {soleAction.label}
+      </button>
+    );
+  }
+  return (
+    <ActionMenu
+      label={label}
+      items={actions}
+      trigger={({ ref, open, onClick, onKeyDown }) => (
+        <button
+          ref={ref}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={label}
+          onClick={onClick}
+          onKeyDown={onKeyDown}
+          className="rounded-control p-1 text-text-secondary hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
+        >
+          <MoreVertical size={14} aria-hidden="true" />
+        </button>
+      )}
+    />
+  );
+}

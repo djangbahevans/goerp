@@ -44,6 +44,10 @@ describe("splitPathAndBody", () => {
   it("throws a clear error when an object variable doesn't carry the placeholder key", () => {
     expect(() => splitPathAndBody("/orders/{id}/confirm", { foo: "bar" })).toThrow(/needs a "id" variable/);
   });
+
+  it('throws a clear error instead of substituting the literal string "undefined" into a placeholder', () => {
+    expect(() => splitPathAndBody("/orders/{id}/confirm", undefined)).toThrow(/needs a "id" variable/);
+  });
 });
 
 function fakeRegistry(route: { method: string; path: string }): ActionRegistry {

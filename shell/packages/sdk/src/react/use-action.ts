@@ -45,7 +45,9 @@ export interface ActionResult<TResult, TVariables> {
 
 type DispatchClient = Pick<APIClient, "get" | "post" | "put" | "patch" | "delete">;
 
-async function dispatch<TResult>(
+// Exported for callers dispatching several dynamically-named routes at
+// runtime instead of one static useAction() hook per route.
+export async function dispatch<TResult>(
   client: DispatchClient,
   method: string,
   path: string,
@@ -104,6 +106,9 @@ export function splitPathAndBody(path: string, variables: unknown): { path: stri
     return { path: path.replace(placeholder, String(paramValue)), body };
   }
 
+  if (variables === undefined) {
+    throw new Error(`useAction: route ${path} needs a "${paramName}" variable, but mutate() was called with none`);
+  }
   return { path: path.replace(placeholder, String(variables)), body: undefined };
 }
 

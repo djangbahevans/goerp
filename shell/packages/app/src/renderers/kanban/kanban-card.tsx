@@ -1,8 +1,7 @@
-import { useOptionalPermission } from "@goerp/sdk/auth";
-import { ActionMenu, UserAvatar } from "@goerp/sdk/components";
+import { UserAvatar } from "@goerp/sdk/components";
 import { KanbanCardProvider } from "@goerp/sdk/react";
-import { MoreVertical } from "lucide-react";
 import type { DragEvent, KeyboardEvent, ReactNode, Ref } from "react";
+import { KanbanActionsMenu } from "./kanban-actions-menu.js";
 import type { KanbanCardData } from "./kanban-view-types.js";
 
 export interface KanbanCardProps {
@@ -26,52 +25,9 @@ export interface KanbanCardProps {
   // reordering and cross-column drops at a specific position.
   onDragOverTarget: (event: DragEvent<HTMLDivElement>) => void;
   onDropOnTarget: (event: DragEvent<HTMLDivElement>) => void;
+  // manifest-spec.md §9.3's allow_drag (default true).
+  allowDrag?: boolean | undefined;
   ref?: Ref<HTMLDivElement> | undefined;
-}
-
-function CardActions({ actions }: { actions: NonNullable<KanbanCardData["actions"]> }): ReactNode {
-  // Called unconditionally (hooks can't be conditional) — ActionMenu
-  // performs this same per-item permission check for the >1-action path
-  // via useOptionalPermission inside ActionMenuItemButton; the lone-action
-  // path must gate itself the same way rather than skipping it.
-  const soleAction = actions.length === 1 ? actions[0] : undefined;
-  const soleActionAllowed = useOptionalPermission(soleAction?.permission);
-
-  if (actions.length === 0) return null;
-  if (soleAction) {
-    if (!soleActionAllowed) return null;
-    return (
-      <button
-        type="button"
-        onClick={soleAction.onClick}
-        disabled={soleAction.disabled}
-        title={soleAction.label}
-        className="rounded-control px-1.5 py-0.5 text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
-      >
-        {soleAction.label}
-      </button>
-    );
-  }
-  return (
-    <ActionMenu
-      label="Card actions"
-      items={actions}
-      trigger={({ ref, open, onClick, onKeyDown }) => (
-        <button
-          ref={ref}
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          aria-label="Card actions"
-          onClick={onClick}
-          onKeyDown={onKeyDown}
-          className="rounded-control p-1 text-text-secondary hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
-        >
-          <MoreVertical size={14} aria-hidden="true" />
-        </button>
-      )}
-    />
-  );
 }
 
 function CardContent({ card }: { card: KanbanCardData }): ReactNode {
@@ -79,7 +35,7 @@ function CardContent({ card }: { card: KanbanCardData }): ReactNode {
     <div className="flex flex-col gap-1">
       <div className="flex items-start justify-between gap-2">
         <span className="font-medium text-sm text-text">{card.title}</span>
-        {card.actions && card.actions.length > 0 && <CardActions actions={card.actions} />}
+        {card.actions && card.actions.length > 0 && <KanbanActionsMenu actions={card.actions} label="Card actions" />}
       </div>
       {card.avatar && (
         <UserAvatar name={card.avatar.name} avatarUrl={card.avatar.avatarUrl} userId={card.avatar.userId} size="sm" />
@@ -106,9 +62,11 @@ export function KanbanCard({
   onDragEnd,
   onDragOverTarget,
   onDropOnTarget,
+  allowDrag = true,
   ref,
 }: KanbanCardProps): ReactNode {
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    if (!allowDrag) return;
     if (event.key === " " || event.key === "Spacebar") {
       event.preventDefault();
       isDragging ? onDrop() : onPickUp();
@@ -132,14 +90,14 @@ export function KanbanCard({
     <div
       ref={ref}
       role="button"
-      draggable
+      draggable={allowDrag}
       tabIndex={tabIndex}
       onFocus={onFocus}
       onKeyDown={handleKeyDown}
-      onDragStart={onDragStart}
+      onDragStart={allowDrag ? onDragStart : undefined}
       onDragEnd={onDragEnd}
-      onDragOver={onDragOverTarget}
-      onDrop={onDropOnTarget}
+      onDragOver={allowDrag ? onDragOverTarget : undefined}
+      onDrop={allowDrag ? onDropOnTarget : undefined}
       aria-roledescription="draggable kanban card"
       aria-grabbed={isDragging}
       aria-label={card.accessibleTitle}
@@ -148,7 +106,9 @@ export function KanbanCard({
       }`}
     >
       {card.render ? (
-        <KanbanCardProvider isDragging={isDragging}>{card.render({ isDragging })}</KanbanCardProvider>
+        <KanbanCardProvider isDragging={isDragging} actions={card.actions ?? []}>
+          {card.render({ isDragging })}
+        </KanbanCardProvider>
       ) : (
         <div className={isDragging ? "opacity-50" : ""}>
           <CardContent card={card} />

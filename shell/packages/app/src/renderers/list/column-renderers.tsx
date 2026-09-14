@@ -108,7 +108,9 @@ function isFileFieldValue(value: unknown): value is FileFieldValue {
   );
 }
 
-function fileUrlOf(value: unknown): string | null {
+// Exported for kanban-renderer.tsx's own avatar_file_id resolution (same
+// file-value shape, a different rendering context than a "avatar" column).
+export function fileUrlOf(value: unknown): string | null {
   if (isFileFieldValue(value)) return value.url;
   if (typeof value === "string" && value) return value;
   return null;
