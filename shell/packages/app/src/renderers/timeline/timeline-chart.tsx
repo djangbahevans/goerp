@@ -1,7 +1,7 @@
 import { ActionButton, TabPanel, Tabs } from "@goerp/sdk/components";
-import { toast } from "@goerp/sdk/notifications";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useOptimisticMutation } from "../shared/use-optimistic-mutation.js";
 import {
   addDays,
   dateToX,
@@ -149,18 +149,17 @@ export function TimelineChart({
   }
 
   const displayRows = withOverrides(rows, localOverride);
+  const runOptimisticMutation = useOptimisticMutation(setLocalOverride);
 
   async function commitChange(barId: string, next: DateRange): Promise<void> {
     const previous = findBarDates(displayRows, barId);
-    setLocalOverride((current) => new Map(current).set(barId, next));
-    try {
-      await onBarChange({ id: barId, ...next });
-    } catch (error) {
-      // Reverts against the current override map, not a stale closure.
-      if (previous) setLocalOverride((current) => new Map(current).set(barId, previous));
-      toast.error(`Couldn't move "${findBarLabel(rows, barId)}". Please try again.`);
-      console.error("TimelineChart: onBarChange failed", error);
-    }
+    await runOptimisticMutation({
+      apply: (current) => new Map(current).set(barId, next),
+      revert: (current) => (previous ? new Map(current).set(barId, previous) : current),
+      commit: () => onBarChange({ id: barId, ...next }),
+      errorMessage: () => `Couldn't move "${findBarLabel(rows, barId)}". Please try again.`,
+      logContext: "TimelineChart: onBarChange failed",
+    });
   }
 
   function handleDragStart(barId: string, kind: TimelineDragKind, clientX: number, current: DateRange): void {
