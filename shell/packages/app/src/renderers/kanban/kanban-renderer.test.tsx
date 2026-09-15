@@ -65,7 +65,12 @@ function pagedResult(rows: Row[], hasMore = false) {
 }
 
 async function renderKanbanRenderer(
-  props: { embedded?: boolean; baseFilter?: Record<string, string>; recordId?: string } = {},
+  props: {
+    embedded?: boolean;
+    baseFilter?: Record<string, string>;
+    recordId?: string;
+    showCreateAction?: boolean;
+  } = {},
   viewOverride: KanbanViewDeclaration = view,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -240,6 +245,58 @@ describe("KanbanRenderer", () => {
         cacheKeyPrefix: "embedded:01j:leads_kanban",
       }),
     );
+  });
+
+  it("hides a create action when embedded, per view-system.md's suppressed-actions contract", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+
+    await renderKanbanRenderer(
+      { embedded: true },
+      { ...view, actions: [{ label: "New Lead", type: "create", view: "leads_form" }] },
+    );
+
+    expect(screen.queryByText("New Lead")).toBeNull();
+  });
+
+  it("shows a create action while embedded when the tab set show_create_action: true", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+
+    await renderKanbanRenderer(
+      { embedded: true, showCreateAction: true },
+      { ...view, actions: [{ label: "New Lead", type: "create", view: "leads_form" }] },
+    );
+
+    expect(screen.getByText("New Lead")).toBeTruthy();
+  });
+
+  it("hides a create-type column action when embedded, same as the header create action", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([{ id: "l1", stage: "new", display_name: "Lead 1" }]));
+
+    await renderKanbanRenderer(
+      { embedded: true },
+      {
+        ...view,
+        group_values: ["new"],
+        column_actions: [{ label: "New in column", type: "create", view: "leads_form" }],
+      },
+    );
+
+    expect(screen.queryByText("New in column")).toBeNull();
+  });
+
+  it("shows a create-type column action while embedded when show_create_action: true", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([{ id: "l1", stage: "new", display_name: "Lead 1" }]));
+
+    await renderKanbanRenderer(
+      { embedded: true, showCreateAction: true },
+      {
+        ...view,
+        group_values: ["new"],
+        column_actions: [{ label: "New in column", type: "create", view: "leads_form" }],
+      },
+    );
+
+    expect(screen.getByText("New in column")).toBeTruthy();
   });
 
   it("caps cards per column at max_cards_per_column, revealing more via Load more", async () => {

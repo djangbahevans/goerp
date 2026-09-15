@@ -28,6 +28,7 @@ export interface ListRendererProps {
   recordId?: string;
   embedded?: boolean;
   baseFilter?: Record<string, string>;
+  showCreateAction?: boolean;
 }
 
 function defaultSortOf(view: ListViewDeclaration): string | undefined {
@@ -244,7 +245,7 @@ const DEFAULT_COLUMN_WIDTH = 160;
 // single checkbox plus padding instead of arbitrary cell content).
 const CHECKBOX_COLUMN_WIDTH = 44;
 
-export function ListRenderer({ view, module, recordId, embedded, baseFilter }: ListRendererProps) {
+export function ListRenderer({ view, module, recordId, embedded, baseFilter, showCreateAction }: ListRendererProps) {
   const listState = useListState(embedded, defaultSortOf(view));
   const { columns, hiddenColumns, revealedFields, toggleColumn } = useVisibleColumns(view);
   const selection = useSelection();
@@ -441,7 +442,12 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter }: L
     <>
       <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
       <div className="flex items-center justify-between gap-2">
-        <ListActions actions={view.actions ?? []} module={module} />
+        <ListActions
+          actions={view.actions ?? []}
+          module={module}
+          {...(embedded !== undefined ? { embedded } : {})}
+          {...(showCreateAction !== undefined ? { showCreateAction } : {})}
+        />
         {hiddenColumns.length > 0 && (
           <ActionMenu
             label="Columns"

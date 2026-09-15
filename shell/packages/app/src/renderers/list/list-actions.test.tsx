@@ -46,14 +46,18 @@ function permissionWrapper(permissions: string[]) {
   };
 }
 
-async function renderActions(actions: ListAction[], Wrapper: ({ children }: { children: ReactNode }) => ReactNode) {
+async function renderActions(
+  actions: ListAction[],
+  Wrapper: ({ children }: { children: ReactNode }) => ReactNode,
+  props: { embedded?: boolean; showCreateAction?: boolean } = {},
+) {
   const rootRoute = createRootRoute();
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
       <Wrapper>
-        <ListActions actions={actions} module="contacts" />
+        <ListActions actions={actions} module="contacts" {...props} />
       </Wrapper>
     ),
   });
@@ -84,6 +88,31 @@ describe("ListActions", () => {
     expect(screen.getByText("Docs")).toBeTruthy();
     expect(screen.queryByText("Export")).toBeNull();
     expect(screen.queryByText("Import")).toBeNull();
+  });
+
+  it("hides a create action when embedded, per view-system.md's suppressed-actions contract", async () => {
+    const actions: ListAction[] = [
+      { label: "New Contact", type: "create", view: "contacts_form" },
+      { label: "Docs", type: "url", url: "https://example.com" },
+    ];
+    await renderActions(actions, fullAccess, { embedded: true });
+
+    expect(screen.queryByText("New Contact")).toBeNull();
+    expect(screen.getByText("Docs")).toBeTruthy();
+  });
+
+  it("shows a create action while embedded when showCreateAction is set", async () => {
+    const actions: ListAction[] = [{ label: "New Contact", type: "create", view: "contacts_form" }];
+    await renderActions(actions, fullAccess, { embedded: true, showCreateAction: true });
+
+    expect(screen.getByText("New Contact")).toBeTruthy();
+  });
+
+  it("shows a create action outside embedded mode regardless of showCreateAction", async () => {
+    const actions: ListAction[] = [{ label: "New Contact", type: "create", view: "contacts_form" }];
+    await renderActions(actions, fullAccess);
+
+    expect(screen.getByText("New Contact")).toBeTruthy();
   });
 
   it("hides an action the current user lacks permission for", async () => {

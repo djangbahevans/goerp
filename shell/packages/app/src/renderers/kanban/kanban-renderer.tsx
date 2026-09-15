@@ -26,11 +26,19 @@ export interface KanbanRendererProps {
   recordId?: string;
   embedded?: boolean;
   baseFilter?: Record<string, string>;
+  showCreateAction?: boolean;
 }
 
 const DEFAULT_MAX_CARDS_PER_COLUMN = 50;
 
-export function KanbanRenderer({ view, module, recordId, embedded, baseFilter }: KanbanRendererProps) {
+export function KanbanRenderer({
+  view,
+  module,
+  recordId,
+  embedded,
+  baseFilter,
+  showCreateAction,
+}: KanbanRendererProps) {
   const listState = useListState(embedded, undefined);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -169,8 +177,13 @@ export function KanbanRenderer({ view, module, recordId, embedded, baseFilter }:
 
   const buckets = bucketRowsByGroup(rows, view.group_by);
   const { avatarField, titleField, secondaryFields } = splitCardFields(view.card_fields);
-  const cardActions = view.card_actions ?? [];
-  const columnActions = view.column_actions ?? [];
+  // Suppressed the same as the header's ListActions "New" button: a
+  // "create"-type entry navigates away, interrupting the parent form.
+  const suppressCreateAction = embedded && !showCreateAction;
+  const filterCreate = (actions: typeof view.card_actions) =>
+    suppressCreateAction ? (actions ?? []).filter((action) => action.type !== "create") : (actions ?? []);
+  const cardActions = filterCreate(view.card_actions);
+  const columnActions = filterCreate(view.column_actions);
   const CustomCardComponent =
     view.card_component && componentRegistry.has(view.card_component)
       ? componentRegistry.resolve(view.card_component)
@@ -221,7 +234,12 @@ export function KanbanRenderer({ view, module, recordId, embedded, baseFilter }:
       <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
       {viewActions.length > 0 && (
         <div className="flex items-center justify-between gap-2">
-          <ListActions actions={viewActions} module={module} />
+          <ListActions
+            actions={viewActions}
+            module={module}
+            {...(embedded !== undefined ? { embedded } : {})}
+            {...(showCreateAction !== undefined ? { showCreateAction } : {})}
+          />
         </div>
       )}
       {groupIds.length === 0 ? (

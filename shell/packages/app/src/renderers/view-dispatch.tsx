@@ -33,13 +33,14 @@ export interface ViewDispatchProps {
   recordId?: string | undefined;
   embedded?: boolean;
   baseFilter?: Record<string, string> | undefined;
+  showCreateAction?: boolean;
 }
 
 // The dispatch switch form-tabs.tsx's EmbeddedView and the /_m/$ catch-all
 // route's GenericRenderer both need — same view-type validation, same
 // renderer switch, differing only in `embedded`/`baseFilter` (a form tab
 // locks a baseFilter and is always embedded; a full-page route is neither).
-export function ViewDispatch({ view, module, recordId, embedded, baseFilter }: ViewDispatchProps) {
+export function ViewDispatch({ view, module, recordId, embedded, baseFilter, showCreateAction }: ViewDispatchProps) {
   // Memoized on `view` — re-parsing the full nested schema on every
   // unrelated re-render (a keystroke elsewhere in the form) is wasted work.
   const result = useMemo(
@@ -67,6 +68,7 @@ export function ViewDispatch({ view, module, recordId, embedded, baseFilter }: V
     ...(embedded !== undefined ? { embedded } : {}),
     ...(baseFilter !== undefined ? { baseFilter } : {}),
     ...(recordId !== undefined ? { recordId } : {}),
+    ...(showCreateAction !== undefined ? { showCreateAction } : {}),
   };
   switch (validated.type) {
     case "list":

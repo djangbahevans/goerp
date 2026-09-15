@@ -67,6 +67,7 @@ function ViewTabContent({
       recordId={recordId}
       baseFilter={resolveTabFilter(tab.filter, record)}
       embedded
+      {...(tab.show_create_action !== undefined ? { showCreateAction: tab.show_create_action } : {})}
     />
   );
 }
