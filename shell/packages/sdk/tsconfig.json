@@ -3,8 +3,9 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "declaration": true,
-    "declarationMap": true
+    // Outside dist/ — package.json's "files" allowlist ships dist/ on publish,
+    // and this cache file has no use to a consumer.
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
   },
   "include": ["src"],
   "exclude": ["src/**/*.stories.tsx"]

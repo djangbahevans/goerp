@@ -3,7 +3,11 @@
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
-    "noEmit": true,
+    // No real .js output — this app is bundled by Vite, not tsc.
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "outDir": "dist-types",
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
     "paths": {
       "@/*": ["./src/*"]
     }

@@ -4,15 +4,17 @@
   "version": "0.0.0",
   "description": "Unified Storybook catalog for @goerp/sdk and @goerp/shell-app's components.",
   "scripts": {
-    "prestorybook": "npm run build -w @goerp/sdk",
+    "build-deps": "npm run build -w @goerp/sdk && npm run build:types -w @goerp/shell-app",
+    "prestorybook": "npm run build-deps",
     "storybook": "storybook dev -p 6006",
-    "prebuild-storybook": "npm run build -w @goerp/sdk",
+    "prebuild-storybook": "npm run build-deps",
     "build-storybook": "storybook build",
-    "pretypecheck": "npm run build -w @goerp/sdk",
+    "pretypecheck": "npm run build-deps",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@goerp/sdk": "*",
+    "@goerp/shell-app": "*",
     "@radix-ui/react-dialog": "^1.1.23",
     "@storybook/react-vite": "^10.6.0",
     "@tailwindcss/vite": "^4.3.3",
