@@ -10,18 +10,21 @@ import { ListRenderer } from "./list/list-renderer.js";
 import { ListViewDeclarationSchema } from "./list/list-view-types.js";
 import { PivotViewDeclarationSchema } from "./pivot/pivot-manifest-types.js";
 import { PivotRenderer } from "./pivot/pivot-renderer.js";
+import { TimelineViewDeclarationSchema } from "./timeline/timeline-manifest-types.js";
+import { TimelineRenderer } from "./timeline/timeline-renderer.js";
 
-// "list", "pivot", "kanban" and "calendar" exist today — timeline (#647)
-// and form (no FormViewDeclarationSchema exists yet to validate against;
+// "list", "pivot", "kanban", "calendar" and "timeline" exist today — form
+// (no FormViewDeclarationSchema exists yet to validate against;
 // FormRenderer has no real manifest-driven call site anywhere in the app
-// yet, per #671's own AC listing only these four) both fall through to the
+// yet, per #671's own AC listing only these four) falls through to the
 // "not implemented yet" case below.
-const KNOWN_VIEW_TYPES = new Set(["list", "pivot", "kanban", "calendar"]);
+const KNOWN_VIEW_TYPES = new Set(["list", "pivot", "kanban", "calendar", "timeline"]);
 const AnyViewDeclarationSchema = v.variant("type", [
   ListViewDeclarationSchema,
   PivotViewDeclarationSchema,
   KanbanViewDeclarationSchema,
   CalendarViewDeclarationSchema,
+  TimelineViewDeclarationSchema,
 ]);
 
 export interface ViewDispatchProps {
@@ -74,5 +77,7 @@ export function ViewDispatch({ view, module, recordId, embedded, baseFilter }: V
       return <KanbanRenderer view={validated} {...rendererProps} />;
     case "calendar":
       return <CalendarRenderer view={validated} {...rendererProps} />;
+    case "timeline":
+      return <TimelineRenderer view={validated} {...rendererProps} />;
   }
 }

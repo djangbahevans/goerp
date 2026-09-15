@@ -206,13 +206,13 @@ describe("FormTabsRenderer", () => {
 
   it("view tab: shows a not-implemented message for a view type with no renderer yet", async () => {
     resolveViewMock.mockResolvedValue({
-      name: "orders_timeline",
-      type: "timeline",
+      name: "orders_form",
+      type: "form",
       resource: "sales.order",
       label: "Orders",
     });
-    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_timeline" }]);
-    expect(await screen.findByText(/timeline.*isn't implemented yet/)).toBeTruthy();
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_form" }]);
+    expect(await screen.findByText(/form.*isn't implemented yet/)).toBeTruthy();
   });
 
   it("view tab: dispatches a resolved kanban-type view to KanbanRenderer", async () => {
@@ -261,6 +261,40 @@ describe("FormTabsRenderer", () => {
     });
     await renderTabs([{ label: "Activities", type: "view", view: "sales.activities_calendar" }]);
     expect(await screen.findByText("Call Acme")).toBeTruthy();
+  });
+
+  it("view tab: dispatches a resolved timeline-type view to TimelineRenderer", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [
+          {
+            data: [{ id: "task-1", planned_start: "2026-05-10", planned_end: "2026-05-14", name: "Design review" }],
+            meta: { cursor: null, hasMore: false },
+          },
+        ],
+      },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    resolveViewMock.mockResolvedValue({
+      name: "project_timeline",
+      type: "timeline",
+      resource: "project.task",
+      label: "Timeline",
+      start_field: "planned_start",
+      end_field: "planned_end",
+      label_field: "name",
+    });
+    await renderTabs([{ label: "Timeline", type: "view", view: "project.project_timeline" }]);
+    // jsdom has no ResizeObserver, so the bar's rendered width (and thus its
+    // visible label text) never resolves above the label-drop threshold —
+    // the accessible name is what's reliably present regardless.
+    expect(await screen.findByRole("group", { name: /Design review/ })).toBeTruthy();
   });
 
   it("view tab: shows a validation error and logs it, instead of crashing, when a resolved kanban view is missing a required field", async () => {
