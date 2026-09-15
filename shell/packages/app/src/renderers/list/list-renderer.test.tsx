@@ -84,7 +84,13 @@ function permissionWrapper(fieldAccess: Record<string, Record<string, { read: bo
 }
 
 async function renderListRenderer(
-  props: { embedded?: boolean; baseFilter?: Record<string, string>; recordId?: string; module?: string },
+  props: {
+    embedded?: boolean;
+    baseFilter?: Record<string, string>;
+    recordId?: string;
+    module?: string;
+    showCreateAction?: boolean;
+  },
   Wrapper: ({ children }: { children: ReactNode }) => React.JSX.Element,
   initialPath = "/",
   viewOverride: ListViewDeclaration = view,
@@ -606,6 +612,46 @@ describe("ListRenderer", () => {
     });
 
     expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("New Contact")).toBeTruthy();
+  });
+
+  it("hides a create action when embedded, per view-system.md's suppressed-actions contract", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({ embedded: true }, fullAccess, "/", {
+      ...view,
+      actions: [{ label: "New Contact", type: "create", view: "contacts_form" }],
+    });
+
+    expect(screen.queryByText("New Contact")).toBeNull();
+  });
+
+  it("shows a create action while embedded when the tab set show_create_action: true", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({ embedded: true, showCreateAction: true }, fullAccess, "/", {
+      ...view,
+      actions: [{ label: "New Contact", type: "create", view: "contacts_form" }],
+    });
+
     expect(screen.getByText("New Contact")).toBeTruthy();
   });
 

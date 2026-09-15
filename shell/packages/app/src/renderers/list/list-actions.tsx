@@ -78,12 +78,18 @@ function UrlActionButton({ action }: { action: ListAction }) {
 export interface ListActionsProps {
   actions: ListAction[];
   module: string;
+  // view-system.md's suppressed-actions contract: hides "create" when embedded, unless show_create_action.
+  embedded?: boolean;
+  showCreateAction?: boolean;
 }
 
-export function ListActions({ actions, module }: ListActionsProps) {
+export function ListActions({ actions, module, embedded, showCreateAction }: ListActionsProps) {
+  const suppressCreate = embedded && !showCreateAction;
+  const visibleActions = suppressCreate ? actions.filter((action) => action.type !== "create") : actions;
+
   return (
     <div className="flex items-center gap-2">
-      {actions.map((action) => {
+      {visibleActions.map((action) => {
         switch (action.type) {
           case "create":
             return <CreateActionButton key={action.label} action={action} module={module} />;
