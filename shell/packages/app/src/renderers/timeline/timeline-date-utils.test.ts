@@ -7,7 +7,6 @@ import {
   navigateRange,
   pixelsPerDay,
   visibleRange,
-  xToDate,
 } from "./timeline-date-utils.js";
 
 function key(date: Date): string {
@@ -76,13 +75,11 @@ describe("gridlineDates", () => {
   });
 });
 
-describe("dateToX/xToDate round-trip", () => {
-  it("round-trips a date through pixel space", () => {
+describe("dateToX", () => {
+  it("places a date at its day-offset from range.start, in pixels", () => {
     const range = { start: new Date(2026, 4, 1), end: new Date(2026, 4, 31) };
     const pxPerDay = pixelsPerDay(310, range);
-    const date = new Date(2026, 4, 15);
-    const x = dateToX(date, range, pxPerDay);
-    expect(key(xToDate(x, range, pxPerDay))).toBe(key(date));
+    expect(dateToX(new Date(2026, 4, 15), range, pxPerDay)).toBe(14 * pxPerDay);
   });
 });
 

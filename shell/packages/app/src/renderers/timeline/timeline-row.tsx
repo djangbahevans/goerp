@@ -28,15 +28,9 @@ export interface TimelineRowProps {
   onBarCancel?: (() => void) | undefined;
 }
 
-// `contents` so the label/track cells become direct grid items of
-// TimelineChart's own grid (sharing its two columns) rather than nesting a
-// second grid inside a grid item — this is what lets the today-marker
-// overlay span every row via a plain `grid-row: 1 / -1` placement.
-//
-// No role="row"/"gridcell" here — same posture Kanban's board/column/card
-// and Calendar's own month grid already take (plain elements, individually
-// labeled, focusable, and live-announced, rather than a full ARIA grid
-// widget the rest of this codebase doesn't otherwise commit to).
+// `contents` so the label/track cells are direct grid items of
+// TimelineChart's own grid — needed for the today-marker's `row-span-full`
+// overlay. No ARIA grid roles here, matching Kanban/Calendar's own posture.
 export function TimelineRow({
   row,
   range,

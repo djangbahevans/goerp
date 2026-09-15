@@ -18,6 +18,15 @@ export function startOfDay(date: Date): Date {
   return result;
 }
 
+// A record's own date field value, parsed defensively — not every row
+// satisfies the manifest's declared field, and an invalid value must drop
+// the row rather than render at an arbitrary fallback date.
+export function toDate(value: unknown): Date | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export function addDays(date: Date, days: number): Date {
   const result = new Date(date);
   result.setDate(result.getDate() + days);

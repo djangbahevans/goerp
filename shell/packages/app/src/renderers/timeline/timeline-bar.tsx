@@ -9,19 +9,10 @@ import { contrastFor } from "../calendar/contrast.js";
 import { addDays, dateToX, formatDate, formatDateRange } from "./timeline-date-utils.js";
 import type { TimelineBarData, TimelineDragKind } from "./timeline-view-types.js";
 
-// Below this rendered width, label_field text wouldn't fit without
-// truncating into an unreadable one- or two-character sliver —
-// timeline-chart.md: dropped from the bar itself, kept only in `title`/the
-// accessible name, never truncated illegibly.
+// See timeline-chart.md's "Minimum bar width" and label-drop rules.
 const LABEL_MIN_WIDTH_PX = 60;
-// timeline-chart.md: a bar never renders narrower than --space-3 (12px)
-// regardless of its actual date span.
 const MIN_BAR_WIDTH_PX = 12;
-// The visual grab-strip stays a narrow 4px so it doesn't visually dominate
-// short bars, but its hit area extends invisibly to --space-12 (48px) —
-// clearing WCAG 2.5.5's 44×44 CSS-px minimum without changing the strip's
-// own look. It overflows the bar's own edge, which is why the bar's outer
-// element (not a clipped inner one) hosts it.
+// See timeline-chart.md's resize-handle hit-area rule (WCAG 2.5.5).
 const RESIZE_HANDLE_HIT_AREA_PX = 48;
 
 export interface TimelineBarProps {
@@ -80,6 +71,16 @@ export function TimelineBar({
     : "bg-primary text-text-inverse";
   const accessibleName = `${bar.label}, ${formatDateRange(displayStart, displayEnd)}`;
 
+  // Day-offset from range.start, shared by valuemin/valuemax/valuenow;
+  // widened to the bar's own start/end since a bar routinely extends past
+  // the visible range and valuenow must stay within [valuemin, valuemax].
+  const rangeStartOffset = 0;
+  const rangeEndOffset = Math.round((range.end.getTime() - range.start.getTime()) / 86_400_000);
+  const startOffset = Math.round((displayStart.getTime() - range.start.getTime()) / 86_400_000);
+  const endOffset = Math.round((displayEnd.getTime() - range.start.getTime()) / 86_400_000);
+  const valueMin = Math.min(rangeStartOffset, startOffset, endOffset);
+  const valueMax = Math.max(rangeEndOffset, startOffset, endOffset);
+
   function handlePointerDown(kind: TimelineDragKind) {
     return (event: ReactPointerEvent<HTMLDivElement>): void => {
       const allowed = kind === "move" ? allowDrag : allowResize;
@@ -91,10 +92,15 @@ export function TimelineBar({
   }
 
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
+    // A resize handle's captured pointer still bubbles through this same
+    // handler on the bar's own outer div — stop it there, or a resize drag
+    // would report every move twice.
+    event.stopPropagation();
     onDragMove?.(event.clientX);
   }
 
-  function handlePointerUp(): void {
+  function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
+    event.stopPropagation();
     onDragEnd?.();
   }
 
@@ -160,18 +166,14 @@ export function TimelineBar({
   }
 
   function resizeHandle(edge: "resize-start" | "resize-end") {
-    const rangeStartOffset = Math.round((range.start.getTime() - displayStart.getTime()) / 86_400_000);
-    const rangeEndOffset = Math.round((range.end.getTime() - displayStart.getTime()) / 86_400_000);
-    const valueNow =
-      edge === "resize-start" ? 0 : Math.round((displayEnd.getTime() - displayStart.getTime()) / 86_400_000);
     return (
       <div
         role="slider"
         tabIndex={0}
         aria-orientation="horizontal"
-        aria-valuemin={rangeStartOffset}
-        aria-valuemax={rangeEndOffset}
-        aria-valuenow={valueNow}
+        aria-valuemin={valueMin}
+        aria-valuemax={valueMax}
+        aria-valuenow={edge === "resize-start" ? startOffset : endOffset}
         aria-valuetext={formatDate(edge === "resize-start" ? displayStart : displayEnd)}
         aria-label={`Resize ${edge === "resize-start" ? "start" : "end"} of ${bar.label}`}
         onPointerDown={handlePointerDown(edge)}

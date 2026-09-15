@@ -27,7 +27,10 @@ describe("buildTimelineRows", () => {
     const bar = row?.bars[0];
     expect(bar?.clamped).toBe(true);
     expect(bar?.start).toEqual(new Date("2026-05-10"));
-    expect(bar?.end).toEqual(new Date("2026-05-11"));
+    // Inclusive end dates (timeline-bar.tsx renders width through end+1
+    // day) mean "one day wide" is end === start, not start+1 (which would
+    // render as two days).
+    expect(bar?.end).toEqual(new Date("2026-05-10"));
   });
 
   it("buckets every row into a single implicit row, labeled '', when group_by is absent", () => {
@@ -89,5 +92,16 @@ describe("assignLanes", () => {
     const lanes = assignLanes(bars);
     expect(lanes.get("a")).toBe(0);
     expect(lanes.get("z")).toBe(1);
+  });
+
+  it("treats a shared boundary day as overlapping — end dates are inclusive", () => {
+    const bars = [
+      { id: "a", start: new Date(2026, 4, 1), end: new Date(2026, 4, 5) },
+      // "b" starts the same day "a" ends — they still share that day's
+      // pixels on screen, so they must not land in the same lane.
+      { id: "b", start: new Date(2026, 4, 5), end: new Date(2026, 4, 10) },
+    ];
+    const lanes = assignLanes(bars);
+    expect(lanes.get("a")).not.toBe(lanes.get("b"));
   });
 });

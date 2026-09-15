@@ -28,13 +28,8 @@ function lastDayOf(rangeStart: Date, monthsSpanned: number): Date {
   return addDays(addMonths(rangeStart, monthsSpanned), -1);
 }
 
-// The date range a mode actually renders, given its focused date — shared
-// by TimelineChart (reporting it via onRangeChange) and the renderer
-// resolving the manifest (computing the same range up front, before
-// TimelineChart's own effect has a chance to report it). Mirrors
-// calendar-date-utils.ts's visibleRange, but month/quarter/year render
-// their real calendar days/months rather than a padded 42-day grid — a
-// Gantt chart has no fixed day-cell grid to pad out.
+// Unlike calendar-date-utils.ts's visibleRange, month/quarter/year render
+// their real calendar days/months, not a padded 42-day grid.
 export function visibleRange(focusedDate: Date, mode: TimelineRangeMode): { start: Date; end: Date } {
   if (mode === "week") {
     const start = startOfWeek(focusedDate);
@@ -105,14 +100,10 @@ export function pixelsPerDay(trackWidthPx: number, range: { start: Date; end: Da
   return totalDays > 0 ? trackWidthPx / totalDays : trackWidthPx;
 }
 
-// Single source of truth for the date↔pixel conversion both bar
-// positioning and pointer-drag math use.
+// Converts a date to its horizontal pixel offset from range.start — the
+// one place bar positioning and header gridlines compute this.
 export function dateToX(date: Date, range: { start: Date; end: Date }, pxPerDay: number): number {
   return daysBetween(range.start, date) * pxPerDay;
-}
-
-export function xToDate(x: number, range: { start: Date; end: Date }, pxPerDay: number): Date {
-  return addDays(range.start, Math.round(x / pxPerDay));
 }
 
 const RANGE_LABEL_FORMAT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };

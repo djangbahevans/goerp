@@ -1,27 +1,19 @@
+import { toDate } from "../calendar/calendar-date-utils.js";
+import { resolveMappedColor } from "../calendar/contrast.js";
 import type { Row } from "../list/list-view-types.js";
 import type { TimelineViewDeclaration } from "./timeline-manifest-types.js";
 import type { TimelineBarData, TimelineRowData } from "./timeline-view-types.js";
 
-function toDate(value: unknown): Date | null {
-  if (typeof value !== "string" && typeof value !== "number") return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-// end_field before start_field is a data error, not a normal case — clamps
-// to a minimum one-day-wide bar anchored at start_field, per
-// timeline-chart.md, rather than rendering a negative-width bar or
-// dropping an otherwise-valid record.
+// Per timeline-chart.md: an inverted range clamps to a one-day bar at
+// start_field. End is inclusive (see timeline-bar.tsx), so that's end===start.
 function clampBarRange(start: Date, end: Date): { start: Date; end: Date; clamped: boolean } {
   if (end.getTime() >= start.getTime()) return { start, end, clamped: false };
-  const clampedEnd = new Date(start);
-  clampedEnd.setDate(clampedEnd.getDate() + 1);
-  return { start, end: clampedEnd, clamped: true };
+  return { start, end: start, clamped: true };
 }
 
 // A single sentinel bucket key covers both "no group_by declared at all"
 // (every row shares it) and "group_by declared but this row's value is
-// absent/null/empty" — labelForGroupKey tells the two apart via hasGroupBy.
+// absent/null/empty" — the caller tells the two apart via view.group_by.
 function groupKey(row: Row, groupBy: string | undefined): string {
   if (!groupBy) return "";
   const value = row[groupBy];
@@ -29,38 +21,20 @@ function groupKey(row: Row, groupBy: string | undefined): string {
   return String(value);
 }
 
-// No group_label_field exists in Timeline's manifest schema (unlike
-// Kanban's group_by, which has one) — group_by's raw value is the row
-// label directly, never a relation lookup. "Unassigned" only applies when
-// a group_by field is actually declared and a row's value is missing.
-function labelForGroupKey(key: string, hasGroupBy: boolean): string {
-  if (!hasGroupBy) return "";
-  return key === "" ? "Unassigned" : key;
-}
-
-// Greedy first-fit over a deterministic sort (start_field ascending, tied
-// by record id) — stable across refetches with no cache needed, since lane
-// assignment is a pure function of the overlapping-bar set for a group. A
-// bar only changes lanes when that set itself changes (entered/left the
-// visible range, or its own dates changed), which is correct behavior, not
-// something to suppress.
+// Greedy first-fit, sorted by start_field then id for a stable result
+// across refetches. End dates are inclusive, so a lane frees up only once
+// its occupant's end is strictly before the next bar's start.
 export function assignLanes<T extends { id: string; start: Date; end: Date }>(bars: T[]): Map<string, number> {
   const sorted = [...bars].sort((a, b) => a.start.getTime() - b.start.getTime() || a.id.localeCompare(b.id));
   const laneEnds: number[] = [];
   const lanes = new Map<string, number>();
   for (const bar of sorted) {
-    const laneIndex = laneEnds.findIndex((end) => end <= bar.start.getTime());
+    const laneIndex = laneEnds.findIndex((end) => end < bar.start.getTime());
     const lane = laneIndex === -1 ? laneEnds.length : laneIndex;
     laneEnds[lane] = bar.end.getTime();
     lanes.set(bar.id, lane);
   }
   return lanes;
-}
-
-function resolveColor(row: Row, view: Pick<TimelineViewDeclaration, "color_field" | "color_map">): string | undefined {
-  if (!view.color_field) return undefined;
-  const colorKey = row[view.color_field];
-  return view.color_map && typeof colorKey === "string" ? view.color_map[colorKey] : undefined;
 }
 
 // Orchestrates: drop rows missing start_field/end_field, clamp inverted
@@ -78,7 +52,7 @@ export function buildTimelineRows(rows: Row[], view: TimelineViewDeclaration): T
     const { start, end, clamped } = clampBarRange(rawStart, rawEnd);
     const id = String(row.id ?? "");
     const label = String(row[view.label_field] ?? "");
-    const color = resolveColor(row, view);
+    const color = resolveMappedColor(view.color_field ? row[view.color_field] : undefined, view.color_map);
     const key = groupKey(row, view.group_by);
 
     let bucket = buckets.get(key);
@@ -95,6 +69,11 @@ export function buildTimelineRows(rows: Row[], view: TimelineViewDeclaration): T
     const lanes = assignLanes(bars);
     const laidOutBars = bars.map((bar) => ({ ...bar, lane: lanes.get(bar.id) ?? 0 }));
     const laneCount = new Set(laidOutBars.map((bar) => bar.lane)).size;
-    return { id: key, label: labelForGroupKey(key, view.group_by !== undefined), bars: laidOutBars, laneCount };
+    // No group_label_field exists in Timeline's manifest schema (unlike
+    // Kanban's group_by) — the raw group_by value is the row label
+    // directly, never a relation lookup. "Unassigned" only applies when a
+    // group_by field is actually declared and a row's value is missing.
+    const label = view.group_by === undefined ? "" : key === "" ? "Unassigned" : key;
+    return { id: key, label, bars: laidOutBars, laneCount };
   });
 }

@@ -1,6 +1,8 @@
 import type { Row } from "../list/list-view-types.js";
+import { toDate } from "./calendar-date-utils.js";
 import type { CalendarViewDeclaration } from "./calendar-manifest-types.js";
 import { ALL_CALENDAR_VIEWS, type CalendarEvent, type CalendarViewMode } from "./calendar-view-types.js";
+import { resolveMappedColor } from "./contrast.js";
 
 // The view mode CalendarView itself would default to, given the same
 // default_view/allowed_views — used to pre-compute the initial fetch range
@@ -13,12 +15,6 @@ export function initialViewMode(
   return allowed[0] ?? "month";
 }
 
-function toDate(value: unknown): Date | null {
-  if (typeof value !== "string" && typeof value !== "number") return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
 // A row missing its own date_field has nothing to place on the calendar —
 // dropped rather than rendered at an arbitrary fallback date.
 export function buildCalendarEvents(rows: Row[], view: CalendarViewDeclaration): CalendarEvent[] {
@@ -29,8 +25,7 @@ export function buildCalendarEvents(rows: Row[], view: CalendarViewDeclaration):
     const id = String(row.id ?? "");
     const title = String(row[view.title_field] ?? "");
     const end = view.end_date_field ? toDate(row[view.end_date_field]) : null;
-    const colorKey = view.color_field ? row[view.color_field] : undefined;
-    const color = view.color_map && typeof colorKey === "string" ? view.color_map[colorKey] : undefined;
+    const color = resolveMappedColor(view.color_field ? row[view.color_field] : undefined, view.color_map);
     events.push({ id, title, start, end, ...(color ? { color } : {}) });
   }
   return events;

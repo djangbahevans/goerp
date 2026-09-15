@@ -1,5 +1,15 @@
 import type { Theme } from "@goerp/sdk/react";
 
+// Shared by Calendar's color_field/color_map (EventChip) and Timeline's
+// (TimelineBar) — both resolve a row's own color_field value through the
+// view's color_map the same way.
+export function resolveMappedColor(
+  colorKey: unknown,
+  colorMap: Record<string, string> | undefined,
+): string | undefined {
+  return colorMap && typeof colorKey === "string" ? colorMap[colorKey] : undefined;
+}
+
 // shell-visual-design.md's real per-theme hex values for --color-text /
 // --color-text-inverse / --color-surface (tokens.css / themes/*.css).
 // EventChip fills are arbitrary tenant-supplied hex, not a themed CSS

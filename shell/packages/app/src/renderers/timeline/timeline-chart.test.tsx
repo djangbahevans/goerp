@@ -112,7 +112,7 @@ describe("TimelineChart", () => {
     expect(screen.getByRole("group", { name: /May 10.*May 14/ })).toBeTruthy();
   });
 
-  it("pointer: a drag-and-drop (even in place) commits via onBarChange", async () => {
+  it("pointer: a pointerdown/pointerup with no movement in between is a no-op (a plain click, not a drag)", () => {
     const props = { ...baseProps(), rows: [oneBarRow()] };
     renderWithPermissions(<TimelineChart {...props} />);
     const bar = screen.getByRole("group", { name: /Design review/ }) as HTMLElement & {
@@ -121,12 +121,6 @@ describe("TimelineChart", () => {
     bar.setPointerCapture = vi.fn();
     fireEvent.pointerDown(bar, { clientX: 100, pointerId: 1 });
     fireEvent.pointerUp(bar);
-    await waitFor(() =>
-      expect(props.onBarChange).toHaveBeenCalledWith({
-        id: "t1",
-        start: new Date(2026, 4, 10),
-        end: new Date(2026, 4, 14),
-      }),
-    );
+    expect(props.onBarChange).not.toHaveBeenCalled();
   });
 });

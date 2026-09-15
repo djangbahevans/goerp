@@ -31,9 +31,7 @@ const RANGE_ITEMS = ALL_TIMELINE_RANGES.map((mode) => ({ id: mode, label: RANGE_
 const GRIDLINE_HEADER_HEIGHT_PX = 24;
 
 // Measures the track column's real rendered width — a continuous date axis
-// needs actual pixels-per-day, unlike every sibling renderer's fixed or
-// CSS-grid-only layout (pivot-grid.tsx explicitly opts out of this for its
-// own simpler fixed-width column).
+// needs actual pixels-per-day.
 function useTrackWidth(): [RefObject<HTMLDivElement | null>, number] {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -103,18 +101,22 @@ function withOverrides(rows: TimelineRowData[], overrides: Map<string, DateRange
   }));
 }
 
-interface PointerDragState {
-  barId: string;
-  kind: TimelineDragKind;
-  startClientX: number;
-  startBar: DateRange;
-  projected: DateRange;
+function sameRange(a: DateRange, b: DateRange): boolean {
+  return a.start.getTime() === b.start.getTime() && a.end.getTime() === b.end.getTime();
 }
 
-interface KeyboardNudgeState {
-  barId: string;
-  pending: DateRange;
-}
+// One slot for "what's currently being manipulated" — lets Enter/Escape
+// and the projected-position overlay apply to either gesture uniformly.
+type ActiveManipulation =
+  | {
+      mode: "pointer";
+      barId: string;
+      kind: TimelineDragKind;
+      startClientX: number;
+      startBar: DateRange;
+      projected: DateRange;
+    }
+  | { mode: "keyboard"; barId: string; original: DateRange; pending: DateRange };
 
 export function TimelineChart({
   rows,
@@ -134,15 +136,12 @@ export function TimelineChart({
   const todayInRange = today >= range.start && today <= range.end;
   const gridlines = gridlineDates(range, rangeMode);
 
-  const [pointerDrag, setPointerDrag] = useState<PointerDragState | null>(null);
-  const [keyboardNudge, setKeyboardNudge] = useState<KeyboardNudgeState | null>(null);
+  const [active, setActive] = useState<ActiveManipulation | null>(null);
   const [localOverride, setLocalOverride] = useState<Map<string, DateRange>>(new Map());
   const [announcement, setAnnouncement] = useState("");
 
-  // A fresh fetch landed (e.g. after invalidateQueries) — discard stale
-  // optimistic overrides, the server's own data is now authoritative. Same
-  // "derive state during render on a prop-identity change" pattern
-  // kanban-board.tsx uses for its own groupsProp reconciliation.
+  // A fresh fetch landed — discard stale overrides (kanban-board.tsx's own
+  // groupsProp reconciliation pattern).
   const [prevRows, setPrevRows] = useState(rows);
   if (rows !== prevRows) {
     setPrevRows(rows);
@@ -157,9 +156,7 @@ export function TimelineChart({
     try {
       await onBarChange({ id: barId, ...next });
     } catch (error) {
-      // Reverts against the *current* override map, not a stale closure —
-      // same "revert against current state" rule kanban-board.tsx's
-      // moveCard follows.
+      // Reverts against the current override map, not a stale closure.
       if (previous) setLocalOverride((current) => new Map(current).set(barId, previous));
       toast.error(`Couldn't move "${findBarLabel(rows, barId)}". Please try again.`);
       console.error("TimelineChart: onBarChange failed", error);
@@ -167,50 +164,53 @@ export function TimelineChart({
   }
 
   function handleDragStart(barId: string, kind: TimelineDragKind, clientX: number, current: DateRange): void {
-    setPointerDrag({ barId, kind, startClientX: clientX, startBar: current, projected: current });
+    setActive({ mode: "pointer", barId, kind, startClientX: clientX, startBar: current, projected: current });
   }
 
   function handleDragMove(clientX: number): void {
-    setPointerDrag((drag) => {
-      if (!drag || pxPerDay <= 0) return drag;
-      const deltaDays = Math.round((clientX - drag.startClientX) / pxPerDay);
-      return { ...drag, projected: applyDelta(drag.kind, drag.startBar, deltaDays) };
+    setActive((current) => {
+      if (!current || current.mode !== "pointer" || pxPerDay <= 0) return current;
+      const deltaDays = Math.round((clientX - current.startClientX) / pxPerDay);
+      return { ...current, projected: applyDelta(current.kind, current.startBar, deltaDays) };
     });
   }
 
   function handleDragEnd(): void {
-    if (!pointerDrag) return;
-    const { barId, projected } = pointerDrag;
-    setPointerDrag(null);
-    void commitChange(barId, projected);
+    if (!active || active.mode !== "pointer") return;
+    const { barId, projected, startBar } = active;
+    setActive(null);
+    if (!sameRange(projected, startBar)) void commitChange(barId, projected);
   }
 
   function handleNudge(barId: string, target: TimelineDragKind, deltaDays: number, current: DateRange): void {
-    const base = keyboardNudge?.barId === barId ? keyboardNudge.pending : current;
+    const isContinuing = active?.mode === "keyboard" && active.barId === barId;
+    const original = isContinuing ? active.original : current;
+    const base = isContinuing ? active.pending : current;
     const pending = applyDelta(target, base, deltaDays);
-    setKeyboardNudge({ barId, pending });
+    setActive({ mode: "keyboard", barId, original, pending });
     setAnnouncement(`${findBarLabel(rows, barId)} projected ${formatDateRange(pending.start, pending.end)}.`);
   }
 
+  // Commits whichever gesture is active, pointer or keyboard.
   function handleCommit(): void {
-    if (!keyboardNudge) return;
-    const { barId, pending } = keyboardNudge;
-    setKeyboardNudge(null);
-    setAnnouncement(`${findBarLabel(rows, barId)} moved to ${formatDateRange(pending.start, pending.end)}.`);
-    void commitChange(barId, pending);
+    if (!active) return;
+    const { barId } = active;
+    const next = active.mode === "keyboard" ? active.pending : active.projected;
+    const original = active.mode === "keyboard" ? active.original : active.startBar;
+    setActive(null);
+    setAnnouncement(`${findBarLabel(rows, barId)} moved to ${formatDateRange(next.start, next.end)}.`);
+    if (!sameRange(next, original)) void commitChange(barId, next);
   }
 
   function handleCancel(): void {
-    if (!keyboardNudge) return;
-    setAnnouncement(`Move cancelled. ${findBarLabel(rows, keyboardNudge.barId)} stays at its previous dates.`);
-    setKeyboardNudge(null);
+    if (!active) return;
+    setAnnouncement(`Move cancelled. ${findBarLabel(rows, active.barId)} stays at its previous dates.`);
+    setActive(null);
   }
 
-  const activeDrag = pointerDrag
-    ? { barId: pointerDrag.barId, projected: pointerDrag.projected }
-    : keyboardNudge
-      ? { barId: keyboardNudge.barId, projected: keyboardNudge.pending }
-      : undefined;
+  const activeDrag = active
+    ? { barId: active.barId, projected: active.mode === "pointer" ? active.projected : active.pending }
+    : undefined;
 
   return (
     <Tabs items={RANGE_ITEMS} activeId={rangeMode} onChange={(id) => onRangeModeChange(id as TimelineRangeMode)}>
