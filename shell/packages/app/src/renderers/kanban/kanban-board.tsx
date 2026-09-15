@@ -1,6 +1,6 @@
-import { toast } from "@goerp/sdk/notifications";
 import type { DragEvent, ReactNode } from "react";
 import { useState } from "react";
+import { useOptimisticMutation } from "../shared/use-optimistic-mutation.js";
 import { KanbanColumn } from "./kanban-column.js";
 import type { KanbanBoardProps, KanbanDropTarget, KanbanGroup } from "./kanban-view-types.js";
 
@@ -82,6 +82,7 @@ export function KanbanBoard({
   const [dropTarget, setDropTarget] = useState<KanbanDropTarget | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [focusedCardId, setFocusedCardId] = useState<string | null>(() => firstCardId(groupsProp));
+  const runOptimisticMutation = useOptimisticMutation(setGroups);
 
   // Reconciles with the caller's authoritative data (e.g. after a refetch)
   // during render rather than an effect — a plain if, not useEffect, since
@@ -113,16 +114,13 @@ export function KanbanBoard({
       return;
     }
     const sourceIndex = findCardIndex(groups, fromGroupId, cardId);
-    setGroups((current) => reorderCards(current, cardId, fromGroupId, toGroupId, index));
-    try {
-      await onMoveCard(cardId, fromGroupId, toGroupId);
-    } catch (error) {
-      // Reverts against the *current* state, not the pre-move snapshot, so
-      // an unrelated concurrent update survives the revert.
-      setGroups((current) => reorderCards(current, cardId, toGroupId, fromGroupId, sourceIndex));
-      toast.error(`Couldn't move "${cardTitle(groups, cardId)}". Please try again.`);
-      console.error("KanbanBoard: onMoveCard failed", error);
-    }
+    await runOptimisticMutation({
+      apply: (current) => reorderCards(current, cardId, fromGroupId, toGroupId, index),
+      revert: (current) => reorderCards(current, cardId, toGroupId, fromGroupId, sourceIndex),
+      commit: () => onMoveCard(cardId, fromGroupId, toGroupId),
+      errorMessage: () => `Couldn't move "${cardTitle(groups, cardId)}". Please try again.`,
+      logContext: "KanbanBoard: onMoveCard failed",
+    });
   }
 
   function handlePickUp(cardId: string): void {
