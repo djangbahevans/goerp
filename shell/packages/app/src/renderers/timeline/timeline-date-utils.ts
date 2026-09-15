@@ -117,11 +117,16 @@ export function xToDate(x: number, range: { start: Date; end: Date }, pxPerDay: 
 
 const RANGE_LABEL_FORMAT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
 
+// "Sep 14" — a single resize handle's own aria-valuetext needs just the one
+// date it's adjusting, not a redundant same-date-twice range.
+export function formatDate(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, RANGE_LABEL_FORMAT).format(date);
+}
+
 // "Sep 10 – Sep 14" — feeds a TimelineBar's accessible name (label +
 // range) and the live floating label shown while dragging/resizing.
 export function formatDateRange(start: Date, end: Date): string {
-  const formatter = new Intl.DateTimeFormat(undefined, RANGE_LABEL_FORMAT);
-  return `${formatter.format(start)} – ${formatter.format(end)}`;
+  return `${formatDate(start)} – ${formatDate(end)}`;
 }
 
 const GRIDLINE_FORMATS: Record<TimelineRangeMode, Intl.DateTimeFormatOptions> = {

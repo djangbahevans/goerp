@@ -7,21 +7,25 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../list/list-view-types.js";
 import type { TimelineViewDeclaration } from "./timeline-manifest-types.js";
 import { TimelineRenderer } from "./timeline-renderer.js";
 
-const { useInfiniteListMock } = vi.hoisted(() => ({ useInfiniteListMock: vi.fn() }));
+const { useInfiniteListMock, saveRecordMock } = vi.hoisted(() => ({
+  useInfiniteListMock: vi.fn(),
+  saveRecordMock: vi.fn(),
+}));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
-  return { ...actual, useInfiniteList: useInfiniteListMock };
+  return { ...actual, useInfiniteList: useInfiniteListMock, saveRecord: saveRecordMock };
 });
 
 afterEach(() => {
   cleanup();
   useInfiniteListMock.mockReset();
+  saveRecordMock.mockReset();
 });
 
 const INITIAL_DATE = new Date(2026, 4, 13); // Wednesday, May 13 2026
@@ -165,6 +169,25 @@ describe("TimelineRenderer", () => {
       expect.objectContaining({
         filter: expect.objectContaining({ project_id: "01j" }),
         cacheKeyPrefix: "embedded:01j:project_timeline",
+      }),
+    );
+  });
+
+  it("keyboard-nudging and committing a bar saves start_field/end_field on the dragged record", async () => {
+    saveRecordMock.mockResolvedValue({});
+    useInfiniteListMock.mockReturnValue(
+      pagedResult([{ id: "task-1", planned_start: "2026-05-10", planned_end: "2026-05-14", name: "Design review" }]),
+    );
+
+    await renderTimelineRenderer();
+    const bar = await screen.findByRole("group", { name: /Design review/ });
+    fireEvent.keyDown(bar, { key: "ArrowRight" });
+    fireEvent.keyDown(bar, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(saveRecordMock).toHaveBeenCalledWith("project.task", "task-1", {
+        planned_start: "2026-05-11",
+        planned_end: "2026-05-15",
       }),
     );
   });

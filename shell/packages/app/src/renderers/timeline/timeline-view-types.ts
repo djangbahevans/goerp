@@ -45,6 +45,11 @@ export interface TimelineBarChange {
   end: Date;
 }
 
+// Shared by TimelineBar's pointer/keyboard handlers and TimelineChart's own
+// drag/nudge state — "move" shifts both dates, "resize-start"/"resize-end"
+// changes only the one edge.
+export type TimelineDragKind = "move" | "resize-start" | "resize-end";
+
 export interface TimelineChartProps {
   rows: TimelineRowData[];
   range: { start: Date; end: Date };

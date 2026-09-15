@@ -1,8 +1,13 @@
 import { useTheme } from "@goerp/sdk/react";
-import type { CSSProperties, ReactNode } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import { contrastFor } from "../calendar/contrast.js";
-import { addDays, dateToX, formatDateRange } from "./timeline-date-utils.js";
-import type { TimelineBarData } from "./timeline-view-types.js";
+import { addDays, dateToX, formatDate, formatDateRange } from "./timeline-date-utils.js";
+import type { TimelineBarData, TimelineDragKind } from "./timeline-view-types.js";
 
 // Below this rendered width, label_field text wouldn't fit without
 // truncating into an unreadable one- or two-character sliver —
@@ -12,6 +17,12 @@ const LABEL_MIN_WIDTH_PX = 60;
 // timeline-chart.md: a bar never renders narrower than --space-3 (12px)
 // regardless of its actual date span.
 const MIN_BAR_WIDTH_PX = 12;
+// The visual grab-strip stays a narrow 4px so it doesn't visually dominate
+// short bars, but its hit area extends invisibly to --space-12 (48px) —
+// clearing WCAG 2.5.5's 44×44 CSS-px minimum without changing the strip's
+// own look. It overflows the bar's own edge, which is why the bar's outer
+// element (not a clipped inner one) hosts it.
+const RESIZE_HANDLE_HIT_AREA_PX = 48;
 
 export interface TimelineBarProps {
   bar: TimelineBarData;
@@ -19,14 +30,40 @@ export interface TimelineBarProps {
   pxPerDay: number;
   allowDrag?: boolean | undefined;
   allowResize?: boolean | undefined;
+  // Live projected dates while this bar is the one being pointer-dragged or
+  // keyboard-nudged — overrides bar.start/end for rendering position and
+  // the floating date label; absent otherwise.
+  projected?: { start: Date; end: Date } | undefined;
+  onDragStart?: ((kind: TimelineDragKind, clientX: number, current: { start: Date; end: Date }) => void) | undefined;
+  onDragMove?: ((clientX: number) => void) | undefined;
+  onDragEnd?: (() => void) | undefined;
+  onNudge?: ((target: TimelineDragKind, deltaDays: number, current: { start: Date; end: Date }) => void) | undefined;
+  onCommit?: (() => void) | undefined;
+  onCancel?: (() => void) | undefined;
 }
 
-export function TimelineBar({ bar, range, pxPerDay }: TimelineBarProps): ReactNode {
+export function TimelineBar({
+  bar,
+  range,
+  pxPerDay,
+  allowDrag = true,
+  allowResize = true,
+  projected,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  onNudge,
+  onCommit,
+  onCancel,
+}: TimelineBarProps): ReactNode {
   const { theme } = useTheme();
   const contrast = bar.color ? contrastFor(bar.color, theme) : null;
+  const isDragging = projected !== undefined;
+  const displayStart = projected?.start ?? bar.start;
+  const displayEnd = projected?.end ?? bar.end;
 
-  const left = dateToX(bar.start, range, pxPerDay);
-  const rawWidth = dateToX(addDays(bar.end, 1), range, pxPerDay) - left;
+  const left = dateToX(displayStart, range, pxPerDay);
+  const rawWidth = dateToX(addDays(displayEnd, 1), range, pxPerDay) - left;
   const width = Math.max(rawWidth, MIN_BAR_WIDTH_PX);
   const showLabel = width >= LABEL_MIN_WIDTH_PX;
 
@@ -41,7 +78,114 @@ export function TimelineBar({ bar, range, pxPerDay }: TimelineBarProps): ReactNo
       ? contrast.text.className
       : ""
     : "bg-primary text-text-inverse";
-  const accessibleName = `${bar.label}, ${formatDateRange(bar.start, bar.end)}`;
+  const accessibleName = `${bar.label}, ${formatDateRange(displayStart, displayEnd)}`;
+
+  function handlePointerDown(kind: TimelineDragKind) {
+    return (event: ReactPointerEvent<HTMLDivElement>): void => {
+      const allowed = kind === "move" ? allowDrag : allowResize;
+      if (!allowed) return;
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      onDragStart?.(kind, event.clientX, { start: bar.start, end: bar.end });
+    };
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
+    onDragMove?.(event.clientX);
+  }
+
+  function handlePointerUp(): void {
+    onDragEnd?.();
+  }
+
+  function handleBarKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onCommit?.();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel?.();
+      return;
+    }
+    if (!allowDrag) return;
+    const current = { start: bar.start, end: bar.end };
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      onNudge?.("move", -1, current);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      onNudge?.("move", 1, current);
+    } else if (event.key === "PageUp") {
+      event.preventDefault();
+      onNudge?.("move", -7, current);
+    } else if (event.key === "PageDown") {
+      event.preventDefault();
+      onNudge?.("move", 7, current);
+    }
+  }
+
+  function handleResizeHandleKeyDown(edge: "resize-start" | "resize-end") {
+    return (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+      // A handle is its own independently-focusable widget — its keys must
+      // never fall through to the bar body's own move-nudge handling.
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onCommit?.();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel?.();
+        return;
+      }
+      if (!allowResize || !event.shiftKey) return;
+      const current = { start: bar.start, end: bar.end };
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        onNudge?.(edge, -1, current);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        onNudge?.(edge, 1, current);
+      } else if (event.key === "PageUp") {
+        event.preventDefault();
+        onNudge?.(edge, -7, current);
+      } else if (event.key === "PageDown") {
+        event.preventDefault();
+        onNudge?.(edge, 7, current);
+      }
+    };
+  }
+
+  function resizeHandle(edge: "resize-start" | "resize-end") {
+    const rangeStartOffset = Math.round((range.start.getTime() - displayStart.getTime()) / 86_400_000);
+    const rangeEndOffset = Math.round((range.end.getTime() - displayStart.getTime()) / 86_400_000);
+    const valueNow =
+      edge === "resize-start" ? 0 : Math.round((displayEnd.getTime() - displayStart.getTime()) / 86_400_000);
+    return (
+      <div
+        role="slider"
+        tabIndex={0}
+        aria-orientation="horizontal"
+        aria-valuemin={rangeStartOffset}
+        aria-valuemax={rangeEndOffset}
+        aria-valuenow={valueNow}
+        aria-valuetext={formatDate(edge === "resize-start" ? displayStart : displayEnd)}
+        aria-label={`Resize ${edge === "resize-start" ? "start" : "end"} of ${bar.label}`}
+        onPointerDown={handlePointerDown(edge)}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onKeyDown={handleResizeHandleKeyDown(edge)}
+        className="absolute top-0 h-full cursor-ew-resize focus-visible:shadow-focus focus-visible:outline-none"
+        style={{
+          width: RESIZE_HANDLE_HIT_AREA_PX,
+          [edge === "resize-start" ? "left" : "right"]: -((RESIZE_HANDLE_HIT_AREA_PX - 4) / 2),
+        }}
+      />
+    );
+  }
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: role="group" marks a real keyboard-operable move/resize widget, not a form's <fieldset> grouping.
@@ -52,11 +196,26 @@ export function TimelineBar({ bar, range, pxPerDay }: TimelineBarProps): ReactNo
       title={bar.label}
       aria-label={accessibleName}
       style={style}
-      className={`absolute top-0 h-full truncate rounded-control px-3 text-left text-sm transition-shadow duration-(--duration-fast) ease-out hover:shadow-sm focus-visible:shadow-focus focus-visible:outline-none ${colorClassName} ${
-        contrast?.needsOutline ? "border border-border" : ""
-      }`}
+      onPointerDown={handlePointerDown("move")}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onKeyDown={handleBarKeyDown}
+      className={`absolute top-0 h-full rounded-control text-sm transition-all duration-(--duration-fast) ease-out hover:shadow-sm focus-visible:shadow-focus focus-visible:outline-none ${colorClassName} ${
+        isDragging ? "opacity-85" : ""
+      } ${contrast?.needsOutline ? "border border-border" : ""}`}
     >
-      {showLabel && bar.label}
+      <div className="flex h-full items-center truncate px-3 text-left">{showLabel && bar.label}</div>
+      {allowResize && (
+        <>
+          {resizeHandle("resize-start")}
+          {resizeHandle("resize-end")}
+        </>
+      )}
+      {isDragging && (
+        <div className="-top-6 absolute left-0 whitespace-nowrap rounded-control bg-surface px-1.5 py-0.5 text-text text-xs shadow-md">
+          {formatDateRange(displayStart, displayEnd)}
+        </div>
+      )}
     </div>
   );
 }
