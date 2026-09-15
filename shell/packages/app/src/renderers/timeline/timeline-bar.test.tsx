@@ -40,6 +40,24 @@ describe("TimelineBar", () => {
     expect(screen.getByRole("group").getAttribute("aria-label")).toContain("Design review");
   });
 
+  it("clips a bar starting before the visible range to the track's left edge", () => {
+    render(<TimelineBar bar={makeBar({ start: new Date(2026, 3, 1) })} range={range} pxPerDay={10} />);
+    expect((screen.getByRole("group") as HTMLElement).style.left).toBe("0px");
+  });
+
+  it("clips a bar ending after the visible range to the track's right edge", () => {
+    render(
+      <TimelineBar
+        bar={makeBar({ start: new Date(2026, 4, 25), end: new Date(2026, 5, 10) })}
+        range={range}
+        pxPerDay={10}
+      />,
+    );
+    const style = (screen.getByRole("group") as HTMLElement).style;
+    // range is May 1–31 inclusive: 31 days * 10px/day = 310px track width.
+    expect(Number.parseFloat(style.left) + Number.parseFloat(style.width)).toBeLessThanOrEqual(310);
+  });
+
   it("applies the color_map fill as an inline background color", () => {
     render(<TimelineBar bar={makeBar({ color: "#3B82F6" })} range={range} pxPerDay={50} />);
     expect((screen.getByRole("group") as HTMLElement).style.backgroundColor).toBe("rgb(59, 130, 246)");

@@ -169,14 +169,14 @@ export function TimelineChart({
 
   function handleDragMove(clientX: number): void {
     setActive((current) => {
-      if (!current || current.mode !== "pointer" || pxPerDay <= 0) return current;
+      if (current?.mode !== "pointer" || pxPerDay <= 0) return current;
       const deltaDays = Math.round((clientX - current.startClientX) / pxPerDay);
       return { ...current, projected: applyDelta(current.kind, current.startBar, deltaDays) };
     });
   }
 
   function handleDragEnd(): void {
-    if (!active || active.mode !== "pointer") return;
+    if (active?.mode !== "pointer") return;
     const { barId, projected, startBar } = active;
     setActive(null);
     if (!sameRange(projected, startBar)) void commitChange(barId, projected);

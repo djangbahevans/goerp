@@ -53,9 +53,14 @@ export function TimelineBar({
   const displayStart = projected?.start ?? bar.start;
   const displayEnd = projected?.end ?? bar.end;
 
-  const left = dateToX(displayStart, range, pxPerDay);
-  const rawWidth = dateToX(addDays(displayEnd, 1), range, pxPerDay) - left;
-  const width = Math.max(rawWidth, MIN_BAR_WIDTH_PX);
+  // Clipped to the track's own edges — a bar routinely starts before or
+  // ends after the visible range (the fetch is an overlap query), and an
+  // unclamped position would render past the track's own box instead of
+  // clipping at the boundary the way timeline-chart.md specifies.
+  const trackWidth = dateToX(addDays(range.end, 1), range, pxPerDay);
+  const left = Math.max(dateToX(displayStart, range, pxPerDay), 0);
+  const right = Math.min(dateToX(addDays(displayEnd, 1), range, pxPerDay), trackWidth);
+  const width = Math.max(right - left, MIN_BAR_WIDTH_PX);
   const showLabel = width >= LABEL_MIN_WIDTH_PX;
 
   const style: CSSProperties = {
