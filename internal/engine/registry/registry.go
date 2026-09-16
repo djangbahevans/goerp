@@ -388,9 +388,10 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 // registerBuiltinRoutes registers the engine's own built-in routes into
 // table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
 // /auth/mfa/reverify, /admin/users/{id}/mfa/reset,
-// /admin/users/{id}/roles[/{role}], /_meta/permissions, /_meta/shares, and
-// /_meta/schema resolve through the exact same RouteTable.Lookup module
-// routes do — no second router. Safe against collision by construction:
+// /admin/users/{id}/roles[/{role}], /_meta/permissions, /_meta/shares,
+// /_meta/saved-filters, and /_meta/schema resolve through the exact same
+// RouteTable.Lookup module routes do — no second router. Safe against
+// collision by construction:
 // RegisterModuleRoutes already rejects any module route whose top path
 // segment starts with "_", or is exactly "auth" or "admin", as a reserved
 // engine namespace.
@@ -467,6 +468,33 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathParams:   map[string]string{"id": "uuid"},
 		},
 		PathTemplate: "/_meta/shares/{id}",
+	})
+
+	// /_meta/saved-filters (goerp#635) — same not-EngineBuiltin posture as
+	// /_meta/shares above, for the same reason.
+	table.Register("POST", "/_meta/saved-filters", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/saved-filters",
+	})
+	table.Register("GET", "/_meta/saved-filters", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/saved-filters",
+	})
+	table.Register("PATCH", "/_meta/saved-filters/{id}", &route.RouteEntry{
+		Manifest: route.RouteManifest{
+			EngineNative: true,
+			Auth:         "required",
+			PathParams:   map[string]string{"id": "uuid"},
+		},
+		PathTemplate: "/_meta/saved-filters/{id}",
+	})
+	table.Register("DELETE", "/_meta/saved-filters/{id}", &route.RouteEntry{
+		Manifest: route.RouteManifest{
+			EngineNative: true,
+			Auth:         "required",
+			PathParams:   map[string]string{"id": "uuid"},
+		},
+		PathTemplate: "/_meta/saved-filters/{id}",
 	})
 }
 

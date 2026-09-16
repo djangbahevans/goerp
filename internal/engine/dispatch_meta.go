@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -363,6 +364,190 @@ func (e *Engine) dispatchSharesDeleteRoute(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "revoke share failed")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// savedFilterCreateRequest is POST /_meta/saved-filters' request body —
+// view-system.md §4 "Saved filters": {view_name, label, query_string, is_default}.
+type savedFilterCreateRequest struct {
+	ViewName    string `json:"view_name"`
+	Label       string `json:"label"`
+	QueryString string `json:"query_string"`
+	IsDefault   bool   `json:"is_default"`
+}
+
+// savedFilterUpdateRequest is PATCH /_meta/saved-filters/{id}'s request
+// body — label and/or is_default; query_string is immutable per
+// view-system.md §4: "delete and re-save instead".
+type savedFilterUpdateRequest struct {
+	Label     *string `json:"label"`
+	IsDefault *bool   `json:"is_default"`
+}
+
+type savedFilterResponse struct {
+	ID          string `json:"id"`
+	ViewName    string `json:"view_name"`
+	Label       string `json:"label"`
+	QueryString string `json:"query_string"`
+	IsDefault   bool   `json:"is_default"`
+}
+
+func savedFilterToResponse(sf *savedfilters.SavedFilter) savedFilterResponse {
+	return savedFilterResponse{
+		ID:          sf.ID,
+		ViewName:    sf.ViewName,
+		Label:       sf.Label,
+		QueryString: sf.QueryString,
+		IsDefault:   sf.IsDefault,
+	}
+}
+
+// dispatchSavedFiltersCreateRoute is POST /_meta/saved-filters' handler
+// (goerp#635) — same EngineNative-not-EngineBuiltin posture as
+// dispatchSharesCreateRoute above. Always creates against the caller's
+// own user_id; there's no way to create a saved filter on another
+// user's behalf.
+func (e *Engine) dispatchSavedFiltersCreateRoute(w http.ResponseWriter, r *http.Request) {
+	authCtx := authFromContext(r.Context())
+	tenantCtx := tenantFromContext(r.Context())
+	if authCtx == nil || tenantCtx == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		return
+	}
+
+	var body savedFilterCreateRequest
+	if err := json.UnmarshalRead(r.Body, &body); err != nil {
+		writeRouteError(w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
+		return
+	}
+	if body.ViewName == "" || body.Label == "" || body.QueryString == "" {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "view_name, label, and query_string are required")
+		return
+	}
+
+	sf, err := e.savedFiltersStore.Create(r.Context(), tenantCtx.Slug, authCtx.UserID, body.ViewName, body.Label, body.QueryString, body.IsDefault)
+	if err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "create saved filter failed")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, savedFilterToResponse(sf))
+}
+
+// dispatchSavedFiltersListRoute is GET /_meta/saved-filters?view_name=...'s
+// handler (goerp#635) — a user's own saved filters for one view,
+// own-rows-only enforced at the store query itself
+// (multitenancy-internals.md's "a user sees and manages only their own
+// rows" note), not a separate authorization layer.
+func (e *Engine) dispatchSavedFiltersListRoute(w http.ResponseWriter, r *http.Request) {
+	authCtx := authFromContext(r.Context())
+	tenantCtx := tenantFromContext(r.Context())
+	if authCtx == nil || tenantCtx == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		return
+	}
+
+	viewName := r.URL.Query().Get("view_name")
+	if viewName == "" {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "view_name query parameter is required")
+		return
+	}
+
+	filters, err := e.savedFiltersStore.ListForUserAndView(r.Context(), tenantCtx.Slug, authCtx.UserID, viewName)
+	if err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list saved filters failed")
+		return
+	}
+
+	out := make([]savedFilterResponse, len(filters))
+	for i, sf := range filters {
+		out[i] = savedFilterToResponse(&sf)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// resolveOwnedSavedFilter resolves auth/tenant context and the path
+// {id}, then Gets and caps the row to authCtx's own rows — the identical
+// sequence dispatchSavedFiltersUpdateRoute and
+// dispatchSavedFiltersDeleteRoute both need before their one differing
+// operation. Writes the appropriate error response itself and returns
+// ok=false on any failure, so a caller only needs to check ok.
+func (e *Engine) resolveOwnedSavedFilter(w http.ResponseWriter, r *http.Request) (tenantSlug, id string, ok bool) {
+	authCtx := authFromContext(r.Context())
+	tenantCtx := tenantFromContext(r.Context())
+	if authCtx == nil || tenantCtx == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		return "", "", false
+	}
+
+	id = route.ParamsFromContext(r.Context())["id"]
+	if id == "" {
+		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		return "", "", false
+	}
+
+	sf, err := e.savedFiltersStore.Get(r.Context(), tenantCtx.Slug, id)
+	if err != nil {
+		if errors.Is(err, savedfilters.ErrNotFound) {
+			writeRouteError(w, http.StatusNotFound, "not_found", "saved filter not found")
+			return "", "", false
+		}
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "resolve saved filter failed")
+		return "", "", false
+	}
+	if sf.UserID != authCtx.UserID {
+		writeRouteError(w, http.StatusForbidden, "permission_denied", "you do not own this saved filter")
+		return "", "", false
+	}
+
+	return tenantCtx.Slug, id, true
+}
+
+// dispatchSavedFiltersUpdateRoute is PATCH /_meta/saved-filters/{id}'s
+// handler (goerp#635) — renames and/or toggles is_default; query_string
+// is immutable, so it's not part of savedFilterUpdateRequest at all.
+func (e *Engine) dispatchSavedFiltersUpdateRoute(w http.ResponseWriter, r *http.Request) {
+	var body savedFilterUpdateRequest
+	if err := json.UnmarshalRead(r.Body, &body); err != nil {
+		writeRouteError(w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
+		return
+	}
+
+	tenantSlug, id, ok := e.resolveOwnedSavedFilter(w, r)
+	if !ok {
+		return
+	}
+
+	updated, err := e.savedFiltersStore.Update(r.Context(), tenantSlug, id, body.Label, body.IsDefault)
+	if err != nil {
+		if errors.Is(err, savedfilters.ErrNotFound) {
+			writeRouteError(w, http.StatusNotFound, "not_found", "saved filter not found")
+			return
+		}
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "update saved filter failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, savedFilterToResponse(updated))
+}
+
+// dispatchSavedFiltersDeleteRoute is DELETE /_meta/saved-filters/{id}'s
+// handler (goerp#635).
+func (e *Engine) dispatchSavedFiltersDeleteRoute(w http.ResponseWriter, r *http.Request) {
+	tenantSlug, id, ok := e.resolveOwnedSavedFilter(w, r)
+	if !ok {
+		return
+	}
+
+	if err := e.savedFiltersStore.Delete(r.Context(), tenantSlug, id); err != nil {
+		if errors.Is(err, savedfilters.ErrNotFound) {
+			writeRouteError(w, http.StatusNotFound, "not_found", "saved filter not found")
+			return
+		}
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "delete saved filter failed")
 		return
 	}
 

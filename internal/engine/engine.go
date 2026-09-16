@@ -94,6 +94,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
@@ -150,6 +151,7 @@ type Engine struct {
 	replicaDB         *sql.DB
 	userStore         *user.Store
 	recordSharesStore *recordshares.Store
+	savedFiltersStore *savedfilters.Store
 	cacheClient       *cache.Client
 	searchClient      *search.Client
 	storageBackend    storage.Backend
@@ -254,6 +256,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	userStore := user.NewStore(primaryPool)
 	recordSharesStore := recordshares.NewStore(primaryPool)
+	savedFiltersStore := savedfilters.NewStore(primaryPool)
 	if err := userStore.Bootstrap(ctx); err != nil {
 		_ = primaryPool.Close()
 		_ = schemaPool.Close()
@@ -1035,6 +1038,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		replicaDB:         replicaPool,
 		userStore:         userStore,
 		recordSharesStore: recordSharesStore,
+		savedFiltersStore: savedFiltersStore,
 		cacheClient:       cacheClient,
 		searchClient:      searchClient,
 		storageBackend:    storageBackend,
@@ -1066,6 +1070,13 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["POST /_meta/shares"] = http.HandlerFunc(e.dispatchSharesCreateRoute)
 	builtinRoutes["GET /_meta/shares"] = http.HandlerFunc(e.dispatchSharesListRoute)
 	builtinRoutes["DELETE /_meta/shares/{id}"] = http.HandlerFunc(e.dispatchSharesDeleteRoute)
+
+	// /_meta/saved-filters (goerp#635) follows the identical EngineNative,
+	// not-EngineBuiltin pattern /_meta/shares establishes just above.
+	builtinRoutes["POST /_meta/saved-filters"] = http.HandlerFunc(e.dispatchSavedFiltersCreateRoute)
+	builtinRoutes["GET /_meta/saved-filters"] = http.HandlerFunc(e.dispatchSavedFiltersListRoute)
+	builtinRoutes["PATCH /_meta/saved-filters/{id}"] = http.HandlerFunc(e.dispatchSavedFiltersUpdateRoute)
+	builtinRoutes["DELETE /_meta/saved-filters/{id}"] = http.HandlerFunc(e.dispatchSavedFiltersDeleteRoute)
 
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.

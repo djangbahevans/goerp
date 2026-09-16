@@ -12,15 +12,35 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PivotViewDeclaration } from "./pivot-manifest-types.js";
 import { PivotRenderer } from "./pivot-renderer.js";
 
-const { usePivotDataMock } = vi.hoisted(() => ({ usePivotDataMock: vi.fn() }));
+const { usePivotDataMock, useSavedFiltersMock } = vi.hoisted(() => ({
+  usePivotDataMock: vi.fn(),
+  // No saved filters and already resolved by default — real network
+  // access would otherwise hang indefinitely in this test environment,
+  // since nothing here mocks the sdk's internal http client.
+  useSavedFiltersMock: vi.fn(() => ({
+    filters: [],
+    isLoading: false,
+    save: vi.fn(),
+    remove: vi.fn(),
+    setDefault: vi.fn(),
+  })),
+}));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
-  return { ...actual, usePivotData: usePivotDataMock };
+  return { ...actual, usePivotData: usePivotDataMock, useSavedFilters: useSavedFiltersMock };
 });
 
 afterEach(() => {
   cleanup();
   usePivotDataMock.mockReset();
+  useSavedFiltersMock.mockReset();
+  useSavedFiltersMock.mockImplementation(() => ({
+    filters: [],
+    isLoading: false,
+    save: vi.fn(),
+    remove: vi.fn(),
+    setDefault: vi.fn(),
+  }));
 });
 
 const view: PivotViewDeclaration = {
@@ -148,5 +168,13 @@ describe("PivotRenderer", () => {
       "sales.order",
       expect.objectContaining({ filter: expect.objectContaining({ state: "confirmed" }) }),
     );
+  });
+
+  it("disables the saved-filters fetch when embedded, since it's never consulted there", async () => {
+    usePivotDataMock.mockReturnValue({ data: { cells: [] }, isLoading: false, isFetching: false, isError: false });
+
+    await renderPivotRenderer({ embedded: true });
+
+    expect(useSavedFiltersMock).toHaveBeenCalledWith("sales_pivot", { enabled: false });
   });
 });

@@ -13,12 +13,23 @@ import type { Row } from "../list/list-view-types.js";
 import type { KanbanViewDeclaration } from "./kanban-manifest-types.js";
 import { KanbanRenderer } from "./kanban-renderer.js";
 
-const { useInfiniteListMock, saveRecordMock, resourceMetadataResolveMock, useRelationLabelsMock } = vi.hoisted(() => ({
-  useInfiniteListMock: vi.fn(),
-  saveRecordMock: vi.fn(),
-  resourceMetadataResolveMock: vi.fn(),
-  useRelationLabelsMock: vi.fn(() => new Map()),
-}));
+const { useInfiniteListMock, saveRecordMock, resourceMetadataResolveMock, useRelationLabelsMock, useSavedFiltersMock } =
+  vi.hoisted(() => ({
+    useInfiniteListMock: vi.fn(),
+    saveRecordMock: vi.fn(),
+    resourceMetadataResolveMock: vi.fn(),
+    useRelationLabelsMock: vi.fn(() => new Map()),
+    // No saved filters and already resolved by default — real network
+    // access would otherwise hang indefinitely in this test environment,
+    // since nothing here mocks the sdk's internal http client.
+    useSavedFiltersMock: vi.fn(() => ({
+      filters: [],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    })),
+  }));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
   return {
@@ -26,6 +37,7 @@ vi.mock("@goerp/sdk/react", async (importOriginal) => {
     useInfiniteList: useInfiniteListMock,
     saveRecord: saveRecordMock,
     useRelationLabels: useRelationLabelsMock,
+    useSavedFilters: useSavedFiltersMock,
   };
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
@@ -39,6 +51,14 @@ afterEach(() => {
   saveRecordMock.mockReset();
   resourceMetadataResolveMock.mockReset();
   useRelationLabelsMock.mockClear();
+  useSavedFiltersMock.mockReset();
+  useSavedFiltersMock.mockImplementation(() => ({
+    filters: [],
+    isLoading: false,
+    save: vi.fn(),
+    remove: vi.fn(),
+    setDefault: vi.fn(),
+  }));
 });
 
 const view: KanbanViewDeclaration = {
@@ -231,6 +251,14 @@ describe("KanbanRenderer", () => {
       "crm.lead",
       expect.objectContaining({ filter: expect.objectContaining({ state: "active" }) }),
     );
+  });
+
+  it("disables the saved-filters fetch when embedded, since it's never consulted there", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+
+    await renderKanbanRenderer({ embedded: true });
+
+    expect(useSavedFiltersMock).toHaveBeenCalledWith("leads_kanban", { enabled: false });
   });
 
   it("merges the embedded base filter and isolates the cache key by view and record", async () => {
