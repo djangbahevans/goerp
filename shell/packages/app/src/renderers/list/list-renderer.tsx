@@ -12,6 +12,7 @@ import { columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
 import { ListFilters } from "./list-filters.js";
 import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js";
+import { SavedFiltersChip } from "./saved-filters-chip.js";
 import { useDefaultFilterApplication, useListState } from "./use-list-state.js";
 import { useSelection } from "./use-selection.js";
 import type { TreeRow } from "./use-tree-rows.js";
@@ -377,16 +378,19 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
           {...(embedded !== undefined ? { embedded } : {})}
           {...(showCreateAction !== undefined ? { showCreateAction } : {})}
         />
-        {hiddenColumns.length > 0 && (
-          <ActionMenu
-            label="Columns"
-            items={hiddenColumns.map((column) => ({
-              label: column.label ?? column.field,
-              checked: revealedFields.has(column.field),
-              onClick: () => toggleColumn(column.field),
-            }))}
-          />
-        )}
+        <div className="flex items-center gap-2">
+          {!embedded && <SavedFiltersChip viewName={view.name} listState={listState} />}
+          {hiddenColumns.length > 0 && (
+            <ActionMenu
+              label="Columns"
+              items={hiddenColumns.map((column) => ({
+                label: column.label ?? column.field,
+                checked: revealedFields.has(column.field),
+                onClick: () => toggleColumn(column.field),
+              }))}
+            />
+          )}
+        </div>
       </div>
       {showSelection && <BulkActions actions={bulkActions} selectedIds={selectedIds} clearSelection={clearSelection} />}
       {!isTree && groupByOptions.length > 0 && (
