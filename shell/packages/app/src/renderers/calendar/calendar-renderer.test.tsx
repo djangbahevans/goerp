@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import type { UseSavedFiltersResult } from "@goerp/sdk/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -13,13 +14,25 @@ import type { Row } from "../list/list-view-types.js";
 import type { CalendarViewDeclaration } from "./calendar-manifest-types.js";
 import { CalendarRenderer } from "./calendar-renderer.js";
 
-const { useInfiniteListMock, resolveViewPathMock } = vi.hoisted(() => ({
+const { useInfiniteListMock, resolveViewPathMock, useSavedFiltersMock } = vi.hoisted(() => ({
   useInfiniteListMock: vi.fn(),
   resolveViewPathMock: vi.fn(),
+  // No saved filters and already resolved by default — real network
+  // access would otherwise hang indefinitely in this test environment,
+  // since nothing here mocks the sdk's internal http client.
+  useSavedFiltersMock: vi.fn(
+    (): UseSavedFiltersResult => ({
+      filters: [],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    }),
+  ),
 }));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
-  return { ...actual, useInfiniteList: useInfiniteListMock };
+  return { ...actual, useInfiniteList: useInfiniteListMock, useSavedFilters: useSavedFiltersMock };
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
@@ -30,6 +43,14 @@ afterEach(() => {
   cleanup();
   useInfiniteListMock.mockReset();
   resolveViewPathMock.mockReset();
+  useSavedFiltersMock.mockReset();
+  useSavedFiltersMock.mockImplementation(() => ({
+    filters: [],
+    isLoading: false,
+    save: vi.fn(),
+    remove: vi.fn(),
+    setDefault: vi.fn(),
+  }));
 });
 
 const INITIAL_DATE = new Date(2026, 4, 13); // Wednesday, May 13 2026
@@ -227,6 +248,42 @@ describe("CalendarRenderer", () => {
       "contacts.activity",
       expect.objectContaining({ filter: expect.objectContaining({ assigned_to: "u1" }) }),
     );
+  });
+
+  it("applies the user's own is_default saved filter instead of the manifest's default_filters", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+    useSavedFiltersMock.mockReturnValue({
+      filters: [
+        {
+          id: "f1",
+          viewName: "activities_calendar",
+          label: "Mine",
+          queryString: "?filter[assigned_to]=u2",
+          isDefault: true,
+        },
+      ],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    await renderCalendarRenderer({}, { ...view, default_filters: { assigned_to: "u1" } });
+
+    await waitFor(() => {
+      expect(useInfiniteListMock).toHaveBeenCalledWith(
+        "contacts.activity",
+        expect.objectContaining({ filter: expect.objectContaining({ assigned_to: "u2" }) }),
+      );
+    });
+  });
+
+  it("disables the saved-filters fetch when embedded, since it's never consulted there", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+
+    await renderCalendarRenderer({ embedded: true });
+
+    expect(useSavedFiltersMock).toHaveBeenCalledWith("activities_calendar", { enabled: false });
   });
 
   it("merges the embedded base filter and isolates the cache key by view and record", async () => {

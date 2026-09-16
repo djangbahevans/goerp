@@ -4,10 +4,10 @@ import { toast } from "@goerp/sdk/notifications";
 import { useInfiniteList } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ListFilters } from "../list/list-filters.js";
 import type { Row } from "../list/list-view-types.js";
-import { computeDefaultFilters, useListState } from "../list/use-list-state.js";
+import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
 import { dateKey, visibleRange } from "./calendar-date-utils.js";
 import { buildCalendarEvents, initialViewMode } from "./calendar-events.js";
 import type { CalendarViewDeclaration } from "./calendar-manifest-types.js";
@@ -56,16 +56,10 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
   const listState = useListState(embedded, undefined);
   const navigate = useNavigate();
 
-  const defaultsApplied = useRef(false);
-  const { setFilters } = listState;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once on mount, guarded by defaultsApplied — view/listState.filter/setFilters are deliberately read only at that first run, not tracked as change-triggers.
-  useEffect(() => {
-    if (defaultsApplied.current) return;
-    defaultsApplied.current = true;
-    if (Object.keys(listState.filter).length > 0) return;
-    const defaults = computeDefaultFilters(view);
-    if (Object.keys(defaults).length > 0) setFilters(defaults);
-  }, []);
+  // Calendar's own date-range filter (below) always wins over listState.filter
+  // for view.date_field, so a saved/manifest default touching that field is
+  // harmless — it's just never the one that ends up applied.
+  useDefaultFilterApplication(view, listState, embedded);
 
   // Computed once and passed to CalendarView's own initialDate below,
   // rather than each calling `new Date()` independently — two separate
