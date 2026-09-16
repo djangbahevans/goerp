@@ -1,10 +1,8 @@
 import { downloadBlob } from "@goerp/sdk";
 import { ActionButton, EmptyState, Icon, Skeleton } from "@goerp/sdk/components";
-import { usePivotData, useSavedFilters } from "@goerp/sdk/react";
-import { useEffect, useRef } from "react";
+import { usePivotData } from "@goerp/sdk/react";
 import { ListFilters } from "../list/list-filters.js";
-import { computeDefaultFilters, resolveDefaultSavedFilterState } from "../list/list-renderer.js";
-import { useListState } from "../list/use-list-state.js";
+import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
 import { buildPivotSheetData, pivotSheetDataToBlob } from "./pivot-download.js";
 import type { PivotViewDeclaration } from "./pivot-manifest-types.js";
 import { mapPivotResponse, toValueColumns } from "./pivot-mapping.js";
@@ -28,42 +26,9 @@ export interface PivotRendererProps {
 export function PivotRenderer({ view, recordId, embedded, baseFilter }: PivotRendererProps) {
   const listState = useListState(embedded, undefined);
 
-  // Embedded views never touch the URL, so the "explicit URL params"
-  // precedence tier doesn't apply to them, and there's nothing to fetch —
-  // disabled rather than wasting a request whose result is never used.
-  const savedFiltersView = useSavedFilters(view.name, { enabled: !embedded });
-
-  // Snapshotted once at mount, not read live inside the effect below —
-  // the effect's own run is deferred until savedFiltersView resolves, and
-  // re-reading listState.filter live at that later point can no longer
-  // distinguish "never had anything" from "the user already cleared it
-  // back to empty" during the wait. Pivot never reads listState.sort/
-  // groupBy (rows/columns/values come solely from the manifest), so
-  // unlike ListRenderer this only ever needs to guard filter.
-  const hadExplicitFilterOnMount = useRef(Object.keys(listState.filter).length > 0);
-
-  // Applied once, waiting for savedFiltersView before applying either
-  // kind of default (view-system.md §4's precedence rule), so a user's
-  // own is_default saved filter can beat the manifest's default_filters
-  // rather than racing it.
-  const defaultsApplied = useRef(false);
-  const { setFilters } = listState;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: guarded by defaultsApplied, gated on savedFiltersView.isLoading; view/setFilters/savedFiltersView.filters/hadExplicitFilterOnMount are deliberately read only once that gate opens, not tracked as change-triggers.
-  useEffect(() => {
-    if (defaultsApplied.current) return;
-    if (!embedded && savedFiltersView.isLoading) return;
-    defaultsApplied.current = true;
-    if (hadExplicitFilterOnMount.current) return;
-
-    const savedDefault = embedded ? undefined : resolveDefaultSavedFilterState(savedFiltersView.filters);
-    if (savedDefault) {
-      if (Object.keys(savedDefault.filter).length > 0) setFilters(savedDefault.filter);
-      return;
-    }
-
-    const defaults = computeDefaultFilters(view);
-    if (Object.keys(defaults).length > 0) setFilters(defaults);
-  }, [embedded, savedFiltersView.isLoading]);
+  // rows/columns/values come solely from the manifest, not listState —
+  // no need for useDefaultFilterApplication's applySortAndGroupBy option.
+  useDefaultFilterApplication(view, listState, embedded);
 
   // view-system.md's embedded-rendering contract: the locked base filter
   // always wins over user-driven state, never the other way around.

@@ -1,3 +1,4 @@
+import type { UseSavedFiltersResult } from "@goerp/sdk/react";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -6,10 +7,44 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { listStateToSearch, parseListSearch, useListState } from "./use-list-state.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  computeDefaultFilters,
+  listStateToSearch,
+  parseListSearch,
+  useDefaultFilterApplication,
+  useListState,
+} from "./use-list-state.js";
 
-afterEach(cleanup);
+const { useSavedFiltersMock } = vi.hoisted(() => ({
+  // No saved filters and already resolved by default — tests exercising
+  // the saved-filter precedence itself override this per-test.
+  useSavedFiltersMock: vi.fn(
+    (): UseSavedFiltersResult => ({
+      filters: [],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    }),
+  ),
+}));
+vi.mock("@goerp/sdk/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
+  return { ...actual, useSavedFilters: useSavedFiltersMock };
+});
+
+afterEach(() => {
+  cleanup();
+  useSavedFiltersMock.mockReset();
+  useSavedFiltersMock.mockImplementation(() => ({
+    filters: [],
+    isLoading: false,
+    save: vi.fn(),
+    remove: vi.fn(),
+    setDefault: vi.fn(),
+  }));
+});
 
 describe("parseListSearch / listStateToSearch", () => {
   it("extracts bracketed filter keys, sort, and group_by, round-tripping back to the same search object", () => {
@@ -205,5 +240,216 @@ describe("useListState", () => {
 
     expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_active: "true" }));
     expect(router.state.location.search).toEqual({});
+  });
+});
+
+function DefaultFilterProbe({
+  embedded,
+  defaultFilters,
+  applySortAndGroupBy,
+}: {
+  embedded: boolean;
+  defaultFilters?: Record<string, unknown>;
+  applySortAndGroupBy?: boolean;
+}) {
+  const listState = useListState(embedded, undefined);
+  useDefaultFilterApplication(
+    { name: "probe_view", ...(defaultFilters !== undefined ? { default_filters: defaultFilters } : {}) },
+    listState,
+    embedded,
+    applySortAndGroupBy,
+  );
+  return (
+    <div>
+      <span data-testid="filter">{JSON.stringify(listState.filter)}</span>
+      <span data-testid="sort">{listState.sort ?? ""}</span>
+      <span data-testid="group-by">{listState.groupBy ?? ""}</span>
+    </div>
+  );
+}
+
+async function renderDefaultFilterProbe(
+  initialPath: string,
+  embedded: boolean,
+  options: { defaultFilters?: Record<string, unknown>; applySortAndGroupBy?: boolean } = {},
+) {
+  const rootRoute = createRootRoute();
+  const indexRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => (
+      <DefaultFilterProbe
+        embedded={embedded}
+        {...(options.defaultFilters !== undefined ? { defaultFilters: options.defaultFilters } : {})}
+        {...(options.applySortAndGroupBy !== undefined ? { applySortAndGroupBy: options.applySortAndGroupBy } : {})}
+      />
+    ),
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([indexRoute]),
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
+  });
+  await router.load();
+  await act(async () => {
+    render(<RouterProvider router={router} />);
+  });
+  return { router };
+}
+
+describe("useDefaultFilterApplication", () => {
+  it("applies the manifest's default_filters when nothing else is present", async () => {
+    await renderDefaultFilterProbe("/", false, { defaultFilters: { is_active: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_active: true }));
+  });
+
+  it("applies the user's own is_default saved filter instead of the manifest's default_filters", async () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [
+        { id: "f1", viewName: "probe_view", label: "Mine", queryString: "?filter[is_active]=false", isDefault: true },
+      ],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    await renderDefaultFilterProbe("/", false, { defaultFilters: { is_active: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_active: false }));
+  });
+
+  it("an explicit URL filter wins over the user's own is_default saved filter", async () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [
+        { id: "f1", viewName: "probe_view", label: "Mine", queryString: "?filter[is_active]=false", isDefault: true },
+      ],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    await renderDefaultFilterProbe("/?filter[type]=company", false, {});
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ type: "company" }));
+  });
+
+  it("waits for the saved-filters fetch to resolve before applying the manifest's default_filters", async () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [],
+      isLoading: true,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    await renderDefaultFilterProbe("/", false, { defaultFilters: { is_active: true } });
+
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({}));
+  });
+
+  it("disables the saved-filters fetch when embedded, since it's never consulted there", async () => {
+    await renderDefaultFilterProbe("/", true, { defaultFilters: { is_active: true } });
+
+    expect(useSavedFiltersMock).toHaveBeenCalledWith("probe_view", { enabled: false });
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ is_active: true }));
+  });
+
+  it("with applySortAndGroupBy, replays a saved default's sort and group_by too", async () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [
+        { id: "f1", viewName: "probe_view", label: "Mine", queryString: "?sort=-name&group_by=state", isDefault: true },
+      ],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    await renderDefaultFilterProbe("/", false, { applySortAndGroupBy: true });
+
+    expect(screen.getByTestId("sort").textContent).toBe("-name");
+    expect(screen.getByTestId("group-by").textContent).toBe("state");
+  });
+
+  it("without applySortAndGroupBy, a saved default's sort is never replayed (Kanban/Pivot never read listState.sort)", async () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [{ id: "f1", viewName: "probe_view", label: "Mine", queryString: "?sort=-name", isDefault: true }],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    await renderDefaultFilterProbe("/", false, {});
+
+    expect(screen.getByTestId("sort").textContent).toBe("");
+  });
+
+  it("with applySortAndGroupBy, an explicit URL sort with no filter[...] params still wins over a saved default's sort", async () => {
+    useSavedFiltersMock.mockReturnValue({
+      filters: [{ id: "f1", viewName: "probe_view", label: "Mine", queryString: "?sort=name", isDefault: true }],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    await renderDefaultFilterProbe("/?sort=-created_at", false, { applySortAndGroupBy: true });
+
+    expect(screen.getByTestId("sort").textContent).toBe("-created_at");
+  });
+});
+
+describe("computeDefaultFilters", () => {
+  it("coerces default_filters' plain values, arrays becoming string arrays", () => {
+    const defaults = computeDefaultFilters({ default_filters: { is_active: true, count: 3, tag_ids: [1, 2] } });
+    expect(defaults).toEqual({ is_active: true, count: 3, tag_ids: ["1", "2"] });
+  });
+
+  it("wraps a text filter's default in {like}", () => {
+    const defaults = computeDefaultFilters({
+      filters: [{ field: "name", label: "Name", type: "text", default: "acme" }],
+    });
+    expect(defaults).toEqual({ name: { like: "acme" } });
+  });
+
+  it("passes a daterange/number_range filter's default through as {gte,lte}", () => {
+    const defaults = computeDefaultFilters({
+      filters: [{ field: "created_at", label: "Created", type: "daterange", default: { gte: "2026-01-01" } }],
+    });
+    expect(defaults).toEqual({ created_at: { gte: "2026-01-01" } });
+  });
+
+  it("stringifies a number_range filter's numeric default bounds", () => {
+    const defaults = computeDefaultFilters({
+      filters: [{ field: "amount", label: "Amount", type: "number_range", default: { gte: 10, lte: 100 } }],
+    });
+    expect(defaults).toEqual({ amount: { gte: "10", lte: "100" } });
+  });
+
+  it("accepts a range-shaped default_filters value even with no per-field type context", () => {
+    const defaults = computeDefaultFilters({ default_filters: { created_at: { gte: "2026-01-01" } } });
+    expect(defaults).toEqual({ created_at: { gte: "2026-01-01" } });
+  });
+
+  it("coerces a multi_select/tags filter's array default to a string array", () => {
+    const defaults = computeDefaultFilters({
+      filters: [{ field: "tag_ids", label: "Tags", type: "tags", default: ["a", "b"] }],
+    });
+    expect(defaults).toEqual({ tag_ids: ["a", "b"] });
+  });
+
+  it("default_filters wins over a filter's own default for the same field", () => {
+    const defaults = computeDefaultFilters({
+      default_filters: { type: "company" },
+      filters: [{ field: "type", label: "Type", type: "select", default: "person" }],
+    });
+    expect(defaults).toEqual({ type: "company" });
+  });
+
+  it("returns an empty object when neither default_filters nor any filter declares a default", () => {
+    expect(computeDefaultFilters({ filters: [{ field: "type", label: "Type", type: "select" }] })).toEqual({});
   });
 });

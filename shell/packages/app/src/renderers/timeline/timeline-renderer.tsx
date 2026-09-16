@@ -3,9 +3,8 @@ import { createInfiniteListQueryOptions, saveRecord, useInfiniteList } from "@go
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ListFilters } from "../list/list-filters.js";
-import { computeDefaultFilters } from "../list/list-renderer.js";
 import type { Row } from "../list/list-view-types.js";
-import { useListState } from "../list/use-list-state.js";
+import { computeDefaultFilters, useListState } from "../list/use-list-state.js";
 import { TimelineChart } from "./timeline-chart.js";
 import { dateKey, initialRangeMode, navigateRange, startOfDay, visibleRange } from "./timeline-date-utils.js";
 import { buildTimelineRows } from "./timeline-layout.js";
