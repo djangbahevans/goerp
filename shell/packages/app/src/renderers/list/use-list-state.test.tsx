@@ -264,6 +264,15 @@ function DefaultFilterProbe({
       <span data-testid="filter">{JSON.stringify(listState.filter)}</span>
       <span data-testid="sort">{listState.sort ?? ""}</span>
       <span data-testid="group-by">{listState.groupBy ?? ""}</span>
+      <button type="button" onClick={() => listState.setFilter("type", "person")}>
+        edit-type
+      </button>
+      <button type="button" onClick={() => listState.setFilter("priority", "high")}>
+        edit-priority
+      </button>
+      <button type="button" onClick={() => listState.setSort("created_at")}>
+        edit-sort
+      </button>
     </div>
   );
 }
@@ -399,6 +408,59 @@ describe("useDefaultFilterApplication", () => {
     await renderDefaultFilterProbe("/?sort=-created_at", false, { applySortAndGroupBy: true });
 
     expect(screen.getByTestId("sort").textContent).toBe("-created_at");
+  });
+
+  it("goerp#815: a filter edited while the saved-filters fetch is still pending is not overwritten once it resolves", async () => {
+    let isLoading = true;
+    useSavedFiltersMock.mockImplementation(() => ({
+      filters: [],
+      isLoading,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    }));
+
+    const { router } = await renderDefaultFilterProbe("/", false, { defaultFilters: { region: "us" } });
+
+    // Edits while the fetch is still pending — must not be clobbered once it resolves.
+    await act(async () => {
+      fireEvent.click(screen.getByText("edit-type"));
+    });
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ type: "person" }));
+
+    isLoading = false;
+    // A second, unrelated edit forces a re-render so the resolved isLoading is picked up.
+    await act(async () => {
+      fireEvent.click(screen.getByText("edit-priority"));
+    });
+
+    expect(router.state.location.search).not.toHaveProperty("filter[region]");
+    expect(screen.getByTestId("filter").textContent).toBe(JSON.stringify({ type: "person", priority: "high" }));
+  });
+
+  it("goerp#815: a sort chosen while the saved-filters fetch is still pending is not overwritten once it resolves", async () => {
+    let isLoading = true;
+    useSavedFiltersMock.mockImplementation(() => ({
+      filters: [{ id: "f1", viewName: "probe_view", label: "Mine", queryString: "?sort=-name", isDefault: true }],
+      isLoading,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    }));
+
+    await renderDefaultFilterProbe("/", false, { applySortAndGroupBy: true });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("edit-sort"));
+    });
+    expect(screen.getByTestId("sort").textContent).toBe("created_at");
+
+    isLoading = false;
+    await act(async () => {
+      fireEvent.click(screen.getByText("edit-priority"));
+    });
+
+    expect(screen.getByTestId("sort").textContent).toBe("created_at");
   });
 });
 
