@@ -25,6 +25,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
+	"github.com/rs/zerolog/log"
 )
 
 type Handler struct {
@@ -61,13 +62,19 @@ type meResponse struct {
 	Tenant meTenant `json:"tenant"`
 }
 
-// meUser deliberately omits name/avatarUrl/locale/timezone
-// (typescript-sdk-reference.md §6's CurrentUser) — user.User has no
-// backing columns for them yet (a separate, unfiled user-profile-fields
-// ticket). Every field below already exists on user.User/AuthContext.
+// meUser deliberately omits locale/timezone (typescript-sdk-reference.md
+// §6's CurrentUser) — user.Profile has no backing columns for them yet (a
+// separate, unfiled user-profile-fields ticket). Name/AvatarURL come from
+// user.Store.GetProfile (goerp#817) and are nil for a user with no
+// system.user_profiles row (pre-goerp#817 users, or any invite path other
+// than tenant provisioning until a general invite endpoint exists) — the
+// frontend falls back to a derived display name in that case rather than
+// this handler inventing one.
 type meUser struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
+	Name          *string    `json:"name"`
+	AvatarURL     *string    `json:"avatar_url"`
 	Roles         []string   `json:"roles"`
 	AMR           []string   `json:"amr"`
 	MFAVerifiedAt *time.Time `json:"mfa_verified_at"`
@@ -122,11 +129,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A profile lookup failure degrades to nil name/avatarUrl (the
+	// frontend already derives a display name for that case) rather than
+	// failing the whole session check — id/email/roles above already
+	// resolved successfully, and this field is cosmetic, not a session
+	// validity signal.
+	var name, avatarURL *string
+	profile, err := h.users.GetProfile(ctx, authCtx.UserID)
+	switch {
+	case err == nil:
+		name, avatarURL = &profile.Name, profile.AvatarURL
+	case errors.Is(err, user.ErrProfileNotFound):
+		// Leave name/avatarURL nil.
+	default:
+		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: profile lookup failed, omitting name/avatar")
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, meResponse{
 		User: meUser{
 			ID:            authCtx.UserID,
 			Email:         u.Email,
+			Name:          name,
+			AvatarURL:     avatarURL,
 			Roles:         authCtx.RolesLive,
 			AMR:           authCtx.AMR,
 			MFAVerifiedAt: authCtx.MFAVerifiedAt,

@@ -8,7 +8,15 @@ import { CommandPalette } from "./command-palette.js";
 import { commandRegistry } from "./command-registry.js";
 import type { Command } from "./command-types.js";
 
-const fakeUser = { id: "u1", email: "demo@goerp.dev", roles: [], amr: [], mfaVerifiedAt: null };
+const fakeUser = {
+  id: "u1",
+  email: "demo@goerp.dev",
+  name: null,
+  avatarUrl: null,
+  roles: [],
+  amr: [],
+  mfaVerifiedAt: null,
+};
 const fakeTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
 const fakeAuth: AuthContextValue = {

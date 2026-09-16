@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { AuthMachine, authTransition } from "./auth-machine.js";
 import type { AuthState, CurrentTenant, CurrentUser } from "./types.js";
 
-const user: CurrentUser = { id: "u1", email: "a@example.com", roles: ["admin"], amr: ["pwd"], mfaVerifiedAt: null };
+const user: CurrentUser = {
+  id: "u1",
+  email: "a@example.com",
+  name: null,
+  avatarUrl: null,
+  roles: ["admin"],
+  amr: ["pwd"],
+  mfaVerifiedAt: null,
+};
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
 describe("authTransition", () => {

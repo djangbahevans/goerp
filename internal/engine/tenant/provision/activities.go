@@ -451,14 +451,11 @@ func (a *Activities) SeedSystemData(ctx context.Context, slug string) error {
 
 // CreateAdminUser invites the tenant's founding admin via the same invite
 // mechanism a normal in-app "invite a teammate" call uses (invite.Store.
-// Invite) — creates the user (status 'invited'), a tenant_invitations
-// row, and sends the invite email; no separate "welcome email" activity
-// needed. AdminName has no home yet: invite.Store.Invite (goerp#148) has
-// no display-name parameter, so it isn't captured here either — an
-// existing gap in that package, not something this ticket adds scope to
-// fix.
-func (a *Activities) CreateAdminUser(ctx context.Context, slug, adminEmail string) error {
-	if _, err := a.inviteStore.Invite(ctx, slug, adminEmail, "admin", nil); err != nil {
+// Invite) — creates the user (status 'invited'), a system.user_profiles
+// row (goerp#817), a tenant_invitations row, and sends the invite email;
+// no separate "welcome email" activity needed.
+func (a *Activities) CreateAdminUser(ctx context.Context, slug, adminEmail, adminName string) error {
+	if _, err := a.inviteStore.Invite(ctx, slug, adminEmail, "admin", adminName, nil); err != nil {
 		return fmt.Errorf("invite admin user: %w", err)
 	}
 	return nil

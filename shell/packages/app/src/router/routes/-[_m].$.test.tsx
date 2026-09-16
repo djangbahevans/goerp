@@ -12,7 +12,7 @@ import { routeTree } from "../routeTree.gen.js";
 // component always renders CommandPalette (useAuth + useQueryClient +
 // useContext(PermissionContext)) regardless of which child route matches,
 // so every route test needs these three, not just this route's own logic.
-const FAKE_USER = { id: "u1", email: "a@b.com", roles: [], amr: [], mfaVerifiedAt: null };
+const FAKE_USER = { id: "u1", email: "a@b.com", name: null, avatarUrl: null, roles: [], amr: [], mfaVerifiedAt: null };
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 const FAKE_AUTH: AuthContextValue = {
   state: { status: "authenticated", user: FAKE_USER, tenant: FAKE_TENANT },

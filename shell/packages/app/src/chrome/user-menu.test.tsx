@@ -12,7 +12,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UserMenu } from "./user-menu.js";
 
 function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
-  const user = { id: "u1", email: "jane.doe@example.com", roles: [], amr: [], mfaVerifiedAt: null };
+  const user = {
+    id: "u1",
+    email: "jane.doe@example.com",
+    name: null,
+    avatarUrl: null,
+    roles: [],
+    amr: [],
+    mfaVerifiedAt: null,
+  };
   const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
   return {
     state: { status: "authenticated", user, tenant },
@@ -97,8 +105,44 @@ describe("UserMenu", () => {
   });
 
   it("falls back to the raw email when the local-part title-cases to empty", async () => {
-    const user = { id: "u2", email: "@example.com", roles: [], amr: [], mfaVerifiedAt: null };
+    const user = {
+      id: "u2",
+      email: "@example.com",
+      name: null,
+      avatarUrl: null,
+      roles: [],
+      amr: [],
+      mfaVerifiedAt: null,
+    };
     await renderUserMenu(fakeAuth({ user }));
     expect(screen.getByRole("button", { name: "@example.com's account menu" })).toBeTruthy();
+  });
+
+  it("falls back to a derived name when the profile name is an empty string", async () => {
+    const user = {
+      id: "u4",
+      email: "jane.doe@example.com",
+      name: "",
+      avatarUrl: null,
+      roles: [],
+      amr: [],
+      mfaVerifiedAt: null,
+    };
+    await renderUserMenu(fakeAuth({ user }));
+    expect(screen.getByRole("button", { name: "Jane Doe's account menu" })).toBeTruthy();
+  });
+
+  it("uses the real name instead of deriving one when the user has a profile", async () => {
+    const user = {
+      id: "u3",
+      email: "jane.doe@example.com",
+      name: "Ada Lovelace",
+      avatarUrl: null,
+      roles: [],
+      amr: [],
+      mfaVerifiedAt: null,
+    };
+    await renderUserMenu(fakeAuth({ user }));
+    expect(screen.getByRole("button", { name: "Ada Lovelace's account menu" })).toBeTruthy();
   });
 });

@@ -21,12 +21,13 @@ const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
 // needing a real system.users table — most tests here exercise
 // invite.Store's own behavior, not user.Store's.
 type fakeUserResolver struct {
-	ids map[string]string
-	n   int
+	ids      map[string]string
+	profiles map[string]string
+	n        int
 }
 
 func newFakeUserResolver() *fakeUserResolver {
-	return &fakeUserResolver{ids: make(map[string]string)}
+	return &fakeUserResolver{ids: make(map[string]string), profiles: make(map[string]string)}
 }
 
 func (f *fakeUserResolver) FindOrCreateInvited(ctx context.Context, email string) (string, error) {
@@ -37,6 +38,13 @@ func (f *fakeUserResolver) FindOrCreateInvited(ctx context.Context, email string
 	id := fmt.Sprintf("fake-user-%d", f.n)
 	f.ids[email] = id
 	return id, nil
+}
+
+func (f *fakeUserResolver) EnsureProfile(ctx context.Context, userID, name string) error {
+	if _, ok := f.profiles[userID]; !ok {
+		f.profiles[userID] = name
+	}
+	return nil
 }
 
 // openTestStore creates a fixture tenant_<random> schema with roles
@@ -141,13 +149,18 @@ func TestInvite_CreatesInvitationForUnknownEmail(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	email := uniqueEmail(t)
 
-	inv, err := store.Invite(context.Background(), slug, email, "admin", nil)
+	inv, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
 
 	if inv.Email != email {
 		t.Errorf("Email = %q, want %q", inv.Email, email)
+	}
+	fake := store.users.(*fakeUserResolver)
+	userID := fake.ids[email]
+	if got := fake.profiles[userID]; got != "Test User" {
+		t.Errorf("profile name for %q = %q, want %q", userID, got, "Test User")
 	}
 	if inv.AcceptedAt != nil {
 		t.Error("expected AcceptedAt to be nil")
@@ -160,10 +173,25 @@ func TestInvite_CreatesInvitationForUnknownEmail(t *testing.T) {
 	}
 }
 
+func TestInvite_BlankNameSkipsProfileCreation(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	email := uniqueEmail(t)
+
+	if _, err := store.Invite(context.Background(), slug, email, "admin", "  ", nil); err != nil {
+		t.Fatalf("Invite() error: %v", err)
+	}
+
+	fake := store.users.(*fakeUserResolver)
+	userID := fake.ids[email]
+	if _, ok := fake.profiles[userID]; ok {
+		t.Errorf("profile for %q was created from a blank name, want no profile row", userID)
+	}
+}
+
 func TestInvite_UnknownRoleFails(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	_, err := store.Invite(context.Background(), slug, uniqueEmail(t), "does-not-exist", nil)
+	_, err := store.Invite(context.Background(), slug, uniqueEmail(t), "does-not-exist", "Test User", nil)
 	if !errors.Is(err, role.ErrRoleNotFound) {
 		t.Errorf("Invite() with unknown role: error = %v, want role.ErrRoleNotFound", err)
 	}
@@ -174,7 +202,7 @@ func TestInvite_ReinvitingLiveEmailReusesRowAndRotatesToken(t *testing.T) {
 	schema := tenantschema.Name(slug)
 	email := uniqueEmail(t)
 
-	first, err := store.Invite(context.Background(), slug, email, "admin", nil)
+	first, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("first Invite() error: %v", err)
 	}
@@ -186,7 +214,7 @@ func TestInvite_ReinvitingLiveEmailReusesRowAndRotatesToken(t *testing.T) {
 		t.Fatalf("query first token_hash: %v", err)
 	}
 
-	second, err := store.Invite(context.Background(), slug, email, "admin", nil)
+	second, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("second Invite() error: %v", err)
 	}
@@ -230,7 +258,7 @@ func TestRevoke_FreesEmailForFreshInvite(t *testing.T) {
 	schema := tenantschema.Name(slug)
 	email := uniqueEmail(t)
 
-	first, err := store.Invite(context.Background(), slug, email, "admin", nil)
+	first, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -251,7 +279,7 @@ func TestRevoke_FreesEmailForFreshInvite(t *testing.T) {
 
 	// A fresh invite to the same email now creates a NEW row — the
 	// revoked one is excluded from the partial index's conflict target.
-	second, err := store.Invite(context.Background(), slug, email, "admin", nil)
+	second, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() after revoke: %v", err)
 	}
@@ -264,7 +292,7 @@ func TestRevoke_NonLiveReturnsErrInvitationNotLive(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	email := uniqueEmail(t)
 
-	inv, err := store.Invite(context.Background(), slug, email, "admin", nil)
+	inv, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -282,7 +310,7 @@ func TestResendInvite_ResolvesEmailAndRotatesToken(t *testing.T) {
 	schema := tenantschema.Name(slug)
 	email := uniqueEmail(t)
 
-	inv, err := store.Invite(context.Background(), slug, email, "admin", nil)
+	inv, err := store.Invite(context.Background(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -356,7 +384,7 @@ func TestInvite_ComposesWithRealUserStore(t *testing.T) {
 	}
 
 	email := uniqueEmail(t)
-	inv, err := inviteStore.Invite(context.Background(), slug, email, "admin", nil)
+	inv, err := inviteStore.Invite(context.Background(), slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -392,18 +420,18 @@ func TestListExpired_ReturnsOnlyExpiredLiveInvitations(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	ctx := context.Background()
 
-	expired, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", nil)
+	expired, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
 	backdateExpiry(t, conn, slug, expired.ID, time.Now().Add(-time.Hour))
 
-	live, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", nil)
+	live, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
 
-	accepted, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", nil)
+	accepted, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -413,7 +441,7 @@ func TestListExpired_ReturnsOnlyExpiredLiveInvitations(t *testing.T) {
 		t.Fatalf("mark accepted: %v", err)
 	}
 
-	revoked, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", nil)
+	revoked, err := store.Invite(ctx, slug, uniqueEmail(t), "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}

@@ -19,7 +19,15 @@ describe("fetchCurrentSession", () => {
   it("maps a 200 response to camelCase user/tenant", async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse(200, {
-        user: { id: "u1", email: "a@example.com", roles: ["admin"], amr: ["pwd"], mfa_verified_at: null },
+        user: {
+          id: "u1",
+          email: "a@example.com",
+          name: "Ada Lovelace",
+          avatar_url: null,
+          roles: ["admin"],
+          amr: ["pwd"],
+          mfa_verified_at: null,
+        },
         tenant: { id: "t1", slug: "acme", name: "Acme", plan: "pro" },
       }),
     );
@@ -28,7 +36,15 @@ describe("fetchCurrentSession", () => {
     const session = await fetchCurrentSession();
 
     expect(session).toEqual({
-      user: { id: "u1", email: "a@example.com", roles: ["admin"], amr: ["pwd"], mfaVerifiedAt: null },
+      user: {
+        id: "u1",
+        email: "a@example.com",
+        name: "Ada Lovelace",
+        avatarUrl: null,
+        roles: ["admin"],
+        amr: ["pwd"],
+        mfaVerifiedAt: null,
+      },
       tenant: { id: "t1", slug: "acme", name: "Acme", plan: "pro" },
     });
     expect(fetchMock).toHaveBeenCalledWith("/auth/me", { credentials: "include" });
