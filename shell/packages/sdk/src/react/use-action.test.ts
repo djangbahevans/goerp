@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
+import { moduleErrorHandlerRegistry } from "../module/module-error-handler-registry.js";
 import { toast } from "../notifications/toast.js";
 import type { ActionRegistry } from "./action-registry.js";
 import { createActionMutationOptions, splitPathAndBody } from "./use-action.js";
@@ -168,7 +169,58 @@ describe("createActionMutationOptions", () => {
     );
     opts.onError!(err, undefined as never, undefined, undefined as never);
 
-    expect(errorHandler).toHaveBeenCalledWith(err, { queryClient });
+    expect(errorHandler).toHaveBeenCalledWith(err, { queryClient, toast });
+  });
+
+  it("falls back to the route's module's registered error handler when no local onError/errorHandler is given", () => {
+    const registry = fakeRegistry({ method: "POST", path: "/x" });
+    const queryClient = new QueryClient();
+    const moduleHandler = vi.fn();
+    moduleErrorHandlerRegistry.register("sales", { "sales.order.insufficient_stock": moduleHandler });
+    const err = new AppError({ code: "sales.order.insufficient_stock", message: "no stock", httpStatus: 422 });
+
+    const opts = createActionMutationOptions("sales.confirmOrder", {}, queryClient, registry, {} as never);
+    opts.onError!(err, undefined as never, undefined, undefined as never);
+
+    expect(moduleHandler).toHaveBeenCalledWith(err, { queryClient, toast });
+  });
+
+  it("falls back to the module's '*' wildcard when no exact-code handler is registered", () => {
+    const registry = fakeRegistry({ method: "POST", path: "/x" });
+    const queryClient = new QueryClient();
+    const wildcardHandler = vi.fn();
+    moduleErrorHandlerRegistry.register("sales", { "*": wildcardHandler });
+    const err = new AppError({ code: "sales.order.unknown_thing", message: "boom", httpStatus: 500 });
+
+    const opts = createActionMutationOptions("sales.confirmOrder", {}, queryClient, registry, {} as never);
+    opts.onError!(err, undefined as never, undefined, undefined as never);
+
+    expect(wildcardHandler).toHaveBeenCalledWith(err, { queryClient, toast });
+  });
+
+  it("skips the module's registered default entirely when a local onError is given", () => {
+    const registry = fakeRegistry({ method: "POST", path: "/x" });
+    const queryClient = new QueryClient();
+    const moduleHandler = vi.fn();
+    moduleErrorHandlerRegistry.register("sales", { "*": moduleHandler });
+    const onError = vi.fn();
+    const err = new AppError({ code: "sales.order.unknown_thing", message: "boom", httpStatus: 500 });
+
+    const opts = createActionMutationOptions("sales.confirmOrder", { onError }, queryClient, registry, {} as never);
+    opts.onError!(err, undefined as never, undefined, undefined as never);
+
+    expect(moduleHandler).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(err, undefined, undefined);
+  });
+
+  it("does not fall back to a module default when no module is registered for the route", () => {
+    const registry = fakeRegistry({ method: "POST", path: "/x" });
+    const queryClient = new QueryClient();
+    const err = new AppError({ code: "unregistered_module.thing", message: "boom", httpStatus: 500 });
+
+    const opts = createActionMutationOptions("unregistered_module.doThing", {}, queryClient, registry, {} as never);
+
+    expect(() => opts.onError!(err, undefined as never, undefined, undefined as never)).not.toThrow();
   });
 
   it("does not call errorHandler when it is null", () => {

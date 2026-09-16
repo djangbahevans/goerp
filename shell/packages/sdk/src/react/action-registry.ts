@@ -6,6 +6,13 @@ export interface ActionRoute {
   path: string;
 }
 
+// Shared with use-action.ts's onError, which needs the same
+// {module}.{name} split to look up a module's registered error handler.
+export function moduleNameOf(routeName: string): string | undefined {
+  const dotIndex = routeName.indexOf(".");
+  return dotIndex < 0 ? undefined : routeName.slice(0, dotIndex);
+}
+
 // Resolves a useAction() route name ({module}.{name}) against
 // GET /_meta/schema, per shell-architecture.md's "How named action
 // routes are resolved". Shares schemaRegistry's own cached schema fetch
@@ -14,12 +21,11 @@ export class ActionRegistry {
   constructor(private readonly schema: Pick<SchemaRegistry, "getSchema">) {}
 
   async resolve(routeName: string): Promise<ActionRoute> {
-    const dotIndex = routeName.indexOf(".");
-    if (dotIndex < 0) {
+    const moduleName = moduleNameOf(routeName);
+    if (moduleName === undefined) {
       throw new Error(`useAction: route "${routeName}" must be in "{module}.{name}" format`);
     }
-    const moduleName = routeName.slice(0, dotIndex);
-    const actionName = routeName.slice(dotIndex + 1);
+    const actionName = routeName.slice(moduleName.length + 1);
 
     const schema = await this.schema.getSchema();
     const moduleSchema = schema.modules[moduleName];

@@ -8,17 +8,12 @@ import {
 import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
+import { moduleErrorHandlerRegistry } from "../module/module-error-handler-registry.js";
+import type { ErrorHandler, ErrorHandlerContext } from "../module/module-types.js";
 import { toast } from "../notifications/toast.js";
-import { type ActionRegistry, actionRegistry } from "./action-registry.js";
+import { type ActionRegistry, actionRegistry, moduleNameOf } from "./action-registry.js";
 
-// Scoped down from typescript-sdk-reference.md's full ErrorHandlerContext
-// (navigate, toast, queryClient) — navigate has no hook to source it from
-// yet (no useNavigate built), so it's omitted rather than faked.
-export interface ActionErrorHandlerContext {
-  queryClient: QueryClient;
-}
-
-export type ErrorHandler = (err: AppError, ctx: ActionErrorHandlerContext) => void;
+export type { ErrorHandler, ErrorHandlerContext };
 
 export interface ActionOptions<TResult, TVariables> {
   invalidates?: QueryKey[];
@@ -26,9 +21,13 @@ export interface ActionOptions<TResult, TVariables> {
   onError?: (err: AppError, variables: TVariables, context: unknown) => void;
   onSuccess?: (data: TResult, variables: TVariables) => void;
   onSettled?: (data: TResult | undefined, err: AppError | null, variables: TVariables) => void;
-  // No defineModule.errorHandlers registry exists yet to override, so a
-  // provided handler is simply called and an omitted/null one is not —
-  // there is no "module default" this currently falls back to.
+  // Overrides the module's own defineModule().errorHandlers default for
+  // this one call — explicit null suppresses even that default. Omitted
+  // entirely (not present in the options object at all) falls back to the
+  // route's module's registered handler, looked up by this error's exact
+  // code then that module's "*" wildcard; providing a local onError skips
+  // the module default entirely, the same "isn't handled by a local
+  // onError callback" precedence typescript-sdk-reference.md documents.
   errorHandler?: ErrorHandler | null;
   successMessage?: string | ((data: TResult) => string);
 }
@@ -126,7 +125,14 @@ export function createActionMutationOptions<TResult, TVariables>(
       return dispatch<TResult>(client, route.method, path, body);
     },
     onError: (err, variables, context) => {
-      options.errorHandler?.(err, { queryClient });
+      if (options.errorHandler !== undefined) {
+        options.errorHandler?.(err, { queryClient, toast });
+      } else if (options.onError === undefined) {
+        const moduleName = moduleNameOf(routeName);
+        const moduleHandler =
+          moduleName !== undefined ? moduleErrorHandlerRegistry.resolve(moduleName, err.code) : undefined;
+        moduleHandler?.(err, { queryClient, toast });
+      }
       options.onError?.(err, variables, context);
     },
     onSuccess: (data, variables) => {

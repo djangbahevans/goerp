@@ -1,3 +1,6 @@
+import type { ModuleDefinition } from "@goerp/sdk";
+import { registerModule } from "./register-module.js";
+
 function hexEncode(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -84,5 +87,57 @@ export async function ensureLoaded(
     throw err;
   });
   loaded.set(key, promise);
+  return promise;
+}
+
+function asModuleDefinition(moduleName: string, loadedModule: unknown): ModuleDefinition {
+  const definition = (loadedModule as { default?: unknown } | null)?.default;
+  if (!definition || typeof definition !== "object" || typeof (definition as { name?: unknown }).name !== "string") {
+    throw new Error(`module bundle for "${moduleName}" has no valid defineModule() default export`);
+  }
+  return definition as ModuleDefinition;
+}
+
+// Commands are the one part of a ModuleDefinition registerModule() (not
+// defineModule() itself) handles — see that function's own comment — so a
+// hot-reloaded module's prior command batch needs its own unregister call
+// here too, keyed by bare module name (not the bundle-specific key below),
+// so the second registerModule() call replaces it instead of leaving two
+// batches of the same commands in CommandRegistry.
+const unregisterCommands = new Map<string, () => void>();
+
+// Wraps ensureLoaded with the one registration step it deliberately leaves
+// undone (module-loader.ts's own job is loading/verifying bytes, not
+// registration). Keyed identically to ensureLoaded so registerModule() runs
+// exactly once per distinct bundle, not once per navigation to a view in
+// that module — ensureLoaded's own cache would otherwise return the same
+// resolved promise on every call, but nothing stopped a second .then() from
+// running registerModule() again each time without this registry's own,
+// separate dedup.
+const registered = new Map<string, Promise<void>>();
+
+export async function ensureModuleRegistered(
+  moduleName: string,
+  bundleUrl: string | null,
+  bundleSha256: string | null,
+  options?: LoadVerifiedModuleOptions,
+): Promise<void> {
+  if (!bundleUrl || !bundleSha256) return;
+
+  const key = `${moduleName}:${bundleUrl}:${bundleSha256}`;
+  const existing = registered.get(key);
+  if (existing) return existing;
+
+  const promise = ensureLoaded(moduleName, bundleUrl, bundleSha256, options)
+    .then((loadedModule) => {
+      if (!loadedModule) return;
+      unregisterCommands.get(moduleName)?.();
+      unregisterCommands.set(moduleName, registerModule(asModuleDefinition(moduleName, loadedModule)));
+    })
+    .catch((err: unknown) => {
+      registered.delete(key);
+      throw err;
+    });
+  registered.set(key, promise);
   return promise;
 }

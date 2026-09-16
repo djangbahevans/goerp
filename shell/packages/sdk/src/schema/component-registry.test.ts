@@ -33,4 +33,15 @@ describe("ComponentRegistry", () => {
     registry.register("BulkTagAction", Stub);
     expect(registry.has("BulkTagAction")).toBe(true);
   });
+
+  it("unregister() clears a name so it can be registered again without colliding", () => {
+    const registry = new ComponentRegistry();
+    registry.register("BulkTagAction", Stub);
+    registry.unregister("BulkTagAction");
+    function Other() {
+      return null;
+    }
+    expect(() => registry.register("BulkTagAction", Other)).not.toThrow();
+    expect(registry.resolve("BulkTagAction")).toBe(Other);
+  });
 });

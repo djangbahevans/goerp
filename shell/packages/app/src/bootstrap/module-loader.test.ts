@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureLoaded, loadVerifiedModule } from "./module-loader";
+import { ensureLoaded, ensureModuleRegistered, loadVerifiedModule } from "./module-loader";
+
+const { registerModuleMock } = vi.hoisted(() => ({ registerModuleMock: vi.fn(() => () => {}) }));
+vi.mock("./register-module.js", () => ({ registerModule: registerModuleMock }));
 
 // SHA-256 test vector for FIXTURE_TEXT, precomputed independently via
 // `sha256sum` rather than by calling this module's own hashing code —
@@ -27,6 +30,7 @@ function stubFetch(response: { ok: boolean; status?: number; statusText?: string
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  registerModuleMock.mockClear();
 });
 
 describe("loadVerifiedModule", () => {
@@ -182,5 +186,82 @@ describe("ensureLoaded", () => {
 
     expect(newImporter).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ default: { version: 2 } });
+  });
+});
+
+describe("ensureModuleRegistered", () => {
+  let moduleCounter = 0;
+  beforeEach(() => {
+    moduleCounter += 1;
+  });
+
+  it("resolves without registering when bundleUrl is null", async () => {
+    await ensureModuleRegistered(`erm-${moduleCounter}`, null, null);
+    expect(registerModuleMock).not.toHaveBeenCalled();
+  });
+
+  it("calls registerModule with the loaded bundle's default export", async () => {
+    const { bytes, sha256 } = canned();
+    stubFetch({ ok: true, bytes });
+    const definition = { name: `erm-${moduleCounter}` };
+    const importer = vi.fn(async () => ({ default: definition }));
+
+    await ensureModuleRegistered(`erm-${moduleCounter}`, "https://example.test/bundle.js", sha256, { importer });
+
+    expect(registerModuleMock).toHaveBeenCalledWith(definition);
+  });
+
+  it("registers exactly once across repeated calls for the same bundle, not once per call", async () => {
+    const { bytes, sha256 } = canned();
+    stubFetch({ ok: true, bytes });
+    const moduleName = `erm-${moduleCounter}`;
+    const importer = vi.fn(async () => ({ default: { name: moduleName } }));
+
+    await ensureModuleRegistered(moduleName, "https://example.test/bundle.js", sha256, { importer });
+    await ensureModuleRegistered(moduleName, "https://example.test/bundle.js", sha256, { importer });
+
+    expect(registerModuleMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws a clear error when the loaded bundle has no valid defineModule() default export", async () => {
+    const { bytes, sha256 } = canned();
+    stubFetch({ ok: true, bytes });
+    const moduleName = `erm-${moduleCounter}`;
+    const importer = vi.fn(async () => ({}));
+
+    await expect(
+      ensureModuleRegistered(moduleName, "https://example.test/bundle.js", sha256, { importer }),
+    ).rejects.toThrow(/no valid defineModule\(\) default export/);
+    expect(registerModuleMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when the default export's name isn't a string, not just when name is absent", async () => {
+    const { bytes, sha256 } = canned();
+    stubFetch({ ok: true, bytes });
+    const moduleName = `erm-${moduleCounter}`;
+    const importer = vi.fn(async () => ({ default: { name: 123 } }));
+
+    await expect(
+      ensureModuleRegistered(moduleName, "https://example.test/bundle.js", sha256, { importer }),
+    ).rejects.toThrow(/no valid defineModule\(\) default export/);
+    expect(registerModuleMock).not.toHaveBeenCalled();
+  });
+
+  it("unregisters a module's prior command batch before registering its hot-reloaded one", async () => {
+    const { bytes, sha256 } = canned();
+    stubFetch({ ok: true, bytes });
+    const moduleName = `erm-${moduleCounter}`;
+    const oldUnregister = vi.fn();
+    registerModuleMock.mockReturnValueOnce(oldUnregister);
+    const importer = vi.fn(async () => ({ default: { name: moduleName, version: 1 } }));
+
+    await ensureModuleRegistered(moduleName, "https://example.test/bundle-v1.js", sha256, { importer });
+    expect(oldUnregister).not.toHaveBeenCalled();
+
+    const newImporter = vi.fn(async () => ({ default: { name: moduleName, version: 2 } }));
+    await ensureModuleRegistered(moduleName, "https://example.test/bundle-v2.js", sha256, { importer: newImporter });
+
+    expect(oldUnregister).toHaveBeenCalledTimes(1);
+    expect(registerModuleMock).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,10 +1,10 @@
 import type { Command } from "./command-types.js";
 
-// Stand-in for defineModule().commands[], which doesn't exist yet — module
-// registration itself (defineModule) is unbuilt anywhere in the SDK. A
-// module registers its commands here instead, until the real
-// module-registration API lands (same posture as @goerp/sdk/schema's
-// ComponentRegistry standing in for defineModule().views).
+// Backs defineModule().commands — @goerp/sdk can't import this directly
+// (CommandRegistry is shell-app-owned, the real rendered Cmd+K palette),
+// so bootstrap/register-module.js is the one place that maps a loaded
+// module's ModuleDefinition.commands into this registry; see that file's
+// own comment for why.
 export class CommandRegistry {
   private readonly batches = new Set<Command[]>();
   private readonly listeners = new Set<() => void>();
