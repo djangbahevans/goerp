@@ -292,22 +292,35 @@ export function useDefaultFilterApplication(
   });
   const savedFiltersView = useSavedFilters(view.name, { enabled: !embedded });
 
-  // A useRef initializer runs on every render but only its first result
-  // sticks — needed since the effect below waits on savedFiltersView, and
-  // a live re-read at that later point couldn't distinguish "never had
-  // anything" from "the user already cleared it back to empty" meanwhile.
-  const hadExplicitStateOnMount = useRef(
-    Object.keys(listState.filter).length > 0 || (!embedded && applySortAndGroupBy && hasExplicitUrlState),
-  );
-
   const defaultsApplied = useRef(false);
+
+  // Monotonic: once true, stays true — distinguishes "the caller had
+  // nothing to begin with" from "the user cleared it back to empty" (the
+  // original mount-time-only check). Re-derived from this render's live
+  // values on every render, not just at mount, so an edit that lands after
+  // mount but before savedFiltersView resolves is treated the same as if
+  // it had already been present at mount. Done here in the render body
+  // rather than in a separate effect so it's guaranteed to run before the
+  // gated effect below on any given commit — two effects would depend on
+  // declaration order to get that right. (An edit whose own state update
+  // hasn't yet committed to a render at the exact instant savedFiltersView
+  // resolves is still a narrow, undetectable residual — same class of
+  // accepted gap as ReplaceProfile's concurrent-first-save race.)
+  const hadExplicitState = useRef(false);
+  if (
+    !defaultsApplied.current &&
+    (Object.keys(listState.filter).length > 0 || (!embedded && applySortAndGroupBy && hasExplicitUrlState))
+  ) {
+    hadExplicitState.current = true;
+  }
+
   const { setFilters, setSort, setGroupBy } = listState;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: guarded by defaultsApplied, gated on savedFiltersView.isLoading; the rest (view/setFilters/setSort/setGroupBy/applySortAndGroupBy/savedFiltersView.filters/hadExplicitStateOnMount) are deliberately read only once that gate opens, not tracked as change-triggers.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guarded by defaultsApplied, gated on savedFiltersView.isLoading; the rest (view/setFilters/setSort/setGroupBy/applySortAndGroupBy/savedFiltersView.filters/hadExplicitState) are deliberately read only once that gate opens, not tracked as change-triggers.
   useEffect(() => {
     if (defaultsApplied.current) return;
     if (!embedded && savedFiltersView.isLoading) return;
     defaultsApplied.current = true;
-    if (hadExplicitStateOnMount.current) return;
+    if (hadExplicitState.current) return;
 
     const savedDefault = embedded ? undefined : resolveDefaultSavedFilterState(savedFiltersView.filters);
     if (savedDefault) {
