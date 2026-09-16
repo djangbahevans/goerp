@@ -1,20 +1,18 @@
-import type { FilterRange } from "@goerp/sdk";
 import { ActionButton, ActionMenu, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
-import type { RelationBatchSpec, SavedFilter } from "@goerp/sdk/react";
-import { useInfiniteList, useRelationLabels, useSavedFilters } from "@goerp/sdk/react";
+import type { RelationBatchSpec } from "@goerp/sdk/react";
+import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
-import { defaultParseSearch, useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
-import { isMultiValueFilter, ListFilters } from "./list-filters.js";
-import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
-import type { FilterValue, ListState } from "./use-list-state.js";
-import { hasExplicitListState, parseListSearch, useListState } from "./use-list-state.js";
+import { ListFilters } from "./list-filters.js";
+import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js";
+import { useDefaultFilterApplication, useListState } from "./use-list-state.js";
 import { useSelection } from "./use-selection.js";
 import type { TreeRow } from "./use-tree-rows.js";
 import { useTreeRows } from "./use-tree-rows.js";
@@ -34,77 +32,6 @@ export interface ListRendererProps {
 function defaultSortOf(view: ListViewDeclaration): string | undefined {
   if (!view.default_sort) return undefined;
   return view.default_sort_dir === "desc" ? `-${view.default_sort}` : view.default_sort;
-}
-
-// Accepts numeric bounds too — manifest-spec.md types `default`/
-// `default_filters` as `any`, and a number_range filter's natural default
-// is numeric, not pre-stringified.
-function coerceRangeBounds(raw: unknown): FilterRange | undefined {
-  if (typeof raw !== "object" || raw === null) return undefined;
-  const { gte, lte } = raw as { gte?: unknown; lte?: unknown };
-  const range: FilterRange = {};
-  if (typeof gte === "string" || typeof gte === "number") range.gte = String(gte);
-  if (typeof lte === "string" || typeof lte === "number") range.lte = String(lte);
-  return Object.keys(range).length > 0 ? range : undefined;
-}
-
-// A `Filter.default`'s raw JSON value, wrapped to match how its type
-// serializes (manifest-spec.md's `default` field carries no shape info of
-// its own).
-function coerceFilterDefault(filter: ListFilter, raw: unknown): FilterValue | undefined {
-  if (filter.type === "text") return typeof raw === "string" ? { like: raw } : undefined;
-  if (filter.type === "daterange" || filter.type === "number_range") return coerceRangeBounds(raw);
-  if (isMultiValueFilter(filter)) return Array.isArray(raw) ? raw.map(String) : undefined;
-  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") return raw;
-  return undefined;
-}
-
-// `default_filters` values have no per-field type context the way a
-// Filter object's own `default` does — a range-shaped object is inferred
-// from its own {gte,lte} shape rather than a declared filter type.
-function coerceDefaultFiltersValue(raw: unknown): FilterValue | undefined {
-  if (Array.isArray(raw)) return raw.map(String);
-  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") return raw;
-  return coerceRangeBounds(raw);
-}
-
-// manifest-spec.md §9.1: default_filters wins over a Filter's own default
-// on the same field, applied only when the view first loads with no
-// filter[...] params already present. Takes only the two fields it
-// touches (not the full ListViewDeclaration) so PivotViewDeclaration,
-// which declares the same default_filters/filters shape (manifest-spec.md
-// §9.5), can reuse this directly.
-export function computeDefaultFilters(
-  view: Pick<ListViewDeclaration, "default_filters" | "filters">,
-): Record<string, FilterValue> {
-  const defaults: Record<string, FilterValue> = {};
-
-  for (const [field, raw] of Object.entries(view.default_filters ?? {})) {
-    const value = coerceDefaultFiltersValue(raw);
-    if (value !== undefined) defaults[field] = value;
-  }
-
-  for (const filter of view.filters ?? []) {
-    if (filter.default === undefined || filter.field in defaults) continue;
-    const value = coerceFilterDefault(filter, filter.default);
-    if (value !== undefined) defaults[filter.field] = value;
-  }
-
-  return defaults;
-}
-
-// view-system.md §4's default-filter precedence: a user's own is_default
-// saved filter beats the manifest's default_filters. defaultParseSearch
-// is the same parser the router itself runs on a freshly-loaded URL (no
-// custom parseSearch is configured anywhere in this app), so replaying a
-// saved filter's captured queryString through it — rather than a
-// hand-rolled coercion — behaves identically to actually navigating to
-// that URL. Shared by PivotRenderer/KanbanRenderer the same way
-// computeDefaultFilters above is.
-export function resolveDefaultSavedFilterState(filters: SavedFilter[]): ListState | undefined {
-  const defaultFilter = filters.find((filter) => filter.isDefault);
-  if (!defaultFilter) return undefined;
-  return parseListSearch(defaultParseSearch(defaultFilter.queryString));
 }
 
 // Every relation column without `display_field` resolves via
@@ -297,53 +224,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   }, [rowClickView, module]);
   const rowClickParam = view.row_click_param ?? "id";
 
-  // Embedded views never touch the URL (view-system.md's embedded
-  // contract), so the "explicit URL params" precedence tier doesn't apply
-  // to them at all, and there's nothing to fetch — disabled rather than
-  // wasting a request whose result would never be consulted.
-  const rawSearch = useSearch({ strict: false }) as Record<string, unknown>;
-  const savedFiltersView = useSavedFilters(view.name, { enabled: !embedded });
-
-  // Snapshotted once at mount (a useRef initializer runs on every render
-  // but only its first result sticks) rather than read live inside the
-  // effect below — the effect's own run is deferred until
-  // savedFiltersView resolves, and re-reading listState.filter live at
-  // that later point can no longer distinguish "the URL/caller never had
-  // anything" from "the user already cleared it back to empty" during
-  // the wait, which would otherwise reapply a default over a deliberate
-  // clear. For full-page mode this also has to cover sort/group_by, not
-  // just filter — listState.sort is never undefined by the time it's
-  // read (useFullPageListState already backfills defaultSort onto it),
-  // so an explicit ?sort= with no filter[...] param needs the raw search
-  // itself to still win over a saved default's own sort.
-  const hadExplicitStateOnMount = useRef(
-    embedded ? Object.keys(listState.filter).length > 0 : hasExplicitListState(rawSearch),
-  );
-
-  // Applied once, waiting for savedFiltersView to finish loading first
-  // (full-page mode only) so a user's own is_default saved filter can
-  // beat the manifest's default_filters per view-system.md §4's
-  // precedence rule, rather than racing it.
-  const defaultsApplied = useRef(false);
-  const { setFilters, setSort, setGroupBy } = listState;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: guarded by defaultsApplied, gated on savedFiltersView.isLoading; view/setFilters/setSort/setGroupBy/savedFiltersView.filters/hadExplicitStateOnMount are deliberately read only once that gate opens, not tracked as change-triggers.
-  useEffect(() => {
-    if (defaultsApplied.current) return;
-    if (!embedded && savedFiltersView.isLoading) return;
-    defaultsApplied.current = true;
-    if (hadExplicitStateOnMount.current) return;
-
-    const savedDefault = embedded ? undefined : resolveDefaultSavedFilterState(savedFiltersView.filters);
-    if (savedDefault) {
-      if (Object.keys(savedDefault.filter).length > 0) setFilters(savedDefault.filter);
-      if (savedDefault.sort !== undefined) setSort(savedDefault.sort);
-      if (savedDefault.groupBy !== undefined) setGroupBy(savedDefault.groupBy);
-      return;
-    }
-
-    const defaults = computeDefaultFilters(view);
-    if (Object.keys(defaults).length > 0) setFilters(defaults);
-  }, [embedded, savedFiltersView.isLoading]);
+  useDefaultFilterApplication(view, listState, embedded, true);
 
   const bulkActions = view.bulk_actions ?? [];
   // manifest-spec.md: `selectable` defaults true, but a checkbox column

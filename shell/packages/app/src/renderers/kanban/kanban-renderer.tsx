@@ -1,23 +1,16 @@
 import { ActionButton, EmptyState, Icon, Skeleton } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
-import {
-  createInfiniteListQueryOptions,
-  saveRecord,
-  useInfiniteList,
-  useRelationLabels,
-  useSavedFilters,
-} from "@goerp/sdk/react";
+import { createInfiniteListQueryOptions, saveRecord, useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
 import { componentRegistry, resourceMetadataRegistry } from "@goerp/sdk/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fileUrlOf } from "../list/column-renderers.js";
 import { ListActions } from "../list/list-actions.js";
 import { ListFilters } from "../list/list-filters.js";
-import { computeDefaultFilters, resolveDefaultSavedFilterState } from "../list/list-renderer.js";
 import type { Row } from "../list/list-view-types.js";
-import { useListState } from "../list/use-list-state.js";
+import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
 import { resolveKanbanActionItems, useKanbanRouteAction } from "./kanban-actions.js";
 import { KanbanBoard } from "./kanban-board.js";
 import { bucketRowsByGroup, deriveGroupIds, splitCardFields } from "./kanban-grouping.js";
@@ -50,42 +43,9 @@ export function KanbanRenderer({
   const queryClient = useQueryClient();
   const routeAction = useKanbanRouteAction();
 
-  // Embedded views never touch the URL, so the "explicit URL params"
-  // precedence tier doesn't apply to them, and there's nothing to fetch —
-  // disabled rather than wasting a request whose result is never used.
-  const savedFiltersView = useSavedFilters(view.name, { enabled: !embedded });
-
-  // Snapshotted once at mount, not read live inside the effect below —
-  // the effect's own run is deferred until savedFiltersView resolves, and
-  // re-reading listState.filter live at that later point can no longer
-  // distinguish "never had anything" from "the user already cleared it
-  // back to empty" during the wait. Kanban never reads listState.sort/
-  // groupBy (grouping is driven entirely by view.group_by), so unlike
-  // ListRenderer this only ever needs to guard filter.
-  const hadExplicitFilterOnMount = useRef(Object.keys(listState.filter).length > 0);
-
-  // Applied once, waiting for savedFiltersView before applying either
-  // kind of default (view-system.md §4's precedence rule), so a user's
-  // own is_default saved filter can beat the manifest's default_filters
-  // rather than racing it.
-  const defaultsApplied = useRef(false);
-  const { setFilters } = listState;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: guarded by defaultsApplied, gated on savedFiltersView.isLoading; view/setFilters/savedFiltersView.filters/hadExplicitFilterOnMount are deliberately read only once that gate opens, not tracked as change-triggers.
-  useEffect(() => {
-    if (defaultsApplied.current) return;
-    if (!embedded && savedFiltersView.isLoading) return;
-    defaultsApplied.current = true;
-    if (hadExplicitFilterOnMount.current) return;
-
-    const savedDefault = embedded ? undefined : resolveDefaultSavedFilterState(savedFiltersView.filters);
-    if (savedDefault) {
-      if (Object.keys(savedDefault.filter).length > 0) setFilters(savedDefault.filter);
-      return;
-    }
-
-    const defaults = computeDefaultFilters(view);
-    if (Object.keys(defaults).length > 0) setFilters(defaults);
-  }, [embedded, savedFiltersView.isLoading]);
+  // Grouping is driven by view.group_by, not listState.groupBy — no need
+  // for useDefaultFilterApplication's applySortAndGroupBy option.
+  useDefaultFilterApplication(view, listState, embedded);
 
   // view-system.md's embedded-rendering contract: the locked base filter
   // always wins over user-driven state, never the other way around.

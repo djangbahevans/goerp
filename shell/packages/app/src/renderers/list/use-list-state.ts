@@ -1,7 +1,11 @@
 import type { FilterParamValue, FilterRange } from "@goerp/sdk";
 import { flattenFilterParams } from "@goerp/sdk";
-import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useMemo, useState } from "react";
+import type { SavedFilter } from "@goerp/sdk/react";
+import { useSavedFilters } from "@goerp/sdk/react";
+import { defaultParseSearch, useNavigate, useSearch } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isMultiValueFilter } from "./list-filters.js";
+import type { ListFilter, ListViewDeclaration } from "./list-view-types.js";
 
 // Filter/sort/group-by state for a list view: full-page mode sources it
 // from URL query params, embedded mode from local React state — never
@@ -208,4 +212,112 @@ export function useListState(embedded: boolean | undefined, defaultSort: string 
   const embeddedState = useEmbeddedListState(defaultSort);
   const fullPageState = useFullPageListState(defaultSort);
   return embedded ? embeddedState : fullPageState;
+}
+
+// Accepts numeric bounds too — manifest-spec.md types `default`/
+// `default_filters` as `any`, and a number_range filter's natural default
+// is numeric, not pre-stringified.
+function coerceRangeBounds(raw: unknown): FilterRange | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const { gte, lte } = raw as { gte?: unknown; lte?: unknown };
+  const range: FilterRange = {};
+  if (typeof gte === "string" || typeof gte === "number") range.gte = String(gte);
+  if (typeof lte === "string" || typeof lte === "number") range.lte = String(lte);
+  return Object.keys(range).length > 0 ? range : undefined;
+}
+
+// A `Filter.default`'s raw JSON value, wrapped to match how its type
+// serializes (manifest-spec.md's `default` field carries no shape info of
+// its own).
+function coerceFilterDefault(filter: ListFilter, raw: unknown): FilterValue | undefined {
+  if (filter.type === "text") return typeof raw === "string" ? { like: raw } : undefined;
+  if (filter.type === "daterange" || filter.type === "number_range") return coerceRangeBounds(raw);
+  if (isMultiValueFilter(filter)) return Array.isArray(raw) ? raw.map(String) : undefined;
+  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") return raw;
+  return undefined;
+}
+
+// `default_filters` values have no per-field type context the way a
+// Filter object's own `default` does — a range-shaped object is inferred
+// from its own {gte,lte} shape rather than a declared filter type.
+function coerceDefaultFiltersValue(raw: unknown): FilterValue | undefined {
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") return raw;
+  return coerceRangeBounds(raw);
+}
+
+// manifest-spec.md §9.1: default_filters wins over a Filter's own default on the same field.
+// Takes only the fields it touches, not the full ListViewDeclaration, so KanbanViewDeclaration/PivotViewDeclaration can reuse it too.
+export function computeDefaultFilters(
+  view: Pick<ListViewDeclaration, "default_filters" | "filters">,
+): Record<string, FilterValue> {
+  const defaults: Record<string, FilterValue> = {};
+
+  for (const [field, raw] of Object.entries(view.default_filters ?? {})) {
+    const value = coerceDefaultFiltersValue(raw);
+    if (value !== undefined) defaults[field] = value;
+  }
+
+  for (const filter of view.filters ?? []) {
+    if (filter.default === undefined || filter.field in defaults) continue;
+    const value = coerceFilterDefault(filter, filter.default);
+    if (value !== undefined) defaults[filter.field] = value;
+  }
+
+  return defaults;
+}
+
+// view-system.md §4: a user's own is_default saved filter beats the manifest's default_filters.
+// Replays the saved queryString through defaultParseSearch (the same parser the router itself runs) rather than hand-rolling coercion.
+export function resolveDefaultSavedFilterState(filters: SavedFilter[]): ListState | undefined {
+  const defaultFilter = filters.find((filter) => filter.isDefault);
+  if (!defaultFilter) return undefined;
+  return parseListSearch(defaultParseSearch(defaultFilter.queryString));
+}
+
+// view-system.md §4's default-filter precedence, shared by List/Kanban/Pivot: explicit state wins, else a user's own is_default saved filter, else the manifest's default_filters.
+// applySortAndGroupBy is true only for ListRenderer — Kanban/Pivot never read listState.sort/groupBy, since grouping/shape there comes from the manifest.
+export function useDefaultFilterApplication(
+  view: Pick<ListViewDeclaration, "name" | "default_filters" | "filters">,
+  listState: ListStateHandle,
+  embedded: boolean | undefined,
+  applySortAndGroupBy = false,
+): void {
+  // select avoids re-rendering on unrelated search-param changes, and lets
+  // Kanban/Pivot (applySortAndGroupBy false) skip the raw-search check
+  // below without paying for a second, discarded subscription.
+  const hasExplicitUrlState = useSearch({
+    strict: false,
+    select: (search: Record<string, unknown>) => hasExplicitListState(search),
+  });
+  const savedFiltersView = useSavedFilters(view.name, { enabled: !embedded });
+
+  // A useRef initializer runs on every render but only its first result
+  // sticks — needed since the effect below waits on savedFiltersView, and
+  // a live re-read at that later point couldn't distinguish "never had
+  // anything" from "the user already cleared it back to empty" meanwhile.
+  const hadExplicitStateOnMount = useRef(
+    Object.keys(listState.filter).length > 0 || (!embedded && applySortAndGroupBy && hasExplicitUrlState),
+  );
+
+  const defaultsApplied = useRef(false);
+  const { setFilters, setSort, setGroupBy } = listState;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guarded by defaultsApplied, gated on savedFiltersView.isLoading; the rest (view/setFilters/setSort/setGroupBy/applySortAndGroupBy/savedFiltersView.filters/hadExplicitStateOnMount) are deliberately read only once that gate opens, not tracked as change-triggers.
+  useEffect(() => {
+    if (defaultsApplied.current) return;
+    if (!embedded && savedFiltersView.isLoading) return;
+    defaultsApplied.current = true;
+    if (hadExplicitStateOnMount.current) return;
+
+    const savedDefault = embedded ? undefined : resolveDefaultSavedFilterState(savedFiltersView.filters);
+    if (savedDefault) {
+      if (Object.keys(savedDefault.filter).length > 0) setFilters(savedDefault.filter);
+      if (applySortAndGroupBy && savedDefault.sort !== undefined) setSort(savedDefault.sort);
+      if (applySortAndGroupBy && savedDefault.groupBy !== undefined) setGroupBy(savedDefault.groupBy);
+      return;
+    }
+
+    const defaults = computeDefaultFilters(view);
+    if (Object.keys(defaults).length > 0) setFilters(defaults);
+  }, [embedded, savedFiltersView.isLoading]);
 }
