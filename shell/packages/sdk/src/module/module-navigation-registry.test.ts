@@ -21,4 +21,11 @@ describe("ModuleNavigationRegistry", () => {
     expect(() => registry.register("contacts", replacement)).not.toThrow();
     expect(registry.resolve("contacts")).toBe(replacement);
   });
+
+  it("clears a module's prior registration when re-registered with null/undefined (hot-reloaded module stops declaring navigation)", () => {
+    const registry = new ModuleNavigationRegistry();
+    registry.register("contacts", () => null);
+    registry.register("contacts", undefined);
+    expect(registry.resolve("contacts")).toBeUndefined();
+  });
 });

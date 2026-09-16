@@ -78,6 +78,21 @@ describe("defineModule", () => {
     expect(extensionBatchLoaderRegistry.has("sales.orders_list_test_h")).toBe(false);
   });
 
+  it("clears a module's prior navigation/errorHandlers when a hot-reloaded definition omits them", () => {
+    defineModule({
+      name: "define_module_test_i",
+      navigation: () => null,
+      errorHandlers: { "*": () => {} },
+    });
+    expect(moduleNavigationRegistry.resolve("define_module_test_i")).toBeDefined();
+    expect(moduleErrorHandlerRegistry.resolve("define_module_test_i", "anything")).toBeDefined();
+
+    defineModule({ name: "define_module_test_i" });
+
+    expect(moduleNavigationRegistry.resolve("define_module_test_i")).toBeUndefined();
+    expect(moduleErrorHandlerRegistry.resolve("define_module_test_i", "anything")).toBeUndefined();
+  });
+
   it("leaves commands and dispose untouched on the returned definition, for the app's own registration step", () => {
     const commands = [{ id: "x", label: "X", action: () => {} }];
     const dispose = () => {};

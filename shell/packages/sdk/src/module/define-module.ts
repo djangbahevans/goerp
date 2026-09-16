@@ -35,11 +35,10 @@ export function defineModule(definition: ModuleDefinition): ModuleDefinition {
     batchLoaders: batchLoaders.map(([key]) => key),
   });
 
-  if (definition.navigation) {
-    moduleNavigationRegistry.register(definition.name, definition.navigation);
-  }
-  if (definition.errorHandlers) {
-    moduleErrorHandlerRegistry.register(definition.name, definition.errorHandlers);
-  }
+  // Registered unconditionally (not just when present) so a hot-reloaded
+  // module that stops declaring navigation/errorHandlers clears its prior
+  // bundle's entry — both registries treat a nullish value as "clear".
+  moduleNavigationRegistry.register(definition.name, definition.navigation);
+  moduleErrorHandlerRegistry.register(definition.name, definition.errorHandlers);
   return definition;
 }

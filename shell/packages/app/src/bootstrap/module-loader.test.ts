@@ -247,6 +247,37 @@ describe("ensureModuleRegistered", () => {
     expect(registerModuleMock).not.toHaveBeenCalled();
   });
 
+  it("ignores an older hot-reload's registration if it resolves after a newer one already started", async () => {
+    const { bytes, sha256 } = canned();
+    const moduleName = `erm-${moduleCounter}`;
+
+    let resolveOldFetch!: (value: { ok: true; arrayBuffer: () => Promise<ArrayBuffer> }) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveOldFetch = resolve)))
+      .mockImplementationOnce(async () => ({ ok: true, arrayBuffer: async () => bytes }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const oldImporter = vi.fn(async () => ({ default: { name: moduleName, version: 1 } }));
+    const newImporter = vi.fn(async () => ({ default: { name: moduleName, version: 2 } }));
+
+    const oldPromise = ensureModuleRegistered(moduleName, "https://example.test/bundle-v1.js", sha256, {
+      importer: oldImporter,
+    });
+    const newPromise = ensureModuleRegistered(moduleName, "https://example.test/bundle-v2.js", sha256, {
+      importer: newImporter,
+    });
+    await newPromise;
+    // The older fetch only resolves now, after the newer registration has
+    // already completed — simulating the older bundle's network round trip
+    // simply taking longer than the newer one's.
+    resolveOldFetch({ ok: true, arrayBuffer: async () => bytes });
+    await oldPromise;
+
+    expect(registerModuleMock).toHaveBeenCalledTimes(1);
+    expect(registerModuleMock).toHaveBeenCalledWith({ name: moduleName, version: 2 });
+  });
+
   it("unregisters a module's prior command batch before registering its hot-reloaded one", async () => {
     const { bytes, sha256 } = canned();
     stubFetch({ ok: true, bytes });

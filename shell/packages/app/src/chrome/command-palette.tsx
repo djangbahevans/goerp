@@ -124,7 +124,10 @@ export function CommandPalette(): ReactNode {
       : null;
 
   const execute = (command: Command) => {
-    if (!context) return;
+    if (!context) {
+      toast.error("Not ready yet — try again in a moment.");
+      return;
+    }
     setOpen(false);
     // A module-registered command's action may be async (CommandDefinition
     // permits void | Promise<void>) — awaited here only to surface a

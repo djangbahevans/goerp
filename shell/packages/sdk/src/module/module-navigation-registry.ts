@@ -9,8 +9,12 @@ type NavigationFn = NonNullable<ModuleDefinition["navigation"]>;
 export class ModuleNavigationRegistry {
   private readonly byModule = new Map<string, NavigationFn>();
 
-  register(moduleName: string, navigation: NavigationFn): void {
-    this.byModule.set(moduleName, navigation);
+  // Accepts null/undefined so a hot-reloaded module that stops declaring
+  // navigation clears its old entry, instead of a falsy value being
+  // skipped and leaving the prior bundle's function active.
+  register(moduleName: string, navigation: NavigationFn | null | undefined): void {
+    if (navigation) this.byModule.set(moduleName, navigation);
+    else this.byModule.delete(moduleName);
   }
 
   resolve(moduleName: string): NavigationFn | undefined {

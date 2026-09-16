@@ -181,6 +181,20 @@ describe("CommandPalette", () => {
     await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("shows an error toast instead of executing when auth isn't ready yet (context is null)", async () => {
+    const action = vi.fn();
+    registerTestCommands([{ id: "a", label: "Alpha Command", action }]);
+    const toastErrorSpy = vi.spyOn(toast, "error").mockImplementation(() => {});
+    await renderPalette({ auth: fakeAuth({ user: null, isAuthenticated: false }) });
+    openPalette();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "alpha" } });
+
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+
+    expect(action).not.toHaveBeenCalled();
+    expect(toastErrorSpy).toHaveBeenCalledWith(expect.stringMatching(/not ready/i));
+  });
+
   it("clicking a result executes it the same way Enter does", async () => {
     const action = vi.fn();
     registerTestCommands([{ id: "a", label: "Alpha Command", action }]);

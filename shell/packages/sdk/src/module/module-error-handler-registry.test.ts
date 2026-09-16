@@ -42,4 +42,11 @@ describe("ModuleErrorHandlerRegistry", () => {
     expect(() => registry.register("contacts", { "*": replacement })).not.toThrow();
     expect(registry.resolve("contacts", "anything")).toBe(replacement);
   });
+
+  it("clears a module's prior registration when re-registered with undefined (hot-reloaded module stops declaring errorHandlers)", () => {
+    const registry = new ModuleErrorHandlerRegistry();
+    registry.register("contacts", { "*": () => {} });
+    registry.register("contacts", undefined);
+    expect(registry.resolve("contacts", "anything")).toBeUndefined();
+  });
 });

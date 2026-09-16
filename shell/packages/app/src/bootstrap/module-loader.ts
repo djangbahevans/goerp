@@ -98,23 +98,20 @@ function asModuleDefinition(moduleName: string, loadedModule: unknown): ModuleDe
   return definition as ModuleDefinition;
 }
 
-// Commands are the one part of a ModuleDefinition registerModule() (not
-// defineModule() itself) handles — see that function's own comment — so a
-// hot-reloaded module's prior command batch needs its own unregister call
-// here too, keyed by bare module name (not the bundle-specific key below),
-// so the second registerModule() call replaces it instead of leaving two
-// batches of the same commands in CommandRegistry.
+// Commands are registerModule()'s own job, not defineModule()'s (see that
+// function's comment) — keyed by bare module name so a hot-reloaded
+// module's command batch replaces its predecessor instead of doubling up.
 const unregisterCommands = new Map<string, () => void>();
 
-// Wraps ensureLoaded with the one registration step it deliberately leaves
-// undone (module-loader.ts's own job is loading/verifying bytes, not
-// registration). Keyed identically to ensureLoaded so registerModule() runs
-// exactly once per distinct bundle, not once per navigation to a view in
-// that module — ensureLoaded's own cache would otherwise return the same
-// resolved promise on every call, but nothing stopped a second .then() from
-// running registerModule() again each time without this registry's own,
-// separate dedup.
+// Dedupes registerModule() to once per distinct bundle, same key as
+// ensureLoaded, since that cache alone would return its resolved promise
+// on every call without stopping a second .then() from registering again.
 const registered = new Map<string, Promise<void>>();
+
+// The moduleName -> key this module most recently started registering,
+// so an out-of-order resolution (an older hot-reload's fetch/import
+// finishing after a newer one's) doesn't clobber the newer registration.
+const latestKeyForModule = new Map<string, string>();
 
 export async function ensureModuleRegistered(
   moduleName: string,
@@ -125,12 +122,14 @@ export async function ensureModuleRegistered(
   if (!bundleUrl || !bundleSha256) return;
 
   const key = `${moduleName}:${bundleUrl}:${bundleSha256}`;
+  latestKeyForModule.set(moduleName, key);
   const existing = registered.get(key);
   if (existing) return existing;
 
   const promise = ensureLoaded(moduleName, bundleUrl, bundleSha256, options)
     .then((loadedModule) => {
       if (!loadedModule) return;
+      if (latestKeyForModule.get(moduleName) !== key) return;
       unregisterCommands.get(moduleName)?.();
       unregisterCommands.set(moduleName, registerModule(asModuleDefinition(moduleName, loadedModule)));
     })
