@@ -386,9 +386,10 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 }
 
 // registerBuiltinRoutes registers the engine's own built-in routes into
-// table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
-// /auth/mfa/reverify, /admin/users/{id}/mfa/reset,
-// /admin/users/{id}/roles[/{role}], /_meta/permissions, /_meta/shares,
+// table, so /_health, /_ready, /auth/login, /auth/me, /auth/refresh,
+// /auth/logout, /auth/mfa/verify, /auth/mfa/reverify,
+// /admin/users/{id}/mfa/reset, /admin/users/{id}/roles[/{role}],
+// /admin/tenant/plan, /_meta/permissions, /_meta/shares,
 // /_meta/saved-filters, /_meta/schema, and /storage/upload resolve through
 // the exact same RouteTable.Lookup module routes do — no second router.
 // Safe against collision by construction:
@@ -416,12 +417,24 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: path,
 		})
 	}
-	for _, path := range []string{"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify", "/admin/users/{id}/mfa/reset", "/admin/users/{id}/roles"} {
+	for _, path := range []string{
+		"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify",
+		"/admin/users/{id}/mfa/reset", "/admin/users/{id}/roles",
+		// goerp#822: previously present in engine.go's builtinRoutes
+		// dispatch map but missing here, so unreachable in production.
+		"/auth/refresh", "/auth/logout", "/admin/tenant/plan",
+	} {
 		table.Register("POST", path, &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 			PathTemplate: path,
 		})
 	}
+
+	// goerp#822: same gap as the POST paths just above.
+	table.Register("GET", "/auth/me", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		PathTemplate: "/auth/me",
+	})
 	// /admin/users/{id}/roles/{role} (goerp#619) — DELETE half of the same
 	// grant/revoke flow the POST route above handles; same tenant-facing,
 	// EngineBuiltin posture as /admin/users/{id}/mfa/reset.

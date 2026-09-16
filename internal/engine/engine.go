@@ -1095,6 +1095,16 @@ func New(cfg *config.Config) (*Engine, error) {
 	// dispatchWSRoute is an *Engine method.
 	builtinRoutes["GET /_ws"] = http.HandlerFunc(e.dispatchWSRoute)
 
+	// goerp#822: a builtinRoutes entry with no matching
+	// registry.registerBuiltinRoutes registration 404s in
+	// routeResolutionMiddleware before dispatch is ever reached — this
+	// caught four routes that had silently regressed that way. Checked
+	// here, once every builtinRoutes entry above has been added.
+	if err := verifyBuiltinRouteParity(builtinRoutes, moduleRegistry.Snapshot().RouteTable()); err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("verify builtin route parity: %w", err)
+	}
+
 	// buildChain needs e (dispatchORMRoute/invokeHandler are *Engine
 	// methods), which doesn't exist until the literal above — this call
 	// used to sit right after builtinRoutes/defaultRateLimit were built,

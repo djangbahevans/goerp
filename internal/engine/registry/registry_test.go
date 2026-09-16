@@ -616,6 +616,26 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	if !uploadEntry.Manifest.EngineBuiltin {
 		t.Error("Lookup(POST, /storage/upload).Manifest.EngineBuiltin = false, want true")
 	}
+
+	// goerp#822: these four were previously missing here despite being
+	// dispatched from engine.go's builtinRoutes map.
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/auth/me"},
+		{"POST", "/auth/refresh"},
+		{"POST", "/auth/logout"},
+		{"POST", "/admin/tenant/plan"},
+	} {
+		entry, _, result, _ := table.Lookup(c.method, c.path)
+		if result != route.RouteFound {
+			t.Fatalf("Lookup(%s, %s) result = %v, want RouteFound", c.method, c.path, result)
+		}
+		if !entry.Manifest.EngineNative {
+			t.Errorf("Lookup(%s, %s).Manifest.EngineNative = false, want true", c.method, c.path)
+		}
+		if !entry.Manifest.EngineBuiltin {
+			t.Errorf("Lookup(%s, %s).Manifest.EngineBuiltin = false, want true", c.method, c.path)
+		}
+	}
 }
 
 func TestBuildEventRegistry_FromModules(t *testing.T) {
