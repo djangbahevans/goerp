@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import type { UseSavedFiltersResult } from "@goerp/sdk/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -20,29 +21,54 @@ import {
 } from "./list-renderer.js";
 import type { ListViewDeclaration, Row } from "./list-view-types.js";
 
-const { useInfiniteListMock, useRelationLabelsMock, resolveViewPathMock, resolveResourceMock, getMock } = vi.hoisted(
-  () => ({
-    useInfiniteListMock: vi.fn(),
-    useRelationLabelsMock: vi.fn((_specs: { ids: string[] }[]) => new Map()),
-    resolveViewPathMock: vi.fn(async (): Promise<string | null> => "/contacts/{id}"),
-    // use-tree-rows.ts's own real (unmocked) data-fetching for children —
-    // only exercised by tree_field tests, which set these explicitly.
-    resolveResourceMock: vi.fn(async () => ({ listPath: "/contacts" })),
-    getMock: vi.fn(
-      async (): Promise<{ data: Row[]; meta: { cursor: null; hasMore: boolean } }> => ({
-        data: [],
-        meta: { cursor: null, hasMore: false },
-      }),
-    ),
-  }),
-);
+const {
+  useInfiniteListMock,
+  useRelationLabelsMock,
+  useSavedFiltersMock,
+  resolveViewPathMock,
+  resolveResourceMock,
+  getMock,
+} = vi.hoisted(() => ({
+  useInfiniteListMock: vi.fn(),
+  useRelationLabelsMock: vi.fn((_specs: { ids: string[] }[]) => new Map()),
+  // No saved filters and already resolved by default — real network
+  // access would otherwise hang indefinitely in this test environment
+  // (apiClient's own internal retry logic, independent of TanStack
+  // Query's retry option) since nothing here ever mocks the sdk's
+  // internal http client. Tests exercising the saved-filter precedence
+  // itself override this per-test.
+  useSavedFiltersMock: vi.fn(
+    (): UseSavedFiltersResult => ({
+      filters: [],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    }),
+  ),
+  resolveViewPathMock: vi.fn(async (): Promise<string | null> => "/contacts/{id}"),
+  // use-tree-rows.ts's own real (unmocked) data-fetching for children —
+  // only exercised by tree_field tests, which set these explicitly.
+  resolveResourceMock: vi.fn(async () => ({ listPath: "/contacts" })),
+  getMock: vi.fn(
+    async (): Promise<{ data: Row[]; meta: { cursor: null; hasMore: boolean } }> => ({
+      data: [],
+      meta: { cursor: null, hasMore: false },
+    }),
+  ),
+}));
 vi.mock("@goerp/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk")>();
   return { ...actual, apiClient: { ...actual.apiClient, get: getMock } };
 });
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
-  return { ...actual, useInfiniteList: useInfiniteListMock, useRelationLabels: useRelationLabelsMock };
+  return {
+    ...actual,
+    useInfiniteList: useInfiniteListMock,
+    useRelationLabels: useRelationLabelsMock,
+    useSavedFilters: useSavedFiltersMock,
+  };
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
@@ -58,6 +84,14 @@ afterEach(() => {
   useInfiniteListMock.mockReset();
   useRelationLabelsMock.mockClear();
   useRelationLabelsMock.mockImplementation(() => new Map());
+  useSavedFiltersMock.mockReset();
+  useSavedFiltersMock.mockImplementation(() => ({
+    filters: [],
+    isLoading: false,
+    save: vi.fn(),
+    remove: vi.fn(),
+    setDefault: vi.fn(),
+  }));
   resolveViewPathMock.mockClear();
   resolveResourceMock.mockClear();
   getMock.mockReset();
@@ -655,6 +689,23 @@ describe("ListRenderer", () => {
     expect(screen.getByText("New Contact")).toBeTruthy();
   });
 
+  it("disables the saved-filters fetch when embedded, since it's never consulted there", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({ embedded: true }, fullAccess);
+
+    expect(useSavedFiltersMock).toHaveBeenCalledWith("contacts_list", { enabled: false });
+  });
+
   it("requests batch-fetched relation labels for a relation column with no display_field", async () => {
     useInfiniteListMock.mockReturnValue({
       data: {
@@ -794,6 +845,124 @@ describe("ListRenderer", () => {
     });
 
     expect(router.state.location.search).toEqual({ "filter[type]": "company" });
+  });
+
+  it("applies the user's own is_default saved filter instead of the manifest's default_filters", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+    useSavedFiltersMock.mockReturnValue({
+      filters: [
+        {
+          id: "f1",
+          viewName: "contacts_list",
+          label: "Mine",
+          queryString: "?filter[is_active]=false",
+          isDefault: true,
+        },
+      ],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    const { router } = await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      default_filters: { is_active: true },
+    });
+
+    expect(router.state.location.search).toEqual({ "filter[is_active]": false });
+  });
+
+  it("explicit URL params win over the user's own is_default saved filter", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+    useSavedFiltersMock.mockReturnValue({
+      filters: [
+        {
+          id: "f1",
+          viewName: "contacts_list",
+          label: "Mine",
+          queryString: "?filter[is_active]=false",
+          isDefault: true,
+        },
+      ],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    const { router } = await renderListRenderer({}, fullAccess, "/?filter[type]=company", view);
+
+    expect(router.state.location.search).toEqual({ "filter[type]": "company" });
+  });
+
+  it("an explicit URL sort with no filter[...] params still wins over a saved default's sort", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+    useSavedFiltersMock.mockReturnValue({
+      filters: [{ id: "f1", viewName: "contacts_list", label: "Mine", queryString: "?sort=name", isDefault: true }],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    const { router } = await renderListRenderer({}, fullAccess, "/?sort=-created_at", view);
+
+    expect(router.state.location.search).toEqual({ sort: "-created_at" });
+  });
+
+  it("waits for the saved-filters fetch to resolve before applying the manifest's default_filters", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+    useSavedFiltersMock.mockReturnValue({
+      filters: [],
+      isLoading: true,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    const { router } = await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      default_filters: { is_active: true },
+    });
+
+    expect(router.state.location.search).toEqual({});
   });
 
   it("Load more: disabled with ActionButton's own loading treatment while isFetchingNextPage", async () => {

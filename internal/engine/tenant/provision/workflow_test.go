@@ -238,6 +238,17 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		t.Error("expected the record_shares table to have been created by CreateEngineTables")
 	}
 
+	var savedFiltersExists bool
+	if err := env.conn.QueryRow(
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'saved_filters')",
+		"tenant_"+slug,
+	).Scan(&savedFiltersExists); err != nil {
+		t.Fatalf("check saved_filters table: %v", err)
+	}
+	if !savedFiltersExists {
+		t.Error("expected the saved_filters table to have been created by CreateEngineTables")
+	}
+
 	for _, table := range []string{"audit_log", "event_log"} {
 		var registered bool
 		if err := env.conn.QueryRow(

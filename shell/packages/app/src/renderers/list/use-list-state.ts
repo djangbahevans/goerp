@@ -36,6 +36,16 @@ function isListStateKey(key: string): boolean {
   return key === "sort" || key === "group_by" || FILTER_KEY_PATTERN.test(key);
 }
 
+// Whether the raw (pre-defaultSort-fallback) URL search carries any
+// filter[...]/sort/group_by key at all — the "explicit URL params" tier
+// of view-system.md §4's default-filter precedence needs this distinct
+// from parseListSearch's own output, since listState.sort is never
+// undefined by the time a caller reads it (useFullPageListState already
+// backfills a missing sort with defaultSort).
+export function hasExplicitListState(search: Record<string, unknown>): boolean {
+  return Object.keys(search).some(isListStateKey);
+}
+
 export function parseListSearch(search: Record<string, unknown>): ListState {
   const filter: Record<string, FilterValue> = {};
   const ranges: Record<string, FilterRange> = {};

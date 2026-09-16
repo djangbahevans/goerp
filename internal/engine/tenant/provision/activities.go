@@ -15,6 +15,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
+	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
@@ -216,19 +217,21 @@ func registerTenantPartition(ctx context.Context, pool *sql.DB, slug, table, con
 // (invite.Store.Bootstrap — requires roles to exist first, per its own
 // foreign key), record_shares (recordshares.Store.Bootstrap — goerp#472,
 // the .Shareable() model widening's compiled RLS EXISTS lookup reads
-// this uniformly regardless of which module owns the model), module_config
-// (this ticket's own SeedTenantConfig step), sequences (backing store for
-// Sequence-kind fields' per-tenant counters, keyed by
+// this uniformly regardless of which module owns the model),
+// saved_filters (savedfilters.Store.Bootstrap — goerp#635, the built-in
+// /_meta/saved-filters endpoint's own-rows-only backing table),
+// module_config (this ticket's own SeedTenantConfig step), sequences
+// (backing store for Sequence-kind fields' per-tenant counters, keyed by
 // (model, field, period_key)), audit_log (goerp#363 — host.orm's write
 // path records one row here per INSERT/UPDATE/DELETE on a module's own
 // audited_tables[]), and event_log (goerp#16 — eventdelivery.Worker
 // records one row here per dispatched domain event).
-// multitenancy-internals.md §6 step 3 lists several further engine-owned
-// tables (files, notifications, notification_preferences, saved_filters,
-// view_overrides) — deliberately not created here: nothing in this
-// codebase reads or writes any of them yet (each is its own separate,
-// untriaged feature area). Creating unconsumed tables now would be
-// schema no code can yet verify against.
+// multitenancy-internals.md §6 step 3 lists further engine-owned tables
+// (files, notifications, notification_preferences, view_overrides) —
+// deliberately not created here: nothing in this codebase reads or
+// writes any of them yet (each is its own separate, untriaged feature
+// area). Creating unconsumed tables now would be schema no code can yet
+// verify against.
 func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error {
 	if err := role.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
 		return fmt.Errorf("bootstrap roles: %w", err)
@@ -243,6 +246,10 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 
 	if err := recordshares.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
 		return fmt.Errorf("bootstrap record_shares: %w", err)
+	}
+
+	if err := savedfilters.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
+		return fmt.Errorf("bootstrap saved_filters: %w", err)
 	}
 
 	query := fmt.Sprintf(createModuleConfigTable, tenantschema.Name(slug))
