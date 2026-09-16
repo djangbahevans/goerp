@@ -30,6 +30,7 @@ const fakeAuth = {
   login: async () => {},
   logout: async () => {},
   submitMFA: async () => {},
+  updateProfile: async () => {},
 };
 
 const permissionValue = createPermissionContextValue({

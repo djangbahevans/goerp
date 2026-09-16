@@ -1,8 +1,14 @@
 import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { AppError } from "../error/app-error.js";
-import { fetchCurrentSession, login as loginRequest, logout as logoutRequest, submitMFACode } from "./auth-client.js";
+import {
+  fetchCurrentSession,
+  login as loginRequest,
+  logout as logoutRequest,
+  submitMFACode,
+  updateProfile as updateProfileRequest,
+} from "./auth-client.js";
 import { authMachine } from "./auth-machine.js";
-import type { AuthContextValue, LoginCredentials, MFAMethod } from "./types.js";
+import type { AuthContextValue, LoginCredentials, MFAMethod, UpdateProfileInput } from "./types.js";
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -103,6 +109,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const updateProfile = useCallback(async (input: UpdateProfileInput): Promise<void> => {
+    const current = authMachine.getState();
+    if (current.status !== "authenticated" && current.status !== "refreshing") {
+      throw new Error("updateProfile called outside the authenticated state");
+    }
+
+    await updateProfileRequest(input);
+
+    const session = await fetchCurrentSession();
+    if (!session) {
+      throw new Error("updateProfile succeeded but the session check that follows it failed");
+    }
+    authMachine.transition({ type: "profile_updated", user: session.user });
+  }, []);
+
   const logout = useCallback(async (): Promise<void> => {
     authMachine.transition({ type: "logout_started" });
     await logoutRequest();
@@ -119,8 +140,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       submitMFA,
+      updateProfile,
     };
-  }, [state, login, logout, submitMFA]);
+  }, [state, login, logout, submitMFA, updateProfile]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

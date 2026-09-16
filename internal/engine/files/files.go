@@ -15,11 +15,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+var ErrFileNotFound = errors.New("file not found")
 
 type Store struct {
 	db *sql.DB
@@ -131,6 +134,67 @@ func (s *Store) Insert(ctx context.Context, tenantSlug string, row InsertRow) er
 	}
 
 	return nil
+}
+
+// MarkDeleted soft-deletes id (object-storage-guide.md §10 "Manual
+// deletion" — sets deleted_at; the actual storage object is the caller's
+// own responsibility, same as storage.Delete's asynchronous-cron
+// counterpart the SDK-facing version documents). A no-op, not an error,
+// if id doesn't exist or is already deleted.
+func (s *Store) MarkDeleted(ctx context.Context, tenantSlug, id string) error {
+	schema := tenantschema.Name(tenantSlug)
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s.files SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`, schema), id)
+	if err != nil {
+		return fmt.Errorf("mark file %q deleted: %w", id, err)
+	}
+	return nil
+}
+
+// File is one files row.
+type File struct {
+	ID             string
+	TenantID       string
+	StorageKey     string
+	OriginalName   string
+	ContentType    string
+	SizeBytes      int64
+	ChecksumSHA256 string
+	UploadedBy     string
+	Purpose        string
+	IsPublic       bool
+	ScanStatus     string
+	DeletedAt      *time.Time
+}
+
+const fileColumns = `id, tenant_id, storage_key, original_name, content_type, size_bytes, checksum_sha256, uploaded_by, purpose, is_public, scan_status, deleted_at`
+
+// GetByID looks up id within tenantSlug's own files table — a file id from
+// one tenant is never visible from another's schema, since each has a
+// physically separate table. ErrFileNotFound covers both "no such id" and
+// "tenant's files table doesn't exist yet" (isUndefinedTable), the same
+// two cases StorageKeysForTenant treats as "nothing here" rather than an
+// error.
+func (s *Store) GetByID(ctx context.Context, tenantSlug, id string) (*File, error) {
+	schema := tenantschema.Name(tenantSlug)
+
+	row := s.db.QueryRowContext(ctx, fmt.Sprintf(`SELECT %s FROM %s.files WHERE id = $1`, fileColumns, schema), id)
+
+	var f File
+	var uploadedBy sql.NullString
+	if err := row.Scan(
+		&f.ID, &f.TenantID, &f.StorageKey, &f.OriginalName, &f.ContentType, &f.SizeBytes,
+		&f.ChecksumSHA256, &uploadedBy, &f.Purpose, &f.IsPublic, &f.ScanStatus, &f.DeletedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || isUndefinedTable(err) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("get file %q: %w", id, err)
+	}
+	if uploadedBy.Valid {
+		f.UploadedBy = uploadedBy.String
+	}
+
+	return &f, nil
 }
 
 // StorageKeysForTenant returns every storage_key ever recorded for the

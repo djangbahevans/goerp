@@ -47,7 +47,13 @@ export type AuthEvent =
   | { type: "refresh_failed" }
   | { type: "session_expired" }
   | { type: "logout_started" }
-  | { type: "logout_complete" };
+  | { type: "logout_complete" }
+  | { type: "profile_updated"; user: CurrentUser };
+
+export interface UpdateProfileInput {
+  name: string;
+  avatarId?: string | undefined;
+}
 
 export interface AuthContextValue {
   state: AuthState;
@@ -57,4 +63,5 @@ export interface AuthContextValue {
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   submitMFA: (code: string, method?: MFAMethod) => Promise<void>;
+  updateProfile: (input: UpdateProfileInput) => Promise<void>;
 }

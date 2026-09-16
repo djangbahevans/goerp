@@ -1,5 +1,5 @@
 import { AppError } from "../error/app-error.js";
-import type { CurrentTenant, CurrentUser, LoginCredentials, MFAMethod } from "./types.js";
+import type { CurrentTenant, CurrentUser, LoginCredentials, MFAMethod, UpdateProfileInput } from "./types.js";
 
 interface MeResponseBody {
   user: {
@@ -104,6 +104,21 @@ export async function submitMFACode(challengeToken: string, code: string, method
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mfa_token: challengeToken, type: method, code }),
+  });
+  if (!response.ok) throw await readError(response);
+}
+
+// updateProfile backs PATCH /auth/me (shell-ux.md §4.1). Its own response
+// carries only the saved name, not the full CurrentUser shape (no
+// resolved avatar URL, roles, etc.) — the caller re-fetches the session
+// afterward, same "the mutation call itself doesn't carry the hydrated
+// state" pattern login/submitMFA already use.
+export async function updateProfile(input: UpdateProfileInput): Promise<void> {
+  const response = await fetch("/auth/me", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: input.name, avatar_id: input.avatarId }),
   });
   if (!response.ok) throw await readError(response);
 }

@@ -435,6 +435,11 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/auth/me",
 	})
+	// goerp#819: self-service profile save.
+	table.Register("PATCH", "/auth/me", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		PathTemplate: "/auth/me",
+	})
 	// /admin/users/{id}/roles/{role} (goerp#619) — DELETE half of the same
 	// grant/revoke flow the POST route above handles; same tenant-facing,
 	// EngineBuiltin posture as /admin/users/{id}/mfa/reset.

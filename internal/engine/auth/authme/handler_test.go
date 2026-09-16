@@ -19,9 +19,11 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -37,6 +39,7 @@ type fixture struct {
 	issuer      *authtoken.Issuer
 	revoker     *sessionrevoke.Revoker
 	tenantStore *tenant.Store
+	filesStore  *files.Store
 	domain      string
 	tenantID    string
 	tenantSlug  string
@@ -99,7 +102,15 @@ func newFixture(t *testing.T) *fixture {
 	roleMap := permcache.NewRolePermissionMap()
 	revoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 	authChecker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, roleCache, roleMap, apiKeys, false, nil, nil, nil)
-	handler := NewHandler(tenantResolver, authChecker, userStore)
+
+	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
+	backend, err := storage.New("local")
+	if err != nil {
+		t.Fatalf("storage.New() error: %v", err)
+	}
+	filesStore := files.NewStore(conn)
+
+	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, backend)
 
 	slug := fmt.Sprintf("authmetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Test Co")
@@ -132,6 +143,9 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("create fixture schema: %v", err)
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", schema)) })
+	if err := filesStore.Bootstrap(ctx, slug); err != nil {
+		t.Fatalf("files Bootstrap() error: %v", err)
+	}
 	if err := roleStore.Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
@@ -151,6 +165,7 @@ func newFixture(t *testing.T) *fixture {
 		issuer:      issuer,
 		revoker:     revoker,
 		tenantStore: tenantStore,
+		filesStore:  filesStore,
 		domain:      domain,
 		tenantID:    tt.ID,
 		tenantSlug:  slug,
@@ -289,6 +304,218 @@ func TestServeHTTP_ReturnsNameWhenProfileExists(t *testing.T) {
 	}
 	if resp.User.AvatarURL != nil {
 		t.Errorf("user.avatar_url = %v, want nil (no avatar set)", *resp.User.AvatarURL)
+	}
+}
+
+func TestServeHTTP_ReturnsResolvedAvatarURLWhenAvatarIsSet(t *testing.T) {
+	f := newFixture(t)
+
+	fileID := "00000000-0000-7000-8000-000000000001"
+	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+		ID:           fileID,
+		TenantID:     f.tenantID,
+		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
+		OriginalName: "avatar.png",
+		ContentType:  "image/png",
+		SizeBytes:    123,
+		Purpose:      "avatars",
+	}); err != nil {
+		t.Fatalf("insert fixture file: %v", err)
+	}
+	if _, err := f.conn.Exec(
+		`INSERT INTO system.user_profiles (user_id, name, avatar_file_id) VALUES ($1, $2, $3)`,
+		f.userID, "Ada Lovelace", fileID,
+	); err != nil {
+		t.Fatalf("insert fixture profile: %v", err)
+	}
+	accessToken := f.issueAccessToken(t)
+
+	rec := f.doMe(t, f.domain, accessToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.User.AvatarURL == nil || *resp.User.AvatarURL == "" {
+		t.Fatal("user.avatar_url is nil/empty, want a resolved URL")
+	}
+	if *resp.User.AvatarURL == fileID {
+		t.Error("user.avatar_url is the raw file id, want a resolved signed URL")
+	}
+}
+
+func TestServeHTTP_AvatarNilWhenFileRowMissing(t *testing.T) {
+	f := newFixture(t)
+
+	// avatar_file_id points at a file id that was never inserted into
+	// this tenant's files table — files.Store.GetByID returns
+	// ErrFileNotFound.
+	fileID := "00000000-0000-7000-8000-000000000002"
+	if _, err := f.conn.Exec(
+		`INSERT INTO system.user_profiles (user_id, name, avatar_file_id) VALUES ($1, $2, $3)`,
+		f.userID, "Ada Lovelace", fileID,
+	); err != nil {
+		t.Fatalf("insert fixture profile: %v", err)
+	}
+	accessToken := f.issueAccessToken(t)
+
+	rec := f.doMe(t, f.domain, accessToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.User.AvatarURL != nil {
+		t.Errorf("user.avatar_url = %v, want nil (no matching files row)", *resp.User.AvatarURL)
+	}
+}
+
+func TestServeHTTP_AvatarNilWhenFileSoftDeleted(t *testing.T) {
+	f := newFixture(t)
+
+	fileID := "00000000-0000-7000-8000-000000000003"
+	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+		ID:           fileID,
+		TenantID:     f.tenantID,
+		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
+		OriginalName: "avatar.png",
+		ContentType:  "image/png",
+		SizeBytes:    123,
+		Purpose:      "avatars",
+	}); err != nil {
+		t.Fatalf("insert fixture file: %v", err)
+	}
+	if err := f.filesStore.MarkDeleted(context.Background(), f.tenantSlug, fileID); err != nil {
+		t.Fatalf("MarkDeleted() error: %v", err)
+	}
+	if _, err := f.conn.Exec(
+		`INSERT INTO system.user_profiles (user_id, name, avatar_file_id) VALUES ($1, $2, $3)`,
+		f.userID, "Ada Lovelace", fileID,
+	); err != nil {
+		t.Fatalf("insert fixture profile: %v", err)
+	}
+	accessToken := f.issueAccessToken(t)
+
+	rec := f.doMe(t, f.domain, accessToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.User.AvatarURL != nil {
+		t.Errorf("user.avatar_url = %v, want nil (file is soft-deleted)", *resp.User.AvatarURL)
+	}
+}
+
+func TestServeHTTP_AvatarNilWhenFilesStoreOrBackendMissing(t *testing.T) {
+	f := newFixture(t)
+
+	fileID := "00000000-0000-7000-8000-000000000004"
+	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+		ID:           fileID,
+		TenantID:     f.tenantID,
+		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
+		OriginalName: "avatar.png",
+		ContentType:  "image/png",
+		SizeBytes:    123,
+		Purpose:      "avatars",
+	}); err != nil {
+		t.Fatalf("insert fixture file: %v", err)
+	}
+	if _, err := f.conn.Exec(
+		`INSERT INTO system.user_profiles (user_id, name, avatar_file_id) VALUES ($1, $2, $3)`,
+		f.userID, "Ada Lovelace", fileID,
+	); err != nil {
+		t.Fatalf("insert fixture profile: %v", err)
+	}
+	accessToken := f.issueAccessToken(t)
+
+	// A shallow copy with files/backend nilled out — same warn-only
+	// dependency shape storage.New(cfg.StorageBackend) can leave engine.go
+	// with in production (a down/misconfigured object storage backend).
+	broken := *f.handler
+	broken.files = nil
+	broken.backend = nil
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	req.Host = f.domain
+	req.RemoteAddr = "203.0.113.7:54321"
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec := httptest.NewRecorder()
+	broken.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.User.AvatarURL != nil {
+		t.Errorf("user.avatar_url = %v, want nil (files/backend unavailable)", *resp.User.AvatarURL)
+	}
+}
+
+// erroringBackend implements storage.Backend, failing only SignedURL —
+// exercises resolveAvatarURL's own degrade-on-backend-error branch, which
+// the real LocalBackend's SignedURL never takes (it never fails).
+type erroringBackend struct{ storage.Backend }
+
+func (erroringBackend) SignedURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	return "", fmt.Errorf("backend unavailable")
+}
+
+func TestServeHTTP_AvatarNilWhenSignedURLGenerationFails(t *testing.T) {
+	f := newFixture(t)
+
+	fileID := "00000000-0000-7000-8000-000000000005"
+	if err := f.filesStore.Insert(context.Background(), f.tenantSlug, files.InsertRow{
+		ID:           fileID,
+		TenantID:     f.tenantID,
+		StorageKey:   "avatars/" + f.tenantID + "/2026/01/" + fileID + ".png",
+		OriginalName: "avatar.png",
+		ContentType:  "image/png",
+		SizeBytes:    123,
+		Purpose:      "avatars",
+	}); err != nil {
+		t.Fatalf("insert fixture file: %v", err)
+	}
+	if _, err := f.conn.Exec(
+		`INSERT INTO system.user_profiles (user_id, name, avatar_file_id) VALUES ($1, $2, $3)`,
+		f.userID, "Ada Lovelace", fileID,
+	); err != nil {
+		t.Fatalf("insert fixture profile: %v", err)
+	}
+	accessToken := f.issueAccessToken(t)
+
+	broken := *f.handler
+	broken.backend = erroringBackend{}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	req.Host = f.domain
+	req.RemoteAddr = "203.0.113.7:54321"
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	rec := httptest.NewRecorder()
+	broken.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.User.AvatarURL != nil {
+		t.Errorf("user.avatar_url = %v, want nil (SignedURL failed)", *resp.User.AvatarURL)
 	}
 }
 

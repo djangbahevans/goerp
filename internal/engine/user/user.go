@@ -45,14 +45,50 @@ const createIndex = `
 // (separate, unfiled tickets), so they're left off rather than added
 // unused; a later ticket can add them with ALTER TABLE the same way
 // tenant.Tenant's suspended_by comment describes for its own deferred
-// column.
+// column. avatar_file_id (goerp#819) stores a files.id, not a URL —
+// storage.SignedURL expires (max 24h), so a resolvable URL is generated
+// fresh on every GET /auth/me rather than persisted here.
 const createUserProfilesTable = `
 CREATE TABLE IF NOT EXISTS system.user_profiles (
-    user_id     UUID PRIMARY KEY REFERENCES system.users(id) ON DELETE CASCADE,
-    name        TEXT NOT NULL,
-    avatar_url  TEXT,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    user_id         UUID PRIMARY KEY REFERENCES system.users(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    avatar_file_id  UUID,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
+`
+
+// migrateAvatarURLColumn renames a pre-goerp#819 deployment's
+// avatar_url TEXT (goerp#817's original column name, live on main before
+// this ticket) to avatar_file_id UUID. CREATE TABLE IF NOT EXISTS above
+// is a no-op against an already-bootstrapped table, so without this an
+// already-running environment (the shared dev Postgres included — hit
+// firsthand while building this ticket) keeps the old column forever and
+// every GetProfile/SetProfile call starts failing with "column
+// avatar_file_id does not exist". No shipped code path ever wrote a real
+// value to avatar_url, but the USING clause still guards the cast with a
+// UUID-shape check rather than casting unconditionally: an environment
+// where something wrote non-UUID data into the column out of band (a
+// manual edit, a one-off script) gets that value silently dropped to
+// NULL instead of failing the cast — and since this runs inside
+// Bootstrap's transaction, a cast failure here would otherwise fail the
+// entire engine startup, not just the profile feature.
+const migrateAvatarURLColumn = `
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'system' AND table_name = 'user_profiles' AND column_name = 'avatar_url'
+    ) THEN
+        ALTER TABLE system.user_profiles RENAME COLUMN avatar_url TO avatar_file_id;
+        ALTER TABLE system.user_profiles ALTER COLUMN avatar_file_id TYPE UUID USING (
+            CASE
+                WHEN avatar_file_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                THEN avatar_file_id::uuid
+                ELSE NULL
+            END
+        );
+    END IF;
+END $$;
 `
 
 // failedLoginLockThreshold/lockDuration are the minimal single-tier
@@ -116,6 +152,9 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createUserProfilesTable); err != nil {
 			return fmt.Errorf("create user_profiles table: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, migrateAvatarURLColumn); err != nil {
+			return fmt.Errorf("migrate user_profiles avatar column: %w", err)
 		}
 
 		return nil

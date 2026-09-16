@@ -22,6 +22,7 @@ const FAKE_AUTH: AuthContextValue = {
   login: async () => {},
   logout: async () => {},
   submitMFA: async () => {},
+  updateProfile: async () => {},
 };
 
 // Exercises the real generated route tree (not a hand-built stand-in) so

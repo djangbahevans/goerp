@@ -30,6 +30,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     login: vi.fn(),
     logout: vi.fn(async () => {}),
     submitMFA: vi.fn(),
+    updateProfile: vi.fn(),
     ...overrides,
   };
 }

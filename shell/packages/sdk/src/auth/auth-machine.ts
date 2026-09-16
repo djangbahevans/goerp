@@ -63,6 +63,11 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
 
     case "logout_complete":
       return state.status === "logging_out" ? { status: "unauthenticated" } : state;
+
+    case "profile_updated":
+      return state.status === "authenticated" || state.status === "refreshing"
+        ? { status: state.status, user: event.user, tenant: state.tenant }
+        : state;
   }
 }
 
