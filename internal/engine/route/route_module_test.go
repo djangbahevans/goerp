@@ -144,6 +144,16 @@ func TestRegisterModuleRoutes_ReservedAdmin(t *testing.T) {
 	}
 }
 
+func TestRegisterModuleRoutes_ReservedStorage(t *testing.T) {
+	table := New()
+	err := RegisterModuleRoutes(table, "storage", "domain", []ExplicitRoute{
+		{Method: "GET", Path: "/"},
+	})
+	if err == nil {
+		t.Fatal("want error: expanded path's first segment is \"storage\"")
+	}
+}
+
 func TestRegisterModuleRoutes_ReservedConnectorsForNonConnector(t *testing.T) {
 	table := New()
 	err := RegisterModuleRoutes(table, "connectors", "domain", []ExplicitRoute{

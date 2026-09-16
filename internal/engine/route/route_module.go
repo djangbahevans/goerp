@@ -102,7 +102,7 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 		switch {
 		case strings.HasPrefix(first, "_"):
 			return fmt.Errorf("route: module %q: %s is a reserved engine namespace", moduleName, expandedPath)
-		case first == "auth" || first == "admin":
+		case first == "auth" || first == "admin" || first == "storage":
 			return fmt.Errorf("route: module %q: %s is a reserved engine namespace", moduleName, expandedPath)
 		case first == "connectors" && moduleType != "connector":
 			return fmt.Errorf("route: module %q: %s is reserved for connector-type modules", moduleName, expandedPath)

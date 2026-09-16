@@ -605,6 +605,17 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	if !entry.Manifest.EngineBuiltin {
 		t.Error("Lookup(POST, /auth/login).Manifest.EngineBuiltin = false, want true")
 	}
+
+	uploadEntry, _, uploadResult, _ := table.Lookup("POST", "/storage/upload")
+	if uploadResult != route.RouteFound {
+		t.Fatalf("Lookup(POST, /storage/upload) result = %v, want RouteFound", uploadResult)
+	}
+	if !uploadEntry.Manifest.EngineNative {
+		t.Error("Lookup(POST, /storage/upload).Manifest.EngineNative = false, want true")
+	}
+	if !uploadEntry.Manifest.EngineBuiltin {
+		t.Error("Lookup(POST, /storage/upload).Manifest.EngineBuiltin = false, want true")
+	}
 }
 
 func TestBuildEventRegistry_FromModules(t *testing.T) {

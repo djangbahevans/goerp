@@ -100,6 +100,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
+	"github.com/djangbahevans/goerp/internal/engine/storageupload"
 	"github.com/djangbahevans/goerp/internal/engine/systemworker"
 	"github.com/djangbahevans/goerp/internal/engine/telemetry"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
@@ -748,6 +749,15 @@ func New(cfg *config.Config) (*Engine, error) {
 	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
+	// filesStore is constructed here (rather than down by
+	// offboardActivities, which also needs it) since storageUploadHandler
+	// needs it before builtinRoutes is built.
+	filesStore := files.NewStore(primaryPool)
+	storageUploadHandler := storageupload.NewHandler(tenantResolver, authChecker, storageBackend, filesStore, storageupload.Limits{
+		MaxFileBytes: cfg.StorageMaxFileBytes,
+		AllowedTypes: cfg.StorageAllowedTypes,
+		BlockedTypes: cfg.StorageBlockedTypes,
+	})
 	builtinRoutes := map[string]http.Handler{
 		"GET /_health":                     server.HealthHandler(),
 		"GET /_ready":                      server.ReadyHandler(),
@@ -758,6 +768,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/mfa/verify":            mfaVerifyHandler,
 		"POST /auth/mfa/reverify":          mfaReverifyHandler,
 		"POST /admin/users/{id}/mfa/reset": mfaResetHandler,
+		"POST /storage/upload":             storageUploadHandler,
 	}
 	defaultRateLimit := route.RateLimitConfig{Requests: cfg.RateLimitMax, WindowSeconds: int(cfg.RateLimitWindow.Seconds()), Scope: "ip"}
 
@@ -781,10 +792,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	// OffboardTenantWorkflow's activities need moduleRegistry too (its
 	// DeleteSearchIndexes step enumerates each loaded module's declared
 	// SearchIndexes) — registered here for the same reason
-	// provisionActivities is. filesStore is this package's only
-	// construction of internal/engine/files.Store; DeleteTenantStorageFiles
-	// is the one activity that reads it.
-	filesStore := files.NewStore(primaryPool)
+	// provisionActivities is. filesStore (constructed above, alongside
+	// storageUploadHandler) is DeleteTenantStorageFiles's one reader.
 	offboardActivities := tenantoffboard.NewActivities(tenantStore, filesStore, cacheClient, searchClient, storageBackend, schemaPool, moduleRegistry)
 	systemWorker.RegisterWorkflow(tenantoffboard.OffboardTenantWorkflow)
 	systemWorker.RegisterActivity(offboardActivities)
