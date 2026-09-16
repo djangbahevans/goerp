@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path"
-	"strings"
-	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/files"
@@ -101,7 +99,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			})
 		}
 
-		if !contentTypeAllowed(input.ContentType, limits) {
+		if !storage.ContentTypeAllowed(input.ContentType, limits.allowedTypes, limits.blockedTypes) {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
 				Code:    "storage.invalid_content_type",
 				Message: fmt.Sprintf("content type %q is not permitted", input.ContentType),
@@ -112,17 +110,19 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 		if purpose == "" {
 			purpose = defaultUploadPurpose
 		}
+		if !storage.ValidPurpose(purpose) {
+			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+				Code:    "storage.invalid_purpose",
+				Message: fmt.Sprintf("purpose %q is not a valid storage key segment", purpose),
+			})
+		}
 
 		fileID, err := uuid.NewV7()
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
 		}
 
-		// {purpose}/{tenant_id}/{year}/{month}/{file_id}.{ext}
-		// (object-storage-guide.md §12) — purpose first so a single S3
-		// prefix filter matches every tenant's files under that purpose.
-		key := fmt.Sprintf("%s/%s/%s/%s%s",
-			purpose, modCtx.TenantID, time.Now().UTC().Format("2006/01"), fileID.String(), path.Ext(input.Filename))
+		key := storage.BuildKey(purpose, modCtx.TenantID, fileID.String(), path.Ext(input.Filename))
 
 		checksum := sha256.Sum256(input.Data)
 		checksumHex := hex.EncodeToString(checksum[:])
@@ -179,24 +179,4 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 
 		return abi.WriteToModule(ctx, m, allocate, out)
 	}
-}
-
-func contentTypeAllowed(contentType string, limits storageUploadLimits) bool {
-	ct := strings.ToLower(contentType)
-
-	for _, blocked := range limits.blockedTypes {
-		if strings.ToLower(blocked) == ct {
-			return false
-		}
-	}
-
-	if len(limits.allowedTypes) == 0 {
-		return true
-	}
-	for _, allowed := range limits.allowedTypes {
-		if strings.ToLower(allowed) == ct {
-			return true
-		}
-	}
-	return false
 }

@@ -389,12 +389,12 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 // table, so /_health, /_ready, /auth/login, /auth/mfa/verify,
 // /auth/mfa/reverify, /admin/users/{id}/mfa/reset,
 // /admin/users/{id}/roles[/{role}], /_meta/permissions, /_meta/shares,
-// /_meta/saved-filters, and /_meta/schema resolve through the exact same
-// RouteTable.Lookup module routes do — no second router. Safe against
-// collision by construction:
+// /_meta/saved-filters, /_meta/schema, and /storage/upload resolve through
+// the exact same RouteTable.Lookup module routes do — no second router.
+// Safe against collision by construction:
 // RegisterModuleRoutes already rejects any module route whose top path
-// segment starts with "_", or is exactly "auth" or "admin", as a reserved
-// engine namespace.
+// segment starts with "_", or is exactly "auth", "admin", or "storage",
+// as a reserved engine namespace.
 //
 // /admin/users/{id}/mfa/reset and /admin/users/{id}/roles[/{role}] are
 // tenant-facing routes despite their "/admin/" prefix — see
@@ -495,6 +495,16 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathParams:   map[string]string{"id": "uuid"},
 		},
 		PathTemplate: "/_meta/saved-filters/{id}",
+	})
+
+	// /storage/upload (goerp#818) — same EngineBuiltin posture as
+	// /auth/login above: storageupload.Handler resolves tenant/auth itself
+	// (same manual ResolveByHost/Authenticate pattern authme.Handler
+	// uses), so the standard middleware chain must no-op for it rather
+	// than run Class A resolution ahead of a handler that redoes it.
+	table.Register("POST", "/storage/upload", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		PathTemplate: "/storage/upload",
 	})
 }
 
