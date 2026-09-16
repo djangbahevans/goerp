@@ -161,6 +161,11 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 		return
 	}
 
+	if wantsParquet(r) {
+		writeParquet(w, out.Records)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": out.Records,
 		"meta": map[string]any{

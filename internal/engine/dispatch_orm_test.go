@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -26,6 +28,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parquet-go/parquet-go"
 )
 
 // dispatchORMTestPostgresDSN points directly at the compose.dev.yml
@@ -426,6 +429,100 @@ func TestDispatchORMRoute_List_UndeclaredFilterFieldReturns400(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestDispatchORMRoute_List_FormatParquet_ReturnsParquetContentType proves
+// goerp#642's AC: ?format=parquet on a list route returns the documented
+// content type (view-system.md §8) instead of the JSON envelope.
+func TestDispatchORMRoute_List_FormatParquet_ReturnsParquetContentType(t *testing.T) {
+	f := newDispatchORMFixture(t)
+
+	body, _ := json.Marshal(map[string]any{"id": "aaaaaaaa-0000-0000-0000-000000000001", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Parquet Widget", "code": "PQ-1"})
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodGet, "/testmodule/widgets?format=parquet", nil, f.entryList, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != parquetContentType {
+		t.Fatalf("Content-Type = %q, want %q", got, parquetContentType)
+	}
+	if w.Body.Len() == 0 {
+		t.Fatal("empty parquet body")
+	}
+}
+
+// TestDispatchORMRoute_List_AcceptParquetHeader_ReturnsParquetContentType
+// proves the Accept-header alternative view-system.md §8 documents
+// alongside ?format=parquet triggers the same encoding.
+func TestDispatchORMRoute_List_AcceptParquetHeader_ReturnsParquetContentType(t *testing.T) {
+	f := newDispatchORMFixture(t)
+
+	w := httptest.NewRecorder()
+	r := f.request(http.MethodGet, "/testmodule/widgets", nil, f.entryList, nil)
+	r.Header.Set("Accept", parquetContentType)
+	f.e.dispatchORMRoute(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != parquetContentType {
+		t.Fatalf("Content-Type = %q, want %q", got, parquetContentType)
+	}
+}
+
+// TestDispatchORMRoute_List_FormatParquet_FilterAppliesIdentically proves
+// goerp#642's AC that filter[...] narrows the Parquet response the same
+// way it narrows the JSON one — same dispatchORMList code path up to the
+// final encoding branch, verified end to end rather than assumed.
+func TestDispatchORMRoute_List_FormatParquet_FilterAppliesIdentically(t *testing.T) {
+	f := newDispatchORMFixture(t)
+
+	ids := []string{"bbbbbbbb-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000002"}
+	for i, code := range []string{"PF-1", "PF-2"} {
+		body, _ := json.Marshal(map[string]any{"id": ids[i], "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Filtered Parquet %d", i), "code": code})
+		w := httptest.NewRecorder()
+		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %d status = %d, want 201; body: %s", i, w.Code, w.Body.String())
+		}
+	}
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodGet, "/testmodule/widgets?format=parquet&filter[code]=PF-1", nil, f.entryList, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	// No explicit schema: reads the one the file itself embeds (what
+	// writeParquet produced), rather than risking a mismatched hand-written
+	// one silently projecting rows away.
+	reader := parquet.NewReader(bytes.NewReader(w.Body.Bytes()))
+	defer reader.Close()
+
+	var rows []map[string]any
+	for {
+		row := make(map[string]any)
+		err := reader.Read(&row)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				t.Fatalf("reader.Read: %v", err)
+			}
+			break
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1; rows: %#v", len(rows), rows)
+	}
+	if rows[0]["code"] != "PF-1" {
+		t.Errorf("rows[0][code] = %v, want PF-1", rows[0]["code"])
 	}
 }
 
