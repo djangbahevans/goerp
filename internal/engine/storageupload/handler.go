@@ -134,8 +134,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, h.limits.MaxFileBytes+multipartOverheadBytes)
 	if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeJSONError(w, http.StatusRequestEntityTooLarge, "file_too_large", "upload exceeds the maximum allowed size")
 			return
 		}
