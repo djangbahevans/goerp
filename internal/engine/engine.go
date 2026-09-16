@@ -47,6 +47,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authlogout"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authmeupdate"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authrefresh"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
@@ -746,13 +747,15 @@ func New(cfg *config.Config) (*Engine, error) {
 	mfaLockout := lockout.NewCounter(cacheClient)
 	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil)
-	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore)
+	// filesStore is constructed here (rather than down by
+	// offboardActivities, which also needs it) since authMeHandler
+	// (avatar URL resolution, goerp#819) and storageUploadHandler both
+	// need it before builtinRoutes is built.
+	filesStore := files.NewStore(primaryPool)
+	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, filesStore, storageBackend)
+	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
-	// filesStore is constructed here (rather than down by
-	// offboardActivities, which also needs it) since storageUploadHandler
-	// needs it before builtinRoutes is built.
-	filesStore := files.NewStore(primaryPool)
 	storageUploadHandler := storageupload.NewHandler(tenantResolver, authChecker, storageBackend, filesStore, storageupload.Limits{
 		MaxFileBytes: cfg.StorageMaxFileBytes,
 		AllowedTypes: cfg.StorageAllowedTypes,
@@ -762,6 +765,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"GET /_health":                     server.HealthHandler(),
 		"GET /_ready":                      server.ReadyHandler(),
 		"GET /auth/me":                     authMeHandler,
+		"PATCH /auth/me":                   authMeUpdateHandler,
 		"POST /auth/refresh":               authRefreshHandler,
 		"POST /auth/login":                 loginHandler,
 		"POST /auth/logout":                authLogoutHandler,

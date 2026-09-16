@@ -26,15 +26,17 @@ export function UserMenu(): ReactNode {
 
   if (!user) return null;
   const displayName = user.name || displayNameFromEmail(user.email);
-  // Routed through a string-typed parameter: these three routes don't
-  // exist yet, and a literal `to` not in the route tree fails typecheck.
+  // Routed through a string-typed parameter: "/settings" and
+  // "/keyboard-shortcuts" don't exist yet, and a literal `to` not in the
+  // route tree fails typecheck. "/settings/profile" (goerp#819) is real
+  // now and navigated via the router's own typed `to` below instead.
   const goTo = (path: string) => void navigate({ to: path });
 
   return (
     <ActionMenu
       label={displayName}
       items={[
-        { label: "Profile", onClick: () => goTo("/profile") },
+        { label: "Profile", onClick: () => void navigate({ to: "/settings/profile" }) },
         { label: "Settings", onClick: () => goTo("/settings") },
         { label: "Dark mode", checked: theme === "dark", onClick: toggleTheme },
         { label: "Keyboard shortcuts", onClick: () => goTo("/keyboard-shortcuts") },

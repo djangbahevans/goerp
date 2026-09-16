@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
-import { fetchCurrentSession, login, logout, submitMFACode } from "./auth-client.js";
+import { fetchCurrentSession, login, logout, submitMFACode, updateProfile } from "./auth-client.js";
 
 function jsonResponse(status: number, body: unknown, statusText = ""): Response {
   return {
@@ -181,6 +181,57 @@ describe("submitMFACode", () => {
     await expect(submitMFACode("mfa-tok", "000000", "totp")).rejects.toMatchObject({
       code: "invalid_mfa_code",
     });
+  });
+});
+
+describe("updateProfile", () => {
+  it("PATCHes name and avatar_id", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { name: "Ada Lovelace" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateProfile({ name: "Ada Lovelace", avatarId: "file-1" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/me",
+      expect.objectContaining({
+        method: "PATCH",
+        credentials: "include",
+        body: JSON.stringify({ name: "Ada Lovelace", avatar_id: "file-1" }),
+      }),
+    );
+  });
+
+  it("omits avatar_id from the body when not given", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { name: "Ada Lovelace" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateProfile({ name: "Ada Lovelace" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/me",
+      expect.objectContaining({ body: JSON.stringify({ name: "Ada Lovelace" }) }),
+    );
+  });
+
+  it("sends an empty-string avatar_id as a real value, distinct from omitting it", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { name: "Ada Lovelace" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateProfile({ name: "Ada Lovelace", avatarId: "" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/me",
+      expect.objectContaining({ body: JSON.stringify({ name: "Ada Lovelace", avatar_id: "" }) }),
+    );
+  });
+
+  it("throws an AppError on failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(400, { error: { code: "invalid_request", message: '"name" is required' } })),
+    );
+
+    await expect(updateProfile({ name: "" })).rejects.toMatchObject({ code: "invalid_request" });
   });
 });
 

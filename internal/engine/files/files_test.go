@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -171,6 +172,95 @@ func TestStorageKeysForTenant_ReturnsEveryInsertedKey(t *testing.T) {
 		if !want[key] {
 			t.Errorf("unexpected key %q", key)
 		}
+	}
+}
+
+func insertFixtureFile(t *testing.T, store *Store, slug, purpose string) InsertRow {
+	t.Helper()
+	fileID, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("uuid.NewV7: %v", err)
+	}
+	tenantID, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("uuid.NewV7: %v", err)
+	}
+	row := InsertRow{
+		ID:           fileID.String(),
+		TenantID:     tenantID.String(),
+		StorageKey:   purpose + "/" + tenantID.String() + "/2026/08/" + fileID.String() + ".png",
+		OriginalName: "avatar.png",
+		ContentType:  "image/png",
+		SizeBytes:    100,
+		Purpose:      purpose,
+	}
+	if err := store.Insert(context.Background(), slug, row); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	return row
+}
+
+func TestGetByID_ReturnsInsertedRow(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	row := insertFixtureFile(t, store, slug, "avatars")
+
+	got, err := store.GetByID(context.Background(), slug, row.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if got.StorageKey != row.StorageKey {
+		t.Errorf("StorageKey = %q, want %q", got.StorageKey, row.StorageKey)
+	}
+	if got.Purpose != "avatars" {
+		t.Errorf("Purpose = %q, want %q", got.Purpose, "avatars")
+	}
+}
+
+func TestGetByID_UnknownIDReturnsErrFileNotFound(t *testing.T) {
+	store, _, slug := openTestStore(t)
+
+	_, err := store.GetByID(context.Background(), slug, "00000000-0000-7000-8000-000000000001")
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Errorf("GetByID() error = %v, want ErrFileNotFound", err)
+	}
+}
+
+func TestGetByID_NoFilesTableReturnsErrFileNotFound(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	schema := tenantschema.Name(slug)
+	if _, err := conn.ExecContext(context.Background(), fmt.Sprintf("DROP TABLE %s.files", schema)); err != nil {
+		t.Fatalf("drop files table: %v", err)
+	}
+
+	_, err := store.GetByID(context.Background(), slug, "00000000-0000-7000-8000-000000000001")
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Errorf("GetByID() error = %v, want ErrFileNotFound", err)
+	}
+}
+
+func TestMarkDeleted_SetsDeletedAt(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	row := insertFixtureFile(t, store, slug, "avatars")
+
+	if err := store.MarkDeleted(context.Background(), slug, row.ID); err != nil {
+		t.Fatalf("MarkDeleted() error: %v", err)
+	}
+
+	var deletedAt sql.NullTime
+	query := fmt.Sprintf(`SELECT deleted_at FROM %s.files WHERE id = $1`, tenantschema.Name(slug))
+	if err := conn.QueryRowContext(context.Background(), query, row.ID).Scan(&deletedAt); err != nil {
+		t.Fatalf("query deleted_at: %v", err)
+	}
+	if !deletedAt.Valid {
+		t.Error("deleted_at is NULL, want a timestamp")
+	}
+}
+
+func TestMarkDeleted_UnknownIDIsNotAnError(t *testing.T) {
+	store, _, slug := openTestStore(t)
+
+	if err := store.MarkDeleted(context.Background(), slug, "00000000-0000-7000-8000-000000000001"); err != nil {
+		t.Errorf("MarkDeleted() error = %v, want nil", err)
 	}
 }
 

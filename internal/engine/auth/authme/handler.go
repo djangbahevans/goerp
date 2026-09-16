@@ -15,6 +15,7 @@
 package authme
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -23,19 +24,29 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/rs/zerolog/log"
 )
 
+// avatarURLExpiry matches object-storage-guide.md §6's own "Generate a
+// signed URL valid for 1 hour" example — long enough that a mount-time
+// GET /auth/me's URL stays valid through a typical session, short enough
+// that a since-replaced or deleted avatar stops being servable promptly.
+const avatarURLExpiry = time.Hour
+
 type Handler struct {
 	tenants *tenantresolve.Resolver
 	auth    *authcheck.Checker
 	users   *user.Store
+	files   *files.Store
+	backend storage.Backend
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, backend storage.Backend) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, backend: backend}
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -69,7 +80,9 @@ type meResponse struct {
 // system.user_profiles row (pre-goerp#817 users, or any invite path other
 // than tenant provisioning until a general invite endpoint exists) — the
 // frontend falls back to a derived display name in that case rather than
-// this handler inventing one.
+// this handler inventing one. AvatarURL is a freshly-generated signed URL
+// (goerp#819), resolved from Profile.AvatarFileID on every request — never
+// persisted, since signed URLs expire.
 type meUser struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
@@ -138,7 +151,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	profile, err := h.users.GetProfile(ctx, authCtx.UserID)
 	switch {
 	case err == nil:
-		name, avatarURL = &profile.Name, profile.AvatarURL
+		name = &profile.Name
+		if profile.AvatarFileID != nil {
+			avatarURL = h.resolveAvatarURL(ctx, tenantCtx.Slug, authCtx.UserID, *profile.AvatarFileID)
+		}
 	case errors.Is(err, user.ErrProfileNotFound):
 		// Leave name/avatarURL nil.
 	default:
@@ -163,4 +179,38 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Plan: string(tenantCtx.Plan),
 		},
 	})
+}
+
+// resolveAvatarURL turns a stored file id into a signed URL, or nil on any
+// failure (missing files.Store/storage.Backend dependency, the file row
+// having since been deleted, or a backend error) — same "degrade rather
+// than fail the whole session check" reasoning ServeHTTP applies to a
+// profile lookup failure.
+func (h *Handler) resolveAvatarURL(ctx context.Context, tenantSlug, userID, fileID string) *string {
+	if h.files == nil || h.backend == nil {
+		return nil
+	}
+
+	f, err := h.files.GetByID(ctx, tenantSlug, fileID)
+	if err != nil {
+		if !errors.Is(err, files.ErrFileNotFound) {
+			log.Warn().Err(err).Str("user_id", userID).Str("file_id", fileID).Msg("authme: avatar file lookup failed")
+		}
+		return nil
+	}
+	// A soft-deleted file (authmeupdate.Handler's own validation already
+	// rejects setting avatar_id to one — same rule enforced here for a
+	// profile pointing at a file deleted after being set) has nothing
+	// left to sign a working URL for.
+	if f.DeletedAt != nil {
+		return nil
+	}
+
+	url, err := h.backend.SignedURL(ctx, f.StorageKey, avatarURLExpiry)
+	if err != nil {
+		log.Warn().Err(err).Str("user_id", userID).Str("file_id", fileID).Msg("authme: avatar signed URL generation failed")
+		return nil
+	}
+
+	return &url
 }

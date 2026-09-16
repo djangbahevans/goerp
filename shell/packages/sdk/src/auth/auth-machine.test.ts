@@ -90,6 +90,26 @@ describe("authTransition", () => {
     expect(next).toEqual({ status: "unauthenticated" });
   });
 
+  it("authenticated → authenticated on profile_updated, replacing user but keeping tenant", () => {
+    const start: AuthState = { status: "authenticated", user, tenant };
+    const updatedUser = { ...user, name: "New Name" };
+    const next = authTransition(start, { type: "profile_updated", user: updatedUser });
+    expect(next).toEqual({ status: "authenticated", user: updatedUser, tenant });
+  });
+
+  it("refreshing → refreshing on profile_updated, preserving status", () => {
+    const start: AuthState = { status: "refreshing", user, tenant };
+    const updatedUser = { ...user, name: "New Name" };
+    const next = authTransition(start, { type: "profile_updated", user: updatedUser });
+    expect(next).toEqual({ status: "refreshing", user: updatedUser, tenant });
+  });
+
+  it("ignores profile_updated outside authenticated/refreshing", () => {
+    const start: AuthState = { status: "unauthenticated" };
+    const next = authTransition(start, { type: "profile_updated", user });
+    expect(next).toBe(start);
+  });
+
   it("authenticated → logging_out → unauthenticated", () => {
     const start: AuthState = { status: "authenticated", user, tenant };
     const loggingOut = authTransition(start, { type: "logout_started" });

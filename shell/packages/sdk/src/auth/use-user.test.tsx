@@ -25,6 +25,7 @@ function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue 
     login: vi.fn(),
     logout: vi.fn(),
     submitMFA: vi.fn(),
+    updateProfile: vi.fn(),
     ...overrides,
   };
 }
