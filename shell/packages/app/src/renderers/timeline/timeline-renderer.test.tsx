@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import type { UseSavedFiltersResult } from "@goerp/sdk/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -13,19 +14,44 @@ import type { Row } from "../list/list-view-types.js";
 import type { TimelineViewDeclaration } from "./timeline-manifest-types.js";
 import { TimelineRenderer } from "./timeline-renderer.js";
 
-const { useInfiniteListMock, saveRecordMock } = vi.hoisted(() => ({
+const { useInfiniteListMock, saveRecordMock, useSavedFiltersMock } = vi.hoisted(() => ({
   useInfiniteListMock: vi.fn(),
   saveRecordMock: vi.fn(),
+  // No saved filters and already resolved by default — real network
+  // access would otherwise hang indefinitely in this test environment,
+  // since nothing here mocks the sdk's internal http client.
+  useSavedFiltersMock: vi.fn(
+    (): UseSavedFiltersResult => ({
+      filters: [],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    }),
+  ),
 }));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
-  return { ...actual, useInfiniteList: useInfiniteListMock, saveRecord: saveRecordMock };
+  return {
+    ...actual,
+    useInfiniteList: useInfiniteListMock,
+    saveRecord: saveRecordMock,
+    useSavedFilters: useSavedFiltersMock,
+  };
 });
 
 afterEach(() => {
   cleanup();
   useInfiniteListMock.mockReset();
   saveRecordMock.mockReset();
+  useSavedFiltersMock.mockReset();
+  useSavedFiltersMock.mockImplementation(() => ({
+    filters: [],
+    isLoading: false,
+    save: vi.fn(),
+    remove: vi.fn(),
+    setDefault: vi.fn(),
+  }));
 });
 
 const INITIAL_DATE = new Date(2026, 4, 13); // Wednesday, May 13 2026
@@ -157,6 +183,42 @@ describe("TimelineRenderer", () => {
       "project.task",
       expect.objectContaining({ filter: expect.objectContaining({ assignee_id: "u1" }) }),
     );
+  });
+
+  it("applies the user's own is_default saved filter instead of the manifest's default_filters", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+    useSavedFiltersMock.mockReturnValue({
+      filters: [
+        {
+          id: "f1",
+          viewName: "project_timeline",
+          label: "Mine",
+          queryString: "?filter[assignee_id]=u2",
+          isDefault: true,
+        },
+      ],
+      isLoading: false,
+      save: vi.fn(),
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+    });
+
+    await renderTimelineRenderer({}, { ...view, default_filters: { assignee_id: "u1" } });
+
+    await waitFor(() => {
+      expect(useInfiniteListMock).toHaveBeenCalledWith(
+        "project.task",
+        expect.objectContaining({ filter: expect.objectContaining({ assignee_id: "u2" }) }),
+      );
+    });
+  });
+
+  it("disables the saved-filters fetch when embedded, since it's never consulted there", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+
+    await renderTimelineRenderer({ embedded: true });
+
+    expect(useSavedFiltersMock).toHaveBeenCalledWith("project_timeline", { enabled: false });
   });
 
   it("merges the embedded base filter and isolates the cache key by view and record", async () => {

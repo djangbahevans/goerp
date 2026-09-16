@@ -1,10 +1,10 @@
 import { ActionButton, Icon, Skeleton } from "@goerp/sdk/components";
 import { createInfiniteListQueryOptions, saveRecord, useInfiniteList } from "@goerp/sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ListFilters } from "../list/list-filters.js";
 import type { Row } from "../list/list-view-types.js";
-import { computeDefaultFilters, useListState } from "../list/use-list-state.js";
+import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
 import { TimelineChart } from "./timeline-chart.js";
 import { dateKey, initialRangeMode, navigateRange, startOfDay, visibleRange } from "./timeline-date-utils.js";
 import { buildTimelineRows } from "./timeline-layout.js";
@@ -32,16 +32,10 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
   const listState = useListState(embedded, undefined);
   const queryClient = useQueryClient();
 
-  const defaultsApplied = useRef(false);
-  const { setFilters } = listState;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once on mount, guarded by defaultsApplied — view/listState.filter/setFilters are deliberately read only at that first run, not tracked as change-triggers.
-  useEffect(() => {
-    if (defaultsApplied.current) return;
-    defaultsApplied.current = true;
-    if (Object.keys(listState.filter).length > 0) return;
-    const defaults = computeDefaultFilters(view);
-    if (Object.keys(defaults).length > 0) setFilters(defaults);
-  }, []);
+  // Timeline's own overlap-range filter (below) always wins over
+  // listState.filter for start_field/end_field, so a saved/manifest default
+  // touching those fields is harmless — it's just never the one applied.
+  useDefaultFilterApplication(view, listState, embedded);
 
   const [today] = useState(() => initialDate ?? new Date());
   const [focusedDate, setFocusedDate] = useState(today);
