@@ -1,3 +1,6 @@
+import type { ModuleDefinition } from "@goerp/sdk";
+import { registerModule } from "./register-module.js";
+
 function hexEncode(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -84,5 +87,56 @@ export async function ensureLoaded(
     throw err;
   });
   loaded.set(key, promise);
+  return promise;
+}
+
+function asModuleDefinition(moduleName: string, loadedModule: unknown): ModuleDefinition {
+  const definition = (loadedModule as { default?: unknown } | null)?.default;
+  if (!definition || typeof definition !== "object" || typeof (definition as { name?: unknown }).name !== "string") {
+    throw new Error(`module bundle for "${moduleName}" has no valid defineModule() default export`);
+  }
+  return definition as ModuleDefinition;
+}
+
+// Commands are registerModule()'s own job, not defineModule()'s (see that
+// function's comment) — keyed by bare module name so a hot-reloaded
+// module's command batch replaces its predecessor instead of doubling up.
+const unregisterCommands = new Map<string, () => void>();
+
+// Dedupes registerModule() to once per distinct bundle, same key as
+// ensureLoaded, since that cache alone would return its resolved promise
+// on every call without stopping a second .then() from registering again.
+const registered = new Map<string, Promise<void>>();
+
+// The moduleName -> key this module most recently started registering,
+// so an out-of-order resolution (an older hot-reload's fetch/import
+// finishing after a newer one's) doesn't clobber the newer registration.
+const latestKeyForModule = new Map<string, string>();
+
+export async function ensureModuleRegistered(
+  moduleName: string,
+  bundleUrl: string | null,
+  bundleSha256: string | null,
+  options?: LoadVerifiedModuleOptions,
+): Promise<void> {
+  if (!bundleUrl || !bundleSha256) return;
+
+  const key = `${moduleName}:${bundleUrl}:${bundleSha256}`;
+  latestKeyForModule.set(moduleName, key);
+  const existing = registered.get(key);
+  if (existing) return existing;
+
+  const promise = ensureLoaded(moduleName, bundleUrl, bundleSha256, options)
+    .then((loadedModule) => {
+      if (!loadedModule) return;
+      if (latestKeyForModule.get(moduleName) !== key) return;
+      unregisterCommands.get(moduleName)?.();
+      unregisterCommands.set(moduleName, registerModule(asModuleDefinition(moduleName, loadedModule)));
+    })
+    .catch((err: unknown) => {
+      registered.delete(key);
+      throw err;
+    });
+  registered.set(key, promise);
   return promise;
 }

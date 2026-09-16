@@ -22,3 +22,5 @@ export {
   isFilterLike,
   isFilterRange,
 } from "./http/index.js";
+export { defineModule } from "./module/define-module.js";
+export type { ModuleDefinition } from "./module/module-types.js";

@@ -266,9 +266,9 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       );
 
     case "custom":
-      // Requires a module component registry (defineModule's fieldRenderers.{})
-      // that doesn't exist in this repo yet — renders the raw value as a
-      // fallback rather than silently nothing.
+      // ComponentRegistry (backing defineModule().fieldRenderers, goerp#762)
+      // isn't consulted here yet — goerp#752's own scope, not this file's.
+      // Renders the raw value as a fallback rather than silently nothing.
       return value == null ? "" : String(value);
 
     default:

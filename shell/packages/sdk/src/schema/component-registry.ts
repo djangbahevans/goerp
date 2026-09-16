@@ -3,11 +3,9 @@ import type { ComponentType } from "react";
 // biome-ignore lint/suspicious/noExplicitAny: a registered component's own prop shape is owner-defined; callers narrow it after resolve().
 export type RegisteredComponent = ComponentType<any>;
 
-// Stand-in for defineModule().views, which doesn't exist in this SDK yet —
-// module registration itself (defineModule) is unbuilt. Bulk actions'
-// `component` field (view-system.md's "Bulk actions") resolves through
-// this until the real module-registration API lands; a module registers
-// its component here by name instead of via defineModule().
+// Backs defineModule().views/.fieldRenderers (../module/define-module.js
+// registers directly into this shared singleton) and bulk actions'
+// `component` field (view-system.md's "Bulk actions").
 export class ComponentRegistry {
   private readonly components = new Map<string, RegisteredComponent>();
 
@@ -32,5 +30,12 @@ export class ComponentRegistry {
 
   has(name: string): boolean {
     return this.components.has(name);
+  }
+
+  // For a caller that tracks its own previously-registered names (e.g.
+  // defineModule() re-registering a hot-reloaded module) to clear them
+  // before registering again, rather than hitting the collision guard.
+  unregister(name: string): void {
+    this.components.delete(name);
   }
 }

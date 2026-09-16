@@ -21,3 +21,5 @@ export type {
 } from "./types.js";
 export { useAuth } from "./use-auth.js";
 export { useFieldPermission, useOptionalPermission, usePermission } from "./use-permission.js";
+export { useTenant } from "./use-tenant.js";
+export { useUser } from "./use-user.js";

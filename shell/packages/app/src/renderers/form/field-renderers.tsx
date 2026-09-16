@@ -864,8 +864,9 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       return <span>{stringValue}</span>;
 
     case "custom":
-      // No module component registry exists yet (defineModule().views) —
-      // same fallback column-renderers.tsx already uses for "custom" columns.
+      // ComponentRegistry (backing defineModule().views, goerp#762) isn't
+      // consulted here yet — goerp#752's own scope, not this file's. Same
+      // fallback column-renderers.tsx already uses for "custom" columns.
       return <span>{stringValue}</span>;
 
     default:

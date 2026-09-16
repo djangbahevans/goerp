@@ -17,7 +17,8 @@
     "./form": "./dist/form/index.js",
     "./notifications": "./dist/notifications/index.js",
     "./error": "./dist/error/index.js",
-    "./schema": "./dist/schema/index.js"
+    "./schema": "./dist/schema/index.js",
+    "./module": "./dist/module/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

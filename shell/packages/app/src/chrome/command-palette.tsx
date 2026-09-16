@@ -1,4 +1,4 @@
-import { PermissionContext } from "@goerp/sdk/auth";
+import { PermissionContext, useAuth } from "@goerp/sdk/auth";
 import { MODAL_OVERLAY_CLASSES } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -59,6 +59,7 @@ export function CommandPalette(): ReactNode {
 
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const auth = useAuth();
   const permissions = useContext(PermissionContext);
   if (!permissions) {
     throw new Error("CommandPalette must be used within a PermissionProvider");
@@ -107,11 +108,34 @@ export function CommandPalette(): ReactNode {
     // biome-ignore lint/nursery/useReactCompiler: scrollIntoView is a DOM side effect keyed on activeIndex, not a state update.
   }, [activeIndex]);
 
-  const context: CommandContext = { navigate: (path) => void navigate({ to: path }), toast, queryClient };
+  // CommandPalette mounts at the app root (__root.tsx) regardless of auth
+  // state, so user/tenant can genuinely be null here (e.g. on the login
+  // screen) — a command that needs them just can't run yet, rather than
+  // this component crashing the whole shell over a normal, temporary state.
+  const context: CommandContext | null =
+    auth.user && auth.tenant
+      ? {
+          navigate: (path) => void navigate({ to: path }),
+          user: auth.user,
+          tenant: auth.tenant,
+          toast,
+          queryClient,
+        }
+      : null;
 
   const execute = (command: Command) => {
+    if (!context) {
+      toast.error("Not ready yet — try again in a moment.");
+      return;
+    }
     setOpen(false);
-    command.action(context);
+    // A module-registered command's action may be async (CommandDefinition
+    // permits void | Promise<void>) — awaited here only to surface a
+    // rejection as a toast instead of an unhandled promise rejection the
+    // palette itself (already closed by the time it settles) can't show.
+    void Promise.resolve(command.action(context)).catch((err: unknown) => {
+      toast.error(err instanceof Error ? err.message : String(err));
+    });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {

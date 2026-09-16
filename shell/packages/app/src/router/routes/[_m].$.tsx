@@ -2,7 +2,7 @@ import { createPermissionContextValue, permissionDataRef } from "@goerp/sdk/auth
 import { ActionButton, EmptyState, Icon, PageLayout } from "@goerp/sdk/components";
 import { viewRegistryRef } from "@goerp/sdk/schema";
 import { createFileRoute, notFound, redirect } from "@tanstack/react-router";
-import { ensureLoaded } from "../../bootstrap/module-loader.js";
+import { ensureModuleRegistered } from "../../bootstrap/module-loader.js";
 import { GenericRenderer } from "../../renderers/generic-renderer.js";
 
 // The shell's own /_m/* catch-all (shell-architecture.md §6 "Dynamic
@@ -37,7 +37,7 @@ export const Route = createFileRoute("/_m/$")({
   },
   loader: async ({ context }) => {
     const { view, bundleSha256 } = context;
-    await ensureLoaded(view.module, view.bundleUrl, bundleSha256);
+    await ensureModuleRegistered(view.module, view.bundleUrl, bundleSha256);
     return view;
   },
   component: RouteComponent,

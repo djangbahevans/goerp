@@ -1,22 +1,10 @@
-import type { ToastAPI } from "@goerp/sdk/notifications";
-import type { QueryClient } from "@tanstack/react-query";
+import type { CommandContext, CommandDefinition } from "@goerp/sdk/module";
 
-// shell-architecture.md §18's Command/CommandContext — the data model the
-// command palette merges three sources into and executes against.
-export interface Command {
-  id: string;
-  label: string;
+export type { CommandContext };
+
+// shell-architecture.md §18's Command. Extends @goerp/sdk's CommandDefinition
+// with description/group — this shell's own presentational/grouping fields.
+export interface Command extends CommandDefinition {
   description?: string;
-  keywords?: string[];
-  icon?: string;
-  shortcut?: string;
-  permission?: string;
   group?: string;
-  action: (ctx: CommandContext) => void;
-}
-
-export interface CommandContext {
-  navigate: (path: string) => void;
-  toast: ToastAPI;
-  queryClient: QueryClient;
 }

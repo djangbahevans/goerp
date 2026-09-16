@@ -2,8 +2,11 @@
 // for one relation column, called once per page with that column's ids.
 export type BatchLoader = (ids: string[]) => Promise<Map<string, string>>;
 
-// Stand-in for defineModule().batchLoaders until real module registration
-// exists (same provisional pattern as ComponentRegistry). Keyed by
+// A relation column's own id-to-label resolution (manifest-spec.md §8b
+// Strategy 2) — a different registry and contract from defineModule()'s
+// batchLoaders (../module/extension-batch-loader-registry.js), despite the
+// similar name: this one is per relation column, id-to-label strings; that
+// one is per view, id-to-extension-field-values records. Keyed by
 // `${viewName}.${columnField}`, since a view can have several relation
 // columns each needing a different loader.
 export class BatchLoaderRegistry {
