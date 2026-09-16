@@ -3,7 +3,15 @@ import { AuthMachine } from "../auth/auth-machine.js";
 import type { CurrentTenant, CurrentUser } from "../auth/types.js";
 import { tenantChannel, userChannel, WebSocketManager, wireWebSocketManager } from "./ws-manager.js";
 
-const user: CurrentUser = { id: "u1", email: "a@example.com", roles: [], amr: ["pwd"], mfaVerifiedAt: null };
+const user: CurrentUser = {
+  id: "u1",
+  email: "a@example.com",
+  name: null,
+  avatarUrl: null,
+  roles: [],
+  amr: ["pwd"],
+  mfaVerifiedAt: null,
+};
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
 const CONNECTING = 0;

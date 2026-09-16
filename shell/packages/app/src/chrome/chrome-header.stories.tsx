@@ -12,7 +12,15 @@ import {
 } from "@tanstack/react-router";
 import { ChromeHeader } from "./chrome-header.js";
 
-const fakeUser = { id: "u1", email: "jane.doe@example.com", roles: [], amr: [], mfaVerifiedAt: null };
+const fakeUser = {
+  id: "u1",
+  email: "jane.doe@example.com",
+  name: null,
+  avatarUrl: null,
+  roles: [],
+  amr: [],
+  mfaVerifiedAt: null,
+};
 const fakeTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 const fakeAuth = {
   state: { status: "authenticated" as const, user: fakeUser, tenant: fakeTenant },

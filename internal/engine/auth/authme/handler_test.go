@@ -254,11 +254,41 @@ func TestServeHTTP_ValidTokenReturnsUserAndTenant(t *testing.T) {
 	if len(resp.User.Roles) == 0 {
 		t.Error("user.roles is empty, want the fixture's granted admin role")
 	}
+	if resp.User.Name != nil {
+		t.Errorf("user.name = %v, want nil (fixture user has no user_profiles row)", *resp.User.Name)
+	}
+	if resp.User.AvatarURL != nil {
+		t.Errorf("user.avatar_url = %v, want nil", *resp.User.AvatarURL)
+	}
 	if resp.Tenant.ID != f.tenantID {
 		t.Errorf("tenant.id = %q, want %q", resp.Tenant.ID, f.tenantID)
 	}
 	if resp.Tenant.Slug != f.tenantSlug {
 		t.Errorf("tenant.slug = %q, want %q", resp.Tenant.Slug, f.tenantSlug)
+	}
+}
+
+func TestServeHTTP_ReturnsNameWhenProfileExists(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.conn.Exec(`INSERT INTO system.user_profiles (user_id, name) VALUES ($1, $2)`, f.userID, "Ada Lovelace"); err != nil {
+		t.Fatalf("insert fixture profile: %v", err)
+	}
+	accessToken := f.issueAccessToken(t)
+
+	rec := f.doMe(t, f.domain, accessToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.User.Name == nil || *resp.User.Name != "Ada Lovelace" {
+		t.Errorf("user.name = %v, want \"Ada Lovelace\"", resp.User.Name)
+	}
+	if resp.User.AvatarURL != nil {
+		t.Errorf("user.avatar_url = %v, want nil (no avatar set)", *resp.User.AvatarURL)
 	}
 }
 

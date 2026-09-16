@@ -5,6 +5,8 @@ interface MeResponseBody {
   user: {
     id: string;
     email: string;
+    name: string | null;
+    avatar_url: string | null;
     roles: string[];
     amr: string[];
     mfa_verified_at: string | null;
@@ -21,6 +23,8 @@ function mapUser(user: MeResponseBody["user"]): CurrentUser {
   return {
     id: user.id,
     email: user.email,
+    name: user.name,
+    avatarUrl: user.avatar_url,
     roles: user.roles,
     amr: user.amr,
     mfaVerifiedAt: user.mfa_verified_at,

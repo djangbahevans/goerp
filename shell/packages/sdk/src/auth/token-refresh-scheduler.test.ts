@@ -4,7 +4,15 @@ import { AuthMachine } from "./auth-machine.js";
 import { TokenRefreshScheduler, wireAutoRefresh } from "./token-refresh-scheduler.js";
 import type { CurrentTenant, CurrentUser } from "./types.js";
 
-const user: CurrentUser = { id: "u1", email: "a@example.com", roles: [], amr: ["pwd"], mfaVerifiedAt: null };
+const user: CurrentUser = {
+  id: "u1",
+  email: "a@example.com",
+  name: null,
+  avatarUrl: null,
+  roles: [],
+  amr: ["pwd"],
+  mfaVerifiedAt: null,
+};
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
 function fakeRefresher(fn: () => Promise<RefreshOutcome>): SessionRefresher {

@@ -90,7 +90,7 @@ func Workflow(ctx workflow.Context, input Input) error {
 		return fmt.Errorf("seed system data: %w", err)
 	}
 
-	if err := workflow.ExecuteActivity(ctx, "CreateAdminUser", input.Slug, input.AdminEmail).Get(ctx, nil); err != nil {
+	if err := workflow.ExecuteActivity(ctx, "CreateAdminUser", input.Slug, input.AdminEmail, input.AdminName).Get(ctx, nil); err != nil {
 		return fmt.Errorf("create admin user: %w", err)
 	}
 

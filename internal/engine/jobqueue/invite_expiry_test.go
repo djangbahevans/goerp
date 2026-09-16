@@ -31,6 +31,10 @@ func (f *fakeUserResolver) FindOrCreateInvited(ctx context.Context, email string
 	return fmt.Sprintf("fake-user-%d", f.n), nil
 }
 
+func (f *fakeUserResolver) EnsureProfile(ctx context.Context, userID, name string) error {
+	return nil
+}
+
 func openInviteExpiryWorker(t *testing.T) (*InviteExpiryWorker, *tenant.Store, *invite.Store, *sql.DB) {
 	t.Helper()
 
@@ -119,7 +123,7 @@ func TestWork_EmitsExpiredInviteExactlyOnceAcrossRuns(t *testing.T) {
 
 	tt := newExpiryTestTenant(t, tenantStore, roleStore, inviteStore, conn)
 
-	inv, err := inviteStore.Invite(ctx, tt.Slug, fmt.Sprintf("t%d@example.com", time.Now().UnixNano()), "admin", nil)
+	inv, err := inviteStore.Invite(ctx, tt.Slug, fmt.Sprintf("t%d@example.com", time.Now().UnixNano()), "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -148,12 +152,12 @@ func TestWork_SkipsLiveAcceptedAndRevokedInvitations(t *testing.T) {
 
 	tt := newExpiryTestTenant(t, tenantStore, roleStore, inviteStore, conn)
 
-	live, err := inviteStore.Invite(ctx, tt.Slug, fmt.Sprintf("live%d@example.com", time.Now().UnixNano()), "admin", nil)
+	live, err := inviteStore.Invite(ctx, tt.Slug, fmt.Sprintf("live%d@example.com", time.Now().UnixNano()), "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
 
-	accepted, err := inviteStore.Invite(ctx, tt.Slug, fmt.Sprintf("accepted%d@example.com", time.Now().UnixNano()), "admin", nil)
+	accepted, err := inviteStore.Invite(ctx, tt.Slug, fmt.Sprintf("accepted%d@example.com", time.Now().UnixNano()), "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}

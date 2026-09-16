@@ -93,8 +93,9 @@ type TenantMembership interface {
 
 // UserResolver is satisfied by *user.Store (GetByID) — resolves the id
 // TenantMembership.AdminUserID returns into the email the status route
-// reports. system.users has no display-name column yet, so admin_user
-// only ever carries id/email, not a name.
+// reports. system.users itself still has no display-name column (that
+// lives on the separate system.user_profiles table, goerp#817) — this
+// status route stays id/email-only, not extended to surface it.
 type UserResolver interface {
 	GetByID(ctx context.Context, id string) (*user.User, error)
 }

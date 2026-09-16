@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -44,6 +45,7 @@ type Store struct {
 
 type UserResolver interface {
 	FindOrCreateInvited(ctx context.Context, email string) (userID string, err error)
+	EnsureProfile(ctx context.Context, userID, name string) error
 }
 
 type RoleResolver interface {
@@ -139,12 +141,21 @@ func generateToken() (rawToken, tokenHash string, err error) {
 }
 
 // Invite resolves roleName to an id, finds-or-creates the invitee's
-// system.users row, then upserts the invitation — reusing a live one for
-// this email if it exists (auth-internals.md §3: sending to an
-// already-invited email is equivalent to resend). Emits user.invited and
-// sends the invite email; both are best-effort no-ops when audit/mailer
-// are nil, logged rather than failing the invite itself.
-func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName string, invitedBy *string) (*Invitation, error) {
+// system.users row, ensures a user_profiles row exists with name (a
+// no-op if the invitee already has one — see UserResolver.EnsureProfile;
+// this also means a platform user with no profile who's already active in
+// another tenant can have their platform-level name set by this tenant's
+// invite — accepted, since user_profiles has no other set-path yet and a
+// name is strictly better than none; goerp#819's self-service rename lets
+// a user correct it themselves), then upserts the invitation — reusing a
+// live one for this email if it exists (auth-internals.md §3: sending to
+// an already-invited email is equivalent to resend). Emits user.invited
+// and sends the invite email; both are best-effort no-ops when
+// audit/mailer are nil, logged rather than failing the invite itself.
+// A blank name (e.g. tenant provisioning's optional --admin-name) skips
+// EnsureProfile entirely rather than persisting an empty string a display
+// layer's nil-check wouldn't catch.
+func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name string, invitedBy *string) (*Invitation, error) {
 	roleID, err := s.roles.GetRoleByName(ctx, tenantSlug, roleName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve role %q: %w", roleName, err)
@@ -153,6 +164,12 @@ func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName string, 
 	userID, err := s.users.FindOrCreateInvited(ctx, email)
 	if err != nil {
 		return nil, fmt.Errorf("find or create invitee: %w", err)
+	}
+
+	if strings.TrimSpace(name) != "" {
+		if err := s.users.EnsureProfile(ctx, userID, name); err != nil {
+			return nil, fmt.Errorf("ensure invitee profile: %w", err)
+		}
 	}
 
 	rawToken, tokenHash, err := generateToken()
@@ -175,12 +192,10 @@ func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName string, 
 	}
 
 	s.emit(ctx, tenantSlug, "user.invited", map[string]any{"invitation_id": inv.ID, "email": email})
-	// userID is the invitee's system.users row — nothing here reads it
-	// beyond confirming FindOrCreateInvited succeeded; whether the
-	// invitee is new vs. existing (for email copy) isn't distinguished
-	// yet since UserResolver only returns an id, not a found/created flag.
+	// Whether the invitee is new vs. existing (for email copy) isn't
+	// distinguished — UserResolver only returns an id, not a found/created
+	// flag.
 	s.sendInvite(ctx, email, tenantSlug, rawToken, true)
-	_ = userID
 
 	return inv, nil
 }

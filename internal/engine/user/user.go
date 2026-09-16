@@ -40,6 +40,21 @@ const createIndex = `
         ON system.users (email) WHERE deleted_at IS NULL;
 `
 
+// createUserProfilesTable matches auth-internals.md's user_profiles
+// definition, minus locale/timezone/phone — those have no consumer yet
+// (separate, unfiled tickets), so they're left off rather than added
+// unused; a later ticket can add them with ALTER TABLE the same way
+// tenant.Tenant's suspended_by comment describes for its own deferred
+// column.
+const createUserProfilesTable = `
+CREATE TABLE IF NOT EXISTS system.user_profiles (
+    user_id     UUID PRIMARY KEY REFERENCES system.users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    avatar_url  TEXT,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+`
+
 // failedLoginLockThreshold/lockDuration are the minimal single-tier
 // lockout auth-internals.md §3 step 5/§15's login flow requires
 // ("brute force counters ... reject if locked"). The full escalating
@@ -98,6 +113,9 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createIndex); err != nil {
 			return fmt.Errorf("create users email index: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createUserProfilesTable); err != nil {
+			return fmt.Errorf("create user_profiles table: %w", err)
 		}
 
 		return nil

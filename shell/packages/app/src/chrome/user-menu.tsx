@@ -6,10 +6,12 @@ import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { titleCaseWords } from "./title-case-words.js";
 
-// CurrentUser has no `name` field, only `email` — UserAvatar's `name` is
-// required, so this derives a presentable value ("jane.doe" -> "Jane Doe").
-// Falls back to the raw email if the local-part title-cases to empty
-// (e.g. "@example.com").
+// CurrentUser.name is null for a user with no system.user_profiles row
+// (pre-goerp#817 users, or any invite path other than tenant provisioning
+// until a general invite endpoint exists) — derives a presentable value
+// from the email local-part instead ("jane.doe" -> "Jane Doe"). Falls
+// back to the raw email if the local-part title-cases to empty (e.g.
+// "@example.com").
 function displayNameFromEmail(email: string): string {
   const local = email.split("@")[0] ?? "";
   return titleCaseWords(local, /[._-]/) || email;
@@ -23,7 +25,7 @@ export function UserMenu(): ReactNode {
   const navigate = useNavigate();
 
   if (!user) return null;
-  const displayName = displayNameFromEmail(user.email);
+  const displayName = user.name || displayNameFromEmail(user.email);
   // Routed through a string-typed parameter: these three routes don't
   // exist yet, and a literal `to` not in the route tree fails typecheck.
   const goTo = (path: string) => void navigate({ to: path });
@@ -50,7 +52,7 @@ export function UserMenu(): ReactNode {
           onKeyDown={onKeyDown}
           className="flex items-center gap-1.5 rounded-control p-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:shadow-focus"
         >
-          <UserAvatar name={displayName} size="sm" />
+          <UserAvatar userId={user.id} name={displayName} avatarUrl={user.avatarUrl} size="sm" />
           <ChevronDown
             size={14}
             aria-hidden="true"

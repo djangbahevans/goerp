@@ -5,7 +5,15 @@ import { AuthContext } from "./auth-provider.js";
 import type { AuthContextValue, CurrentTenant, CurrentUser } from "./types.js";
 import { useUser } from "./use-user.js";
 
-const USER: CurrentUser = { id: "u1", email: "a@b.com", roles: [], amr: [], mfaVerifiedAt: null };
+const USER: CurrentUser = {
+  id: "u1",
+  email: "a@b.com",
+  name: null,
+  avatarUrl: null,
+  roles: [],
+  amr: [],
+  mfaVerifiedAt: null,
+};
 const TENANT: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
 function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
