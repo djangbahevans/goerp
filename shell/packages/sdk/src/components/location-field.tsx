@@ -55,8 +55,10 @@ function clampLng(n: number): number {
   return Math.min(180, Math.max(-180, n));
 }
 
-// No self-hosted glyph/sprite server exists yet — omitting glyphs/sprite
-// just skips label/icon layers; roads/water/buildings still render fine.
+// No self-hosted sprite server exists yet — omitting `sprite` just skips
+// icon layers (POI markers render as blank, logged as a console warning);
+// text labels render fine via the browser's local fonts even with no
+// `glyphs` PBF server configured.
 function buildStyle(tileUrl: string | undefined, theme: "light" | "dark"): maplibregl.StyleSpecification {
   if (tileUrl === undefined) {
     return {
@@ -73,7 +75,13 @@ function buildStyle(tileUrl: string | undefined, theme: "light" | "dark"): mapli
   }
   return {
     version: 8,
-    sources: { [PMTILES_SOURCE_ID]: { type: "vector", url: `pmtiles://${tileUrl}` } },
+    sources: {
+      [PMTILES_SOURCE_ID]: {
+        type: "vector",
+        url: `pmtiles://${tileUrl}`,
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      },
+    },
     layers: basemapLayers(PMTILES_SOURCE_ID, theme === "dark" ? DARK : LIGHT, { lang: "en" }),
   };
 }
@@ -135,7 +143,11 @@ export function LocationField({
         style: buildStyle(tileUrl, theme),
         center: isCompleteValue(value) ? [value.lng, value.lat] : EMPTY_CENTER,
         zoom: EMPTY_ZOOM,
-        attributionControl: false,
+        // OSM's ODbL license requires attribution wherever this tile data
+        // renders. MapLibre CSS-hides an empty attribution control once its
+        // style loads, so the tileUrl-less fallback shows nothing after a
+        // brief initial flash.
+        attributionControl: { compact: true },
       });
     } catch {
       // No WebGL support — the coordinate inputs below remain fully usable.
