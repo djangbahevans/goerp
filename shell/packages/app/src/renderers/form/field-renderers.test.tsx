@@ -310,6 +310,20 @@ describe("FieldInput", () => {
     expect(onChange).toHaveBeenCalledWith({ a: 2 });
   });
 
+  it("textarea: renders a plain textarea, unaffected by markdown's split into its own case", () => {
+    const onChange = renderField({ field: "notes", type: "textarea" }, "plain text");
+    const textarea = screen.getByDisplayValue("plain text");
+    expect(textarea.tagName).toBe("TEXTAREA");
+    fireEvent.change(textarea, { target: { value: "edited" } });
+    expect(onChange).toHaveBeenCalledWith("edited");
+  });
+
+  it("markdown: renders MarkdownField's toolbar instead of a plain textarea", () => {
+    renderField({ field: "notes", type: "markdown" }, "Some **text**");
+    expect(screen.getByRole("toolbar", { name: "Formatting" })).toBeTruthy();
+    expect(screen.queryByRole("textbox")?.tagName).not.toBe("TEXTAREA");
+  });
+
   it("separator/label: render with no bindable control and never call onChange", () => {
     renderField({ field: "_", type: "separator" }, undefined);
     expect(document.querySelector("hr")).toBeTruthy();
