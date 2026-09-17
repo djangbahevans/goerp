@@ -35,6 +35,10 @@ interface Entry {
   name: string;
 }
 
+// Fixed row count, not a measured panel height — approximates max-h-80 at
+// this file's shared row height without an extra DOM measurement pass.
+export const PAGE_JUMP = 10;
+
 // Shared by timezone-select.tsx/currency-select.tsx, whose datasets are
 // enumerated at runtime instead of bundled like country/language.
 export function supportedValuesOrEmpty(key: "currency" | "timeZone"): string[] {
@@ -166,6 +170,29 @@ export function CodeSelect({
       case "ArrowUp":
         event.preventDefault();
         if (matches.length > 0) setHighlightedIndex((activeIndex - 1 + matches.length) % matches.length);
+        break;
+      case "Home":
+        // Only intercepted while browsing the unfiltered list — once a query
+        // is typed, Home/End fall through to the input's own native
+        // caret-to-start/caret-to-end behavior instead of hijacking it.
+        if (query === "" && matches.length > 0) {
+          event.preventDefault();
+          setHighlightedIndex(0);
+        }
+        break;
+      case "End":
+        if (query === "" && matches.length > 0) {
+          event.preventDefault();
+          setHighlightedIndex(matches.length - 1);
+        }
+        break;
+      case "PageUp":
+        event.preventDefault();
+        if (matches.length > 0) setHighlightedIndex(Math.max(0, activeIndex - PAGE_JUMP));
+        break;
+      case "PageDown":
+        event.preventDefault();
+        if (matches.length > 0) setHighlightedIndex(Math.min(matches.length - 1, activeIndex + PAGE_JUMP));
         break;
       case "Enter": {
         event.preventDefault();
