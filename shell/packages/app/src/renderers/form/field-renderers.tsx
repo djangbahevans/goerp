@@ -12,6 +12,7 @@ import {
   IconPicker,
   LanguageSelect,
   LocationField,
+  MarkdownField,
   MoneyField,
   RelationPicker,
   RichTextField,
@@ -398,9 +399,6 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       );
 
     case "textarea":
-    case "markdown":
-      // markdown falls back to a plain textarea — no editor library chosen
-      // yet.
       return (
         <textarea
           id={id}
@@ -410,6 +408,18 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           disabled={disabled}
           className={PLAIN_INPUT_CLASS_NAME}
           onChange={(e) => onChange(e.target.value)}
+        />
+      );
+
+    case "markdown":
+      return (
+        <MarkdownField
+          ariaLabelledBy={id}
+          value={stringValue}
+          placeholder={field.placeholder}
+          rows={field.rows}
+          disabled={disabled}
+          onChange={onChange}
         />
       );
 

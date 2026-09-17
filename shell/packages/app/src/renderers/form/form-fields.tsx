@@ -13,7 +13,9 @@ import type { FormField } from "./form-view-types.js";
 // "can't assume a single labelable native control" reasoning applies, and
 // the resolved component receives the generated id as its own `id` prop to
 // apply via aria-labelledby on whichever element it considers primary.
-const ARIA_LABELLEDBY_FIELD_TYPES = new Set(["code", "rich_text", "json", "location", "custom"]);
+// "markdown" (goerp#858) is the same contentEditable Tiptap surface
+// "rich_text"/"code" already are, just a different serialization format.
+const ARIA_LABELLEDBY_FIELD_TYPES = new Set(["code", "rich_text", "markdown", "json", "location", "custom"]);
 
 export interface FormFieldRowProps {
   field: FormField;

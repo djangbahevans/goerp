@@ -217,6 +217,22 @@ describe("FormFieldRow", () => {
       expect(screen.getByLabelText("Script")).toBe(screen.getByRole("textbox"));
     });
 
+    it("markdown: associates the visible label via aria-labelledby, since the contentEditable primary control isn't natively labelable", () => {
+      const Wrapper = withFieldAccess({ notes: { read: true, write: true } });
+      render(
+        <Wrapper>
+          <FormFieldRow
+            field={{ field: "notes", type: "markdown", label: "Notes" }}
+            resource="contacts.contact"
+            record={{ notes: "Hello" }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      expect(screen.getByLabelText("Notes")).toBe(screen.getByRole("textbox"));
+    });
+
     it("location: associates the visible label with both coordinate inputs via aria-labelledby, since the map canvas isn't natively labelable", () => {
       const Wrapper = withFieldAccess({ geo: { read: true, write: true } });
       render(
