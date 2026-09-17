@@ -42,6 +42,8 @@ export type { FileFieldProps, FileValue } from "./file-field.js";
 export { FileField } from "./file-field.js";
 export type { IconName, IconNameLike, IconProps } from "./icon.js";
 export { Icon, isKnownIconName } from "./icon.js";
+export type { IconPickerProps } from "./icon-picker.js";
+export { IconPicker } from "./icon-picker.js";
 export type { LanguageSelectProps } from "./language-select.js";
 export { LanguageSelect } from "./language-select.js";
 export type { LoadingOverlayProps } from "./loading-overlay.js";

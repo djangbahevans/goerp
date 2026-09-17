@@ -1,7 +1,9 @@
-import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { fieldInputClassName } from "./field-input-styles.js";
+import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 
 // Shared combobox mechanics behind country-select.tsx and
 // language-select.tsx — same searchable-list-over-a-static-dataset shape,
@@ -27,13 +29,6 @@ interface Entry {
   name: string;
 }
 
-const CLEAR_BUTTON_STYLE: CSSProperties = {
-  position: "absolute",
-  insetInlineEnd: "var(--space-2)",
-  top: "50%",
-  transform: "translateY(-50%)",
-};
-
 export function CodeSelect({
   id,
   codes,
@@ -56,7 +51,6 @@ export function CodeSelect({
   // otherwise clip the dropdown instead of letting it float above the page.
   const containerRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLSpanElement | null>(null);
-  const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
 
   // The resolved locale doesn't change while mounted, so names+sort order
   // are computed once per dataset.
@@ -95,42 +89,8 @@ export function CodeSelect({
     setQuery("");
   }
 
-  // Runs before paint, positioned once on open — not re-tracked on
-  // scroll/resize, since the panel closes on Escape/selection/outside-click
-  // well before either would matter (same simplification ActionMenu's own
-  // panel makes).
-  useLayoutEffect(() => {
-    if (!isOpen) {
-      setPosition(null);
-      return;
-    }
-    const containerEl = containerRef.current;
-    if (!containerEl) return;
-    const containerRect = containerEl.getBoundingClientRect();
-    const panelHeight = panelRef.current?.getBoundingClientRect().height ?? 0;
-    const fitsBelow = containerRect.bottom + 4 + panelHeight <= window.innerHeight - 8;
-    const top = fitsBelow ? containerRect.bottom + 4 : Math.max(8, containerRect.top - 4 - panelHeight);
-    setPosition({ top, left: containerRect.left, width: containerRect.width });
-  }, [isOpen]);
-
-  // Closes on a click outside both the input and the portaled panel —
-  // mousedown, not click, so it commits before any outside element's own
-  // click handler fires. Doesn't rely on blur/relatedTarget the way this
-  // component's pre-portal version did: the panel is no longer a DOM
-  // descendant of the input's container once portaled, so a plain
-  // event.currentTarget.contains(event.relatedTarget) check would
-  // incorrectly treat every click inside the panel as "outside" too.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: close is a plain function recreated every render, not a reactive dependency — only isOpen should re-arm this listener.
-  useEffect(() => {
-    if (!isOpen) return;
-    function handlePointerDown(event: MouseEvent): void {
-      const target = event.target as Node;
-      if (containerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
-      close();
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [isOpen]);
+  const position = useFloatingPanelPosition(isOpen, containerRef, panelRef);
+  useOutsideClickClose(isOpen, [containerRef, panelRef], close);
 
   function selectEntry(entry: Entry): void {
     onChange(entry.code);
@@ -207,16 +167,7 @@ export function CodeSelect({
         </span>
       )}
       {!isOpen && selected && (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange("")}
-          aria-label={`Clear ${selected.name}`}
-          style={CLEAR_BUTTON_STYLE}
-          className="rounded-control p-1 text-text-secondary hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          ×
-        </button>
+        <ComboboxClearButton label={selected.name} disabled={disabled} onClear={() => onChange("")} />
       )}
       {isOpen &&
         createPortal(
