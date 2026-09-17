@@ -1,13 +1,14 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { fieldInputClassName } from "./field-input-styles.js";
 import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 
-// Shared combobox mechanics behind country-select.tsx and
-// language-select.tsx — same searchable-list-over-a-static-dataset shape,
-// differing only in dataset, name resolution, and row visual.
+// Shared combobox mechanics behind country-select.tsx, language-select.tsx,
+// timezone-select.tsx, and currency-select.tsx — same searchable-list-over-
+// a-dataset shape, differing only in dataset, name resolution, and row
+// visual.
 
 export interface CodeSelectProps {
   id?: string | undefined;
@@ -91,6 +92,16 @@ export function CodeSelect({
 
   const position = useFloatingPanelPosition(isOpen, containerRef, panelRef);
   useOutsideClickClose(isOpen, [containerRef, panelRef], close);
+
+  // The panel scrolls internally once its content exceeds max-h-80, so
+  // arrow-key highlighting needs to carry the viewport with it — otherwise
+  // a keyboard-only user can highlight an option scrolled out of view.
+  useEffect(() => {
+    if (!isOpen) return;
+    // getElementById, not a CSS selector — useId()'s own value contains a
+    // ":" that would otherwise need escaping.
+    document.getElementById(`${listboxId}-option-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [isOpen, activeIndex, listboxId]);
 
   function selectEntry(entry: Entry): void {
     onChange(entry.code);
@@ -180,7 +191,7 @@ export function CodeSelect({
                 ? { position: "fixed", top: position.top, left: position.left, width: position.width }
                 : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
             }
-            className="z-(--z-dropdown) min-w-60 rounded-structural border border-border bg-surface p-2 shadow-md"
+            className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
           >
             {matches.length === 0 ? (
               <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">

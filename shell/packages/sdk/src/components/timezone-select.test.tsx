@@ -1,6 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TimezoneSelect } from "./timezone-select.js";
+
+// jsdom doesn't implement scrollIntoView at all — code-select.tsx calls it
+// to keep the keyboard-highlighted option visible within the panel's
+// scrollable area.
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 afterEach(cleanup);
 
