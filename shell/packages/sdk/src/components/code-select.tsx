@@ -1,9 +1,14 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { fieldInputClassName } from "./field-input-styles.js";
-import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
+import {
+  optionElementId,
+  useFloatingPanelPosition,
+  useOutsideClickClose,
+  useScrollHighlightedOptionIntoView,
+} from "./floating-panel.js";
 
 // Shared combobox mechanics behind country-select.tsx, language-select.tsx,
 // timezone-select.tsx, and currency-select.tsx — same searchable-list-over-
@@ -28,10 +33,6 @@ export interface CodeSelectProps {
 interface Entry {
   code: string;
   name: string;
-}
-
-function optionElementId(listboxId: string, index: number): string {
-  return `${listboxId}-option-${index}`;
 }
 
 // Shared by timezone-select.tsx/currency-select.tsx, whose datasets are
@@ -136,18 +137,10 @@ export function CodeSelect({
     setQuery("");
   }
 
-  const position = useFloatingPanelPosition(isOpen, containerRef, panelRef);
+  const position = useFloatingPanelPosition(isOpen, containerRef, panelRef, true);
   useOutsideClickClose(isOpen, [containerRef, panelRef], close);
 
-  // Keeps the highlighted option in view within the now-scrollable panel.
-  // matches.length is a deliberate extra dependency, not read in the body —
-  // a filter keystroke can change what's rendered at index 0 without
-  // changing activeIndex's own value, and would otherwise not re-trigger this.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: matches.length is intentionally over-specified, see above.
-  useEffect(() => {
-    if (!isOpen) return;
-    document.getElementById(optionElementId(listboxId, activeIndex))?.scrollIntoView({ block: "nearest" });
-  }, [isOpen, activeIndex, listboxId, matches.length]);
+  useScrollHighlightedOptionIntoView(isOpen, listboxId, activeIndex, matches.length);
 
   function selectEntry(entry: Entry): void {
     onChange(entry.code);

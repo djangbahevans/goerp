@@ -1,10 +1,16 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Badge, type BadgeColor } from "./badge.js";
 import { fieldInputClassName } from "./field-input-styles.js";
+import {
+  optionElementId,
+  useFloatingPanelPosition,
+  useOutsideClickClose,
+  useScrollHighlightedOptionIntoView,
+} from "./floating-panel.js";
 import { Icon, type IconNameLike } from "./icon.js";
 
 // manifest-spec.md's FieldOption object (§10), redefined locally since
@@ -35,8 +41,12 @@ export interface SelectProps {
 
 const TRIGGER_CLASSES = `flex w-full items-center justify-between gap-2 text-left ${fieldInputClassName(false, "input", "sans")}`;
 // docs/components/select.md's own states table never truncates panel
-// labels, unlike the closed trigger.
+// labels, unlike the closed trigger. SelectSingle's own Radix Content
+// manages its own scrolling/available-height internally, so this stays
+// unscrolled/uncapped here — only SelectMultiple's hand-rolled panel below
+// gets an explicit max-height, since Radix isn't managing that one.
 const PANEL_CLASSES = "z-(--z-dropdown) w-max rounded-structural border border-border bg-surface p-2 shadow-md";
+const MULTI_PANEL_CLASSES = `${PANEL_CLASSES} max-h-80 overflow-y-auto`;
 const ROW_CLASSES =
   "flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-control px-2 py-1 text-sm text-text outline-none";
 // The chevron is pinned here (not a normal flex child) so its position never
@@ -173,7 +183,6 @@ function SelectMultiple({
   // otherwise clip the dropdown instead of letting it float above the page.
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLSpanElement | null>(null);
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
 
   function open(): void {
     if (disabled) return;
@@ -192,42 +201,9 @@ function SelectMultiple({
     setIsOpen(false);
   }
 
-  // Runs before paint, positioned once on open — not re-tracked on
-  // scroll/resize, since the panel closes on Escape/selection/outside-click
-  // well before either would matter (same simplification ActionMenu's own
-  // panel makes).
-  useLayoutEffect(() => {
-    if (!isOpen) {
-      setPosition(null);
-      return;
-    }
-    const triggerEl = triggerRef.current;
-    if (!triggerEl) return;
-    const triggerRect = triggerEl.getBoundingClientRect();
-    const panelHeight = panelRef.current?.getBoundingClientRect().height ?? 0;
-    const fitsBelow = triggerRect.bottom + 4 + panelHeight <= window.innerHeight - 8;
-    const top = fitsBelow ? triggerRect.bottom + 4 : Math.max(8, triggerRect.top - 4 - panelHeight);
-    setPosition({ top, left: triggerRect.left });
-  }, [isOpen]);
-
-  // Closes on a click outside both the trigger and the portaled panel —
-  // mousedown, not click, so it commits before any outside element's own
-  // click handler fires. Doesn't rely on blur/relatedTarget the way this
-  // component's pre-portal version did: the panel is no longer a DOM
-  // descendant of the trigger once portaled, so a plain
-  // event.currentTarget.contains(event.relatedTarget) check would
-  // incorrectly treat every click inside the panel as "outside" too.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: close is a plain function recreated every render, not a reactive dependency — only isOpen should re-arm this listener.
-  useEffect(() => {
-    if (!isOpen) return;
-    function handlePointerDown(event: MouseEvent): void {
-      const target = event.target as Node;
-      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
-      close();
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [isOpen]);
+  const position = useFloatingPanelPosition(isOpen, triggerRef, panelRef, false);
+  useOutsideClickClose(isOpen, [triggerRef, panelRef], close);
+  useScrollHighlightedOptionIntoView(isOpen, listboxId, activeIndex, options.length);
 
   function toggle(option: SelectOption): void {
     if (option.disabled) return;
@@ -300,7 +276,7 @@ function SelectMultiple({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={listboxId}
-        aria-activedescendant={isOpen && options.length > 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+        aria-activedescendant={isOpen && options.length > 0 ? optionElementId(listboxId, activeIndex) : undefined}
         onClick={() => (isOpen ? close() : open())}
         onKeyDown={handleKeyDown}
         className={TRIGGER_CLASSES}
@@ -320,14 +296,14 @@ function SelectMultiple({
                 ? { position: "fixed", top: position.top, left: position.left }
                 : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
             }
-            className={PANEL_CLASSES}
+            className={MULTI_PANEL_CLASSES}
           >
             {options.map((option, index) => (
               // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG listbox-button pattern — options are never independently focusable, only virtually "focused" via aria-activedescendant on the trigger button.
               // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the trigger button's own onKeyDown.
               <div
                 key={option.value}
-                id={`${listboxId}-option-${index}`}
+                id={optionElementId(listboxId, index)}
                 role="option"
                 aria-selected={selectedSet.has(option.value)}
                 aria-disabled={option.disabled}

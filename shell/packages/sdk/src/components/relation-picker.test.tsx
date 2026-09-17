@@ -2,6 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RelationPicker } from "./relation-picker.js";
 
+// jsdom doesn't implement scrollIntoView at all — the panel calls it to
+// keep the keyboard-highlighted option visible within its scrollable area.
+Element.prototype.scrollIntoView = vi.fn();
+
 afterEach(cleanup);
 
 const ROWS = [
