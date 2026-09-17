@@ -7,7 +7,9 @@ import { summarizeIssues } from "./summarize-issues.js";
 import type { MetaSchema, ModelDef } from "./types.js";
 
 // shell-architecture.md §9's ResolvedView — a browser path resolved all
-// the way through to the view declaration that serves it.
+// the way through to the view declaration that serves it. `recordId` is
+// only set when the path matched a `{id}`-templated route (below) — an
+// exact-match route (no `{id}` segment) never carries one.
 export interface ResolvedView {
   module: string;
   viewName: string;
@@ -15,6 +17,7 @@ export interface ResolvedView {
   declaration: ViewDeclaration;
   permissions: string[];
   bundleUrl: string | null;
+  recordId?: string;
 }
 
 // The shape a module manifest's `navigation` array declares
@@ -193,10 +196,22 @@ export function filterViewByCapability(view: ViewDeclaration, resource: Resource
 // buildViewRegistry assembles shell-architecture.md §9's ViewRegistry.
 // resources/models reuse buildResourceRegistry/buildModelRegistry as-is
 // (goerp#638/#639) rather than re-scanning routes/models a second time.
+// A route's trailing "/{id}" segment (manifest-spec.md's row_click/
+// row_click_param convention — the only templated form any declared route
+// path uses today, per goerp#837/#838). Matching a fuller multi-segment
+// template isn't needed to unblock anything that exists yet.
+const TRAILING_ID_SEGMENT = "/{id}";
+
 export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
   const resources = buildResourceRegistry(schema);
   const models = buildModelRegistry(schema);
   const routeMap = new Map<string, ResolvedView>();
+  // Keyed by the route's path with its trailing "/{id}" stripped, so a
+  // concrete URL like "/contacts/01j8x..." can be matched against a
+  // declared "/contacts/{id}" route — routeMap alone only ever matches the
+  // literal, unsubstituted template string, which nothing actually
+  // navigates to.
+  const templatedRouteMap = new Map<string, ResolvedView>();
   const permissionsByView = new Map<string, string[]>();
 
   for (const [moduleName, moduleSchema] of Object.entries(schema.modules)) {
@@ -218,6 +233,9 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
         bundleUrl: moduleSchema.frontend?.bundle_url ?? null,
       };
       routeMap.set(route.path, resolved);
+      if (route.path.endsWith(TRAILING_ID_SEGMENT)) {
+        templatedRouteMap.set(route.path.slice(0, -TRAILING_ID_SEGMENT.length), resolved);
+      }
       permissionsByView.set(`${moduleName}.${declaration.name}`, permissions);
     }
   }
@@ -225,7 +243,18 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
   const navigationTree = buildNavTree(schema);
 
   return {
-    resolveRoute: (path) => routeMap.get(path) ?? null,
+    resolveRoute: (path) => {
+      const exact = routeMap.get(path);
+      if (exact) return exact;
+
+      const lastSlash = path.lastIndexOf("/");
+      if (lastSlash === -1) return null;
+      const id = path.slice(lastSlash + 1);
+      if (!id) return null;
+
+      const templated = templatedRouteMap.get(path.slice(0, lastSlash));
+      return templated ? { ...templated, recordId: id } : null;
+    },
     navigationTree,
     resources,
     models,
