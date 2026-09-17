@@ -19,6 +19,7 @@ goerp/
 ├── sdk/                  # public Module SDK (Go + React + supporting packages)
 ├── shell/                # React 19 SPA that hosts and renders module frontends
 ├── modules/               # example/first-party .erp modules used for e2e testing
+├── scripts/               # operational scripts (not part of any build/test pipeline)
 └── compose.dev.yml        # local development dependency stack
 ```
 
@@ -97,3 +98,7 @@ A healthy response looks like:
 ```
 
 `postgres_replica`/`meilisearch` read `"ok"` with `0` latency when they're simply unconfigured (`GOERP_DB_REPLICA_DSN`/`GOERP_MEILISEARCH_URL` unset) — not because they were actually checked. `GET localhost:8080/_ready` reports whether the full startup sequence has completed and is what a Kubernetes readiness probe would check.
+
+## Operational scripts
+
+`scripts/generate-ghana-pmtiles.sh` extracts a Ghana-region [PMTiles](https://docs.protomaps.com/) basemap archive from Protomaps' daily basemap build and uploads it to object storage (SeaweedFS by default, matching the stack above) — the file `LocationField`'s `tileUrl` points at (`docs/components/location-field.md` in nexus-docs). Requires the `go-pmtiles` CLI (`go install github.com/protomaps/go-pmtiles@latest`) and the AWS CLI. Re-run it whenever the archive needs refreshing; it isn't part of any build or CI pipeline.

@@ -10,6 +10,14 @@ const config: StorybookConfig = {
   framework: "@storybook/react-vite",
   viteFinal: async (viteConfig) => {
     viteConfig.plugins = [...(viteConfig.plugins ?? []), react(), tailwindcss()];
+    // maplibre-gl loads its tile-decoding worker via a URL Vite's dep
+    // pre-bundling breaks in dev mode (the worker chunk 404s) — excluding
+    // it from optimization keeps the package's own worker-loading logic
+    // intact (LocationField, @goerp/sdk/components).
+    viteConfig.optimizeDeps = {
+      ...viteConfig.optimizeDeps,
+      exclude: [...(viteConfig.optimizeDeps?.exclude ?? []), "maplibre-gl"],
+    };
     // @goerp/sdk's package.json `exports` map every subpath to compiled
     // dist/ output. A story living inside packages/sdk/src imports its own
     // component via a relative path instead, which Vite resolves straight
