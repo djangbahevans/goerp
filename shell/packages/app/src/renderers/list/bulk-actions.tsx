@@ -38,7 +38,7 @@ function CustomBulkActionButton({
   const visible = useBulkActionGate(
     action,
     selectedCount,
-    action.component !== undefined && componentRegistry.has(action.component),
+    componentRegistry.tryResolve(action.component) !== undefined,
   );
   if (!visible) return null;
 
@@ -151,15 +151,16 @@ function ActiveCustomPanel({
     [selectedIds, isLoading, setLoading, onComplete, onCancel],
   );
 
-  // CustomBulkActionButton only activates an action once componentRegistry.has()
-  // already confirmed this name resolves — resolve() itself never throws on
-  // that path, but a name unregistered between render and click (or a
-  // registry cleared mid-session, e.g. hot reload) shouldn't crash the
-  // whole list view over one stale bulk-action reference.
-  if (!action.component || !componentRegistry.has(action.component)) {
+  // CustomBulkActionButton only activates an action once tryResolve()
+  // already confirmed this name resolves — a name unregistered between
+  // render and click (or a registry cleared mid-session, e.g. hot reload)
+  // shouldn't crash the whole list view over one stale bulk-action
+  // reference, so this re-checks rather than assuming the earlier check
+  // still holds.
+  const Component = componentRegistry.tryResolve(action.component);
+  if (!Component) {
     return <div role="alert">"{action.component}" isn't a registered component — this bulk action can't be shown.</div>;
   }
-  const Component = componentRegistry.resolve(action.component);
 
   return (
     <BulkActionContext.Provider value={contextValue}>

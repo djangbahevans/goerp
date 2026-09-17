@@ -174,10 +174,7 @@ export function KanbanRenderer({
     suppressCreateAction ? (actions ?? []).filter((action) => action.type !== "create") : (actions ?? []);
   const cardActions = filterCreate(view.card_actions);
   const columnActions = filterCreate(view.column_actions);
-  const CustomCardComponent =
-    view.card_component && componentRegistry.has(view.card_component)
-      ? componentRegistry.resolve(view.card_component)
-      : undefined;
+  const CustomCardComponent = componentRegistry.tryResolve(view.card_component);
 
   function buildCard(row: Row): KanbanCardData {
     const id = String(row.id ?? "");
