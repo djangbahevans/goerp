@@ -44,4 +44,22 @@ describe("ComponentRegistry", () => {
     expect(() => registry.register("BulkTagAction", Other)).not.toThrow();
     expect(registry.resolve("BulkTagAction")).toBe(Other);
   });
+
+  describe("tryResolve()", () => {
+    it("returns the registered component for a resolvable name", () => {
+      const registry = new ComponentRegistry();
+      registry.register("BulkTagAction", Stub);
+      expect(registry.tryResolve("BulkTagAction")).toBe(Stub);
+    });
+
+    it("returns undefined, not a throw, for an unregistered name", () => {
+      const registry = new ComponentRegistry();
+      expect(registry.tryResolve("Missing")).toBeUndefined();
+    });
+
+    it("returns undefined for an undefined name, without a Map lookup", () => {
+      const registry = new ComponentRegistry();
+      expect(registry.tryResolve(undefined)).toBeUndefined();
+    });
+  });
 });

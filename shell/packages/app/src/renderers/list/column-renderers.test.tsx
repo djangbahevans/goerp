@@ -1,9 +1,21 @@
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { columnStyle, renderCell, renderCellContent, renderHref } from "./column-renderers.js";
 import type { ListColumn } from "./list-view-types.js";
 
-afterEach(cleanup);
+const { tryResolveComponentMock } = vi.hoisted(() => ({
+  tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
+}));
+
+vi.mock("@goerp/sdk/schema", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
+  return { ...actual, componentRegistry: { tryResolve: tryResolveComponentMock } };
+});
+
+afterEach(() => {
+  cleanup();
+  tryResolveComponentMock.mockReset().mockReturnValue(undefined);
+});
 
 function cell(column: Partial<ListColumn> & { field: string }, row: Record<string, unknown>) {
   return render(renderCellContent(column as ListColumn, row)).container;
@@ -210,8 +222,46 @@ describe("renderCellContent", () => {
     expect(html.querySelector("pre")?.textContent).toBe(JSON.stringify({ a: 1 }, null, 2));
   });
 
-  it("custom: falls back to the raw value — no module component registry exists yet", () => {
+  it("custom: falls back to the raw value when no component is declared", () => {
     expect(cell({ field: "x", type: "custom" }, { x: "raw" }).textContent).toBe("raw");
+  });
+
+  it("custom: falls back to the raw value when the declared component isn't registered", () => {
+    tryResolveComponentMock.mockReturnValue(undefined);
+    expect(cell({ field: "x", type: "custom", component: "Unregistered" }, { x: "raw" }).textContent).toBe("raw");
+  });
+
+  it("custom: resolves a registered component, passing record/value/component_props", () => {
+    function CustomCell(props: { record: Record<string, unknown>; value: unknown; label: string }) {
+      return (
+        <span>
+          {String(props.value)}:{String(props.record.x)}:{props.label}
+        </span>
+      );
+    }
+    tryResolveComponentMock.mockReturnValue(CustomCell);
+    const html = cell(
+      { field: "x", type: "custom", component: "CustomCell", component_props: { label: "tagged" } },
+      { x: "raw" },
+    );
+    expect(tryResolveComponentMock).toHaveBeenCalledWith("CustomCell");
+    expect(html.textContent).toBe("raw:raw:tagged");
+  });
+
+  it("custom: component_props can't shadow the real record/value wiring props", () => {
+    function CustomCell(props: { record: Record<string, unknown>; value: unknown }) {
+      return (
+        <span>
+          {String(props.value)}:{String(props.record.x)}
+        </span>
+      );
+    }
+    tryResolveComponentMock.mockReturnValue(CustomCell);
+    const html = cell(
+      { field: "x", type: "custom", component: "CustomCell", component_props: { value: "spoofed", record: {} } },
+      { x: "raw" },
+    );
+    expect(html.textContent).toBe("raw:raw");
   });
 });
 

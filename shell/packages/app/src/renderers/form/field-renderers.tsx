@@ -24,7 +24,7 @@ import {
   ToggleField,
 } from "@goerp/sdk/components";
 import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions } from "@goerp/sdk/react";
-import { resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
+import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
@@ -845,11 +845,25 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       // interpreter it needs doesn't exist yet (same gap as `condition`).
       return <span>{stringValue}</span>;
 
-    case "custom":
-      // ComponentRegistry (backing defineModule().views, goerp#762) isn't
-      // consulted here yet — goerp#752's own scope, not this file's. Same
-      // fallback column-renderers.tsx already uses for "custom" columns.
-      return <span>{stringValue}</span>;
+    case "custom": {
+      const Component = componentRegistry.tryResolve(field.component);
+      if (!Component) return <span>{stringValue}</span>;
+      // Wiring props spread last so a manifest-authored component_props key
+      // can never shadow onChange and silently break the two-way binding.
+      // `id` is the form-fields.tsx-generated aria-labelledby target
+      // (ARIA_LABELLEDBY_FIELD_TYPES) — the component applies it to
+      // whichever element it considers its own primary control.
+      return (
+        <Component
+          {...field.component_props}
+          id={id}
+          value={value}
+          onChange={onChange}
+          record={record}
+          disabled={disabled}
+        />
+      );
+    }
 
     default:
       return (
