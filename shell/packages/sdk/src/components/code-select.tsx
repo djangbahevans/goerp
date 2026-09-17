@@ -1,13 +1,14 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { fieldInputClassName } from "./field-input-styles.js";
 import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 
-// Shared combobox mechanics behind country-select.tsx and
-// language-select.tsx — same searchable-list-over-a-static-dataset shape,
-// differing only in dataset, name resolution, and row visual.
+// Shared combobox mechanics behind country-select.tsx, language-select.tsx,
+// timezone-select.tsx, and currency-select.tsx — same searchable-list-over-
+// a-dataset shape, differing only in dataset, name resolution, and row
+// visual.
 
 export interface CodeSelectProps {
   id?: string | undefined;
@@ -27,6 +28,52 @@ export interface CodeSelectProps {
 interface Entry {
   code: string;
   name: string;
+}
+
+function optionElementId(listboxId: string, index: number): string {
+  return `${listboxId}-option-${index}`;
+}
+
+// Shared by timezone-select.tsx/currency-select.tsx, whose datasets are
+// enumerated at runtime instead of bundled like country/language.
+export function supportedValuesOrEmpty(key: "currency" | "timeZone"): string[] {
+  try {
+    return Intl.supportedValuesOf(key);
+  } catch {
+    return [];
+  }
+}
+
+export interface CodeSelectFallbackProps {
+  id?: string | undefined;
+  value?: string | undefined;
+  onChange: (value: string) => void;
+  placeholder?: string | undefined;
+  disabled?: boolean | undefined;
+}
+
+// Rendered instead of CodeSelect when supportedValuesOrEmpty comes back
+// empty (Intl.supportedValuesOf unavailable) — a plain free-text input,
+// the terminal degrade CountrySelect/LanguageSelect never need since their
+// bundled datasets are always populated.
+export function CodeSelectFallbackInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+  disabled = false,
+}: CodeSelectFallbackProps): ReactNode {
+  return (
+    <input
+      id={id}
+      type="text"
+      className={fieldInputClassName(false, "input", "sans")}
+      value={value ?? ""}
+      disabled={disabled}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
 }
 
 export function CodeSelect({
@@ -92,6 +139,16 @@ export function CodeSelect({
   const position = useFloatingPanelPosition(isOpen, containerRef, panelRef);
   useOutsideClickClose(isOpen, [containerRef, panelRef], close);
 
+  // Keeps the highlighted option in view within the now-scrollable panel.
+  // matches.length is a deliberate extra dependency, not read in the body —
+  // a filter keystroke can change what's rendered at index 0 without
+  // changing activeIndex's own value, and would otherwise not re-trigger this.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: matches.length is intentionally over-specified, see above.
+  useEffect(() => {
+    if (!isOpen) return;
+    document.getElementById(optionElementId(listboxId, activeIndex))?.scrollIntoView({ block: "nearest" });
+  }, [isOpen, activeIndex, listboxId, matches.length]);
+
   function selectEntry(entry: Entry): void {
     onChange(entry.code);
     close();
@@ -145,7 +202,7 @@ export function CodeSelect({
         aria-expanded={isOpen}
         aria-controls={listboxId}
         aria-autocomplete="list"
-        aria-activedescendant={isOpen && matches.length > 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+        aria-activedescendant={isOpen && matches.length > 0 ? optionElementId(listboxId, activeIndex) : undefined}
         value={triggerValue}
         title={!isOpen && selected ? selected.name : undefined}
         disabled={disabled}
@@ -180,7 +237,7 @@ export function CodeSelect({
                 ? { position: "fixed", top: position.top, left: position.left, width: position.width }
                 : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
             }
-            className="z-(--z-dropdown) min-w-60 rounded-structural border border-border bg-surface p-2 shadow-md"
+            className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
           >
             {matches.length === 0 ? (
               <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
@@ -193,7 +250,7 @@ export function CodeSelect({
                 // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
                 <div
                   key={entry.code}
-                  id={`${listboxId}-option-${index}`}
+                  id={optionElementId(listboxId, index)}
                   role="option"
                   aria-label={entry.name}
                   aria-selected={index === activeIndex}

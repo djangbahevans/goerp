@@ -4,6 +4,7 @@ import {
   CodeField,
   ColorPicker,
   CountrySelect,
+  CurrencySelect,
   DateField,
   DateTimeField,
   FileField,
@@ -19,6 +20,7 @@ import {
   SliderField,
   TagsField,
   TimeField,
+  TimezoneSelect,
   ToggleField,
 } from "@goerp/sdk/components";
 import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions } from "@goerp/sdk/react";
@@ -362,16 +364,6 @@ function TagsInput({
   );
 }
 
-// Intl.supportedValuesOf covers timezone/currency; no enumeration API
-// exists for country/language, so those fall back to free-text input.
-function supportedValuesOrEmpty(key: "currency" | "timeZone"): string[] {
-  try {
-    return Intl.supportedValuesOf(key);
-  } catch {
-    return [];
-  }
-}
-
 export interface FieldInputProps {
   field: FormField;
   value: unknown;
@@ -687,30 +679,26 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       );
 
     case "timezone_select":
-    case "currency_select": {
-      const values = supportedValuesOrEmpty(type === "timezone_select" ? "timeZone" : "currency");
-      if (values.length === 0) {
-        return (
-          <input
-            id={id}
-            type="text"
-            value={stringValue}
-            disabled={disabled}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        );
-      }
       return (
-        <select id={id} disabled={disabled} value={stringValue} onChange={(e) => onChange(e.target.value)}>
-          <option value="">—</option>
-          {values.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
+        <TimezoneSelect
+          id={id}
+          value={stringValue}
+          onChange={onChange}
+          placeholder="Select a timezone…"
+          disabled={disabled}
+        />
       );
-    }
+
+    case "currency_select":
+      return (
+        <CurrencySelect
+          id={id}
+          value={stringValue}
+          onChange={onChange}
+          placeholder="Select a currency…"
+          disabled={disabled}
+        />
+      );
 
     case "color_picker":
       return <ColorPicker id={id} value={stringValue} disabled={disabled} onChange={onChange} />;
