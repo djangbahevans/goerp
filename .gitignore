@@ -9,6 +9,7 @@ docs/
 # Env files — never commit secrets.
 .env
 .env.*
+!.env.example
 
 # Compiled binaries, if built locally.
 /engine

@@ -102,3 +102,7 @@ A healthy response looks like:
 ## Operational scripts
 
 `scripts/generate-ghana-pmtiles.sh` extracts a Ghana-region [PMTiles](https://docs.protomaps.com/) basemap archive from Protomaps' daily basemap build and uploads it to object storage (SeaweedFS by default, matching the stack above) — the file `LocationField`'s `tileUrl` points at (`docs/components/location-field.md` in nexus-docs). Requires the `go-pmtiles` CLI (`go install github.com/protomaps/go-pmtiles@latest`) and the AWS CLI. Re-run it whenever the archive needs refreshing; it isn't part of any build or CI pipeline.
+
+## Frontend build-time config
+
+The shell app (`shell/packages/app`) takes deployment-wide build-time config via Vite env vars — copy `shell/packages/app/.env.example` to `.env` and fill in for a real deployment. Currently just `VITE_MAP_TILE_URL` (the PMTiles archive URL above); unset, `LocationField` renders its plain-background fallback with no other behavior change.

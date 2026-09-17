@@ -60,7 +60,10 @@ function clampLng(n: number): number {
 // text labels render fine via the browser's local fonts even with no
 // `glyphs` PBF server configured.
 function buildStyle(tileUrl: string | undefined, theme: "light" | "dark"): maplibregl.StyleSpecification {
-  if (tileUrl === undefined) {
+  // An unfilled .env value (VITE_MAP_TILE_URL=) resolves to "", not
+  // undefined — treated the same as unset rather than building a broken
+  // "pmtiles://" source.
+  if (tileUrl === undefined || tileUrl === "") {
     return {
       version: 8,
       sources: {},
