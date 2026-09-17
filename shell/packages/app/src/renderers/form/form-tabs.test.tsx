@@ -205,14 +205,18 @@ describe("FormTabsRenderer", () => {
   });
 
   it("view tab: shows a not-implemented message for a view type with no renderer yet", async () => {
+    // "form" itself is a real, wired dispatch target as of goerp#840 — and
+    // manifest-spec.md's own validation rules forbid a "view"-type tab from
+    // referencing a "form" view in the first place. Any type absent from
+    // KNOWN_VIEW_TYPES exercises the same not-implemented fallback.
     resolveViewMock.mockResolvedValue({
-      name: "orders_form",
-      type: "form",
+      name: "orders_gantt",
+      type: "gantt",
       resource: "sales.order",
       label: "Orders",
     });
-    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_form" }]);
-    expect(await screen.findByText(/form.*isn't implemented yet/)).toBeTruthy();
+    await renderTabs([{ label: "Orders", type: "view", view: "sales.orders_gantt" }]);
+    expect(await screen.findByText(/gantt.*isn't implemented yet/)).toBeTruthy();
   });
 
   it("view tab: dispatches a resolved kanban-type view to KanbanRenderer", async () => {
