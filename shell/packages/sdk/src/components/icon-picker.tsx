@@ -76,7 +76,7 @@ export function IconPicker({ id, value, onChange, placeholder, disabled = false 
     setQuery("");
   }
 
-  const position = useFloatingPanelPosition(isOpen, containerRef, panelRef);
+  const position = useFloatingPanelPosition(isOpen, containerRef, panelRef, false);
 
   // Keeps the keyboard-highlighted cell's row scrolled into view — layout
   // effect, not a passive one, so the row mounts (and aria-activedescendant

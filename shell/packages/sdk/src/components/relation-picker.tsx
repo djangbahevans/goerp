@@ -1,5 +1,5 @@
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { APIClient } from "../http/index.js";
 import { apiClient } from "../http/index.js";
@@ -7,6 +7,12 @@ import type { ResourceMetadataRegistry } from "../schema/index.js";
 import { resourceListPath, resourceMetadataRegistry } from "../schema/index.js";
 import { EmptyState } from "./empty-state.js";
 import { fieldInputClassName } from "./field-input-styles.js";
+import {
+  optionElementId,
+  useFloatingPanelPosition,
+  useOutsideClickClose,
+  useScrollHighlightedOptionIntoView,
+} from "./floating-panel.js";
 import type { RelationValue } from "./relation-field.js";
 import { Skeleton } from "./skeleton.js";
 
@@ -171,12 +177,9 @@ export function RelationPicker({
   // Portaled to document.body, position: fixed — same reasoning as
   // ActionMenu's own panel: an ancestor with overflow: hidden (SectionCard's
   // own collapse-transition wrapper, e.g.) would otherwise clip the
-  // dropdown instead of letting it float above the page. Null until
-  // measured, so it renders hidden for one frame rather than flashing at
-  // (0, 0).
+  // dropdown instead of letting it float above the page.
   const containerRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLSpanElement | null>(null);
-  const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const selected: RelationValue[] = multiple ? (Array.isArray(value) ? value : []) : [];
   const singleValue: RelationValue | null = multiple ? null : ((value as RelationValue | null) ?? null);
@@ -304,39 +307,9 @@ export function RelationPicker({
     }
   }
 
-  // Runs before paint, positioned once on open — not re-tracked on
-  // scroll/resize, since the panel closes on Escape/selection/outside-click
-  // well before either would matter (same simplification ActionMenu's own
-  // panel makes).
-  useLayoutEffect(() => {
-    if (!isOpen) {
-      setPosition(null);
-      return;
-    }
-    const containerEl = containerRef.current;
-    if (!containerEl) return;
-    const containerRect = containerEl.getBoundingClientRect();
-    const panelHeight = panelRef.current?.getBoundingClientRect().height ?? 0;
-    const fitsBelow = containerRect.bottom + 4 + panelHeight <= window.innerHeight - 8;
-    const top = fitsBelow ? containerRect.bottom + 4 : Math.max(8, containerRect.top - 4 - panelHeight);
-    setPosition({ top, left: containerRect.left, width: containerRect.width });
-  }, [isOpen]);
-
-  // Closes on a click outside both the input/pills area and the portaled
-  // panel — mousedown, not click, so it commits before any outside
-  // element's own click handler fires (same reasoning ActionMenu's own
-  // dismissal uses).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: dismiss is a plain function recreated every render, not a reactive dependency — only isOpen should re-arm this listener.
-  useEffect(() => {
-    if (!isOpen) return;
-    function handlePointerDown(event: MouseEvent): void {
-      const target = event.target as Node;
-      if (containerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
-      dismiss();
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [isOpen]);
+  const position = useFloatingPanelPosition(isOpen, containerRef, panelRef, true);
+  useOutsideClickClose(isOpen, [containerRef, panelRef], dismiss);
+  useScrollHighlightedOptionIntoView(isOpen, listboxId, activeIndex, entries.length);
 
   const triggerValue = isOpen ? query : (singleValue?.display ?? query);
 
@@ -372,7 +345,7 @@ export function RelationPicker({
         aria-expanded={isOpen}
         aria-controls={listboxId}
         aria-autocomplete="list"
-        aria-activedescendant={isOpen && entries.length > 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+        aria-activedescendant={isOpen && entries.length > 0 ? optionElementId(listboxId, activeIndex) : undefined}
         value={triggerValue}
         title={!isOpen && singleValue ? singleValue.display : undefined}
         disabled={disabled}
@@ -406,7 +379,7 @@ export function RelationPicker({
                 ? { position: "fixed", top: position.top, left: position.left, width: position.width }
                 : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
             }
-            className="z-(--z-dropdown) min-w-60 rounded-structural border border-border bg-surface p-2 shadow-md"
+            className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
           >
             {status === "error" ? (
               <EmptyState
@@ -425,7 +398,7 @@ export function RelationPicker({
                 // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
                 <div
                   key={entry.kind === "option" ? entry.row.id : "create"}
-                  id={`${listboxId}-option-${index}`}
+                  id={optionElementId(listboxId, index)}
                   role="option"
                   aria-selected={index === activeIndex}
                   aria-disabled={disabled}
