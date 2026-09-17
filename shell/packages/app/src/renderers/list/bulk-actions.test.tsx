@@ -6,11 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BulkActions } from "./bulk-actions.js";
 import type { BulkAction } from "./list-view-types.js";
 
-const { useActionMock, useExportMock, resolveComponentMock, hasComponentMock } = vi.hoisted(() => ({
+function DefaultStub() {
+  return null;
+}
+
+const { useActionMock, useExportMock, tryResolveComponentMock } = vi.hoisted(() => ({
   useActionMock: vi.fn(),
   useExportMock: vi.fn(),
-  resolveComponentMock: vi.fn(),
-  hasComponentMock: vi.fn(() => true),
+  tryResolveComponentMock: vi.fn(),
 }));
 
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
@@ -19,21 +22,23 @@ vi.mock("@goerp/sdk/react", async (importOriginal) => {
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
-  return { ...actual, componentRegistry: { resolve: resolveComponentMock, has: hasComponentMock } };
+  return { ...actual, componentRegistry: { tryResolve: tryResolveComponentMock } };
 });
 
 beforeEach(() => {
   useActionMock.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false, error: null });
   useExportMock.mockReturnValue({ trigger: vi.fn(async () => {}), isPending: false, isError: false, error: null });
-  hasComponentMock.mockReturnValue(true);
+  // Actual TestPanel components below override this per test — this default
+  // only needs to be resolvable so the gate/visibility tests above them
+  // don't have to know about component registration at all.
+  tryResolveComponentMock.mockReturnValue(DefaultStub);
 });
 
 afterEach(() => {
   cleanup();
   useActionMock.mockReset();
   useExportMock.mockReset();
-  resolveComponentMock.mockReset();
-  hasComponentMock.mockReset();
+  tryResolveComponentMock.mockReset();
 });
 
 function permissionWrapper(permissions: string[]) {
@@ -104,7 +109,7 @@ describe("BulkActions", () => {
   });
 
   it("hides a custom action whose component was never registered, instead of crashing", () => {
-    hasComponentMock.mockReturnValue(false);
+    tryResolveComponentMock.mockReturnValue(undefined);
     const actions: BulkAction[] = [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }];
     expect(() => renderBulkActions(actions, ["1"])).not.toThrow();
     expect(screen.queryByText("Add Tag")).toBeNull();
@@ -128,20 +133,35 @@ describe("BulkActions", () => {
     }
 
     it("mounts the registered component with selection context after the button is clicked", () => {
-      resolveComponentMock.mockReturnValue(TestPanel);
+      tryResolveComponentMock.mockReturnValue(TestPanel);
       const actions: BulkAction[] = [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }];
       renderBulkActions(actions, ["1", "2"]);
 
       fireEvent.click(screen.getByText("Add Tag"));
 
-      expect(resolveComponentMock).toHaveBeenCalledWith("BulkTagAction");
+      expect(tryResolveComponentMock).toHaveBeenCalledWith("BulkTagAction");
       expect(screen.getByText("2 selected")).toBeTruthy();
       expect(screen.getByText("1,2")).toBeTruthy();
       expect(screen.queryByText("Add Tag")).toBeNull();
     });
 
+    it("shows an alert instead of crashing when the component unregisters between the gate check and the click", () => {
+      // Simulates the exact race ActiveCustomPanel's own re-check guards
+      // against: the button was visible (gate saw it registered), but by
+      // the time the panel mounts, tryResolve() no longer finds it.
+      tryResolveComponentMock.mockReturnValueOnce(TestPanel).mockReturnValue(undefined);
+      const actions: BulkAction[] = [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }];
+      renderBulkActions(actions, ["1"]);
+
+      fireEvent.click(screen.getByText("Add Tag"));
+
+      expect(screen.getByRole("alert").textContent).toBe(
+        "\"BulkTagAction\" isn't a registered component — this bulk action can't be shown.",
+      );
+    });
+
     it("onComplete clears the selection and closes the panel", () => {
-      resolveComponentMock.mockReturnValue(TestPanel);
+      tryResolveComponentMock.mockReturnValue(TestPanel);
       const clearSelection = vi.fn();
       const actions: BulkAction[] = [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }];
       renderBulkActions(actions, ["1"], clearSelection);
@@ -153,7 +173,7 @@ describe("BulkActions", () => {
     });
 
     it("onCancel closes the panel without clearing the selection", () => {
-      resolveComponentMock.mockReturnValue(TestPanel);
+      tryResolveComponentMock.mockReturnValue(TestPanel);
       const clearSelection = vi.fn();
       const actions: BulkAction[] = [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }];
       renderBulkActions(actions, ["1"], clearSelection);
@@ -166,7 +186,7 @@ describe("BulkActions", () => {
     });
 
     it("stays open when the selection drops to zero while the panel is active", () => {
-      resolveComponentMock.mockReturnValue(TestPanel);
+      tryResolveComponentMock.mockReturnValue(TestPanel);
       const clearSelection = vi.fn();
       const actions: BulkAction[] = [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }];
       const { rerender } = renderBulkActions(actions, ["1"], clearSelection);
