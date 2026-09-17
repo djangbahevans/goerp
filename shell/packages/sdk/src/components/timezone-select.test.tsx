@@ -1,6 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PAGE_JUMP } from "./code-select.js";
 import { TimezoneSelect } from "./timezone-select.js";
+
+function nth(options: HTMLElement[], index: number): HTMLElement {
+  const option = options.at(index);
+  if (!option) throw new Error(`Expected an option at index ${index}`);
+  return option;
+}
 
 // jsdom doesn't implement scrollIntoView at all — code-select.tsx calls it
 // to keep the keyboard-highlighted option visible within the panel's
@@ -113,6 +120,64 @@ describe("TimezoneSelect", () => {
   it("disables the input when disabled", () => {
     render(<TimezoneSelect value="" onChange={vi.fn()} disabled />);
     expect((screen.getByRole("combobox") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("Home/End jump the highlight to the first/last option", async () => {
+    const onChange = vi.fn();
+    render(<TimezoneSelect value="" onChange={onChange} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    const options = await screen.findAllByRole("option");
+
+    fireEvent.keyDown(input, { key: "End" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(nth(options, -1).id);
+
+    fireEvent.keyDown(input, { key: "Home" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(nth(options, 0).id);
+
+    fireEvent.keyDown(input, { key: "End" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const lastName = nth(options, -1).textContent ?? "";
+    expect(onChange).toHaveBeenCalledWith(lastName.replaceAll(" ", "_"));
+  });
+
+  it("Home/End don't hijack the search input's own caret once a query is typed", async () => {
+    render(<TimezoneSelect value="" onChange={vi.fn()} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "africa" } });
+    await screen.findAllByRole("option");
+    const activeBefore = input.getAttribute("aria-activedescendant");
+
+    // Neither key is intercepted for listbox navigation while there's a
+    // typed query to edit — the highlight stays put, leaving Home/End free
+    // for the input's own native caret-to-start/caret-to-end behavior.
+    fireEvent.keyDown(input, { key: "Home" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(activeBefore);
+    fireEvent.keyDown(input, { key: "End" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(activeBefore);
+  });
+
+  it("PageDown/PageUp jump the highlight by a fixed row count and clamp at the list's edges", async () => {
+    render(<TimezoneSelect value="" onChange={vi.fn()} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    const options = await screen.findAllByRole("option");
+
+    fireEvent.keyDown(input, { key: "PageDown" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(nth(options, PAGE_JUMP).id);
+
+    fireEvent.keyDown(input, { key: "PageUp" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(nth(options, 0).id);
+
+    // Doesn't wrap past the top when already at (or near) the first option.
+    fireEvent.keyDown(input, { key: "PageUp" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(nth(options, 0).id);
+
+    fireEvent.keyDown(input, { key: "End" });
+    fireEvent.keyDown(input, { key: "PageDown" });
+    // Doesn't wrap past the bottom when already at (or near) the last option.
+    expect(input.getAttribute("aria-activedescendant")).toBe(nth(options, -1).id);
   });
 
   it("falls back to a plain text input when Intl.supportedValuesOf is unavailable", () => {
