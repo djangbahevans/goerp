@@ -9,6 +9,7 @@ import {
   FileField,
   fieldInputClassName,
   LanguageSelect,
+  LocationField,
   MoneyField,
   RelationPicker,
   RichTextField,
@@ -830,26 +831,8 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
     }
 
     case "location": {
-      // No map library chosen yet — lat/lng entered directly.
       const coords = value as { lat?: number; lng?: number } | undefined;
-      return (
-        <span>
-          <input
-            type="number"
-            aria-label="latitude"
-            value={coords?.lat ?? ""}
-            disabled={disabled}
-            onChange={(e) => onChange({ ...coords, lat: toNumber(e.target.value) })}
-          />
-          <input
-            type="number"
-            aria-label="longitude"
-            value={coords?.lng ?? ""}
-            disabled={disabled}
-            onChange={(e) => onChange({ ...coords, lng: toNumber(e.target.value) })}
-          />
-        </span>
-      );
+      return <LocationField id={id} ariaLabelledBy={id} value={coords} disabled={disabled} onChange={onChange} />;
     }
 
     case "separator":

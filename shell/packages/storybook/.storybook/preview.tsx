@@ -3,6 +3,10 @@ import { themeStore } from "@goerp/sdk/react";
 import type { Decorator, Preview } from "@storybook/react-vite";
 import { useEffect } from "react";
 import "../../app/src/design/tokens.css";
+// LocationField (@goerp/sdk/components) renders a MapLibre GL JS map — its
+// marker positioning/controls CSS isn't bundled with the JS, the same
+// reason main.tsx imports this at the real app's entry point too.
+import "maplibre-gl/dist/maplibre-gl.css";
 
 // Always-allow: permission gating itself is unit-tested, not story-tested,
 // and useOptionalPermission throws outside a PermissionContext at all.

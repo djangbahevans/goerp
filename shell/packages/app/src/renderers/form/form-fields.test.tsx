@@ -209,6 +209,23 @@ describe("FormFieldRow", () => {
       expect(screen.getByLabelText("Script")).toBe(screen.getByRole("textbox"));
     });
 
+    it("location: associates the visible label with both coordinate inputs via aria-labelledby, since the map canvas isn't natively labelable", () => {
+      const Wrapper = withFieldAccess({ geo: { read: true, write: true } });
+      render(
+        <Wrapper>
+          <FormFieldRow
+            field={{ field: "geo", type: "location", label: "Site location" }}
+            resource="contacts.contact"
+            record={{ geo: { lat: 5.56, lng: -0.2 } }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      expect(screen.getByRole("spinbutton", { name: "Site location Latitude" })).toBeTruthy();
+      expect(screen.getByRole("spinbutton", { name: "Site location Longitude" })).toBeTruthy();
+    });
+
     it("tags: associates the visible label with the combobox input, not a selected tag's remove button", async () => {
       const Wrapper = withFieldAccess({ tag_ids: { read: true, write: true } });
       renderWithQueryClient(

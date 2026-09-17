@@ -46,6 +46,8 @@ export type { LanguageSelectProps } from "./language-select.js";
 export { LanguageSelect } from "./language-select.js";
 export type { LoadingOverlayProps } from "./loading-overlay.js";
 export { LoadingOverlay } from "./loading-overlay.js";
+export type { LocationFieldProps, LocationValue } from "./location-field.js";
+export { LocationField } from "./location-field.js";
 export { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
 export type { MoneyFieldProps } from "./money-field.js";
 export { MoneyField } from "./money-field.js";
