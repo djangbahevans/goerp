@@ -144,8 +144,9 @@ export function LocationField({
         center: isCompleteValue(value) ? [value.lng, value.lat] : EMPTY_CENTER,
         zoom: EMPTY_ZOOM,
         // OSM's ODbL license requires attribution wherever this tile data
-        // renders; MapLibre draws nothing here when the style has no
-        // sources (the tileUrl-less fallback), so this is a no-op then.
+        // renders. MapLibre CSS-hides an empty attribution control once its
+        // style loads, so the tileUrl-less fallback shows nothing after a
+        // brief initial flash.
         attributionControl: { compact: true },
       });
     } catch {

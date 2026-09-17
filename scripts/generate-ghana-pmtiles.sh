@@ -21,7 +21,9 @@ MAXZOOM=14 # Street-level detail. z15/z16 extract to the same size as z15
            # the file size — not worth it for a form-field location picker.
 
 if [ -z "${SOURCE_URL:-}" ]; then
-  LATEST_KEY=$(curl -sL "https://build-metadata.protomaps.dev/builds.json" | python3 -c "import json,sys; print(json.load(sys.stdin)[-1]['key'])")
+  # Sorted explicitly by key (a YYYYMMDD-prefixed filename, so lexical order
+  # is chronological) rather than trusting builds.json's own array order.
+  LATEST_KEY=$(curl -sL "https://build-metadata.protomaps.dev/builds.json" | python3 -c "import json,sys; print(sorted(json.load(sys.stdin), key=lambda b: b['key'])[-1]['key'])")
   SOURCE_URL="https://build.protomaps.com/${LATEST_KEY}"
 fi
 STORAGE_ENDPOINT="${STORAGE_ENDPOINT:-http://localhost:8334}" # SeaweedFS S3 gateway, dev default.
@@ -37,6 +39,7 @@ go-pmtiles verify "$OUTPUT"
 
 echo "Uploading to s3://${STORAGE_BUCKET}/${REMOTE_KEY} (${STORAGE_ENDPOINT})..."
 aws --endpoint-url "$STORAGE_ENDPOINT" s3 cp "$OUTPUT" "s3://${STORAGE_BUCKET}/${REMOTE_KEY}"
+rm -f "$OUTPUT"
 
 echo "Done. Public URL (dev SeaweedFS, no auth): ${STORAGE_ENDPOINT}/${STORAGE_BUCKET}/${REMOTE_KEY}"
 echo "A production deployment's storage backend needs its own public-read bucket policy configured separately — this dev instance allows anonymous access by default."
