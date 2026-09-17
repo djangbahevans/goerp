@@ -1,186 +1,203 @@
-import type { FilterOption, ListAction, ListColumn } from "../list/list-view-types.js";
+import { optionalNullable as opt } from "@goerp/sdk/schema";
+import * as v from "valibot";
+import { type FilterOption, FilterOptionSchema, ListActionSchema, ListColumnSchema } from "../list/list-view-types.js";
 
-// manifest-spec.md §9.2's Form View wire schema, wire (snake_case) casing.
+// manifest-spec.md §9.2's Form View wire schema, as valibot schemas —
+// goerp#839's own runtime counterpart to the plain TS interfaces this file
+// used to only have (unlike every sibling *-view-types.ts file). Wiring
+// "form" into view-dispatch.tsx's KNOWN_VIEW_TYPES/AnyViewDeclarationSchema
+// and the dispatch switch itself is goerp#840's job, not this file's.
 // `condition`/`readonly_condition` are typed but unevaluated (backlog #18).
 
 // manifest-spec.md §10's Field Types table.
-export type FieldType =
-  | "text"
-  | "textarea"
-  | "rich_text"
-  | "email"
-  | "phone"
-  | "url"
-  | "number"
-  | "integer"
-  | "currency"
-  | "percent"
-  | "date"
-  | "datetime"
-  | "time"
-  | "date_range"
-  | "duration"
-  | "boolean"
-  | "toggle"
-  | "select"
-  | "multi_select"
-  | "radio"
-  | "relation"
-  | "many2many"
-  | "tags"
-  | "user_select"
-  | "country_select"
-  | "language_select"
-  | "timezone_select"
-  | "currency_select"
-  | "color_picker"
-  | "icon_picker"
-  | "file"
-  | "file_multi"
-  | "image"
-  | "avatar_upload"
-  | "signature"
-  | "barcode"
-  | "qr_code"
-  | "rating"
-  | "slider"
-  | "json"
-  | "code"
-  | "markdown"
-  | "address"
-  | "location"
-  | "separator"
-  | "label"
-  | "computed_display"
-  | "custom";
+const FIELD_TYPES = [
+  "text",
+  "textarea",
+  "rich_text",
+  "email",
+  "phone",
+  "url",
+  "number",
+  "integer",
+  "currency",
+  "percent",
+  "date",
+  "datetime",
+  "time",
+  "date_range",
+  "duration",
+  "boolean",
+  "toggle",
+  "select",
+  "multi_select",
+  "radio",
+  "relation",
+  "many2many",
+  "tags",
+  "user_select",
+  "country_select",
+  "language_select",
+  "timezone_select",
+  "currency_select",
+  "color_picker",
+  "icon_picker",
+  "file",
+  "file_multi",
+  "image",
+  "avatar_upload",
+  "signature",
+  "barcode",
+  "qr_code",
+  "rating",
+  "slider",
+  "json",
+  "code",
+  "markdown",
+  "address",
+  "location",
+  "separator",
+  "label",
+  "computed_display",
+  "custom",
+] as const;
+export type FieldType = (typeof FIELD_TYPES)[number];
 
 // manifest-spec.md's FieldOption object — identical shape to ListFilter's
 // own FilterOption, reused rather than redefined.
 export type FieldOption = FilterOption;
 
-export interface FormField {
-  field: string;
-  label?: string;
-  type?: FieldType;
-  required?: boolean;
-  readonly?: boolean;
-  readonly_condition?: string;
-  hidden?: boolean;
-  condition?: string;
-  placeholder?: string;
-  help_text?: string;
-  span?: number;
-  autofocus?: boolean;
-  computed?: boolean;
-  options?: FieldOption[];
-  resource?: string;
-  resource_filter?: Record<string, unknown>;
-  resource_label_field?: string;
-  multiple?: boolean;
-  creatable?: boolean;
-  min?: number;
-  max?: number;
-  step?: number;
-  rows?: number;
-  accept?: string;
-  max_file_size_mb?: number;
-  currency_field?: string;
-  align?: "left" | "center" | "right";
-  component?: string;
-  component_props?: Record<string, unknown>;
-  format?: string;
-  suffix?: string;
-  prefix?: string;
-  copy_to_clipboard?: boolean;
-  open_in_new_tab?: boolean;
-  // "date_range"/"address" bind to more than one field on the record.
-  range_start_field?: string;
-  range_end_field?: string;
-  address_fields?: Record<string, string>;
+export const FormFieldSchema = v.looseObject({
+  field: v.string(),
+  label: opt(v.string()),
+  type: opt(v.picklist(FIELD_TYPES)),
+  required: opt(v.boolean()),
+  readonly: opt(v.boolean()),
+  readonly_condition: opt(v.string()),
+  hidden: opt(v.boolean()),
+  condition: opt(v.string()),
+  placeholder: opt(v.string()),
+  help_text: opt(v.string()),
+  span: opt(v.number()),
+  autofocus: opt(v.boolean()),
+  computed: opt(v.boolean()),
+  options: opt(v.array(FilterOptionSchema)),
+  resource: opt(v.string()),
+  resource_filter: opt(v.record(v.string(), v.unknown())),
+  resource_label_field: opt(v.string()),
+  multiple: opt(v.boolean()),
+  creatable: opt(v.boolean()),
+  min: opt(v.number()),
+  max: opt(v.number()),
+  step: opt(v.number()),
+  rows: opt(v.number()),
+  accept: opt(v.string()),
+  max_file_size_mb: opt(v.number()),
+  currency_field: opt(v.string()),
+  align: opt(v.picklist(["left", "center", "right"] as const)),
+  component: opt(v.string()),
+  component_props: opt(v.record(v.string(), v.unknown())),
+  format: opt(v.string()),
+  suffix: opt(v.string()),
+  prefix: opt(v.string()),
+  copy_to_clipboard: opt(v.boolean()),
+  open_in_new_tab: opt(v.boolean()),
+  // "date_range" only — binds to two fields instead of one.
+  range_start_field: opt(v.string()),
+  range_end_field: opt(v.string()),
+  // "address" only — binds to multiple fields via a field-name mapping.
+  address_fields: opt(v.record(v.string(), v.string())),
   // "computed_display" only.
-  expression?: string;
+  expression: opt(v.string()),
   // "code" only.
-  language?: string;
+  language: opt(v.string()),
   // "label" only.
-  label_text?: string;
-}
+  label_text: opt(v.string()),
+});
+export type FormField = v.InferOutput<typeof FormFieldSchema>;
 
-export type FormSectionType = "fields" | "header" | "sub_list" | "custom";
+const FORM_SECTION_TYPES = ["fields", "header", "sub_list", "custom"] as const;
+export type FormSectionType = (typeof FORM_SECTION_TYPES)[number];
 
-export interface FormSection {
-  name?: string;
-  label?: string;
-  type?: FormSectionType;
+export const FormSectionSchema = v.looseObject({
+  name: opt(v.string()),
+  label: opt(v.string()),
+  type: opt(v.picklist(FORM_SECTION_TYPES)),
   // Layout column count for "fields"/"header"; ListColumn[] for "sub_list".
-  columns?: 1 | 2 | 3 | 4 | ListColumn[];
-  collapsible?: boolean;
-  collapsed_by_default?: boolean;
-  condition?: string;
+  columns: opt(v.union([v.literal(1), v.literal(2), v.literal(3), v.literal(4), v.array(ListColumnSchema)])),
+  collapsible: opt(v.boolean()),
+  collapsed_by_default: opt(v.boolean()),
+  condition: opt(v.string()),
   // "fields"/"header" sections.
-  fields?: FormField[];
+  fields: opt(v.array(FormFieldSchema)),
   // "sub_list" sections.
-  field?: string;
-  inline_key?: string;
-  inline_edit?: boolean;
-  add_label?: string;
-  max_rows?: number;
-  sort?: string;
-  create_route?: string;
-  update_route?: string;
-  delete_route?: string;
+  field: opt(v.string()),
+  inline_key: opt(v.string()),
+  inline_edit: opt(v.boolean()),
+  add_label: opt(v.string()),
+  max_rows: opt(v.number()),
+  sort: opt(v.string()),
+  create_route: opt(v.string()),
+  update_route: opt(v.string()),
+  delete_route: opt(v.string()),
   // "custom" sections.
-  component?: string;
-}
+  component: opt(v.string()),
+});
+export type FormSection = v.InferOutput<typeof FormSectionSchema>;
 
-export type FormTabType = "sub_list" | "view" | "fields" | "component";
+const FORM_TAB_TYPES = ["sub_list", "view", "fields", "component"] as const;
+export type FormTabType = (typeof FORM_TAB_TYPES)[number];
 
-export interface FormTab {
-  label: string;
-  icon?: string;
-  type: FormTabType;
-  permission?: string;
-  condition?: string;
-  badge_count_route?: string;
+export const FormTabSchema = v.looseObject({
+  label: v.string(),
+  icon: opt(v.string()),
+  type: v.picklist(FORM_TAB_TYPES),
+  permission: opt(v.string()),
+  condition: opt(v.string()),
+  badge_count_route: opt(v.string()),
   // "sub_list" tabs.
-  field?: string;
-  inline_key?: string;
-  columns?: ListColumn[];
+  field: opt(v.string()),
+  inline_key: opt(v.string()),
+  columns: opt(v.array(ListColumnSchema)),
   // "view" tabs.
-  view?: string;
-  filter?: Record<string, unknown>;
-  show_create_action?: boolean;
+  view: opt(v.string()),
+  filter: opt(v.record(v.string(), v.unknown())),
+  show_create_action: opt(v.boolean()),
   // "fields" tabs.
-  sections?: FormSection[];
+  sections: opt(v.array(FormSectionSchema)),
   // "component" tabs.
-  component?: string;
-}
+  component: opt(v.string()),
+});
+export type FormTab = v.InferOutput<typeof FormTabSchema>;
 
-export interface FormSidebarSection {
-  label?: string;
-  fields: string[];
-}
+export const FormSidebarSectionSchema = v.looseObject({
+  label: opt(v.string()),
+  fields: v.array(v.string()),
+});
+export type FormSidebarSection = v.InferOutput<typeof FormSidebarSectionSchema>;
 
-export interface FormSidebar {
-  width?: number;
-  sections: FormSidebarSection[];
-}
+export const FormSidebarSchema = v.looseObject({
+  width: opt(v.number()),
+  sections: v.array(FormSidebarSectionSchema),
+});
+export type FormSidebar = v.InferOutput<typeof FormSidebarSchema>;
 
-export interface FormViewDeclaration {
-  name: string;
-  type: "form";
-  resource: string;
-  label: string;
-  icon?: string;
-  permission?: string;
-  create_route?: string;
-  update_route?: string;
-  delete_route?: string;
-  fetch_route?: string;
-  sections: FormSection[];
-  tabs?: FormTab[];
-  header_actions?: ListAction[];
-  sidebar?: FormSidebar | null;
-  chatter?: boolean;
-  autosave?: boolean;
-  readonly_condition?: string;
-}
+export const FormViewDeclarationSchema = v.looseObject({
+  name: v.string(),
+  type: v.literal("form"),
+  resource: v.string(),
+  label: v.string(),
+  icon: opt(v.string()),
+  permission: opt(v.string()),
+  create_route: opt(v.string()),
+  update_route: opt(v.string()),
+  delete_route: opt(v.string()),
+  fetch_route: opt(v.string()),
+  sections: v.array(FormSectionSchema),
+  tabs: opt(v.array(FormTabSchema)),
+  header_actions: opt(v.array(ListActionSchema)),
+  sidebar: opt(FormSidebarSchema),
+  chatter: opt(v.boolean()),
+  autosave: opt(v.boolean()),
+  readonly_condition: opt(v.string()),
+});
+export type FormViewDeclaration = v.InferOutput<typeof FormViewDeclarationSchema>;
