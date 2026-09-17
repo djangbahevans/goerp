@@ -5,13 +5,11 @@ import type { Row } from "../list/list-view-types.js";
 import { FieldInput, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
-// ContentEditable primary controls aren't natively labelable — <label
-// htmlFor> wouldn't associate, so these get <span id> + aria-labelledby
-// instead (goerp#698). "json" joined this set alongside "code" once it
-// moved onto the same CodeField (goerp#742) — a plain <textarea> didn't
-// need it, but CodeField's CodeMirror host isn't a native form control
-// either.
-const ARIA_LABELLEDBY_FIELD_TYPES = new Set(["code", "rich_text", "json"]);
+// ContentEditable/canvas primary controls aren't natively labelable —
+// <label htmlFor> wouldn't associate, so these get <span id> +
+// aria-labelledby instead (goerp#698). "location"'s map canvas is the same
+// case (goerp#830).
+const ARIA_LABELLEDBY_FIELD_TYPES = new Set(["code", "rich_text", "json", "location"]);
 
 export interface FormFieldRowProps {
   field: FormField;
@@ -27,7 +25,6 @@ const UNASSOCIATED_FIELD_TYPES = new Set([
   "date_range",
   "duration",
   "address",
-  "location",
   "radio",
   "rating",
   "signature",
