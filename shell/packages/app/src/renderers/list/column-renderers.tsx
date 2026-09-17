@@ -1,4 +1,5 @@
 import { Badge, type BadgeColor, CountryFlag, formatRelativeTime, StatusDot, UserAvatar } from "@goerp/sdk/components";
+import { componentRegistry } from "@goerp/sdk/schema";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
 
@@ -265,11 +266,13 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
         </details>
       );
 
-    case "custom":
-      // ComponentRegistry (backing defineModule().fieldRenderers, goerp#762)
-      // isn't consulted here yet — goerp#752's own scope, not this file's.
-      // Renders the raw value as a fallback rather than silently nothing.
-      return value == null ? "" : String(value);
+    case "custom": {
+      const Component = componentRegistry.tryResolve(column.component);
+      if (!Component) return value == null ? "" : String(value);
+      // Wiring props spread last so a manifest-authored component_props
+      // key can never shadow the real record/value passed in.
+      return <Component {...column.component_props} record={row} value={value} />;
+    }
 
     default:
       return value == null ? "" : String(value);

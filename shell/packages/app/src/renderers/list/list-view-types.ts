@@ -67,6 +67,8 @@ export const ListColumnSchema = v.looseObject({
   display_field: opt(v.string()),
   resource_label_field: opt(v.string()),
   currency_field: opt(v.string()),
+  component: opt(v.string()),
+  component_props: opt(v.record(v.string(), v.unknown())),
 });
 export type ListColumn = v.InferOutput<typeof ListColumnSchema>;
 

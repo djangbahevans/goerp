@@ -8,8 +8,12 @@ import type { FormField } from "./form-view-types.js";
 // ContentEditable/canvas primary controls aren't natively labelable —
 // <label htmlFor> wouldn't associate, so these get <span id> +
 // aria-labelledby instead (goerp#698). "location"'s map canvas is the same
-// case (goerp#830).
-const ARIA_LABELLEDBY_FIELD_TYPES = new Set(["code", "rich_text", "json", "location"]);
+// case (goerp#830). "custom" (goerp#752) renders an arbitrary
+// module-registered component of unknown internal structure — the same
+// "can't assume a single labelable native control" reasoning applies, and
+// the resolved component receives the generated id as its own `id` prop to
+// apply via aria-labelledby on whichever element it considers primary.
+const ARIA_LABELLEDBY_FIELD_TYPES = new Set(["code", "rich_text", "json", "location", "custom"]);
 
 export interface FormFieldRowProps {
   field: FormField;
@@ -30,7 +34,6 @@ const UNASSOCIATED_FIELD_TYPES = new Set([
   "signature",
   "qr_code",
   "computed_display",
-  "custom",
 ]);
 
 // Whether this field reaches RelationPicker at all, and as `multiple` —

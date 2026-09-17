@@ -32,6 +32,14 @@ export class ComponentRegistry {
     return this.components.has(name);
   }
 
+  // A declared-but-possibly-unregistered name (a manifest `component` field
+  // left unset, or naming a module that hasn't loaded) is the common case at
+  // most call sites — this collapses their has()-then-resolve() into one
+  // lookup and returns undefined instead of resolve()'s throw.
+  tryResolve(name: string | undefined): RegisteredComponent | undefined {
+    return name ? this.components.get(name) : undefined;
+  }
+
   // For a caller that tracks its own previously-registered names (e.g.
   // defineModule() re-registering a hot-reloaded module) to clear them
   // before registering again, rather than hitting the collision guard.

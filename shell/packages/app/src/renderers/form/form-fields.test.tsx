@@ -8,11 +8,12 @@ import type { FormField } from "./form-view-types.js";
 
 // Only the label-association tests below (tags/relation-backed fields) need
 // a real resource query — matches field-renderers.test.tsx's own mocking.
-const { getMock } = vi.hoisted(() => ({
+const { getMock, tryResolveComponentMock } = vi.hoisted(() => ({
   getMock: vi.fn(async () => ({
     data: [{ id: "1", name: "VIP" }],
     meta: { cursor: null, hasMore: false },
   })),
+  tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
 }));
 vi.mock("@goerp/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk")>();
@@ -20,10 +21,17 @@ vi.mock("@goerp/sdk", async (importOriginal) => {
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
-  return { ...actual, resourceRegistry: { resolve: vi.fn(async () => ({ listPath: "/tags" })) } };
+  return {
+    ...actual,
+    resourceRegistry: { resolve: vi.fn(async () => ({ listPath: "/tags" })) },
+    componentRegistry: { tryResolve: tryResolveComponentMock },
+  };
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  tryResolveComponentMock.mockReset().mockReturnValue(undefined);
+});
 
 function renderWithQueryClient(children: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -224,6 +232,26 @@ describe("FormFieldRow", () => {
       );
       expect(screen.getByRole("spinbutton", { name: "Site location Latitude" })).toBeTruthy();
       expect(screen.getByRole("spinbutton", { name: "Site location Longitude" })).toBeTruthy();
+    });
+
+    it("custom: associates the visible label with a registered component's own control via aria-labelledby, since its internal structure is arbitrary", () => {
+      function Widget(props: { id?: string }) {
+        return <input aria-labelledby={props.id} type="text" />;
+      }
+      tryResolveComponentMock.mockReturnValue(Widget);
+      const Wrapper = withFieldAccess({ widget: { read: true, write: true } });
+      render(
+        <Wrapper>
+          <FormFieldRow
+            field={{ field: "widget", type: "custom", component: "Widget", label: "Widget" }}
+            resource="contacts.contact"
+            record={{ widget: "" }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      expect(screen.getByLabelText("Widget")).toBe(screen.getByRole("textbox"));
     });
 
     it("tags: associates the visible label with the combobox input, not a selected tag's remove button", async () => {

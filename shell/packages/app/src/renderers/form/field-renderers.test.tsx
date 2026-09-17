@@ -5,7 +5,7 @@ import type { Row } from "../list/list-view-types.js";
 import { FieldInput, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
-const { resolveResourceMock, resolveMetadataMock, getMock } = vi.hoisted(() => ({
+const { resolveResourceMock, resolveMetadataMock, getMock, tryResolveComponentMock } = vi.hoisted(() => ({
   resolveResourceMock: vi.fn(async () => ({ listPath: "/tags" })),
   resolveMetadataMock: vi.fn(
     async (): Promise<{ listRoute: string; labelField: string; searchParam: string } | undefined> => ({
@@ -21,6 +21,7 @@ const { resolveResourceMock, resolveMetadataMock, getMock } = vi.hoisted(() => (
     ],
     meta: { cursor: null, hasMore: false },
   })),
+  tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
 }));
 vi.mock("@goerp/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk")>();
@@ -32,6 +33,7 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
     ...actual,
     resourceRegistry: { resolve: resolveResourceMock },
     resourceMetadataRegistry: { resolve: resolveMetadataMock },
+    componentRegistry: { tryResolve: tryResolveComponentMock },
   };
 });
 
@@ -40,6 +42,7 @@ afterEach(() => {
   resolveResourceMock.mockClear();
   resolveMetadataMock.mockClear();
   getMock.mockClear();
+  tryResolveComponentMock.mockReset().mockReturnValue(undefined);
 });
 
 // jsdom doesn't implement scrollIntoView (jsdom/jsdom#1695) — @goerp/sdk's
@@ -317,9 +320,64 @@ describe("FieldInput", () => {
     expect(screen.getByText("42")).toBeTruthy();
   });
 
-  it("custom: falls back to the raw value — no module component registry exists yet", () => {
+  it("custom: falls back to the raw value when no component is declared", () => {
+    renderField({ field: "widget", type: "custom" }, "raw-value");
+    expect(screen.getByText("raw-value")).toBeTruthy();
+  });
+
+  it("custom: falls back to the raw value when the declared component isn't registered", () => {
     renderField({ field: "widget", type: "custom", component: "MyWidget" }, "raw-value");
     expect(screen.getByText("raw-value")).toBeTruthy();
+  });
+
+  it("custom: resolves a registered component, passing value/onChange/record/disabled/id/component_props", () => {
+    function MyWidget(props: {
+      value: unknown;
+      onChange: (value: unknown) => void;
+      record: Row;
+      disabled: boolean;
+      id?: string;
+      label: string;
+    }) {
+      return (
+        <button type="button" id={props.id} onClick={() => props.onChange("clicked")} disabled={props.disabled}>
+          {String(props.value)}:{String(props.record.id)}:{props.label}
+        </button>
+      );
+    }
+    tryResolveComponentMock.mockReturnValue(MyWidget);
+    const onChange = renderField(
+      { field: "widget", type: "custom", component: "MyWidget", component_props: { label: "tagged" } },
+      "raw-value",
+      { id: "01j..." },
+    );
+    expect(tryResolveComponentMock).toHaveBeenCalledWith("MyWidget");
+    const button = screen.getByRole("button", { name: "raw-value:01j...:tagged" });
+    fireEvent.click(button);
+    expect(onChange).toHaveBeenCalledWith("clicked");
+  });
+
+  it("custom: component_props can't shadow the real value/onChange/record/disabled wiring props", () => {
+    function MyWidget(props: { value: unknown; onChange: (value: unknown) => void }) {
+      return (
+        <button type="button" onClick={() => props.onChange("clicked")}>
+          {String(props.value)}
+        </button>
+      );
+    }
+    tryResolveComponentMock.mockReturnValue(MyWidget);
+    const onChange = renderField(
+      {
+        field: "widget",
+        type: "custom",
+        component: "MyWidget",
+        component_props: { value: "spoofed", onChange: () => {} },
+      },
+      "raw-value",
+    );
+    const button = screen.getByRole("button", { name: "raw-value" });
+    fireEvent.click(button);
+    expect(onChange).toHaveBeenCalledWith("clicked");
   });
 
   it("relation with no resource, i.e. a plain field: falls back to the raw value instead of a picker", () => {
