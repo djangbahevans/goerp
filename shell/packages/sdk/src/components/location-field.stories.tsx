@@ -14,8 +14,7 @@ export default meta;
 
 type Story = StoryObj<typeof LocationField>;
 
-// No tileUrl configured in any story — matches field-renderers.tsx, which
-// doesn't wire one through yet (goerp#834). Every story renders the
+// No tileUrl configured in any story — every story renders the
 // plain-background fallback; click/drag/coordinate-input behavior is
 // identical either way.
 function LocationFieldDemo() {

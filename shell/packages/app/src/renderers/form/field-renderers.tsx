@@ -832,7 +832,16 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
 
     case "location": {
       const coords = value as { lat?: number; lng?: number } | undefined;
-      return <LocationField id={id} ariaLabelledBy={id} value={coords} disabled={disabled} onChange={onChange} />;
+      return (
+        <LocationField
+          id={id}
+          ariaLabelledBy={id}
+          value={coords}
+          disabled={disabled}
+          onChange={onChange}
+          tileUrl={import.meta.env.VITE_MAP_TILE_URL}
+        />
+      );
     }
 
     case "separator":
