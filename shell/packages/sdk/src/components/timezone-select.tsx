@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { CodeSelect } from "./code-select.js";
-import { fieldInputClassName } from "./field-input-styles.js";
+import { useState } from "react";
+import { CodeSelect, CodeSelectFallbackInput, supportedValuesOrEmpty } from "./code-select.js";
 
 export interface TimezoneSelectProps {
   id?: string | undefined;
@@ -11,20 +11,6 @@ export interface TimezoneSelectProps {
   disabled?: boolean | undefined;
 }
 
-// Intl.supportedValuesOf enumerates the full valid set at runtime, unlike
-// country/language — no bundled static dataset needed. Computed once at
-// module scope (not per-render/per-mount) so CodeSelect's own `codes`-keyed
-// memoization sees a reference-stable array.
-function supportedTimezonesOrEmpty(): string[] {
-  try {
-    return Intl.supportedValuesOf("timeZone");
-  } catch {
-    return [];
-  }
-}
-
-const TIMEZONE_CODES = supportedTimezonesOrEmpty();
-
 // Display/search/sort formatting only — not a resolved name (Intl.DisplayNames
 // has no "timeZone" type). A raw IANA id's underscore reads oddly and a typed
 // "new york" wouldn't otherwise match "America/New_York".
@@ -33,16 +19,20 @@ function spacedTimezoneName(id: string): string {
 }
 
 export function TimezoneSelect({ id, value, onChange, placeholder, disabled = false }: TimezoneSelectProps): ReactNode {
-  if (TIMEZONE_CODES.length === 0) {
+  // Lazy useState, not a module-level constant — keeps codes reference-stable
+  // across this instance's own re-renders (CodeSelect's entries memoization
+  // depends on it) while still calling Intl.supportedValuesOf fresh per
+  // mount, so a test can mock it before rendering.
+  const [codes] = useState(() => supportedValuesOrEmpty("timeZone"));
+
+  if (codes.length === 0) {
     return (
-      <input
+      <CodeSelectFallbackInput
         id={id}
-        type="text"
-        className={fieldInputClassName(false, "input", "sans")}
-        value={value ?? ""}
-        disabled={disabled}
+        value={value}
+        onChange={onChange}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       />
     );
   }
@@ -50,7 +40,7 @@ export function TimezoneSelect({ id, value, onChange, placeholder, disabled = fa
   return (
     <CodeSelect
       id={id}
-      codes={TIMEZONE_CODES}
+      codes={codes}
       nameOf={spacedTimezoneName}
       renderRow={(_code, name) => <span className="font-mono">{name}</span>}
       value={value}

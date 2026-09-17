@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { CodeSelect } from "./code-select.js";
-import { fieldInputClassName } from "./field-input-styles.js";
+import { useState } from "react";
+import { CodeSelect, CodeSelectFallbackInput, supportedValuesOrEmpty } from "./code-select.js";
 
 export interface CurrencySelectProps {
   id?: string | undefined;
@@ -11,36 +11,23 @@ export interface CurrencySelectProps {
   disabled?: boolean | undefined;
 }
 
-// Mirrors timezone-select.tsx's supportedTimezonesOrEmpty — computed once at
-// module scope for a reference-stable array. No display formatting needed:
-// ISO 4217 codes are flat three-letter strings with no separators to
-// normalize, and no name/symbol resolution (a symbol like "$" is ambiguous
-// across currencies; the code alone is both cheaper and clearer).
-function supportedCurrenciesOrEmpty(): string[] {
-  try {
-    return Intl.supportedValuesOf("currency");
-  } catch {
-    return [];
-  }
-}
-
-const CURRENCY_CODES = supportedCurrenciesOrEmpty();
-
 function identity(code: string): string {
   return code;
 }
 
 export function CurrencySelect({ id, value, onChange, placeholder, disabled = false }: CurrencySelectProps): ReactNode {
-  if (CURRENCY_CODES.length === 0) {
+  // See timezone-select.tsx's identical lazy useState for why this isn't a
+  // module-level constant.
+  const [codes] = useState(() => supportedValuesOrEmpty("currency"));
+
+  if (codes.length === 0) {
     return (
-      <input
+      <CodeSelectFallbackInput
         id={id}
-        type="text"
-        className={fieldInputClassName(false, "input", "sans")}
-        value={value ?? ""}
-        disabled={disabled}
+        value={value}
+        onChange={onChange}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       />
     );
   }
@@ -48,7 +35,7 @@ export function CurrencySelect({ id, value, onChange, placeholder, disabled = fa
   return (
     <CodeSelect
       id={id}
-      codes={CURRENCY_CODES}
+      codes={codes}
       nameOf={identity}
       renderRow={(code) => <span className="font-mono">{code}</span>}
       value={value}

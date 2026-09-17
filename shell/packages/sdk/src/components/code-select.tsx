@@ -30,6 +30,52 @@ interface Entry {
   name: string;
 }
 
+function optionElementId(listboxId: string, index: number): string {
+  return `${listboxId}-option-${index}`;
+}
+
+// Shared by timezone-select.tsx/currency-select.tsx, whose datasets are
+// enumerated at runtime instead of bundled like country/language.
+export function supportedValuesOrEmpty(key: "currency" | "timeZone"): string[] {
+  try {
+    return Intl.supportedValuesOf(key);
+  } catch {
+    return [];
+  }
+}
+
+export interface CodeSelectFallbackProps {
+  id?: string | undefined;
+  value?: string | undefined;
+  onChange: (value: string) => void;
+  placeholder?: string | undefined;
+  disabled?: boolean | undefined;
+}
+
+// Rendered instead of CodeSelect when supportedValuesOrEmpty comes back
+// empty (Intl.supportedValuesOf unavailable) — a plain free-text input,
+// the terminal degrade CountrySelect/LanguageSelect never need since their
+// bundled datasets are always populated.
+export function CodeSelectFallbackInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+  disabled = false,
+}: CodeSelectFallbackProps): ReactNode {
+  return (
+    <input
+      id={id}
+      type="text"
+      className={fieldInputClassName(false, "input", "sans")}
+      value={value ?? ""}
+      disabled={disabled}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
 export function CodeSelect({
   id,
   codes,
@@ -93,15 +139,15 @@ export function CodeSelect({
   const position = useFloatingPanelPosition(isOpen, containerRef, panelRef);
   useOutsideClickClose(isOpen, [containerRef, panelRef], close);
 
-  // The panel scrolls internally once its content exceeds max-h-80, so
-  // arrow-key highlighting needs to carry the viewport with it — otherwise
-  // a keyboard-only user can highlight an option scrolled out of view.
+  // Keeps the highlighted option in view within the now-scrollable panel.
+  // matches.length is a deliberate extra dependency, not read in the body —
+  // a filter keystroke can change what's rendered at index 0 without
+  // changing activeIndex's own value, and would otherwise not re-trigger this.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: matches.length is intentionally over-specified, see above.
   useEffect(() => {
     if (!isOpen) return;
-    // getElementById, not a CSS selector — useId()'s own value contains a
-    // ":" that would otherwise need escaping.
-    document.getElementById(`${listboxId}-option-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
-  }, [isOpen, activeIndex, listboxId]);
+    document.getElementById(optionElementId(listboxId, activeIndex))?.scrollIntoView({ block: "nearest" });
+  }, [isOpen, activeIndex, listboxId, matches.length]);
 
   function selectEntry(entry: Entry): void {
     onChange(entry.code);
@@ -156,7 +202,7 @@ export function CodeSelect({
         aria-expanded={isOpen}
         aria-controls={listboxId}
         aria-autocomplete="list"
-        aria-activedescendant={isOpen && matches.length > 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+        aria-activedescendant={isOpen && matches.length > 0 ? optionElementId(listboxId, activeIndex) : undefined}
         value={triggerValue}
         title={!isOpen && selected ? selected.name : undefined}
         disabled={disabled}
@@ -204,7 +250,7 @@ export function CodeSelect({
                 // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
                 <div
                   key={entry.code}
-                  id={`${listboxId}-option-${index}`}
+                  id={optionElementId(listboxId, index)}
                   role="option"
                   aria-label={entry.name}
                   aria-selected={index === activeIndex}

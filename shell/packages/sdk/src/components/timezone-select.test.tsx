@@ -114,4 +114,18 @@ describe("TimezoneSelect", () => {
     render(<TimezoneSelect value="" onChange={vi.fn()} disabled />);
     expect((screen.getByRole("combobox") as HTMLInputElement).disabled).toBe(true);
   });
+
+  it("falls back to a plain text input when Intl.supportedValuesOf is unavailable", () => {
+    const spy = vi.spyOn(Intl, "supportedValuesOf").mockImplementation(() => {
+      throw new Error("unsupported");
+    });
+    const onChange = vi.fn();
+    render(<TimezoneSelect value="Africa/Accra" onChange={onChange} placeholder="Pick a timezone" />);
+    expect(screen.queryByRole("combobox")).toBeNull();
+    const input = screen.getByPlaceholderText("Pick a timezone") as HTMLInputElement;
+    expect(input.value).toBe("Africa/Accra");
+    fireEvent.change(input, { target: { value: "typed" } });
+    expect(onChange).toHaveBeenCalledWith("typed");
+    spy.mockRestore();
+  });
 });

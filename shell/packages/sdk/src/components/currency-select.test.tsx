@@ -105,4 +105,18 @@ describe("CurrencySelect", () => {
     render(<CurrencySelect value="" onChange={vi.fn()} disabled />);
     expect((screen.getByRole("combobox") as HTMLInputElement).disabled).toBe(true);
   });
+
+  it("falls back to a plain text input when Intl.supportedValuesOf is unavailable", () => {
+    const spy = vi.spyOn(Intl, "supportedValuesOf").mockImplementation(() => {
+      throw new Error("unsupported");
+    });
+    const onChange = vi.fn();
+    render(<CurrencySelect value="USD" onChange={onChange} placeholder="Pick a currency" />);
+    expect(screen.queryByRole("combobox")).toBeNull();
+    const input = screen.getByPlaceholderText("Pick a currency") as HTMLInputElement;
+    expect(input.value).toBe("USD");
+    fireEvent.change(input, { target: { value: "typed" } });
+    expect(onChange).toHaveBeenCalledWith("typed");
+    spy.mockRestore();
+  });
 });
