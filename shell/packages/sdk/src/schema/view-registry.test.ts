@@ -63,6 +63,48 @@ describe("buildViewRegistry — resolveRoute", () => {
     expect(registry.resolveRoute("/nonexistent")).toBeNull();
   });
 
+  it("matches a concrete id against a declared {id}-templated route and captures the id", () => {
+    const schemaWithForm: MetaSchema = {
+      ...schema,
+      modules: {
+        contacts: moduleSchema({
+          routes: [
+            ...schema.modules.contacts!.routes,
+            route({
+              method: "GET",
+              path: "/contacts/{id}",
+              view: "contacts_form",
+              permissions: ["contacts:contact:read"],
+            }),
+          ],
+          views: [
+            ...schema.modules.contacts!.views,
+            { name: "contacts_form", type: "form", resource: "contacts.contact", label: "Contact" },
+          ],
+        }),
+      },
+    };
+    const registry = buildViewRegistry(schemaWithForm);
+
+    expect(registry.resolveRoute("/contacts/01j8x000000000000000000000")).toMatchObject({
+      module: "contacts",
+      viewName: "contacts_form",
+      viewType: "form",
+      recordId: "01j8x000000000000000000000",
+    });
+    // The template string itself is never a real navigation target, but the
+    // raw-path exact-match entry still resolves it the same as before —
+    // additive matching, not a replacement of the existing lookup.
+    const exact = registry.resolveRoute("/contacts/{id}");
+    expect(exact?.viewName).toBe("contacts_form");
+    expect(exact?.recordId).toBeUndefined();
+  });
+
+  it("returns null when a concrete path's prefix doesn't match any declared {id}-templated route", () => {
+    const registry = buildViewRegistry(schema);
+    expect(registry.resolveRoute("/contacts/01j8x000000000000000000000")).toBeNull();
+  });
+
   it("returns null when a route's view field doesn't match any declared view", () => {
     const schemaWithBadRef: MetaSchema = {
       ...schema,
