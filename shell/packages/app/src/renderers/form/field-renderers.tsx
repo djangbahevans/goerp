@@ -8,6 +8,7 @@ import {
   DateTimeField,
   FileField,
   fieldInputClassName,
+  IconPicker,
   LanguageSelect,
   LocationField,
   MoneyField,
@@ -610,7 +611,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
           id={id}
           options={field.options ?? []}
           value={selectValue}
-          onChange={(next) => onChange(next === "" ? undefined : next)}
+          onChange={onChange}
           multiple={field.multiple || type === "multi_select"}
           placeholder={`Select ${field.label ?? field.field}…`}
           disabled={disabled}
@@ -660,11 +661,15 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       return <RelationInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />;
 
     case "country_select":
+      // onChange passes "" straight through on clear — mapping it to
+      // undefined drops the key from JSON.stringify(edits) entirely, so a
+      // clear never reaches buildAssignment (host_orm_write.go) and the
+      // old value silently survives server-side.
       return (
         <CountrySelect
           id={id}
           value={stringValue}
-          onChange={(code) => onChange(code === "" ? undefined : code)}
+          onChange={onChange}
           placeholder="Select a country…"
           disabled={disabled}
         />
@@ -675,7 +680,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
         <LanguageSelect
           id={id}
           value={stringValue}
-          onChange={(tag) => onChange(tag === "" ? undefined : tag)}
+          onChange={onChange}
           placeholder="Select a language…"
           disabled={disabled}
         />
@@ -711,16 +716,13 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       return <ColorPicker id={id} value={stringValue} disabled={disabled} onChange={onChange} />;
 
     case "icon_picker":
-      // Free-text Lucide icon name — no icon-browsing picker UI yet.
       return (
-        <input
+        <IconPicker
           id={id}
-          type="text"
-          value={stringValue}
-          placeholder="lucide icon name"
+          value={stringValue === "" ? undefined : stringValue}
+          onChange={onChange}
+          placeholder="Choose an icon…"
           disabled={disabled}
-          className={PLAIN_INPUT_CLASS_NAME}
-          onChange={(e) => onChange(e.target.value)}
         />
       );
 
