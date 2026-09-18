@@ -7,7 +7,7 @@ export { ActionButton } from "./action-button.js";
 // itself." AlertDialog already relies on this internally; exported here so
 // call sites outside the sdk package (form-share-action.tsx) can too.
 export { actionButtonClassName } from "./action-button-styles.js";
-export type { ActionMenuItem, ActionMenuProps } from "./action-menu.js";
+export type { ActionMenuItem, ActionMenuItemConfirm, ActionMenuProps } from "./action-menu.js";
 export { ActionMenu } from "./action-menu.js";
 export type { AlertDialogInput, AlertDialogProps, AlertDialogSelectOption } from "./alert-dialog.js";
 export { AlertDialog, AlertDialogInputSchema, AlertDialogSelectOptionSchema } from "./alert-dialog.js";

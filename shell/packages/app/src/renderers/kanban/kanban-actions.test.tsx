@@ -90,4 +90,70 @@ describe("resolveKanbanActionItems", () => {
 
     expect(resolveKanbanActionItems(actions, "crm", navigate, routeAction)).toEqual([]);
   });
+
+  it("maps a route action's confirm into the item, gated by ActionMenu itself", () => {
+    const routeAction = { mutate: vi.fn() } as unknown as ReturnType<typeof useKanbanRouteAction>;
+    const actions: ListAction[] = [
+      {
+        label: "Archive",
+        type: "route",
+        route: "crm.archiveLead",
+        confirm: { title: "Archive Lead", message: "Archive this lead?", confirm_label: "Archive" },
+      },
+    ];
+
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, "lead-1");
+    expect(items[0]?.confirm).toEqual({
+      title: "Archive Lead",
+      message: "Archive this lead?",
+      confirmLabel: "Archive",
+      cancelLabel: undefined,
+      destructive: undefined,
+      input: undefined,
+    });
+    // Not fired on its own — the confirm gate lives in ActionMenu, which
+    // calls onClick only once the dialog is confirmed.
+    expect(routeAction.mutate).not.toHaveBeenCalled();
+  });
+
+  it("merges the confirm dialog's collected input into the route mutation alongside the record id", () => {
+    const routeAction = { mutate: vi.fn() } as unknown as ReturnType<typeof useKanbanRouteAction>;
+    const actions: ListAction[] = [
+      {
+        label: "Archive",
+        type: "route",
+        route: "crm.archiveLead",
+        confirm: {
+          title: "Archive Lead",
+          message: "Why?",
+          input: { field: "reason", label: "Reason", type: "text" },
+        },
+      },
+    ];
+
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, "lead-1");
+    items[0]?.onClick?.("stale");
+
+    expect(routeAction.mutate).toHaveBeenCalledWith({
+      route: "crm.archiveLead",
+      variables: { id: "lead-1", reason: "stale" },
+    });
+  });
+
+  it('never lets a confirm.input.field literally named "id" overwrite the real record id', () => {
+    const routeAction = { mutate: vi.fn() } as unknown as ReturnType<typeof useKanbanRouteAction>;
+    const actions: ListAction[] = [
+      {
+        label: "Archive",
+        type: "route",
+        route: "crm.archiveLead",
+        confirm: { title: "Archive Lead", message: "Why?", input: { field: "id", label: "ID", type: "text" } },
+      },
+    ];
+
+    const items = resolveKanbanActionItems(actions, "crm", navigate, routeAction, "lead-1");
+    items[0]?.onClick?.("not-a-real-id");
+
+    expect(routeAction.mutate).toHaveBeenCalledWith({ route: "crm.archiveLead", variables: { id: "lead-1" } });
+  });
 });

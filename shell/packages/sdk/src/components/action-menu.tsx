@@ -4,8 +4,22 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOptionalPermission } from "../auth/use-permission.js";
 import { actionButtonClassName } from "./action-button-styles.js";
+import { AlertDialog, type AlertDialogInput } from "./alert-dialog.js";
 import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { Icon, type IconNameLike } from "./icon.js";
+
+// manifest-spec.md's ConfirmDialog object, in AlertDialogProps' own
+// camelCase — a caller mapping from a manifest's snake_case Action.confirm
+// does that translation itself (e.g. list-actions.tsx), the same way it
+// already does for every other ActionMenuItem field.
+export interface ActionMenuItemConfirm {
+  title: string;
+  message: string;
+  confirmLabel?: string | undefined;
+  cancelLabel?: string | undefined;
+  destructive?: boolean | undefined;
+  input?: AlertDialogInput | undefined;
+}
 
 export interface ActionMenuItem {
   type?: "item" | "separator" | undefined;
@@ -13,7 +27,9 @@ export interface ActionMenuItem {
   label?: string | undefined;
   // Lucide icon name, shown before the label.
   icon?: IconNameLike | undefined;
-  onClick?: (() => void) | undefined;
+  // Called with the confirm dialog's collected input value, or undefined
+  // when this item declares no `confirm.input` (or no `confirm` at all).
+  onClick?: ((inputValue?: string) => void) | undefined;
   variant?: "default" | "danger" | undefined;
   permission?: string | undefined;
   disabled?: boolean | undefined;
@@ -21,6 +37,9 @@ export interface ActionMenuItem {
   // shape, not a new component. Present (boolean, not undefined) switches
   // the item to role="menuitemcheckbox" with a trailing checkmark.
   checked?: boolean | undefined;
+  // If set, a confirmation dialog gates onClick — activating the item
+  // opens it instead of firing immediately, closing the menu either way.
+  confirm?: ActionMenuItemConfirm | undefined;
 }
 
 // Renders the trigger button when a caller needs a different visual (e.g.
@@ -73,17 +92,23 @@ function ActionMenuItemButton({
   tabIndex,
   itemRef,
   onSelect,
+  onConfirmNeeded,
 }: {
   item: ActionMenuItem;
   tabIndex: number;
   itemRef: (el: HTMLButtonElement | null) => void;
   onSelect: () => void;
+  onConfirmNeeded: () => void;
 }): ReactNode {
   const allowed = useOptionalPermission(item.permission);
   if (!allowed) return null;
 
   const handleClick = () => {
     if (item.disabled) return;
+    if (item.confirm) {
+      onConfirmNeeded();
+      return;
+    }
     item.onClick?.();
     // A checkable item is a toggle to flip and re-inspect, not a one-shot
     // action to commit and dismiss from — action-menu.md's States entry for
@@ -147,6 +172,12 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLSpanElement | null>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // confirmItem only ever moves to a new item, never back to null on its
+  // own — confirmOpen alone drives visibility, so AlertDialog's exit
+  // animation plays against the item it was opened for instead of losing
+  // its content mid-transition.
+  const [confirmItem, setConfirmItem] = useState<ActionMenuItem | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   // One stable callback per index, so a re-render (e.g. every arrow-key
   // press) doesn't churn every item's ref via a fresh inline closure.
   const itemRefCallbacks = useRef(new Map<number, (el: HTMLButtonElement | null) => void>());
@@ -298,12 +329,34 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
                     setOpen(false);
                     triggerRef.current?.focus();
                   }}
+                  onConfirmNeeded={() => {
+                    setConfirmItem(item);
+                    setConfirmOpen(true);
+                    setOpen(false);
+                    triggerRef.current?.focus();
+                  }}
                 />
               );
             })}
           </span>,
           document.body,
         )}
+      {confirmItem?.confirm && (
+        <AlertDialog
+          open={confirmOpen}
+          title={confirmItem.confirm.title}
+          description={confirmItem.confirm.message}
+          confirmLabel={confirmItem.confirm.confirmLabel}
+          cancelLabel={confirmItem.confirm.cancelLabel}
+          confirmVariant={confirmItem.confirm.destructive ? "danger" : "primary"}
+          {...(confirmItem.confirm.input ? { input: confirmItem.confirm.input } : {})}
+          onConfirm={(inputValue) => {
+            confirmItem.onClick?.(inputValue);
+            setConfirmOpen(false);
+          }}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      )}
     </span>
   );
 }

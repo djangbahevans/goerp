@@ -15,8 +15,11 @@ export function KanbanActionsMenu({ actions, label }: KanbanActionsMenuProps): R
   // Called unconditionally (hooks can't be conditional) — ActionMenu
   // performs this same per-item permission check for the >1-action path
   // via useOptionalPermission inside ActionMenuItemButton; the lone-action
-  // path must gate itself the same way rather than skipping it.
-  const soleAction = actions.length === 1 ? actions[0] : undefined;
+  // path must gate itself the same way rather than skipping it. A
+  // confirm-gated sole action skips this compact-button shortcut entirely
+  // and falls through to a real (1-item) ActionMenu below, which already
+  // owns the confirm-dialog flow — not worth re-implementing here too.
+  const soleAction = actions.length === 1 && !actions[0]?.confirm ? actions[0] : undefined;
   const soleActionAllowed = useOptionalPermission(soleAction?.permission);
 
   if (actions.length === 0) return null;
@@ -25,7 +28,7 @@ export function KanbanActionsMenu({ actions, label }: KanbanActionsMenuProps): R
     return (
       <button
         type="button"
-        onClick={soleAction.onClick}
+        onClick={() => soleAction.onClick?.()}
         disabled={soleAction.disabled}
         title={soleAction.label}
         className="rounded-control px-1.5 py-0.5 text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"

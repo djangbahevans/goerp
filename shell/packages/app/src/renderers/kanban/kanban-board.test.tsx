@@ -175,7 +175,7 @@ describe("KanbanBoard", () => {
       return (
         <>
           {actions.map((action) => (
-            <button key={action.label} type="button" onClick={action.onClick}>
+            <button key={action.label} type="button" onClick={() => action.onClick?.()}>
               {action.label}
             </button>
           ))}

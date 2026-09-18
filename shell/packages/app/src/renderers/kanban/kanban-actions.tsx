@@ -6,6 +6,7 @@ import { actionRegistry, dispatch, splitPathAndBody } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useMutation } from "@tanstack/react-query";
 import type { ListAction } from "../list/list-view-types.js";
+import { mapActionConfirm } from "../shared/map-action-confirm.js";
 
 // Only "create"/"route"/"url" — the same depth list-actions.tsx renders.
 
@@ -40,6 +41,7 @@ function resolveCreateAction(action: ListAction, module: string, navigate: Kanba
     label: action.label,
     ...(action.icon ? { icon: action.icon } : {}),
     ...(action.permission ? { permission: action.permission } : {}),
+    ...(action.confirm ? { confirm: mapActionConfirm(action.confirm) } : {}),
     onClick: () => {
       viewPathRegistry
         .resolve(view, module)
@@ -52,7 +54,11 @@ function resolveCreateAction(action: ListAction, module: string, navigate: Kanba
   };
 }
 
-// The bare record id fills the route's own `{id}` placeholder.
+// The bare record id fills the route's own `{id}` placeholder — unless a
+// confirm dialog also collected an input value, in which case both need
+// to reach the request: `{id, [confirm.input.field]: inputValue}`, the
+// object call shape splitPathAndBody documents for a path with a
+// placeholder plus body fields alongside it.
 function resolveRouteAction(
   action: ListAction,
   routeAction: KanbanRouteAction,
@@ -60,11 +66,19 @@ function resolveRouteAction(
 ): ActionMenuItem | undefined {
   if (!action.route) return undefined;
   const route = action.route;
+  const confirm = action.confirm;
   return {
     label: action.label,
     ...(action.icon ? { icon: action.icon } : {}),
     ...(action.permission ? { permission: action.permission } : {}),
-    onClick: () => routeAction.mutate({ route, variables: recordId }),
+    ...(confirm ? { confirm: mapActionConfirm(confirm) } : {}),
+    onClick: (inputValue?: string) => {
+      // `id` last, not first — a manifest confirm.input.field literally
+      // named "id" must not silently overwrite the real record id.
+      const variables =
+        confirm?.input && inputValue !== undefined ? { [confirm.input.field]: inputValue, id: recordId } : recordId;
+      routeAction.mutate({ route, variables });
+    },
   };
 }
 
@@ -75,6 +89,7 @@ function resolveUrlAction(action: ListAction): ActionMenuItem | undefined {
     label: action.label,
     ...(action.icon ? { icon: action.icon } : {}),
     ...(action.permission ? { permission: action.permission } : {}),
+    ...(action.confirm ? { confirm: mapActionConfirm(action.confirm) } : {}),
     onClick: () => {
       window.open(url, "_blank", "noopener,noreferrer");
     },

@@ -405,6 +405,96 @@ describe("ActionMenu", () => {
     });
   });
 
+  describe("confirm-gated items", () => {
+    it("activating a confirm-gated item opens the dialog and closes the menu instead of firing immediately", () => {
+      const onClick = vi.fn();
+      render(
+        withPermissions(
+          [],
+          <ActionMenu
+            label="Actions"
+            items={[{ label: "Archive", onClick, confirm: { title: "Archive?", message: "Sure?" } }]}
+          />,
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+
+      expect(onClick).not.toHaveBeenCalled();
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(screen.getByRole("heading", { name: "Archive?" })).toBeTruthy();
+    });
+
+    it("confirming fires onClick; cancelling doesn't", () => {
+      const onClick = vi.fn();
+      render(
+        withPermissions(
+          [],
+          <ActionMenu
+            label="Actions"
+            items={[{ label: "Archive", onClick, confirm: { title: "Archive?", message: "Sure?" } }]}
+          />,
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(onClick).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+      expect(onClick).toHaveBeenCalledOnce();
+    });
+
+    it("passes the dialog's collected input value through to onClick", () => {
+      const onClick = vi.fn();
+      render(
+        withPermissions(
+          [],
+          <ActionMenu
+            label="Actions"
+            items={[
+              {
+                label: "Archive",
+                onClick,
+                confirm: {
+                  title: "Archive?",
+                  message: "Why?",
+                  input: { label: "Reason", type: "text" },
+                },
+              },
+            ]}
+          />,
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+      fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "stale" } });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+      expect(onClick).toHaveBeenCalledWith("stale");
+    });
+
+    it("a disabled confirm-gated item never opens the dialog", () => {
+      const onClick = vi.fn();
+      render(
+        withPermissions(
+          [],
+          <ActionMenu
+            label="Actions"
+            items={[{ label: "Archive", onClick, disabled: true, confirm: { title: "Archive?", message: "Sure?" } }]}
+          />,
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+
+      expect(onClick).not.toHaveBeenCalled();
+      expect(screen.queryByRole("heading", { name: "Archive?" })).toBeNull();
+    });
+  });
+
   describe("custom trigger", () => {
     it("renders the caller's trigger instead of the default button, wired to the same open state", () => {
       render(
