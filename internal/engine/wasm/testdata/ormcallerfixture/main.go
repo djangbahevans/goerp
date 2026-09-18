@@ -73,7 +73,7 @@ func runOrmFlow() uint64 {
 	readOut, err := orm.Read[widget](widgetModel, []string{id1}, nil)
 	record("read", strconv.Itoa(len(readOut)), err)
 
-	err = orm.Write(widgetModel, id1, map[string]any{"price": int64(200)}, "")
+	err = orm.Write(widgetModel, id1, map[string]any{"price": int64(200)}, nil)
 	record("write", "", err)
 
 	searchIDs, err := orm.Search(widgetModel, "record.price = 200")
@@ -147,7 +147,7 @@ func runOrmTxFlow() uint64 {
 			return err
 		}
 
-		if err := orm.WriteTx(tx, widgetModel, id1, map[string]any{"price": int64(750)}, ""); err != nil {
+		if err := orm.WriteTx(tx, widgetModel, id1, map[string]any{"price": int64(750)}, nil); err != nil {
 			return err
 		}
 		record("write_tx", "", nil)

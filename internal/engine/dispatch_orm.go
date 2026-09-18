@@ -328,11 +328,16 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 		return
 	}
 
+	var expectedEtag *string
+	if values, present := r.Header["If-Match"]; present && len(values) > 0 {
+		expectedEtag = new(values[0])
+	}
+
 	out, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMWriteInput{
 		Model:        entry.Manifest.Model,
 		ID:           id,
 		Record:       record,
-		ExpectedEtag: r.Header.Get("If-Match"),
+		ExpectedEtag: expectedEtag,
 	})
 	if hostErr != nil {
 		writeHostError(w, hostErr)
@@ -359,18 +364,13 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 //
 // The state check and the write are two separate ORM calls, not one
 // transaction — a compare-and-swap on the read's etag closes the
-// resulting race for any transition after a record's first real write
-// (two concurrent transitions racing off the same starting state can no
-// longer both succeed; the loser gets orm.etag_mismatch, not a silent
-// overwrite). ORMCreate never rotates a fresh record's etag column away
-// from its schema default (only the write functions do), so this
-// protection doesn't reach two transitions racing immediately after
-// create — the same gap dispatchORMUpdate's own If-Match-based
-// optimistic lock already has for a freshly created record whose caller
-// hasn't captured a real etag yet. Closing that gap needs the ORM write
-// pipeline to accept an arbitrary column-value precondition (not just
-// etag) so the check and the write can be one atomic SQL statement — a
-// bigger change than this ticket's minimal slice.
+// resulting race (two concurrent transitions racing off the same
+// starting state can no longer both succeed; the loser gets
+// orm.etag_mismatch, not a silent overwrite), including for a record
+// whose etag is still its never-written default: ExpectedEtag is a
+// pointer, so a genuinely-empty etag threads through as a real
+// precondition rather than being mistaken for "no precondition
+// supplied" (goerp#871).
 func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
@@ -426,7 +426,7 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 		Model:        entry.Manifest.Model,
 		ID:           id,
 		Record:       map[string]any{wf.Field: wf.To},
-		ExpectedEtag: etag,
+		ExpectedEtag: new(etag),
 	})
 	if hostErr != nil {
 		writeHostError(w, hostErr)

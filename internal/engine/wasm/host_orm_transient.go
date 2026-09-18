@@ -119,10 +119,11 @@ func transientRead(ctx context.Context, cacheClient *cache.Client, modCtx *Modul
 // Go-side check-then-CAS would leave a TOCTOU gap a concurrent unlink
 // could slip through between the two round trips, resurrecting a
 // just-deleted key. checkEtag is only true when the caller actually
-// supplied an expectedEtag — an empty expectedEtag means "no
-// optimistic-locking precondition," not "the precondition is an empty
-// string" (a legitimately stored etag can itself be "").
-func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, id string, record map[string]any, newEtag, expectedEtag string) (ORMWriteOutput, *abi.HostError) {
+// supplied an expectedEtag (a non-nil pointer) — nil means "no
+// optimistic-locking precondition," distinct from a pointer to "" (a
+// real precondition requiring the stored etag to still be its
+// never-written default).
+func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, id string, record map[string]any, newEtag string, expectedEtag *string) (ORMWriteOutput, *abi.HostError) {
 	key := transientKey(modCtx.TenantSlug, qualifiedModel, id)
 
 	data, err := msgpack.Marshal(record)
@@ -130,7 +131,12 @@ func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *Modu
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 
-	ok, err := cacheClient.CompareAndSetHash(ctx, key, transientEtagHashField, true, expectedEtag != "", expectedEtag, transientDataHashField, string(data), newEtag, transientTTL(md))
+	checkEtag := expectedEtag != nil
+	var expectedEtagVal string
+	if checkEtag {
+		expectedEtagVal = *expectedEtag
+	}
+	ok, err := cacheClient.CompareAndSetHash(ctx, key, transientEtagHashField, true, checkEtag, expectedEtagVal, transientDataHashField, string(data), newEtag, transientTTL(md))
 	if err != nil {
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
