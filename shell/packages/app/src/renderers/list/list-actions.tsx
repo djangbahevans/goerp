@@ -14,6 +14,7 @@ import { actionRegistry, dispatch, splitPathAndBody, useAction, useExport } from
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { mapActionConfirm } from "../shared/map-action-confirm.js";
 import type { ListAction } from "./list-view-types.js";
 
 // export/import/custom action types still aren't rendered.
@@ -212,19 +213,11 @@ async function fireHeaderMenuItem(
 function MenuActionButton({ action, module }: { action: ListAction; module: string }) {
   const allowed = useOptionalPermission(action.permission);
   const navigate = useNavigate();
-  // confirmItem is never cleared back to null on close — only confirmOpen
-  // is, so the dialog stays mounted (its exit animation can play) with the
-  // last-selected item's content instead of unmounting mid-transition.
-  const [confirmItem, setConfirmItem] = useState<ListAction | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   if (!allowed) return null;
 
-  const fire = (item: ListAction, inputValue?: string) => {
-    fireHeaderMenuItem(item, module, navigate, inputValue).catch((err: unknown) => {
-      toast.error(err instanceof Error ? err.message : String(err));
-    });
-  };
-
+  // ActionMenu owns the confirm-gate itself (per-item `confirm`) — this
+  // just maps ListAction's snake_case wire shape into it and fires for
+  // real once ActionMenu calls back with (or without) a collected input.
   const menuItems: ActionMenuItem[] = (action.items ?? [])
     .filter((item) => MENU_ITEM_TYPES.has(item.type))
     .map((item) =>
@@ -236,53 +229,35 @@ function MenuActionButton({ action, module }: { action: ListAction; module: stri
             icon: item.icon,
             permission: item.permission,
             variant: item.style === "danger" ? "danger" : "default",
-            onClick: () => {
-              if (item.confirm) {
-                setConfirmItem(item);
-                setConfirmOpen(true);
-              } else {
-                fire(item);
-              }
+            confirm: mapActionConfirm(item.confirm),
+            onClick: (inputValue?: string) => {
+              fireHeaderMenuItem(item, module, navigate, inputValue).catch((err: unknown) => {
+                toast.error(err instanceof Error ? err.message : String(err));
+              });
             },
           },
     );
 
   return (
-    <>
-      <ActionMenu
-        label={action.label ?? ""}
-        items={menuItems}
-        trigger={({ ref, open, disabled, onClick, onKeyDown }) => (
-          <button
-            ref={ref}
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={open}
-            disabled={disabled}
-            onClick={onClick}
-            onKeyDown={onKeyDown}
-            className={actionButtonClassName(
-              action.style === "danger" ? "danger" : (action.style ?? "secondary"),
-              "md",
-            )}
-          >
-            {action.icon && <Icon name={action.icon} size={16} aria-hidden="true" />}
-            {action.label}
-          </button>
-        )}
-      />
-      {confirmItem?.confirm && (
-        <ConfirmAlertDialog
-          confirm={confirmItem.confirm}
-          open={confirmOpen}
-          onConfirm={(inputValue) => {
-            fire(confirmItem, inputValue);
-            setConfirmOpen(false);
-          }}
-          onCancel={() => setConfirmOpen(false)}
-        />
+    <ActionMenu
+      label={action.label ?? ""}
+      items={menuItems}
+      trigger={({ ref, open, disabled, onClick, onKeyDown }) => (
+        <button
+          ref={ref}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={onClick}
+          onKeyDown={onKeyDown}
+          className={actionButtonClassName(action.style === "danger" ? "danger" : (action.style ?? "secondary"), "md")}
+        >
+          {action.icon && <Icon name={action.icon} size={16} aria-hidden="true" />}
+          {action.label}
+        </button>
       )}
-    </>
+    />
   );
 }
 
