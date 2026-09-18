@@ -199,6 +199,11 @@ export const FormViewDeclarationSchema = v.looseObject({
   sections: v.array(FormSectionSchema),
   tabs: opt(v.array(FormTabSchema)),
   header_actions: opt(v.array(ListActionSchema)),
+  // Auto-renders one button per transition legal from the record's
+  // current state, off the resource's own .Workflow()-declared field
+  // (goerp#864, view-system.md's "Auto-rendered transition buttons") —
+  // additive alongside header_actions, not a replacement for it.
+  workflow_actions: opt(v.boolean()),
   sidebar: opt(FormSidebarSchema),
   chatter: opt(v.boolean()),
   autosave: opt(v.boolean()),

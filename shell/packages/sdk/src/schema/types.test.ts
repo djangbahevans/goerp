@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
-import { FieldDefSchema, ModuleSchemaSchema, RouteSchemaSchema } from "./types.js";
+import { FieldDefSchema, ModuleSchemaSchema, RouteSchemaSchema, WorkflowTransitionSchema } from "./types.js";
 
 const baseRoute = { method: "GET", path: "/x", permissions: [], response_is_list: false };
 
@@ -31,6 +31,45 @@ describe("RouteSchemaSchema", () => {
 describe("FieldDefSchema", () => {
   it("only requires name and type", () => {
     expect(v.safeParse(FieldDefSchema, { name: "email", type: "text" }).success).toBe(true);
+  });
+
+  it("leaves workflow absent for a field with no .Workflow() declaration", () => {
+    const result = v.safeParse(FieldDefSchema, { name: "state", type: "selection" });
+    expect(result.success).toBe(true);
+    expect(result.success && result.output.workflow).toBeUndefined();
+  });
+
+  it("parses a .Workflow()-declared field's states and transitions", () => {
+    const result = v.safeParse(FieldDefSchema, {
+      name: "state",
+      type: "selection",
+      workflow: {
+        states: ["draft", "confirmed"],
+        transitions: [{ from: "draft", to: "confirmed", action_name: "confirm", permission: "sales:order:confirm" }],
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.output.workflow?.states).toEqual(["draft", "confirmed"]);
+  });
+});
+
+describe("WorkflowTransitionSchema", () => {
+  it("requires from/to/action_name; permission and condition stay optional", () => {
+    expect(
+      v.safeParse(WorkflowTransitionSchema, { from: "draft", to: "confirmed", action_name: "confirm" }).success,
+    ).toBe(true);
+    expect(v.safeParse(WorkflowTransitionSchema, { from: "draft", to: "confirmed" }).success).toBe(false);
+  });
+
+  it("carries condition through as a raw, unvalidated expression string", () => {
+    const result = v.safeParse(WorkflowTransitionSchema, {
+      from: "confirmed",
+      to: "done",
+      action_name: "complete",
+      condition: "record.amount_paid >= record.amount_total",
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.output.condition).toBe("record.amount_paid >= record.amount_total");
   });
 });
 
