@@ -112,6 +112,10 @@ export const FormFieldSchema = v.looseObject({
   language: opt(v.string()),
   // "label" only.
   label_text: opt(v.string()),
+  // "barcode" only. barcode-field.md's on_scan_route orchestration and its
+  // own proposed default symbology set, overridable per field.
+  on_scan_route: opt(v.string()),
+  formats: opt(v.array(v.string())),
 });
 export type FormField = v.InferOutput<typeof FormFieldSchema>;
 

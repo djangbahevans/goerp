@@ -59,6 +59,7 @@
     "@tiptap/pm": "^3.31.3",
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
+    "barcode-detector": "^3.2.2",
     "lucide-react": "^1.42.0",
     "maplibre-gl": "^6.10.0",
     "pmtiles": "^4.5.0",

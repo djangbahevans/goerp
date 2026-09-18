@@ -1,6 +1,7 @@
 import { apiClient } from "@goerp/sdk";
-import type { FileValue, RelationValue, TagValue } from "@goerp/sdk/components";
+import type { BarcodeFormat, FileValue, RelationValue, TagValue } from "@goerp/sdk/components";
 import {
+  BarcodeField,
   CodeField,
   ColorPicker,
   CountrySelect,
@@ -24,10 +25,10 @@ import {
   TimezoneSelect,
   ToggleField,
 } from "@goerp/sdk/components";
-import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions } from "@goerp/sdk/react";
+import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions, useAction } from "@goerp/sdk/react";
 import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Row } from "../list/list-view-types.js";
 import type { FieldType, FormField } from "./form-view-types.js";
 
@@ -132,6 +133,11 @@ export function readFieldValue(field: FormField, record: Row): unknown {
 // patch is merged as-is instead of wrapped under this field's own name.
 export function writeFieldValue(field: FormField, value: unknown): Record<string, unknown> {
   if (field.type === "date_range" || field.type === "address") return value as Record<string, unknown>;
+  // barcode: a plain string wraps under the field's own name; an object is
+  // on_scan_route's already-resolved patch, passed through as-is.
+  if (field.type === "barcode" && typeof value === "object" && value !== null) {
+    return value as Record<string, unknown>;
+  }
   return { [field.field]: value };
 }
 
@@ -361,6 +367,59 @@ function TagsInput({
       options={options}
       disabled={disabled}
       placeholder={`Add ${field.label ?? field.field}…`}
+    />
+  );
+}
+
+// A record's current value stringified for BarcodeField's plain-text
+// input, mirroring FieldInput's own stringValue for every other type.
+function barcodeStringValue(value: unknown): string {
+  return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+// on_scan_route orchestration lives here (TagsInput/FileInput's own split) — writes the scan immediately,
+// then merges the lookup's resolved fields; useAction's own onError handles a failed lookup.
+function BarcodeInput({
+  field,
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  field: FormField;
+  id?: string | undefined;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+}) {
+  const lookup = useAction<{ data?: Record<string, unknown> }, string>(field.on_scan_route ?? "");
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+
+  async function handleScan(code: string) {
+    try {
+      const result = await lookup.mutateAsync(code);
+      if (mountedRef.current && result.data) onChange(result.data);
+    } catch {
+      // Already surfaced via useAction's own onError.
+    }
+  }
+
+  return (
+    <BarcodeField
+      id={id}
+      value={barcodeStringValue(value)}
+      onChange={onChange}
+      onScan={(code) => void handleScan(code)}
+      formats={field.formats as BarcodeFormat[] | undefined}
+      placeholder={field.placeholder}
+      disabled={disabled}
+      isLookingUp={lookup.isPending}
     />
   );
 }
@@ -741,17 +800,18 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       );
 
     case "barcode":
-      // Camera-driven scanning needs a WASM decoder + camera-access
-      // library, neither chosen yet — manual code entry stands in.
-      return (
-        <input
+      // useAction (BarcodeInput) is only worth mounting when there's an
+      // on_scan_route lookup to actually run.
+      return field.on_scan_route ? (
+        <BarcodeInput field={field} id={id} value={value} onChange={onChange} disabled={disabled} />
+      ) : (
+        <BarcodeField
           id={id}
-          type="text"
-          value={stringValue}
-          placeholder="Scan or enter code"
+          value={barcodeStringValue(value)}
+          onChange={onChange}
+          formats={field.formats as BarcodeFormat[] | undefined}
+          placeholder={field.placeholder}
           disabled={disabled}
-          className={PLAIN_INPUT_CLASS_NAME}
-          onChange={(e) => onChange(e.target.value)}
         />
       );
 

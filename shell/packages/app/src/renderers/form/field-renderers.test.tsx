@@ -1,28 +1,39 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "../list/list-view-types.js";
 import { FieldInput, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
-const { resolveResourceMock, resolveMetadataMock, getMock, tryResolveComponentMock } = vi.hoisted(() => ({
-  resolveResourceMock: vi.fn(async () => ({ listPath: "/tags" })),
-  resolveMetadataMock: vi.fn(
-    async (): Promise<{ listRoute: string; labelField: string; searchParam: string } | undefined> => ({
-      listRoute: "GET /tags",
-      labelField: "name",
-      searchParam: "q",
-    }),
-  ),
-  getMock: vi.fn(async () => ({
-    data: [
-      { id: "1", name: "VIP" },
-      { id: "2", name: "Lead" },
-    ],
-    meta: { cursor: null, hasMore: false },
-  })),
-  tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
-}));
+const { resolveResourceMock, resolveMetadataMock, getMock, tryResolveComponentMock, useActionMock, mutateAsyncMock } =
+  vi.hoisted(() => ({
+    resolveResourceMock: vi.fn(async () => ({ listPath: "/tags" })),
+    resolveMetadataMock: vi.fn(
+      async (): Promise<{ listRoute: string; labelField: string; searchParam: string } | undefined> => ({
+        listRoute: "GET /tags",
+        labelField: "name",
+        searchParam: "q",
+      }),
+    ),
+    getMock: vi.fn(async () => ({
+      data: [
+        { id: "1", name: "VIP" },
+        { id: "2", name: "Lead" },
+      ],
+      meta: { cursor: null, hasMore: false },
+    })),
+    tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
+    mutateAsyncMock: vi.fn(async () => ({}) as { data?: Record<string, unknown> }),
+    useActionMock: vi.fn(() => ({
+      mutate: vi.fn(),
+      mutateAsync: mutateAsyncMock,
+      isPending: false,
+      isError: false,
+      error: null,
+      data: undefined,
+      reset: vi.fn(),
+    })),
+  }));
 vi.mock("@goerp/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk")>();
   return { ...actual, apiClient: { ...actual.apiClient, get: getMock } };
@@ -36,6 +47,23 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
     componentRegistry: { tryResolve: tryResolveComponentMock },
   };
 });
+vi.mock("@goerp/sdk/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
+  return { ...actual, useAction: useActionMock };
+});
+// barcode-detector/zxing-wasm's real decoder never runs in a unit test —
+// only field-renderers.tsx's own on_scan_route orchestration is under test
+// here, matching barcode-field.test.tsx's own scope split.
+const { detectMock } = vi.hoisted(() => ({
+  detectMock: vi.fn(async (_image: unknown) => [] as { rawValue: string }[]),
+}));
+vi.mock("barcode-detector/pure", () => ({
+  BarcodeDetector: class {
+    detect(image: unknown) {
+      return detectMock(image);
+    }
+  },
+}));
 
 afterEach(() => {
   cleanup();
@@ -43,12 +71,21 @@ afterEach(() => {
   resolveMetadataMock.mockClear();
   getMock.mockClear();
   tryResolveComponentMock.mockReset().mockReturnValue(undefined);
+  useActionMock.mockClear();
+  mutateAsyncMock.mockReset().mockResolvedValue({});
+  detectMock.mockReset().mockResolvedValue([]);
 });
 
 // jsdom doesn't implement scrollIntoView (jsdom/jsdom#1695) — @goerp/sdk's
 // Select (Radix-based for its single-select mode) calls it internally
 // whenever the panel opens.
 Element.prototype.scrollIntoView = vi.fn();
+
+// BarcodeField's scan trigger needs a real getUserMedia/HTMLMediaElement.play
+// to exist at all in jsdom, even for tests that never actually click it.
+const getUserMediaMock = vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] }) as unknown as MediaStream);
+Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: getUserMediaMock }, configurable: true });
+HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
 
 function renderField(field: FormField, value: unknown, record: Row = {}) {
   const onChange = vi.fn();
@@ -136,6 +173,15 @@ describe("readFieldValue/writeFieldValue", () => {
       customer_id: "01j8...",
     });
     expect(writeFieldValue({ field: "tag_ids", type: "many2many" }, ["1", "2"])).toEqual({ tag_ids: ["1", "2"] });
+  });
+
+  it("barcode: writeFieldValue wraps a plain string under the field's own name, but passes an object through as an already-resolved patch", () => {
+    const field: FormField = { field: "barcode", type: "barcode" };
+    expect(writeFieldValue(field, "012345")).toEqual({ barcode: "012345" });
+    expect(writeFieldValue(field, { barcode: "012345", product_name: "Widget" })).toEqual({
+      barcode: "012345",
+      product_name: "Widget",
+    });
   });
 
   it("file: reads the embedded, _id-stripped companion object as a FileValue", () => {
@@ -322,6 +368,76 @@ describe("FieldInput", () => {
     renderField({ field: "notes", type: "markdown" }, "Some **text**");
     expect(screen.getByRole("toolbar", { name: "Formatting" })).toBeTruthy();
     expect(screen.queryByRole("textbox")?.tagName).not.toBe("TEXTAREA");
+  });
+
+  it("barcode: manual typing calls onChange directly and never triggers on_scan_route", () => {
+    const onChange = renderField({ field: "barcode", type: "barcode" }, "");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "012345" } });
+    expect(onChange).toHaveBeenCalledWith("012345");
+    expect(mutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it("barcode: without on_scan_route declared, useAction is never even mounted", () => {
+    renderField({ field: "barcode", type: "barcode" }, "");
+    expect(useActionMock).not.toHaveBeenCalled();
+  });
+
+  it("barcode: without on_scan_route declared, a successful scan only calls onChange with the plain code", async () => {
+    vi.useFakeTimers();
+    try {
+      detectMock.mockResolvedValue([{ rawValue: "9781234567897" }]);
+      const onChange = renderField({ field: "barcode", type: "barcode" }, "");
+      fireEvent.click(screen.getByRole("button", { name: "Scan barcode" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(onChange).toHaveBeenCalledWith("9781234567897");
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(mutateAsyncMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("barcode: with on_scan_route declared, a successful scan writes the code immediately, then merges the lookup's resolved fields", async () => {
+    vi.useFakeTimers();
+    try {
+      detectMock.mockResolvedValue([{ rawValue: "9781234567897" }]);
+      mutateAsyncMock.mockResolvedValue({ data: { product_name: "Widget", unit_price: 9.99 } });
+      const onChange = renderField({ field: "barcode", type: "barcode", on_scan_route: "inventory.findByBarcode" }, "");
+      fireEvent.click(screen.getByRole("button", { name: "Scan barcode" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      // The scanned code writes immediately, before the lookup resolves.
+      expect(onChange).toHaveBeenNthCalledWith(1, "9781234567897");
+      expect(mutateAsyncMock).toHaveBeenCalledWith("9781234567897");
+      // Flushes the still-pending mutateAsync().then() microtask — waitFor's
+      // own real-timer polling would never fire while fake timers are active.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onChange).toHaveBeenNthCalledWith(2, { product_name: "Widget", unit_price: 9.99 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("barcode: a failed on_scan_route lookup leaves the already-scanned code in place, with no second onChange", async () => {
+    vi.useFakeTimers();
+    try {
+      detectMock.mockResolvedValue([{ rawValue: "9781234567897" }]);
+      mutateAsyncMock.mockRejectedValue(new Error("not found"));
+      const onChange = renderField({ field: "barcode", type: "barcode", on_scan_route: "inventory.findByBarcode" }, "");
+      fireEvent.click(screen.getByRole("button", { name: "Scan barcode" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(onChange).toHaveBeenCalledWith("9781234567897");
+      expect(onChange).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("separator/label: render with no bindable control and never call onChange", () => {
