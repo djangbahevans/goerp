@@ -442,6 +442,66 @@ func TestHostORM_SearchRead_CursorPagination(t *testing.T) {
 	}
 }
 
+// TestHostORM_SearchRead_CursorPagination_FieldsExcludingPrimaryKey proves
+// cursor pagination still works when a caller's own Fields projection
+// excludes the primary key column — reproduces a bug where NextCursor
+// silently came back empty on a full page (records[len-1][pkCol] missed,
+// since pkCol was never selected), making the caller believe it had
+// already seen the whole dataset when rows were still left unread.
+func TestHostORM_SearchRead_CursorPagination_FieldsExcludingPrimaryKey(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+
+	slug := fmt.Sprintf("ormcursorfieldstest%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+
+	rows := [][2]string{
+		{"11111111-1111-1111-1111-111111111111", "A"},
+		{"22222222-2222-2222-2222-222222222222", "B"},
+		{"33333333-3333-3333-3333-333333333333", "C"},
+	}
+	createFixtureWidgetsTable(t, primaryDB, slug, rows)
+
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDecl()})
+	inst := newHostORMCaller(t, ctx, r, mc)
+
+	var page1 ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget", Fields: []string{"name"}, Limit: 2}, &page1)
+	if !env.OK {
+		t.Fatalf("search_read page 1 failed: %+v", env.Error)
+	}
+	if len(page1.Records) != 2 {
+		t.Fatalf("page 1 = %+v, want 2 records", page1)
+	}
+	if page1.NextCursor == "" {
+		t.Fatal("page 1 NextCursor is empty on a full page — the third row would be silently dropped")
+	}
+	if _, ok := page1.Records[0]["id"]; ok {
+		t.Errorf("page 1 record carries an id field though Fields excluded it: %+v", page1.Records[0])
+	}
+
+	var page2 ORMSearchReadOutput
+	env = callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget", Fields: []string{"name"}, Limit: 2, Cursor: page1.NextCursor}, &page2)
+	if !env.OK {
+		t.Fatalf("search_read page 2 failed: %+v", env.Error)
+	}
+	if len(page2.Records) != 1 {
+		t.Fatalf("page 2 = %+v, want the remaining 1 record", page2)
+	}
+	if _, ok := page2.Records[0]["id"]; ok {
+		t.Errorf("page 2 record carries an id field though Fields excluded it: %+v", page2.Records[0])
+	}
+
+	seen := map[string]bool{}
+	for _, rec := range append(page1.Records, page2.Records...) {
+		seen[fmt.Sprintf("%v", rec["name"])] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("paged through %d distinct names across both pages, want 3", len(seen))
+	}
+}
+
 func TestHostORM_Read_ByIDs(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
