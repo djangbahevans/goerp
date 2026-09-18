@@ -285,12 +285,10 @@ func TestDispatchORMRoute_WorkflowTransition_MissingIDPathParam_400(t *testing.T
 //
 // The record is moved to "confirmed" via one ordinary, sequential
 // "confirm" call first — not raced — so it carries a real, non-""
-// etag before the race starts: a brand-new record's etag column is still
-// its schema default ("") until the first write rotates it (ORMCreate
-// never does), and "" doubles as writeOneRecordTx's own "no compare-and-
-// swap requested" sentinel, so racing directly off a just-created record
-// wouldn't exercise this fix at all — see dispatchORMWorkflowTransition's
-// own doc comment for that gap.
+// etag before the race starts. See
+// TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins
+// below for the same race exercised directly off a just-created record,
+// whose etag is still its schema default ("").
 func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_OnlyOneWins(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
 	id := "55555555-5555-5555-5555-555555555554"
@@ -317,6 +315,50 @@ func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_
 	wg.Add(2)
 	go run(0, f.entryCancel, "cancel")
 	go run(1, f.entryReopen, "reopen")
+	wg.Wait()
+
+	var successes, conflicts int
+	for i, code := range codes {
+		switch code {
+		case http.StatusOK:
+			successes++
+		case http.StatusConflict:
+			conflicts++
+		default:
+			t.Fatalf("request %d: status = %d, want 200 or 409; body: %s", i, code, bodies[i])
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("codes = %v, want exactly one 200 and one 409 (bodies: %v)", codes, bodies)
+	}
+}
+
+// TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins
+// is the ConcurrentTransitionsFromSameState race above, but fired directly
+// off a just-created record with no intervening write — its etag is still
+// the column's schema default (""). ExpectedEtag is a *string, so that
+// genuinely-empty etag threads through dispatchORMWorkflowTransition's
+// write as a real compare-and-swap precondition rather than being read as
+// "no precondition supplied" (goerp#871); confirm and reject are both
+// valid from "draft", the state every order starts in.
+func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins(t *testing.T) {
+	f := newDispatchWorkflowFixture(t)
+	id := "55555555-5555-5555-5555-555555555555"
+	f.createOrder(t, id)
+
+	codes := make([]int, 2)
+	bodies := make([]string, 2)
+
+	run := func(i int, entry *route.RouteEntry, action string) {
+		w := httptest.NewRecorder()
+		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/"+action, nil, entry, map[string]string{"id": id}))
+		codes[i] = w.Code
+		bodies[i] = w.Body.String()
+	}
+
+	var wg sync.WaitGroup
+	wg.Go(func() { run(0, f.entryConfirm, "confirm") })
+	wg.Go(func() { run(1, f.entryReject, "reject") })
 	wg.Wait()
 
 	var successes, conflicts int

@@ -90,11 +90,23 @@ type ORMFirstOrCreateOutput struct {
 }
 
 type ORMWriteInput struct {
-	Model        string         `msgpack:"model"`
-	ID           string         `msgpack:"id"`
-	Record       map[string]any `msgpack:"record"`
-	ExpectedEtag string         `msgpack:"expected_etag,omitempty"`
-	TxID         string         `msgpack:"tx_id"`
+	Model  string         `msgpack:"model"`
+	ID     string         `msgpack:"id"`
+	Record map[string]any `msgpack:"record"`
+	// ExpectedEtag is nil when the caller supplied no optimistic-locking
+	// precondition at all, distinct from a non-nil pointer to "" (a real
+	// precondition requiring the stored etag to still be its
+	// never-written default). A bare string field couldn't tell those
+	// apart, which silently dropped the precondition for any record
+	// written for the first time since its create — see goerp#871.
+	// ORMCreate deliberately never stamps a real etag onto a fresh
+	// record itself (unlike every write function, which rotates one on
+	// every call) — the column's own default ('', data-layer.md §2.4)
+	// is the documented, intentional value for a record no write has
+	// ever touched; fixing the precondition here is what makes that
+	// default value usable, rather than routing around it at create.
+	ExpectedEtag *string `msgpack:"expected_etag,omitempty"`
+	TxID         string  `msgpack:"tx_id"`
 }
 
 type ORMWriteOutput struct {
@@ -1225,11 +1237,12 @@ func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, 
 }
 
 // writeOneRecordTx updates the row identified by id on tx — the shared
-// core of ORMWrite/ORMWriteMany/ORMWriteWhere. expectedEtag == "" skips
+// core of ORMWrite/ORMWriteMany/ORMWriteWhere. expectedEtag == nil skips
 // the etag-scoped WHERE clause entirely (the bulk callers' "no etag
-// check" semantics); a non-empty expectedEtag adds it, matching single
-// write's optimistic-lock behavior.
-func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag string) (map[string]any, *abi.HostError) {
+// check" semantics); a non-nil expectedEtag adds it — including when it
+// points to "", which requires the stored etag to still be its
+// never-written default rather than silently matching anything.
+func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag *string) (map[string]any, *abi.HostError) {
 	sets, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
 	if hostErr != nil {
 		return nil, hostErr
@@ -1247,8 +1260,8 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 
 	args = append(args, id)
 	whereClause := fmt.Sprintf("%s = $%d", pkColQuoted, len(args))
-	if expectedEtag != "" && hasField(md, "etag") {
-		args = append(args, expectedEtag)
+	if expectedEtag != nil && hasField(md, "etag") {
+		args = append(args, *expectedEtag)
 		whereClause += fmt.Sprintf(" AND %s = $%d", quoteIdentORM("etag"), len(args))
 	}
 
@@ -1283,7 +1296,7 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}
-		updated, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, qualifiedModel, pkCol, id, record, "")
+		updated, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, qualifiedModel, pkCol, id, record, nil)
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}
@@ -1726,8 +1739,8 @@ func translateWriteError(err error, md model.ModelDeclaration) *abi.HostError {
 // orm.etag_mismatch) from a genuinely missing or RLS-filtered row
 // (orm.not_found) — the same 404-shaped-denial rule this codebase's read
 // paths already follow (security-model.md).
-func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, id, expectedEtag string) *abi.HostError {
-	if expectedEtag == "" {
+func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, id string, expectedEtag *string) *abi.HostError {
+	if expectedEtag == nil {
 		return &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
 	}
 	var exists bool

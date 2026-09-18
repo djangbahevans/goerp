@@ -17,7 +17,7 @@ type ormWriteInput struct {
 	Model        string         `msgpack:"model"`
 	ID           string         `msgpack:"id"`
 	Record       map[string]any `msgpack:"record"`
-	ExpectedEtag string         `msgpack:"expected_etag,omitempty"`
+	ExpectedEtag *string        `msgpack:"expected_etag,omitempty"`
 	TxID         string         `msgpack:"tx_id"`
 }
 
@@ -25,19 +25,22 @@ type ormWriteOutput struct {
 	Record map[string]any `msgpack:"record"`
 }
 
-// Write updates one record by ID via host.orm.write. expectedEtag, if
-// set, enforces optimistic locking — a mismatch fails with
-// orm.etag_mismatch (check via IsEtagMismatch).
-func Write(model, id string, vals map[string]any, expectedEtag string) error {
+// Write updates one record by ID via host.orm.write. A nil expectedEtag
+// writes unconditionally; a non-nil expectedEtag enforces optimistic
+// locking against the stored value — including a pointer to "" for a
+// record that has never been written since it was created (the etag
+// column's own default) — and a mismatch fails with orm.etag_mismatch
+// (check via IsEtagMismatch).
+func Write(model, id string, vals map[string]any, expectedEtag *string) error {
 	return write("", model, id, vals, expectedEtag)
 }
 
 // WriteTx is Write, scoped to tx's own open transaction.
-func WriteTx(tx *db.Tx, model, id string, vals map[string]any, expectedEtag string) error {
+func WriteTx(tx *db.Tx, model, id string, vals map[string]any, expectedEtag *string) error {
 	return write(tx.TxID(), model, id, vals, expectedEtag)
 }
 
-func write(txID, model, id string, vals map[string]any, expectedEtag string) error {
+func write(txID, model, id string, vals map[string]any, expectedEtag *string) error {
 	var out ormWriteOutput
 	return hostcall.Do(hostORMWrite, ormWriteInput{Model: model, ID: id, Record: vals, ExpectedEtag: expectedEtag, TxID: txID}, &out)
 }
