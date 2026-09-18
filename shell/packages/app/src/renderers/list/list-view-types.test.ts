@@ -2,7 +2,7 @@ import { AlertDialogInputSchema } from "@goerp/sdk/components";
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 import {
-  BulkActionConfirmInputSchema,
+  ActionConfirmInputSchema,
   ListActionSchema,
   ListColumnSchema,
   ListFilterSchema,
@@ -42,17 +42,17 @@ describe("ListColumnSchema", () => {
   });
 });
 
-describe("BulkActionConfirmInputSchema", () => {
+describe("ActionConfirmInputSchema", () => {
   it("extends AlertDialogInputSchema's own fields rather than retyping them", () => {
-    const result = v.safeParse(BulkActionConfirmInputSchema, { label: "Reason", type: "text", field: "reason" });
+    const result = v.safeParse(ActionConfirmInputSchema, { label: "Reason", type: "text", field: "reason" });
     expect(result.success).toBe(true);
   });
 
   it("stays assignable to AlertDialogInput with no cast needed", () => {
-    const parsed = v.parse(BulkActionConfirmInputSchema, { label: "Reason", type: "text", field: "reason" });
+    const parsed = v.parse(ActionConfirmInputSchema, { label: "Reason", type: "text", field: "reason" });
     // A type-level check as much as a runtime one: this line wouldn't
-    // compile if BulkActionConfirmInput drifted from AlertDialogInput's
-    // own shape (see bulk-actions.tsx, which relies on exactly this).
+    // compile if ActionConfirmInput drifted from AlertDialogInput's own
+    // shape (see bulk-actions.tsx, which relies on exactly this).
     expect(v.is(AlertDialogInputSchema, parsed)).toBe(true);
   });
 });
@@ -76,6 +76,58 @@ describe("ListActionSchema", () => {
   it("rejects a type outside the documented action-type enum", () => {
     expect(v.safeParse(ListActionSchema, { label: "New", type: "create" }).success).toBe(true);
     expect(v.safeParse(ListActionSchema, { label: "New", type: "delete" }).success).toBe(false);
+  });
+
+  it("accepts a menu action with nested items and a separator, label omitted on the separator", () => {
+    const result = v.safeParse(ListActionSchema, {
+      label: "More",
+      type: "menu",
+      style: "ghost",
+      icon: "more-horizontal",
+      items: [
+        { label: "Duplicate", type: "route", route: "sales.duplicateOrder" },
+        { label: "Export", type: "export" },
+        { type: "separator" },
+        {
+          label: "Archive",
+          type: "route",
+          route: "sales.archiveOrder",
+          style: "danger",
+          confirm: { title: "Archive Order", message: "Archive this order?" },
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.output.items).toHaveLength(4);
+  });
+
+  it("accepts view-system.md §5's own header_actions worked example verbatim", () => {
+    const result = v.safeParse(ListActionSchema, {
+      label: "Cancel",
+      type: "route",
+      route: "sales.cancelOrder",
+      style: "danger",
+      condition: "record.state = 'confirmed'",
+      confirm: { title: "Cancel Order", message: "This order will be cancelled. This cannot be undone." },
+      permission: "sales:order:write",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("requires label on every type except separator", () => {
+    expect(v.safeParse(ListActionSchema, { type: "separator" }).success).toBe(true);
+    expect(v.safeParse(ListActionSchema, { type: "route", route: "sales.confirmOrder" }).success).toBe(false);
+  });
+
+  it("accepts an optional format, for a report action's download extension", () => {
+    const result = v.safeParse(ListActionSchema, {
+      label: "Export",
+      type: "report",
+      report: "sales.export_csv",
+      format: "csv",
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.output.format).toBe("csv");
   });
 });
 

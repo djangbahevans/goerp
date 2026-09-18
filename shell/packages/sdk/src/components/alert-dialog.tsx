@@ -7,7 +7,7 @@ import { actionButtonClassName } from "./action-button-styles.js";
 import { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
 
 // manifest-spec.md's SelectOption, as used by ConfirmInput — a schema, not
-// just a type, so BulkActionConfirmInputSchema can extend it directly.
+// just a type, so ActionConfirmInputSchema can extend it directly.
 export const AlertDialogSelectOptionSchema = v.looseObject({
   value: v.string(),
   label: v.string(),

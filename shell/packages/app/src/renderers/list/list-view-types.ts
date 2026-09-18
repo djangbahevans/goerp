@@ -6,8 +6,8 @@ import * as v from "valibot";
 export type Row = Record<string, unknown>;
 
 // manifest-spec.md §9.1's List View wire schema, as valibot schemas.
-// `condition` is passed through but never evaluated (backlog #18);
-// `ConfirmDialog` is omitted from ListAction (goerp#575's scope).
+// `condition` is passed through but never evaluated (backlog #18) — an
+// action with one is always shown/enabled, everywhere ListAction is used.
 
 const COLUMN_TYPES = [
   "text",
@@ -112,42 +112,82 @@ export const ListFilterSchema = v.looseObject({
 });
 export type ListFilter = v.InferOutput<typeof ListFilterSchema>;
 
-const ACTION_TYPES = ["create", "route", "export", "import", "report", "url", "custom"] as const;
+// "separator" only makes sense inside a "menu" action's own `items` —
+// every other Action consumer treats it the same as an unhandled type
+// (falls through to their existing default: return null).
+const ACTION_TYPES = ["create", "route", "export", "import", "report", "url", "custom", "menu", "separator"] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
 
-export const ListActionSchema = v.looseObject({
-  label: v.string(),
-  type: v.picklist(ACTION_TYPES),
-  view: opt(v.string()),
-  icon: opt(v.string()),
-  style: opt(v.picklist(BUTTON_STYLES)),
-  permission: opt(v.string()),
-  condition: opt(v.string()),
-  route: opt(v.string()),
-  route_params: opt(v.record(v.string(), v.unknown())),
-  report: opt(v.string()),
-  url: opt(v.string()),
-  component: opt(v.string()),
-});
-export type ListAction = v.InferOutput<typeof ListActionSchema>;
-
 // manifest-spec.md's ConfirmInput object, plus the `field` key AlertDialog itself doesn't need.
-export const BulkActionConfirmInputSchema = v.looseObject({
+export const ActionConfirmInputSchema = v.looseObject({
   ...AlertDialogInputSchema.entries,
   field: v.string(),
 });
-export type BulkActionConfirmInput = v.InferOutput<typeof BulkActionConfirmInputSchema>;
+export type ActionConfirmInput = v.InferOutput<typeof ActionConfirmInputSchema>;
 
-// manifest-spec.md's ConfirmDialog object.
-export const BulkActionConfirmSchema = v.looseObject({
+// manifest-spec.md's ConfirmDialog object — shared by ListAction (header
+// actions, row actions) and BulkAction, not bulk-actions-specific despite
+// this file's older Bulk-prefixed naming having briefly suggested otherwise.
+export const ActionConfirmSchema = v.looseObject({
   title: v.string(),
   message: v.string(),
   confirm_label: opt(v.string()),
   cancel_label: opt(v.string()),
   destructive: opt(v.boolean()),
-  input: opt(BulkActionConfirmInputSchema),
+  input: opt(ActionConfirmInputSchema),
 });
-export type BulkActionConfirm = v.InferOutput<typeof BulkActionConfirmSchema>;
+export type ActionConfirm = v.InferOutput<typeof ActionConfirmSchema>;
+
+// manifest-spec.md's Action object. Recursive: a "menu"-type action's
+// `items` are themselves Actions, down to a "separator" entry (the only
+// type allowed no `label`, enforced by the check below). v.lazy needs the
+// output type spelled out by hand (ListAction below) rather than inferred
+// via v.InferOutput, since the schema can't reference its own
+// not-yet-inferred type while being defined.
+export interface ListAction {
+  label?: string | undefined;
+  type: ActionType;
+  view?: string | undefined;
+  icon?: string | undefined;
+  style?: (typeof BUTTON_STYLES)[number] | undefined;
+  permission?: string | undefined;
+  condition?: string | undefined;
+  route?: string | undefined;
+  route_params?: Record<string, unknown> | undefined;
+  report?: string | undefined;
+  // For type: "report" — the downloaded file's extension. Default: "pdf".
+  format?: string | undefined;
+  url?: string | undefined;
+  component?: string | undefined;
+  confirm?: ActionConfirm | undefined;
+  // Only meaningful for type: "menu" — the dropdown's own entries.
+  items?: ListAction[] | undefined;
+}
+
+export const ListActionSchema: v.GenericSchema<unknown, ListAction> = v.pipe(
+  v.looseObject({
+    label: opt(v.string()),
+    type: v.picklist(ACTION_TYPES),
+    view: opt(v.string()),
+    icon: opt(v.string()),
+    style: opt(v.picklist(BUTTON_STYLES)),
+    permission: opt(v.string()),
+    condition: opt(v.string()),
+    route: opt(v.string()),
+    route_params: opt(v.record(v.string(), v.unknown())),
+    report: opt(v.string()),
+    format: opt(v.string()),
+    url: opt(v.string()),
+    component: opt(v.string()),
+    confirm: opt(ActionConfirmSchema),
+    items: opt(v.array(v.lazy((): v.GenericSchema<unknown, ListAction> => ListActionSchema))),
+  }),
+  // label is only truly optional for "separator" (manifest-spec.md's Action object).
+  v.check(
+    (value) => value.type === "separator" || Boolean(value.label),
+    'label is required unless type is "separator"',
+  ),
+);
 
 // manifest-spec.md's BulkAction object — Action's fields plus `confirm`/min_selected/max_selected.
 export const BulkActionSchema = v.looseObject({
@@ -161,7 +201,7 @@ export const BulkActionSchema = v.looseObject({
   route_params: opt(v.record(v.string(), v.unknown())),
   format: opt(v.string()),
   component: opt(v.string()),
-  confirm: opt(BulkActionConfirmSchema),
+  confirm: opt(ActionConfirmSchema),
   // Default: 1.
   min_selected: opt(v.number()),
   max_selected: opt(v.number()),
