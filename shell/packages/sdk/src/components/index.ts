@@ -13,6 +13,8 @@ export type { AlertDialogInput, AlertDialogProps, AlertDialogSelectOption } from
 export { AlertDialog, AlertDialogInputSchema, AlertDialogSelectOptionSchema } from "./alert-dialog.js";
 export type { BadgeColor, BadgeProps } from "./badge.js";
 export { BADGE_COLOR_CLASSES, Badge } from "./badge.js";
+export type { BarcodeFieldProps, BarcodeFormat } from "./barcode-field.js";
+export { BarcodeField } from "./barcode-field.js";
 export type { BreadcrumbItem, BreadcrumbProps } from "./breadcrumb.js";
 export { Breadcrumb } from "./breadcrumb.js";
 export type { BulkActionPanelProps } from "./bulk-action-panel.js";
