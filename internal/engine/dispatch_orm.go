@@ -98,6 +98,8 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		e.dispatchORMPreview(ctx, w, r, entry, modCtx)
 	case "pivot":
 		e.dispatchORMPivot(ctx, w, r, entry, modCtx)
+	case "workflow_transition":
+		e.dispatchORMWorkflowTransition(ctx, w, rr.pathParams, entry, modCtx, insertClient)
 	default:
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "unknown crud action: "+entry.Manifest.CrudAction)
 	}
@@ -340,6 +342,100 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 	writeJSON(w, http.StatusOK, out.Record)
 }
 
+// dispatchORMWorkflowTransition serves a .Workflow()-declared transition
+// action (goerp#864) — verifies the record's current state matches the
+// transition's declared From, then performs the ordinary ORM write that
+// moves it to To, so constraint hooks and Store(true) recomputation apply
+// exactly as they would for any other write; nothing about a transition
+// needs its own copy of validation logic that already exists elsewhere.
+// The transition's .Requires() permission is enforced upstream, by the
+// standard tenant/auth/permission middleware chain reading
+// entry.Manifest.Permissions — same as any other EngineNative route, no
+// special-casing here. Evaluating the transition's optional Condition
+// against the fetched record is a separate, not-yet-built server-side
+// evaluation mode (go-sdk-reference.md "Declarative workflow
+// transitions") — this handler accepts a Condition-declared transition
+// without enforcing it.
+//
+// The state check and the write are two separate ORM calls, not one
+// transaction — a compare-and-swap on the read's etag closes the
+// resulting race for any transition after a record's first real write
+// (two concurrent transitions racing off the same starting state can no
+// longer both succeed; the loser gets orm.etag_mismatch, not a silent
+// overwrite). ORMCreate never rotates a fresh record's etag column away
+// from its schema default (only the write functions do), so this
+// protection doesn't reach two transitions racing immediately after
+// create — the same gap dispatchORMUpdate's own If-Match-based
+// optimistic lock already has for a freshly created record whose caller
+// hasn't captured a real etag yet. Closing that gap needs the ORM write
+// pipeline to accept an arbitrary column-value precondition (not just
+// etag) so the check and the write can be one atomic SQL statement — a
+// bigger change than this ticket's minimal slice.
+func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
+	id := pathParams["id"]
+	if id == "" {
+		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		return
+	}
+
+	wf := entry.Manifest.Workflow
+
+	// SkipFieldSecurity: this read only feeds the state-gate check below
+	// (its result is never returned to the caller), so masking it against
+	// the caller's own field-read permissions would be checking the wrong
+	// thing — a caller who holds the transition's own .Requires()
+	// permission but not some unrelated read rule on the gating field
+	// would otherwise see every transition attempt fail as
+	// orm.invalid_transition, regardless of the record's real state.
+	//
+	// The etag is read alongside the gate field and threaded through as
+	// ExpectedEtag on the write below so the read-check-write sequence is
+	// atomic: two concurrent transitions racing off the same starting
+	// state (e.g. "confirm" and "reject", both valid from "draft") can no
+	// longer both pass their precondition check and then both write —
+	// whichever write commits first rotates the etag, and the second
+	// write fails orm.etag_mismatch instead of silently overwriting the
+	// first transition's result.
+	// Fields is left unset (reads every declared column) rather than
+	// naming wf.Field/"etag" explicitly — readableColumns rejects an
+	// unknown field name outright, and a .Workflow() model built without
+	// WithStandardFields() wouldn't declare "etag" at all.
+	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, wasm.ORMReadInput{
+		Model: entry.Manifest.Model,
+		IDs:   []string{id},
+	}, wasm.SkipFieldSecurity())
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+	if len(readOut.Records) == 0 {
+		writeRouteError(w, http.StatusNotFound, abi.ErrCodeNotFound, "record not found")
+		return
+	}
+
+	record := readOut.Records[0]
+	current, _ := record[wf.Field].(string)
+	if current != wf.From {
+		writeRouteError(w, http.StatusConflict, abi.ErrCodeInvalidTransition,
+			entry.Manifest.Name+" requires "+wf.Field+" to be "+wf.From+", but it is "+current)
+		return
+	}
+	etag, _ := record["etag"].(string)
+
+	writeOut, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMWriteInput{
+		Model:        entry.Manifest.Model,
+		ID:           id,
+		Record:       map[string]any{wf.Field: wf.To},
+		ExpectedEtag: etag,
+	})
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, writeOut.Record)
+}
+
 func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
@@ -417,7 +513,7 @@ func ormErrorStatus(code string) int {
 	switch code {
 	case abi.ErrCodeNotFound, abi.ErrCodeModelNotFound:
 		return http.StatusNotFound
-	case abi.ErrCodeEtagMismatch, abi.ErrCodeUniqueViolation, abi.ErrCodeForeignKeyViolation:
+	case abi.ErrCodeEtagMismatch, abi.ErrCodeUniqueViolation, abi.ErrCodeForeignKeyViolation, abi.ErrCodeInvalidTransition:
 		return http.StatusConflict
 	case abi.ErrCodeValidationFailed, abi.ErrCodeFieldUnknown, abi.ErrCodeDomainInvalid, abi.ErrCodeTransientNotListable:
 		return http.StatusBadRequest

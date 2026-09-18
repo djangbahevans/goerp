@@ -17,6 +17,28 @@ import (
 type SuppressedRoute struct {
 	Model string
 	Op    string
+	// Kind distinguishes what kind of auto-derived candidate was
+	// suppressed — "enable_ops" (the zero value, for RegisterModelRoutes's
+	// own candidates, so existing SuppressedRoute{Model, Op} literals
+	// throughout the test suite stay valid) or "workflow_transition" (a
+	// .Workflow()-declared transition action, from
+	// RegisterModelWorkflowActions) — callers use it to log an accurate
+	// startup warning instead of always naming EnableOps.
+	Kind string
+}
+
+const SuppressedWorkflowTransition = "workflow_transition"
+
+// LogMessage is the startup-warning message a caller logs for one
+// suppressed route — factored out so RegisterRoutes's three call sites
+// (loader.LoadAll, registry.ModuleRegistry.Update, moduleboot.LoadCascading)
+// all describe a suppressed workflow-transition action accurately instead
+// of always naming EnableOps.
+func (s SuppressedRoute) LogMessage() string {
+	if s.Kind == SuppressedWorkflowTransition {
+		return "Workflow: explicit route already registered, auto-derived transition action suppressed"
+	}
+	return "EnableOps: explicit route already registered, auto-derived route suppressed"
 }
 
 // RegisterModelRoutes derives and registers the CRUD routes each model's
@@ -74,6 +96,75 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 				},
 			})
 			claimedThisCall[key] = qualifiedModel
+		}
+	}
+
+	return suppressed, nil
+}
+
+// RegisterModelWorkflowActions derives and registers one route per
+// .Workflow()-declared transition on each model's Selection fields — the
+// engine-native counterpart, for transition actions, to RegisterModelRoutes
+// for the seven reserved CRUD ops. Called after RegisterModelRoutes within
+// RegisterRoutes, so a transition's derived POST {plural}/{id}/{action_name}
+// path is checked against everything already committed to table: an
+// explicit hand-written engine.Action for that action name, or (in the
+// unlikely case of a name collision) an EnableOps-derived candidate —
+// same suppress-not-fail collision rule as RegisterModelRoutes, logged the
+// same way by the caller (go-sdk-reference.md "Declarative workflow
+// transitions": "same override rule" as EnableOps).
+func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType string, models []model.ModelDeclaration) ([]SuppressedRoute, error) {
+	var suppressed []SuppressedRoute
+	claimedThisCall := make(map[string]string, len(models)) // "method path" -> qualified model that claimed it
+
+	prefix := ModulePathPrefix(moduleName, moduleType)
+
+	for _, md := range models {
+		qualifiedModel := moduleName + "." + md.Name
+		plural := "/" + pluralPathSegment(md)
+
+		for _, f := range md.Fields {
+			for _, t := range f.Def.WorkflowTransitions {
+				method, relPath := "POST", plural+"/{id}/"+t.ActionName
+				expandedPath := prefix + relPath
+				key := method + " " + expandedPath
+
+				if claimant, ok := claimedThisCall[key]; ok {
+					return suppressed, fmt.Errorf("route: module %q: models %q and %q both derive %s %s from a workflow transition",
+						moduleName, claimant, qualifiedModel, method, expandedPath)
+				}
+
+				if table.Registered(method, expandedPath) {
+					suppressed = append(suppressed, SuppressedRoute{Model: qualifiedModel, Op: t.ActionName, Kind: SuppressedWorkflowTransition})
+					continue
+				}
+
+				var permissions []string
+				if t.Permission != "" {
+					permissions = []string{t.Permission}
+				}
+
+				table.Register(method, expandedPath, &RouteEntry{
+					ModuleName:   moduleName,
+					PathTemplate: expandedPath,
+					Manifest: RouteManifest{
+						Auth:           "required",
+						Permissions:    permissions,
+						Model:          qualifiedModel,
+						Name:           t.ActionName,
+						CrudAction:     "workflow_transition",
+						EngineNative:   true,
+						StorageBackend: storageBackendString(md.Backend),
+						Workflow: &WorkflowManifest{
+							Field:     f.Name,
+							From:      t.From,
+							To:        t.To,
+							Condition: t.ConditionExpr,
+						},
+					},
+				})
+				claimedThisCall[key] = qualifiedModel
+			}
 		}
 	}
 
@@ -193,5 +284,16 @@ func RegisterRoutes(table *RouteTable, moduleName, moduleType string, explicit [
 	if err := RegisterModuleRoutes(table, moduleName, moduleType, explicit); err != nil {
 		return nil, err
 	}
-	return RegisterModelRoutes(table, moduleName, moduleType, models)
+
+	suppressed, err := RegisterModelRoutes(table, moduleName, moduleType, models)
+	if err != nil {
+		return nil, err
+	}
+
+	workflowSuppressed, err := RegisterModelWorkflowActions(table, moduleName, moduleType, models)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(suppressed, workflowSuppressed...), nil
 }

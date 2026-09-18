@@ -542,11 +542,38 @@ func makeORMRead(r *Runtime, db *sql.DB, cacheClient *cache.Client) func(ctx con
 	}
 }
 
+// ORMReadOption configures an engine-internal ORMRead call. It's a plain
+// Go-side functional option, never part of ORMReadInput's msgpack-decoded
+// wire shape — the wasm host-call boundary (makeORMRead below) always
+// calls ORMRead with zero options, so a module has no way to set one of
+// these itself over the ABI.
+type ORMReadOption func(*ormReadOptions)
+
+type ormReadOptions struct {
+	skipFieldSecurity bool
+}
+
+// SkipFieldSecurity reads a record's real column values, unmasked by the
+// caller's own field-read permissions — for engine-internal precondition
+// checks (e.g. dispatch_orm.go's workflow-transition state gate) that
+// never return the read result to the caller. Applying the caller's
+// field masking there wouldn't protect anything (nothing is exposed);
+// it would only feed the engine's own logic a nullified/omitted value
+// and produce a wrong answer.
+func SkipFieldSecurity() ORMReadOption {
+	return func(o *ormReadOptions) { o.skipFieldSecurity = true }
+}
+
 // ORMRead is host.orm read's plain-Go core — see ORMSearch's doc comment
 // for the shared-entry-point rationale. Branches to transientRead
 // (host_orm_transient.go) for Transient-backed models internally, so
 // callers never need to know a model's backend before calling in.
-func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx *ModuleContext, input ORMReadInput) (ORMReadOutput, *abi.HostError) {
+func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx *ModuleContext, input ORMReadInput, opts ...ORMReadOption) (ORMReadOutput, *abi.HostError) {
+	var o ormReadOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
 		return ORMReadOutput{}, abi.CapabilityDenied("db.read")
 	}
@@ -606,7 +633,9 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 
-	applyFieldMasking(modCtx, input.Model, records)
+	if !o.skipFieldSecurity {
+		applyFieldMasking(modCtx, input.Model, records)
+	}
 
 	if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
 		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}

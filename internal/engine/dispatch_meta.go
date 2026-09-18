@@ -611,11 +611,38 @@ type metaSchemaModel struct {
 
 // metaSchemaField is shell-architecture.md §9's FieldDef.
 type metaSchemaField struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Required     bool   `json:"required,omitempty"`
-	RelatedModel string `json:"related_model,omitempty"`
-	InverseField string `json:"inverse_field,omitempty"`
+	Name         string              `json:"name"`
+	Type         string              `json:"type"`
+	Required     bool                `json:"required,omitempty"`
+	RelatedModel string              `json:"related_model,omitempty"`
+	InverseField string              `json:"inverse_field,omitempty"`
+	Workflow     *metaSchemaWorkflow `json:"workflow,omitempty"`
+}
+
+// metaSchemaWorkflow exposes a .Workflow()-declared Selection field's
+// state/transition graph (go-sdk-reference.md "Declarative workflow
+// transitions") — a form view's "workflow_actions": true reads this to
+// auto-render transition buttons (view-system.md's "Auto-rendered
+// transition buttons"), deriving each button's permission and
+// route (POST {plural}/{id}/{action_name}) from it. States is the
+// field's own SelectionValues — there's no separate state vocabulary to
+// keep in sync with the field it governs.
+type metaSchemaWorkflow struct {
+	States      []string               `json:"states"`
+	Transitions []metaSchemaTransition `json:"transitions"`
+}
+
+type metaSchemaTransition struct {
+	From       string `json:"from"`
+	To         string `json:"to"`
+	ActionName string `json:"action_name"`
+	Permission string `json:"permission,omitempty"`
+	// Condition is the raw domain-expression string, passed through
+	// unevaluated — the shell's own domain-expression interpreter
+	// (goerp#829) evaluates it client-side to decide whether to show the
+	// button; the engine doesn't evaluate it server-side yet either
+	// (go-sdk-reference.md's ConditionExpr doc comment).
+	Condition string `json:"condition,omitempty"`
 }
 
 // metaSchemaPermission is shell-architecture.md §9's PermissionDeclaration
@@ -641,6 +668,7 @@ func metaSchemaModelFrom(md sdkmodel.ModelDeclaration) metaSchemaModel {
 			Required:     f.Def.IsRequired,
 			RelatedModel: f.Def.RelatedModel,
 			InverseField: f.Def.InverseField,
+			Workflow:     metaSchemaWorkflowFrom(f.Def),
 		})
 	}
 	ops := make([]string, 0, len(md.EnabledOps))
@@ -654,6 +682,31 @@ func metaSchemaModelFrom(md sdkmodel.ModelDeclaration) metaSchemaModel {
 		Fields:      fields,
 		EnabledOps:  ops,
 		Shareable:   md.Shareable,
+	}
+}
+
+// metaSchemaWorkflowFrom builds def's workflow schema entry, or nil if def
+// has no .Workflow() declaration (the common case — most fields, and
+// even most Selection fields, aren't a workflow gate).
+func metaSchemaWorkflowFrom(def sdkmodel.FieldDef) *metaSchemaWorkflow {
+	if len(def.WorkflowTransitions) == 0 {
+		return nil
+	}
+
+	transitions := make([]metaSchemaTransition, 0, len(def.WorkflowTransitions))
+	for _, t := range def.WorkflowTransitions {
+		transitions = append(transitions, metaSchemaTransition{
+			From:       t.From,
+			To:         t.To,
+			ActionName: t.ActionName,
+			Permission: t.Permission,
+			Condition:  t.ConditionExpr,
+		})
+	}
+
+	return &metaSchemaWorkflow{
+		States:      def.SelectionValues,
+		Transitions: transitions,
 	}
 }
 

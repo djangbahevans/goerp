@@ -48,6 +48,23 @@ type RouteManifest struct {
 	EngineBuiltin bool
 
 	StorageBackend string // "table"|"transient"|"virtual"
+
+	// Workflow carries a .Workflow()-declared transition's own from/to/
+	// field/condition — set only when CrudAction is "workflow_transition".
+	// dispatchORMWorkflowTransition reads this to validate the record's
+	// current state and drive the write; nothing else on RouteManifest
+	// names the specific field a workflow transition governs.
+	Workflow *WorkflowManifest
+}
+
+// WorkflowManifest is one .Workflow()-declared transition's dispatch-time
+// data — the RouteManifest.Workflow companion to Name (the transition's
+// action name) and Permissions (its .Requires() permission, if any).
+type WorkflowManifest struct {
+	Field     string // the Selection field this transition governs
+	From      string
+	To        string
+	Condition string // raw domain-expression string; not evaluated (goerp#864)
 }
 
 type RateLimitConfig struct {
