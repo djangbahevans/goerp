@@ -11,6 +11,11 @@ export interface APIClient {
   patch<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
   delete<T>(path: string, options?: RequestOptions): Promise<T>;
   getBlob(path: string, options?: RequestOptions): Promise<Blob>;
+  // Same as getBlob, but also hands back the response headers — needed
+  // where pagination state rides on headers instead of a JSON envelope
+  // (view-system.md §8's use_wasm:true Parquet pages, X-Next-Cursor/
+  // X-Has-More).
+  getBlobWithHeaders(path: string, options?: RequestOptions): Promise<{ blob: Blob; headers: Headers }>;
   postFormData<T>(path: string, data: Record<string, unknown>, options?: RequestOptions): Promise<T>;
 }
 

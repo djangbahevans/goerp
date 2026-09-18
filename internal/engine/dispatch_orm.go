@@ -162,7 +162,7 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 	}
 
 	if wantsParquet(r) {
-		writeParquet(w, out.Records)
+		writeParquet(w, out.Records, out.NextCursor)
 		return
 	}
 

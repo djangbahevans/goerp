@@ -280,12 +280,13 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 
+	// A page has a next one only if it came back full — whether or not
+	// this call itself was already paging via input.Cursor. A short last
+	// page on a cursor-based request must not claim there's more.
 	var nextCursor string
-	if input.Cursor != "" || (limit > 0 && len(records) == limit) {
-		if len(records) > 0 {
-			if last, ok := records[len(records)-1][pkCol]; ok {
-				nextCursor = fmt.Sprintf("%v", last)
-			}
+	if limit > 0 && len(records) == limit {
+		if last, ok := records[len(records)-1][pkCol]; ok {
+			nextCursor = fmt.Sprintf("%v", last)
 		}
 	}
 

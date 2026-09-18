@@ -86,10 +86,16 @@ func TestWriteParquet_RoundTrips(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	writeParquet(rec, records)
+	writeParquet(rec, records, "")
 
 	if got := rec.Header().Get("Content-Type"); got != parquetContentType {
 		t.Fatalf("Content-Type = %q, want %q", got, parquetContentType)
+	}
+	if got := rec.Header().Get("X-Has-More"); got != "false" {
+		t.Errorf("X-Has-More = %q, want %q", got, "false")
+	}
+	if got := rec.Header().Get("X-Next-Cursor"); got != "" {
+		t.Errorf("X-Next-Cursor = %q, want empty", got)
 	}
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
@@ -121,11 +127,27 @@ func TestWriteParquet_RoundTrips(t *testing.T) {
 
 func TestWriteParquet_EmptyRecords(t *testing.T) {
 	rec := httptest.NewRecorder()
-	writeParquet(rec, []map[string]any{})
+	writeParquet(rec, []map[string]any{}, "")
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
 	if len(rec.Body.Bytes()) == 0 {
 		t.Fatalf("expected some bytes even for zero rows (a valid empty parquet file)")
+	}
+}
+
+// TestWriteParquet_NextCursor_SetsPaginationHeaders verifies a non-empty
+// cursor surfaces on the response as X-Next-Cursor/X-Has-More — the only
+// way a use_wasm:true pivot caller can tell there's another page to fetch,
+// since the body itself is a raw Parquet file with no JSON envelope.
+func TestWriteParquet_NextCursor_SetsPaginationHeaders(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeParquet(rec, []map[string]any{{"id": "1"}}, "next-page-cursor")
+
+	if got := rec.Header().Get("X-Next-Cursor"); got != "next-page-cursor" {
+		t.Errorf("X-Next-Cursor = %q, want %q", got, "next-page-cursor")
+	}
+	if got := rec.Header().Get("X-Has-More"); got != "true" {
+		t.Errorf("X-Has-More = %q, want %q", got, "true")
 	}
 }

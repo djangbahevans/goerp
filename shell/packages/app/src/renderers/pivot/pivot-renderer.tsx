@@ -1,5 +1,7 @@
+import type { FilterParamValue } from "@goerp/sdk";
 import { downloadBlob } from "@goerp/sdk";
 import { ActionButton, EmptyState, Icon, Skeleton } from "@goerp/sdk/components";
+import type { PivotResponse } from "@goerp/sdk/react";
 import { usePivotData } from "@goerp/sdk/react";
 import { ListFilters } from "../list/list-filters.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
@@ -7,14 +9,15 @@ import { buildPivotSheetData, pivotSheetDataToBlob } from "./pivot-download.js";
 import type { PivotViewDeclaration } from "./pivot-manifest-types.js";
 import { mapPivotResponse, toValueColumns } from "./pivot-mapping.js";
 import { PivotView } from "./pivot-view.js";
+import { usePivotWasmData } from "./use-pivot-wasm-data.js";
 
 // shell-architecture.md's PivotRenderer — resolves a manifest "type":
 // "pivot" view's rows/columns/values/default_filters/filters/
-// allow_download (manifest-spec.md §9.5, view-system.md §8's "use_wasm:
-// false" path) into the PivotView/PivotGrid primitive's props (goerp#646,
-// picking up where PR #755/goerp#718 left off). Built directly on
-// ListRenderer's template — same default-filter application, filter
-// state, and embedded-mode cache-key isolation.
+// allow_download (manifest-spec.md §9.5, view-system.md §8) into the
+// PivotView/PivotGrid primitive's props (goerp#646/#648, picking up where
+// PR #755/goerp#718 left off). Built directly on ListRenderer's template —
+// same default-filter application, filter state, and embedded-mode
+// cache-key isolation.
 export interface PivotRendererProps {
   view: PivotViewDeclaration;
   module: string;
@@ -23,24 +26,35 @@ export interface PivotRendererProps {
   baseFilter?: Record<string, string>;
 }
 
-export function PivotRenderer({ view, recordId, embedded, baseFilter }: PivotRendererProps) {
-  const listState = useListState(embedded, undefined);
+interface PivotDataSourceProps {
+  view: PivotViewDeclaration;
+  listState: ReturnType<typeof useListState>;
+  filter: Record<string, FilterParamValue>;
+  cacheKeyPrefix: string | undefined;
+}
 
-  // rows/columns/values come solely from the manifest, not listState —
-  // no need for useDefaultFilterApplication's applySortAndGroupBy option.
-  useDefaultFilterApplication(view, listState, embedded);
+interface PivotHookResult {
+  data: PivotResponse | undefined;
+  isLoading: boolean;
+  isFetching: boolean;
+  isError: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
 
-  // view-system.md's embedded-rendering contract: the locked base filter
-  // always wins over user-driven state, never the other way around.
-  const filter = { ...listState.filter, ...baseFilter };
-
-  const { data, isLoading, isFetching, isError, error, refetch } = usePivotData(view.resource, {
-    rows: view.rows,
-    columns: view.columns,
-    values: view.values,
-    filter,
-    ...(embedded ? { cacheKeyPrefix: `embedded:${recordId ?? ""}:${view.name}` } : {}),
-  });
+// Shared by both use_wasm branches below — same loading/error/mapped-data/
+// download rendering either way, since mapPivotResponse (pivot-mapping.ts)
+// normalizes both sources into the same PivotResponse shape first.
+function PivotDataView({
+  view,
+  listState,
+  hook,
+}: {
+  view: PivotViewDeclaration;
+  listState: ReturnType<typeof useListState>;
+  hook: PivotHookResult;
+}) {
+  const { data, isLoading, isFetching, isError, error, refetch } = hook;
 
   if (isLoading) {
     return <Skeleton type="table" columns={view.values.length + 1} />;
@@ -55,7 +69,7 @@ export function PivotRenderer({ view, recordId, embedded, baseFilter }: PivotRen
         <ActionButton
           variant="secondary"
           onClick={() => {
-            void refetch();
+            refetch();
           }}
         >
           Retry
@@ -104,4 +118,76 @@ export function PivotRenderer({ view, recordId, embedded, baseFilter }: PivotRen
       />
     </>
   );
+}
+
+// view-system.md §8 "use_wasm: false" — a server-side GROUP BY ROLLUP
+// aggregation request on every rows/columns/filter change.
+function PivotRendererServer({ view, listState, filter, cacheKeyPrefix }: PivotDataSourceProps) {
+  const { data, isLoading, isFetching, isError, error, refetch } = usePivotData(view.resource, {
+    rows: view.rows,
+    columns: view.columns,
+    values: view.values,
+    filter,
+    ...(cacheKeyPrefix !== undefined ? { cacheKeyPrefix } : {}),
+  });
+
+  return (
+    <PivotDataView
+      view={view}
+      listState={listState}
+      hook={{
+        data,
+        isLoading,
+        isFetching,
+        isError,
+        error,
+        refetch: () => {
+          void refetch();
+        },
+      }}
+    />
+  );
+}
+
+// view-system.md §8 "use_wasm: true" (default) — fetches the full
+// filtered dataset as Parquet once and re-aggregates it client-side via
+// DuckDB-WASM on every rows/columns/values change, with a fresh fetch
+// only when the filter narrows the dataset differently.
+function PivotRendererWasm({ view, listState, filter, cacheKeyPrefix }: PivotDataSourceProps) {
+  const { data, isLoading, isError, error, refetch } = usePivotWasmData(view.resource, {
+    rows: view.rows,
+    columns: view.columns,
+    values: view.values,
+    filter,
+    ...(cacheKeyPrefix !== undefined ? { cacheKeyPrefix } : {}),
+  });
+
+  return (
+    <PivotDataView
+      view={view}
+      listState={listState}
+      hook={{ data, isLoading, isFetching: false, isError, error, refetch }}
+    />
+  );
+}
+
+export function PivotRenderer({ view, recordId, embedded, baseFilter }: PivotRendererProps) {
+  const listState = useListState(embedded, undefined);
+
+  // rows/columns/values come solely from the manifest, not listState —
+  // no need for useDefaultFilterApplication's applySortAndGroupBy option.
+  useDefaultFilterApplication(view, listState, embedded);
+
+  // view-system.md's embedded-rendering contract: the locked base filter
+  // always wins over user-driven state, never the other way around.
+  const filter = { ...listState.filter, ...baseFilter };
+  const cacheKeyPrefix = embedded ? `embedded:${recordId ?? ""}:${view.name}` : undefined;
+
+  // use_wasm is a static manifest field, never toggled at runtime for a
+  // mounted view — switching which of these two renders is safe with
+  // respect to React's rules of hooks.
+  if (view.use_wasm === false) {
+    return <PivotRendererServer view={view} listState={listState} filter={filter} cacheKeyPrefix={cacheKeyPrefix} />;
+  }
+  return <PivotRendererWasm view={view} listState={listState} filter={filter} cacheKeyPrefix={cacheKeyPrefix} />;
 }

@@ -20,6 +20,10 @@ import { PivotRenderer } from "./pivot-renderer.js";
 // exact react-query cache entry usePivotData reads, the same convention
 // list-renderer.stories.tsx uses, rather than mocking @goerp/sdk (not
 // possible in a real browser the way pivot-renderer.test.tsx's vi.mock is).
+// use_wasm: false pins every story below to that server-aggregation path
+// — the use_wasm: true (default) path fetches real Parquet bytes and runs
+// DuckDB-WASM in a Web Worker, neither of which this file's react-query-
+// cache-seeding approach can stand in for; it has no Storybook coverage.
 
 const MODULE = "sales";
 
@@ -35,6 +39,7 @@ const view: PivotViewDeclaration = {
     { field: "id", aggregation: "count", label: "Order Count" },
   ],
   allow_download: true,
+  use_wasm: false,
 };
 
 const RESPONSE: PivotResponse = {

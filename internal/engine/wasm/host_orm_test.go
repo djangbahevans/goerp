@@ -432,6 +432,9 @@ func TestHostORM_SearchRead_CursorPagination(t *testing.T) {
 	if len(page2.Records) != 1 {
 		t.Fatalf("page 2 = %+v, want the remaining 1 record", page2)
 	}
+	if page2.NextCursor != "" {
+		t.Fatalf("page 2 NextCursor = %q, want empty — it came back short, there is no page 3", page2.NextCursor)
+	}
 
 	seen := map[string]bool{}
 	for _, rec := range append(page1.Records, page2.Records...) {

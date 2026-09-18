@@ -526,6 +526,52 @@ func TestDispatchORMRoute_List_FormatParquet_FilterAppliesIdentically(t *testing
 	}
 }
 
+// TestDispatchORMRoute_List_FormatParquet_CursorHeadersPageThroughResults
+// proves a use_wasm:true pivot caller can page through a Parquet response
+// larger than one page via X-Next-Cursor/X-Has-More, since the raw Parquet
+// body has no JSON envelope to carry that state.
+func TestDispatchORMRoute_List_FormatParquet_CursorHeadersPageThroughResults(t *testing.T) {
+	f := newDispatchORMFixture(t)
+
+	ids := []string{"cccccccc-0000-0000-0000-000000000001", "cccccccc-0000-0000-0000-000000000002"}
+	for i, code := range []string{"PC-1", "PC-2"} {
+		body, _ := json.Marshal(map[string]any{"id": ids[i], "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Cursor Parquet %d", i), "code": code})
+		w := httptest.NewRecorder()
+		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %d status = %d, want 201; body: %s", i, w.Code, w.Body.String())
+		}
+	}
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodGet, "/testmodule/widgets?format=parquet&limit=1&filter[code][in]=PC-1,PC-2", nil, f.entryList, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("X-Has-More"); got != "true" {
+		t.Fatalf("first page X-Has-More = %q, want %q", got, "true")
+	}
+	cursor := w.Header().Get("X-Next-Cursor")
+	if cursor == "" {
+		t.Fatal("first page X-Next-Cursor is empty, want a cursor")
+	}
+
+	// limit=5 here, not 1: the second page's only remaining record (1)
+	// comes back short of that limit, which is what actually proves
+	// has_more resolves to false — asking with the same limit=1 would come
+	// back exactly full again and (correctly, for simple keyset
+	// pagination with no lookahead row) still read as "maybe more".
+	w = httptest.NewRecorder()
+	target := fmt.Sprintf("/testmodule/widgets?format=parquet&limit=5&filter[code][in]=PC-1,PC-2&cursor=%s", cursor)
+	f.e.dispatchORMRoute(w, f.request(http.MethodGet, target, nil, f.entryList, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("second page status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("X-Has-More"); got != "false" {
+		t.Fatalf("second page X-Has-More = %q, want %q", got, "false")
+	}
+}
+
 func TestDispatchORMRoute_VirtualBackend_NotImplemented(t *testing.T) {
 	f := newDispatchORMFixture(t)
 	entry := &route.RouteEntry{ModuleName: "testmodule", PathTemplate: "/testmodule/widgets", Manifest: route.RouteManifest{

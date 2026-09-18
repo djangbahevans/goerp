@@ -131,8 +131,12 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
   }
 
   async getBlob(path: string, options?: RequestOptions): Promise<Blob> {
+    return (await this.getBlobWithHeaders(path, options)).blob;
+  }
+
+  async getBlobWithHeaders(path: string, options?: RequestOptions): Promise<{ blob: Blob; headers: Headers }> {
     const response = await this.send("GET", path, undefined, options);
-    return response.blob();
+    return { blob: await response.blob(), headers: response.headers };
   }
 
   async postFormData<T>(path: string, data: Record<string, unknown>, options?: RequestOptions): Promise<T> {
