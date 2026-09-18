@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/parquet-go/parquet-go"
@@ -38,7 +39,14 @@ func wantsParquet(r *http.Request) bool {
 // is JSON-encoded into a string column instead of a nested Parquet struct —
 // this ticket's actual consumer (DuckDB-WASM pivot re-aggregation) groups
 // by flat dimension/measure columns, not nested objects.
-func writeParquet(w http.ResponseWriter, records []map[string]any) {
+//
+// The page's own cursor/has-more state (out.NextCursor from the same
+// wasm.ORMSearchRead call the JSON path uses) rides as response headers
+// rather than an envelope field — the body is a raw Parquet file, so there's
+// no JSON wrapper to carry a "meta" object the way the JSON list response
+// does. A use_wasm:true pivot caller pages through these to assemble the
+// full filtered dataset client-side (view-system.md §8).
+func writeParquet(w http.ResponseWriter, records []map[string]any, nextCursor string) {
 	normalized := make([]map[string]any, len(records))
 	for i, record := range records {
 		row := make(map[string]any, len(record))
@@ -67,6 +75,8 @@ func writeParquet(w http.ResponseWriter, records []map[string]any) {
 	}
 
 	w.Header().Set("Content-Type", parquetContentType)
+	w.Header().Set("X-Next-Cursor", nextCursor)
+	w.Header().Set("X-Has-More", strconv.FormatBool(nextCursor != ""))
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(buf.Bytes()); err != nil {
 		log.Error().Err(err).Msg("dispatchORMList: write parquet response")
