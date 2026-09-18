@@ -65,9 +65,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         title={view.label}
         actions={
           <>
-            {view.workflow_actions && (
-              <WorkflowActions resource={view.resource} module={module} recordId={recordId} record={record} />
-            )}
+            {view.workflow_actions && <WorkflowActions resource={view.resource} recordId={recordId} record={record} />}
             <ListActions actions={view.header_actions ?? []} module={module} />
             <ShareHeaderAction resource={view.resource} recordId={recordId} />
           </>

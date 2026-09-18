@@ -1,5 +1,5 @@
 import { ActionButton } from "@goerp/sdk/components";
-import { useAction } from "@goerp/sdk/react";
+import { moduleNameOf, useAction } from "@goerp/sdk/react";
 import { modelRegistry, type WorkflowTransition } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { titleCaseWords } from "../../chrome/title-case-words.js";
@@ -9,18 +9,26 @@ import { recordQueryKey } from "./use-form-record.js";
 // One button per transition, its own useAction instance — ActionButton
 // self-gates on `permission`, so no separate useOptionalPermission check
 // is needed the way a plain (non-hook-owning) list item would.
+//
+// routeModule is resource's own owning module ("{module}.{model}", split
+// via moduleNameOf), not necessarily the module that declared the form
+// view rendering this button — a view can reference a resource from
+// another module (manifest-spec.md's "{module}.{view_name}" cross-module
+// view reference), and a transition's route is always registered under
+// the resource's own module (RegisterModelWorkflowActions), not the
+// view's. Using the wrong one would resolve against a nonexistent route.
 function TransitionButton({
-  module,
+  routeModule,
   resource,
   recordId,
   transition,
 }: {
-  module: string;
+  routeModule: string;
   resource: string;
   recordId: string;
   transition: WorkflowTransition;
 }) {
-  const transitionAction = useAction<unknown, string>(`${module}.${transition.action_name}`, {
+  const transitionAction = useAction<unknown, string>(`${routeModule}.${transition.action_name}`, {
     invalidates: [recordQueryKey(resource, recordId)],
   });
 
@@ -38,7 +46,6 @@ function TransitionButton({
 
 export interface WorkflowActionsProps {
   resource: string;
-  module: string;
   recordId: string | undefined;
   record: Row;
 }
@@ -51,16 +58,18 @@ export interface WorkflowActionsProps {
 // here — the shell's domain-expression interpreter (goerp#829) doesn't
 // exist yet, the same "typed but unevaluated" posture header_actions'
 // own `condition` field already has.
-export function WorkflowActions({ resource, module, recordId, record }: WorkflowActionsProps) {
+export function WorkflowActions({ resource, recordId, record }: WorkflowActionsProps) {
   const { data: model } = useQuery({
     queryKey: ["form-model-workflow", resource],
     queryFn: () => modelRegistry.resolve(resource),
+    enabled: recordId !== undefined,
   });
 
   if (recordId === undefined) return null;
 
   const field = model?.fields.find((f) => f.workflow);
-  if (!field?.workflow) return null;
+  const routeModule = moduleNameOf(resource);
+  if (!field?.workflow || routeModule === undefined) return null;
 
   const currentState = record[field.name];
   const legalTransitions = field.workflow.transitions.filter((t) => t.from === currentState);
@@ -71,7 +80,7 @@ export function WorkflowActions({ resource, module, recordId, record }: Workflow
       {legalTransitions.map((transition) => (
         <TransitionButton
           key={transition.action_name}
-          module={module}
+          routeModule={routeModule}
           resource={resource}
           recordId={recordId}
           transition={transition}

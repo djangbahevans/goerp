@@ -162,6 +162,13 @@ describe("FormViewDeclarationSchema", () => {
     expect(v.safeParse(FormViewDeclarationSchema, { ...base, type: "list" }).success).toBe(false);
   });
 
+  it("workflow_actions stays optional and accepts a boolean", () => {
+    expect(v.safeParse(FormViewDeclarationSchema, base).success).toBe(true);
+    expect(v.safeParse(FormViewDeclarationSchema, { ...base, workflow_actions: true }).success).toBe(true);
+    expect(v.safeParse(FormViewDeclarationSchema, { ...base, workflow_actions: false }).success).toBe(true);
+    expect(v.safeParse(FormViewDeclarationSchema, { ...base, workflow_actions: "yes" }).success).toBe(false);
+  });
+
   it("validates nested sections/tabs/sidebar", () => {
     const result = v.safeParse(FormViewDeclarationSchema, {
       ...base,

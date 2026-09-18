@@ -68,24 +68,33 @@ function orderModel(overrides: Partial<ModelDef["fields"][number]> = {}): ModelD
 
 async function renderWorkflowActions(
   Wrapper: ({ children }: { children: ReactNode }) => ReactNode,
-  props: { recordId: string | undefined; record: Record<string, unknown> },
+  props: { recordId: string | undefined; record: Record<string, unknown>; resource?: string },
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(
     <QueryClientProvider client={client}>
       <Wrapper>
-        <WorkflowActions resource="sales.order" module="sales" {...props} />
+        <WorkflowActions resource="sales.order" {...props} />
       </Wrapper>
     </QueryClientProvider>,
   );
-  await vi.waitFor(() => expect(resolveModelMock).toHaveBeenCalled());
+  if (props.recordId !== undefined) {
+    await vi.waitFor(() => expect(resolveModelMock).toHaveBeenCalled());
+  }
   return result;
 }
 
 describe("WorkflowActions", () => {
-  it("renders nothing on a create form (no recordId yet)", async () => {
+  it("renders nothing on a create form (no recordId yet), and never resolves the model at all", async () => {
     resolveModelMock.mockResolvedValue(orderModel());
     await renderWorkflowActions(fullAccess, { recordId: undefined, record: { state: "draft" } });
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(resolveModelMock).not.toHaveBeenCalled();
+  });
+
+  it("renders nothing for a resource with no module qualifier", async () => {
+    resolveModelMock.mockResolvedValue(orderModel());
+    await renderWorkflowActions(fullAccess, { recordId: "01j", record: { state: "draft" }, resource: "order" });
     expect(screen.queryByRole("button")).toBeNull();
   });
 
@@ -117,17 +126,25 @@ describe("WorkflowActions", () => {
     expect(screen.queryByText("Confirm")).toBeNull();
   });
 
-  it("dispatches the transition's action route with the record id on click", async () => {
+  it("dispatches the transition's action route (derived from resource's own module) with the record id on click", async () => {
     const mutate = vi.fn();
     useActionMock.mockReturnValue({ mutate, isPending: false, isError: false, error: null });
     resolveModelMock.mockResolvedValue(orderModel());
-    await renderWorkflowActions(fullAccess, { recordId: "01j", record: { state: "draft" } });
+    // A different module than any FormRenderer "module" prop happens to be
+    // — proves the route name comes from resource's own qualifier, not a
+    // caller-supplied module that could name a different one (see
+    // form-workflow-actions.tsx's TransitionButton doc comment).
+    await renderWorkflowActions(fullAccess, {
+      recordId: "01j",
+      record: { state: "draft" },
+      resource: "purchasing.order",
+    });
 
     const button = await screen.findByText("Confirm");
     fireEvent.click(button);
 
     expect(useActionMock).toHaveBeenCalledWith(
-      "sales.confirm",
+      "purchasing.confirm",
       expect.objectContaining({ invalidates: expect.any(Array) }),
     );
     expect(mutate).toHaveBeenCalledWith("01j");
