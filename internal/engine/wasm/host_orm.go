@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -245,9 +246,19 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	}
 	defer finish()
 
+	// Cursor pagination always computes NextCursor from pkCol below — if
+	// the caller's own Fields projection excluded it, select it anyway
+	// (and strip it back out of each record afterward) rather than
+	// silently losing the ability to page past a full page.
+	pkRequested := slices.Contains(columns, pkCol)
+	queryColumns := columns
+	if !pkRequested {
+		queryColumns = slices.Concat(columns, []string{pkCol})
+	}
+
 	table := quoteIdentORM(tableNameForORM(md))
-	selectCols := make([]string, len(columns))
-	for i, c := range columns {
+	selectCols := make([]string, len(queryColumns))
+	for i, c := range queryColumns {
 		selectCols[i] = quoteIdentORM(c)
 	}
 
@@ -287,6 +298,15 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	if limit > 0 && len(records) == limit {
 		if last, ok := records[len(records)-1][pkCol]; ok {
 			nextCursor = fmt.Sprintf("%v", last)
+		}
+	}
+
+	// pkCol was only added to the query above to make the cursor
+	// computable — strip it back out so a caller who didn't request it
+	// doesn't see it in the response.
+	if !pkRequested {
+		for _, record := range records {
+			delete(record, pkCol)
 		}
 	}
 
