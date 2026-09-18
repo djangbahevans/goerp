@@ -37,6 +37,30 @@ export const RouteSchemaSchema = v.looseObject({
 });
 export type RouteSchema = v.InferOutput<typeof RouteSchemaSchema>;
 
+// A .Workflow()-declared transition off a Selection field — from/to/
+// action_name always present, permission/condition present only when the
+// transition declared them. condition is the raw domain-expression
+// string, carried through unevaluated (goerp#829's shell-side
+// interpreter doesn't exist yet) — same "typed but unevaluated" posture
+// as ListAction/FormSection's own `condition` field.
+export const WorkflowTransitionSchema = v.looseObject({
+  from: v.string(),
+  to: v.string(),
+  action_name: v.string(),
+  permission: v.optional(v.string()),
+  condition: v.optional(v.string()),
+});
+export type WorkflowTransition = v.InferOutput<typeof WorkflowTransitionSchema>;
+
+// A Selection field's .Workflow() declaration — present on FieldDef.workflow
+// only when that field actually declared one (most fields, even most
+// Selection fields, don't).
+export const FieldWorkflowSchema = v.looseObject({
+  states: v.array(v.string()),
+  transitions: v.array(WorkflowTransitionSchema),
+});
+export type FieldWorkflow = v.InferOutput<typeof FieldWorkflowSchema>;
+
 // shell-architecture.md §9's FieldDef.
 export const FieldDefSchema = v.looseObject({
   name: v.string(),
@@ -46,6 +70,7 @@ export const FieldDefSchema = v.looseObject({
   // "one2many" only — the many2one field on related_model pointing back
   // at this model.
   inverse_field: v.optional(v.string()),
+  workflow: v.optional(FieldWorkflowSchema),
 });
 export type FieldDef = v.InferOutput<typeof FieldDefSchema>;
 

@@ -28,7 +28,16 @@ export type { ResourceRegistryEntry } from "./resource-registry.js";
 export { ResourceRegistry } from "./resource-registry.js";
 export { SchemaRegistry, schemaRegistry } from "./schema-registry.js";
 export { summarizeIssues } from "./summarize-issues.js";
-export type { CRUDAction, FieldDef, MetaSchema, ModelDef, ModuleSchema, RouteSchema } from "./types.js";
+export type {
+  CRUDAction,
+  FieldDef,
+  FieldWorkflow,
+  MetaSchema,
+  ModelDef,
+  ModuleSchema,
+  RouteSchema,
+  WorkflowTransition,
+} from "./types.js";
 export type { NavigationGroup, NavigationItem, ResolvedView, ViewRegistry } from "./view-registry.js";
 export { buildEmptyViewRegistry, buildViewRegistry, filterViewByCapability } from "./view-registry.js";
 export {

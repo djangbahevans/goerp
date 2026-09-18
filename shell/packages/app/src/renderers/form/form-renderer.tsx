@@ -5,6 +5,7 @@ import { ShareHeaderAction } from "./form-share-action.js";
 import { FormSidebarRenderer } from "./form-sidebar.js";
 import { FormTabsRenderer } from "./form-tabs.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
+import { WorkflowActions } from "./form-workflow-actions.js";
 import type { UseFormRecordOptions } from "./use-form-record.js";
 import { useFormRecord } from "./use-form-record.js";
 
@@ -64,6 +65,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         title={view.label}
         actions={
           <>
+            {view.workflow_actions && <WorkflowActions resource={view.resource} recordId={recordId} record={record} />}
             <ListActions actions={view.header_actions ?? []} module={module} />
             <ShareHeaderAction resource={view.resource} recordId={recordId} />
           </>
