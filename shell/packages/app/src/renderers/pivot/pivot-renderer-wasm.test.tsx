@@ -12,11 +12,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PivotViewDeclaration } from "./pivot-manifest-types.js";
 import { PivotRenderer } from "./pivot-renderer.js";
 
-const { usePivotDataMock, useSavedFiltersMock } = vi.hoisted(() => ({
-  usePivotDataMock: vi.fn(),
-  // No saved filters and already resolved by default — real network
-  // access would otherwise hang indefinitely in this test environment,
-  // since nothing here mocks the sdk's internal http client.
+const { usePivotWasmDataMock, useSavedFiltersMock } = vi.hoisted(() => ({
+  usePivotWasmDataMock: vi.fn(),
   useSavedFiltersMock: vi.fn(() => ({
     filters: [],
     isLoading: false,
@@ -25,14 +22,15 @@ const { usePivotDataMock, useSavedFiltersMock } = vi.hoisted(() => ({
     setDefault: vi.fn(),
   })),
 }));
+vi.mock("./use-pivot-wasm-data.js", () => ({ usePivotWasmData: usePivotWasmDataMock }));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
-  return { ...actual, usePivotData: usePivotDataMock, useSavedFilters: useSavedFiltersMock };
+  return { ...actual, useSavedFilters: useSavedFiltersMock };
 });
 
 afterEach(() => {
   cleanup();
-  usePivotDataMock.mockReset();
+  usePivotWasmDataMock.mockReset();
   useSavedFiltersMock.mockReset();
   useSavedFiltersMock.mockImplementation(() => ({
     filters: [],
@@ -43,8 +41,7 @@ afterEach(() => {
   }));
 });
 
-// This file covers the use_wasm:false (server-aggregation) path —
-// pivot-renderer-wasm.test.tsx covers use_wasm:true (the default).
+// use_wasm left unset — view-system.md §8's default is true.
 const view: PivotViewDeclaration = {
   name: "sales_pivot",
   type: "pivot",
@@ -53,16 +50,12 @@ const view: PivotViewDeclaration = {
   rows: ["region"],
   columns: ["state"],
   values: [{ field: "amount_total", aggregation: "sum", label: "Revenue" }],
-  use_wasm: false,
 };
 
 async function renderPivotRenderer(
   props: { embedded?: boolean; baseFilter?: Record<string, string>; recordId?: string } = {},
   viewOverride: PivotViewDeclaration = view,
 ) {
-  // useListState calls useSearch/useNavigate unconditionally even in
-  // embedded mode (its own doc comment) — a router context is always
-  // needed, matching list-renderer.test.tsx's own harness.
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const permissionValue = createPermissionContextValue({
     permissions: new Set(),
@@ -89,9 +82,9 @@ async function renderPivotRenderer(
   render(<RouterProvider router={router} />);
 }
 
-describe("PivotRenderer", () => {
-  it("shows a loading state while the pivot data is in flight", async () => {
-    usePivotDataMock.mockReturnValue({ data: undefined, isLoading: true, isFetching: true, isError: false });
+describe("PivotRenderer (use_wasm: true, the default)", () => {
+  it("shows a loading state while the dataset is being fetched/loaded", async () => {
+    usePivotWasmDataMock.mockReturnValue({ data: undefined, isLoading: true, isError: false, error: null });
 
     await renderPivotRenderer();
 
@@ -100,10 +93,9 @@ describe("PivotRenderer", () => {
 
   it("shows an error state with a retry action", async () => {
     const refetch = vi.fn();
-    usePivotDataMock.mockReturnValue({
+    usePivotWasmDataMock.mockReturnValue({
       data: undefined,
       isLoading: false,
-      isFetching: false,
       isError: true,
       error: new Error("boom"),
       refetch,
@@ -116,8 +108,8 @@ describe("PivotRenderer", () => {
     expect(refetch).toHaveBeenCalled();
   });
 
-  it("maps a loaded response into the pivot grid and shows the title", async () => {
-    usePivotDataMock.mockReturnValue({
+  it("maps a loaded response into the pivot grid and shows the title, with no recompute indicator", async () => {
+    usePivotWasmDataMock.mockReturnValue({
       data: {
         cells: [
           { row: ["east"], column: ["confirmed"], values: { amount_total_sum: 150 } },
@@ -125,8 +117,8 @@ describe("PivotRenderer", () => {
         ],
       },
       isLoading: false,
-      isFetching: false,
       isError: false,
+      error: null,
     });
 
     await renderPivotRenderer();
@@ -138,19 +130,19 @@ describe("PivotRenderer", () => {
   });
 
   it("shows the empty state when the response has no cells", async () => {
-    usePivotDataMock.mockReturnValue({ data: { cells: [] }, isLoading: false, isFetching: false, isError: false });
+    usePivotWasmDataMock.mockReturnValue({ data: { cells: [] }, isLoading: false, isError: false, error: null });
 
     await renderPivotRenderer();
 
     expect(screen.getByRole("heading", { name: "No sales analysis data found." })).toBeTruthy();
   });
 
-  it("passes rows/columns/values and the merged filter to usePivotData", async () => {
-    usePivotDataMock.mockReturnValue({ data: { cells: [] }, isLoading: false, isFetching: false, isError: false });
+  it("passes rows/columns/values and the merged filter to usePivotWasmData", async () => {
+    usePivotWasmDataMock.mockReturnValue({ data: { cells: [] }, isLoading: false, isError: false, error: null });
 
     await renderPivotRenderer({ embedded: true, baseFilter: { customer_id: "acme" } });
 
-    expect(usePivotDataMock).toHaveBeenCalledWith(
+    expect(usePivotWasmDataMock).toHaveBeenCalledWith(
       "sales.order",
       expect.objectContaining({
         rows: ["region"],
@@ -160,24 +152,5 @@ describe("PivotRenderer", () => {
         cacheKeyPrefix: "embedded::sales_pivot",
       }),
     );
-  });
-
-  it("applies default_filters once on mount", async () => {
-    usePivotDataMock.mockReturnValue({ data: { cells: [] }, isLoading: false, isFetching: false, isError: false });
-
-    await renderPivotRenderer({ embedded: true }, { ...view, default_filters: { state: "confirmed" } });
-
-    expect(usePivotDataMock).toHaveBeenCalledWith(
-      "sales.order",
-      expect.objectContaining({ filter: expect.objectContaining({ state: "confirmed" }) }),
-    );
-  });
-
-  it("disables the saved-filters fetch when embedded, since it's never consulted there", async () => {
-    usePivotDataMock.mockReturnValue({ data: { cells: [] }, isLoading: false, isFetching: false, isError: false });
-
-    await renderPivotRenderer({ embedded: true });
-
-    expect(useSavedFiltersMock).toHaveBeenCalledWith("sales_pivot", { enabled: false });
   });
 });
