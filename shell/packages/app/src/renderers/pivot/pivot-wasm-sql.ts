@@ -43,10 +43,19 @@ export function buildPivotAggregateSQL(
   for (const v of values) {
     const alias = `${v.field}_${v.aggregation}`;
     valueAliases.push(alias);
-    const expr =
-      v.aggregation === "count_distinct"
-        ? `COUNT(DISTINCT ${quoteIdent(v.field)})`
-        : `${AGGREGATE_SQL_FUNCS[v.aggregation]}(${quoteIdent(v.field)})`;
+    let expr: string;
+    if (v.aggregation === "count_distinct") {
+      expr = `COUNT(DISTINCT ${quoteIdent(v.field)})`;
+    } else {
+      const fn = AGGREGATE_SQL_FUNCS[v.aggregation];
+      // Manifest parsing already rejects an aggregation outside this set
+      // (pivot-manifest-types.ts's picklist) — this only guards a value
+      // reaching here some other way, matching ORMAggregate's own
+      // up-front validation rather than letting it become an opaque
+      // DuckDB parser error on `undefined(...)`.
+      if (fn === undefined) throw new Error(`buildPivotAggregateSQL: unknown aggregation "${v.aggregation}"`);
+      expr = `${fn}(${quoteIdent(v.field)})`;
+    }
     selectExprs.push(`${expr} AS ${quoteIdent(alias)}`);
   }
 

@@ -49,6 +49,18 @@ describe("buildPivotAggregateSQL", () => {
     const { sql } = buildPivotAggregateSQL("t", ['weird"field'], [], [{ field: "id", aggregation: "count" }]);
     expect(sql).toContain('"weird""field"');
   });
+
+  it("throws a clear error for an aggregation outside the known set, instead of building malformed SQL", () => {
+    expect(() =>
+      buildPivotAggregateSQL(
+        "t",
+        ["region"],
+        [],
+        // @ts-expect-error — exercising a value manifest parsing (picklist) would already reject.
+        [{ field: "id", aggregation: "median" }],
+      ),
+    ).toThrow(/unknown aggregation "median"/);
+  });
 });
 
 describe("mapDuckDBRowsToPivotResponse", () => {

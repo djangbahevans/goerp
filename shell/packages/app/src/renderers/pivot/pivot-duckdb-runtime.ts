@@ -23,6 +23,12 @@ export function getDuckDB(): Promise<duckdb.AsyncDuckDB> {
     const db = new duckdb.AsyncDuckDB(logger, worker);
     await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
     return db;
-  })();
+  })().catch((err: unknown) => {
+    // A transient failure (e.g. the WASM binary fetch dropping) must not
+    // wedge every future call behind one cached rejected promise — the
+    // next getDuckDB() call should retry from scratch.
+    dbPromise = null;
+    throw err;
+  });
   return dbPromise;
 }
