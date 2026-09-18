@@ -10,6 +10,7 @@
     ".": "./dist/index.js",
     "./react": "./dist/react/index.js",
     "./auth": "./dist/auth/index.js",
+    "./domain": "./dist/domain/index.js",
     "./components": "./dist/components/index.js",
     "./i18n": "./dist/i18n/index.js",
     "./nav": "./dist/nav/index.js",
