@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -150,6 +151,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 
+	if err := validateWorkflowTransitions(models); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
 	synthesizedViews, suppressedViews, nav, err := route.SynthesizeViews(src.Name, mf.Type, models, mf.Views, mf.Navigation)
 	if err != nil {
 		m.Fail(fmt.Sprintf("synthesize views: %v", err))
@@ -215,7 +221,7 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 			} else {
 				for _, s := range suppressed {
 					log.Warn().Str("module", src.Name).Str("model", s.Model).Str("op", s.Op).
-						Msg("EnableOps: explicit route already registered, auto-derived route suppressed")
+						Msg(s.LogMessage())
 				}
 			}
 		}
@@ -431,6 +437,60 @@ func validateTransientModels(models []model.ModelDeclaration) error {
 		for _, op := range md.EnabledOps {
 			if op.Name == "list" {
 				return fmt.Errorf("model %s: EnableOps(List) is not allowed on a Transient model", md.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// validateWorkflowTransitions enforces .Workflow()'s load-time
+// invariants (go-sdk-reference.md "Declarative workflow transitions"):
+// it's only meaningful on a Selection field, every transition's
+// from/to must be members of that field's own SelectionValues (there's
+// no separate state vocabulary to keep in sync with the field it
+// governs), every transition needs a non-empty action name unique
+// within its model (two transitions sharing a name would derive the
+// same route path), and a declared Condition must at least parse —
+// the same class of validation validate_policies.go already applies to
+// ABAC policy conditions, via the same domain.Parse entry point.
+// Evaluating a Condition at transition-invocation time is a separate,
+// not-yet-built mechanism; this only checks it's syntactically valid.
+func validateWorkflowTransitions(models []model.ModelDeclaration) error {
+	for _, md := range models {
+		actionNames := make(map[string]string, 4) // action name -> field name that claimed it
+		for _, f := range md.Fields {
+			if len(f.Def.WorkflowTransitions) == 0 {
+				continue
+			}
+			if f.Def.Kind != model.KindSelection {
+				return fmt.Errorf("model %s: field %s: .Workflow() is only valid on a Selection field", md.Name, f.Name)
+			}
+
+			states := make(map[string]bool, len(f.Def.SelectionValues))
+			for _, v := range f.Def.SelectionValues {
+				states[v] = true
+			}
+
+			for _, t := range f.Def.WorkflowTransitions {
+				if t.ActionName == "" {
+					return fmt.Errorf("model %s: field %s: a workflow transition needs a non-empty action name", md.Name, f.Name)
+				}
+				if !states[t.From] {
+					return fmt.Errorf("model %s: field %s: transition %q: from state %q is not one of the field's Selection values", md.Name, f.Name, t.ActionName, t.From)
+				}
+				if !states[t.To] {
+					return fmt.Errorf("model %s: field %s: transition %q: to state %q is not one of the field's Selection values", md.Name, f.Name, t.ActionName, t.To)
+				}
+				if claimant, ok := actionNames[t.ActionName]; ok {
+					return fmt.Errorf("model %s: fields %s and %s both declare a workflow transition named %q", md.Name, claimant, f.Name, t.ActionName)
+				}
+				actionNames[t.ActionName] = f.Name
+
+				if t.ConditionExpr != "" {
+					if _, err := domain.Parse(t.ConditionExpr); err != nil {
+						return fmt.Errorf("model %s: field %s: transition %q: condition failed to parse: %w", md.Name, f.Name, t.ActionName, err)
+					}
+				}
 			}
 		}
 	}

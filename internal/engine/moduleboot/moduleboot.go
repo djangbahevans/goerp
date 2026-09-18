@@ -342,7 +342,7 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 			} else {
 				for _, s := range suppressed {
 					log.Warn().Str("module", src.Name).Str("model", s.Model).Str("op", s.Op).
-						Msg("EnableOps: explicit route already registered, auto-derived route suppressed")
+						Msg(s.LogMessage())
 				}
 			}
 		}

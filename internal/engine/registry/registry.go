@@ -379,7 +379,7 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 		}
 		for _, s := range suppressed {
 			log.Warn().Str("module", name).Str("model", s.Model).Str("op", s.Op).
-				Msg("EnableOps: explicit route already registered, auto-derived route suppressed")
+				Msg(s.LogMessage())
 		}
 	}
 	return table, nil

@@ -169,6 +169,12 @@ type FieldDef struct {
 	IsStored   bool     `msgpack:"is_stored,omitempty"`  // Store(true): persisted, recomputed on write. Store(false): computed fresh on read
 	DependsOn  []string `msgpack:"depends_on,omitempty"` // field names, or "relField.remoteField" through a Many2One
 
+	// Workflow (KindSelection only) — go-sdk-reference.md "Declarative
+	// workflow transitions". Each entry auto-registers as an
+	// engine-native transition action; from/to are validated against
+	// SelectionValues at module-load time.
+	WorkflowTransitions []WorkflowTransition `msgpack:"workflow_transitions,omitempty"`
+
 	// Field-level access control (go-sdk-reference.md §22 "Access
 	// control", manifest-spec.md §8a, auth-internals.md §12). A field
 	// with no ReadPermission has no read restriction — that's the
@@ -291,6 +297,17 @@ func (f FieldDef) Store(stored bool) FieldDef { f.IsStored = stored; return f }
 // One2Many field named relField on the same model (remoteField names a
 // field on the One2Many's child model).
 func (f FieldDef) Depends(paths ...string) FieldDef { f.DependsOn = paths; return f }
+
+// Workflow declares this Selection field's allowed state transitions —
+// each one auto-registers as an engine-native action gated by its own
+// .Requires() permission, at the same point EnableOps registers its
+// candidate actions, subject to the same "explicit hand-written
+// engine.Action beats auto-generated" override rule (go-sdk-reference.md
+// "Declarative workflow transitions").
+func (f FieldDef) Workflow(transitions ...WorkflowTransition) FieldDef {
+	f.WorkflowTransitions = transitions
+	return f
+}
 
 // AccessOpt configures a field's Access() permission requirements —
 // model.AccessRead(permission), model.AccessWrite(permission).

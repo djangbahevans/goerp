@@ -98,6 +98,8 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		e.dispatchORMPreview(ctx, w, r, entry, modCtx)
 	case "pivot":
 		e.dispatchORMPivot(ctx, w, r, entry, modCtx)
+	case "workflow_transition":
+		e.dispatchORMWorkflowTransition(ctx, w, rr.pathParams, entry, modCtx, insertClient)
 	default:
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "unknown crud action: "+entry.Manifest.CrudAction)
 	}
@@ -340,6 +342,63 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 	writeJSON(w, http.StatusOK, out.Record)
 }
 
+// dispatchORMWorkflowTransition serves a .Workflow()-declared transition
+// action (goerp#864) — verifies the record's current state matches the
+// transition's declared From, then performs the ordinary ORM write that
+// moves it to To, so constraint hooks and Store(true) recomputation apply
+// exactly as they would for any other write; nothing about a transition
+// needs its own copy of validation logic that already exists elsewhere.
+// The transition's .Requires() permission is enforced upstream, by the
+// standard tenant/auth/permission middleware chain reading
+// entry.Manifest.Permissions — same as any other EngineNative route, no
+// special-casing here. Evaluating the transition's optional Condition
+// against the fetched record is a separate, not-yet-built server-side
+// evaluation mode (go-sdk-reference.md "Declarative workflow
+// transitions") — this handler accepts a Condition-declared transition
+// without enforcing it.
+func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
+	id := pathParams["id"]
+	if id == "" {
+		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		return
+	}
+
+	wf := entry.Manifest.Workflow
+
+	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, wasm.ORMReadInput{
+		Model:  entry.Manifest.Model,
+		IDs:    []string{id},
+		Fields: []string{wf.Field},
+	})
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+	if len(readOut.Records) == 0 {
+		writeRouteError(w, http.StatusNotFound, abi.ErrCodeNotFound, "record not found")
+		return
+	}
+
+	current, _ := readOut.Records[0][wf.Field].(string)
+	if current != wf.From {
+		writeRouteError(w, http.StatusConflict, abi.ErrCodeInvalidTransition,
+			entry.Manifest.Name+" requires "+wf.Field+" to be "+wf.From+", but it is "+current)
+		return
+	}
+
+	writeOut, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMWriteInput{
+		Model:  entry.Manifest.Model,
+		ID:     id,
+		Record: map[string]any{wf.Field: wf.To},
+	})
+	if hostErr != nil {
+		writeHostError(w, hostErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, writeOut.Record)
+}
+
 func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
@@ -417,7 +476,7 @@ func ormErrorStatus(code string) int {
 	switch code {
 	case abi.ErrCodeNotFound, abi.ErrCodeModelNotFound:
 		return http.StatusNotFound
-	case abi.ErrCodeEtagMismatch, abi.ErrCodeUniqueViolation, abi.ErrCodeForeignKeyViolation:
+	case abi.ErrCodeEtagMismatch, abi.ErrCodeUniqueViolation, abi.ErrCodeForeignKeyViolation, abi.ErrCodeInvalidTransition:
 		return http.StatusConflict
 	case abi.ErrCodeValidationFailed, abi.ErrCodeFieldUnknown, abi.ErrCodeDomainInvalid, abi.ErrCodeTransientNotListable:
 		return http.StatusBadRequest

@@ -117,6 +117,15 @@ const (
 	ErrCodeTransientNotListable = "orm.transient_not_listable"
 )
 
+// Workflow-transition error codes (go-sdk-reference.md "Declarative
+// workflow transitions").
+const (
+	// ErrCodeInvalidTransition rejects a workflow-transition action
+	// invoked while the record's current state isn't the transition's
+	// declared From state.
+	ErrCodeInvalidTransition = "orm.invalid_transition"
+)
+
 // host.event error codes (host-abi-reference.md "host.event.emit_tx"/
 // "host.event.emit").
 const (
