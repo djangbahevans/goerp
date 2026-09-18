@@ -65,6 +65,17 @@ func TestValidateWorkflowTransitions_RejectsEmptyActionName(t *testing.T) {
 	}
 }
 
+func TestValidateWorkflowTransitions_RejectsActionNameContainingSlash(t *testing.T) {
+	md := model.Define("order").Field("state", model.Selection("draft", "confirmed").Workflow(
+		model.Transition("draft", "confirmed", "confirm/force"),
+	))
+
+	err := validateWorkflowTransitions([]model.ModelDeclaration{*md})
+	if err == nil || !strings.Contains(err.Error(), "must not contain") {
+		t.Fatalf("err = %v, want an error about the action name containing a slash", err)
+	}
+}
+
 func TestValidateWorkflowTransitions_RejectsDuplicateActionNameAcrossFields(t *testing.T) {
 	md := model.Define("order").
 		Field("state", model.Selection("draft", "confirmed").Workflow(

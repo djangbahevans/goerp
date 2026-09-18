@@ -475,6 +475,9 @@ func validateWorkflowTransitions(models []model.ModelDeclaration) error {
 				if t.ActionName == "" {
 					return fmt.Errorf("model %s: field %s: a workflow transition needs a non-empty action name", md.Name, f.Name)
 				}
+				if strings.Contains(t.ActionName, "/") {
+					return fmt.Errorf("model %s: field %s: transition action name %q must not contain %q — it becomes a single path segment (POST {plural}/{id}/{action_name})", md.Name, f.Name, t.ActionName, "/")
+				}
 				if !states[t.From] {
 					return fmt.Errorf("model %s: field %s: transition %q: from state %q is not one of the field's Selection values", md.Name, f.Name, t.ActionName, t.From)
 				}

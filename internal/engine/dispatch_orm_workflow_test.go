@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,11 +37,13 @@ import (
 func orderModelDecl() model.ModelDeclaration {
 	d := model.Define("order").WithStandardFields().
 		Field("name", model.Text().Required()).
-		Field("state", model.Selection("draft", "confirmed", "cancelled").
+		Field("state", model.Selection("draft", "confirmed", "rejected", "cancelled").
 			Default("draft").
 			Workflow(
 				model.Transition("draft", "confirmed", "confirm").Requires("sales:order:confirm"),
+				model.Transition("draft", "rejected", "reject"),
 				model.Transition("confirmed", "cancelled", "cancel"),
+				model.Transition("confirmed", "draft", "reopen"),
 			))
 	return *d
 }
@@ -78,7 +81,9 @@ type dispatchWorkflowFixture struct {
 	tenantID     string
 	entryCreate  *route.RouteEntry
 	entryConfirm *route.RouteEntry
+	entryReject  *route.RouteEntry
 	entryCancel  *route.RouteEntry
+	entryReopen  *route.RouteEntry
 }
 
 func newDispatchWorkflowFixture(t *testing.T) *dispatchWorkflowFixture {
@@ -138,7 +143,9 @@ func newDispatchWorkflowFixture(t *testing.T) *dispatchWorkflowFixture {
 			Manifest: route.RouteManifest{Auth: "required", Model: "sales.order", CrudAction: "create", EngineNative: true, StorageBackend: "table"},
 		},
 		entryConfirm: transitionEntry("confirm", "draft", "confirmed"),
+		entryReject:  transitionEntry("reject", "draft", "rejected"),
 		entryCancel:  transitionEntry("cancel", "confirmed", "cancelled"),
+		entryReopen:  transitionEntry("reopen", "confirmed", "draft"),
 	}
 }
 
@@ -260,5 +267,185 @@ func TestDispatchORMRoute_WorkflowTransition_MissingIDPathParam_400(t *testing.T
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_OnlyOneWins
+// reproduces the race a code review caught in the first version of
+// dispatchORMWorkflowTransition: two transitions both valid from the same
+// starting state (cancel -> cancelled, reopen -> draft, both valid from
+// "confirmed") fired concurrently against the same record. Both requests'
+// state-precondition reads can observe "confirmed" before either write
+// lands; without threading the read's etag through as the write's
+// ExpectedEtag, both writes would succeed and the second one would
+// silently clobber the first's result with no 409 ever raised. With the
+// etag fix, exactly one request's write wins (200) and the other loses
+// the race on its own precondition (409 orm.etag_mismatch) — never two
+// 200s and never a silent overwrite.
+//
+// The record is moved to "confirmed" via one ordinary, sequential
+// "confirm" call first — not raced — so it carries a real, non-""
+// etag before the race starts: a brand-new record's etag column is still
+// its schema default ("") until the first write rotates it (ORMCreate
+// never does), and "" doubles as writeOneRecordTx's own "no compare-and-
+// swap requested" sentinel, so racing directly off a just-created record
+// wouldn't exercise this fix at all — see dispatchORMWorkflowTransition's
+// own doc comment for that gap.
+func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_OnlyOneWins(t *testing.T) {
+	f := newDispatchWorkflowFixture(t)
+	id := "55555555-5555-5555-5555-555555555554"
+	f.createOrder(t, id)
+
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, f.entryConfirm, map[string]string{"id": id}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("setup confirm status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var wg sync.WaitGroup
+	codes := make([]int, 2)
+	bodies := make([]string, 2)
+
+	run := func(i int, entry *route.RouteEntry, action string) {
+		defer wg.Done()
+		w := httptest.NewRecorder()
+		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/"+action, nil, entry, map[string]string{"id": id}))
+		codes[i] = w.Code
+		bodies[i] = w.Body.String()
+	}
+
+	wg.Add(2)
+	go run(0, f.entryCancel, "cancel")
+	go run(1, f.entryReopen, "reopen")
+	wg.Wait()
+
+	var successes, conflicts int
+	for i, code := range codes {
+		switch code {
+		case http.StatusOK:
+			successes++
+		case http.StatusConflict:
+			conflicts++
+		default:
+			t.Fatalf("request %d: status = %d, want 200 or 409; body: %s", i, code, bodies[i])
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("codes = %v, want exactly one 200 and one 409 (bodies: %v)", codes, bodies)
+	}
+}
+
+// restrictedOrderModelDecl mirrors orderModelDecl but the gating "state"
+// field also carries its own, independent field-read permission — a
+// distinct rule from any transition's own .Requires() — to exercise
+// dispatchORMWorkflowTransition's internal state read against a caller
+// who holds the transition's permission but not the field's.
+func restrictedOrderModelDecl() model.ModelDeclaration {
+	d := model.Define("order").WithStandardFields().
+		Field("name", model.Text().Required()).
+		Field("state", model.Selection("draft", "confirmed").
+			Default("draft").
+			Access(model.AccessRead("sales:order:state_read")).
+			Workflow(
+				model.Transition("draft", "confirmed", "confirm").Requires("sales:order:confirm"),
+			))
+	return *d
+}
+
+// TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStateCheck
+// reproduces a code-review finding: the internal state-precondition read
+// inside dispatchORMWorkflowTransition must not be subject to the
+// caller's own field-read permissions the way a client-facing read is.
+// The caller here holds neither the "state" field's read permission
+// (sales:order:state_read) nor any permission at all — an ordinary
+// masked ORMRead would nullify/omit "state", making the precondition
+// check always see a mismatch and always report orm.invalid_transition
+// regardless of the record's real state. The fix (wasm.SkipFieldSecurity)
+// reads the real value for this internal check, so a caller who legitimately
+// holds the transition's own permission (checked upstream, not simulated
+// by this fixture) still gets a successful transition.
+func TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStateCheck(t *testing.T) {
+	conn := openDispatchORMTestDB(t)
+	ensureRiverJobMigrated(t)
+	slug := fmt.Sprintf("dispatchworkflowfieldsec%d", time.Now().UnixNano())
+	createFixtureOrdersSchema(t, conn, slug)
+
+	rt, err := wasm.New(&config.Config{
+		CompilationCache:            filepath.Join(t.TempDir(), "cache"),
+		Environment:                 string(config.Production),
+		PoolMaxMemoryByes:           1 << 20,
+		DBMaxConcurrentTransactions: 10,
+	}, conn, nil, nil)
+	if err != nil {
+		t.Fatalf("wasm.New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(map[string]*module.LoadedModule{
+		"sales": {
+			Status:       module.StatusReady,
+			Manifest:     manifest.Manifest{Name: "sales", Type: "standard"},
+			ModelDecls:   []model.ModelDeclaration{restrictedOrderModelDecl()},
+			Capabilities: abi.CapDBRead | abi.CapDBWrite,
+		},
+	}); err != nil {
+		t.Fatalf("registry Update: %v", err)
+	}
+
+	e := &Engine{primaryDB: conn, wasmRuntime: rt, moduleRegistry: reg}
+	tenantID := "00000000-0000-0000-0000-000000000001"
+
+	entryCreate := &route.RouteEntry{
+		ModuleName: "sales", PathTemplate: "/sales/orders",
+		Manifest: route.RouteManifest{Auth: "required", Model: "sales.order", CrudAction: "create", EngineNative: true, StorageBackend: "table"},
+	}
+	entryConfirm := &route.RouteEntry{
+		ModuleName: "sales", PathTemplate: "/sales/orders/{id}/confirm",
+		Manifest: route.RouteManifest{
+			Auth: "required", Model: "sales.order", Name: "confirm", CrudAction: "workflow_transition",
+			EngineNative: true, StorageBackend: "table",
+			Workflow: &route.WorkflowManifest{Field: "state", From: "draft", To: "confirmed"},
+		},
+	}
+
+	// No PermissionSet at all — this caller holds neither
+	// sales:order:state_read nor sales:order:confirm. dispatchORMRoute
+	// itself never checks entry.Manifest.Permissions (that's the upstream
+	// middleware's job, bypassed by calling dispatchORMRoute directly in
+	// this fixture, same as every other test in this file) — what's under
+	// test is only whether the internal state read is unmasked.
+	req := func(method, target string, body []byte, entry *route.RouteEntry, pathParams map[string]string) *http.Request {
+		var r *http.Request
+		if body != nil {
+			r = httptest.NewRequest(method, target, bytes.NewReader(body))
+		} else {
+			r = httptest.NewRequest(method, target, nil)
+		}
+		ctx := withRouteResolution(r.Context(), &routeResolution{snap: e.moduleRegistry.Snapshot(), entry: entry, pathParams: pathParams})
+		ctx = withTenantContext(ctx, &tenantresolve.TenantContext{TenantID: tenantID, Slug: slug, Entitlements: tenantresolve.EntitlementSet{Features: map[string]bool{"module.sales": true}}})
+		ctx = withAuthContext(ctx, &authcheck.AuthContext{IsAuthenticated: true, UserID: "00000000-0000-0000-0000-0000000000aa"})
+		return r.WithContext(ctx)
+	}
+
+	id := "66666666-6666-6666-6666-666666666661"
+	createBody, _ := json.Marshal(map[string]any{"id": id, "tenant_id": tenantID, "name": "Order"})
+	w := httptest.NewRecorder()
+	e.dispatchORMRoute(w, req(http.MethodPost, "/sales/orders", createBody, entryCreate, nil))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	e.dispatchORMRoute(w, req(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, entryConfirm, map[string]string{"id": id}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("confirm status = %d, want 200 (state check must not be masked by the caller's missing field-read permission); body: %s", w.Code, w.Body.String())
+	}
+	var updated map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode confirm response: %v", err)
+	}
+	if updated["state"] != "confirmed" {
+		t.Errorf("state = %v, want confirmed", updated["state"])
 	}
 }
