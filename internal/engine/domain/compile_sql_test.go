@@ -62,6 +62,17 @@ func TestCompileToSQL_MultipleLiteralsGetSequentialPlaceholders(t *testing.T) {
 	}
 }
 
+func TestCompileToSQL_NotWrapsWholePredicate(t *testing.T) {
+	frag, args := compileToSQL(t, "NOT record.state = 'draft'")
+	want := `(NOT ("state" = $1))`
+	if frag != want {
+		t.Fatalf("fragment = %s, want %s", frag, want)
+	}
+	if !reflect.DeepEqual(args, []any{"draft"}) {
+		t.Fatalf("args = %#v, want [\"draft\"]", args)
+	}
+}
+
 func TestCompileToSQL_LikeAllowed(t *testing.T) {
 	// Unlike CompileToRLS, LIKE/ILIKE is valid in the search-domain context.
 	frag, args := compileToSQL(t, "record.name ILIKE 'acme%'")
