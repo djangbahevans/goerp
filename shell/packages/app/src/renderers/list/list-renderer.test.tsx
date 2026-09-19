@@ -414,6 +414,75 @@ describe("ListRenderer", () => {
     expect(screen.queryByText(/selected/)).toBeNull();
   });
 
+  describe("bulk action conditions", () => {
+    function rows() {
+      useInfiniteListMock.mockReturnValue({
+        data: {
+          pages: [{ data: [{ id: "1", name: "Ada", ssn: "000-00-0000" }], meta: { cursor: null, hasMore: false } }],
+        },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+    }
+
+    it("shows a bulk action whose condition holds", async () => {
+      rows();
+      await renderListRenderer({}, fullAccess, "/", {
+        ...view,
+        bulk_actions: [
+          {
+            label: "Export",
+            type: "export",
+            route: "contacts.exportContacts",
+            condition: "NOT user_has_permission('contacts:contact:export')",
+          },
+        ],
+      });
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select row" }));
+      expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
+    });
+
+    it("renders no selection checkboxes when every bulk action's condition is false", async () => {
+      rows();
+      await renderListRenderer({}, fullAccess, "/", {
+        ...view,
+        bulk_actions: [
+          {
+            label: "Add Tag",
+            type: "custom",
+            component: "BulkTagAction",
+            condition: "user_has_permission('contacts:contact:export')",
+          },
+        ],
+      });
+      expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    });
+
+    it("hides only the bulk action whose condition is false, keeping selection for the rest", async () => {
+      rows();
+      await renderListRenderer({}, fullAccess, "/", {
+        ...view,
+        bulk_actions: [
+          { label: "Export", type: "export", route: "contacts.exportContacts" },
+          {
+            label: "Export Hidden",
+            type: "export",
+            route: "contacts.exportContacts",
+            condition: "user_has_role('admin')",
+          },
+        ],
+      });
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select row" }));
+      expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Export Hidden" })).toBeNull();
+    });
+  });
+
   it("full-page mode: passes the URL-derived filter/sort into useInfiniteList", async () => {
     useInfiniteListMock.mockReturnValue({
       data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },

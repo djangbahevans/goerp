@@ -102,7 +102,12 @@ function PivotDataView({
 
   return (
     <>
-      <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
+      <ListFilters
+        filters={view.filters ?? []}
+        values={listState.filter}
+        onChange={listState.setFilter}
+        viewName={view.name}
+      />
       <PivotView
         title={view.label}
         rowHeaders={mapped.rowHeaders}

@@ -97,7 +97,12 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
 
   return (
     <>
-      <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
+      <ListFilters
+        filters={view.filters ?? []}
+        values={listState.filter}
+        onChange={listState.setFilter}
+        viewName={view.name}
+      />
       <TimelineChart
         rows={timelineRows}
         range={range}

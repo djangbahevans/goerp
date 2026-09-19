@@ -128,7 +128,12 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
 
   return (
     <>
-      <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
+      <ListFilters
+        filters={view.filters ?? []}
+        values={listState.filter}
+        onChange={listState.setFilter}
+        viewName={view.name}
+      />
       <CalendarView
         events={events}
         {...(view.allowed_views ? { allowedViews: view.allowed_views } : {})}

@@ -6,8 +6,7 @@ import * as v from "valibot";
 export type Row = Record<string, unknown>;
 
 // manifest-spec.md §9.1's List View wire schema, as valibot schemas.
-// ListAction's `condition` is evaluated by conditions/use-condition-evaluator.ts;
-// a column's, filter's and bulk action's `condition` is passed through unevaluated.
+// Every `condition` here is evaluated by conditions/use-condition-evaluator.ts.
 
 const COLUMN_TYPES = [
   "text",
