@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	sdkmodel "github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -130,22 +131,26 @@ type shareCreateRequest struct {
 }
 
 type shareResponse struct {
-	ID               string     `json:"id"`
-	Model            string     `json:"model"`
-	RecordID         string     `json:"record_id"`
-	SharedWithUserID string     `json:"shared_with_user_id"`
-	Permission       string     `json:"permission"`
-	SharedBy         string     `json:"shared_by"`
-	CreatedAt        time.Time  `json:"created_at"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	ID               string `json:"id"`
+	Model            string `json:"model"`
+	RecordID         string `json:"record_id"`
+	SharedWithUserID string `json:"shared_with_user_id"`
+	// SharedWithEmail is empty when the recipient's user record no longer
+	// exists.
+	SharedWithEmail string     `json:"shared_with_email"`
+	Permission      string     `json:"permission"`
+	SharedBy        string     `json:"shared_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 }
 
-func shareToResponse(sh *recordshares.Share) shareResponse {
+func shareToResponse(sh *recordshares.Share, recipientEmail string) shareResponse {
 	return shareResponse{
 		ID:               sh.ID,
 		Model:            sh.Model,
 		RecordID:         sh.RecordID,
 		SharedWithUserID: sh.SharedWithUserID,
+		SharedWithEmail:  recipientEmail,
 		Permission:       sh.Permission,
 		SharedBy:         sh.SharedBy,
 		CreatedAt:        sh.CreatedAt,
@@ -220,6 +225,10 @@ func (e *Engine) dispatchSharesCreateRoute(w http.ResponseWriter, r *http.Reques
 		writeRouteError(w, http.StatusBadRequest, "invalid_request", `permission must be "read" or "write"`)
 		return
 	}
+	if body.ExpiresAt != nil && !body.ExpiresAt.After(time.Now()) {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "expires_at must be in the future")
+		return
+	}
 
 	snap := e.moduleRegistry.Snapshot()
 	if snap == nil {
@@ -283,7 +292,7 @@ func (e *Engine) dispatchSharesCreateRoute(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, shareToResponse(sh))
+	writeJSON(w, http.StatusCreated, shareToResponse(sh, recipient.Email))
 }
 
 // dispatchSharesListRoute is GET /_meta/shares' handler (goerp#475) —
@@ -317,10 +326,33 @@ func (e *Engine) dispatchSharesListRoute(w http.ResponseWriter, r *http.Request)
 	}
 
 	out := make([]shareResponse, len(shares))
+	emails := make(map[string]string, len(shares))
 	for i, sh := range shares {
-		out[i] = shareToResponse(&sh)
+		email, seen := emails[sh.SharedWithUserID]
+		if !seen {
+			email = e.recipientEmail(ctx, sh.SharedWithUserID)
+			emails[sh.SharedWithUserID] = email
+		}
+		out[i] = shareToResponse(&sh, email)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// recipientEmail resolves a share recipient's email, or "" when the user
+// record no longer exists or the lookup fails — a share listing degrades to
+// an unnamed recipient rather than failing whole.
+func (e *Engine) recipientEmail(ctx context.Context, userID string) string {
+	u, err := e.userStore.GetByID(ctx, userID)
+	if err != nil {
+		if !errors.Is(err, user.ErrUserNotFound) {
+			log.Warn().Err(err).Str("user_id", userID).Msg("dispatch shares: recipient lookup failed, omitting email")
+		}
+		return ""
+	}
+	if u.Status == user.StatusDeleted {
+		return ""
+	}
+	return u.Email
 }
 
 // dispatchSharesDeleteRoute is DELETE /_meta/shares/{id}'s handler
@@ -607,6 +639,9 @@ type metaSchemaModel struct {
 	Fields      []metaSchemaField `json:"fields"`
 	EnabledOps  []string          `json:"enabled_ops"`
 	Shareable   bool              `json:"shareable"`
+	// SharePermissions lists the access levels .Shareable(perms...) accepts,
+	// in declared order; omitted for a model that isn't shareable.
+	SharePermissions []string `json:"share_permissions,omitempty"`
 }
 
 // metaSchemaField is shell-architecture.md §9's FieldDef.
@@ -675,13 +710,20 @@ func metaSchemaModelFrom(md sdkmodel.ModelDeclaration) metaSchemaModel {
 	for _, op := range md.EnabledOps {
 		ops = append(ops, op.Name)
 	}
+	var sharePermissions []string
+	if md.Shareable {
+		for _, p := range md.SharePerms {
+			sharePermissions = append(sharePermissions, string(p))
+		}
+	}
 	return metaSchemaModel{
-		Name:        md.Name,
-		Label:       md.Label,
-		LabelPlural: md.LabelPlural,
-		Fields:      fields,
-		EnabledOps:  ops,
-		Shareable:   md.Shareable,
+		Name:             md.Name,
+		Label:            md.Label,
+		LabelPlural:      md.LabelPlural,
+		Fields:           fields,
+		EnabledOps:       ops,
+		Shareable:        md.Shareable,
+		SharePermissions: sharePermissions,
 	}
 }
 
