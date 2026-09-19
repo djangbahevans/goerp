@@ -4,8 +4,8 @@ import "fmt"
 
 // Parse parses a domain expression string into an Expr AST. Operator
 // precedence, highest to lowest binding power, follows manifest-spec.md §8
-// "Domain expression operators" exactly: NOT, comparison, LIKE/ILIKE,
-// IS NULL, IN, child_of/parent_of, AND, OR.
+// "Domain expression operators" exactly: comparison, LIKE/ILIKE, IS NULL,
+// IN, child_of/parent_of, NOT, AND, OR.
 func Parse(src string) (Expr, error) {
 	toks, err := newLexer(src).tokenize()
 	if err != nil {
@@ -61,19 +61,33 @@ func (p *parser) parseOr() (Expr, error) {
 }
 
 func (p *parser) parseAnd() (Expr, error) {
-	left, err := p.parseChildOf()
+	left, err := p.parseNot()
 	if err != nil {
 		return nil, err
 	}
 	for p.cur().kind == tokAnd {
 		p.advance()
-		right, err := p.parseChildOf()
+		right, err := p.parseNot()
 		if err != nil {
 			return nil, err
 		}
 		left = BinaryExpr{Op: "AND", Left: left, Right: right}
 	}
 	return left, nil
+}
+
+// NOT binds below every predicate (comparison, IS NULL, IN, ...) and above
+// AND, as in SQL: `NOT record.a IS NULL` is `NOT (record.a IS NULL)`.
+func (p *parser) parseNot() (Expr, error) {
+	if p.cur().kind != tokNot {
+		return p.parseChildOf()
+	}
+	p.advance()
+	operand, err := p.parseNot()
+	if err != nil {
+		return nil, err
+	}
+	return UnaryExpr{Op: "NOT", Operand: operand}, nil
 }
 
 func (p *parser) parseChildOf() (Expr, error) {
@@ -187,7 +201,7 @@ var comparisonOps = map[tokenKind]string{
 }
 
 func (p *parser) parseComparison() (Expr, error) {
-	left, err := p.parseUnary()
+	left, err := p.parsePrimary()
 	if err != nil {
 		return nil, err
 	}
@@ -197,25 +211,12 @@ func (p *parser) parseComparison() (Expr, error) {
 			return left, nil
 		}
 		p.advance()
-		right, err := p.parseUnary()
+		right, err := p.parsePrimary()
 		if err != nil {
 			return nil, err
 		}
 		left = BinaryExpr{Op: op, Left: left, Right: right}
 	}
-}
-
-// NOT — highest precedence, unary prefix.
-func (p *parser) parseUnary() (Expr, error) {
-	if p.cur().kind == tokNot {
-		p.advance()
-		operand, err := p.parseUnary()
-		if err != nil {
-			return nil, err
-		}
-		return UnaryExpr{Op: "NOT", Operand: operand}, nil
-	}
-	return p.parsePrimary()
 }
 
 func (p *parser) parsePrimary() (Expr, error) {

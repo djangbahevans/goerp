@@ -64,6 +64,70 @@ func TestParse_Not(t *testing.T) {
 	}
 }
 
+func TestParse_NotBindsBelowPredicates(t *testing.T) {
+	a := RecordField{Field: "a"}
+	b := RecordField{Field: "b"}
+	eq1 := BinaryExpr{Op: "=", Left: a, Right: Literal{Value: Number("1")}}
+	eq2 := BinaryExpr{Op: "=", Left: b, Right: Literal{Value: Number("2")}}
+	not := func(e Expr) Expr { return UnaryExpr{Op: "NOT", Operand: e} }
+
+	cases := []struct {
+		src  string
+		want Expr
+	}{
+		{"NOT record.a = 1", not(eq1)},
+		{"NOT record.a IS NULL", not(IsNullExpr{Operand: a})},
+		{"NOT record.a IS NOT NULL", not(IsNullExpr{Operand: a, Not: true})},
+		{"NOT record.a IN (1, 2)", not(InExpr{Operand: a, Values: []Expr{Literal{Value: Number("1")}, Literal{Value: Number("2")}}})},
+		{"NOT record.a LIKE 'x%'", not(BinaryExpr{Op: "LIKE", Left: a, Right: Literal{Value: "x%"}})},
+		{"NOT record child_of record.p", not(TreeExpr{Op: "child_of", Target: RecordField{Field: "p"}})},
+		{"NOT NOT record.a = 1", not(not(eq1))},
+		{"NOT record.a = 1 AND record.b = 2", BinaryExpr{Op: "AND", Left: not(eq1), Right: eq2}},
+		{"NOT record.a = 1 OR record.b = 2", BinaryExpr{Op: "OR", Left: not(eq1), Right: eq2}},
+		{"record.b = 2 AND NOT record.a = 1", BinaryExpr{Op: "AND", Left: eq2, Right: not(eq1)}},
+		{"NOT (record.a = 1 OR record.b = 2)", not(BinaryExpr{Op: "OR", Left: eq1, Right: eq2})},
+	}
+	for _, tc := range cases {
+		t.Run(tc.src, func(t *testing.T) {
+			got, err := Parse(tc.src)
+			if err != nil {
+				t.Fatalf("Parse() error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Parse() = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParse_NotRejectedAsPredicateOperand(t *testing.T) {
+	cases := []string{
+		"record.a = NOT record.b",
+		"record.a IN (NOT record.b)",
+		"record.a LIKE NOT record.b",
+	}
+	for _, src := range cases {
+		if _, err := Parse(src); err == nil {
+			t.Errorf("Parse(%q) expected error, got none", src)
+		}
+	}
+}
+
+func TestParse_ParenthesizedNotAsPredicateOperand(t *testing.T) {
+	got, err := Parse("record.a = (NOT record.b)")
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	want := BinaryExpr{
+		Op:    "=",
+		Left:  RecordField{Field: "a"},
+		Right: UnaryExpr{Op: "NOT", Operand: RecordField{Field: "b"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Parse() = %#v, want %#v", got, want)
+	}
+}
+
 func TestParse_IsNull(t *testing.T) {
 	expr, err := Parse("record.deleted_at IS NULL")
 	if err != nil {

@@ -52,6 +52,14 @@ func TestCompileToRLS_Not(t *testing.T) {
 	}
 }
 
+func TestCompileToRLS_NotWrapsWholePredicate(t *testing.T) {
+	got := compileSrc(t, "NOT record.deleted_at IS NULL")
+	want := `(NOT ("deleted_at" IS NULL))`
+	if got != want {
+		t.Fatalf("CompileToRLS() = %s, want %s", got, want)
+	}
+}
+
 func TestCompileToRLS_IsNull(t *testing.T) {
 	got := compileSrc(t, "record.deleted_at IS NULL")
 	want := `("deleted_at" IS NULL)`
