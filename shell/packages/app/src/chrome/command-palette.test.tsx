@@ -17,7 +17,16 @@ import { commandRegistry } from "./command-registry.js";
 import type { Command } from "./command-types.js";
 
 function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
-  const user = { id: "u1", email: "a@b.com", name: null, avatarUrl: null, roles: [], amr: [], mfaVerifiedAt: null };
+  const user = {
+    id: "u1",
+    email: "a@b.com",
+    contactId: null,
+    name: null,
+    avatarUrl: null,
+    roles: [],
+    amr: [],
+    mfaVerifiedAt: null,
+  };
   const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
   return {
     state: { status: "authenticated", user, tenant },

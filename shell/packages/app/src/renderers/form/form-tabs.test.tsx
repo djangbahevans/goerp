@@ -11,6 +11,7 @@ import {
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import { FormTabsRenderer, resolveRecordExpression } from "./form-tabs.js";
 import type { FormTab } from "./form-view-types.js";
@@ -317,5 +318,68 @@ describe("FormTabsRenderer", () => {
     expect(alert.textContent).toContain("kanban");
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("orders_kanban"));
     warnSpy.mockRestore();
+  });
+});
+
+describe("FormTabsRenderer conditions", () => {
+  const tabs: FormTab[] = [
+    { label: "General", type: "fields", sections: [] },
+    { label: "Company", type: "fields", sections: [], condition: "record.type = 'company'" },
+  ];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  it("shows a tab whose condition holds", async () => {
+    await renderTabs(tabs, { type: "company" });
+    expect(screen.getByRole("tab", { name: "Company" })).toBeTruthy();
+  });
+
+  it("hides a tab whose condition is false", async () => {
+    await renderTabs(tabs, { type: "person" });
+    expect(screen.getByRole("tab", { name: "General" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Company" })).toBeNull();
+  });
+
+  it("falls back to the first visible tab when the active tab's condition stops holding", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const Wrapper = permissionWrapper([]);
+    const ui = (record: Row) => (
+      <QueryClientProvider client={client}>
+        <Wrapper>
+          <FormTabsRenderer
+            tabs={[
+              { label: "General", type: "fields", sections: [{ type: "header", label: "G", fields: [] }] },
+              { ...tabs[1], sections: [] } as FormTab,
+            ]}
+            resource="contacts.contact"
+            module="contacts"
+            record={record}
+            recordId="01j"
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui({ type: "company" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Company" }));
+    expect(screen.getByRole("tab", { name: "Company" }).getAttribute("aria-selected")).toBe("true");
+
+    rerender(ui({ type: "person" }));
+    expect(screen.queryByRole("tab", { name: "Company" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "General" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("hides a tab, and reports the location, when its condition is malformed", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderTabs([
+      { label: "Company", type: "fields", sections: [], condition: "record.type ==" },
+      tabs[0] as FormTab,
+    ]);
+    expect(screen.queryByRole("tab", { name: "Company" })).toBeNull();
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain('tab "Company" condition');
   });
 });

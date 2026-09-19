@@ -2,6 +2,7 @@ import { DataTable, type DataTableColumn, EmptyState, SectionCard, type SectionC
 import { modelRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { renderCell } from "../list/column-renderers.js";
 import { ListRenderer } from "../list/list-renderer.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
@@ -192,9 +193,18 @@ function SubListSection({ section, resource, module, record, recordId }: FormSec
   );
 }
 
-// `section.condition` is typed but unevaluated — always renders.
 export function FormSectionRenderer(props: FormSectionRendererProps) {
-  const { section } = props;
+  const { section, resource, record } = props;
+  const conditions = useConditionEvaluator(`${resource} form`);
+  if (
+    !conditions.isVisible(
+      section.condition,
+      `section "${section.name ?? section.label ?? section.field}" condition`,
+      record,
+    )
+  ) {
+    return null;
+  }
   switch (section.type ?? "fields") {
     case "fields":
       return <FieldsSection {...props} />;

@@ -37,6 +37,7 @@ export interface NavigationItem {
   path: string;
   icon: string;
   permission?: string;
+  condition?: string;
   badgeCountRoute?: string;
   // manifest-spec.md §12 NavItem.external: `path` is an external URL
   // opened in a new tab instead of a router link.
@@ -49,6 +50,7 @@ export interface NavigationGroup {
   icon: string;
   module: string;
   permission?: string;
+  condition?: string;
   children: NavigationItem[];
 }
 
@@ -74,15 +76,11 @@ const NavItemDeclarationSchema = v.looseObject({
   view: opt(v.string()),
   route: v.string(),
   permission: opt(v.string()),
+  condition: opt(v.string()),
   badge_count_route: opt(v.string()),
   external: opt(v.boolean()),
-  // default_filters and condition are parsed as part of the manifest
-  // contract but have nowhere to land yet: default_filters isn't applied
-  // by any nav consumer, and no shell-side domain-expression evaluator
-  // exists for condition (the same gap form-tabs.tsx's
-  // resolveRecordExpression and field-renderers.tsx's computed_display
-  // both already note) — an item with a condition is rendered
-  // unconditionally rather than silently hidden or half-implemented.
+  // default_filters is parsed as part of the manifest contract but
+  // isn't applied by any nav consumer yet.
 });
 
 const NavGroupDeclarationSchema = v.looseObject({
@@ -90,6 +88,7 @@ const NavGroupDeclarationSchema = v.looseObject({
   icon: opt(v.string()),
   order: v.number(),
   permission: opt(v.string()),
+  condition: opt(v.string()),
   children: v.array(NavItemDeclarationSchema),
 });
 
@@ -138,12 +137,14 @@ function buildNavTree(schema: MetaSchema): NavigationGroup[] {
           icon: declaration.icon ?? DEFAULT_GROUP_ICON,
           module: moduleName,
           ...(declaration.permission !== undefined ? { permission: declaration.permission } : {}),
+          ...(declaration.condition !== undefined ? { condition: declaration.condition } : {}),
           children: declaration.children.map((item) => ({
             key: `${moduleName}:${slugify(declaration.label)}:${slugify(item.label)}`,
             label: item.label,
             path: expandNavPath(moduleName, item.route),
             icon: item.icon ?? DEFAULT_ITEM_ICON,
             ...(item.permission !== undefined ? { permission: item.permission } : {}),
+            ...(item.condition !== undefined ? { condition: item.condition } : {}),
             ...(item.badge_count_route !== undefined ? { badgeCountRoute: item.badge_count_route } : {}),
             ...(item.external !== undefined ? { external: item.external } : {}),
           })),

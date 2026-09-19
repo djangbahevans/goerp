@@ -9,6 +9,7 @@ const USER: CurrentUser = {
   id: "u1",
   email: "a@b.com",
   name: null,
+  contactId: null,
   avatarUrl: null,
   roles: [],
   amr: [],

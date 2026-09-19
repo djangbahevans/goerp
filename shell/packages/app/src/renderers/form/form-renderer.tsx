@@ -1,4 +1,5 @@
 import { ActionButton, Icon, PageHeader, PageLayout, Skeleton } from "@goerp/sdk/components";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { ListActions } from "../list/list-actions.js";
 import { FormSectionRenderer } from "./form-sections.js";
 import { ShareHeaderAction } from "./form-share-action.js";
@@ -28,6 +29,8 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
     { autoSave: view.autosave ?? false, ...testFormRecordOptions },
   );
 
+  const conditions = useConditionEvaluator(`form "${view.name}"`);
+
   if (isLoading) {
     return (
       <PageLayout>
@@ -53,8 +56,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
     );
   }
 
-  // `readonly_condition` is typed but unevaluated — stays editable.
-  const formReadonly = false;
+  const formReadonly = conditions.isReadonly(view.readonly_condition, "readonly_condition", record);
 
   return (
     <PageLayout>
@@ -66,7 +68,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         actions={
           <>
             {view.workflow_actions && <WorkflowActions resource={view.resource} recordId={recordId} record={record} />}
-            <ListActions actions={view.header_actions ?? []} module={module} />
+            <ListActions actions={view.header_actions ?? []} module={module} record={record} viewName={view.name} />
             <ShareHeaderAction resource={view.resource} recordId={recordId} />
           </>
         }
@@ -123,7 +125,12 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         // does, at a smaller scale — sticky, not scrolled away with a long
         // field list.
         <footer className="sticky bottom-0 flex items-center gap-4 border-t border-border bg-bg p-4">
-          <ActionButton variant="primary" loading={isSaving} disabled={!isDirty} onClick={() => void save()}>
+          <ActionButton
+            variant="primary"
+            loading={isSaving}
+            disabled={!isDirty || formReadonly}
+            onClick={() => void save()}
+          >
             Save
           </ActionButton>
           {saveError && (

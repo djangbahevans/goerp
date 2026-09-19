@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import type { KanbanViewDeclaration } from "./kanban-manifest-types.js";
 import { KanbanRenderer } from "./kanban-renderer.js";
@@ -370,5 +371,66 @@ describe("KanbanRenderer", () => {
     );
 
     expect(await screen.findByText("New")).toBeTruthy();
+  });
+});
+
+describe("KanbanRenderer conditions", () => {
+  beforeEach(() => {
+    resourceMetadataResolveMock.mockResolvedValue(undefined);
+    saveRecordMock.mockResolvedValue({});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  it("evaluates a card action's condition against that card's own record", async () => {
+    useInfiniteListMock.mockReturnValue(
+      pagedResult([
+        { id: "l1", stage: "new", display_name: "Lead 1" },
+        { id: "l2", stage: "won", display_name: "Lead 2" },
+      ]),
+    );
+    await renderKanbanRenderer(
+      {},
+      {
+        ...view,
+        card_actions: [{ label: "Reopen", type: "route", route: "crm.reopen", condition: "record.stage = 'won'" }],
+      },
+    );
+    expect(screen.getAllByText("Reopen")).toHaveLength(1);
+  });
+
+  it("hides a column action whose condition is false, and a view action likewise", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([{ id: "l1", stage: "new", display_name: "Lead 1" }]));
+    await renderKanbanRenderer(
+      {},
+      {
+        ...view,
+        group_values: ["new"],
+        column_actions: [
+          { label: "Archive all", type: "route", route: "crm.archive", condition: "user_has_role('admin')" },
+        ],
+        actions: [
+          { label: "Export leads", type: "url", url: "https://a.example", condition: "user_has_role('admin')" },
+        ],
+      },
+    );
+    expect(screen.queryByText("Archive all")).toBeNull();
+    expect(screen.queryByText("Export leads")).toBeNull();
+  });
+
+  it("hides a card action, without throwing, when its condition is malformed", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    useInfiniteListMock.mockReturnValue(pagedResult([{ id: "l1", stage: "new", display_name: "Lead 1" }]));
+    await renderKanbanRenderer(
+      {},
+      {
+        ...view,
+        card_actions: [{ label: "Reopen", type: "route", route: "crm.reopen", condition: "record.stage ==" }],
+      },
+    );
+    expect(screen.queryByText("Reopen")).toBeNull();
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain("leads_kanban");
   });
 });

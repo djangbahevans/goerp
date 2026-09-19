@@ -16,6 +16,7 @@ const fakeUser = {
   id: "u1",
   email: "jane.doe@example.com",
   name: null,
+  contactId: null,
   avatarUrl: null,
   roles: [],
   amr: [],

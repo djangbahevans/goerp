@@ -121,6 +121,7 @@ type User struct {
 	Email            string
 	Status           Status
 	PasswordHash     *string
+	ContactID        *string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	LockedUntil      *time.Time
@@ -161,7 +162,7 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	})
 }
 
-const userColumns = `id, email, status, password_hash, created_at, updated_at, locked_until, failed_login_count`
+const userColumns = `id, email, status, password_hash, contact_id::text, created_at, updated_at, locked_until, failed_login_count`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -169,7 +170,7 @@ type rowScanner interface {
 
 func scanUser(sc rowScanner) (*User, error) {
 	var u User
-	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount); err != nil {
+	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.ContactID, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount); err != nil {
 		return nil, err
 	}
 	return &u, nil

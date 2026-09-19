@@ -6,6 +6,7 @@ const user: CurrentUser = {
   id: "u1",
   email: "a@example.com",
   name: null,
+  contactId: null,
   avatarUrl: null,
   roles: ["admin"],
   amr: ["pwd"],
