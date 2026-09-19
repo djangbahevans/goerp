@@ -245,7 +245,7 @@ const view: FormViewDeclaration = {
               field: "lifetime_value",
               label: "Lifetime Value",
               type: "computed_display",
-              expression: "orders_total - refunds_total",
+              expression: "record.orders_total - record.refunds_total",
             },
             { field: "custom_widget", label: "Custom Widget", type: "custom" },
           ],
@@ -345,7 +345,8 @@ const RECORD: Row = {
   hq_city: "Accra",
   hq_zip: "00233",
   geo: { lat: 5.6, lng: -0.19 },
-  lifetime_value: "$12,400",
+  orders_total: 15000,
+  refunds_total: 2600,
   custom_widget: "Custom module component not installed",
 };
 
@@ -525,6 +526,7 @@ export const FieldCatalog: Story = {
     expect(canvas.getByText("invoice.pdf")).toBeInTheDocument(); // file_multi
     expect((canvas.getByLabelText("Contract Period start") as HTMLInputElement).value).toBe("2026-01-01");
     expect(canvas.getByDisplayValue("012345678905")).toBeInTheDocument(); // barcode
+    expect(canvas.getByText("12,400")).toBeInTheDocument(); // computed_display
   },
 };
 
@@ -741,5 +743,58 @@ export const MalformedCondition: Story = {
     expect(canvas.queryByLabelText("Job Title")).not.toBeInTheDocument();
     expect(canvas.getByLabelText("Account Code")).toBeDisabled();
     expect(canvas.getByLabelText("Name")).toBeEnabled();
+  },
+};
+
+const computedView: FormViewDeclaration = {
+  ...view,
+  sections: [
+    {
+      type: "fields",
+      label: "Totals",
+      fields: [
+        { field: "orders_total", label: "Orders", type: "number" },
+        { field: "refunds_total", label: "Refunds", type: "number" },
+        {
+          field: "net",
+          label: "Net",
+          type: "computed_display",
+          expression: "record.orders_total - record.refunds_total",
+        },
+        {
+          field: "refund_rate",
+          label: "Refund rate",
+          type: "computed_display",
+          expression: "PERCENT(record.refunds_total / record.orders_total, 1)",
+        },
+      ],
+    },
+  ],
+  tabs: [],
+};
+
+function computedClient(): QueryClient {
+  const client = seededClient();
+  client.setQueryData(recordQueryKey(view.resource, RECORD_ID), { orders_total: 15000, refunds_total: 2600 });
+  return client;
+}
+
+export const ComputedDisplay: Story = {
+  name: "computed_display: updates live as a referenced field changes, and shows a failure for an empty operand",
+  args: { view: computedView },
+  decorators: [withFormProviders(computedClient())],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByText("12,400")).toBeInTheDocument());
+    expect(canvas.getByText("17.3%")).toBeInTheDocument();
+
+    const refunds = canvas.getByLabelText("Refunds");
+    await userEvent.clear(refunds);
+    await waitFor(() => expect(canvas.getAllByText("Can't compute")).toHaveLength(2));
+
+    await userEvent.type(refunds, "5000");
+    await waitFor(() => expect(canvas.getByText("10,000")).toBeInTheDocument());
+    expect(canvas.getByText("33.3%")).toBeInTheDocument();
+    expect(canvas.queryByText("Can't compute")).not.toBeInTheDocument();
   },
 };

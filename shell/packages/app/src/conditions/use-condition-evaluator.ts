@@ -1,5 +1,5 @@
 import { AuthContext, PermissionContext } from "@goerp/sdk/auth";
-import { evaluateCondition, type UserBindings } from "@goerp/sdk/domain";
+import { evaluateCondition, evaluateValue, type UserBindings } from "@goerp/sdk/domain";
 import { useContext, useMemo } from "react";
 
 type RecordState = Readonly<Record<string, unknown>>;
@@ -7,11 +7,15 @@ type RecordState = Readonly<Record<string, unknown>>;
 const EMPTY_RECORD: RecordState = Object.freeze({});
 const NO_PERMISSIONS: ReadonlySet<string> = new Set();
 
+export type ComputedValue = { ok: true; value: number | string } | { ok: false; message: string };
+
 export interface ConditionEvaluator {
   // No condition shows the element; a malformed or unevaluable one hides it.
   isVisible(condition: string | undefined, location: string, record?: RecordState): boolean;
   // No condition leaves the element editable; a malformed or unevaluable one locks it.
   isReadonly(condition: string | undefined, location: string, record?: RecordState): boolean;
+  // A malformed or unevaluable expression is a failure, never a blank or a guessed value; only a malformed one is reported to the console.
+  computeValue(expression: string, location: string, record?: RecordState): ComputedValue;
 }
 
 const reported = new Set<string>();
@@ -21,11 +25,11 @@ export function resetReportedConditionErrors(): void {
 }
 
 // Conditions re-evaluate on every keystroke; each broken expression is reported once.
-function reportOnce(scope: string, location: string, condition: string, message: string): void {
-  const key = JSON.stringify([scope, location, condition]);
+function reportOnce(scope: string, location: string, source: string, message: string): void {
+  const key = JSON.stringify([scope, location, source]);
   if (reported.has(key)) return;
   reported.add(key);
-  console.error(`${scope} › ${location}: ${message} (condition: ${condition})`);
+  console.error(`${scope} › ${location}: ${message} (expression: ${source})`);
 }
 
 function useUserBindings(): UserBindings {
@@ -65,6 +69,13 @@ export function useConditionEvaluator(scope: string): ConditionEvaluator {
     return {
       isVisible: (condition, location, record = EMPTY_RECORD) => evaluate(condition, location, record, false) ?? true,
       isReadonly: (condition, location, record = EMPTY_RECORD) => evaluate(condition, location, record, true) ?? false,
+      computeValue(expression, location, record = EMPTY_RECORD) {
+        const result = evaluateValue(expression, { record });
+        if (result.ok) return result;
+        // An evaluation failure (an empty operand, a division by zero) is data state the field itself shows.
+        if (result.error.phase === "parse") reportOnce(scope, location, expression, result.error.message);
+        return { ok: false, message: result.error.message };
+      },
     };
   }, [scope, user]);
 }

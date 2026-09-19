@@ -29,6 +29,7 @@ import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions, useAc
 import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import type { FieldType, FormField } from "./form-view-types.js";
 
@@ -424,18 +425,52 @@ function BarcodeInput({
   );
 }
 
+// ROUND allows up to 15 digits, so the default 3-digit cap would truncate a
+// legitimately rounded value.
+const COMPUTED_NUMBER_FORMAT = new Intl.NumberFormat(undefined, { maximumFractionDigits: 15 });
+
+// Without an `expression` the stored value is shown as-is.
+function ComputedDisplayField({
+  field,
+  record,
+  fallback,
+  scope,
+}: {
+  field: FormField;
+  record: Row;
+  fallback: string;
+  scope: string;
+}) {
+  const conditions = useConditionEvaluator(scope);
+  if (field.expression === undefined) return <span>{fallback}</span>;
+
+  const result = conditions.computeValue(field.expression, `field "${field.field}" expression`, record);
+  if (!result.ok) {
+    return (
+      <span className="text-sm text-danger" title={result.message}>
+        Can't compute<span className="sr-only">: {result.message}</span>
+      </span>
+    );
+  }
+  // `+ 0` folds -0 into 0, which Intl.NumberFormat would otherwise print as "-0".
+  const text = typeof result.value === "number" ? COMPUTED_NUMBER_FORMAT.format(result.value + 0) : result.value;
+  return <span className="font-mono">{text}</span>;
+}
+
 export interface FieldInputProps {
   field: FormField;
   value: unknown;
   onChange: (value: unknown) => void;
   record: Row;
+  // Names the declaring form in a malformed-expression console report.
+  resource?: string;
   disabled?: boolean;
   // FormFieldRow's label target (goerp#698) — omitted for types with no
   // single primary control (compound, self-labeled group/canvas, none).
   id?: string | undefined;
 }
 
-export function FieldInput({ field, value, onChange, record, disabled = false, id }: FieldInputProps) {
+export function FieldInput({ field, value, onChange, record, resource, disabled = false, id }: FieldInputProps) {
   const type = field.type ?? "text";
   const stringValue = typeof value === "string" ? value : value == null ? "" : String(value);
   const selectValue: string | string[] = Array.isArray(value) ? value.map(String) : stringValue;
@@ -911,8 +946,14 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       return <p>{field.label_text}</p>;
 
     case "computed_display":
-      // `expression` isn't evaluated yet (goerp#751).
-      return <span>{stringValue}</span>;
+      return (
+        <ComputedDisplayField
+          field={field}
+          record={record}
+          fallback={stringValue}
+          scope={resource === undefined ? "form" : `${resource} form`}
+        />
+      );
 
     case "custom": {
       const Component = componentRegistry.tryResolve(field.component);
