@@ -240,14 +240,34 @@ describe("SharePanel", () => {
       expect(grant).not.toHaveBeenCalled();
     });
 
-    it("refuses an email the record is already shared with, ignoring case", () => {
+    it("says an existing recipient's access and expiry will be replaced, before submitting", () => {
+      const expiresAt = "2026-10-01T22:59:59.999Z";
+      useSharesMock.mockReturnValue(handle({ shares: [{ ...ada, expiresAt }] }));
+      renderPanel();
+      expect(screen.queryByText(/Already shared/)).toBeNull();
+      fill("ADA@example.com");
+      const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(expiresAt));
+      expect(
+        screen.getByText(
+          `Already shared: Can view, expires ${formatted}. Sharing again replaces their access and expiry.`,
+        ),
+      ).toBeTruthy();
+      fill("bo@example.com");
+      expect(screen.queryByText(/Already shared/)).toBeNull();
+    });
+
+    it("updates an existing recipient's access instead of refusing, ignoring case, and announces the update", async () => {
       const grant = vi.fn(async () => {});
       useSharesMock.mockReturnValue(handle({ grant, shares: [ada] }));
       renderPanel();
       fill("ADA@example.com");
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Access" })).getByLabelText("Can edit"));
       fireEvent.click(screen.getByRole("button", { name: "Share" }));
-      expect(screen.getByText("Already shared with this user. Revoke their access first to change it.")).toBeTruthy();
-      expect(grant).not.toHaveBeenCalled();
+
+      await waitFor(() =>
+        expect(grant).toHaveBeenCalledWith({ userEmail: "ADA@example.com", permission: "write", expiresAt: undefined }),
+      );
+      await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Updated access for ADA@example.com."));
     });
 
     it("shows recipient_not_found on the email field", async () => {
