@@ -22,6 +22,7 @@ describe("fetchCurrentSession", () => {
         user: {
           id: "u1",
           email: "a@example.com",
+          contact_id: "c1",
           name: "Ada Lovelace",
           avatar_url: null,
           roles: ["admin"],
@@ -40,6 +41,7 @@ describe("fetchCurrentSession", () => {
         id: "u1",
         email: "a@example.com",
         name: "Ada Lovelace",
+        contactId: "c1",
         avatarUrl: null,
         roles: ["admin"],
         amr: ["pwd"],

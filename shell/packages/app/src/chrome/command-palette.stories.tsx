@@ -12,6 +12,7 @@ const fakeUser = {
   id: "u1",
   email: "demo@goerp.dev",
   name: null,
+  contactId: null,
   avatarUrl: null,
   roles: [],
   amr: [],

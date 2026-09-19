@@ -269,6 +269,9 @@ func TestServeHTTP_ValidTokenReturnsUserAndTenant(t *testing.T) {
 	if len(resp.User.Roles) == 0 {
 		t.Error("user.roles is empty, want the fixture's granted admin role")
 	}
+	if resp.User.ContactID != nil {
+		t.Errorf("user.contact_id = %v, want nil (fixture user has no linked contact)", *resp.User.ContactID)
+	}
 	if resp.User.Name != nil {
 		t.Errorf("user.name = %v, want nil (fixture user has no user_profiles row)", *resp.User.Name)
 	}
@@ -280,6 +283,28 @@ func TestServeHTTP_ValidTokenReturnsUserAndTenant(t *testing.T) {
 	}
 	if resp.Tenant.Slug != f.tenantSlug {
 		t.Errorf("tenant.slug = %q, want %q", resp.Tenant.Slug, f.tenantSlug)
+	}
+}
+
+func TestServeHTTP_ReturnsContactIDWhenUserIsLinkedToContact(t *testing.T) {
+	f := newFixture(t)
+	const contactID = "0198a3c2-7d4e-7c1a-9f3b-5e2d1a4b6c80"
+	if _, err := f.conn.Exec(`UPDATE system.users SET contact_id = $1 WHERE id = $2`, contactID, f.userID); err != nil {
+		t.Fatalf("link fixture user to contact: %v", err)
+	}
+	accessToken := f.issueAccessToken(t)
+
+	rec := f.doMe(t, f.domain, accessToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.User.ContactID == nil || *resp.User.ContactID != contactID {
+		t.Errorf("user.contact_id = %v, want %q", resp.User.ContactID, contactID)
 	}
 }
 

@@ -86,6 +86,7 @@ type meResponse struct {
 type meUser struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
+	ContactID     *string    `json:"contact_id"`
 	Name          *string    `json:"name"`
 	AvatarURL     *string    `json:"avatar_url"`
 	Roles         []string   `json:"roles"`
@@ -166,6 +167,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		User: meUser{
 			ID:            authCtx.UserID,
 			Email:         u.Email,
+			ContactID:     u.ContactID,
 			Name:          name,
 			AvatarURL:     avatarURL,
 			Roles:         authCtx.RolesLive,

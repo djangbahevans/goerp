@@ -1,6 +1,7 @@
 export interface CurrentUser {
   id: string;
   email: string;
+  contactId: string | null;
   name: string | null;
   avatarUrl: string | null;
   roles: string[];
