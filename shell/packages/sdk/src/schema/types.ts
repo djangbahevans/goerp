@@ -40,9 +40,7 @@ export type RouteSchema = v.InferOutput<typeof RouteSchemaSchema>;
 // A .Workflow()-declared transition off a Selection field — from/to/
 // action_name always present, permission/condition present only when the
 // transition declared them. condition is the raw domain-expression
-// string, carried through unevaluated (goerp#829's shell-side
-// interpreter doesn't exist yet) — same "typed but unevaluated" posture
-// as ListAction/FormSection's own `condition` field.
+// string, evaluated by the shell against the form's record.
 export const WorkflowTransitionSchema = v.looseObject({
   from: v.string(),
   to: v.string(),

@@ -9,8 +9,9 @@ import {
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import { ListActions } from "./list-actions.js";
-import type { ListAction } from "./list-view-types.js";
+import type { ListAction, Row } from "./list-view-types.js";
 
 const { useActionMock, useExportMock, resolveViewPathMock, actionRegistryResolveMock, dispatchMock, toastErrorMock } =
   vi.hoisted(() => ({
@@ -74,7 +75,7 @@ function permissionWrapper(permissions: string[]) {
 async function renderActions(
   actions: ListAction[],
   Wrapper: ({ children }: { children: ReactNode }) => ReactNode,
-  props: { embedded?: boolean; showCreateAction?: boolean } = {},
+  props: { embedded?: boolean; showCreateAction?: boolean; record?: Row; viewName?: string } = {},
 ) {
   const rootRoute = createRootRoute();
   const indexRoute = createRoute({
@@ -494,5 +495,108 @@ describe("ListActions", () => {
     expect(() => render(<ListActions actions={actions} module="contacts" />)).toThrow(
       /must be used within a PermissionProvider/,
     );
+  });
+});
+
+describe("ListActions conditions", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  const confirm: ListAction = {
+    label: "Confirm",
+    type: "route",
+    route: "sales.confirm",
+    condition: "record.state = 'draft'",
+  };
+
+  it("shows an action whose condition holds against the record", async () => {
+    await renderActions([confirm], fullAccess, { record: { state: "draft" } });
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeTruthy();
+  });
+
+  it("hides an action whose condition is false against the record", async () => {
+    await renderActions([confirm], fullAccess, { record: { state: "done" } });
+    expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  });
+
+  it("hides a record-bound action when there is no record, as on a list header", async () => {
+    await renderActions([confirm], fullAccess);
+    expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  });
+
+  it("evaluates a permission-based condition against the permission context", async () => {
+    const actions: ListAction[] = [
+      {
+        label: "Allowed",
+        type: "url",
+        url: "https://a.example",
+        condition: "user_has_permission('contacts:contact:write')",
+      },
+      {
+        label: "Denied",
+        type: "url",
+        url: "https://b.example",
+        condition: "user_has_permission('contacts:contact:delete')",
+      },
+    ];
+    await renderActions(actions, fullAccess);
+    expect(screen.getByText("Allowed")).toBeTruthy();
+    expect(screen.queryByText("Denied")).toBeNull();
+  });
+
+  it("hides a menu's items individually by their own condition", async () => {
+    const actions: ListAction[] = [
+      {
+        label: "More",
+        type: "menu",
+        items: [
+          { label: "Shown", type: "route", route: "contacts.a", condition: "record.state = 'draft'" },
+          { label: "Concealed", type: "route", route: "contacts.b", condition: "record.state = 'done'" },
+        ],
+      },
+    ];
+    await renderActions(actions, fullAccess, { record: { state: "draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getByText("Shown")).toBeTruthy();
+    expect(screen.queryByText("Concealed")).toBeNull();
+  });
+
+  it("drops a separator stranded by a hidden item, rather than leaving it dangling", async () => {
+    const actions: ListAction[] = [
+      {
+        label: "More",
+        type: "menu",
+        items: [
+          { label: "Shown", type: "route", route: "contacts.a" },
+          { type: "separator" },
+          { label: "Concealed", type: "route", route: "contacts.b", condition: "record.state = 'done'" },
+        ],
+      },
+    ];
+    await renderActions(actions, fullAccess, { record: { state: "draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getByText("Shown")).toBeTruthy();
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+
+  it("hides a menu action itself by its own condition", async () => {
+    await renderActions([{ label: "More", type: "menu", items: [], condition: "record.state = 'done'" }], fullAccess, {
+      record: { state: "draft" },
+    });
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  });
+
+  it("hides an action, and reports the view and action, when its condition is malformed", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderActions([{ ...confirm, condition: "record.state ==" }], fullAccess, {
+      record: { state: "draft" },
+      viewName: "orders_form",
+    });
+    expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+    const message = String(consoleError.mock.calls[0]?.[0]);
+    expect(message).toContain("orders_form");
+    expect(message).toContain('action "Confirm" condition');
   });
 });

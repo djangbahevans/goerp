@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import { FormFieldRow } from "./form-fields.js";
 import type { FormField } from "./form-view-types.js";
 
@@ -427,5 +428,87 @@ describe("FormFieldRow", () => {
       );
       expect(screen.getByText("Priority").closest("label")?.querySelector("label")).toBeNull();
     });
+  });
+});
+
+describe("FormFieldRow conditions", () => {
+  const Wrapper = withFieldAccess({ email: { read: true, write: true } });
+  const conditional: FormField = { ...field, condition: "record.type = 'person'" };
+
+  function renderRow(props: { field: FormField; record?: Record<string, unknown>; formReadonly?: boolean }) {
+    return (
+      <Wrapper>
+        <FormFieldRow
+          field={props.field}
+          resource="contacts.contact"
+          record={props.record ?? { email: "a@b.com" }}
+          onChange={vi.fn()}
+          formReadonly={props.formReadonly ?? false}
+        />
+      </Wrapper>
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  it("renders the field while its condition holds and hides it when it stops holding", () => {
+    const { rerender } = render(renderRow({ field: conditional, record: { type: "person", email: "a@b.com" } }));
+    expect(screen.getByDisplayValue("a@b.com")).toBeTruthy();
+
+    rerender(renderRow({ field: conditional, record: { type: "company", email: "a@b.com" } }));
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+
+    rerender(renderRow({ field: conditional, record: { type: "person", email: "a@b.com" } }));
+    expect(screen.getByDisplayValue("a@b.com")).toBeTruthy();
+  });
+
+  it("hides a separator whose condition is false", () => {
+    const { container } = render(
+      renderRow({ field: { field: "sep", type: "separator", condition: "record.type = 'person'" }, record: {} }),
+    );
+    expect(container.querySelector("hr")).toBeNull();
+  });
+
+  it("locks only the field whose readonly_condition holds", () => {
+    const readonlyWhenDone: FormField = { ...field, readonly_condition: "record.state = 'done'" };
+    const { rerender } = render(renderRow({ field: readonlyWhenDone, record: { state: "draft", email: "a@b.com" } }));
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(false);
+
+    rerender(renderRow({ field: readonlyWhenDone, record: { state: "done", email: "a@b.com" } }));
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("does not call onChange for a field locked by its readonly_condition", () => {
+    const onChange = vi.fn();
+    render(
+      <Wrapper>
+        <FormFieldRow
+          field={{ ...field, readonly_condition: "record.state = 'done'" }}
+          resource="contacts.contact"
+          record={{ state: "done", email: "a@b.com" }}
+          onChange={onChange}
+          formReadonly={false}
+        />
+      </Wrapper>,
+    );
+    fireEvent.change(screen.getByDisplayValue("a@b.com"), { target: { value: "x@y.com" } });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("hides a field and reports it, without throwing, when its condition is malformed", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { container } = render(renderRow({ field: { ...field, condition: "record.type ==" } }));
+    expect(container.textContent).toBe("");
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain('field "email" condition');
+  });
+
+  it("locks a field, without throwing, when its readonly_condition is malformed", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(renderRow({ field: { ...field, readonly_condition: "record.state ==" } }));
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
   });
 });

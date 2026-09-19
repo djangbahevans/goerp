@@ -375,6 +375,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
         <ListActions
           actions={view.actions ?? []}
           module={module}
+          viewName={view.name}
           {...(embedded !== undefined ? { embedded } : {})}
           {...(showCreateAction !== undefined ? { showCreateAction } : {})}
         />

@@ -14,8 +14,9 @@ import { actionRegistry, dispatch, splitPathAndBody, useAction, useExport } from
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { mapActionConfirm } from "../shared/map-action-confirm.js";
-import type { ListAction } from "./list-view-types.js";
+import type { ListAction, Row } from "./list-view-types.js";
 
 // export/import/custom action types still aren't rendered.
 
@@ -169,6 +170,14 @@ function UrlActionButton({ action }: { action: ListAction }) {
 // filtered out of menuItems below rather than left as a dead click.
 const MENU_ITEM_TYPES = new Set(["route", "report", "url", "create", "separator"]);
 
+// Hiding items by condition can strand a separator at either end or leave two adjacent.
+function trimSeparators(items: ActionMenuItem[]): ActionMenuItem[] {
+  return items.filter(
+    (item, index) =>
+      item.type !== "separator" || (index > 0 && index < items.length - 1 && items[index - 1]?.type !== "separator"),
+  );
+}
+
 // Fires one menu item imperatively rather than via useAction/useExport — a
 // menu's items are a runtime-sized array, so a fixed hook-per-item set
 // isn't possible the way it is for the single static action each
@@ -210,7 +219,15 @@ async function fireHeaderMenuItem(
   }
 }
 
-function MenuActionButton({ action, module }: { action: ListAction; module: string }) {
+function MenuActionButton({
+  action,
+  module,
+  isVisible,
+}: {
+  action: ListAction;
+  module: string;
+  isVisible: (action: ListAction) => boolean;
+}) {
   const allowed = useOptionalPermission(action.permission);
   const navigate = useNavigate();
   if (!allowed) return null;
@@ -219,7 +236,7 @@ function MenuActionButton({ action, module }: { action: ListAction; module: stri
   // just maps ListAction's snake_case wire shape into it and fires for
   // real once ActionMenu calls back with (or without) a collected input.
   const menuItems: ActionMenuItem[] = (action.items ?? [])
-    .filter((item) => MENU_ITEM_TYPES.has(item.type))
+    .filter((item) => MENU_ITEM_TYPES.has(item.type) && isVisible(item))
     .map((item) =>
       item.type === "separator"
         ? { type: "separator" }
@@ -241,7 +258,7 @@ function MenuActionButton({ action, module }: { action: ListAction; module: stri
   return (
     <ActionMenu
       label={action.label ?? ""}
-      items={menuItems}
+      items={trimSeparators(menuItems)}
       trigger={({ ref, open, disabled, onClick, onKeyDown }) => (
         <button
           ref={ref}
@@ -267,11 +284,16 @@ export interface ListActionsProps {
   // view-system.md's suppressed-actions contract: hides "create" when embedded, unless show_create_action.
   embedded?: boolean;
   showCreateAction?: boolean;
+  record?: Row;
+  viewName?: string;
 }
 
-export function ListActions({ actions, module, embedded, showCreateAction }: ListActionsProps) {
+export function ListActions({ actions, module, embedded, showCreateAction, record, viewName }: ListActionsProps) {
+  const conditions = useConditionEvaluator(viewName ?? "actions");
+  const isVisible = (action: ListAction) =>
+    conditions.isVisible(action.condition, `action "${action.label ?? action.type}" condition`, record);
   const suppressCreate = embedded && !showCreateAction;
-  const visibleActions = suppressCreate ? actions.filter((action) => action.type !== "create") : actions;
+  const visibleActions = actions.filter((action) => !(suppressCreate && action.type === "create") && isVisible(action));
 
   return (
     <div className="flex items-center gap-2">
@@ -286,7 +308,9 @@ export function ListActions({ actions, module, embedded, showCreateAction }: Lis
           case "url":
             return <UrlActionButton key={action.label ?? index} action={action} />;
           case "menu":
-            return <MenuActionButton key={action.label ?? index} action={action} module={module} />;
+            return (
+              <MenuActionButton key={action.label ?? index} action={action} module={module} isVisible={isVisible} />
+            );
           default:
             return null;
         }

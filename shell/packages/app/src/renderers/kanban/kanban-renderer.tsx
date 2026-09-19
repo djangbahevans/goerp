@@ -6,10 +6,11 @@ import { componentRegistry, resourceMetadataRegistry } from "@goerp/sdk/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { fileUrlOf } from "../list/column-renderers.js";
 import { ListActions } from "../list/list-actions.js";
 import { ListFilters } from "../list/list-filters.js";
-import type { Row } from "../list/list-view-types.js";
+import type { ListAction, Row } from "../list/list-view-types.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
 import { resolveKanbanActionItems, useKanbanRouteAction } from "./kanban-actions.js";
 import { KanbanBoard } from "./kanban-board.js";
@@ -39,6 +40,7 @@ export function KanbanRenderer({
   showCreateAction,
 }: KanbanRendererProps) {
   const listState = useListState(embedded, undefined);
+  const conditions = useConditionEvaluator(view.name);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const routeAction = useKanbanRouteAction();
@@ -175,6 +177,10 @@ export function KanbanRenderer({
   const cardActions = filterCreate(view.card_actions);
   const columnActions = filterCreate(view.column_actions);
   const CustomCardComponent = componentRegistry.tryResolve(view.card_component);
+  const visibleActions = (actions: ListAction[], record?: Row) =>
+    actions.filter((action) =>
+      conditions.isVisible(action.condition, `action "${action.label ?? action.type}" condition`, record),
+    );
 
   function buildCard(row: Row): KanbanCardData {
     const id = String(row.id ?? "");
@@ -192,7 +198,7 @@ export function KanbanRenderer({
       // No separate field names the avatar's owner, so it reuses the title.
       ...(avatarField ? { avatar: { name: title, avatarUrl: fileUrlOf(row[avatarField]) } } : {}),
       ...(cardActions.length > 0
-        ? { actions: resolveKanbanActionItems(cardActions, module, navigate, routeAction, id) }
+        ? { actions: resolveKanbanActionItems(visibleActions(cardActions, row), module, navigate, routeAction, id) }
         : {}),
       ...(CustomCardComponent ? { render: () => <CustomCardComponent record={row} /> } : {}),
     };
@@ -209,7 +215,7 @@ export function KanbanRenderer({
       // hasNextPage also counts: one flat server cursor spans every column.
       hasMore: bucket.length > revealedCount || hasNextPage,
       ...(columnActions.length > 0
-        ? { actions: resolveKanbanActionItems(columnActions, module, navigate, routeAction) }
+        ? { actions: resolveKanbanActionItems(visibleActions(columnActions), module, navigate, routeAction) }
         : {}),
     };
   });
@@ -224,6 +230,7 @@ export function KanbanRenderer({
           <ListActions
             actions={viewActions}
             module={module}
+            viewName={view.name}
             {...(embedded !== undefined ? { embedded } : {})}
             {...(showCreateAction !== undefined ? { showCreateAction } : {})}
           />

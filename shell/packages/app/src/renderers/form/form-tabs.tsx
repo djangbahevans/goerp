@@ -3,14 +3,14 @@ import { TabPanel, Tabs } from "@goerp/sdk/components";
 import { filterViewByCapability, resourceRegistry, viewDeclarationRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { useContext, useState } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import { ViewDispatch } from "../view-dispatch.js";
 import { FormSectionRenderer } from "./form-sections.js";
 import type { FormTab } from "./form-view-types.js";
 
-// A literal, or a `record.{field}` reference — not the full (unfiled)
-// domain expression language `condition` needs; a "view" tab can't
-// function at all without at least this much.
+// A literal, or a `record.{field}` reference — a tab `filter` value isn't a
+// domain expression, so nothing richer is interpreted here.
 export function resolveRecordExpression(expr: unknown, record: Row): unknown {
   if (typeof expr !== "string") return expr;
   const match = /^record\.(\w+)$/.exec(expr);
@@ -163,12 +163,17 @@ export function FormTabsRenderer({
   formReadonly,
 }: FormTabsRendererProps) {
   const permissions = useContext(PermissionContext);
+  const conditions = useConditionEvaluator(`${resource} form`);
   if (!permissions) {
     throw new Error("FormTabsRenderer must be used within a PermissionProvider");
   }
   // Filtered once: a restricted tab can neither show a button nor become
   // active (hiding just the button would still let a stale activeId render it).
-  const visibleTabs = tabs.filter((tab) => !tab.permission || permissions.check(tab.permission));
+  const visibleTabs = tabs.filter(
+    (tab) =>
+      (!tab.permission || permissions.check(tab.permission)) &&
+      conditions.isVisible(tab.condition, `tab "${tab.label}" condition`, record),
+  );
 
   // No stable id on FormTab — label is what key/TabPanel id already used.
   const [activeId, setActiveId] = useState<string | undefined>(() => visibleTabs[0]?.label);

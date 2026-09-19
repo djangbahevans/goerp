@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import { WorkflowActions } from "./form-workflow-actions.js";
 
 const { useActionMock, resolveModelMock } = vi.hoisted(() => ({
@@ -148,5 +149,45 @@ describe("WorkflowActions", () => {
       expect.objectContaining({ invalidates: expect.any(Array) }),
     );
     expect(mutate).toHaveBeenCalledWith("01j");
+  });
+});
+
+describe("WorkflowActions conditions", () => {
+  // A second, unconditional draft transition proves the model resolved and rendered before an absence is asserted.
+  function modelWithCondition(condition: string): ModelDef {
+    const model = orderModel();
+    const workflow = model.fields[0]?.workflow;
+    if (!workflow) throw new Error("orderModel has no workflow");
+    const [confirm] = workflow.transitions;
+    if (confirm) confirm.condition = condition;
+    workflow.transitions.push({ from: "draft", to: "cancelled", action_name: "cancel" });
+    return model;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  it("renders a legal transition whose condition holds against the record", async () => {
+    resolveModelMock.mockResolvedValue(modelWithCondition("record.amount_total > 0"));
+    await renderWorkflowActions(fullAccess, { recordId: "01j", record: { state: "draft", amount_total: 10 } });
+    expect(await screen.findByRole("button", { name: "Confirm" })).toBeTruthy();
+  });
+
+  it("omits a legal transition whose condition is false", async () => {
+    resolveModelMock.mockResolvedValue(modelWithCondition("record.amount_total > 0"));
+    await renderWorkflowActions(fullAccess, { recordId: "01j", record: { state: "draft", amount_total: 0 } });
+    expect(await screen.findByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  });
+
+  it("omits a transition, and reports the location, when its condition is malformed", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    resolveModelMock.mockResolvedValue(modelWithCondition("record.amount_total >"));
+    await renderWorkflowActions(fullAccess, { recordId: "01j", record: { state: "draft", amount_total: 10 } });
+    expect(await screen.findByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain('workflow transition "confirm" condition');
   });
 });

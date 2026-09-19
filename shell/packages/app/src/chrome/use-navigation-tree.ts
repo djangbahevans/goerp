@@ -1,6 +1,7 @@
 import { PermissionContext } from "@goerp/sdk/auth";
 import { ViewRegistryContext } from "@goerp/sdk/schema";
 import { useContext } from "react";
+import { useConditionEvaluator } from "../conditions/use-condition-evaluator.js";
 import type { NavigationGroup } from "./navigation-types.js";
 
 // `tree` defaults to `viewRegistry.navigationTree` (built by
@@ -16,16 +17,26 @@ export function useNavigationTree(tree?: NavigationGroup[]): NavigationGroup[] {
   const sourceTree = tree ?? viewRegistry?.navigationTree ?? [];
 
   const permissionContext = useContext(PermissionContext);
+  const conditions = useConditionEvaluator("navigation");
   if (!permissionContext) {
     throw new Error("useNavigationTree must be used within a PermissionProvider");
   }
   const { check, moduleEnabled } = permissionContext;
 
   return sourceTree
-    .filter((group) => moduleEnabled(group.module) && (!group.permission || check(group.permission)))
+    .filter(
+      (group) =>
+        moduleEnabled(group.module) &&
+        (!group.permission || check(group.permission)) &&
+        conditions.isVisible(group.condition, `group "${group.label}" condition`),
+    )
     .map((group) => ({
       ...group,
-      children: group.children.filter((item) => !item.permission || check(item.permission)),
+      children: group.children.filter(
+        (item) =>
+          (!item.permission || check(item.permission)) &&
+          conditions.isVisible(item.condition, `item "${item.label}" condition`),
+      ),
     }))
     .filter((group) => group.children.length > 0);
 }

@@ -619,3 +619,127 @@ export const AutosaveSaving: Story = {
     await waitFor(() => expect(canvas.getByRole("status")).toHaveTextContent("Saving…"));
   },
 };
+
+const conditionalView: FormViewDeclaration = {
+  ...view,
+  sections: [
+    {
+      type: "header",
+      fields: [
+        { field: "is_company", label: "Company", type: "boolean" },
+        { field: "name", label: "Name", type: "text" },
+      ],
+    },
+    {
+      type: "fields",
+      label: "Identity",
+      fields: [
+        { field: "job_title", label: "Job Title", type: "text", condition: "record.is_company = false" },
+        { field: "vat_number", label: "VAT Number", type: "text", condition: "record.is_company = true" },
+        { field: "account_code", label: "Account Code", type: "text", readonly_condition: "record.is_company = true" },
+      ],
+    },
+    {
+      type: "fields",
+      label: "Company Details",
+      condition: "record.is_company = true",
+      fields: [{ field: "employee_count", label: "Employees", type: "number" }],
+    },
+  ],
+  tabs: [
+    {
+      label: "Company Billing",
+      type: "fields",
+      condition: "record.is_company = true",
+      sections: [{ type: "fields", fields: [{ field: "billing_email", label: "Billing Email", type: "email" }] }],
+    },
+    { label: "Notes", type: "fields", sections: [{ type: "fields", fields: [{ field: "notes", label: "Notes" }] }] },
+  ],
+};
+
+function conditionalClient(): QueryClient {
+  const client = seededClient();
+  client.setQueryData(recordQueryKey(view.resource, RECORD_ID), {
+    is_company: false,
+    name: "Acme Corp",
+    job_title: "Buyer",
+    vat_number: "GH-1234",
+    account_code: "A-100",
+    employee_count: 12,
+    billing_email: "billing@acme.example",
+    notes: "Key account",
+  });
+  return client;
+}
+
+export const ConditionalVisibilityAndReadonly: Story = {
+  name: "conditions: a field, a section, a tab and read-only state follow the record",
+  args: { view: conditionalView },
+  decorators: [withFormProviders(conditionalClient())],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
+
+    // A person: person-only field shown, company-only field/section/tab hidden, account code editable.
+    expect(canvas.getByLabelText("Job Title")).toBeInTheDocument();
+    expect(canvas.queryByLabelText("VAT Number")).not.toBeInTheDocument();
+    expect(canvas.queryByRole("heading", { name: "Company Details" })).not.toBeInTheDocument();
+    expect(canvas.queryByRole("tab", { name: "Company Billing" })).not.toBeInTheDocument();
+    expect(canvas.getByLabelText("Account Code")).toBeEnabled();
+
+    // Flipping the record to a company flips every one of them.
+    await userEvent.click(canvas.getByLabelText("Company"));
+    expect(canvas.queryByLabelText("Job Title")).not.toBeInTheDocument();
+    expect(canvas.getByLabelText("VAT Number")).toBeInTheDocument();
+    expect(canvas.getByRole("heading", { name: "Company Details" })).toBeInTheDocument();
+    expect(canvas.getByRole("tab", { name: "Company Billing" })).toBeInTheDocument();
+    expect(canvas.getByLabelText("Account Code")).toBeDisabled();
+
+    // And back again.
+    await userEvent.click(canvas.getByLabelText("Company"));
+    expect(canvas.getByLabelText("Job Title")).toBeInTheDocument();
+    expect(canvas.queryByRole("tab", { name: "Company Billing" })).not.toBeInTheDocument();
+    expect(canvas.getByLabelText("Account Code")).toBeEnabled();
+  },
+};
+
+export const FormReadonlyCondition: Story = {
+  name: "conditions: a form-level readonly_condition locks every field and Save",
+  args: { view: { ...conditionalView, readonly_condition: "record.name = 'Acme Corp'" } },
+  decorators: [withFormProviders(conditionalClient())],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
+    expect(canvas.getByLabelText("Name")).toBeDisabled();
+    expect(canvas.getByLabelText("Job Title")).toBeDisabled();
+    expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+  },
+};
+
+export const MalformedCondition: Story = {
+  name: "conditions: a malformed condition fails closed without breaking the form",
+  args: {
+    view: {
+      ...conditionalView,
+      sections: [
+        {
+          type: "fields",
+          fields: [
+            { field: "name", label: "Name", type: "text" },
+            { field: "job_title", label: "Job Title", type: "text", condition: "record.is_company ==" },
+            { field: "account_code", label: "Account Code", type: "text", readonly_condition: "record.is_company ==" },
+          ],
+        },
+      ],
+      tabs: [],
+    },
+  },
+  decorators: [withFormProviders(conditionalClient())],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
+    expect(canvas.queryByLabelText("Job Title")).not.toBeInTheDocument();
+    expect(canvas.getByLabelText("Account Code")).toBeDisabled();
+    expect(canvas.getByLabelText("Name")).toBeEnabled();
+  },
+};

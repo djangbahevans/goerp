@@ -3,6 +3,7 @@ import { moduleNameOf, useAction } from "@goerp/sdk/react";
 import { modelRegistry, type WorkflowTransition } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { titleCaseWords } from "../../chrome/title-case-words.js";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import { recordQueryKey } from "./use-form-record.js";
 
@@ -54,11 +55,9 @@ export interface WorkflowActionsProps {
 // transition legal from the record's current state, off the resource's
 // own .Workflow()-declared Selection field (goerp#864) — additive
 // alongside header_actions, not a replacement for it. A transition's own
-// `condition` is carried through on WorkflowTransition but not evaluated
-// here — the shell's domain-expression interpreter (goerp#829) doesn't
-// exist yet, the same "typed but unevaluated" posture header_actions'
-// own `condition` field already has.
+// `condition` further narrows the legal set against the live record.
 export function WorkflowActions({ resource, recordId, record }: WorkflowActionsProps) {
+  const conditions = useConditionEvaluator(`${resource} form`);
   const { data: model } = useQuery({
     queryKey: ["form-model-workflow", resource],
     queryFn: () => modelRegistry.resolve(resource),
@@ -72,7 +71,11 @@ export function WorkflowActions({ resource, recordId, record }: WorkflowActionsP
   if (!field?.workflow || routeModule === undefined) return null;
 
   const currentState = record[field.name];
-  const legalTransitions = field.workflow.transitions.filter((t) => t.from === currentState);
+  const legalTransitions = field.workflow.transitions.filter(
+    (t) =>
+      t.from === currentState &&
+      conditions.isVisible(t.condition, `workflow transition "${t.action_name}" condition`, record),
+  );
   if (legalTransitions.length === 0) return null;
 
   return (

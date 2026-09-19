@@ -233,6 +233,32 @@ describe("buildViewRegistry — navigationTree", () => {
     expect(tree[1]?.children[0]?.path).toBe("/_m/hr/employees");
   });
 
+  it("carries a group's and an item's `condition` through to the navigation tree", () => {
+    const schema: MetaSchema = {
+      engine_version: "test",
+      schema_hash: "abc",
+      modules: {
+        contacts: moduleSchema({
+          navigation: [
+            {
+              label: "Sales",
+              order: 1,
+              condition: "user_has_role('sales_manager')",
+              children: [
+                { label: "All", route: "/", condition: "user_has_permission('contacts:contact:read')" },
+                { label: "Plain", route: "/plain" },
+              ],
+            },
+          ],
+        }),
+      },
+    };
+    const group = buildViewRegistry(schema).navigationTree[0];
+    expect(group?.condition).toBe("user_has_role('sales_manager')");
+    expect(group?.children[0]?.condition).toBe("user_has_permission('contacts:contact:read')");
+    expect(group?.children[1]).not.toHaveProperty("condition");
+  });
+
   it("falls back to default icons when a group/item declares none", () => {
     const schema: MetaSchema = {
       engine_version: "test",

@@ -7,7 +7,7 @@ import { type FilterOption, FilterOptionSchema, ListActionSchema, ListColumnSche
 // used to only have (unlike every sibling *-view-types.ts file). Wiring
 // "form" into view-dispatch.tsx's KNOWN_VIEW_TYPES/AnyViewDeclarationSchema
 // and the dispatch switch itself is goerp#840's job, not this file's.
-// `condition`/`readonly_condition` are typed but unevaluated (backlog #18).
+// `condition`/`readonly_condition` are evaluated by conditions/use-condition-evaluator.ts.
 
 // manifest-spec.md §10's Field Types table.
 const FIELD_TYPES = [

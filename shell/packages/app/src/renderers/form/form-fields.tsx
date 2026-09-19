@@ -1,6 +1,7 @@
 import { useFieldPermission } from "@goerp/sdk/auth";
 import { FieldWrapper } from "@goerp/sdk/components";
 import { useId } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import { FieldInput, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
@@ -73,9 +74,17 @@ function usesImplicitLabelWrap(field: FormField): boolean {
 export function FormFieldRow({ field, resource, record, onChange, formReadonly }: FormFieldRowProps) {
   const { canRead, canWrite } = useFieldPermission(resource, field.field);
   const generatedId = useId();
-  if (field.hidden || !canRead) return null;
+  const conditions = useConditionEvaluator(`${resource} form`);
+  if (field.hidden || !canRead || !conditions.isVisible(field.condition, `field "${field.field}" condition`, record)) {
+    return null;
+  }
 
-  const readonly = formReadonly || field.readonly || field.computed || !canWrite;
+  const readonly =
+    formReadonly ||
+    field.readonly ||
+    field.computed ||
+    !canWrite ||
+    conditions.isReadonly(field.readonly_condition, `field "${field.field}" readonly_condition`, record);
   const value = readFieldValue(field, record);
 
   if (field.type === "separator" || field.type === "label") {

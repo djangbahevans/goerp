@@ -911,8 +911,7 @@ export function FieldInput({ field, value, onChange, record, disabled = false, i
       return <p>{field.label_text}</p>;
 
     case "computed_display":
-      // `expression` isn't evaluated — the shell-side domain-expression
-      // interpreter it needs doesn't exist yet (same gap as `condition`).
+      // `expression` isn't evaluated yet (goerp#751).
       return <span>{stringValue}</span>;
 
     case "custom": {

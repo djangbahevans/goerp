@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import { FormSectionRenderer, sectionLayoutColumns, sectionListColumns } from "./form-sections.js";
 import type { FormSection } from "./form-view-types.js";
@@ -176,5 +177,45 @@ describe("FormSectionRenderer", () => {
   it('"custom": falls back to a message naming the unresolvable component', async () => {
     await renderSection({ type: "custom", component: "MySection" });
     expect(screen.getByText(/MySection/)).toBeTruthy();
+  });
+});
+
+describe("FormSectionRenderer conditions", () => {
+  const section: FormSection = {
+    type: "fields",
+    label: "Contact Info",
+    condition: "record.type = 'person'",
+    fields: [{ field: "email", type: "email" }],
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  it("renders the section while its condition holds", async () => {
+    await renderSection(section, { type: "person", email: "a@b.com" });
+    expect(screen.getByRole("heading", { name: "Contact Info" })).toBeTruthy();
+  });
+
+  it("renders nothing for a section whose condition is false", async () => {
+    await renderSection(section, { type: "company", email: "a@b.com" });
+    expect(screen.queryByRole("heading", { name: "Contact Info" })).toBeNull();
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
+  });
+
+  it("renders nothing, and reports the location, for a section whose condition is malformed", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderSection({ ...section, condition: "record.type ==" }, { type: "person" });
+    expect(screen.queryByRole("heading", { name: "Contact Info" })).toBeNull();
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain('section "Contact Info" condition');
+  });
+
+  it("applies the condition to a header section too", async () => {
+    await renderSection(
+      { type: "header", condition: "record.type = 'person'", fields: [{ field: "email", type: "email" }] },
+      { type: "company", email: "a@b.com" },
+    );
+    expect(screen.queryByDisplayValue("a@b.com")).toBeNull();
   });
 });

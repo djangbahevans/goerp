@@ -1,7 +1,8 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../conditions/use-condition-evaluator.js";
 import type { NavigationGroup } from "./navigation-types.js";
 import { useNavigationTree } from "./use-navigation-tree.js";
 
@@ -70,5 +71,64 @@ describe("useNavigationTree", () => {
     });
     expect(result.current.map((g) => g.key)).toEqual(["sales", "hr"]);
     expect(result.current[0]?.children.map((c) => c.key)).toEqual(["orders", "reports"]);
+  });
+});
+
+describe("useNavigationTree conditions", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  function tree(itemCondition?: string, groupCondition?: string): NavigationGroup[] {
+    return [
+      {
+        key: "sales",
+        label: "Sales",
+        icon: "home",
+        module: "sales",
+        ...(groupCondition !== undefined ? { condition: groupCondition } : {}),
+        children: [
+          { key: "orders", label: "Orders", path: "/sales/orders", icon: "home" },
+          {
+            key: "admin",
+            label: "Admin",
+            path: "/sales/admin",
+            icon: "home",
+            ...(itemCondition !== undefined ? { condition: itemCondition } : {}),
+          },
+        ],
+      },
+    ];
+  }
+
+  it("keeps an item whose condition holds", () => {
+    const { result } = renderHook(() => useNavigationTree(tree("user_has_permission('sales.admin')")), {
+      wrapper: wrapper(["sales.admin"], ["sales"]),
+    });
+    expect(result.current[0]?.children.map((c) => c.key)).toEqual(["orders", "admin"]);
+  });
+
+  it("drops an item whose condition is false", () => {
+    const { result } = renderHook(() => useNavigationTree(tree("user_has_permission('sales.admin')")), {
+      wrapper: wrapper([], ["sales"]),
+    });
+    expect(result.current[0]?.children.map((c) => c.key)).toEqual(["orders"]);
+  });
+
+  it("drops a group whose condition is false", () => {
+    const { result } = renderHook(() => useNavigationTree(tree(undefined, "user_has_permission('sales.admin')")), {
+      wrapper: wrapper([], ["sales"]),
+    });
+    expect(result.current).toEqual([]);
+  });
+
+  it("drops an item, and reports it, when its condition is malformed", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { result } = renderHook(() => useNavigationTree(tree("user_has_permission(")), {
+      wrapper: wrapper([], ["sales"]),
+    });
+    expect(result.current[0]?.children.map((c) => c.key)).toEqual(["orders"]);
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain('item "Admin" condition');
   });
 });

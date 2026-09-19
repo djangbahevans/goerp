@@ -2,6 +2,7 @@ import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { FormRendererProps } from "./form-renderer.js";
 import { FormRenderer } from "./form-renderer.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
@@ -131,5 +132,103 @@ describe("FormRenderer", () => {
       "01j",
       expect.objectContaining({ registry, client, autoSaveDelay: 10 }),
     );
+  });
+});
+
+describe("FormRenderer conditions", () => {
+  const fieldPermissions = createPermissionContextValue({
+    permissions: new Set(),
+    fieldAccess: { "contacts.contact": { email: { read: true, write: true }, phone: { read: true, write: true } } },
+    modulesEnabled: new Set(),
+  });
+  const conditionalView: FormViewDeclaration = {
+    ...view,
+    sections: [
+      {
+        type: "fields",
+        fields: [
+          { field: "email", type: "email" },
+          { field: "phone", type: "text", readonly_condition: "record.state = 'locked'" },
+        ],
+      },
+    ],
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  function renderConditional(v: FormViewDeclaration, record: Record<string, unknown>, isDirty = true) {
+    useFormRecordMock.mockReturnValue(handle({ record, isDirty }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <PermissionContext.Provider value={fieldPermissions}>
+          <FormRenderer view={v} module="contacts" recordId="01j" />
+        </PermissionContext.Provider>
+      </QueryClientProvider>,
+    );
+  }
+
+  const record = { email: "a@b.com", phone: "555", state: "open" };
+
+  it("leaves every field editable and Save enabled when the form's readonly_condition is false", () => {
+    renderConditional({ ...conditionalView, readonly_condition: "record.state = 'done'" }, record);
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByDisplayValue("555") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("makes every field read-only and disables Save when the form's readonly_condition holds", () => {
+    renderConditional({ ...conditionalView, readonly_condition: "record.state = 'open'" }, record);
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByDisplayValue("555") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("locks only the field whose own readonly_condition holds, leaving Save enabled", () => {
+    renderConditional(conditionalView, { ...record, state: "locked" });
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByDisplayValue("555") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("re-evaluates the form's readonly_condition when the record changes", () => {
+    const readonlyView = { ...conditionalView, readonly_condition: "record.state = 'done'" };
+    const { rerender } = renderConditional(readonlyView, record);
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(false);
+
+    useFormRecordMock.mockReturnValue(handle({ record: { ...record, state: "done" }, isDirty: true }));
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <PermissionContext.Provider value={fieldPermissions}>
+          <FormRenderer view={readonlyView} module="contacts" recordId="01j" />
+        </PermissionContext.Provider>
+      </QueryClientProvider>,
+    );
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("locks the form and disables Save, reporting the view, when readonly_condition is malformed", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderConditional({ ...conditionalView, readonly_condition: "record.state ==" }, record);
+    expect((screen.getByDisplayValue("a@b.com") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain('form "contacts_form"');
+  });
+
+  it("evaluates header_actions conditions against the form's record", () => {
+    const actionView: FormViewDeclaration = {
+      ...conditionalView,
+      header_actions: [
+        { label: "Reopen", type: "url", url: "https://a.example", condition: "record.state = 'done'" },
+        { label: "Archive", type: "url", url: "https://b.example", condition: "record.state = 'open'" },
+      ],
+    };
+    renderConditional(actionView, record);
+    expect(screen.getByText("Archive")).toBeTruthy();
+    expect(screen.queryByText("Reopen")).toBeNull();
   });
 });
