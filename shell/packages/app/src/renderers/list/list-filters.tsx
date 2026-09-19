@@ -7,6 +7,7 @@ import { resourceMetadataRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useId } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { ListFilter } from "./list-view-types.js";
 import type { FilterValue } from "./use-list-state.js";
 
@@ -329,9 +330,14 @@ export interface ListFiltersProps {
   filters: ListFilter[];
   values: Record<string, FilterValue>;
   onChange: (field: string, value: FilterValue | undefined) => void;
+  viewName?: string;
 }
 
-export function ListFilters({ filters, values, onChange }: ListFiltersProps) {
+export function ListFilters({ filters: declaredFilters, values, onChange, viewName }: ListFiltersProps) {
+  const conditions = useConditionEvaluator(viewName ?? "filters");
+  const filters = declaredFilters.filter((filter) =>
+    conditions.isVisible(filter.condition, `filter "${filter.field}" condition`),
+  );
   if (filters.length === 0) return null;
 
   return (

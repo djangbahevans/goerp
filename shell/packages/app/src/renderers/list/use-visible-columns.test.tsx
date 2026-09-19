@@ -1,7 +1,8 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { ListColumn } from "./list-view-types.js";
 import { filterColumnsByFieldAccess, useVisibleColumns } from "./use-visible-columns.js";
 
@@ -128,5 +129,84 @@ describe("useVisibleColumns", () => {
     act(() => result.current.toggleColumn("internal_note"));
     expect(result.current.columns).toEqual([{ field: "name" }]);
     expect(result.current.revealedFields.has("internal_note")).toBe(false);
+  });
+});
+
+describe("useVisibleColumns conditions", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  function wrapperWithPermissions(permissions: string[]) {
+    const value = createPermissionContextValue({
+      permissions: new Set(permissions),
+      fieldAccess: { "contacts.contact": { name: { read: true, write: true }, margin: { read: true, write: true } } },
+      modulesEnabled: new Set(),
+    });
+    return function Wrapper({ children }: { children: ReactNode }) {
+      return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
+    };
+  }
+
+  const view = (columns: ListColumn[]) => ({
+    name: "contacts_list",
+    type: "list" as const,
+    resource: "contacts.contact",
+    label: "Contacts",
+    columns,
+  });
+  const marginCondition = "user_has_permission('contacts:contact:financials_read')";
+
+  it("keeps a column whose condition holds", () => {
+    const { result } = renderHook(
+      () => useVisibleColumns(view([{ field: "name" }, { field: "margin", condition: marginCondition }])),
+      { wrapper: wrapperWithPermissions(["contacts:contact:financials_read"]) },
+    );
+    expect(result.current.columns.map((c) => c.field)).toEqual(["name", "margin"]);
+  });
+
+  it("drops a column whose condition is false", () => {
+    const { result } = renderHook(
+      () => useVisibleColumns(view([{ field: "name" }, { field: "margin", condition: marginCondition }])),
+      { wrapper: wrapperWithPermissions([]) },
+    );
+    expect(result.current.columns.map((c) => c.field)).toEqual(["name"]);
+  });
+
+  it("leaves a conditioned hidden column out of the toggle menu when its condition is false", () => {
+    const { result } = renderHook(
+      () => useVisibleColumns(view([{ field: "margin", hidden: true, condition: marginCondition }])),
+      { wrapper: wrapperWithPermissions([]) },
+    );
+    expect(result.current.hiddenColumns).toEqual([]);
+  });
+
+  it("offers a conditioned hidden column in the toggle menu when its condition holds", () => {
+    const { result } = renderHook(
+      () => useVisibleColumns(view([{ field: "margin", hidden: true, condition: marginCondition }])),
+      { wrapper: wrapperWithPermissions(["contacts:contact:financials_read"]) },
+    );
+    expect(result.current.hiddenColumns.map((c) => c.field)).toEqual(["margin"]);
+  });
+
+  it("treats a record reference as unbound, so the column is dropped", () => {
+    const { result } = renderHook(
+      () => useVisibleColumns(view([{ field: "name" }, { field: "margin", condition: "record.type = 'company'" }])),
+      { wrapper: wrapperWithPermissions([]) },
+    );
+    expect(result.current.columns.map((c) => c.field)).toEqual(["name"]);
+  });
+
+  it("drops a column, and reports the view and column, when its condition is malformed", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { result } = renderHook(
+      () => useVisibleColumns(view([{ field: "name" }, { field: "margin", condition: "user_has_permission(" }])),
+      { wrapper: wrapperWithPermissions([]) },
+    );
+    expect(result.current.columns.map((c) => c.field)).toEqual(["name"]);
+    const message = String(consoleError.mock.calls[0]?.[0]);
+    expect(message).toContain("contacts_list");
+    expect(message).toContain('column "margin" condition');
   });
 });

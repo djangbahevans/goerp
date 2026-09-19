@@ -1,5 +1,6 @@
 import { PermissionContext } from "@goerp/sdk/auth";
 import { useContext, useMemo, useState } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { ListColumn, ListViewDeclaration } from "./list-view-types.js";
 
 // A column the current user lacks field-level read access to is absent from
@@ -33,7 +34,15 @@ export function useVisibleColumns(view: ListViewDeclaration): VisibleColumnsResu
     throw new Error("useVisibleColumns must be used within a PermissionProvider");
   }
 
-  const allColumns = view.columns ?? [];
+  const conditions = useConditionEvaluator(view.name);
+  const declaredColumns = view.columns;
+  const allColumns = useMemo(
+    () =>
+      (declaredColumns ?? []).filter((column) =>
+        conditions.isVisible(column.condition, `column "${column.field}" condition`),
+      ),
+    [declaredColumns, conditions],
+  );
   const { checkField } = permissions;
   // Session-local only, same as every other per-user display preference
   // ListRenderer already holds (sort, group-by, filters) — none of those

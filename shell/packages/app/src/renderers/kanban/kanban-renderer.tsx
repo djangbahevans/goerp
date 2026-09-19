@@ -224,7 +224,12 @@ export function KanbanRenderer({
 
   return (
     <>
-      <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
+      <ListFilters
+        filters={view.filters ?? []}
+        values={listState.filter}
+        onChange={listState.setFilter}
+        viewName={view.name}
+      />
       {viewActions.length > 0 && (
         <div className="flex items-center justify-between gap-2">
           <ListActions

@@ -7,6 +7,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
@@ -189,6 +190,7 @@ const CHECKBOX_COLUMN_WIDTH = 44;
 
 export function ListRenderer({ view, module, recordId, embedded, baseFilter, showCreateAction }: ListRendererProps) {
   const listState = useListState(embedded, defaultSortOf(view));
+  const conditions = useConditionEvaluator(view.name);
   const { columns, hiddenColumns, revealedFields, toggleColumn } = useVisibleColumns(view);
   const selection = useSelection();
   const navigate = useNavigate();
@@ -227,7 +229,9 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
 
   useDefaultFilterApplication(view, listState, embedded, true);
 
-  const bulkActions = view.bulk_actions ?? [];
+  const bulkActions = (view.bulk_actions ?? []).filter((action) =>
+    conditions.isVisible(action.condition, `bulk action "${action.label}" condition`),
+  );
   // manifest-spec.md: `selectable` defaults true, but a checkbox column
   // with nothing to bulk-act on is just clutter.
   const showSelection = view.selectable !== false && bulkActions.length > 0;
@@ -370,7 +374,12 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
 
   return (
     <>
-      <ListFilters filters={view.filters ?? []} values={listState.filter} onChange={listState.setFilter} />
+      <ListFilters
+        filters={view.filters ?? []}
+        values={listState.filter}
+        onChange={listState.setFilter}
+        viewName={view.name}
+      />
       <div className="flex items-center justify-between gap-2">
         <ListActions
           actions={view.actions ?? []}

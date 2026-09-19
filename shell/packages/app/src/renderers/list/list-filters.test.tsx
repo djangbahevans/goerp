@@ -1,7 +1,9 @@
+import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import { booleanFilterState, ListFilters } from "./list-filters.js";
 import type { ListFilter } from "./list-view-types.js";
 
@@ -391,5 +393,58 @@ describe("ListFilters", () => {
       </Providers>,
     );
     expect(await screen.findByRole("combobox")).toBeTruthy();
+  });
+});
+
+describe("ListFilters conditions", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  const permission = "sales:order:financials_read";
+  const filters: ListFilter[] = [
+    { field: "type", label: "Type", type: "select", options: [{ value: "person", label: "Person" }] },
+    { field: "margin", label: "Margin", type: "number", condition: `user_has_permission('${permission}')` },
+  ];
+
+  function renderFiltersAs(permissions: string[], declared: ListFilter[] = filters) {
+    const value = createPermissionContextValue({
+      permissions: new Set(permissions),
+      fieldAccess: {},
+      modulesEnabled: new Set(),
+    });
+    return render(
+      <Providers>
+        <PermissionContext.Provider value={value}>
+          <ListFilters filters={declared} values={{}} onChange={vi.fn()} viewName="orders_list" />
+        </PermissionContext.Provider>
+      </Providers>,
+    );
+  }
+
+  it("renders a filter whose condition holds", () => {
+    renderFiltersAs([permission]);
+    expect(screen.getByText("Margin")).toBeTruthy();
+  });
+
+  it("omits a filter whose condition is false, leaving the others", () => {
+    renderFiltersAs([]);
+    expect(screen.getByText("Type")).toBeTruthy();
+    expect(screen.queryByText("Margin")).toBeNull();
+  });
+
+  it("renders nothing when every filter's condition is false", () => {
+    const { container } = renderFiltersAs([], [{ ...filters[1], condition: "user_has_role('admin')" } as ListFilter]);
+    expect(container.textContent).toBe("");
+  });
+
+  it("omits a filter, and reports the view and filter, when its condition is malformed", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderFiltersAs([permission], [{ ...filters[1], condition: "user_has_permission(" } as ListFilter]);
+    expect(screen.queryByText("Margin")).toBeNull();
+    const message = String(consoleError.mock.calls[0]?.[0]);
+    expect(message).toContain("orders_list");
+    expect(message).toContain('filter "margin" condition');
   });
 });
