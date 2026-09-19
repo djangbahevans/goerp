@@ -80,6 +80,7 @@ export const ModelDefSchema = v.looseObject({
   fields: v.array(FieldDefSchema),
   enabled_ops: v.array(v.string()),
   shareable: v.boolean(),
+  share_permissions: v.optional(v.array(v.picklist(["read", "write"]))),
 });
 export type ModelDef = v.InferOutput<typeof ModelDefSchema>;
 

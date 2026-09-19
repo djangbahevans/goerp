@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -369,6 +370,9 @@ func TestDispatchSharesCreateRoute_Success(t *testing.T) {
 	if resp.SharedWithUserID != f.recipientID {
 		t.Errorf("shared_with_user_id = %q, want %q", resp.SharedWithUserID, f.recipientID)
 	}
+	if resp.SharedWithEmail != f.recipientEmail {
+		t.Errorf("shared_with_email = %q, want %q", resp.SharedWithEmail, f.recipientEmail)
+	}
 	if resp.Permission != "write" {
 		t.Errorf("permission = %q, want write", resp.Permission)
 	}
@@ -516,6 +520,116 @@ func TestDispatchSharesListRoute_ReturnsSharesForRecord(t *testing.T) {
 	}
 	if len(resp.Data) != 1 || resp.Data[0].SharedWithUserID != f.recipientID {
 		t.Errorf("data = %+v, want one share to %q", resp.Data, f.recipientID)
+	}
+	if len(resp.Data) == 1 && resp.Data[0].SharedWithEmail != f.recipientEmail {
+		t.Errorf("shared_with_email = %q, want %q", resp.Data[0].SharedWithEmail, f.recipientEmail)
+	}
+}
+
+func TestDispatchSharesListRoute_OmitsEmailForRecipientWhoNoLongerExists(t *testing.T) {
+	f := newDispatchSharesFixture(t, model.ReadShare)
+	const goneUserID = "99999999-9999-9999-9999-999999999999"
+	if _, err := f.e.recordSharesStore.Create(t.Context(), f.slug, "testmodule.widget", f.recordID, goneUserID, "read", f.sharerID, nil); err != nil {
+		t.Fatalf("seed Create() error: %v", err)
+	}
+
+	target := "/_meta/shares?model=testmodule.widget&record_id=" + f.recordID
+	w := httptest.NewRecorder()
+	f.e.dispatchSharesListRoute(w, f.request(http.MethodGet, target, nil, nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []shareResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].SharedWithUserID != goneUserID || resp.Data[0].SharedWithEmail != "" {
+		t.Errorf("data = %+v, want one share to %q with an empty email", resp.Data, goneUserID)
+	}
+}
+
+func TestDispatchSharesListRoute_OmitsEmailForDeletedRecipient(t *testing.T) {
+	f := newDispatchSharesFixture(t, model.ReadShare)
+	if _, err := f.e.recordSharesStore.Create(t.Context(), f.slug, "testmodule.widget", f.recordID, f.recipientID, "read", f.sharerID, nil); err != nil {
+		t.Fatalf("seed Create() error: %v", err)
+	}
+	conn := openDispatchORMTestDB(t)
+	if _, err := conn.Exec(`UPDATE system.users SET status = 'deleted' WHERE id = $1`, f.recipientID); err != nil {
+		t.Fatalf("mark recipient deleted: %v", err)
+	}
+
+	target := "/_meta/shares?model=testmodule.widget&record_id=" + f.recordID
+	w := httptest.NewRecorder()
+	f.e.dispatchSharesListRoute(w, f.request(http.MethodGet, target, nil, nil))
+
+	var resp struct {
+		Data []shareResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].SharedWithEmail != "" {
+		t.Errorf("data = %+v, want one share with an empty email for a deleted recipient", resp.Data)
+	}
+}
+
+func TestDispatchSharesCreateRoute_RejectsExpiryNotInTheFuture(t *testing.T) {
+	f := newDispatchSharesFixture(t, model.ReadShare)
+
+	body, _ := json.Marshal(map[string]any{
+		"model":      "testmodule.widget",
+		"record_id":  f.recordID,
+		"user_email": f.recipientEmail,
+		"permission": "read",
+		"expires_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	})
+	w := httptest.NewRecorder()
+	f.e.dispatchSharesCreateRoute(w, f.request(http.MethodPost, "/_meta/shares", body, nil))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if code := decodeErrorCode(t, w); code != "invalid_request" {
+		t.Errorf("error.code = %q, want invalid_request", code)
+	}
+	shares, err := f.e.recordSharesStore.ListForRecord(t.Context(), f.slug, "testmodule.widget", f.recordID)
+	if err != nil {
+		t.Fatalf("ListForRecord() error: %v", err)
+	}
+	if len(shares) != 0 {
+		t.Errorf("record_shares rows = %d, want 0 after a rejected request", len(shares))
+	}
+}
+
+func TestMetaSchemaModelFrom_SharePermissions(t *testing.T) {
+	tests := []struct {
+		name string
+		md   model.ModelDeclaration
+		want []string
+	}{
+		{"both levels, in declared order", model.ModelDeclaration{Shareable: true, SharePerms: []model.SharePermission{model.WriteShare, model.ReadShare}}, []string{"write", "read"}},
+		{"one level", model.ModelDeclaration{Shareable: true, SharePerms: []model.SharePermission{model.ReadShare}}, []string{"read"}},
+		{"shareable with no levels", model.ModelDeclaration{Shareable: true}, nil},
+		{"not shareable", model.ModelDeclaration{SharePerms: []model.SharePermission{model.ReadShare}}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := metaSchemaModelFrom(tt.md)
+			if !slices.Equal(got.SharePermissions, tt.want) {
+				t.Errorf("SharePermissions = %v, want %v", got.SharePermissions, tt.want)
+			}
+			out, err := json.Marshal(got)
+			if err != nil {
+				t.Fatalf("Marshal() error: %v", err)
+			}
+			hasKey := strings.Contains(string(out), `"share_permissions"`)
+			if hasKey != (len(tt.want) > 0) {
+				t.Errorf("share_permissions key present = %v for %v, want %v; body: %s", hasKey, tt.want, len(tt.want) > 0, out)
+			}
+		})
 	}
 }
 
