@@ -389,6 +389,45 @@ func TestDispatchSharesCreateRoute_Success(t *testing.T) {
 	}
 }
 
+func TestDispatchSharesCreateRoute_UpdatesAnExistingRecipientsShareInPlace(t *testing.T) {
+	f := newDispatchSharesFixture(t, model.ReadShare, model.WriteShare)
+	post := func(permission string) (int, shareResponse) {
+		body, _ := json.Marshal(map[string]any{
+			"model":      "testmodule.widget",
+			"record_id":  f.recordID,
+			"user_email": f.recipientEmail,
+			"permission": permission,
+		})
+		w := httptest.NewRecorder()
+		f.e.dispatchSharesCreateRoute(w, f.request(http.MethodPost, "/_meta/shares", body, nil))
+		var resp shareResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
+		}
+		return w.Code, resp
+	}
+
+	code, first := post("read")
+	if code != http.StatusCreated {
+		t.Fatalf("first POST status = %d, want 201", code)
+	}
+	code, second := post("write")
+	if code != http.StatusOK {
+		t.Fatalf("second POST status = %d, want 200 for an existing recipient", code)
+	}
+	if second.ID != first.ID || second.Permission != "write" {
+		t.Errorf("second POST = %+v, want the same id %q with permission write", second, first.ID)
+	}
+
+	shares, err := f.e.recordSharesStore.ListForRecord(t.Context(), f.slug, "testmodule.widget", f.recordID)
+	if err != nil {
+		t.Fatalf("ListForRecord() error: %v", err)
+	}
+	if len(shares) != 1 || shares[0].Permission != "write" {
+		t.Errorf("shares = %+v, want one write share", shares)
+	}
+}
+
 func TestDispatchSharesCreateRoute_RejectsWhenSharerCannotReadRecord(t *testing.T) {
 	f := newDispatchSharesFixture(t, model.ReadShare, model.WriteShare)
 
@@ -501,8 +540,8 @@ func TestDispatchSharesCreateRoute_DeniedRecordAccessMasksUnknownRecipient(t *te
 
 func TestDispatchSharesListRoute_ReturnsSharesForRecord(t *testing.T) {
 	f := newDispatchSharesFixture(t, model.ReadShare)
-	if _, err := f.e.recordSharesStore.Create(context.Background(), f.slug, "testmodule.widget", f.recordID, f.recipientID, "read", f.sharerID, nil); err != nil {
-		t.Fatalf("seed Create() error: %v", err)
+	if _, _, err := f.e.recordSharesStore.Grant(context.Background(), f.slug, "testmodule.widget", f.recordID, f.recipientID, "read", f.sharerID, nil); err != nil {
+		t.Fatalf("seed Grant() error: %v", err)
 	}
 
 	target := "/_meta/shares?model=testmodule.widget&record_id=" + f.recordID
@@ -529,8 +568,8 @@ func TestDispatchSharesListRoute_ReturnsSharesForRecord(t *testing.T) {
 func TestDispatchSharesListRoute_OmitsEmailForRecipientWhoNoLongerExists(t *testing.T) {
 	f := newDispatchSharesFixture(t, model.ReadShare)
 	const goneUserID = "99999999-9999-9999-9999-999999999999"
-	if _, err := f.e.recordSharesStore.Create(t.Context(), f.slug, "testmodule.widget", f.recordID, goneUserID, "read", f.sharerID, nil); err != nil {
-		t.Fatalf("seed Create() error: %v", err)
+	if _, _, err := f.e.recordSharesStore.Grant(t.Context(), f.slug, "testmodule.widget", f.recordID, goneUserID, "read", f.sharerID, nil); err != nil {
+		t.Fatalf("seed Grant() error: %v", err)
 	}
 
 	target := "/_meta/shares?model=testmodule.widget&record_id=" + f.recordID
@@ -553,8 +592,8 @@ func TestDispatchSharesListRoute_OmitsEmailForRecipientWhoNoLongerExists(t *test
 
 func TestDispatchSharesListRoute_OmitsEmailForDeletedRecipient(t *testing.T) {
 	f := newDispatchSharesFixture(t, model.ReadShare)
-	if _, err := f.e.recordSharesStore.Create(t.Context(), f.slug, "testmodule.widget", f.recordID, f.recipientID, "read", f.sharerID, nil); err != nil {
-		t.Fatalf("seed Create() error: %v", err)
+	if _, _, err := f.e.recordSharesStore.Grant(t.Context(), f.slug, "testmodule.widget", f.recordID, f.recipientID, "read", f.sharerID, nil); err != nil {
+		t.Fatalf("seed Grant() error: %v", err)
 	}
 	conn := openDispatchORMTestDB(t)
 	if _, err := conn.Exec(`UPDATE system.users SET status = 'deleted' WHERE id = $1`, f.recipientID); err != nil {
@@ -635,9 +674,9 @@ func TestMetaSchemaModelFrom_SharePermissions(t *testing.T) {
 
 func TestDispatchSharesDeleteRoute_RevokesShare(t *testing.T) {
 	f := newDispatchSharesFixture(t, model.ReadShare)
-	sh, err := f.e.recordSharesStore.Create(context.Background(), f.slug, "testmodule.widget", f.recordID, f.recipientID, "read", f.sharerID, nil)
+	sh, _, err := f.e.recordSharesStore.Grant(context.Background(), f.slug, "testmodule.widget", f.recordID, f.recipientID, "read", f.sharerID, nil)
 	if err != nil {
-		t.Fatalf("seed Create() error: %v", err)
+		t.Fatalf("seed Grant() error: %v", err)
 	}
 
 	w := httptest.NewRecorder()
@@ -686,9 +725,9 @@ func TestDispatchSharesDeleteRoute_RejectsWhenCallerCannotReadRecord(t *testing.
 	f := newDispatchSharesFixture(t, model.ReadShare)
 	// A share pointing at a record_id that doesn't (or no longer) exist —
 	// e.g. the underlying row was deleted after the share was granted.
-	sh, err := f.e.recordSharesStore.Create(context.Background(), f.slug, "testmodule.widget", "99999999-9999-9999-9999-999999999999", f.recipientID, "read", f.sharerID, nil)
+	sh, _, err := f.e.recordSharesStore.Grant(context.Background(), f.slug, "testmodule.widget", "99999999-9999-9999-9999-999999999999", f.recipientID, "read", f.sharerID, nil)
 	if err != nil {
-		t.Fatalf("seed Create() error: %v", err)
+		t.Fatalf("seed Grant() error: %v", err)
 	}
 
 	w := httptest.NewRecorder()

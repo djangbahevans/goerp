@@ -104,6 +104,10 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
     if (!isGranting) emailRef.current?.focus();
   }, [isGranting]);
 
+  const typed = email.trim().toLowerCase();
+  const existingShare =
+    typed === "" ? undefined : shares.find((share) => share.sharedWithEmail?.toLowerCase() === typed);
+
   async function submit(): Promise<void> {
     if (permission === undefined || isGranting) return;
     const recipient = email.trim();
@@ -115,18 +119,14 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
       emailRef.current?.focus();
       return;
     }
-    if (shares.some((share) => share.sharedWithEmail?.toLowerCase() === recipient.toLowerCase())) {
-      setEmailError("Already shared with this user. Revoke their access first to change it.");
-      emailRef.current?.focus();
-      return;
-    }
     if (expires && expires < todayAsDateFieldValue()) {
       setExpiresError("Choose today or a later date.");
       return;
     }
+    const isUpdate = existingShare !== undefined;
     try {
       await grant({ userEmail: recipient, permission, expiresAt: expires ? endOfLocalDay(expires) : undefined });
-      setAnnouncement(`Shared with ${recipient}.`);
+      setAnnouncement(isUpdate ? `Updated access for ${recipient}.` : `Shared with ${recipient}.`);
       setEmail("");
       setExpires(undefined);
     } catch (err) {
@@ -207,6 +207,13 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
               }}
             />
           </div>
+          {existingShare && (
+            <p className="text-text-secondary text-xs">
+              Already shared: {PERMISSION_LABELS[existingShare.permission]}
+              {existingShare.expiresAt ? `, expires ${EXPIRY_FORMAT.format(new Date(existingShare.expiresAt))}` : ""}.
+              Sharing again replaces their access and expiry.
+            </p>
+          )}
           {permissions.length === 1 && (
             <p className="text-xs text-text-secondary">
               They'll be able to {PERMISSION_VERBS[permission]} this {label}.

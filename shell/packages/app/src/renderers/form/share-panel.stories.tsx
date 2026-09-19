@@ -76,15 +76,30 @@ function fakeBackend(seed: WireShare[], options: { failLoad?: boolean } = {}) {
       _path: string,
       body: { user_email: string; permission: "read" | "write"; expires_at?: string },
     ) => {
-      if (!KNOWN_EMAILS.has(body.user_email.toLowerCase())) {
+      const known =
+        KNOWN_EMAILS.has(body.user_email.toLowerCase()) ||
+        shares.some((share) => share.shared_with_email === body.user_email.toLowerCase());
+      if (!known) {
         throw new AppError({ code: "recipient_not_found", message: "no user with that email", httpStatus: 400 });
+      }
+      const email = body.user_email.toLowerCase();
+      const existing = shares.find((share) => share.shared_with_email === email);
+      if (existing) {
+        const { expires_at: _previous, ...rest } = existing;
+        const updated: WireShare = {
+          ...rest,
+          permission: body.permission,
+          ...(body.expires_at ? { expires_at: body.expires_at } : {}),
+        };
+        shares = shares.map((share) => (share.id === existing.id ? updated : share));
+        return updated;
       }
       const created: WireShare = {
         id: `s${nextId++}`,
         model: "sales.order",
         record_id: "o1",
         shared_with_user_id: `u${nextId}`,
-        shared_with_email: body.user_email.toLowerCase(),
+        shared_with_email: email,
         permission: body.permission,
         shared_by: "u1",
         created_at: new Date().toISOString(),
@@ -189,8 +204,31 @@ export const GrantAndRevoke: Story = {
   },
 };
 
+export const ChangeAccess: Story = {
+  name: "sharing again with an existing recipient changes their access in place",
+  beforeEach: fakeBackend(SEED),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByText("ama.owusu@example.com")).toBeInTheDocument());
+    const list = within(canvas.getByRole("list"));
+    expect(list.getAllByText("Can view")).toHaveLength(2);
+
+    await userEvent.type(canvas.getByLabelText("Email"), "AMA.OWUSU@example.com");
+    expect(canvas.getByText(/Already shared: Can view/)).toBeInTheDocument();
+    await userEvent.click(canvas.getByLabelText("Can edit"));
+    await userEvent.click(canvas.getByRole("button", { name: "Share" }));
+
+    await waitFor(() =>
+      expect(canvas.getByRole("status")).toHaveTextContent("Updated access for AMA.OWUSU@example.com."),
+    );
+    await waitFor(() => expect(list.getAllByText("Can view")).toHaveLength(1));
+    expect(list.getAllByText("Can edit")).toHaveLength(2);
+    expect(list.getAllByText("ama.owusu@example.com")).toHaveLength(1);
+  },
+};
+
 export const RecipientNotFound: Story = {
-  name: "grant errors: unknown email, empty email, already shared",
+  name: "grant errors: unknown email and empty email",
   beforeEach: fakeBackend(SEED),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -201,10 +239,6 @@ export const RecipientNotFound: Story = {
 
     await userEvent.type(canvas.getByLabelText("Email"), "nobody@example.com{Enter}");
     await waitFor(() => expect(canvas.getByText("No user with that email address.")).toBeInTheDocument());
-
-    await userEvent.clear(canvas.getByLabelText("Email"));
-    await userEvent.type(canvas.getByLabelText("Email"), "AMA.OWUSU@example.com{Enter}");
-    expect(canvas.getByText(/Already shared with this user/)).toBeInTheDocument();
   },
 };
 

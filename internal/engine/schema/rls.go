@@ -8,6 +8,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -159,8 +160,9 @@ func (e *SchemaDiffEngine) syncShareWidening(ctx context.Context, sess *SchemaSy
 
 // ensureRecordSharesTable creates record_shares in the syncing session's
 // tenant schema if it doesn't already exist yet — mirrors
-// internal/engine/recordshares.Store.Bootstrap's own DDL, duplicated
-// rather than called directly since that Store takes a *sql.DB (to open
+// internal/engine/recordshares.Store.Bootstrap's own DDL (the index
+// statements are shared, via recordshares.UniqueIndexStatements; the rest
+// is duplicated) rather than calling it directly since that Store takes a *sql.DB (to open
 // its own advisory-locked transaction) while this runs inside the
 // already-open *sql.Conn a schema-sync session shares across every
 // statement it issues. Takes the identical advisory lock key Bootstrap
@@ -199,12 +201,10 @@ func (e *SchemaDiffEngine) ensureRecordSharesTable(ctx context.Context, sess *Sc
 		return fmt.Errorf("create table: %w", err)
 	}
 
-	const createIndex = `
-		CREATE INDEX IF NOT EXISTS idx_record_shares_lookup
-		    ON record_shares(model, record_id, shared_with_user_id)
-	`
-	if _, err := tx.ExecContext(ctx, createIndex); err != nil {
-		return fmt.Errorf("create lookup index: %w", err)
+	for _, stmt := range recordshares.UniqueIndexStatements("") {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("create unique index: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

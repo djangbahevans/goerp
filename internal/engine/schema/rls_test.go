@@ -956,3 +956,73 @@ func TestSyncShareWidening_ConcurrentFirstUseAcrossModulesAllSucceed(t *testing.
 		}
 	}
 }
+
+// TestEnsureRecordSharesTable_DeduplicatesAnExistingTable covers schema sync's
+// own copy of the record_shares DDL against a table created before the
+// unique index existed and already holding duplicate rows — the state a
+// tenant provisioned earlier is in when its next module sync arrives.
+func TestEnsureRecordSharesTable_DeduplicatesAnExistingTable(t *testing.T) {
+	sess, engine, conn := setupTenantSchemaForModule(t, "sharelegacy", "sharelegacymod")
+	schema := quoteIdent("tenant_sharelegacy")
+
+	if _, err := conn.Exec(`CREATE TABLE ` + schema + `.record_shares (
+	    id                   UUID PRIMARY KEY DEFAULT uuidv7(),
+	    model                TEXT NOT NULL,
+	    record_id            UUID NOT NULL,
+	    shared_with_user_id  UUID NOT NULL,
+	    permission           TEXT NOT NULL CHECK (permission IN ('read', 'write')),
+	    shared_by            UUID NOT NULL,
+	    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	    expires_at           TIMESTAMPTZ
+	)`); err != nil {
+		t.Fatalf("create legacy record_shares: %v", err)
+	}
+	if _, err := conn.Exec(`CREATE INDEX idx_record_shares_lookup ON ` + schema + `.record_shares(model, record_id, shared_with_user_id)`); err != nil {
+		t.Fatalf("create legacy lookup index: %v", err)
+	}
+	const recordID, userID = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	for i, id := range []string{"aaaaaaaa-0000-0000-0000-000000000001", "aaaaaaaa-0000-0000-0000-000000000002"} {
+		if _, err := conn.Exec(
+			`INSERT INTO `+schema+`.record_shares (id, model, record_id, shared_with_user_id, permission, shared_by, created_at)
+			 VALUES ($1, 'sales.order', $2, $3, 'read', gen_random_uuid(), NOW() - make_interval(hours => $4))`,
+			id, recordID, userID, 10-i,
+		); err != nil {
+			t.Fatalf("seed duplicate %s: %v", id, err)
+		}
+	}
+
+	if err := engine.ensureRecordSharesTable(context.Background(), sess); err != nil {
+		t.Fatalf("ensureRecordSharesTable() over a table holding duplicates error: %v", err)
+	}
+
+	var remaining []string
+	rows, err := conn.Query(`SELECT id FROM ` + schema + `.record_shares`)
+	if err != nil {
+		t.Fatalf("list rows: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		remaining = append(remaining, id)
+	}
+	if len(remaining) != 1 || remaining[0] != "aaaaaaaa-0000-0000-0000-000000000002" {
+		t.Errorf("remaining rows = %v, want only the newest", remaining)
+	}
+
+	var lookupExists, uniqueExists bool
+	if err := conn.QueryRow(`SELECT
+		EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'tenant_sharelegacy' AND indexname = 'idx_record_shares_lookup'),
+		EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'tenant_sharelegacy' AND indexname = 'idx_record_shares_unique')`).Scan(&lookupExists, &uniqueExists); err != nil {
+		t.Fatalf("check indexes: %v", err)
+	}
+	if lookupExists || !uniqueExists {
+		t.Errorf("lookup index exists = %v, unique index exists = %v, want false, true", lookupExists, uniqueExists)
+	}
+
+	if err := engine.ensureRecordSharesTable(context.Background(), sess); err != nil {
+		t.Errorf("second ensureRecordSharesTable() error: %v", err)
+	}
+}
