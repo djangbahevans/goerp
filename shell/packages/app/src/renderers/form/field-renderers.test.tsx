@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetReportedConditionErrors } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import { FieldInput, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
@@ -445,8 +446,8 @@ describe("FieldInput", () => {
     expect(document.querySelector("hr")).toBeTruthy();
   });
 
-  it("computed_display: renders the value read-only, ignoring `expression`", () => {
-    renderField({ field: "total", type: "computed_display", expression: "line1 + line2" }, "42");
+  it("computed_display: falls back to the stored value when the field declares no expression", () => {
+    renderField({ field: "total", type: "computed_display" }, "42");
     expect(screen.getByText("42")).toBeTruthy();
   });
 
@@ -631,5 +632,98 @@ describe("FieldInput", () => {
     expect(screen.getByText("Spec.docx")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Remove Quote.pdf" }));
     expect(onChange).toHaveBeenCalledWith(["2"]);
+  });
+});
+
+describe("FieldInput computed_display", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetReportedConditionErrors();
+  });
+
+  const field = (expression: string): FormField => ({ field: "margin", type: "computed_display", expression });
+
+  function renderComputed(f: FormField, record: Row) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ui = (r: Row) => (
+      <QueryClientProvider client={client}>
+        <FieldInput field={f} value={undefined} onChange={vi.fn()} record={r} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui(record));
+    return (next: Row) => rerender(ui(next));
+  }
+
+  it("evaluates the expression against the record", () => {
+    renderComputed(field("record.amount - record.cost"), { amount: 10, cost: 4 });
+    expect(screen.getByText("6")).toBeTruthy();
+  });
+
+  it("renders a PERCENT result as the formatted string", () => {
+    renderComputed(field("PERCENT((record.amount - record.cost) / record.amount, 1)"), { amount: 10, cost: 4 });
+    expect(screen.getByText("60.0%")).toBeTruthy();
+  });
+
+  it("does not truncate a ROUND result to the default three fraction digits", () => {
+    renderComputed(field("ROUND(record.rate, 4)"), { rate: 1.23456 });
+    expect(
+      screen.getByText(new Intl.NumberFormat(undefined, { maximumFractionDigits: 15 }).format(1.2346)),
+    ).toBeTruthy();
+  });
+
+  it("reads a decimal string field as a number", () => {
+    renderComputed(field("record.price * record.qty"), { price: "12.50", qty: 4 });
+    expect(screen.getByText("50")).toBeTruthy();
+  });
+
+  it("re-evaluates when a referenced field changes", () => {
+    const update = renderComputed(field("record.a + record.b"), { a: 1, b: 2 });
+    expect(screen.getByText("3")).toBeTruthy();
+    update({ a: 1, b: 5 });
+    expect(screen.getByText("6")).toBeTruthy();
+    expect(screen.queryByText("3")).toBeNull();
+  });
+
+  it("shows a failure, not a blank or a zero, when an operand is empty", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComputed(field("record.amount - record.cost"), { amount: 10, cost: null });
+    const failure = screen.getByText("Can't compute", { exact: false });
+    expect(failure.getAttribute("title")).toContain("record.cost is empty");
+    expect(failure.textContent).toContain("record.cost is empty");
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("shows a failure on division by zero", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComputed(field("record.a / record.b"), { a: 1, b: 0 });
+    expect(screen.getByText("Can't compute", { exact: false }).getAttribute("title")).toContain("division by zero");
+  });
+
+  it("recovers once the operand is fixed", () => {
+    const update = renderComputed(field("record.a / record.b"), { a: 1, b: 0 });
+    expect(screen.getByText("Can't compute", { exact: false })).toBeTruthy();
+    update({ a: 3, b: 2 });
+    expect(screen.queryByText("Can't compute", { exact: false })).toBeNull();
+    expect(screen.getByText("1.5")).toBeTruthy();
+  });
+
+  it("renders a zero result as 0, never -0", () => {
+    renderComputed(field("-record.a"), { a: 0 });
+    expect(screen.getByText("0")).toBeTruthy();
+    expect(screen.queryByText("-0")).toBeNull();
+  });
+
+  it("shows a failure, without throwing, for a malformed expression", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(() => renderComputed(field("record.a +"), { a: 1 })).not.toThrow();
+    expect(screen.getByText("Can't compute", { exact: false })).toBeTruthy();
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain('field "margin" expression');
+  });
+
+  it("rejects a boolean-only construct rather than evaluating it", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    renderComputed(field("record.a = 1"), { a: 1 });
+    expect(screen.getByText("Can't compute", { exact: false })).toBeTruthy();
   });
 });

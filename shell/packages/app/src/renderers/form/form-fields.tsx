@@ -88,7 +88,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
   const value = readFieldValue(field, record);
 
   if (field.type === "separator" || field.type === "label") {
-    return <FieldInput field={field} value={value} record={record} onChange={() => {}} />;
+    return <FieldInput field={field} value={value} record={record} resource={resource} onChange={() => {}} />;
   }
 
   // Explicit id/htmlFor, not a wrapping <label>, for the field types where
@@ -102,6 +102,7 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
       field={field}
       value={value}
       record={record}
+      resource={resource}
       disabled={readonly}
       id={id}
       onChange={(next) => (readonly ? undefined : onChange(writeFieldValue(field, next)))}

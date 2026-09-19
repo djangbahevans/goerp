@@ -162,4 +162,29 @@ describe("useConditionEvaluator", () => {
     rerender();
     expect(result.current.isVisible("user_has_role('admin')", "x")).toBe(true);
   });
+
+  it("computes a value expression against the record", () => {
+    const conditions = evaluator();
+    expect(conditions.computeValue("record.a + record.b", "field x", { a: 1, b: 2 })).toEqual({ ok: true, value: 3 });
+    expect(conditions.computeValue("PERCENT(record.a, 1)", "field x", { a: 0.123 })).toEqual({
+      ok: true,
+      value: "12.3%",
+    });
+  });
+
+  it("fails without a console report for a data-dependent evaluation failure", () => {
+    const conditions = evaluator();
+    expect(conditions.computeValue("record.a / record.b", "field x", { a: 1, b: 0 })).toMatchObject({ ok: false });
+    expect(conditions.computeValue("record.a", "field x", {})).toMatchObject({ ok: false });
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("fails, and reports once, for a malformed value expression", () => {
+    const conditions = evaluator();
+    for (let i = 0; i < 3; i++) {
+      expect(conditions.computeValue("record.a +", "field x", { a: 1 })).toMatchObject({ ok: false });
+    }
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(String(consoleError.mock.calls[0]?.[0])).toContain("(expression: record.a +)");
+  });
 });
