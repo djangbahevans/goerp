@@ -2,10 +2,10 @@ import { actionButtonClassName } from "@goerp/sdk/components";
 import { modelRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
+import { SharePanel } from "./share-panel.js";
 
 // Shown when the model declares .Shareable(), gated off the model
-// registry. The share-management panel itself is goerp#476's scope — this
-// only gives the trigger and the panel shell a real treatment.
+// registry.
 export function ShareHeaderAction({ resource, recordId }: { resource: string; recordId: string | undefined }) {
   const { data: model } = useQuery({
     queryKey: ["form-model-shareable", resource],
@@ -13,7 +13,8 @@ export function ShareHeaderAction({ resource, recordId }: { resource: string; re
   });
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const containerRef = useRef<HTMLSpanElement | null>(null);
+  const headingId = `${panelId}-heading`;
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   // Same disclosure dismissal ActionMenu's own panel uses — outside click
@@ -43,7 +44,7 @@ export function ShareHeaderAction({ resource, recordId }: { resource: string; re
   if (!model?.shareable || recordId === undefined) return null;
 
   return (
-    <span ref={containerRef} className="relative inline-block">
+    <div ref={containerRef} className="relative inline-block">
       <button
         ref={triggerRef}
         type="button"
@@ -56,14 +57,21 @@ export function ShareHeaderAction({ resource, recordId }: { resource: string; re
         Share
       </button>
       {open && (
-        <span
+        <div
           id={panelId}
           role="dialog"
-          className="absolute top-full right-0 z-(--z-dropdown) mt-1 min-w-40 max-w-70 rounded-structural border border-border bg-surface p-3 text-sm text-text-secondary shadow-md"
+          aria-labelledby={headingId}
+          className="absolute top-full right-0 z-(--z-dropdown) mt-1 w-90 max-w-[calc(100vw-2rem)] rounded-structural border border-border bg-surface p-3 text-sm shadow-md"
         >
-          Share management — see goerp#476.
-        </span>
+          <SharePanel
+            resource={resource}
+            recordId={recordId}
+            label={model.label}
+            permissions={model.share_permissions ?? []}
+            headingId={headingId}
+          />
+        </div>
       )}
-    </span>
+    </div>
   );
 }
