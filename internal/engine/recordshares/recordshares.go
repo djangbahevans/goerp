@@ -18,6 +18,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Store struct {
@@ -42,21 +43,52 @@ type Share struct {
 	ExpiresAt        *time.Time
 }
 
-// Create inserts a new grant and returns the created row.
-func (s *Store) Create(ctx context.Context, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy string, expiresAt *time.Time) (*Share, error) {
+// Grant records that sharedWithUserID may access (model, recordID) at
+// permission, and returns the resulting row. A recipient already holding a
+// grant on the record has it updated in place — permission, expires_at and
+// shared_by are replaced, id and created_at are kept — and created reports
+// false; otherwise a row is inserted and created is true. The unique index
+// on (model, record_id, shared_with_user_id) makes this race-safe.
+func (s *Store) Grant(ctx context.Context, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy string, expiresAt *time.Time) (sh *Share, created bool, err error) {
+	sh, created, err = s.upsert(ctx, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt)
+	if !isMissingConflictTarget(err) {
+		return sh, created, err
+	}
+
+	// A tenant provisioned before the unique index existed only gains it when
+	// Bootstrap or a .Shareable() module's schema sync next runs for it, which
+	// may be never; adding it here keeps sharing working on such a tenant.
+	if err := s.Bootstrap(ctx, tenantSlug); err != nil {
+		return nil, false, fmt.Errorf("add record_shares unique index: %w", err)
+	}
+	return s.upsert(ctx, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt)
+}
+
+func (s *Store) upsert(ctx context.Context, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy string, expiresAt *time.Time) (*Share, bool, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
 		INSERT INTO %s.record_shares (model, record_id, shared_with_user_id, permission, shared_by, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, model, record_id, shared_with_user_id, permission, shared_by, created_at, expires_at
+		ON CONFLICT (model, record_id, shared_with_user_id) DO UPDATE
+		    SET permission = EXCLUDED.permission, shared_by = EXCLUDED.shared_by, expires_at = EXCLUDED.expires_at
+		RETURNING id, model, record_id, shared_with_user_id, permission, shared_by, created_at, expires_at, (xmax = 0)
 	`, schema)
 
-	row := s.db.QueryRowContext(ctx, query, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt)
-	sh, err := scanShare(row)
-	if err != nil {
-		return nil, fmt.Errorf("create record share: %w", err)
+	var out Share
+	var created bool
+	if err := s.db.QueryRowContext(ctx, query, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt).Scan(
+		&out.ID, &out.Model, &out.RecordID, &out.SharedWithUserID, &out.Permission, &out.SharedBy, &out.CreatedAt, &out.ExpiresAt, &created,
+	); err != nil {
+		return nil, false, fmt.Errorf("grant record share: %w", err)
 	}
-	return sh, nil
+	return &out, created, nil
+}
+
+// isMissingConflictTarget reports Postgres's invalid_column_reference error
+// (42P10) for an ON CONFLICT target no unique index backs.
+func isMissingConflictTarget(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "42P10"
 }
 
 // ListForRecord returns every non-expired grant on (model, recordID),
@@ -174,18 +206,56 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 			return fmt.Errorf("create record_shares table: %w", err)
 		}
 
-		// Covers the compiled RLS policy's OR EXISTS lookup
-		// (multitenancy-internals.md §5a), which filters on exactly
-		// these three columns on every read of a .Shareable() model's
-		// table — a sequential scan here runs on every such read.
-		createIndex := fmt.Sprintf(`
-			CREATE INDEX IF NOT EXISTS idx_record_shares_lookup
-			    ON %s.record_shares(model, record_id, shared_with_user_id)
-		`, schema)
-		if _, err := tx.ExecContext(ctx, createIndex); err != nil {
-			return fmt.Errorf("create record_shares lookup index: %w", err)
+		for _, stmt := range UniqueIndexStatements(schema + ".") {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("create record_shares unique index: %w", err)
+			}
 		}
 
 		return nil
 	})
+}
+
+// UniqueIndexStatements returns the statements that give record_shares its
+// one-row-per-(model, record_id, shared_with_user_id) unique index, for the
+// table qualified by schemaPrefix ("tenant_acme." or "" to resolve through
+// search_path). Shared by Bootstrap and schema sync's own copy of the DDL so
+// the two cannot drift; both run them in a transaction.
+//
+// On a table without the index — one created before it existed — duplicates
+// are removed first, keeping one row per key: a grant that has not expired in
+// preference to one that has, then the most recently created. The block runs
+// only while the index is absent, so later calls are a no-op. The unique index
+// also serves the compiled RLS policy's OR EXISTS lookup (multitenancy-
+// internals.md §5a), which filters on exactly these three columns on every
+// read of a .Shareable() model's table, so the earlier non-unique lookup index
+// is dropped as redundant. The lock timeout makes the DDL fail, and the sync
+// retry, rather than queue behind a long-running read and stall every later
+// query on the table.
+func UniqueIndexStatements(schemaPrefix string) []string {
+	return []string{
+		`SET LOCAL lock_timeout = '5s'`,
+		fmt.Sprintf(`
+			DO $$
+			BEGIN
+			    IF to_regclass('%[1]sidx_record_shares_unique') IS NULL THEN
+			        LOCK TABLE %[1]srecord_shares IN SHARE ROW EXCLUSIVE MODE;
+			        DELETE FROM %[1]srecord_shares
+			        WHERE id IN (
+			            SELECT id FROM (
+			                SELECT id, ROW_NUMBER() OVER (
+			                    PARTITION BY model, record_id, shared_with_user_id
+			                    ORDER BY (expires_at IS NULL OR expires_at > NOW()) DESC, created_at DESC, id DESC
+			                ) AS rank
+			                FROM %[1]srecord_shares
+			            ) ranked
+			            WHERE rank > 1
+			        );
+			        CREATE UNIQUE INDEX idx_record_shares_unique
+			            ON %[1]srecord_shares(model, record_id, shared_with_user_id);
+			    END IF;
+			END $$
+		`, schemaPrefix),
+		fmt.Sprintf(`DROP INDEX IF EXISTS %sidx_record_shares_lookup`, schemaPrefix),
+	}
 }

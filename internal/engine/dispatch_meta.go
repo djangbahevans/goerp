@@ -195,7 +195,8 @@ func (e *Engine) sharerCanReadRecord(ctx context.Context, authCtx *authcheck.Aut
 
 // dispatchSharesCreateRoute is POST /_meta/shares' handler (goerp#475) —
 // same EngineNative-not-EngineBuiltin posture as dispatchPermissionsRoute
-// above. Creates a record_shares grant after the permission-capping check
+// above. Creates a record_shares grant, or updates the recipient's
+// existing one (200 rather than 201), after the permission-capping check
 // go-sdk-reference.md §22 "Document sharing" specifies: reject a request
 // for more access than the sharer currently has, checked via the
 // sharer's own host.orm.read — the only "current access" signal
@@ -286,13 +287,17 @@ func (e *Engine) dispatchSharesCreateRoute(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	sh, err := e.recordSharesStore.Create(ctx, tenantCtx.Slug, body.Model, body.RecordID, recipient.ID, body.Permission, authCtx.UserID, body.ExpiresAt)
+	sh, created, err := e.recordSharesStore.Grant(ctx, tenantCtx.Slug, body.Model, body.RecordID, recipient.ID, body.Permission, authCtx.UserID, body.ExpiresAt)
 	if err != nil {
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "create share failed")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, shareToResponse(sh, recipient.Email))
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, shareToResponse(sh, recipient.Email))
 }
 
 // dispatchSharesListRoute is GET /_meta/shares' handler (goerp#475) —
