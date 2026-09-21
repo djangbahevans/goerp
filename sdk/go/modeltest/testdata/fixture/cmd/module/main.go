@@ -42,6 +42,10 @@ func init() {
 		return engine.OK(map[string]string{"id": req.PathParams["id"], "model": req.Model, "action": req.Action})
 	})
 
+	engine.Action("widgets.gizmo", "restock", func(req *engine.Request) *engine.Response {
+		return engine.OK(map[string]string{"action": req.Action})
+	}, engine.Scope(engine.CollectionAction), engine.Method(engine.MethodPut))
+
 	engine.GET("/ping", func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"status": "ok"})
 	}, engine.Auth(engine.AuthNone))

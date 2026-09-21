@@ -1,12 +1,22 @@
 package route
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
+
+const (
+	scopeRecord       = "record"
+	scopeCollection   = "collection"
+	pathParamKindUUID = "uuid"
+)
+
+var actionMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE"}
 
 type actionIdentity struct {
 	model  string
@@ -31,6 +41,7 @@ func resolveActionRoutes(moduleName string, explicit []ExplicitRoute, models []m
 	}
 
 	resolved := slices.Clone(explicit)
+	seen := make(map[actionIdentity]bool, len(resolved))
 	for i, r := range resolved {
 		if !isActionRoute(r) {
 			continue
@@ -39,13 +50,69 @@ func resolveActionRoutes(moduleName string, explicit []ExplicitRoute, models []m
 		if !ok {
 			return nil, fmt.Errorf("route: module %q: action %q names model %q, which the module does not declare", moduleName, r.Name, r.Model)
 		}
-		resolved[i].Method, resolved[i].Path = deriveCRUDPath(md, model.Op{Name: r.Name})
+		id := actionIdentity{md.Name, r.Name}
+		if seen[id] {
+			return nil, fmt.Errorf("route: module %q: action %q on model %q is registered more than once", moduleName, r.Name, r.Model)
+		}
+		seen[id] = true
+
+		method, path, pathParams, err := deriveActionRoute(md, r)
+		if err != nil {
+			return nil, fmt.Errorf("route: module %q: action %q on model %q: %w", moduleName, r.Name, r.Model, err)
+		}
+		resolved[i].Method, resolved[i].Path, resolved[i].PathParams = method, path, pathParams
 	}
 	return resolved, nil
 }
 
+// deriveActionRoute derives an action's method, module-relative path and
+// path parameters. A reserved name has a fixed method and path; a custom
+// action is POST unless it declares a method, and addresses one record
+// ({plural}/{id}/{name}, with a UUID id) unless its scope is collection.
+func deriveActionRoute(md model.ModelDeclaration, r ExplicitRoute) (method, path string, pathParams map[string]string, err error) {
+	if r.Scope != "" && r.Scope != scopeRecord && r.Scope != scopeCollection {
+		return "", "", nil, fmt.Errorf("unknown scope %q", r.Scope)
+	}
+
+	if isReservedAction(r.Name) {
+		if r.Method != "" {
+			return "", "", nil, fmt.Errorf("the method of a reserved action is fixed, but %q was declared", r.Method)
+		}
+		method, path = deriveCRUDPath(md, model.Op{Name: r.Name})
+		return method, path, r.PathParams, nil
+	}
+
+	method = cmp.Or(r.Method, "POST")
+	if !slices.Contains(actionMethods, method) {
+		return "", "", nil, fmt.Errorf("unsupported method %q", method)
+	}
+	plural := "/" + pluralPathSegment(md)
+	if r.Scope == scopeCollection {
+		return method, plural + "/" + r.Name, r.PathParams, nil
+	}
+
+	pathParams = maps.Clone(r.PathParams)
+	if pathParams == nil {
+		pathParams = map[string]string{}
+	}
+	if _, declared := pathParams["id"]; !declared {
+		pathParams["id"] = pathParamKindUUID
+	}
+	return method, plural + "/{id}/" + r.Name, pathParams, nil
+}
+
 func isActionRoute(r ExplicitRoute) bool {
 	return r.Name != ""
+}
+
+func isReservedAction(name string) bool {
+	switch name {
+	case model.List.Name, model.Get.Name, model.Create.Name, model.Update.Name,
+		model.Delete.Name, model.Preview.Name, model.Pivot.Name:
+		return true
+	default:
+		return false
+	}
 }
 
 // actionModelNames lists the names an engine.Action may use for md: its

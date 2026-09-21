@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestCrudActionOf(t *testing.T) {
 	if got := crudActionOf(List); got != "list" {
@@ -105,5 +108,101 @@ func TestRouter_HandleWithoutIdentityMatchesByPathOnly(t *testing.T) {
 	}
 	if resp := r.Handle(&Request{Method: "GET", Path: "/orders"}); resp.StatusCode != 404 {
 		t.Fatalf("action route reached by path: status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestAction_WithNoOptionsCarriesRouteDefaults(t *testing.T) {
+	r := withRouter(t)
+	Action("sales.order", "confirm", func(*Request) *Response { return nil })
+
+	d := routeDeclarations(r.routes)[0]
+	if d.Auth != string(AuthRequired) {
+		t.Errorf("Auth = %q, want %q", d.Auth, AuthRequired)
+	}
+	if d.MaxBodyBytes != defaultMaxBodyBytes || d.TimeoutMs != int(defaultTimeout.Milliseconds()) {
+		t.Errorf("MaxBodyBytes/TimeoutMs = %d/%d, want the route defaults", d.MaxBodyBytes, d.TimeoutMs)
+	}
+}
+
+func TestAction_OptionsAreDeclared(t *testing.T) {
+	r := withRouter(t)
+	Action("sales.order", "confirm", func(*Request) *Response { return nil },
+		Requires("sales:order:confirm"),
+		RateLimit(10, 60, PerUser),
+		Timeout(5*time.Second),
+		MaxBody(1024),
+		Embeds("lines", "sales.order_line", true),
+		Method(MethodPut),
+		Scope(CollectionAction),
+	)
+
+	d := routeDeclarations(r.routes)[0]
+	if len(d.Permissions) != 1 || d.Permissions[0] != "sales:order:confirm" {
+		t.Errorf("Permissions = %v", d.Permissions)
+	}
+	if d.RateLimit == nil || d.RateLimit.Requests != 10 || d.RateLimit.Scope != PerUser {
+		t.Errorf("RateLimit = %+v", d.RateLimit)
+	}
+	if d.TimeoutMs != 5000 || d.MaxBodyBytes != 1024 {
+		t.Errorf("TimeoutMs/MaxBodyBytes = %d/%d, want 5000/1024", d.TimeoutMs, d.MaxBodyBytes)
+	}
+	if len(d.Embedded) != 1 || d.Embedded[0].Resource != "sales.order_line" {
+		t.Errorf("Embedded = %+v", d.Embedded)
+	}
+	if d.Method != "PUT" || d.Scope != "collection" || d.Path != "" {
+		t.Errorf("Method/Scope/Path = %q/%q/%q, want PUT/collection/empty", d.Method, d.Scope, d.Path)
+	}
+}
+
+func TestAction_ListReportsResponseIsList(t *testing.T) {
+	r := withRouter(t)
+	Action("sales.order", List, func(*Request) *Response { return nil })
+	Action("sales.order", Get, func(*Request) *Response { return nil })
+	Action("sales.order", "confirm", func(*Request) *Response { return nil })
+
+	decls := routeDeclarations(r.routes)
+	for i, want := range []bool{true, false, false} {
+		if decls[i].ResponseIsList != want {
+			t.Errorf("%s ResponseIsList = %v, want %v", decls[i].Name, decls[i].ResponseIsList, want)
+		}
+	}
+}
+
+func TestModel_BindsAPathRouteToAModel(t *testing.T) {
+	r := withRouter(t)
+	h := func(*Request) *Response { return nil }
+	GET("/some/path", h, Model("sales.order", Get))
+	GET("/some/list", h, Model("sales.order", List), Requires("sales:order:read"))
+	GET("/plain", h)
+
+	decls := routeDeclarations(r.routes)
+	if d := decls[0]; d.Model != "sales.order" || d.CRUDAction != "get" || d.ResponseIsList || d.Name != "" {
+		t.Errorf("get route = %+v, want Model=sales.order CRUDAction=get ResponseIsList=false Name=\"\"", d)
+	}
+	if d := decls[1]; d.CRUDAction != "list" || !d.ResponseIsList || len(d.Permissions) != 1 {
+		t.Errorf("list route = %+v, want CRUDAction=list ResponseIsList=true with permissions kept", d)
+	}
+	if d := decls[2]; d.Model != "" || d.CRUDAction != "" {
+		t.Errorf("plain route = %+v, want no model binding", d)
+	}
+	if decls[0].Path != "/some/path" || decls[0].Method != "GET" {
+		t.Errorf("path route Method/Path = %s %s, want GET /some/path", decls[0].Method, decls[0].Path)
+	}
+}
+
+func TestModel_RouteStillMatchesByPath(t *testing.T) {
+	r := withRouter(t)
+	GET("/some/path", func(*Request) *Response { return &Response{StatusCode: 200} }, Model("sales.order", Get))
+
+	if resp := r.Handle(&Request{Method: "GET", Path: "/some/path"}); resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestReservedNamesConvertToBothTypes(t *testing.T) {
+	var a ActionName = List
+	var c CRUDAction = List
+	if string(a) != string(c) {
+		t.Fatalf("ActionName %q != CRUDAction %q", a, c)
 	}
 }

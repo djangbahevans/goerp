@@ -26,6 +26,7 @@ type ExplicitRoute struct {
 	ResponseIsList bool
 	CrudAction     string
 	Name           string
+	Scope          string
 }
 
 // ExplicitRoutesFrom converts a module's deserialized get_routes output
@@ -60,6 +61,7 @@ func ExplicitRoutesFrom(decls []abiv1.RouteDeclaration) []ExplicitRoute {
 			ResponseIsList: d.ResponseIsList,
 			CrudAction:     d.CRUDAction,
 			Name:           d.Name,
+			Scope:          d.Scope,
 		}
 	}
 	return out

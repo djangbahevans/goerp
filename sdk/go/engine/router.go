@@ -8,13 +8,12 @@ import (
 type Handler func(*Request) *Response
 
 type route struct {
-	method     string
-	segments   []string
-	handler    Handler
-	model      string
-	name       string
-	crudAction string
-	websocket  bool
+	method    string
+	segments  []string
+	handler   Handler
+	name      string
+	scope     string
+	websocket bool
 	routeConfig
 }
 
@@ -47,12 +46,21 @@ func (r *Router) registerWebsocket(method, pattern string, h Handler, opts ...Ro
 	})
 }
 
-func (r *Router) registerAction(model, name, crudAction string, h Handler) {
+func (r *Router) registerAction(model, name string, h Handler, opts ...ActionOption) {
+	cfg := actionConfig{routeConfig: newRouteConfig()}
+	for _, opt := range opts {
+		opt.applyAction(&cfg)
+	}
+	cfg.model = model
+	cfg.crudAction = crudActionOf(ActionName(name))
+	cfg.responseIsList = cfg.crudAction == List
+
 	r.routes = append(r.routes, route{
-		handler:    h,
-		model:      model,
-		name:       name,
-		crudAction: crudAction,
+		method:      string(cfg.method),
+		handler:     h,
+		name:        name,
+		scope:       string(cfg.scope),
+		routeConfig: cfg.routeConfig,
 	})
 }
 
@@ -162,21 +170,23 @@ func routeDeclarations(routes []route) []RouteDeclaration {
 			path = "/" + strings.Join(r.segments, "/")
 		}
 		decls = append(decls, RouteDeclaration{
-			Method:       r.method,
-			Path:         path,
-			Auth:         string(r.auth),
-			Permissions:  r.permissions,
-			RateLimit:    r.rateLimit,
-			MaxBodyBytes: r.maxBodyBytes,
-			TimeoutMs:    r.timeoutMs,
-			Streaming:    r.streaming,
-			Websocket:    r.websocket,
-			RawBody:      r.rawBody,
-			Model:        r.model,
-			Name:         r.name,
-			CRUDAction:   r.crudAction,
-			Embedded:     r.embedded,
-			PathParams:   r.pathParams,
+			Method:         r.method,
+			Path:           path,
+			Auth:           string(r.auth),
+			Permissions:    r.permissions,
+			RateLimit:      r.rateLimit,
+			MaxBodyBytes:   r.maxBodyBytes,
+			TimeoutMs:      r.timeoutMs,
+			Streaming:      r.streaming,
+			Websocket:      r.websocket,
+			RawBody:        r.rawBody,
+			Model:          r.model,
+			Name:           r.name,
+			Scope:          r.scope,
+			CRUDAction:     r.crudAction,
+			ResponseIsList: r.responseIsList,
+			Embedded:       r.embedded,
+			PathParams:     r.pathParams,
 		})
 	}
 	return decls
