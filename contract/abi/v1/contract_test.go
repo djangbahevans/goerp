@@ -391,3 +391,24 @@ func TestAuthzFieldCheckKindValues(t *testing.T) {
 		t.Fatalf("read=%d write=%d, want 0 and 1", AuthzFieldCheckRead, AuthzFieldCheckWrite)
 	}
 }
+
+func TestVirtualOpWireFields(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want []string
+	}{
+		{"VirtualOpRequest", VirtualOpRequest{ID: "i", Record: map[string]any{"a": 1}, ExpectedEtag: "e", Limit: 1, Offset: 1, TenantID: "t", UserID: "u", TraceID: "r"},
+			[]string{"model", "op", "id", "record", "expected_etag", "limit", "offset", "tenant_id", "user_id", "trace_id"}},
+		{"VirtualOpRequest omits empty members", VirtualOpRequest{}, []string{"model", "op"}},
+		{"VirtualOpResponse", VirtualOpResponse{Record: map[string]any{"a": 1}, Records: []map[string]any{{"a": 1}}, Error: &VirtualOpError{}},
+			[]string{"record", "records", "error"}},
+		{"VirtualOpResponse omits empty members", VirtualOpResponse{}, nil},
+		{"VirtualOpError", VirtualOpError{}, []string{"code", "message"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireKeys(t, wireKeys(t, tt.v), tt.want...)
+		})
+	}
+}

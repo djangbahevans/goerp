@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/tetratelabs/wazero"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -21,11 +22,7 @@ var allocOnlyModule = []byte{
 	0x01, 0x20, 0x00, 0x6A, 0x24, 0x00, 0x20, 0x01, 0x0B,
 }
 
-type testEnvelope struct {
-	OK    bool               `msgpack:"ok"`
-	Data  msgpack.RawMessage `msgpack:"data,omitempty"`
-	Error *HostError         `msgpack:"error,omitempty"`
-}
+type testEnvelope = abiv1.Envelope
 
 func newBoundaryTestModule(t *testing.T) (context.Context, wazero.Runtime, wazero.CompiledModule) {
 	t.Helper()

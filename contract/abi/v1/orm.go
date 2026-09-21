@@ -216,3 +216,31 @@ type PreviewError struct {
 	Code    string `msgpack:"code"`
 	Message string `msgpack:"message"`
 }
+
+// VirtualOpRequest is what the engine sends a module's handle_virtual_op
+// export for a model backed by a Virtual backend.
+type VirtualOpRequest struct {
+	Model        string         `msgpack:"model"`
+	Op           string         `msgpack:"op"`
+	ID           string         `msgpack:"id,omitempty"`
+	Record       map[string]any `msgpack:"record,omitempty"`
+	ExpectedEtag string         `msgpack:"expected_etag,omitempty"`
+	Limit        int            `msgpack:"limit,omitempty"`
+	Offset       int            `msgpack:"offset,omitempty"`
+	TenantID     string         `msgpack:"tenant_id,omitempty"`
+	UserID       string         `msgpack:"user_id,omitempty"`
+	TraceID      string         `msgpack:"trace_id,omitempty"`
+}
+
+// VirtualOpResponse is what a module's handle_virtual_op export returns.
+type VirtualOpResponse struct {
+	Record  map[string]any   `msgpack:"record,omitempty"`
+	Records []map[string]any `msgpack:"records,omitempty"`
+	Error   *VirtualOpError  `msgpack:"error,omitempty"`
+}
+
+// VirtualOpError is a Virtual backend function's failure.
+type VirtualOpError struct {
+	Code    string `msgpack:"code"`
+	Message string `msgpack:"message"`
+}

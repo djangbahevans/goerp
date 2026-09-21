@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -68,22 +69,9 @@ func compileVirtualOpFixture(t *testing.T) []byte {
 	return data
 }
 
-// wireVirtualOpRequest/wireVirtualOpResponse mirror sdk/go/orm's own
-// unexported virtualOpRequest/virtualOpResponse wire shapes by field name
-// and msgpack tag (internal/engine/wasm can't import the module-side
-// package's unexported types — the wire contract is the msgpack tags
-// themselves, the same boundary any two independently-compiled binaries
-// on either side of the WASM ABI cross).
-type wireVirtualOpRequest struct {
-	Model    string `msgpack:"model"`
-	Op       string `msgpack:"op"`
-	ID       string `msgpack:"id,omitempty"`
-	TenantID string `msgpack:"tenant_id,omitempty"`
-}
+type wireVirtualOpRequest = abiv1.VirtualOpRequest
 
-type wireVirtualOpResponse struct {
-	Record map[string]any `msgpack:"record,omitempty"`
-}
+type wireVirtualOpResponse = abiv1.VirtualOpResponse
 
 // TestInvokeHandleVirtualOp_RoundTripsThroughRealModule compiles a real Go
 // module registering orm.RegisterVirtualBackend for "legacy.item"
