@@ -22,7 +22,7 @@ func NewSchemaDiffEngine(cfg *Config) *SchemaDiffEngine {
 }
 
 func (e *SchemaDiffEngine) Diff(ctx context.Context, sess *SchemaSyncSession, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) ([]schema.Change, error) {
-	decl, err := newModuleSchemaDeclaration("tenant_"+sess.tenantSlug, sess.moduleName, modelDecls, typeDecls)
+	decl, err := newModuleSchemaDeclaration("tenant_"+sess.tenantSlug, sess.moduleName, modelDecls, typeDecls, WithDependencies(sess.manifest.DependsOn, sess.manifest.SoftDependsOn))
 	if err != nil {
 		return nil, err
 	}

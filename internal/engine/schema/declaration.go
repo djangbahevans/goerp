@@ -12,8 +12,8 @@ type moduleSchemaDeclaration struct {
 	OwnedTables []string
 }
 
-func newModuleSchemaDeclaration(schemaName, moduleName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) (*moduleSchemaDeclaration, error) {
-	atlas, err := ToAtlasSchema(schemaName, moduleName, modelDecls, typeDecls)
+func newModuleSchemaDeclaration(schemaName, moduleName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration, opts ...AtlasOption) (*moduleSchemaDeclaration, error) {
+	atlas, err := ToAtlasSchema(schemaName, moduleName, modelDecls, typeDecls, opts...)
 	if err != nil {
 		return nil, err
 	}
