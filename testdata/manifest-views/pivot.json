@@ -1,0 +1,15 @@
+{
+  "name": "sales_pivot",
+  "type": "pivot",
+  "resource": "sales.order",
+  "label": "Sales Analysis",
+  "rows": ["customer_name"],
+  "columns": ["state"],
+  "values": [
+    {"field": "amount_total", "aggregation": "sum", "label": "Total"}
+  ],
+  "default_filters": {},
+  "filters": [],
+  "allow_download": true,
+  "use_wasm": true
+}

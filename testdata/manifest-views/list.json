@@ -1,0 +1,19 @@
+{
+  "name": "contacts_list",
+  "type": "list",
+  "resource": "contacts.contact",
+  "label": "Contacts",
+  "icon": "users",
+  "permission": "contacts:contact:read",
+  "columns": [],
+  "default_sort": "display_name",
+  "default_sort_dir": "asc",
+  "default_filters": {},
+  "row_click": "contacts_form",
+  "row_click_param": "id",
+  "selectable": true,
+  "filters": [],
+  "actions": [],
+  "bulk_actions": [],
+  "group_by_options": []
+}

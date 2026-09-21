@@ -1,0 +1,17 @@
+{
+  "name": "contacts_form",
+  "type": "form",
+  "resource": "contacts.contact",
+  "label": "Contact",
+  "create_route": "contacts.create_contact",
+  "update_route": "contacts.update_contact",
+  "delete_route": "contacts.delete_contact",
+  "fetch_route": "contacts.get_contact",
+  "sections": [],
+  "tabs": [],
+  "header_actions": [],
+  "sidebar": null,
+  "chatter": true,
+  "autosave": false,
+  "readonly_condition": null
+}

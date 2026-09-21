@@ -199,6 +199,11 @@ type View struct {
 	Chatter           *bool          `json:"chatter,omitempty"`
 	Autosave          bool           `json:"autosave,omitzero"`
 	ReadonlyCondition string         `json:"readonly_condition,omitempty"`
+
+	// Extra holds the members the engine does not model (the type-specific
+	// members of kanban, calendar, timeline, pivot and custom views), kept
+	// verbatim so /_meta/schema serves them to the shell unchanged.
+	Extra map[string]jsontext.Value `json:"-"`
 }
 
 type ViewExtensionRef struct {

@@ -30,6 +30,7 @@ jobs:
           filters: |
             go:
               - "**/*.go"
+              - "testdata/**"
               - "go.mod"
               - "go.sum"
               - "Dockerfile"
@@ -37,6 +38,7 @@ jobs:
               - ".github/workflows/go.yml"
             engine:
               - "internal/engine/**"
+              - "testdata/**"
               - "internal/module/**"
               - "sdk/go/**"
               - "cmd/engine/**"
