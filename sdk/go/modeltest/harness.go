@@ -325,7 +325,7 @@ func syncModuleSchema(t *testing.T, ctx context.Context, tenantID, tenantSlug st
 	}
 	defer func() { _ = sess.Close(ctx) }()
 
-	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: 30 * time.Second})
+	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: 30 * time.Second, TolerateUnloadedDependencies: true})
 
 	changes, err := diffEngine.Diff(ctx, sess, mod.ModelDecls, mod.TypeDecls)
 	if err != nil {

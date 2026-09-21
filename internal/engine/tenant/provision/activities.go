@@ -6,7 +6,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"sort"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
@@ -292,22 +291,28 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 }
 
 // ListModuleNames returns the name of every currently loaded module that
-// isn't StatusFailed, sorted for predictable ordering — Workflow calls
-// SyncModuleSchema once per name returned here.
+// isn't StatusFailed, in dependency order — Workflow calls
+// SyncModuleSchema once per name returned here, so a module's schema sync
+// runs after the schema of every module it depends on.
 func (a *Activities) ListModuleNames(ctx context.Context) ([]string, error) {
 	snap := a.registry.Snapshot()
 	if snap == nil {
 		return nil, nil
 	}
 
-	names := make([]string, 0, len(snap.Modules()))
-	for name, mod := range snap.Modules() {
+	mods := make([]*module.LoadedModule, 0, len(snap.Modules()))
+	for _, mod := range snap.Modules() {
 		if mod.Status == module.StatusFailed {
 			continue
 		}
-		names = append(names, name)
+		mods = append(mods, mod)
 	}
-	sort.Strings(names)
+
+	ordered := module.OrderByDependencies(mods)
+	names := make([]string, len(ordered))
+	for i, mod := range ordered {
+		names[i] = mod.Manifest.Name
+	}
 
 	return names, nil
 }
