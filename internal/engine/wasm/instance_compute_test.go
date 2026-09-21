@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -32,19 +33,9 @@ func compileComputedFixture(t *testing.T) []byte {
 	return data
 }
 
-// wireComputeRequest/wireComputeResponse mirror sdk/go/orm's own
-// unexported computeRequest/computeResponse wire shapes by field name and
-// msgpack tag — see wireVirtualOpRequest's own doc comment
-// (instance_virtualop_test.go) for why this package can't import the
-// module-side types directly.
-type wireComputeRequest struct {
-	FnName string         `msgpack:"fn_name"`
-	Record map[string]any `msgpack:"record"`
-}
+type wireComputeRequest = abiv1.ComputeRequest
 
-type wireComputeResponse struct {
-	Value any `msgpack:"value,omitempty"`
-}
+type wireComputeResponse = abiv1.ComputeResponse
 
 // TestInvokeHandleComputed_RoundTripsThroughRealModule compiles a real Go
 // module registering orm.RegisterComputed for "_compute_amount_total"

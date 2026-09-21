@@ -4,23 +4,13 @@ import (
 	"context"
 	"testing"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// wirePreviewRequest/wirePreviewResponse mirror sdk/go/orm's own
-// unexported previewRequest/previewResponse wire shapes by field name and
-// msgpack tag — see wireVirtualOpRequest's own doc comment
-// (instance_virtualop_test.go) for why this package can't import the
-// module-side types directly.
-type wirePreviewRequest struct {
-	Model    string         `msgpack:"model"`
-	Record   map[string]any `msgpack:"record"`
-	TenantID string         `msgpack:"tenant_id,omitempty"`
-}
+type wirePreviewRequest = abiv1.PreviewRequest
 
-type wirePreviewResponse struct {
-	Record map[string]any `msgpack:"record,omitempty"`
-}
+type wirePreviewResponse = abiv1.PreviewResponse
 
 // TestInvokeHandlePreview_RoundTripsThroughRealModule compiles a real Go
 // module registering orm.RegisterPreviewHook for "testmodule.priced_order"

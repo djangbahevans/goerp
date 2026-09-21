@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -48,14 +49,7 @@ var hostDBCallerModule = []byte{
 	0x08, 0x00, 0x20, 0x00, 0x20, 0x01, 0x10, 0x02, 0x0B,
 }
 
-// wireEnvelope mirrors abi's unexported envelope type structurally (same
-// msgpack field names) so tests outside the abi package can decode a host
-// function's response without abi exporting an internal wire type.
-type wireEnvelope struct {
-	OK    bool               `msgpack:"ok"`
-	Data  msgpack.RawMessage `msgpack:"data,omitempty"`
-	Error *abi.HostError     `msgpack:"error,omitempty"`
-}
+type wireEnvelope = abiv1.Envelope
 
 func openTestPrimaryDB(t *testing.T) *sql.DB {
 	t.Helper()

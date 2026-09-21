@@ -16,12 +16,6 @@ import (
 // back as int8, not int64 or plain int), which a hand-built test can't
 // catch; this one does.
 func TestExecBatchResultFromDetails_RealMsgpackRoundTrip(t *testing.T) {
-	type wireBatchRowError struct {
-		Index   int            `msgpack:"index"`
-		Code    string         `msgpack:"code"`
-		Message string         `msgpack:"message"`
-		Details map[string]any `msgpack:"details,omitempty"`
-	}
 	type wireDetails struct {
 		Details map[string]any `msgpack:"details"`
 	}
@@ -29,7 +23,7 @@ func TestExecBatchResultFromDetails_RealMsgpackRoundTrip(t *testing.T) {
 	original := wireDetails{Details: map[string]any{
 		"total_rows_affected": 3,
 		"failed_count":        1,
-		"errors": []wireBatchRowError{
+		"errors": []abi.DBBatchRowError{
 			{Index: 1, Code: abi.ErrCodeDBUniqueViolation, Message: "duplicate key", Details: map[string]any{"constraint": "widget_name_key"}},
 		},
 	}}

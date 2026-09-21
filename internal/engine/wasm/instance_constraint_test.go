@@ -4,25 +4,13 @@ import (
 	"context"
 	"testing"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// wireConstraintRequest/wireConstraintResponse mirror sdk/go/orm's own
-// unexported constraintRequest/constraintResponse wire shapes by field
-// name and msgpack tag — see wireVirtualOpRequest's own doc comment
-// (instance_virtualop_test.go) for why this package can't import the
-// module-side types directly.
-type wireConstraintRequest struct {
-	Model  string         `msgpack:"model"`
-	Phase  string         `msgpack:"phase"`
-	Record map[string]any `msgpack:"record"`
-}
+type wireConstraintRequest = abiv1.ConstraintRequest
 
-type wireConstraintResponse struct {
-	Allowed bool   `msgpack:"allowed"`
-	Field   string `msgpack:"field,omitempty"`
-	Message string `msgpack:"message,omitempty"`
-}
+type wireConstraintResponse = abiv1.ConstraintResponse
 
 // TestInvokeHandleConstraint_RoundTripsThroughRealModule compiles a real
 // Go module registering orm.RegisterConstraint for

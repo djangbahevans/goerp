@@ -6,6 +6,7 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -52,29 +53,11 @@ func RegisterVirtualBackend(modelName string, backend VirtualBackend) {
 	registry[modelName] = backend
 }
 
-type virtualOpRequest struct {
-	Model        string         `msgpack:"model"`
-	Op           string         `msgpack:"op"`
-	ID           string         `msgpack:"id,omitempty"`
-	Record       map[string]any `msgpack:"record,omitempty"`
-	ExpectedEtag string         `msgpack:"expected_etag,omitempty"`
-	Limit        int            `msgpack:"limit,omitempty"`
-	Offset       int            `msgpack:"offset,omitempty"`
-	TenantID     string         `msgpack:"tenant_id,omitempty"`
-	UserID       string         `msgpack:"user_id,omitempty"`
-	TraceID      string         `msgpack:"trace_id,omitempty"`
-}
+type virtualOpRequest = abi.VirtualOpRequest
 
-type virtualOpResponse struct {
-	Record  map[string]any   `msgpack:"record,omitempty"`
-	Records []map[string]any `msgpack:"records,omitempty"`
-	Error   *virtualOpError  `msgpack:"error,omitempty"`
-}
+type virtualOpResponse = abi.VirtualOpResponse
 
-type virtualOpError struct {
-	Code    string `msgpack:"code"`
-	Message string `msgpack:"message"`
-}
+type virtualOpError = abi.VirtualOpError
 
 // DispatchVirtualOp decodes a virtualOpRequest from module memory at
 // (ptr, length), routes it to the registered VirtualBackend's matching
