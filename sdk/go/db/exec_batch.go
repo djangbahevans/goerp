@@ -28,20 +28,11 @@ type BatchRowError struct {
 	Details map[string]any
 }
 
-type dbExecBatchOpts struct {
-	ContinueOnError bool `msgpack:"continue_on_error"`
-}
+type dbExecBatchOpts = abi.DBExecBatchOpts
 
-type dbExecBatchInput struct {
-	SQL       string          `msgpack:"sql"`
-	ParamSets [][]any         `msgpack:"param_sets"`
-	Opts      dbExecBatchOpts `msgpack:"opts"`
-}
+type dbExecBatchInput = abi.DBExecBatchInput
 
-type dbExecBatchOutput struct {
-	TotalRowsAffected int     `msgpack:"total_rows_affected"`
-	DurationMs        float64 `msgpack:"duration_ms"`
-}
+type dbExecBatchOutput = abi.DBExecBatchOutput
 
 // ExecBatch executes sql once per entry in argSets, inside a single
 // transaction, via host.db.exec_batch. It always runs with

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tetratelabs/wazero/api"
@@ -19,11 +20,7 @@ import (
 // "Program Limit Exceeded" class the payload cap might otherwise suggest.
 const invalidParameterValueSQLState = "22023"
 
-type dbNotifyInput struct {
-	Channel string `msgpack:"channel"`
-	Payload string `msgpack:"payload"`
-	TxID    string `msgpack:"tx_id"`
-}
+type dbNotifyInput = abiv1.DBNotifyInput
 
 // makeDBNotify builds host.db.notify — a tenant-namespaced Postgres
 // NOTIFY, sent immediately against primary if no tx_id is supplied, or on

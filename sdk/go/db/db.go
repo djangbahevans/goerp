@@ -12,7 +12,10 @@
 // host.db.exec-originated failure (errors.go).
 package db
 
-import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+)
 
 // Tx is a handle to a transaction opened via host.db.begin. Its zero
 // value is not usable — obtain one from Begin.
@@ -27,23 +30,13 @@ type Tx struct {
 // opaque.
 func (tx *Tx) TxID() string { return tx.id }
 
-type dbBeginInput struct {
-	Isolation string `msgpack:"isolation"`
-	ReadOnly  bool   `msgpack:"read_only"`
-}
+type dbBeginInput = abi.DBBeginInput
 
-type dbBeginOutput struct {
-	TxID      string `msgpack:"tx_id"`
-	ExpiresAt int64  `msgpack:"expires_at"`
-}
+type dbBeginOutput = abi.DBBeginOutput
 
-type dbTxIDInput struct {
-	TxID string `msgpack:"tx_id"`
-}
+type dbTxIDInput = abi.DBTxIDInput
 
-type dbDurationOutput struct {
-	DurationMs float64 `msgpack:"duration_ms"`
-}
+type dbDurationOutput = abi.DBDurationOutput
 
 // BeginOption configures Begin — WithIsolation, ReadOnly.
 type BeginOption func(*dbBeginInput)

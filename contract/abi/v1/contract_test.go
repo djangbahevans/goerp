@@ -226,3 +226,61 @@ func TestRateLimitScopeValues(t *testing.T) {
 		}
 	}
 }
+
+func TestDBWireFields(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want []string
+	}{
+		{"DBBeginInput", DBBeginInput{}, []string{"isolation", "read_only"}},
+		{"DBBeginOutput", DBBeginOutput{}, []string{"tx_id", "expires_at"}},
+		{"DBTxIDInput", DBTxIDInput{}, []string{"tx_id"}},
+		{"DBDurationOutput", DBDurationOutput{}, []string{"duration_ms"}},
+		{"DBLockInput", DBLockInput{Shared: true}, []string{"key", "tx_id", "timeout_ms", "shared"}},
+		{"DBLockOutput", DBLockOutput{}, []string{"acquired", "duration_ms"}},
+		{"DBNotifyInput", DBNotifyInput{TxID: "t"}, []string{"channel", "payload", "tx_id"}},
+		{"DBQueryInput", DBQueryInput{}, []string{"sql", "params", "tx_id", "opts"}},
+		{"DBQueryOpts", DBQueryOpts{}, []string{"timeout_ms", "read_only"}},
+		{"DBQueryOutput", DBQueryOutput{}, []string{"rows", "column_names", "rows_affected", "duration_ms"}},
+		{"DBExecInput", DBExecInput{TxID: "t"}, []string{"sql", "params", "tx_id", "opts"}},
+		{"DBExecOpts", DBExecOpts{TimeoutMs: 1, Returning: "id", SkipAudit: true, SkipEtag: true, ExpectRows: true},
+			[]string{"timeout_ms", "returning", "skip_audit", "skip_etag", "expect_rows"}},
+		{"DBExecOutput", DBExecOutput{Returning: [][]any{{1}}}, []string{"rows_affected", "returning", "duration_ms"}},
+		{"DBExecBatchInput", DBExecBatchInput{TxID: "t"}, []string{"sql", "param_sets", "tx_id", "opts"}},
+		{"DBExecBatchOpts", DBExecBatchOpts{TimeoutMs: 1, Returning: "id", SkipAudit: true, SkipEtag: true},
+			[]string{"continue_on_error", "timeout_ms", "returning", "skip_audit", "skip_etag"}},
+		{"DBExecBatchOutput", DBExecBatchOutput{Returning: [][]any{{1}}}, []string{"total_rows_affected", "returning", "duration_ms"}},
+		{"DBBatchRowError", DBBatchRowError{Details: map[string]any{"k": 1}}, []string{"index", "code", "message", "details"}},
+		{"DBMigrationDDLInput", DBMigrationDDLInput{Column: "c"}, []string{"op", "table", "column"}},
+		{"DBMigrationDDLOutput", DBMigrationDDLOutput{}, []string{"duration_ms"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireKeys(t, wireKeys(t, tt.v), tt.want...)
+		})
+	}
+}
+
+// A request member the SDK does not set is omitted when empty, so the
+// bytes the SDK sends do not depend on which members the engine accepts.
+func TestDBRequestsOmitEmptyOptionalMembers(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want []string
+	}{
+		{"DBLockInput", DBLockInput{}, []string{"key", "tx_id", "timeout_ms"}},
+		{"DBNotifyInput", DBNotifyInput{}, []string{"channel", "payload"}},
+		{"DBExecInput", DBExecInput{}, []string{"sql", "params", "opts"}},
+		{"DBExecOpts", DBExecOpts{}, nil},
+		{"DBExecBatchInput", DBExecBatchInput{}, []string{"sql", "param_sets", "opts"}},
+		{"DBExecBatchOpts", DBExecBatchOpts{}, []string{"continue_on_error"}},
+		{"DBMigrationDDLInput", DBMigrationDDLInput{}, []string{"op", "table"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireKeys(t, wireKeys(t, tt.v), tt.want...)
+		})
+	}
+}

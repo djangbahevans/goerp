@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -42,23 +43,13 @@ func registerHostDB(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.
 	return err
 }
 
-type dbBeginInput struct {
-	Isolation string `msgpack:"isolation"`
-	ReadOnly  bool   `msgpack:"read_only"`
-}
+type dbBeginInput = abiv1.DBBeginInput
 
-type dbBeginOutput struct {
-	TxID      string `msgpack:"tx_id"`
-	ExpiresAt int64  `msgpack:"expires_at"`
-}
+type dbBeginOutput = abiv1.DBBeginOutput
 
-type dbTxIDInput struct {
-	TxID string `msgpack:"tx_id"`
-}
+type dbTxIDInput = abiv1.DBTxIDInput
 
-type dbDurationOutput struct {
-	DurationMs float64 `msgpack:"duration_ms"`
-}
+type dbDurationOutput = abiv1.DBDurationOutput
 
 func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {

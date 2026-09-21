@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/dbscope"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
@@ -36,24 +37,11 @@ const slowQueryThreshold = 1 * time.Second
 // the generic db.query_error.
 var errResultTooLarge = errors.New("result set exceeds the maximum of 50,000 rows")
 
-type dbQueryOpts struct {
-	TimeoutMs int64 `msgpack:"timeout_ms"`
-	ReadOnly  bool  `msgpack:"read_only"`
-}
+type dbQueryOpts = abiv1.DBQueryOpts
 
-type dbQueryInput struct {
-	SQL    string      `msgpack:"sql"`
-	Params []any       `msgpack:"params"`
-	TxID   string      `msgpack:"tx_id"`
-	Opts   dbQueryOpts `msgpack:"opts"`
-}
+type dbQueryInput = abiv1.DBQueryInput
 
-type dbQueryOutput struct {
-	Rows         [][]any  `msgpack:"rows"`
-	ColumnNames  []string `msgpack:"column_names"`
-	RowsAffected int      `msgpack:"rows_affected"`
-	DurationMs   float64  `msgpack:"duration_ms"`
-}
+type dbQueryOutput = abiv1.DBQueryOutput
 
 // makeDBQuery builds host.db.query (forceReplica false, opts.read_only
 // still routes it to r's replica when set) or host.db.query_replica

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
@@ -14,23 +15,11 @@ type ExecResult struct {
 	DurationMs   float64
 }
 
-type dbExecOpts struct {
-	Returning  string `msgpack:"returning,omitempty"`
-	ExpectRows bool   `msgpack:"expect_rows,omitempty"`
-}
+type dbExecOpts = abi.DBExecOpts
 
-type dbExecInput struct {
-	SQL    string     `msgpack:"sql"`
-	Params []any      `msgpack:"params"`
-	TxID   string     `msgpack:"tx_id,omitempty"`
-	Opts   dbExecOpts `msgpack:"opts"`
-}
+type dbExecInput = abi.DBExecInput
 
-type dbExecOutput struct {
-	RowsAffected int     `msgpack:"rows_affected"`
-	Returning    [][]any `msgpack:"returning,omitempty"`
-	DurationMs   float64 `msgpack:"duration_ms"`
-}
+type dbExecOutput = abi.DBExecOutput
 
 // Exec executes a parameterized INSERT/UPDATE/DELETE via host.db.exec.
 func Exec(sql string, args ...any) (ExecResult, error) {
