@@ -18,6 +18,12 @@ var schema = model.Schema{
 		model.Define("widgets.widget", model.Label("Widget"), model.LabelPlural("Widgets"), model.Table("widgets")).
 			WithStandardFields().
 			Field("name", model.Text().Required()),
+		model.Define("widgets.gadget").
+			WithStandardFields().
+			Field("name", model.Text().Required()).
+			Field("state", model.Selection("draft", "done").Default("'draft'").Workflow(
+				model.Transition("draft", "done", "finish"))).
+			EnableOps(model.List, model.Get, model.Create),
 		model.Define("widgets.gizmo", model.LabelPlural("Gizmo Boxes")).
 			WithStandardFields().
 			EnableOps(model.List),

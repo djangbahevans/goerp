@@ -137,3 +137,42 @@ func TestRecordActionRejectsANonUUIDID(t *testing.T) {
 		t.Fatalf("status = %d, want 400 for a non-UUID id", resp.StatusCode)
 	}
 }
+
+func TestEnableOpsRoutesAreServedByTheEngine(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	h.DB.Seed("widgets_gadget", map[string]any{"id": uuid.NewString(), "name": "Sprocket"})
+
+	list := h.GET("/widgets/gadgets")
+	if list.StatusCode != 200 {
+		t.Fatalf("list status = %d, want 200; error=%v msg=%v", list.StatusCode, list.JSON("error.code"), list.JSON("error.message"))
+	}
+	if items := list.JSONArray("data"); len(items) != 1 || items[0]["name"] != "Sprocket" {
+		t.Fatalf("list data = %+v, want the seeded gadget", items)
+	}
+
+	created := h.POST("/widgets/gadgets", map[string]any{"name": "Flywheel", "tenant_id": h.TenantID})
+	if created.StatusCode != 201 {
+		t.Fatalf("create status = %d, want 201; error=%v msg=%v", created.StatusCode, created.JSON("error.code"), created.JSON("error.message"))
+	}
+	id, _ := created.JSON("id").(string)
+	h.DB.AssertExists("widgets_gadget", map[string]any{"id": id, "name": "Flywheel"})
+
+	got := h.GET("/widgets/gadgets/" + id)
+	if got.StatusCode != 200 || got.JSON("name") != "Flywheel" {
+		t.Fatalf("get status = %d name = %v, want 200 Flywheel", got.StatusCode, got.JSON("name"))
+	}
+}
+
+func TestWorkflowTransitionRouteIsServedByTheEngine(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	id := uuid.NewString()
+	h.DB.Seed("widgets_gadget", map[string]any{"id": id, "name": "Sprocket", "state": "draft"})
+
+	resp := h.POST("/widgets/gadgets/"+id+"/finish", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	h.DB.AssertExists("widgets_gadget", map[string]any{"id": id, "state": "done"})
+}

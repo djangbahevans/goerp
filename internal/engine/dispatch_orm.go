@@ -56,6 +56,11 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if entry.Manifest.StorageBackend == "transient" && e.cacheClient == nil {
+		writeRouteError(w, http.StatusNotImplemented, "not_implemented", "Transient-backed routes need a cache client, which this engine was built without")
+		return
+	}
+
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
