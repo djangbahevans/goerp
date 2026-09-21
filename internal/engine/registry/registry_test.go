@@ -460,7 +460,7 @@ func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnNameChange(t *testing.
 			Status:   module.StatusReady,
 			Manifest: manifest.Manifest{Type: "standard"},
 			ExplicitRoutes: []engine.RouteDeclaration{
-				{Method: "GET", Path: "/{id}", Auth: "required", Model: "contacts.contact", CRUDAction: "get"},
+				{Method: "GET", Path: "/contacts/{id}", Auth: "required", Model: "contacts.contact", CRUDAction: "get"},
 			},
 		},
 	})
@@ -470,10 +470,11 @@ func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnNameChange(t *testing.
 
 	snap2, err := r.Update(map[string]*module.LoadedModule{
 		"contacts": {
-			Status:   module.StatusReady,
-			Manifest: manifest.Manifest{Type: "standard"},
+			Status:     module.StatusReady,
+			Manifest:   manifest.Manifest{Type: "standard"},
+			ModelDecls: []model.ModelDeclaration{*model.Define("contact")},
 			ExplicitRoutes: []engine.RouteDeclaration{
-				{Method: "GET", Path: "/{id}", Auth: "required", Model: "contacts.contact", CRUDAction: "get", Name: "get"},
+				{Auth: "required", Model: "contacts.contact", CRUDAction: "get", Name: "get"},
 			},
 		},
 	})

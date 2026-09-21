@@ -8,6 +8,11 @@ type Request struct {
 	Method string `msgpack:"method"`
 	Path   string `msgpack:"path"`
 
+	// Model and Action identify the engine.Action route the engine matched;
+	// both are empty for a route registered by path.
+	Model  string `msgpack:"model,omitempty"`
+	Action string `msgpack:"action,omitempty"`
+
 	PathParams  map[string]string `msgpack:"params"`
 	QueryParams map[string]string `msgpack:"query"`
 	Headers     map[string]string `msgpack:"headers"`

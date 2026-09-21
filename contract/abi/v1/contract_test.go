@@ -188,6 +188,9 @@ func TestInvocationWireFields(t *testing.T) {
 		{"Request", Request{}, []string{
 			"id", "method", "path", "params", "query", "headers", "body", "user_id", "tenant_id", "tenant_slug",
 			"locale", "timezone", "currency", "direction", "trace_id", "requested_at"}},
+		{"Request with route identity", Request{Model: "sales.order", Action: "confirm"}, []string{
+			"id", "method", "path", "model", "action", "params", "query", "headers", "body", "user_id", "tenant_id", "tenant_slug",
+			"locale", "timezone", "currency", "direction", "trace_id", "requested_at"}},
 		{"Response", Response{}, []string{"status", "headers", "body"}},
 		{"ActivityRequest", ActivityRequest{}, []string{
 			"activity", "payload", "tenant_id", "user_id", "trace_id", "workflow_id", "run_id", "attempt"}},

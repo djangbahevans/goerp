@@ -69,11 +69,9 @@ func newSchemaFixtureEngine(t *testing.T) *Engine {
 					Model:       "widgets.widget",
 				},
 				{
-					Method: "POST",
-					Path:   "/{id}/confirm",
-					Auth:   "required",
-					Model:  "widgets.widget",
-					Name:   "confirm",
+					Auth:  "required",
+					Model: "widgets.widget",
+					Name:  "confirm",
 				},
 			},
 			ModelDecls: []model.ModelDeclaration{*widgetModel},
@@ -221,8 +219,8 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 	if customAction == nil {
 		t.Fatalf("no custom action route named confirm in %+v", mod.Routes)
 	}
-	if customAction.Method != "POST" || customAction.Path != "/widgets/{id}/confirm" {
-		t.Errorf("custom action route = %+v, want POST /widgets/{id}/confirm", customAction)
+	if customAction.Method != "POST" || customAction.Path != "/widgets/widgets/{id}/confirm" {
+		t.Errorf("custom action route = %+v, want POST /widgets/widgets/{id}/confirm", customAction)
 	}
 	if customAction.CrudAction != "" {
 		t.Errorf("custom action route crud_action = %q, want empty", customAction.CrudAction)

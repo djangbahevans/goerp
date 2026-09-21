@@ -217,6 +217,10 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		PermissionSet: authCtx.PermissionSet,
 	}
 
+	if entry.Manifest.Name != "" {
+		req.Model, req.Action = entry.Manifest.Model, entry.Manifest.Name
+	}
+
 	resp, err := e.invokeHandler(ctx, inst, entry.PathTemplate, req, mod)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

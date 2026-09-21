@@ -77,3 +77,32 @@ func TestAnonymous_PingStillWorks(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }
+
+func TestActionOverridesEnableOpsRouteOfModelWithLabelPlural(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.GET("/widgets/gizmo-boxes")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	if got := resp.JSON("served_by"); got != "module" {
+		t.Fatalf("served_by = %v, want module — the engine's EnableOps list route answered instead of the module's handler", got)
+	}
+	if got := resp.JSON("action"); got != "list" {
+		t.Fatalf("action = %v, want list", got)
+	}
+}
+
+func TestCustomActionIsExposedAtDerivedPathAndReachesItsHandler(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	id := uuid.NewString()
+	resp := h.POST("/widgets/gizmo-boxes/"+id+"/ship", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	if resp.JSON("id") != id || resp.JSON("model") != "widgets.gizmo" || resp.JSON("action") != "ship" {
+		t.Fatalf("response = id:%v model:%v action:%v, want id:%s model:widgets.gizmo action:ship",
+			resp.JSON("id"), resp.JSON("model"), resp.JSON("action"), id)
+	}
+}
