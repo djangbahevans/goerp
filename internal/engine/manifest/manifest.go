@@ -246,6 +246,9 @@ type ListColumn struct {
 	DisplayField       string       `json:"display_field,omitempty"`
 	ResourceLabelField string       `json:"resource_label_field,omitempty"`
 	CurrencyField      string       `json:"currency_field,omitempty"`
+
+	// Extra holds the members the engine does not model, kept verbatim.
+	Extra map[string]jsontext.Value `json:"-"`
 }
 
 type BadgeConfig map[string]BadgeValue
@@ -291,6 +294,9 @@ type Action struct {
 	URL         string         `json:"url,omitempty"`
 	Component   string         `json:"component,omitempty"`
 	Confirm     *ConfirmDialog `json:"confirm,omitempty"`
+
+	// Extra holds the members the engine does not model, kept verbatim.
+	Extra map[string]jsontext.Value `json:"-"`
 }
 
 type ConfirmDialog struct {
@@ -373,6 +379,9 @@ type FormSection struct {
 	CreateRoute        string      `json:"create_route,omitempty"`
 	UpdateRoute        string      `json:"update_route,omitempty"`
 	DeleteRoute        string      `json:"delete_route,omitempty"`
+
+	// Extra holds the members the engine does not model, kept verbatim.
+	Extra map[string]jsontext.Value `json:"-"`
 }
 
 type FormField struct {
@@ -410,6 +419,9 @@ type FormField struct {
 	Prefix             string         `json:"prefix,omitempty"`
 	CopyToClipboard    bool           `json:"copy_to_clipboard,omitzero"`
 	OpenInNewTab       *bool          `json:"open_in_new_tab,omitempty"`
+
+	// Extra holds the members the engine does not model, kept verbatim.
+	Extra map[string]jsontext.Value `json:"-"`
 }
 
 type FieldOption struct {
