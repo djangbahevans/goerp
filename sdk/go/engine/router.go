@@ -47,10 +47,8 @@ func (r *Router) registerWebsocket(method, pattern string, h Handler, opts ...Ro
 	})
 }
 
-func (r *Router) registerAction(method, pattern, model, name, crudAction string, h Handler) {
+func (r *Router) registerAction(model, name, crudAction string, h Handler) {
 	r.routes = append(r.routes, route{
-		method:     method,
-		segments:   splitPattern(pattern),
 		handler:    h,
 		model:      model,
 		name:       name,
@@ -92,10 +90,14 @@ func SSE(pattern string, h Handler, opts ...RouteOption) {
 }
 
 func (r *Router) Handle(req *Request) *Response {
+	if req.Model != "" && req.Action != "" {
+		return r.handleAction(req)
+	}
+
 	reqSegments := strings.Split(strings.Trim(req.Path, "/"), "/")
 
 	for _, rt := range r.routes {
-		if rt.method != req.Method {
+		if rt.isAction() || rt.method != req.Method {
 			continue
 		}
 
@@ -114,6 +116,22 @@ func (r *Router) Handle(req *Request) *Response {
 	}
 
 	return notFound()
+}
+
+// handleAction dispatches a request the engine matched to an engine.Action
+// route: the engine already extracted the path parameters, so only the
+// route's (model, action) identity is compared.
+func (r *Router) handleAction(req *Request) *Response {
+	for _, rt := range r.routes {
+		if rt.isAction() && rt.model == req.Model && rt.name == req.Action {
+			return rt.handler(req)
+		}
+	}
+	return notFound()
+}
+
+func (rt route) isAction() bool {
+	return rt.name != ""
 }
 
 // matchSegments compares a registered route's path segments against an
@@ -139,9 +157,13 @@ func matchSegments(pattern, path []string) (map[string]string, bool) {
 func routeDeclarations(routes []route) []RouteDeclaration {
 	decls := make([]RouteDeclaration, 0, len(routes))
 	for _, r := range routes {
+		path := ""
+		if !r.isAction() {
+			path = "/" + strings.Join(r.segments, "/")
+		}
 		decls = append(decls, RouteDeclaration{
 			Method:       r.method,
-			Path:         "/" + strings.Join(r.segments, "/"),
+			Path:         path,
 			Auth:         string(r.auth),
 			Permissions:  r.permissions,
 			RateLimit:    r.rateLimit,

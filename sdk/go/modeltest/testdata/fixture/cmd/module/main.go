@@ -18,6 +18,9 @@ var schema = model.Schema{
 		model.Define("widgets.widget", model.Label("Widget"), model.LabelPlural("Widgets"), model.Table("widgets")).
 			WithStandardFields().
 			Field("name", model.Text().Required()),
+		model.Define("widgets.gizmo", model.LabelPlural("Gizmo Boxes")).
+			WithStandardFields().
+			EnableOps(model.List),
 	},
 }
 
@@ -31,6 +34,14 @@ type widgetRow struct {
 }
 
 func init() {
+	engine.Action("widgets.gizmo", engine.List, func(req *engine.Request) *engine.Response {
+		return engine.OK(map[string]string{"served_by": "module", "action": req.Action})
+	})
+
+	engine.Action("widgets.gizmo", "ship", func(req *engine.Request) *engine.Response {
+		return engine.OK(map[string]string{"id": req.PathParams["id"], "model": req.Model, "action": req.Action})
+	})
+
 	engine.GET("/ping", func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"status": "ok"})
 	}, engine.Auth(engine.AuthNone))

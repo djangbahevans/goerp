@@ -64,6 +64,7 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 	claimedThisCall := make(map[string]string, len(models)) // "method path" -> qualified model that claimed it
 
 	prefix := ModulePathPrefix(moduleName, moduleType)
+	claimedActions := explicitActionIdentities(table, moduleName)
 
 	for _, md := range models {
 		qualifiedModel := moduleName + "." + md.Name
@@ -78,7 +79,7 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 					moduleName, claimant, qualifiedModel, method, expandedPath)
 			}
 
-			if table.Registered(method, expandedPath) {
+			if actionClaimed(claimedActions, moduleName, md, op.Name) || table.Registered(method, expandedPath) {
 				suppressed = append(suppressed, SuppressedRoute{Model: qualifiedModel, Op: op.Name})
 				continue
 			}
@@ -118,6 +119,7 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 	claimedThisCall := make(map[string]string, len(models)) // "method path" -> qualified model that claimed it
 
 	prefix := ModulePathPrefix(moduleName, moduleType)
+	claimedActions := explicitActionIdentities(table, moduleName)
 
 	for _, md := range models {
 		qualifiedModel := moduleName + "." + md.Name
@@ -134,7 +136,7 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 						moduleName, claimant, qualifiedModel, method, expandedPath)
 				}
 
-				if table.Registered(method, expandedPath) {
+				if actionClaimed(claimedActions, moduleName, md, t.ActionName) || table.Registered(method, expandedPath) {
 					suppressed = append(suppressed, SuppressedRoute{Model: qualifiedModel, Op: t.ActionName, Kind: SuppressedWorkflowTransition})
 					continue
 				}
@@ -172,17 +174,9 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 }
 
 // deriveCRUDPath derives the method and module-relative path for one
-// model op, mirroring sdk/go/engine/action.go's actionPath exactly for
-// the seven reserved ops. Unlike that SDK-side function — which only has a
-// bare model-name string, no model registry, and so can never reach
-// LabelPlural — this has the full ModelDeclaration and implements the
-// documented rule in full (go-sdk-reference.md §2a "Path and plural
-// derivation"): RoutePrefixOverride wins outright if set (no
-// pluralization applied, it's an explicit override); otherwise pluralize
-// LabelPlural, or the model's bare resource segment if LabelPlural isn't
-// set either — the same last-dotted-segment fallback actionPath's
-// pluralSegment already uses, so the two stay byte-identical whenever
-// LabelPlural/RoutePrefix are unset.
+// model op or engine.Action name (go-sdk-reference.md §2a "Path and plural
+// derivation"): a reserved verb gets its fixed method and path, and any
+// other name is a record-scoped custom action, POST {plural}/{id}/{name}.
 func deriveCRUDPath(md model.ModelDeclaration, op model.Op) (method, path string) {
 	plural := "/" + pluralPathSegment(md)
 
@@ -202,18 +196,14 @@ func deriveCRUDPath(md model.ModelDeclaration, op model.Op) (method, path string
 	case model.Pivot.Name:
 		return "GET", plural + "/pivot"
 	default:
-		// EnabledOps is only ever populated from the seven reserved model.Op
-		// values (model.go's EnableOps doc comment) — no custom-action
-		// shape exists at the model-declaration level the way
-		// sdk/go/engine.Action's default case handles one.
 		return "POST", plural + "/{id}/" + op.Name
 	}
 }
 
-// pluralPathSegment implements go-sdk-reference.md §2a's documented path
-// derivation rule in full, unlike sdk/go/engine's pluralSegment (which
-// can't reach LabelPlural or RoutePrefixOverride — see that function's
-// own doc comment).
+// pluralPathSegment implements go-sdk-reference.md §2a's path derivation
+// rule: RoutePrefixOverride wins outright if set (no pluralization
+// applied, it's an explicit override); otherwise pluralize LabelPlural, or
+// the model's bare resource segment if LabelPlural isn't set either.
 func pluralPathSegment(md model.ModelDeclaration) string {
 	if md.RoutePrefixOverride != "" {
 		return strings.Trim(md.RoutePrefixOverride, "/")
@@ -281,6 +271,11 @@ func ModulePathPrefix(moduleName, moduleType string) string {
 // (engine-internals.md §10's mergeEnableOpsRoutes) — needs this exact
 // pair; a shared entry point is what keeps them from drifting.
 func RegisterRoutes(table *RouteTable, moduleName, moduleType string, explicit []ExplicitRoute, models []model.ModelDeclaration) ([]SuppressedRoute, error) {
+	explicit, err := resolveActionRoutes(moduleName, explicit, models)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := RegisterModuleRoutes(table, moduleName, moduleType, explicit); err != nil {
 		return nil, err
 	}
