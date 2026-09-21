@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
@@ -52,46 +53,17 @@ func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql
 	return err
 }
 
-type ORMSearchInput struct {
-	Model  string `msgpack:"model"`
-	Domain string `msgpack:"domain"`
-	Order  string `msgpack:"order,omitempty"`
-	Limit  int    `msgpack:"limit,omitempty"`
-	Offset int    `msgpack:"offset,omitempty"`
-	TxID   string `msgpack:"tx_id"`
-}
+type ORMSearchInput = abiv1.ORMSearchInput
 
-type ORMSearchOutput struct {
-	IDs   []string `msgpack:"ids"`
-	Count int64    `msgpack:"count"`
-}
+type ORMSearchOutput = abiv1.ORMSearchOutput
 
-type ORMSearchReadInput struct {
-	Model  string   `msgpack:"model"`
-	Domain string   `msgpack:"domain"`
-	Fields []string `msgpack:"fields,omitempty"`
-	Order  string   `msgpack:"order,omitempty"`
-	Limit  int      `msgpack:"limit,omitempty"`
-	Offset int      `msgpack:"offset,omitempty"`
-	Cursor string   `msgpack:"cursor,omitempty"`
-	TxID   string   `msgpack:"tx_id"`
-}
+type ORMSearchReadInput = abiv1.ORMSearchReadInput
 
-type ORMSearchReadOutput struct {
-	Records    []map[string]any `msgpack:"records"`
-	NextCursor string           `msgpack:"next_cursor,omitempty"`
-}
+type ORMSearchReadOutput = abiv1.ORMSearchReadOutput
 
-type ORMReadInput struct {
-	Model  string   `msgpack:"model"`
-	IDs    []string `msgpack:"ids"`
-	Fields []string `msgpack:"fields,omitempty"`
-	TxID   string   `msgpack:"tx_id"`
-}
+type ORMReadInput = abiv1.ORMReadInput
 
-type ORMReadOutput struct {
-	Records []map[string]any `msgpack:"records"`
-}
+type ORMReadOutput = abiv1.ORMReadOutput
 
 func makeORMSearch(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {

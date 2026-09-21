@@ -5,34 +5,15 @@ import (
 	"maps"
 	"strings"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// previewRequest/previewResponse mirror sdk/go/orm's own unexported
-// previewRequest/previewResponse wire shapes by field name and msgpack
-// tag (sdk/go/orm/preview.go) — the same cross-boundary mirroring
-// computeRequest/computeResponse use (host_orm_compute.go) for the
-// identical reason: sdk/go/orm compiles into a module's WASM binary, not
-// the engine, so this package can't import its unexported types.
-type previewRequest struct {
-	Model    string         `msgpack:"model"`
-	Record   map[string]any `msgpack:"record"`
-	TenantID string         `msgpack:"tenant_id,omitempty"`
-	UserID   string         `msgpack:"user_id,omitempty"`
-	TraceID  string         `msgpack:"trace_id,omitempty"`
-}
+type previewRequest = abiv1.PreviewRequest
 
-type previewResponse struct {
-	Record map[string]any `msgpack:"record,omitempty"`
-	Error  *previewError  `msgpack:"error,omitempty"`
-}
-
-type previewError struct {
-	Code    string `msgpack:"code"`
-	Message string `msgpack:"message"`
-}
+type previewResponse = abiv1.PreviewResponse
 
 // This file holds Preview's dispatch (goerp#372) — not one of host.orm's
 // six CRUD operations, so unlike every other file in this package it has

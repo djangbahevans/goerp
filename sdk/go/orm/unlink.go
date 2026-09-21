@@ -1,15 +1,12 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-type ormUnlinkInput struct {
-	Model string   `msgpack:"model"`
-	IDs   []string `msgpack:"ids"`
-	TxID  string   `msgpack:"tx_id"`
-}
+type ormUnlinkInput = abi.ORMUnlinkInput
 
 // Unlink deletes records by ID via host.orm.unlink. A missing ID aborts
 // the whole call, so a returned ExecResult always has Count == len(ids)

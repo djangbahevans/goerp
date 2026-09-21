@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
@@ -50,98 +51,31 @@ import (
 // fields on a Transient model are likewise out of scope here — recompute
 // is wired only for the Postgres-backed create/write cores below.
 
-type OnConflictOption struct {
-	Fields []string `msgpack:"fields"`
-	Policy string   `msgpack:"policy"` // "ignore" | "update"
-}
+type OnConflictOption = abiv1.ORMOnConflict
 
-type ORMCreateInput struct {
-	Model      string            `msgpack:"model"`
-	Record     map[string]any    `msgpack:"record"`
-	OnConflict *OnConflictOption `msgpack:"on_conflict,omitempty"`
-	TxID       string            `msgpack:"tx_id"`
-}
+type ORMCreateInput = abiv1.ORMCreateInput
 
-type ORMCreateOutput struct {
-	Record map[string]any `msgpack:"record"`
-}
+type ORMCreateOutput = abiv1.ORMCreateOutput
 
-type ORMCreateBatchInput struct {
-	Model      string            `msgpack:"model"`
-	Records    []map[string]any  `msgpack:"records"`
-	OnConflict *OnConflictOption `msgpack:"on_conflict,omitempty"`
-	TxID       string            `msgpack:"tx_id"`
-}
+type ORMCreateBatchInput = abiv1.ORMCreateBatchInput
 
-type ORMCreateBatchOutput struct {
-	Records []map[string]any `msgpack:"records"`
-}
+type ORMCreateBatchOutput = abiv1.ORMCreateBatchOutput
 
-type ORMFirstOrCreateInput struct {
-	Model      string         `msgpack:"model"`
-	UniqueVals map[string]any `msgpack:"unique_vals"`
-	CreateVals map[string]any `msgpack:"create_vals"`
-	TxID       string         `msgpack:"tx_id"`
-}
+type ORMFirstOrCreateInput = abiv1.ORMFirstOrCreateInput
 
-type ORMFirstOrCreateOutput struct {
-	Record  map[string]any `msgpack:"record"`
-	Created bool           `msgpack:"created"`
-}
+type ORMFirstOrCreateOutput = abiv1.ORMFirstOrCreateOutput
 
-type ORMWriteInput struct {
-	Model  string         `msgpack:"model"`
-	ID     string         `msgpack:"id"`
-	Record map[string]any `msgpack:"record"`
-	// ExpectedEtag is nil when the caller supplied no optimistic-locking
-	// precondition at all, distinct from a non-nil pointer to "" (a real
-	// precondition requiring the stored etag to still be its
-	// never-written default). A bare string field couldn't tell those
-	// apart, which silently dropped the precondition for any record
-	// written for the first time since its create — see goerp#871.
-	// ORMCreate deliberately never stamps a real etag onto a fresh
-	// record itself (unlike every write function, which rotates one on
-	// every call) — the column's own default ('', data-layer.md §2.4)
-	// is the documented, intentional value for a record no write has
-	// ever touched; fixing the precondition here is what makes that
-	// default value usable, rather than routing around it at create.
-	ExpectedEtag *string `msgpack:"expected_etag,omitempty"`
-	TxID         string  `msgpack:"tx_id"`
-}
+type ORMWriteInput = abiv1.ORMWriteInput
 
-type ORMWriteOutput struct {
-	Record map[string]any `msgpack:"record"`
-}
+type ORMWriteOutput = abiv1.ORMWriteOutput
 
-type ORMWriteManyInput struct {
-	Model  string         `msgpack:"model"`
-	IDs    []string       `msgpack:"ids"`
-	Record map[string]any `msgpack:"record"`
-	TxID   string         `msgpack:"tx_id"`
-}
+type ORMWriteManyInput = abiv1.ORMWriteManyInput
 
-type ORMWriteWhereInput struct {
-	Model  string         `msgpack:"model"`
-	Domain string         `msgpack:"domain"`
-	Record map[string]any `msgpack:"record"`
-	TxID   string         `msgpack:"tx_id"`
-}
+type ORMWriteWhereInput = abiv1.ORMWriteWhereInput
 
-// ExecResult is write_many/write_where's return shape — how many rows
-// changed and which ones, without the cost of returning every full record
-// body for a call that could touch many rows. host-abi-reference.md names
-// this type but never defines its fields; nothing else in the repo
-// declares it, so this is the shape it gets.
-type ExecResult struct {
-	Count int      `msgpack:"count"`
-	IDs   []string `msgpack:"ids"`
-}
+type ExecResult = abiv1.ORMExecResult
 
-type ORMUnlinkInput struct {
-	Model string   `msgpack:"model"`
-	IDs   []string `msgpack:"ids"`
-	TxID  string   `msgpack:"tx_id"`
-}
+type ORMUnlinkInput = abiv1.ORMUnlinkInput
 
 func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {

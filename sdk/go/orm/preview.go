@@ -1,6 +1,7 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -33,23 +34,11 @@ func RegisterPreviewHook(modelName string, hook PreviewHook) {
 	previewRegistry[modelName] = hook
 }
 
-type previewRequest struct {
-	Model    string         `msgpack:"model"`
-	Record   map[string]any `msgpack:"record"`
-	TenantID string         `msgpack:"tenant_id,omitempty"`
-	UserID   string         `msgpack:"user_id,omitempty"`
-	TraceID  string         `msgpack:"trace_id,omitempty"`
-}
+type previewRequest = abi.PreviewRequest
 
-type previewResponse struct {
-	Record map[string]any `msgpack:"record,omitempty"`
-	Error  *previewError  `msgpack:"error,omitempty"`
-}
+type previewResponse = abi.PreviewResponse
 
-type previewError struct {
-	Code    string `msgpack:"code"`
-	Message string `msgpack:"message"`
-}
+type previewError = abi.PreviewError
 
 // DispatchPreview decodes a previewRequest from module memory at (ptr,
 // length), routes it to the PreviewHook registered for req.Model, and
