@@ -375,3 +375,27 @@ func TestToAtlasSchema_CrossModuleMany2One_DeclaringModelWithNoTable(t *testing.
 		t.Error("expected the declared-dependency rule to apply to a model with no table too")
 	}
 }
+
+func TestToAtlasSchema_CrossModuleMany2One_ModelNamesSpelledWithTheirModule(t *testing.T) {
+	decls := []model.ModelDeclaration{
+		*model.Define("sales.order", model.Table("orders")).
+			Field("id", model.UUID().Required().PrimaryKey()).
+			Field("customer_id", model.Many2One("contacts.contact")),
+	}
+	target := []model.ModelDeclaration{
+		*model.Define("contacts.contact", model.Table("contacts")).Field("id", model.UUID().Required().PrimaryKey()),
+	}
+	s, err := ToAtlasSchema("tenant_acme", "sales", decls, nil,
+		WithDependencies([]string{"contacts"}, nil),
+		WithDependencyModels(map[string][]model.ModelDeclaration{"contacts": target}))
+	if err != nil {
+		t.Fatalf("ToAtlasSchema() error: %v", err)
+	}
+	order, ok := s.Table("orders")
+	if !ok {
+		t.Fatal("orders table not found")
+	}
+	if len(order.ForeignKeys) != 1 || order.ForeignKeys[0].RefTable.Name != "contacts" {
+		t.Fatalf("foreign keys = %+v, want one to contacts", order.ForeignKeys)
+	}
+}

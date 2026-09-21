@@ -49,7 +49,7 @@ func WithDependencyModels(models map[string][]model.ModelDeclaration) AtlasOptio
 		for module, decls := range models {
 			byName := make(map[string]model.ModelDeclaration, len(decls))
 			for _, md := range decls {
-				byName[md.Name] = md
+				byName[md.QualifiedName(module)] = md
 			}
 			c.models[module] = byName
 		}
@@ -117,7 +117,11 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 					}
 				}
 				if !strings.HasPrefix(f.Def.RelatedModel, moduleName+".") {
-					if err := addCrossModuleForeignKey(s, tables[md.Name], f, cfg); err != nil {
+					table := tables[md.QualifiedName(moduleName)]
+					if table == nil && md.Backend == "" {
+						return nil, fmt.Errorf("model %s: no table was built for it", md.Name)
+					}
+					if err := addCrossModuleForeignKey(s, table, f, cfg); err != nil {
 						return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
 					}
 					continue
@@ -181,7 +185,7 @@ func validateOne2Many(md model.ModelDeclaration, f model.NamedField, moduleName 
 // table gets a foreign key; every other relation is a plain column, which
 // cannot carry an on-delete action.
 func addCrossModuleForeignKey(s *schema.Schema, t *schema.Table, f model.NamedField, cfg atlasConfig) error {
-	targetModule, targetName, qualified := strings.Cut(f.Def.RelatedModel, ".")
+	targetModule, _, qualified := strings.Cut(f.Def.RelatedModel, ".")
 	if !qualified {
 		return fmt.Errorf("related_model %q must be module-qualified as {module}.{model}", f.Def.RelatedModel)
 	}
@@ -197,7 +201,7 @@ func addCrossModuleForeignKey(s *schema.Schema, t *schema.Table, f model.NamedFi
 	var targetDecl model.ModelDeclaration
 	if loaded {
 		var ok bool
-		if targetDecl, ok = target[targetName]; !ok {
+		if targetDecl, ok = target[f.Def.RelatedModel]; !ok {
 			return fmt.Errorf("related_model %q is not declared by module %q", f.Def.RelatedModel, targetModule)
 		}
 	}
