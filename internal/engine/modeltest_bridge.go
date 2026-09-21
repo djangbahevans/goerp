@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
@@ -19,12 +20,16 @@ import (
 // WithTenantContext/WithAuthContext below rather than through a real
 // login flow. rt is the same *wasm.Runtime the harness compiled and
 // loaded its one module into — invokeHandler needs it for the module
-// context's transaction limiter.
-func NewModuleTestHandler(reg *registry.ModuleRegistry, rt *wasm.Runtime) http.Handler {
-	e := &Engine{moduleRegistry: reg, wasmRuntime: rt}
+// context's transaction limiter. db is the harness's primary pool, which
+// engine-served (EnableOps and workflow-transition) routes run host.orm
+// against; the cache client those routes use only for Transient models is
+// not provided.
+func NewModuleTestHandler(reg *registry.ModuleRegistry, rt *wasm.Runtime, db *sql.DB) http.Handler {
+	e := &Engine{moduleRegistry: reg, wasmRuntime: rt, primaryDB: db}
 	h := e.buildDispatchHandler(nil)
 	h = routeAuthMiddleware()(h)
 	h = routeResolutionMiddleware(reg)(h)
+	h = recoveryMiddleware()(h)
 	return h
 }
 

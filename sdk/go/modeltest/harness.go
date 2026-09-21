@@ -186,7 +186,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 		TenantID:   tenantID,
 		UserID:     userID,
 		tenantSlug: tenantSlug,
-		handler:    engine.NewModuleTestHandler(reg, rt),
+		handler:    engine.NewModuleTestHandler(reg, rt, primaryDB),
 		permReg:    permReg,
 		moduleName: moduleName,
 		allPerms:   userPerms,
