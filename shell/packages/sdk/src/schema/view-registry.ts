@@ -224,7 +224,7 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
 
       filterViewByCapability(declaration, resources.get(declaration.resource));
 
-      const permissions = route.permissions ?? [];
+      const permissions = route.permissions;
       const resolved: ResolvedView = {
         module: moduleName,
         viewName: declaration.name,

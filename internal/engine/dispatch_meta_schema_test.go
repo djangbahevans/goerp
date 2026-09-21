@@ -379,3 +379,60 @@ func TestDispatchSchemaRoute_OmitsZeroValueBooleanAndNumericMembers(t *testing.T
 		t.Errorf("optional field serves \"required\", want it omitted")
 	}
 }
+
+func TestDispatchSchemaRoute_NilSlicesEncodeAsEmptyArrays(t *testing.T) {
+	bareModel := model.Define("gadget").WithStandardFields().EnableOps(model.List)
+	reg := &registry.ModuleRegistry{}
+	_, err := reg.Update(map[string]*module.LoadedModule{
+		"bare": {
+			Status:     module.StatusReady,
+			Manifest:   manifest.Manifest{Name: "bare", DisplayName: "Bare", Type: "standard", Version: "1.0.0"},
+			ModelDecls: []model.ModelDeclaration{*bareModel},
+		},
+	})
+	if err != nil {
+		t.Fatalf("registry Update() error: %v", err)
+	}
+	e := &Engine{moduleRegistry: reg}
+
+	w := httptest.NewRecorder()
+	e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Modules map[string]map[string]any `json:"modules"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	mod := body.Modules["bare"]
+
+	for _, member := range []string{"views", "navigation", "permissions", "routes"} {
+		if _, ok := mod[member].([]any); !ok {
+			t.Errorf("%s = %#v, want a JSON array", member, mod[member])
+		}
+	}
+
+	routes, _ := mod["routes"].([]any)
+	if len(routes) == 0 {
+		t.Fatal("routes is empty, want the EnableOps-derived route")
+	}
+	for _, r := range routes {
+		route := r.(map[string]any)
+		if _, ok := route["permissions"].([]any); !ok {
+			t.Errorf("route %v permissions = %#v, want a JSON array", route["path"], route["permissions"])
+		}
+	}
+
+	models, _ := mod["models"].(map[string]any)
+	for name, m := range models {
+		md := m.(map[string]any)
+		for _, member := range []string{"fields", "enabled_ops"} {
+			if _, ok := md[member].([]any); !ok {
+				t.Errorf("model %s %s = %#v, want a JSON array", name, member, md[member])
+			}
+		}
+	}
+}

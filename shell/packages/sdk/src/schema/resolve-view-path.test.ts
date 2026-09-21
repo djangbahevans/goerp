@@ -14,8 +14,8 @@ describe("resolveViewPath", () => {
         version: "1",
         display_name: "Contacts",
         routes: [
-          { method: "GET", path: "/contacts", permissions: null, response_is_list: true, view: "contacts_list" },
-          { method: "GET", path: "/contacts/new", permissions: null, response_is_list: false, view: "contacts_form" },
+          { method: "GET", path: "/contacts", permissions: [], response_is_list: true, view: "contacts_list" },
+          { method: "GET", path: "/contacts/new", permissions: [], response_is_list: false, view: "contacts_form" },
         ],
         views: [],
         navigation: [],
@@ -35,9 +35,7 @@ describe("resolveViewPath", () => {
         name: "sales",
         version: "1",
         display_name: "Sales",
-        routes: [
-          { method: "GET", path: "/orders/new", permissions: null, response_is_list: false, view: "orders_form" },
-        ],
+        routes: [{ method: "GET", path: "/orders/new", permissions: [], response_is_list: false, view: "orders_form" }],
         views: [],
         navigation: [],
         models: {},
@@ -65,7 +63,7 @@ describe("ViewPathRegistry", () => {
         version: "1",
         display_name: "Contacts",
         routes: [
-          { method: "GET", path: "/contacts/new", permissions: null, response_is_list: false, view: "contacts_form" },
+          { method: "GET", path: "/contacts/new", permissions: [], response_is_list: false, view: "contacts_form" },
         ],
         views: [],
         navigation: [],

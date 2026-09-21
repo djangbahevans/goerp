@@ -834,32 +834,15 @@ func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// A module with no declared views/navigation/permissions leaves
-		// these nil on its manifest — coalesced to an empty slice so
-		// every array-typed field in the response consistently
-		// serializes as "[]", never "null", the same as Routes below.
-		views := m.Manifest.Views
-		if views == nil {
-			views = []manifest.View{}
-		}
-		navigation := m.Manifest.Navigation
-		if navigation == nil {
-			navigation = []manifest.NavGroup{}
-		}
-		permissions := m.Manifest.Permissions
-		if permissions == nil {
-			permissions = []manifest.Permission{}
-		}
-
 		modules[name] = &metaSchemaModule{
 			Name:         name,
 			Version:      m.Manifest.Version,
 			DisplayName:  m.Manifest.DisplayName,
 			Routes:       []metaSchemaRoute{},
-			Views:        views,
-			Navigation:   navigation,
+			Views:        m.Manifest.Views,
+			Navigation:   m.Manifest.Navigation,
 			Models:       models,
-			Permissions:  permissions,
+			Permissions:  m.Manifest.Permissions,
 			Frontend:     nil, // goerp#588 — no bundle-serving mechanism exists yet
 			PublicConfig: publicConfig,
 		}

@@ -118,19 +118,6 @@ describe("buildViewRegistry — resolveRoute", () => {
     expect(buildViewRegistry(schemaWithBadRef).resolveRoute("/contacts")).toBeNull();
   });
 
-  it("defaults permissions to an empty array when the route declares none (null, not omitted)", () => {
-    const schemaNullPerms: MetaSchema = {
-      ...schema,
-      modules: {
-        contacts: moduleSchema({
-          routes: [route({ method: "GET", path: "/contacts", view: "contacts_list", permissions: null })],
-          views: schema.modules.contacts!.views,
-        }),
-      },
-    };
-    expect(buildViewRegistry(schemaNullPerms).resolveRoute("/contacts")?.permissions).toEqual([]);
-  });
-
   it("exposes the resolved view's own permissions via viewPermissions(module.viewName)", () => {
     const registry = buildViewRegistry(schema);
     expect(registry.viewPermissions("contacts.contacts_list")).toEqual(["contacts:contact:read"]);
