@@ -120,6 +120,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	record := make(map[string]any, len(input.Record))
 	maps.Copy(record, input.Record)
 
+	serverFilled := fillCreateServerFields(md, modCtx, record)
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
@@ -147,7 +148,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMCreateOutput{}, hostErr
 	}
 
-	row, inserted, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict)
+	row, inserted, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
 	if hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
@@ -260,6 +261,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		record := make(map[string]any, len(rec))
 		maps.Copy(record, rec)
 
+		serverFilled := fillCreateServerFields(md, modCtx, record)
 		if hostErr := validateRequired(md, record, true); hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
@@ -276,7 +278,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			return ORMCreateBatchOutput{}, hostErr
 		}
 
-		row, inserted, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict)
+		row, inserted, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
 		if hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
@@ -441,6 +443,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	record := make(map[string]any, len(input.UniqueVals)+len(input.CreateVals))
 	maps.Copy(record, input.CreateVals)
 	maps.Copy(record, input.UniqueVals)
+	fillCreateServerFields(md, modCtx, record)
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -457,7 +460,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
 
-	row, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil)
+	row, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil, nil)
 	if hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -938,6 +941,33 @@ func beginTenantScopedWrite(ctx context.Context, db *sql.DB, modCtx *ModuleConte
 	return tx, nil
 }
 
+// fillCreateServerFields sets, when the record omits them, the standard
+// fields whose value is the request's own on a create: tenant_id from the
+// request's tenant and created_by from its user (left unset for a
+// system-created record or a non-UUID principal). A supplied value is kept.
+// It returns the columns it filled, which an upsert must not overwrite on an
+// existing row.
+func fillCreateServerFields(md model.ModelDeclaration, modCtx *ModuleContext, record map[string]any) (filled []string) {
+	fillIfOmitted := func(field, value string) {
+		if value == "" || !declaresField(md, field) {
+			return
+		}
+		if v, present := record[field]; !present || v == nil {
+			record[field] = value
+			filled = append(filled, field)
+		}
+	}
+	fillIfOmitted("tenant_id", modCtx.TenantID)
+	if _, err := uuid.Parse(modCtx.UserID); err == nil {
+		fillIfOmitted("created_by", modCtx.UserID)
+	}
+	return filled
+}
+
+func declaresField(md model.ModelDeclaration, name string) bool {
+	return slices.ContainsFunc(md.Fields, func(f model.NamedField) bool { return f.Name == name })
+}
+
 // validateRequired checks every .Required() field. requireAll (create)
 // demands presence; write (requireAll=false) only rejects a required
 // field explicitly present in the diff with a null value — a field
@@ -1083,7 +1113,7 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 // just inserted). inserted tells the caller which event type to emit for
 // this row. An OnConflictIgnore hit returns (nil, false, nil) — a
 // skipped conflict is not an error, just nothing to report.
-func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption) (map[string]any, bool, *abi.HostError) {
+func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption, serverFilled []string) (map[string]any, bool, *abi.HostError) {
 	cols, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
 	if hostErr != nil {
 		return nil, false, hostErr
@@ -1113,9 +1143,15 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		case "ignore":
 			insertSQL += fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", strings.Join(quotedTarget, ", "))
 		case "update":
-			setClauses := make([]string, len(cols))
-			for i, c := range cols {
-				setClauses[i] = fmt.Sprintf("%s = EXCLUDED.%s", c, c)
+			setClauses := make([]string, 0, len(cols))
+			for _, c := range cols {
+				if slices.ContainsFunc(serverFilled, func(f string) bool { return c == quoteIdentORM(f) }) {
+					continue
+				}
+				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", c, c))
+			}
+			if len(setClauses) == 0 {
+				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", quotedTarget[0], quotedTarget[0]))
 			}
 			insertSQL += fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", strings.Join(quotedTarget, ", "), strings.Join(setClauses, ", "))
 		default:

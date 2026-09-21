@@ -10,6 +10,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/google/uuid"
 )
 
 // hostORMWriteCallerModule exports call_create/call_create_batch/
@@ -1497,5 +1498,136 @@ func TestHostORM_WriteWhere_ValueWithSingleQuote_SafelyEscaped(t *testing.T) {
 	}
 	if stillExists != 1 {
 		t.Errorf("row count = %d, want 1 (the table itself, not dropped or otherwise disturbed)", stillExists)
+	}
+}
+
+func newServerFieldsFixture(t *testing.T, userID string) (*Runtime, *ModuleContext, string, string) {
+	t.Helper()
+	primaryDB := openTestPrimaryDB(t)
+	slug := fmt.Sprintf("ormservfields%d", time.Now().UnixNano())
+	createFixtureTenantSchema(t, primaryDB, slug)
+	createFixtureItemsTable(t, primaryDB, slug)
+
+	tenantID := "22222222-2222-2222-2222-222222222222"
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+	mc := NewModuleContext("req-1", "testmodule", userID, "contact-1", []string{"admin"}, nil, tenantID, slug, "trace-1",
+		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{itemModelDecl()}})
+	return r, mc, tenantID, slug
+}
+
+func TestORMCreate_FillsTenantAndCreatedByFromTheRequest(t *testing.T) {
+	const userID = "33333333-3333-3333-3333-333333333333"
+	r, mc, tenantID, _ := newServerFieldsFixture(t, userID)
+
+	out, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": uuid.NewString(), "name": "Widget A"},
+	})
+	if hostErr != nil {
+		t.Fatalf("ORMCreate: %v", hostErr)
+	}
+	if out.Record["tenant_id"] != tenantID || out.Record["created_by"] != userID {
+		t.Errorf("tenant_id/created_by = %v/%v, want %s/%s", out.Record["tenant_id"], out.Record["created_by"], tenantID, userID)
+	}
+}
+
+func TestORMCreate_KeepsSuppliedTenantAndCreatedBy(t *testing.T) {
+	r, mc, _, _ := newServerFieldsFixture(t, "33333333-3333-3333-3333-333333333333")
+
+	const tenant, creator = "44444444-4444-4444-4444-444444444444", "55555555-5555-5555-5555-555555555555"
+	out, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": uuid.NewString(), "name": "Widget A", "tenant_id": tenant, "created_by": creator},
+	})
+	if hostErr != nil {
+		t.Fatalf("ORMCreate: %v", hostErr)
+	}
+	if out.Record["tenant_id"] != tenant || out.Record["created_by"] != creator {
+		t.Errorf("tenant_id/created_by = %v/%v, want the supplied %s/%s", out.Record["tenant_id"], out.Record["created_by"], tenant, creator)
+	}
+}
+
+func TestORMCreate_LeavesCreatedByNullForANonUUIDPrincipal(t *testing.T) {
+	r, mc, tenantID, _ := newServerFieldsFixture(t, "system")
+
+	out, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, ORMCreateInput{
+		Model:  "testmodule.item",
+		Record: map[string]any{"id": uuid.NewString(), "name": "Widget A"},
+	})
+	if hostErr != nil {
+		t.Fatalf("ORMCreate: %v", hostErr)
+	}
+	if out.Record["tenant_id"] != tenantID || out.Record["created_by"] != nil {
+		t.Errorf("tenant_id/created_by = %v/%v, want %s/nil", out.Record["tenant_id"], out.Record["created_by"], tenantID)
+	}
+}
+
+func TestORMCreateBatch_FillsTenantOnEveryRecord(t *testing.T) {
+	r, mc, tenantID, _ := newServerFieldsFixture(t, "33333333-3333-3333-3333-333333333333")
+
+	out, hostErr := ORMCreateBatch(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), mc, ORMCreateBatchInput{
+		Model:   "testmodule.item",
+		Records: []map[string]any{{"id": uuid.NewString(), "name": "A"}, {"id": uuid.NewString(), "name": "B"}},
+	})
+	if hostErr != nil {
+		t.Fatalf("ORMCreateBatch: %v", hostErr)
+	}
+	if len(out.Records) != 2 {
+		t.Fatalf("len(Records) = %d, want 2", len(out.Records))
+	}
+	for i, rec := range out.Records {
+		if rec["tenant_id"] != tenantID {
+			t.Errorf("record %d tenant_id = %v, want %s", i, rec["tenant_id"], tenantID)
+		}
+	}
+}
+
+func TestORMCreate_UpsertKeepsTheOriginalCreatedBy(t *testing.T) {
+	const creator, updater = "33333333-3333-3333-3333-333333333333", "66666666-6666-6666-6666-666666666666"
+	r, mc, tenantID, slug := newServerFieldsFixture(t, creator)
+	db := openTestPrimaryDB(t)
+	onConflict := &OnConflictOption{Policy: "update", Fields: []string{"code"}}
+	id := uuid.NewString()
+
+	_, hostErr := ORMCreate(context.Background(), r, db, r.EventInsertClient(), nil, mc, ORMCreateInput{
+		Model:      "testmodule.item",
+		Record:     map[string]any{"id": id, "name": "Widget A", "code": "W-1"},
+		OnConflict: onConflict,
+	})
+	if hostErr != nil {
+		t.Fatalf("first ORMCreate: %v", hostErr)
+	}
+
+	other := NewModuleContext("req-2", "testmodule", updater, "contact-1", []string{"admin"}, nil, tenantID, slug, "trace-2",
+		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{itemModelDecl()}})
+	second, hostErr := ORMCreate(context.Background(), r, db, r.EventInsertClient(), nil, other, ORMCreateInput{
+		Model:      "testmodule.item",
+		Record:     map[string]any{"id": id, "name": "Widget A renamed", "code": "W-1"},
+		OnConflict: onConflict,
+	})
+	if hostErr != nil {
+		t.Fatalf("upsert ORMCreate: %v", hostErr)
+	}
+	if second.Record["name"] != "Widget A renamed" {
+		t.Errorf("name = %v, want the upserted value", second.Record["name"])
+	}
+	if second.Record["created_by"] != creator {
+		t.Errorf("created_by = %v, want the original creator %s", second.Record["created_by"], creator)
+	}
+}
+
+func TestORMFirstOrCreate_FillsTenantOnTheCreatedRecord(t *testing.T) {
+	r, mc, tenantID, _ := newServerFieldsFixture(t, "33333333-3333-3333-3333-333333333333")
+
+	out, hostErr := ORMFirstOrCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), mc, ORMFirstOrCreateInput{
+		Model:      "testmodule.item",
+		UniqueVals: map[string]any{"code": "W-9"},
+		CreateVals: map[string]any{"id": uuid.NewString(), "name": "Widget Z"},
+	})
+	if hostErr != nil {
+		t.Fatalf("ORMFirstOrCreate: %v", hostErr)
+	}
+	if !out.Created || out.Record["tenant_id"] != tenantID {
+		t.Errorf("Created/tenant_id = %v/%v, want true/%s", out.Created, out.Record["tenant_id"], tenantID)
 	}
 }
