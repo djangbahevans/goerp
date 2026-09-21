@@ -54,6 +54,7 @@ const (
 	ErrCodeValidationFailed           = abiv1.ErrCodeValidationFailed
 	ErrCodeUniqueViolation            = abiv1.ErrCodeUniqueViolation
 	ErrCodeEtagMismatch               = abiv1.ErrCodeEtagMismatch
+	ErrCodePreconditionFailed         = abiv1.ErrCodePreconditionFailed
 	ErrCodeForeignKeyViolation        = abiv1.ErrCodeForeignKeyViolation
 	ErrCodeConflictTargetInvalid      = abiv1.ErrCodeConflictTargetInvalid
 	ErrCodeFieldNotWritable           = abiv1.ErrCodeFieldNotWritable

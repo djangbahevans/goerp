@@ -27,6 +27,7 @@ func TestHostErrorCodeMatchers_MatchTheirOwnCodeOnly(t *testing.T) {
 		code    string
 	}{
 		{"IsEtagMismatch", IsEtagMismatch, abi.ErrCodeEtagMismatch},
+		{"IsPreconditionFailed", IsPreconditionFailed, abi.ErrCodePreconditionFailed},
 		{"IsValidationFailed", IsValidationFailed, abi.ErrCodeValidationFailed},
 		{"IsUniqueViolation", IsUniqueViolation, abi.ErrCodeUniqueViolation},
 		{"IsFieldNotWritable", IsFieldNotWritable, abi.ErrCodeFieldNotWritable},

@@ -134,6 +134,29 @@ type ORMWriteWhereInput struct {
 	TxID   string         `msgpack:"tx_id"`
 }
 
+// ORMMutateOp is one relative numeric change of host.orm.mutate: Delta is
+// added to Field, so a decrement carries a negative Delta.
+type ORMMutateOp struct {
+	Field string `msgpack:"field"`
+	Delta any    `msgpack:"delta"`
+}
+
+// ORMMutateInput is the request of host.orm.mutate. Guard is a domain
+// expression evaluated against the record as it stands immediately before
+// the change; empty means unconditional.
+type ORMMutateInput struct {
+	Model string        `msgpack:"model"`
+	ID    string        `msgpack:"id"`
+	Ops   []ORMMutateOp `msgpack:"ops"`
+	Guard string        `msgpack:"guard,omitempty"`
+	TxID  string        `msgpack:"tx_id"`
+}
+
+// ORMMutateOutput is the response of host.orm.mutate.
+type ORMMutateOutput struct {
+	Record map[string]any `msgpack:"record"`
+}
+
 // ORMExecResult is the response of host.orm.write_many and
 // host.orm.write_where: how many rows changed and which ones, without
 // returning every full record.

@@ -31,6 +31,12 @@ func init() {
 		draft["price_list_id"] = "list-" + ctx.TenantID
 		return draft
 	})
+	orm.RegisterConstraint("testmodule.order", orm.OnWrite, func(ctx orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {
+		if record["state"] == "locked" {
+			return orm.Reject("state", "locked orders cannot be written")
+		}
+		return orm.Allow()
+	})
 	orm.RegisterConstraint("testmodule.order", orm.OnDelete, func(ctx orm.ConstraintContext, record map[string]any) *orm.ConstraintResult {
 		if record["state"] != "draft" {
 			return orm.Reject("state", "only draft orders can be deleted")

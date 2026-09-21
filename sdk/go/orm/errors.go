@@ -18,6 +18,11 @@ func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
 // host.orm.write's own orm.etag_mismatch.
 func IsEtagMismatch(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeEtagMismatch) }
 
+// IsPreconditionFailed reports whether err is a host.orm.mutate failure
+// caused by its Where guard being false for the record's current state —
+// orm.precondition_failed.
+func IsPreconditionFailed(err error) bool { return hostErrorCodeIs(err, abi.ErrCodePreconditionFailed) }
+
 // IsValidationFailed reports whether err is a host.orm validation
 // failure — orm.validation_failed. Some (not all) of these errors carry
 // a "field" Details key, reachable via errors.As(err, &he).

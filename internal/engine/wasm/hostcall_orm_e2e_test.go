@@ -51,9 +51,9 @@ type ormFlowReport struct {
 	Steps []ormStepResult `msgpack:"steps"`
 }
 
-// TestOrmCallerFixture_AllTenFunctions_RoundTripThroughRealModule is
+// TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule is
 // goerp#433's acceptance criterion: a real compiled module calls each
-// of the 10 host.orm.* wrappers against a real engine instance and gets
+// of the 11 host.orm.* wrappers against a real engine instance and gets
 // back correctly-decoded results.
 //
 // Also the regression test for a real bug this ticket surfaced in
@@ -68,7 +68,7 @@ type ormFlowReport struct {
 // sdk/go/internal/wasmmem/mem_wasip1.go's own comment for the full
 // story. Without that fix, this test's "unlink" step decodes a corrupted
 // ExecResult even though the engine computed and sent the real one.
-func TestOrmCallerFixture_AllTenFunctions_RoundTripThroughRealModule(t *testing.T) {
+func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 	wasmBytes := compileOrmCallerFixture(t)
@@ -130,6 +130,8 @@ func TestOrmCallerFixture_AllTenFunctions_RoundTripThroughRealModule(t *testing.
 		"first_or_create": "false", // "Widget A" already exists from the create step
 		"write_many":      "2",
 		"write_where":     "2",
+		"mutate":          "250",
+		"mutate_guard":    "",
 		"unlink":          "1",
 	}
 	for _, s := range report.Steps {
@@ -141,8 +143,8 @@ func TestOrmCallerFixture_AllTenFunctions_RoundTripThroughRealModule(t *testing.
 			t.Errorf("step %q detail = %q, want %q", s.Step, s.Detail, want)
 		}
 	}
-	if len(report.Steps) != 10 {
-		t.Errorf("got %d steps, want 10 (one per host.orm.* function the fixture calls): %+v", len(report.Steps), report.Steps)
+	if len(report.Steps) != 12 {
+		t.Errorf("got %d steps, want 12 (one per host.orm.* function the fixture calls, plus a failing-guard mutate): %+v", len(report.Steps), report.Steps)
 	}
 }
 
@@ -207,6 +209,7 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 		"create_batch_tx":    "1",
 		"write_many_tx":      "1",
 		"write_where_tx":     "1",
+		"mutate_tx":          "65",
 		"unlink_tx":          "1",
 		"first_or_create_tx": "false", // hits the row create_tx already inserted on this same transaction
 		"with_tx":            "1",     // SearchCountTx, run before WriteTx renamed anything else matching
@@ -220,8 +223,8 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 			t.Errorf("step %q detail = %q, want %q", s.Step, s.Detail, want)
 		}
 	}
-	if len(report.Steps) != 9 {
-		t.Errorf("got %d steps, want 9: %+v", len(report.Steps), report.Steps)
+	if len(report.Steps) != 10 {
+		t.Errorf("got %d steps, want 10: %+v", len(report.Steps), report.Steps)
 	}
 
 	// The whole point of _Tx: only WithTx's own commit persists anything.
