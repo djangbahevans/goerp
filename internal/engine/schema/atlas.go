@@ -10,14 +10,37 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
+type AtlasOption func(*atlasConfig)
+
+type atlasConfig struct {
+	dependencies map[string]bool
+}
+
+// WithDependencies declares the modules a Many2One may target besides the
+// schema's own.
+func WithDependencies(dependsOn, softDependsOn []string) AtlasOption {
+	return func(c *atlasConfig) {
+		for _, name := range dependsOn {
+			c.dependencies[name] = true
+		}
+		for _, name := range softDependsOn {
+			c.dependencies[name] = true
+		}
+	}
+}
+
 // ToAtlasSchema builds an Atlas schema from one module's own model
 // declarations. moduleName qualifies a Many2One field's relatedModel for
-// resolution against this same modelDecls slice — cross-module relations
-// aren't resolvable here (no aggregation of other modules' declarations
-// exists at this layer yet), so a Many2One field whose relatedModel isn't
-// one of this module's own models fails with a clear error rather than
-// silently skipping the foreign key.
-func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration) (*schema.Schema, error) {
+// resolution against this same modelDecls slice. A Many2One to a declared
+// dependency's model is a plain UUID column with no foreign key. Any other
+// relatedModel that isn't one of this module's own models fails with a
+// clear error rather than silently skipping the foreign key.
+func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration, opts ...AtlasOption) (*schema.Schema, error) {
+	cfg := atlasConfig{dependencies: make(map[string]bool)}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	s := schema.New(schemaName)
 
 	enumTypes := make(map[string]*schema.EnumType, len(typeDecls))
@@ -63,6 +86,12 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 					if f.Def.RelatedModel != moduleName+"."+md.Name {
 						return nil, fmt.Errorf("model %s: field %s: .Tree() requires related_model %q to be the declaring model's own name %q", md.Name, f.Name, f.Def.RelatedModel, moduleName+"."+md.Name)
 					}
+				}
+				if !strings.HasPrefix(f.Def.RelatedModel, moduleName+".") {
+					if err := validateCrossModuleMany2One(f, cfg); err != nil {
+						return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
+					}
+					continue
 				}
 				if err := addForeignKey(tables[md.Name], f, moduleName, modelDecls, tables); err != nil {
 					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
@@ -117,11 +146,24 @@ func validateOne2Many(md model.ModelDeclaration, f model.NamedField, moduleName 
 	return nil
 }
 
+// validateCrossModuleMany2One requires a declared dependency and rejects an
+// on-delete action, which a column with no foreign key cannot carry.
+func validateCrossModuleMany2One(f model.NamedField, cfg atlasConfig) error {
+	targetModule, _, qualified := strings.Cut(f.Def.RelatedModel, ".")
+	if !qualified {
+		return fmt.Errorf("related_model %q must be module-qualified as {module}.{model}", f.Def.RelatedModel)
+	}
+	if !cfg.dependencies[targetModule] {
+		return fmt.Errorf("related_model %q belongs to module %q, which is not in depends_on or soft_depends_on", f.Def.RelatedModel, targetModule)
+	}
+	if f.Def.RelationOnDelete != model.Restrict {
+		return fmt.Errorf("related_model %q belongs to another module, so the relation has no foreign key and .OnDelete() has no effect on it", f.Def.RelatedModel)
+	}
+	return nil
+}
+
 func addForeignKey(t *schema.Table, f model.NamedField, moduleName string, modelDecls []model.ModelDeclaration, tables map[string]*schema.Table) error {
 	prefix := moduleName + "."
-	if !strings.HasPrefix(f.Def.RelatedModel, prefix) {
-		return fmt.Errorf("related_model %q must be module-qualified as %q (cross-module Many2One relations aren't resolvable yet)", f.Def.RelatedModel, prefix+"...")
-	}
 	targetModelName := strings.TrimPrefix(f.Def.RelatedModel, prefix)
 	targetTable, ok := tables[targetModelName]
 	if !ok {
