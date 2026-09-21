@@ -151,12 +151,12 @@ func TestEnableOpsRoutesAreServedByTheEngine(t *testing.T) {
 		t.Fatalf("list data = %+v, want the seeded gadget", items)
 	}
 
-	created := h.POST("/widgets/gadgets", map[string]any{"name": "Flywheel", "tenant_id": h.TenantID})
+	created := h.POST("/widgets/gadgets", map[string]any{"name": "Flywheel"})
 	if created.StatusCode != 201 {
 		t.Fatalf("create status = %d, want 201; error=%v msg=%v", created.StatusCode, created.JSON("error.code"), created.JSON("error.message"))
 	}
 	id, _ := created.JSON("id").(string)
-	h.DB.AssertExists("widgets_gadget", map[string]any{"id": id, "name": "Flywheel"})
+	h.DB.AssertExists("widgets_gadget", map[string]any{"id": id, "name": "Flywheel", "tenant_id": h.TenantID})
 
 	got := h.GET("/widgets/gadgets/" + id)
 	if got.StatusCode != 200 || got.JSON("name") != "Flywheel" {
