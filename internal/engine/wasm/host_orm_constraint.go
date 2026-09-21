@@ -3,37 +3,14 @@ package wasm
 import (
 	"context"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// constraintRequest/constraintResponse mirror sdk/go/orm's own
-// unexported constraintRequest/constraintResponse wire shapes by field
-// name and msgpack tag (sdk/go/orm/constraint.go) — the same
-// cross-boundary mirroring computeRequest/computeResponse
-// (host_orm_compute.go) and previewRequest/previewResponse
-// (host_orm_preview.go) use for the identical reason: sdk/go/orm compiles
-// into a module's WASM binary, not the engine.
-type constraintRequest struct {
-	Model    string         `msgpack:"model"`
-	Phase    string         `msgpack:"phase"`
-	Record   map[string]any `msgpack:"record"`
-	TenantID string         `msgpack:"tenant_id,omitempty"`
-	UserID   string         `msgpack:"user_id,omitempty"`
-	TraceID  string         `msgpack:"trace_id,omitempty"`
-}
+type constraintRequest = abiv1.ConstraintRequest
 
-type constraintResponse struct {
-	Allowed bool             `msgpack:"allowed"`
-	Field   string           `msgpack:"field,omitempty"`
-	Message string           `msgpack:"message,omitempty"`
-	Error   *constraintError `msgpack:"error,omitempty"`
-}
-
-type constraintError struct {
-	Code    string `msgpack:"code"`
-	Message string `msgpack:"message"`
-}
+type constraintResponse = abiv1.ConstraintResponse
 
 // runConstraintHook invokes the constraint hook registered for
 // (qualifiedModel, phase) against record, if the model's owning module

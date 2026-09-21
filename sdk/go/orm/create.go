@@ -1,38 +1,20 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// ormOnConflict is Create/CreateBatch's own idempotent-insert wire shape
-// — Policy is "ignore" or "update".
-type ormOnConflict struct {
-	Fields []string `msgpack:"fields"`
-	Policy string   `msgpack:"policy"`
-}
+type ormOnConflict = abi.ORMOnConflict
 
-type ormCreateInput struct {
-	Model      string         `msgpack:"model"`
-	Record     map[string]any `msgpack:"record"`
-	OnConflict *ormOnConflict `msgpack:"on_conflict,omitempty"`
-	TxID       string         `msgpack:"tx_id"`
-}
+type ormCreateInput = abi.ORMCreateInput
 
-type ormCreateOutput struct {
-	Record map[string]any `msgpack:"record"`
-}
+type ormCreateOutput = abi.ORMCreateOutput
 
-type ormCreateBatchInput struct {
-	Model      string           `msgpack:"model"`
-	Records    []map[string]any `msgpack:"records"`
-	OnConflict *ormOnConflict   `msgpack:"on_conflict,omitempty"`
-	TxID       string           `msgpack:"tx_id"`
-}
+type ormCreateBatchInput = abi.ORMCreateBatchInput
 
-type ormCreateBatchOutput struct {
-	Records []map[string]any `msgpack:"records"`
-}
+type ormCreateBatchOutput = abi.ORMCreateBatchOutput
 
 type createOpts struct {
 	OnConflict *ormOnConflict

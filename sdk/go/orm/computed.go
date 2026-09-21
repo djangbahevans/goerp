@@ -1,6 +1,7 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -32,23 +33,11 @@ func RegisterComputed(fnName string, fn ComputeFunc) {
 	computeRegistry[fnName] = fn
 }
 
-type computeRequest struct {
-	FnName   string         `msgpack:"fn_name"`
-	Record   map[string]any `msgpack:"record"`
-	TenantID string         `msgpack:"tenant_id,omitempty"`
-	UserID   string         `msgpack:"user_id,omitempty"`
-	TraceID  string         `msgpack:"trace_id,omitempty"`
-}
+type computeRequest = abi.ComputeRequest
 
-type computeResponse struct {
-	Value any           `msgpack:"value,omitempty"`
-	Error *computeError `msgpack:"error,omitempty"`
-}
+type computeResponse = abi.ComputeResponse
 
-type computeError struct {
-	Code    string `msgpack:"code"`
-	Message string `msgpack:"message"`
-}
+type computeError = abi.ComputeError
 
 // DispatchComputed decodes a computeRequest from module memory at (ptr,
 // length), routes it to the registered ComputeFunc named by req.FnName,

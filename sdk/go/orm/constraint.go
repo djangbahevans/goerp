@@ -1,6 +1,7 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -66,26 +67,11 @@ func RegisterConstraint(modelName string, phase ConstraintPhase, fn ConstraintFu
 	constraintRegistry[constraintKey{model: modelName, phase: phase}] = fn
 }
 
-type constraintRequest struct {
-	Model    string         `msgpack:"model"`
-	Phase    string         `msgpack:"phase"`
-	Record   map[string]any `msgpack:"record"`
-	TenantID string         `msgpack:"tenant_id,omitempty"`
-	UserID   string         `msgpack:"user_id,omitempty"`
-	TraceID  string         `msgpack:"trace_id,omitempty"`
-}
+type constraintRequest = abi.ConstraintRequest
 
-type constraintResponse struct {
-	Allowed bool             `msgpack:"allowed"`
-	Field   string           `msgpack:"field,omitempty"`
-	Message string           `msgpack:"message,omitempty"`
-	Error   *constraintError `msgpack:"error,omitempty"`
-}
+type constraintResponse = abi.ConstraintResponse
 
-type constraintError struct {
-	Code    string `msgpack:"code"`
-	Message string `msgpack:"message"`
-}
+type constraintError = abi.ConstraintError
 
 // DispatchConstraint decodes a constraintRequest from module memory at
 // (ptr, length), routes it to the ConstraintFunc registered for

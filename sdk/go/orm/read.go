@@ -1,20 +1,14 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-type ormReadInput struct {
-	Model  string   `msgpack:"model"`
-	IDs    []string `msgpack:"ids"`
-	Fields []string `msgpack:"fields,omitempty"`
-	TxID   string   `msgpack:"tx_id"`
-}
+type ormReadInput = abi.ORMReadInput
 
-type ormReadOutput struct {
-	Records []map[string]any `msgpack:"records"`
-}
+type ormReadOutput = abi.ORMReadOutput
 
 // Read fetches records by ID via host.orm.read, mapping each into a T
 // via its own db-tag-mapped fields. An ID matching no record is simply

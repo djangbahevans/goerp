@@ -1,21 +1,14 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-type ormFirstOrCreateInput struct {
-	Model      string         `msgpack:"model"`
-	UniqueVals map[string]any `msgpack:"unique_vals"`
-	CreateVals map[string]any `msgpack:"create_vals"`
-	TxID       string         `msgpack:"tx_id"`
-}
+type ormFirstOrCreateInput = abi.ORMFirstOrCreateInput
 
-type ormFirstOrCreateOutput struct {
-	Record  map[string]any `msgpack:"record"`
-	Created bool           `msgpack:"created"`
-}
+type ormFirstOrCreateOutput = abi.ORMFirstOrCreateOutput
 
 // FirstOrCreate finds the record matching uniqueVals, or inserts
 // uniqueVals merged with createVals if none matches, via
