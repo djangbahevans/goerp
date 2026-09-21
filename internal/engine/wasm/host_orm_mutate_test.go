@@ -319,17 +319,23 @@ func TestORMMutate_FieldWriteSecurity(t *testing.T) {
 	}
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
-	t.Run("denied field is not writable", func(t *testing.T) {
+	t.Run("denied field is write-denied, as for orm.Write", func(t *testing.T) {
 		mc := newWriteFieldSecModuleContext(slug)
 		_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
 			Model: "testmodule.widget", ID: id,
 			Ops: mutateOps(abiMutateOp{Field: "discount_percent", Delta: int64(1)}),
 		})
-		if hostErr == nil || hostErr.Code != abi.ErrCodeFieldNotWritable {
-			t.Fatalf("hostErr = %+v, want %s", hostErr, abi.ErrCodeFieldNotWritable)
+		if hostErr == nil || hostErr.Code != abi.ErrCodeFieldWriteDenied {
+			t.Fatalf("hostErr = %+v, want %s", hostErr, abi.ErrCodeFieldWriteDenied)
 		}
 		if hostErr.Details["field"] != "discount_percent" {
 			t.Errorf("Details[field] = %v, want discount_percent", hostErr.Details["field"])
+		}
+		_, writeErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
+			Model: "testmodule.widget", ID: id, Record: map[string]any{"discount_percent": int64(6)},
+		})
+		if writeErr == nil || writeErr.Code != hostErr.Code {
+			t.Errorf("ORMWrite error = %+v, want the same code as ORMMutate (%s)", writeErr, hostErr.Code)
 		}
 		var stored int
 		if err := primaryDB.QueryRow(`SELECT discount_percent FROM tenant_` + slug + `.widgets WHERE id = '` + id + `'`).Scan(&stored); err != nil {
@@ -353,6 +359,22 @@ func TestORMMutate_FieldWriteSecurity(t *testing.T) {
 			t.Errorf("discount_percent = %v, want 6", out.Record["discount_percent"])
 		}
 	})
+}
+
+func TestPlanMutation_ReadonlyNumericField_NotWritable(t *testing.T) {
+	decl := model.ModelDeclaration{
+		Name: "counter",
+		Fields: []model.NamedField{
+			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+			{Name: "version", Def: model.Integer().Readonly()},
+		},
+	}
+	mc := newORMWriteTestModuleContext("planreadonly", []model.ModelDeclaration{decl})
+
+	_, hostErr := planMutation(mc, "testmodule.counter", decl, []abiMutateOp{{Field: "version", Delta: int64(1)}})
+	if hostErr == nil || hostErr.Code != abi.ErrCodeFieldNotWritable {
+		t.Fatalf("hostErr = %+v, want %s", hostErr, abi.ErrCodeFieldNotWritable)
+	}
 }
 
 func TestORMMutate_ReturnMaskedAuditedAndEventEmitted(t *testing.T) {

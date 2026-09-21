@@ -191,7 +191,7 @@ func planMutation(modCtx *ModuleContext, qualifiedModel string, md model.ModelDe
 			if rule.OnDeniedWrite == fieldsec.Ignore {
 				continue
 			}
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + op.Field + " requires permission " + rule.WritePermission, Details: fieldDetails}
+			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeFieldWriteDenied, Message: "field " + op.Field + " requires permission " + rule.WritePermission, Details: fieldDetails}
 		}
 
 		delta, err := normalizeDelta(def.Kind, op.Delta)

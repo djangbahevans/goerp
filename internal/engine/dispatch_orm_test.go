@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +72,7 @@ func widgetModelDecl() model.ModelDeclaration {
 	d := model.Define("testmodule.widget", model.Table("widget")).WithStandardFields().
 		Field("name", model.Text().Required()).
 		Field("code", model.Text()).
+		Field("internal_ref", model.Text().Readonly()).
 		Index("idx_widgets_code_unique", model.BTreeIndex("code").Unique())
 	return *d
 }
@@ -96,7 +98,8 @@ func createFixtureWidgetsSchema(t *testing.T, conn *sql.DB, slug string) {
 		created_by UUID,
 		etag TEXT NOT NULL DEFAULT '',
 		name TEXT NOT NULL,
-		code TEXT
+		code TEXT,
+		internal_ref TEXT
 	)`); err != nil {
 		t.Fatalf("create widget table: %v", err)
 	}
@@ -270,6 +273,21 @@ func TestDispatchORMRoute_Create_MissingRequiredField_400(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDispatchORMRoute_Create_ReadonlyField_400(t *testing.T) {
+	f := newDispatchORMFixture(t)
+
+	body, _ := json.Marshal(map[string]any{"name": "W", "internal_ref": "x"})
+	w := httptest.NewRecorder()
+	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), abi.ErrCodeFieldNotWritable) {
+		t.Errorf("body = %s, want error code %s", w.Body.String(), abi.ErrCodeFieldNotWritable)
 	}
 }
 
@@ -693,4 +711,21 @@ func TestDispatchHandler_EngineNativeOversizedBodyReturns413(t *testing.T) {
 		t.Fatalf("status = %d, want 413; body: %s", w.Code, w.Body.String())
 	}
 	assertRouteErrorCode(t, w, "body_too_large")
+}
+
+func TestORMErrorStatus_FieldWriteErrors(t *testing.T) {
+	tests := []struct {
+		code string
+		want int
+	}{
+		{abi.ErrCodeFieldWriteDenied, http.StatusForbidden},
+		{abi.ErrCodeFieldNotWritable, http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			if got := ormErrorStatus(tt.code); got != tt.want {
+				t.Errorf("ormErrorStatus(%s) = %d, want %d", tt.code, got, tt.want)
+			}
+		})
+	}
 }
