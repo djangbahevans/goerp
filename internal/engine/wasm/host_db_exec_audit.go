@@ -66,7 +66,7 @@ func resolveAuditedExecTable(modCtx *ModuleContext, table string) (pkCol string,
 		if !ok {
 			return "", nil, false
 		}
-		cols, isAudited := reg.Lookup(modCtx.ModuleName + "." + decl.Name)
+		cols, isAudited := reg.Lookup(decl.QualifiedName(modCtx.ModuleName))
 		if !isAudited {
 			return "", nil, false
 		}

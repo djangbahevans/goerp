@@ -63,7 +63,7 @@ func New() *FieldSecurityRegistry {
 
 func (r *FieldSecurityRegistry) Register(moduleName string, modelDecls []model.ModelDeclaration) {
 	for _, decl := range modelDecls {
-		modelName := moduleName + "." + decl.Name
+		modelName := decl.QualifiedName(moduleName)
 		for _, field := range decl.Fields {
 			rule, ok := fieldSecurityRuleFor(field)
 			if !ok {

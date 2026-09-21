@@ -39,13 +39,8 @@ var filterOperators = map[string]string{
 // internally (unexported there; mirrored here for dispatchORMList's own
 // field-validation needs, which run before any host.orm call is made).
 func resolveModelDecl(modCtx *wasm.ModuleContext, qualifiedName string) (model.ModelDeclaration, bool) {
-	prefix := modCtx.ModuleName + "."
-	if !strings.HasPrefix(qualifiedName, prefix) {
-		return model.ModelDeclaration{}, false
-	}
-	bareName := strings.TrimPrefix(qualifiedName, prefix)
 	for _, md := range modCtx.ModelDecls() {
-		if md.Name == bareName {
+		if md.QualifiedName(modCtx.ModuleName) == qualifiedName {
 			return md, true
 		}
 	}

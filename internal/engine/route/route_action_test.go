@@ -349,12 +349,39 @@ func TestRegisterRoutes_InvalidMethodOrScopeFails(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutes_DuplicateActionThroughBothModelNamesFails(t *testing.T) {
+func TestRegisterRoutes_ActionRejectsANonCanonicalModelName(t *testing.T) {
 	md := model.Define("testmodule.widget")
-	explicit := []ExplicitRoute{actionRoute("testmodule.widget", "confirm"), actionRoute("testmodule.testmodule.widget", "confirm")}
 
-	_, err := RegisterRoutes(New(), "testmodule", "domain", explicit, []model.ModelDeclaration{*md})
-	if err == nil || !strings.Contains(err.Error(), "more than once") {
-		t.Fatalf("error = %v, want a duplicate-action error", err)
+	_, err := RegisterRoutes(New(), "testmodule", "domain", []ExplicitRoute{actionRoute("testmodule.testmodule.widget", "confirm")}, []model.ModelDeclaration{*md})
+	if err == nil || !strings.Contains(err.Error(), "does not declare") {
+		t.Fatalf("error = %v, want an undeclared-model error", err)
+	}
+}
+
+func TestRegisterRoutes_BareAndQualifiedDeclarationsProduceIdenticalRoutes(t *testing.T) {
+	build := func(name string) []AllRoute {
+		md := model.Define(name, model.LabelPlural("Sales Orders")).
+			EnableOps(model.List, model.Get).
+			Field("state", model.Selection("draft", "done").Workflow(model.Transition("draft", "done", "finish")))
+		table := New()
+		if _, err := RegisterRoutes(table, "sales", "domain", []ExplicitRoute{actionRoute("sales.order", "confirm")}, []model.ModelDeclaration{*md}); err != nil {
+			t.Fatalf("RegisterRoutes(%q): %v", name, err)
+		}
+		return table.All()
+	}
+
+	bare, qualified := build("order"), build("sales.order")
+	if len(bare) != len(qualified) || len(bare) == 0 {
+		t.Fatalf("route counts = %d vs %d", len(bare), len(qualified))
+	}
+	for i := range bare {
+		b, q := bare[i], qualified[i]
+		if b.Method != q.Method || b.Entry.PathTemplate != q.Entry.PathTemplate || b.Entry.Manifest.Model != q.Entry.Manifest.Model {
+			t.Errorf("route %d: bare = %s %s (%s), qualified = %s %s (%s)", i,
+				b.Method, b.Entry.PathTemplate, b.Entry.Manifest.Model, q.Method, q.Entry.PathTemplate, q.Entry.Manifest.Model)
+		}
+		if b.Entry.Manifest.Model != "sales.order" {
+			t.Errorf("route %d Model = %q, want sales.order", i, b.Entry.Manifest.Model)
+		}
 	}
 }

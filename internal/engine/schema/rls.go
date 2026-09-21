@@ -100,7 +100,7 @@ func (e *SchemaDiffEngine) syncShareWidening(ctx context.Context, sess *SchemaSy
 			// exist" error the first time this policy is evaluated.
 			return fmt.Errorf("model %s: .Shareable() requires a UUID primary key", md.Name)
 		}
-		qualifiedName := sess.moduleName + "." + md.Name
+		qualifiedName := md.QualifiedName(sess.moduleName)
 
 		if !tableEnsured {
 			// record_shares is normally created by tenant provisioning's
@@ -414,7 +414,7 @@ func resolvePolicyTarget(policy manifest.Policy, modelDecls []model.ModelDeclara
 	var md model.ModelDeclaration
 	found := false
 	for _, d := range modelDecls {
-		if d.Name == resource || d.Name == qualified {
+		if d.QualifiedName(module) == qualified {
 			md = d
 			found = true
 			break

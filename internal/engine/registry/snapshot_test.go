@@ -173,3 +173,28 @@ func TestRegistrySnapshot_NotifTemplate_NilWhenModuleDeclaresNone(t *testing.T) 
 		t.Fatal("NotifTemplate for a module with nil NotifTemplates: ok = true, want false")
 	}
 }
+
+func TestRegistrySnapshot_ModelByName_ResolvesEitherDeclarationSpelling(t *testing.T) {
+	for _, declared := range []string{"widget", "testmodule.widget"} {
+		t.Run(declared, func(t *testing.T) {
+			r := &ModuleRegistry{}
+			snap, err := r.Update(map[string]*module.LoadedModule{
+				"testmodule": {
+					Status:     module.StatusReady,
+					Manifest:   manifest.Manifest{Type: "standard"},
+					ModelDecls: []model.ModelDeclaration{*model.Define(declared)},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Update() error = %v", err)
+			}
+
+			if _, _, md, ok := snap.ModelByName("testmodule.widget"); !ok || md.Name != declared {
+				t.Fatalf("ModelByName(testmodule.widget) = %q, %v, want the %q declaration", md.Name, ok, declared)
+			}
+			if _, _, _, ok := snap.ModelByName("testmodule.testmodule.widget"); ok {
+				t.Fatal("ModelByName resolved a double-qualified name")
+			}
+		})
+	}
+}

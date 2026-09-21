@@ -119,13 +119,12 @@ func (s *RegistrySnapshot) NotifTemplate(moduleName, notificationType, channel, 
 	return mod.NotifTemplates.Resolve(notificationType, channel, userLocale)
 }
 
-// ModelByName resolves a RouteManifest.Model-shaped "{module}.{resource}"
-// string (route.RegisterModelRoutes's own qualifiedModel convention —
-// moduleName + "." + the model's bare, undotted Name) back to the owning
-// module and its ModelDeclaration. A module that failed to load is never
+// ModelByName resolves a module-qualified "{module}.{resource}" model name
+// (RouteManifest.Model's shape) back to the owning module and its
+// ModelDeclaration. A module that failed to load is never
 // matched, mirroring buildRouteTable's own StatusFailed skip.
 func (s *RegistrySnapshot) ModelByName(qualified string) (moduleName string, mod *module.LoadedModule, md model.ModelDeclaration, ok bool) {
-	moduleName, resource, found := strings.Cut(qualified, ".")
+	moduleName, _, found := strings.Cut(qualified, ".")
 	if !found {
 		return "", nil, model.ModelDeclaration{}, false
 	}
@@ -136,7 +135,7 @@ func (s *RegistrySnapshot) ModelByName(qualified string) (moduleName string, mod
 	}
 
 	for _, decl := range mod.ModelDecls {
-		if decl.Name == resource {
+		if decl.QualifiedName(moduleName) == qualified {
 			return moduleName, mod, decl, true
 		}
 	}
