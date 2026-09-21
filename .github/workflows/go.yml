@@ -133,13 +133,16 @@ jobs:
           tags: goerp-engine:${{ github.sha }}
           outputs: type=docker,dest=/tmp/goerp-engine.tar
 
-      - name: Scan Image with Trivy
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          version: v0.74.0
-          input: /tmp/goerp-engine.tar
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
+      # Scans the binary the image ships, which the Dockerfile's own Go
+      # toolchain built, not the one this job's setup-go step built above.
+      # Image-level scanning runs on a schedule (image-scan.yml).
+      - name: Scan Shipped Engine Binary for Vulnerabilities
+        run: |
+          docker load -i /tmp/goerp-engine.tar
+          container=$(docker create goerp-engine:${{ github.sha }})
+          docker cp "$container":/usr/local/bin/engine /tmp/engine-shipped
+          docker rm "$container"
+          go run golang.org/x/vuln/cmd/govulncheck@latest -mode=binary /tmp/engine-shipped
 
       - name: Start Dev Stack
         run: docker compose -f compose.dev.yml up -d --wait
