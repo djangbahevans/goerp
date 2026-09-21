@@ -1,0 +1,8 @@
+{
+  "name": "inventory_dashboard",
+  "type": "custom",
+  "resource": "inventory.product",
+  "label": "Inventory Dashboard",
+  "component": "InventoryDashboard",
+  "permission": "inventory:product:read"
+}

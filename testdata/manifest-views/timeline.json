@@ -1,0 +1,16 @@
+{
+  "name": "project_timeline",
+  "type": "timeline",
+  "resource": "project.task",
+  "label": "Timeline",
+  "start_field": "planned_start",
+  "end_field": "planned_end",
+  "group_by": "assignee_id",
+  "label_field": "name",
+  "color_field": "priority",
+  "color_map": {},
+  "filters": [],
+  "allow_drag": true,
+  "allow_resize": true,
+  "default_range": "month"
+}

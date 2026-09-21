@@ -23,6 +23,7 @@ jobs:
           filters: |
             frontend:
               - "shell/**"
+              - "testdata/**"
               - "**/frontend/**"
               - ".github/workflows/frontend.yml"
 

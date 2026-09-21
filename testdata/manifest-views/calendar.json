@@ -1,0 +1,17 @@
+{
+  "name": "activities_calendar",
+  "type": "calendar",
+  "resource": "contacts.activity",
+  "label": "Activity Calendar",
+  "date_field": "scheduled_at",
+  "end_date_field": null,
+  "title_field": "subject",
+  "color_field": "type",
+  "color_map": {},
+  "default_view": "month",
+  "allowed_views": ["month", "week", "day", "agenda"],
+  "filters": [],
+  "on_click": "contacts_form",
+  "on_date_click": null,
+  "quick_create": false
+}

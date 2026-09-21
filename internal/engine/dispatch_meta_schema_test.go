@@ -2,8 +2,12 @@ package engine
 
 import (
 	"encoding/json"
+	manifestjson "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
@@ -435,4 +439,101 @@ func TestDispatchSchemaRoute_NilSlicesEncodeAsEmptyArrays(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDispatchSchemaRoute_ServesManifestViewsUnchanged(t *testing.T) {
+	paths, err := filepath.Glob("../../testdata/manifest-views/*.json")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no view fixtures (err: %v)", err)
+	}
+
+	var views []manifest.View
+	declared := map[string]map[string]any{}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		var view manifest.View
+		if err := manifestjson.Unmarshal(data, &view); err != nil {
+			t.Fatalf("decode %s: %v", p, err)
+		}
+		var members map[string]any
+		if err := json.Unmarshal(data, &members); err != nil {
+			t.Fatalf("decode %s: %v", p, err)
+		}
+		views = append(views, view)
+		declared[view.Name] = members
+	}
+
+	reg := &registry.ModuleRegistry{}
+	_, err = reg.Update(map[string]*module.LoadedModule{
+		"fixtures": {
+			Status:   module.StatusReady,
+			Manifest: manifest.Manifest{Name: "fixtures", DisplayName: "Fixtures", Type: "standard", Version: "1.0.0", Views: views},
+		},
+	})
+	if err != nil {
+		t.Fatalf("registry Update() error: %v", err)
+	}
+	e := &Engine{moduleRegistry: reg}
+
+	w := httptest.NewRecorder()
+	e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Modules map[string]struct {
+			Views []map[string]any `json:"views"`
+		} `json:"modules"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	served := body.Modules["fixtures"].Views
+	if len(served) != len(declared) {
+		t.Fatalf("served %d views, want %d", len(served), len(declared))
+	}
+	for _, got := range served {
+		name, _ := got["name"].(string)
+		want, ok := declared[name]
+		if !ok {
+			t.Errorf("served unexpected view %q", name)
+			continue
+		}
+		for member, wantValue := range want {
+			gotValue, present := got[member]
+			switch {
+			case present && !reflect.DeepEqual(gotValue, wantValue):
+				t.Errorf("%s: %q = %v, want %v", name, member, gotValue, wantValue)
+			case !present && !isEmptyJSONValue(wantValue):
+				t.Errorf("%s: member %q (%v) is missing from the served view", name, member, wantValue)
+			}
+		}
+		for member := range got {
+			if _, ok := want[member]; !ok {
+				t.Errorf("%s: served member %q that the view does not declare", name, member)
+			}
+		}
+	}
+}
+
+// isEmptyJSONValue reports whether v is a null, false, empty array or empty
+// object — the values a modeled member's omitempty/omitzero tag drops from
+// the served view.
+func isEmptyJSONValue(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case bool:
+		return !x
+	case []any:
+		return len(x) == 0
+	case map[string]any:
+		return len(x) == 0
+	}
+	return false
 }

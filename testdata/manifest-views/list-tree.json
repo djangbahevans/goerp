@@ -1,0 +1,9 @@
+{
+  "name": "accounts_tree",
+  "type": "list",
+  "resource": "accounting.account",
+  "label": "Chart of Accounts",
+  "columns": [],
+  "tree_field": "parent_id",
+  "default_expanded_depth": 1
+}

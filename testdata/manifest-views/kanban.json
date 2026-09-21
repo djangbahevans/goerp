@@ -1,0 +1,22 @@
+{
+  "name": "contacts_kanban",
+  "type": "kanban",
+  "resource": "contacts.contact",
+  "label": "Contacts",
+  "group_by": "type",
+  "group_values": ["person", "company"],
+  "group_label_field": null,
+  "group_color_field": null,
+  "card_fields": ["avatar_file_id", "display_name", "email", "phone"],
+  "card_component": null,
+  "card_actions": [],
+  "column_actions": [],
+  "quick_create": false,
+  "quick_create_fields": [],
+  "allow_drag": true,
+  "drag_updates_field": null,
+  "max_cards_per_column": null,
+  "default_filters": {},
+  "filters": [],
+  "actions": []
+}

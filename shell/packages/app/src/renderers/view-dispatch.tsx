@@ -15,8 +15,8 @@ import { PivotRenderer } from "./pivot/pivot-renderer.js";
 import { TimelineViewDeclarationSchema } from "./timeline/timeline-manifest-types.js";
 import { TimelineRenderer } from "./timeline/timeline-renderer.js";
 
-const KNOWN_VIEW_TYPES = new Set(["list", "pivot", "kanban", "calendar", "timeline", "form"]);
-const AnyViewDeclarationSchema = v.variant("type", [
+export const KNOWN_VIEW_TYPES = new Set(["list", "pivot", "kanban", "calendar", "timeline", "form"]);
+export const AnyViewDeclarationSchema = v.variant("type", [
   ListViewDeclarationSchema,
   PivotViewDeclarationSchema,
   KanbanViewDeclarationSchema,
