@@ -210,11 +210,11 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		Headers:       headers,
 		Body:          bodyBytes,
 		UserID:        authCtx.UserID,
-		PermissionSet: authCtx.PermissionSet,
 		TenantID:      tenantCtx.TenantID,
 		TenantSlug:    tenantCtx.Slug,
 		TraceID:       trace.SpanFromContext(ctx).SpanContext().TraceID().String(),
-		RequestAt:     time.Now(),
+		RequestedAt:   time.Now(),
+		PermissionSet: authCtx.PermissionSet,
 	}
 
 	resp, err := e.invokeHandler(ctx, inst, entry.PathTemplate, req, mod)

@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/job"
@@ -36,7 +37,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
-	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
 	"github.com/vmihailenco/msgpack/v5"
@@ -304,12 +304,12 @@ func verifyChecksum(checksum string, wasmBytes []byte) error {
 	return nil
 }
 
-func callGetRoutes(ctx context.Context, inst *wasm.ModuleInstance) ([]engine.RouteDeclaration, error) {
+func callGetRoutes(ctx context.Context, inst *wasm.ModuleInstance) ([]abiv1.RouteDeclaration, error) {
 	data, err := inst.InvokeNoArg(ctx, "get_routes")
 	if err != nil {
 		return nil, err
 	}
-	var routes []engine.RouteDeclaration
+	var routes []abiv1.RouteDeclaration
 	if err := msgpack.Unmarshal(data, &routes); err != nil {
 		return nil, fmt.Errorf("unmarshal get_routes response: %w", err)
 	}
@@ -359,7 +359,7 @@ func callGetDataMigrations(ctx context.Context, inst *wasm.ModuleInstance) ([]mo
 // manifest routes key to check), which is why this lives in the loader
 // package rather than alongside manifest.validateModuleType's other
 // per-type checks.
-func validateModuleRoutes(mf *manifest.Manifest, routes []engine.RouteDeclaration) error {
+func validateModuleRoutes(mf *manifest.Manifest, routes []abiv1.RouteDeclaration) error {
 	switch mf.Type {
 	case "l10n", "bridge", "theme", "report_bundle", "automation", "field_extension":
 		if len(routes) > 0 {

@@ -17,13 +17,13 @@ import (
 	"context"
 	"fmt"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
-	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -249,11 +249,8 @@ func EnqueueApplicableDataMigration(ctx context.Context, riverClient *river.Clie
 	}
 
 	// The wire payload engine.DispatchDataMigration decodes on the
-	// module's own side — shared directly via import with
-	// sdk/go/model.MigrationJobPayload (see that type's own doc comment
-	// for why this can be a direct import rather than an independently
-	// mirrored copy).
-	payload, err := msgpack.Marshal(model.MigrationJobPayload{
+	// module's own side.
+	payload, err := msgpack.Marshal(abiv1.MigrationJobPayload{
 		Handler:     next.Handler,
 		TenantID:    tenantID,
 		FromVersion: watermark,

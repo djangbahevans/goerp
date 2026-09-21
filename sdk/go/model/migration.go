@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 )
 
@@ -15,20 +16,9 @@ type DataMigration struct {
 	Handler     string `msgpack:"handler"`
 }
 
-// MigrationJobPayload is the msgpack wire shape a data migration job
-// carries across the WASM boundary as its jobqueue.WASMJobArgs.Payload —
-// shared directly by import between the engine (which marshals it in
-// internal/engine/jobdispatch.EnqueueApplicableDataMigration) and this
-// SDK (which unmarshals it in engine.DispatchDataMigration), rather than
-// independently mirrored the way internal/engine/event.Envelope and this
-// package's own wireEvent are: unlike event.Envelope, nothing here is
-// engine-internal, so both sides can share one definition safely.
-type MigrationJobPayload struct {
-	Handler     string `msgpack:"handler"`
-	TenantID    string `msgpack:"tenant_id"`
-	FromVersion string `msgpack:"from_version"`
-	ToVersion   string `msgpack:"to_version"`
-}
+// MigrationJobPayload is the wire shape a data migration job carries
+// across the WASM boundary as its jobqueue.WASMJobArgs.Payload.
+type MigrationJobPayload = abi.MigrationJobPayload
 
 // MigrationContext carries the tenant/version bounds of one data
 // migration handler invocation (migration-guide.md §4), plus progress
