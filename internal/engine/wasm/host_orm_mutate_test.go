@@ -100,6 +100,26 @@ func TestORMMutate_DecrementWithGuard_AppliesAndRotatesEtag(t *testing.T) {
 	}
 }
 
+func TestORMMutate_ChangedFieldsAreSortedRegardlessOfOpOrder(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := context.Background()
+	slug, mc := setupMutateStockTenant(t, primaryDB, "mutatesorted", 10)
+	r := newHostDBTestRuntime(t, primaryDB, 10)
+
+	if _, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+		Model: "testmodule.stock", ID: mutateStockID,
+		Ops: mutateOps(abiMutateOp{Field: "reserved", Delta: int64(1)}, abiMutateOp{Field: "on_hand", Delta: int64(-1)}),
+	}); hostErr != nil {
+		t.Fatalf("ORMMutate: %+v", hostErr)
+	}
+
+	events := updatedEventPayloads(t, primaryDB, slug)
+	if len(events) != 1 {
+		t.Fatalf("orm.record.updated events = %d, want 1", len(events))
+	}
+	assertChangedFields(t, events[0].ChangedFields, "on_hand", "reserved")
+}
+
 func TestORMMutate_FloatAndDecimalFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()

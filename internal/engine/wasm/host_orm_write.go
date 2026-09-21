@@ -564,7 +564,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, hostErr
 	}
 
-	updated, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, input.Model, pkCol, input.ID, record, input.ExpectedEtag)
+	updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, input.Model, pkCol, input.ID, record, input.ExpectedEtag)
 	if hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
@@ -572,7 +572,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 	if hostErr := maintainTreePathOnWrite(ctx, tx, md, pkCol, input.ID, input.Record); hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
-	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(input.Record), updated); hostErr != nil {
+	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFields, updated); hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
 	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "write", updated); hostErr != nil {
@@ -582,7 +582,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, hostErr
 	}
 
-	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", input.Model, updated); err != nil {
+	if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, updated, changedFields); err != nil {
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
@@ -1050,9 +1050,9 @@ func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelNam
 // write_where) funnels through here via createOneRecordTx/
 // writeOneRecordTx. A field with a WritePermission the caller doesn't
 // satisfy is rejected outright (OnDeniedWrite Reject, the default) or
-// silently absent from cols/args (Ignore) — either way before any SQL
+// silently absent from the assigned names/args (Ignore) — either way before any SQL
 // runs.
-func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, record map[string]any) (cols []string, args []any, hostErr *abi.HostError) {
+func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, record map[string]any) (assigned []string, args []any, hostErr *abi.HostError) {
 	fields := make(map[string]model.FieldDef, len(md.Fields))
 	for _, f := range md.Fields {
 		fields[f.Name] = f.Def
@@ -1087,10 +1087,10 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldWriteDenied, Message: "field " + k + " requires permission " + rule.WritePermission, Details: map[string]any{"field": k}}
 		}
 
-		cols = append(cols, quoteIdentORM(k))
+		assigned = append(assigned, k)
 		args = append(args, v)
 	}
-	return cols, args, nil
+	return assigned, args, nil
 }
 
 // writeDeniedBy returns field's field-security rule and true when it
@@ -1123,10 +1123,11 @@ func writeDeniedBy(modCtx *ModuleContext, qualifiedModel, field string) (fieldse
 // this row. An OnConflictIgnore hit returns (nil, false, nil) — a
 // skipped conflict is not an error, just nothing to report.
 func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption, serverFilled []string) (map[string]any, bool, *abi.HostError) {
-	cols, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
+	fields, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
 	if hostErr != nil {
 		return nil, false, hostErr
 	}
+	cols := quoteIdentsORM(fields)
 	if len(cols) == 0 {
 		return nil, false, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to insert"}
 	}
@@ -1228,14 +1229,15 @@ func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, 
 // check" semantics); a non-nil expectedEtag adds it — including when it
 // points to "", which requires the stored etag to still be its
 // never-written default rather than silently matching anything.
-func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag *string) (map[string]any, *abi.HostError) {
-	sets, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
+func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag *string) (map[string]any, []string, *abi.HostError) {
+	assigned, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
 	if hostErr != nil {
-		return nil, hostErr
+		return nil, nil, hostErr
 	}
-	if len(sets) == 0 {
-		return nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to update"}
+	if len(assigned) == 0 {
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to update"}
 	}
+	sets := quoteIdentsORM(assigned)
 
 	table := quoteIdentORM(tableNameForORM(md))
 	pkColQuoted := quoteIdentORM(pkCol)
@@ -1256,17 +1258,17 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 
 	rows, err := tx.QueryContext(ctx, updateSQL, args...)
 	if err != nil {
-		return nil, translateWriteError(err, md)
+		return nil, nil, translateWriteError(err, md)
 	}
 	updated, err := scanRowsToMaps(rows)
 	if err != nil {
-		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	if len(updated) == 0 {
-		return nil, diagnoseZeroRowWrite(ctx, tx, table, pkColQuoted, id, expectedEtag)
+		return nil, nil, diagnoseZeroRowWrite(ctx, tx, table, pkColQuoted, id, expectedEtag)
 	}
-	return updated[0], nil
+	return updated[0], callerWrittenFields(md, assigned), nil
 }
 
 // writeManyIDsTx applies record to every id on tx, emitting one
@@ -1275,14 +1277,13 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 // a domain first). A missing ID or validation failure aborts the whole
 // transaction, matching the AC's all-or-nothing requirement.
 func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (ExecResult, *abi.HostError) {
-	changedFields := changedFieldNames(record)
 	affected := make([]string, 0, len(ids))
 	for _, id := range ids {
 		oldData, hostErr := fetchRowForAuditBeforeWrite(ctx, tx, modCtx, qualifiedModel, md, pkCol, id)
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}
-		updated, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, qualifiedModel, pkCol, id, record, nil)
+		updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, qualifiedModel, pkCol, id, record, nil)
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}
@@ -1298,7 +1299,7 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "UPDATE", oldData, updated); hostErr != nil {
 			return ExecResult{}, hostErr
 		}
-		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", qualifiedModel, updated); err != nil {
+		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, updated, changedFields); err != nil {
 			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 		affected = append(affected, id)
@@ -1307,17 +1308,52 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 }
 
 // changedFieldNames returns record's keys as a slice — for create/
-// create_batch/first_or_create, record is the row actually inserted (every
-// field is "new," so every dependency is trivially satisfied); for
-// write/write_many/write_where, record is the literal diff the caller
-// supplied, matching host-abi-reference.md's own "changed_fields ...
-// computes this from the vals map" framing for event emission.
+// create_batch/first_or_create, record is the row actually inserted, so
+// every field is "new" and every dependency is trivially satisfied. It is
+// also the field list for a recompute triggered by a deleted child row.
+// The write paths use callerWrittenFields instead.
 func changedFieldNames(record map[string]any) []string {
 	names := make([]string, 0, len(record))
 	for k := range record {
 		names = append(names, k)
 	}
 	return names
+}
+
+func quoteIdentsORM(names []string) []string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = quoteIdentORM(n)
+	}
+	return quoted
+}
+
+// callerWrittenFields is the sorted subset of assigned that the caller
+// chose to write: the engine-managed etag and tree path columns are not
+// listed.
+func callerWrittenFields(md model.ModelDeclaration, assigned []string) []string {
+	engineManaged := map[string]bool{"etag": true}
+	for _, f := range md.Fields {
+		if f.Def.IsTree {
+			engineManaged[f.Name+"_path"] = true
+		}
+	}
+	fields := make([]string, 0, len(assigned))
+	for _, f := range assigned {
+		if !engineManaged[f] {
+			fields = append(fields, f)
+		}
+	}
+	slices.Sort(fields)
+	return fields
+}
+
+// emitRecordUpdatedEvent emits orm.record.updated with the fields the call
+// wrote alongside the full stored record.
+func emitRecordUpdatedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any, changedFields []string) error {
+	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.updated", map[string]any{
+		"model": modelName, "record": record, "changed_fields": changedFields,
+	})
 }
 
 // recomputeAfterWrite runs every Store(true) computed field that depends
