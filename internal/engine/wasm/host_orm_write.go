@@ -258,6 +258,9 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
+	// Masked only now: the audit entry, event payload and hooks above
+	// need the full stored row.
+	applyFieldMasking(modCtx, input.Model, []map[string]any{row})
 	return ORMCreateOutput{Record: row}, nil
 }
 
@@ -384,6 +387,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
+	applyFieldMasking(modCtx, input.Model, all)
 	return ORMCreateBatchOutput{Records: all}, nil
 }
 
@@ -496,6 +500,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		if err := commit(); err != nil {
 			return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 		}
+		applyFieldMasking(modCtx, input.Model, found[:1])
 		return ORMFirstOrCreateOutput{Record: found[0], Created: false}, nil
 	}
 
@@ -540,6 +545,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
+	applyFieldMasking(modCtx, input.Model, []map[string]any{row})
 	return ORMFirstOrCreateOutput{Record: row, Created: true}, nil
 }
 
@@ -647,6 +653,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
+	applyFieldMasking(modCtx, input.Model, []map[string]any{updated})
 	return ORMWriteOutput{Record: updated}, nil
 }
 
