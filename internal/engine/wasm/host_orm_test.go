@@ -42,7 +42,7 @@ func newHostORMCaller(t *testing.T, ctx context.Context, r *Runtime, mc *ModuleC
 
 func widgetModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
-		Name:  "widget",
+		Name:  "testmodule.widget",
 		Table: "widgets",
 		Fields: []model.NamedField{
 			{Name: "id", Def: model.UUID().Required().PrimaryKey()},

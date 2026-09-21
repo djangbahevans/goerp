@@ -722,7 +722,7 @@ func metaSchemaModelFrom(md sdkmodel.ModelDeclaration) metaSchemaModel {
 		}
 	}
 	return metaSchemaModel{
-		Name:             md.Name,
+		Name:             md.ResourceName(),
 		Label:            md.Label,
 		LabelPlural:      md.LabelPlural,
 		Fields:           fields,
@@ -824,7 +824,7 @@ func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 
 		models := map[string]metaSchemaModel{}
 		for _, md := range m.ModelDecls {
-			models[name+"."+md.Name] = metaSchemaModelFrom(md)
+			models[md.QualifiedName(name)] = metaSchemaModelFrom(md)
 		}
 
 		publicConfig := map[string]any{}

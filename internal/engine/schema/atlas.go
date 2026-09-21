@@ -82,7 +82,7 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 	tables := make(map[string]*schema.Table, len(modelDecls))
 	declsByName := make(map[string]model.ModelDeclaration, len(modelDecls))
 	for _, md := range modelDecls {
-		declsByName[md.Name] = md
+		declsByName[md.QualifiedName(moduleName)] = md
 		if md.Backend != "" {
 			// A non-default backend (currently only Virtual) has no
 			// table for schema sync to create or manage.
@@ -93,7 +93,7 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 			return nil, fmt.Errorf("model %s: %w", md.Name, err)
 		}
 		s.AddTables(t)
-		tables[md.Name] = t
+		tables[md.QualifiedName(moduleName)] = t
 	}
 
 	// Foreign keys are added in a second pass, once every table in this
@@ -112,8 +112,8 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 					// this: Tree fields still get the ordinary Many2One FK
 					// below, this only rejects a .Tree() field that isn't
 					// actually self-referential.
-					if f.Def.RelatedModel != moduleName+"."+md.Name {
-						return nil, fmt.Errorf("model %s: field %s: .Tree() requires related_model %q to be the declaring model's own name %q", md.Name, f.Name, f.Def.RelatedModel, moduleName+"."+md.Name)
+					if f.Def.RelatedModel != md.QualifiedName(moduleName) {
+						return nil, fmt.Errorf("model %s: field %s: .Tree() requires related_model %q to be the declaring model's own name %q", md.Name, f.Name, f.Def.RelatedModel, md.QualifiedName(moduleName))
 					}
 				}
 				if !strings.HasPrefix(f.Def.RelatedModel, moduleName+".") {
@@ -122,7 +122,7 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 					}
 					continue
 				}
-				if err := addForeignKey(tables[md.Name], f, moduleName, modelDecls, tables); err != nil {
+				if err := addForeignKey(tables[md.QualifiedName(moduleName)], f, moduleName, modelDecls, tables); err != nil {
 					return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
 				}
 			case model.KindOne2Many:
@@ -146,8 +146,7 @@ func validateOne2Many(md model.ModelDeclaration, f model.NamedField, moduleName 
 	if !strings.HasPrefix(f.Def.RelatedModel, prefix) {
 		return fmt.Errorf("related_model %q must be module-qualified as %q (cross-module One2Many relations aren't resolvable yet)", f.Def.RelatedModel, prefix+"...")
 	}
-	targetModelName := strings.TrimPrefix(f.Def.RelatedModel, prefix)
-	targetMD, ok := declsByName[targetModelName]
+	targetMD, ok := declsByName[f.Def.RelatedModel]
 	if !ok {
 		return fmt.Errorf("related_model %q is not one of this module's own declared models", f.Def.RelatedModel)
 	}
@@ -167,7 +166,7 @@ func validateOne2Many(md model.ModelDeclaration, f model.NamedField, moduleName 
 	if inverse.Def.Kind != model.KindMany2One {
 		return fmt.Errorf("inverse field %q on related_model %q is not a Many2One", f.Def.InverseField, f.Def.RelatedModel)
 	}
-	declaringModel := moduleName + "." + md.Name
+	declaringModel := md.QualifiedName(moduleName)
 	if inverse.Def.RelatedModel != declaringModel {
 		return fmt.Errorf("inverse field %q on related_model %q does not point back at %q", f.Def.InverseField, f.Def.RelatedModel, declaringModel)
 	}
@@ -248,9 +247,7 @@ func primaryKeyFieldOf(md model.ModelDeclaration) (string, bool) {
 }
 
 func addForeignKey(t *schema.Table, f model.NamedField, moduleName string, modelDecls []model.ModelDeclaration, tables map[string]*schema.Table) error {
-	prefix := moduleName + "."
-	targetModelName := strings.TrimPrefix(f.Def.RelatedModel, prefix)
-	targetTable, ok := tables[targetModelName]
+	targetTable, ok := tables[f.Def.RelatedModel]
 	if !ok {
 		return fmt.Errorf("related_model %q is not one of this module's own declared models", f.Def.RelatedModel)
 	}

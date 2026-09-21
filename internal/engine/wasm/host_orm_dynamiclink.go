@@ -94,7 +94,7 @@ func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 // DynamicLink target verification, where the referenced model can belong
 // to any loaded module.
 func resolveAnyModel(modCtx *ModuleContext, qualifiedName string) (model.ModelDeclaration, bool) {
-	moduleName, resource, found := strings.Cut(qualifiedName, ".")
+	moduleName, _, found := strings.Cut(qualifiedName, ".")
 	if !found {
 		return model.ModelDeclaration{}, false
 	}
@@ -103,7 +103,7 @@ func resolveAnyModel(modCtx *ModuleContext, qualifiedName string) (model.ModelDe
 		return model.ModelDeclaration{}, false
 	}
 	for _, md := range target.ModelDecls {
-		if md.Name == resource {
+		if md.QualifiedName(moduleName) == qualifiedName {
 			return md, true
 		}
 	}

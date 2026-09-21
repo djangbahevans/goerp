@@ -244,7 +244,7 @@ func migrationDDLTableOwned(modCtx *ModuleContext, table string) bool {
 		if tableNameForORM(decl) != table {
 			continue
 		}
-		qualified := modCtx.ModuleName + "." + decl.Name
+		qualified := decl.QualifiedName(modCtx.ModuleName)
 		return slices.Contains(modCtx.OwnedModels(), qualified) || slices.Contains(modCtx.ExtendsModels(), qualified)
 	}
 	return false

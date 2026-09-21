@@ -68,7 +68,7 @@ func ensureRiverJobMigrated(t *testing.T) {
 }
 
 func widgetModelDecl() model.ModelDeclaration {
-	d := model.Define("widget").WithStandardFields().
+	d := model.Define("testmodule.widget", model.Table("widget")).WithStandardFields().
 		Field("name", model.Text().Required()).
 		Field("code", model.Text()).
 		Index("idx_widgets_code_unique", model.BTreeIndex("code").Unique())
