@@ -79,13 +79,6 @@ func (w *SyncWorker) Work(ctx context.Context, job *river.Job[SyncArgs]) error {
 	return nil
 }
 
-// syncPair is one (tenant, module) unit of work within a SyncArgs job —
-// run's own fanOut item type.
-type syncPair struct {
-	tenant tenant.Tenant
-	mod    *module.LoadedModule
-}
-
 func (w *SyncWorker) run(ctx context.Context, a SyncArgs) (SyncResult, error) {
 	tenants, err := w.resolveTenants(ctx, a.TenantSlug)
 	if err != nil {
@@ -97,29 +90,27 @@ func (w *SyncWorker) run(ctx context.Context, a SyncArgs) (SyncResult, error) {
 		return SyncResult{}, err
 	}
 
-	pairs := make([]syncPair, 0, len(tenants)*len(mods))
-	for _, t := range tenants {
-		for _, mod := range mods {
-			pairs = append(pairs, syncPair{tenant: t, mod: mod})
-		}
-	}
-
 	var result SyncResult
 	var mu sync.Mutex
-	fanOut(pairs, DefaultConcurrency, func(p syncPair) {
-		pairResult := SyncPairResult{Tenant: p.tenant.Slug, Module: p.mod.Manifest.Name}
-		if err := SyncOne(ctx, w.Pool, w.DiffEngine, p.tenant, p.mod, nil); err != nil {
-			pairResult.Error = err.Error()
+	// One module at a time, in dependency order, so a module's schema is
+	// synced before the schema of any module that depends on it; tenants
+	// fan out within each module.
+	for _, mod := range module.OrderByDependencies(mods) {
+		fanOut(tenants, DefaultConcurrency, func(t tenant.Tenant) {
+			pairResult := SyncPairResult{Tenant: t.Slug, Module: mod.Manifest.Name}
+			if err := SyncOne(ctx, w.Pool, w.DiffEngine, t, mod, nil); err != nil {
+				pairResult.Error = err.Error()
+				mu.Lock()
+				result.Failed = append(result.Failed, pairResult)
+				mu.Unlock()
+				return
+			}
+			jobdispatch.EnqueueApplicableDataMigrations(ctx, w.RiverClient, w.Pool, []tenant.Tenant{t}, mod, "schema sync")
 			mu.Lock()
-			result.Failed = append(result.Failed, pairResult)
+			result.Synced = append(result.Synced, pairResult)
 			mu.Unlock()
-			return
-		}
-		jobdispatch.EnqueueApplicableDataMigrations(ctx, w.RiverClient, w.Pool, []tenant.Tenant{p.tenant}, p.mod, "schema sync")
-		mu.Lock()
-		result.Synced = append(result.Synced, pairResult)
-		mu.Unlock()
-	})
+		})
+	}
 
 	// Concurrent completion order is arbitrary — sort both slices by
 	// (tenant, module) so a broad sync's result doesn't reshuffle between

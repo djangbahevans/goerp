@@ -13,30 +13,59 @@ import (
 type AtlasOption func(*atlasConfig)
 
 type atlasConfig struct {
-	dependencies map[string]bool
+	hard            map[string]bool
+	soft            map[string]bool
+	models          map[string]map[string]model.ModelDeclaration
+	tolerateMissing bool
 }
 
+func (c atlasConfig) declares(module string) bool { return c.hard[module] || c.soft[module] }
+
 // WithDependencies declares the modules a Many2One may target besides the
-// schema's own.
+// schema's own: the hard ones from depends_on and the soft ones from
+// soft_depends_on.
 func WithDependencies(dependsOn, softDependsOn []string) AtlasOption {
 	return func(c *atlasConfig) {
 		for _, name := range dependsOn {
-			c.dependencies[name] = true
+			c.hard[name] = true
 		}
 		for _, name := range softDependsOn {
-			c.dependencies[name] = true
+			c.soft[name] = true
+		}
+	}
+}
+
+// WithUnloadedDependenciesTolerated makes a Many2One to a hard dependency that
+// is not loaded a plain column instead of an error, for a caller that syncs
+// one module in isolation.
+func WithUnloadedDependenciesTolerated() AtlasOption {
+	return func(c *atlasConfig) { c.tolerateMissing = true }
+}
+
+// WithDependencyModels supplies the model declarations of the dependencies
+// that are loaded, keyed by module name.
+func WithDependencyModels(models map[string][]model.ModelDeclaration) AtlasOption {
+	return func(c *atlasConfig) {
+		for module, decls := range models {
+			byName := make(map[string]model.ModelDeclaration, len(decls))
+			for _, md := range decls {
+				byName[md.Name] = md
+			}
+			c.models[module] = byName
 		}
 	}
 }
 
 // ToAtlasSchema builds an Atlas schema from one module's own model
 // declarations. moduleName qualifies a Many2One field's relatedModel for
-// resolution against this same modelDecls slice. A Many2One to a declared
-// dependency's model is a plain UUID column with no foreign key. Any other
-// relatedModel that isn't one of this module's own models fails with a
-// clear error rather than silently skipping the foreign key.
+// resolution against this same modelDecls slice. A Many2One to a hard
+// dependency's model gets a foreign key to that model's table, referenced
+// through a stand-in table that is not part of the returned schema; one to a
+// soft dependency's model, or to a model with no table, is a plain UUID
+// column. Any other relatedModel that isn't one of this module's own models
+// fails with a clear error rather than silently skipping the foreign key.
 func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclaration, typeDecls []model.TypeDeclaration, opts ...AtlasOption) (*schema.Schema, error) {
-	cfg := atlasConfig{dependencies: make(map[string]bool)}
+	cfg := atlasConfig{hard: map[string]bool{}, soft: map[string]bool{}, models: map[string]map[string]model.ModelDeclaration{}}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -88,7 +117,7 @@ func ToAtlasSchema(schemaName, moduleName string, modelDecls []model.ModelDeclar
 					}
 				}
 				if !strings.HasPrefix(f.Def.RelatedModel, moduleName+".") {
-					if err := validateCrossModuleMany2One(f, cfg); err != nil {
+					if err := addCrossModuleForeignKey(s, tables[md.Name], f, cfg); err != nil {
 						return nil, fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
 					}
 					continue
@@ -146,20 +175,76 @@ func validateOne2Many(md model.ModelDeclaration, f model.NamedField, moduleName 
 	return nil
 }
 
-// validateCrossModuleMany2One requires a declared dependency and rejects an
-// on-delete action, which a column with no foreign key cannot carry.
-func validateCrossModuleMany2One(f model.NamedField, cfg atlasConfig) error {
-	targetModule, _, qualified := strings.Cut(f.Def.RelatedModel, ".")
+// addCrossModuleForeignKey resolves a Many2One whose related_model belongs
+// to another module. A nil t is a declaring model with no table, which is
+// validated but has no column to constrain. The module must be a declared dependency, and its model
+// must exist when the module is loaded. A hard dependency's model with a
+// table gets a foreign key; every other relation is a plain column, which
+// cannot carry an on-delete action.
+func addCrossModuleForeignKey(s *schema.Schema, t *schema.Table, f model.NamedField, cfg atlasConfig) error {
+	targetModule, targetName, qualified := strings.Cut(f.Def.RelatedModel, ".")
 	if !qualified {
 		return fmt.Errorf("related_model %q must be module-qualified as {module}.{model}", f.Def.RelatedModel)
 	}
-	if !cfg.dependencies[targetModule] {
+	if !cfg.declares(targetModule) {
 		return fmt.Errorf("related_model %q belongs to module %q, which is not in depends_on or soft_depends_on", f.Def.RelatedModel, targetModule)
 	}
-	if f.Def.RelationOnDelete != model.Restrict {
-		return fmt.Errorf("related_model %q belongs to another module, so the relation has no foreign key and .OnDelete() has no effect on it", f.Def.RelatedModel)
+
+	target, loaded := cfg.models[targetModule]
+	if !loaded && cfg.hard[targetModule] && !cfg.tolerateMissing {
+		return fmt.Errorf("related_model %q belongs to hard dependency %q, which is not loaded", f.Def.RelatedModel, targetModule)
 	}
+
+	var targetDecl model.ModelDeclaration
+	if loaded {
+		var ok bool
+		if targetDecl, ok = target[targetName]; !ok {
+			return fmt.Errorf("related_model %q is not declared by module %q", f.Def.RelatedModel, targetModule)
+		}
+	}
+
+	if !loaded || !cfg.hard[targetModule] || targetDecl.Backend != "" {
+		if f.Def.RelationOnDelete != model.Restrict {
+			return fmt.Errorf("related_model %q has no foreign key, so .OnDelete() has no effect on it", f.Def.RelatedModel)
+		}
+		return nil
+	}
+
+	targetPK, ok := primaryKeyFieldOf(targetDecl)
+	if !ok {
+		return fmt.Errorf("related_model %q declares no primary key field", f.Def.RelatedModel)
+	}
+	if t == nil {
+		return nil
+	}
+	col, ok := t.Column(f.Name)
+	if !ok {
+		return fmt.Errorf("column %q not found on its own table", f.Name)
+	}
+
+	// The referenced table belongs to another module's schema sync, which
+	// alone creates and alters it: the stand-in is never added to s.
+	ref := schema.NewTable(TableNameFor(targetDecl)).SetSchema(s)
+	refCol := schema.NewColumn(targetPK)
+	ref.AddColumns(refCol)
+
+	t.AddForeignKeys(schema.NewForeignKey(fmt.Sprintf("%s_%s_fkey", t.Name, f.Name)).
+		SetTable(t).
+		AddColumns(col).
+		SetRefTable(ref).
+		AddRefColumns(refCol).
+		SetOnDelete(onDeleteOption(f.Def.RelationOnDelete)))
+
 	return nil
+}
+
+func primaryKeyFieldOf(md model.ModelDeclaration) (string, bool) {
+	for _, f := range md.Fields {
+		if f.Def.IsPrimaryKey {
+			return f.Name, true
+		}
+	}
+	return "", false
 }
 
 func addForeignKey(t *schema.Table, f model.NamedField, moduleName string, modelDecls []model.ModelDeclaration, tables map[string]*schema.Table) error {

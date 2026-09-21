@@ -40,6 +40,20 @@ func (r *ModuleRegistry) Snapshot() *RegistrySnapshot {
 	return r.current.Load()
 }
 
+// ModelDeclarations returns the model declarations of the named module in
+// the current snapshot, or false when it is not loaded or has failed.
+func (r *ModuleRegistry) ModelDeclarations(moduleName string) ([]model.ModelDeclaration, bool) {
+	snap := r.Snapshot()
+	if snap == nil {
+		return nil, false
+	}
+	mod, ok := snap.Modules()[moduleName]
+	if !ok || mod.Status == module.StatusFailed {
+		return nil, false
+	}
+	return mod.ModelDecls, true
+}
+
 // Update replaces the registry's whole module map in one atomic publish.
 // Safe against another concurrent Update racing on writeMu, but NOT safe
 // against a caller that built modules from a Snapshot() read before

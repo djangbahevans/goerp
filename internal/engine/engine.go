@@ -780,7 +780,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	for i, src := range ordered {
 		orderedModules[i] = loadedModules[src.Name]
 	}
-	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: cfg.SchemaSyncDDLStatementTimeout})
+	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: cfg.SchemaSyncDDLStatementTimeout, ModelSource: moduleRegistry})
 	if err := tenantsync.SyncAll(ctx, syncPool, diffEngine, tenantStore, orderedModules, cfg.SchemaSyncConcurrency); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("sync tenant schemas: %w", err)
