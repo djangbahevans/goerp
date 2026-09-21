@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
-	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
 // processBatchesMaxRetries is migration-guide.md §4's own documented
@@ -28,7 +28,7 @@ const processBatchesRetryBackoff = 200 * time.Millisecond
 // LIMIT query naturally advances to the next batch — the same property
 // that makes this safe to resume after an interruption. A batch is
 // retried up to processBatchesMaxRetries times only when the failure is
-// itself flagged retryable (*hostcall.HostError.Retry, e.g. db.timeout) —
+// itself flagged retryable (*abi.HostError.Retry, e.g. db.timeout) —
 // anything else stops immediately, since retrying a non-transient error
 // (a malformed condition, a fn bug) would just fail identically each
 // time.
@@ -102,6 +102,6 @@ func withRetry(fn func() error) error {
 }
 
 func isRetryable(err error) bool {
-	hostErr, ok := err.(*hostcall.HostError)
+	hostErr, ok := err.(*abi.HostError)
 	return ok && hostErr.Retry
 }

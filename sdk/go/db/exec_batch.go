@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
@@ -58,8 +59,8 @@ func ExecBatch(sql string, argSets [][]any) (ExecBatchResult, error) {
 		return ExecBatchResult{TotalRowsAffected: int64(out.TotalRowsAffected), DurationMs: out.DurationMs}, nil
 	}
 
-	var he *hostcall.HostError
-	if errors.As(err, &he) && he.Code == "db.batch_partial_error" {
+	var he *abi.HostError
+	if errors.As(err, &he) && he.Code == abi.ErrCodeDBBatchPartialError {
 		return execBatchResultFromDetails(he.Details), nil
 	}
 	return ExecBatchResult{}, wrapExecError(err)

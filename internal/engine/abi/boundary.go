@@ -4,20 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
 )
-
-// envelope is the wire-level discriminator every host function response
-// uses. host-abi-reference.md §2/§3 specify msgpack framing and that errors
-// are "returned in place of the normal response" without naming a literal
-// envelope type — this is that type, established here since host.db.begin/
-// commit/rollback are the first host functions to need one.
-type envelope struct {
-	OK    bool               `msgpack:"ok"`
-	Data  msgpack.RawMessage `msgpack:"data,omitempty"`
-	Error *HostError         `msgpack:"error,omitempty"`
-}
 
 // ReadFromModule reads length bytes from the calling module's linear memory
 // at ptr, bounds-checked against the module's actual memory size, and
@@ -45,17 +35,17 @@ func WriteToModule(ctx context.Context, mod api.Module, allocate api.Function, v
 		return EncodeHostError(ctx, mod, allocate, DeserializeError(err))
 	}
 
-	return packAndWrite(ctx, mod, allocate, envelope{OK: true, Data: data})
+	return packAndWrite(ctx, mod, allocate, abiv1.Envelope{OK: true, Data: data})
 }
 
 // EncodeHostError packs hostErr the same way WriteToModule packs a success
 // value — same envelope, same allocate/write/pack path — since errors are
 // returned in place of the normal response, not through a separate channel.
 func EncodeHostError(ctx context.Context, mod api.Module, allocate api.Function, hostErr *HostError) uint64 {
-	return packAndWrite(ctx, mod, allocate, envelope{OK: false, Error: hostErr})
+	return packAndWrite(ctx, mod, allocate, abiv1.Envelope{OK: false, Error: hostErr})
 }
 
-func packAndWrite(ctx context.Context, mod api.Module, allocate api.Function, env envelope) uint64 {
+func packAndWrite(ctx context.Context, mod api.Module, allocate api.Function, env abiv1.Envelope) uint64 {
 	payload, err := msgpack.Marshal(env)
 	if err != nil {
 		// Marshaling our own envelope failing is an engine bug, not a

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 func TestIsNotFound(t *testing.T) {
@@ -29,7 +29,7 @@ func TestIsEtagMismatch(t *testing.T) {
 }
 
 func TestWrapExecError_EtagMismatch(t *testing.T) {
-	raw := &hostcall.HostError{Code: "db.etag_mismatch", Message: "record has been modified since it was last read"}
+	raw := &abi.HostError{Code: abi.ErrCodeDBEtagMismatch, Message: "record has been modified since it was last read"}
 	if got := wrapExecError(raw); !errors.Is(got, ErrEtagMismatch) {
 		t.Errorf("wrapExecError(etag_mismatch) = %v, want ErrEtagMismatch", got)
 	}
@@ -50,7 +50,7 @@ func TestWrapExecError_UnrelatedErrorPassesThroughUnchanged(t *testing.T) {
 
 func TestWrapExecError_NonHostErrorPassesThroughUnchanged(t *testing.T) {
 	// A marshal/unmarshal-layer error (e.g. from hostcall.Do itself) has
-	// no *hostcall.HostError anywhere in its chain — must pass through,
+	// no *abi.HostError anywhere in its chain — must pass through,
 	// not be silently swallowed into one of this package's own sentinels.
 	orig := errors.New("marshal request: some encoding failure")
 	if got := wrapExecError(orig); got != orig {
@@ -59,8 +59,8 @@ func TestWrapExecError_NonHostErrorPassesThroughUnchanged(t *testing.T) {
 }
 
 func TestWrapExecError_UniqueViolation_ProducesPGError(t *testing.T) {
-	raw := &hostcall.HostError{
-		Code:    "db.unique_violation",
+	raw := &abi.HostError{
+		Code:    abi.ErrCodeDBUniqueViolation,
 		Message: `duplicate key value violates unique constraint "widget_name_key"`,
 		Details: map[string]any{"constraint": "widget_name_key", "sqlstate": "23505"},
 	}
@@ -79,8 +79,8 @@ func TestWrapExecError_UniqueViolation_ProducesPGError(t *testing.T) {
 }
 
 func TestWrapExecError_ForeignKeyViolation_ProducesPGError(t *testing.T) {
-	raw := &hostcall.HostError{
-		Code:    "db.foreign_key_violation",
+	raw := &abi.HostError{
+		Code:    abi.ErrCodeDBForeignKeyViolation,
 		Message: "insert or update on table violates foreign key constraint",
 		Details: map[string]any{"table": "widget", "column": "parent_id", "sqlstate": "23503"},
 	}
@@ -99,12 +99,12 @@ func TestWrapExecError_ForeignKeyViolation_ProducesPGError(t *testing.T) {
 }
 
 func TestIsUniqueViolation(t *testing.T) {
-	uniqueErr := wrapExecError(&hostcall.HostError{Code: "db.unique_violation", Details: map[string]any{"sqlstate": "23505"}})
+	uniqueErr := wrapExecError(&abi.HostError{Code: abi.ErrCodeDBUniqueViolation, Details: map[string]any{"sqlstate": "23505"}})
 	if !IsUniqueViolation(uniqueErr) {
 		t.Error("IsUniqueViolation(unique violation) = false, want true")
 	}
 
-	fkErr := wrapExecError(&hostcall.HostError{Code: "db.foreign_key_violation", Details: map[string]any{"sqlstate": "23503"}})
+	fkErr := wrapExecError(&abi.HostError{Code: abi.ErrCodeDBForeignKeyViolation, Details: map[string]any{"sqlstate": "23503"}})
 	if IsUniqueViolation(fkErr) {
 		t.Error("IsUniqueViolation(foreign key violation) = true, want false")
 	}
@@ -114,42 +114,42 @@ func TestIsUniqueViolation(t *testing.T) {
 
 	// Classifies a raw, unwrapped host error the same way it classifies
 	// one already wrapped into *PGError above.
-	rawUniqueErr := &hostcall.HostError{Code: "db.unique_violation"}
+	rawUniqueErr := &abi.HostError{Code: abi.ErrCodeDBUniqueViolation}
 	if !IsUniqueViolation(rawUniqueErr) {
 		t.Error("IsUniqueViolation(raw unique violation) = false, want true")
 	}
 }
 
 func TestIsForeignKeyViolation(t *testing.T) {
-	fkErr := wrapExecError(&hostcall.HostError{Code: "db.foreign_key_violation", Details: map[string]any{"sqlstate": "23503"}})
+	fkErr := wrapExecError(&abi.HostError{Code: abi.ErrCodeDBForeignKeyViolation, Details: map[string]any{"sqlstate": "23503"}})
 	if !IsForeignKeyViolation(fkErr) {
 		t.Error("IsForeignKeyViolation(foreign key violation) = false, want true")
 	}
 
-	uniqueErr := wrapExecError(&hostcall.HostError{Code: "db.unique_violation", Details: map[string]any{"sqlstate": "23505"}})
+	uniqueErr := wrapExecError(&abi.HostError{Code: abi.ErrCodeDBUniqueViolation, Details: map[string]any{"sqlstate": "23505"}})
 	if IsForeignKeyViolation(uniqueErr) {
 		t.Error("IsForeignKeyViolation(unique violation) = true, want false")
 	}
 }
 
 func TestIsDeadlock(t *testing.T) {
-	deadlockErr := &hostcall.HostError{Code: "db.exec_error", Message: "ERROR: deadlock detected (SQLSTATE 40P01)", Details: map[string]any{"sqlstate": "40P01"}}
+	deadlockErr := &abi.HostError{Code: abi.ErrCodeExecError, Message: "ERROR: deadlock detected (SQLSTATE 40P01)", Details: map[string]any{"sqlstate": "40P01"}}
 	if !IsDeadlock(deadlockErr) {
 		t.Error("IsDeadlock(deadlock error) = false, want true")
 	}
 
 	// A generic db.exec_error with a different (or no) sqlstate must not
 	// be misclassified as a deadlock.
-	otherExecErr := &hostcall.HostError{Code: "db.exec_error", Message: "ERROR: null value in column violates not-null constraint", Details: map[string]any{"sqlstate": "23502"}}
+	otherExecErr := &abi.HostError{Code: abi.ErrCodeExecError, Message: "ERROR: null value in column violates not-null constraint", Details: map[string]any{"sqlstate": "23502"}}
 	if IsDeadlock(otherExecErr) {
 		t.Error("IsDeadlock(not-null violation) = true, want false")
 	}
-	noDetailsErr := &hostcall.HostError{Code: "db.exec_error", Message: "some other failure"}
+	noDetailsErr := &abi.HostError{Code: abi.ErrCodeExecError, Message: "some other failure"}
 	if IsDeadlock(noDetailsErr) {
 		t.Error("IsDeadlock(no Details) = true, want false")
 	}
 
-	if IsDeadlock(wrapExecError(&hostcall.HostError{Code: "db.unique_violation", Details: map[string]any{"sqlstate": "23505"}})) {
+	if IsDeadlock(wrapExecError(&abi.HostError{Code: abi.ErrCodeDBUniqueViolation, Details: map[string]any{"sqlstate": "23505"}})) {
 		t.Error("IsDeadlock(unique violation) = true, want false")
 	}
 }

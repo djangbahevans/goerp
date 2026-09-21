@@ -4,18 +4,18 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 func TestIsRetryable_HostErrorWithRetryTrue(t *testing.T) {
-	err := &hostcall.HostError{Code: "db.timeout", Retry: true}
+	err := &abi.HostError{Code: abi.ErrCodeDBTimeout, Retry: true}
 	if !isRetryable(err) {
 		t.Error("isRetryable() = false, want true for a HostError with Retry: true")
 	}
 }
 
 func TestIsRetryable_HostErrorWithRetryFalse(t *testing.T) {
-	err := &hostcall.HostError{Code: "db.query_error", Retry: false}
+	err := &abi.HostError{Code: abi.ErrCodeQueryError, Retry: false}
 	if isRetryable(err) {
 		t.Error("isRetryable() = true, want false for a HostError with Retry: false")
 	}

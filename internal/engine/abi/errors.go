@@ -1,6 +1,10 @@
 package abi
 
-import "errors"
+import (
+	"errors"
+
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+)
 
 // ErrAllocationFailed is returned when a module's allocate export returns 0,
 // signaling the module itself could not satisfy the allocation.
@@ -8,136 +12,61 @@ var ErrAllocationFailed = errors.New("abi.allocation_failed")
 
 // HostError is the msgpack-serialized shape every host function returns in
 // place of a normal response on failure (host-abi-reference.md §3 "Error
-// model").
-type HostError struct {
-	Code    string         `msgpack:"code"`
-	Message string         `msgpack:"message"`
-	Details map[string]any `msgpack:"details,omitempty"`
-	Retry   bool           `msgpack:"retry"`
-}
+// model"). Defined in contract/abi/v1 and shared with the SDK.
+type HostError = abiv1.HostError
 
-func (e *HostError) Error() string {
-	return e.Code + ": " + e.Message
-}
-
-// Standard error codes any host function can return (host-abi-reference.md
-// §3 "Standard error codes").
+// The error codes are defined in contract/abi/v1 and re-exported here
+// (host-abi-reference.md §3 "Standard error codes").
 const (
-	ErrCodeCapabilityDenied = "abi.capability_denied"
-	ErrCodeTenantIsolation  = "abi.tenant_isolation"
-	ErrCodeMemoryFault      = "abi.memory_fault"
-	ErrCodeAllocationFailed = "abi.allocation_failed"
-	ErrCodeDeserializeError = "abi.deserialize_error"
-	ErrCodeTimeout          = "abi.timeout"
-	ErrCodeUnavailable      = "abi.unavailable"
-)
-
-// host.db error codes (host-abi-reference.md §5 "host.db.begin"/"commit"/"rollback").
-const (
-	ErrCodeTransactionAlreadyOpen   = "db.transaction_already_open"
-	ErrCodeTransactionLimitExceeded = "db.transaction_limit_exceeded"
-	ErrCodeTransactionNotFound      = "db.transaction_not_found"
-	ErrCodeCommitFailed             = "db.commit_failed"
-)
-
-// host.db.query/host.db.query_replica error codes (host-abi-reference.md §5
-// "host.db.query"/"host.db.query_replica"). ErrCodeDBTimeout is distinct
-// from the generic ErrCodeTimeout above — the doc documents "db.timeout"
-// specifically for a query exceeding its own timeout_ms, not the general
-// ABI-wide "abi.timeout".
-const (
-	ErrCodeQueryError         = "db.query_error"
-	ErrCodeDBTimeout          = "db.timeout"
-	ErrCodeTableAccessDenied  = "db.table_access_denied"
-	ErrCodeResultTooLarge     = "db.result_too_large"
-	ErrCodeReplicaUnavailable = "db.replica_unavailable"
-)
-
-// host.db.exec error codes (host-abi-reference.md §5 "host.db.exec").
-// Distinct from the host.orm write codes below despite covering the same
-// underlying Postgres errors (unique/FK violation, etag mismatch): the
-// doc documents these under the "db." prefix specifically for exec's raw
-// SQL path, not "orm.".
-const (
-	ErrCodeExecError             = "db.exec_error"
-	ErrCodeNoRowsAffected        = "db.no_rows_affected"
-	ErrCodeDBUniqueViolation     = "db.unique_violation"
-	ErrCodeDBEtagMismatch        = "db.etag_mismatch"
-	ErrCodeDBForeignKeyViolation = "db.foreign_key_violation"
-)
-
-// host.db.exec_batch error codes (host-abi-reference.md §5
-// "host.db.exec_batch").
-const (
-	ErrCodeDBBatchError        = "db.batch_error"
-	ErrCodeDBBatchPartialError = "db.batch_partial_error"
-)
-
-// host.db.migration_ddl error codes (host-abi-reference.md §5
-// "host.db.migration_ddl") — the explicit-consent DropColumn/DropTable
-// escape hatch for data migration handlers (migration-guide.md §4,
-// goerp#500).
-const (
-	ErrCodeMigrationDDLError          = "db.migration_ddl_error"
-	ErrCodeMigrationDDLNotOwned       = "db.migration_ddl_not_owned"
-	ErrCodeMigrationDDLNotInContext   = "db.migration_ddl_not_in_migration_context"
-	ErrCodeMigrationDDLTargetNotFound = "db.migration_ddl_target_not_found"
-)
-
-// host.orm error codes (host-abi-reference.md §5a "host.orm.search"/
-// "host.orm.search_read"/"host.orm.read").
-const (
-	ErrCodeModelNotFound      = "orm.model_not_found"
-	ErrCodeDomainInvalid      = "orm.domain_invalid"
-	ErrCodeFieldNotSearchable = "orm.field_not_searchable"
-	ErrCodeFieldUnknown       = "orm.field_unknown"
-	ErrCodeNotFound           = "orm.not_found"
-	// ErrCodeFieldReadDenied rejects a whole aggregate/pivot request when
-	// a rows/columns/values field has a read rule the caller fails —
-	// aggregation has no per-record mask/nullify/omit fallback to use.
-	ErrCodeFieldReadDenied = "orm.field_read_denied"
-)
-
-// host.orm write error codes (host-abi-reference.md §5a "host.orm.create"/
-// "host.orm.write"/"host.orm.unlink").
-const (
-	ErrCodeValidationFailed          = "orm.validation_failed"
-	ErrCodeUniqueViolation           = "orm.unique_violation"
-	ErrCodeEtagMismatch              = "orm.etag_mismatch"
-	ErrCodeForeignKeyViolation       = "orm.foreign_key_violation"
-	ErrCodeConflictTargetInvalid     = "orm.conflict_target_invalid"
-	ErrCodeFieldNotWritable          = "orm.field_not_writable"
-	ErrCodeFieldWriteDenied          = "orm.field_write_denied"
-	ErrCodeCycleDetected             = "orm.cycle_detected"
-	ErrCodeDynamicLinkTargetNotFound = "orm.dynamic_link_target_not_found"
-)
-
-// Transient-model error codes (go-sdk-reference.md §22 "Transient models").
-const (
-	ErrCodeTransientNotListable = "orm.transient_not_listable"
-)
-
-// Workflow-transition error codes (go-sdk-reference.md "Declarative
-// workflow transitions").
-const (
-	// ErrCodeInvalidTransition rejects a workflow-transition action
-	// invoked while the record's current state isn't the transition's
-	// declared From state.
-	ErrCodeInvalidTransition = "orm.invalid_transition"
-)
-
-// host.event error codes (host-abi-reference.md "host.event.emit_tx"/
-// "host.event.emit").
-const (
-	ErrCodeNoTransaction  = "event.no_transaction"
-	ErrCodeUndeclared     = "event.undeclared"
-	ErrCodeSyncNotAllowed = "event.sync_not_allowed"
-	ErrCodeDispatchFailed = "event.dispatch_failed"
-)
-
-// host.search error codes (host-abi-reference.md §12 "host.search.query").
-const (
-	ErrCodeIndexNotFound = "search.index_not_found"
+	ErrCodeCapabilityDenied           = abiv1.ErrCodeCapabilityDenied
+	ErrCodeTenantIsolation            = abiv1.ErrCodeTenantIsolation
+	ErrCodeMemoryFault                = abiv1.ErrCodeMemoryFault
+	ErrCodeAllocationFailed           = abiv1.ErrCodeAllocationFailed
+	ErrCodeDeserializeError           = abiv1.ErrCodeDeserializeError
+	ErrCodeTimeout                    = abiv1.ErrCodeTimeout
+	ErrCodeUnavailable                = abiv1.ErrCodeUnavailable
+	ErrCodeTransactionAlreadyOpen     = abiv1.ErrCodeTransactionAlreadyOpen
+	ErrCodeTransactionLimitExceeded   = abiv1.ErrCodeTransactionLimitExceeded
+	ErrCodeTransactionNotFound        = abiv1.ErrCodeTransactionNotFound
+	ErrCodeCommitFailed               = abiv1.ErrCodeCommitFailed
+	ErrCodeQueryError                 = abiv1.ErrCodeQueryError
+	ErrCodeDBTimeout                  = abiv1.ErrCodeDBTimeout
+	ErrCodeTableAccessDenied          = abiv1.ErrCodeTableAccessDenied
+	ErrCodeResultTooLarge             = abiv1.ErrCodeResultTooLarge
+	ErrCodeReplicaUnavailable         = abiv1.ErrCodeReplicaUnavailable
+	ErrCodeExecError                  = abiv1.ErrCodeExecError
+	ErrCodeNoRowsAffected             = abiv1.ErrCodeNoRowsAffected
+	ErrCodeDBUniqueViolation          = abiv1.ErrCodeDBUniqueViolation
+	ErrCodeDBEtagMismatch             = abiv1.ErrCodeDBEtagMismatch
+	ErrCodeDBForeignKeyViolation      = abiv1.ErrCodeDBForeignKeyViolation
+	ErrCodeDBBatchError               = abiv1.ErrCodeDBBatchError
+	ErrCodeDBBatchPartialError        = abiv1.ErrCodeDBBatchPartialError
+	ErrCodeMigrationDDLError          = abiv1.ErrCodeMigrationDDLError
+	ErrCodeMigrationDDLNotOwned       = abiv1.ErrCodeMigrationDDLNotOwned
+	ErrCodeMigrationDDLNotInContext   = abiv1.ErrCodeMigrationDDLNotInContext
+	ErrCodeMigrationDDLTargetNotFound = abiv1.ErrCodeMigrationDDLTargetNotFound
+	ErrCodeModelNotFound              = abiv1.ErrCodeModelNotFound
+	ErrCodeDomainInvalid              = abiv1.ErrCodeDomainInvalid
+	ErrCodeFieldNotSearchable         = abiv1.ErrCodeFieldNotSearchable
+	ErrCodeFieldUnknown               = abiv1.ErrCodeFieldUnknown
+	ErrCodeNotFound                   = abiv1.ErrCodeNotFound
+	ErrCodeFieldReadDenied            = abiv1.ErrCodeFieldReadDenied
+	ErrCodeValidationFailed           = abiv1.ErrCodeValidationFailed
+	ErrCodeUniqueViolation            = abiv1.ErrCodeUniqueViolation
+	ErrCodeEtagMismatch               = abiv1.ErrCodeEtagMismatch
+	ErrCodeForeignKeyViolation        = abiv1.ErrCodeForeignKeyViolation
+	ErrCodeConflictTargetInvalid      = abiv1.ErrCodeConflictTargetInvalid
+	ErrCodeFieldNotWritable           = abiv1.ErrCodeFieldNotWritable
+	ErrCodeFieldWriteDenied           = abiv1.ErrCodeFieldWriteDenied
+	ErrCodeCycleDetected              = abiv1.ErrCodeCycleDetected
+	ErrCodeDynamicLinkTargetNotFound  = abiv1.ErrCodeDynamicLinkTargetNotFound
+	ErrCodeTransientNotListable       = abiv1.ErrCodeTransientNotListable
+	ErrCodeInvalidTransition          = abiv1.ErrCodeInvalidTransition
+	ErrCodeNoTransaction              = abiv1.ErrCodeNoTransaction
+	ErrCodeUndeclared                 = abiv1.ErrCodeUndeclared
+	ErrCodeSyncNotAllowed             = abiv1.ErrCodeSyncNotAllowed
+	ErrCodeDispatchFailed             = abiv1.ErrCodeDispatchFailed
+	ErrCodeIndexNotFound              = abiv1.ErrCodeIndexNotFound
 )
 
 func CapabilityDenied(capability string) *HostError {

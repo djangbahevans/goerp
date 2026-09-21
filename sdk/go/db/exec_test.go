@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -65,7 +65,7 @@ func TestTxExecReturning_NoMappedFields_ReturnsError(t *testing.T) {
 // TestWrapExecError_NoRowsAffected_IsErrNotFound covers the sentinel
 // wiring exec.go relies on for ExecReturning's own zero-match case.
 func TestWrapExecError_NoRowsAffected_IsErrNotFound(t *testing.T) {
-	raw := &hostcall.HostError{Code: "db.no_rows_affected", Message: "statement matched zero rows"}
+	raw := &abi.HostError{Code: abi.ErrCodeNoRowsAffected, Message: "statement matched zero rows"}
 	if got := wrapExecError(raw); !errors.Is(got, ErrNotFound) {
 		t.Errorf("wrapExecError(no_rows_affected) = %v, want ErrNotFound", got)
 	}

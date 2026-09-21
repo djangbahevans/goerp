@@ -3,7 +3,7 @@ package db
 import (
 	"errors"
 
-	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 // Sentinel errors and type matchers for host.db.exec/exec_batch's own
@@ -40,12 +40,12 @@ type PGError struct {
 	TableName      string
 	ColumnName     string
 
-	cause *hostcall.HostError
+	cause *abi.HostError
 }
 
 func (e *PGError) Error() string { return e.cause.Error() }
 
-// Unwrap exposes the underlying *hostcall.HostError, so the Is*
+// Unwrap exposes the underlying *abi.HostError, so the Is*
 // matchers below classify a *PGError the same way they'd classify the
 // raw host error it wraps.
 func (e *PGError) Unwrap() error { return e.cause }
@@ -55,22 +55,22 @@ func (e *PGError) Unwrap() error { return e.cause }
 // vocabulary. A stale write becomes ErrEtagMismatch; a unique or
 // foreign-key constraint violation becomes a *PGError carrying that
 // error's own structured Details. Any other error (a different host.*
-// failure, an error with no *hostcall.HostError anywhere in its chain, or
+// failure, an error with no *abi.HostError anywhere in its chain, or
 // nil) passes through unchanged.
 func wrapExecError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var he *hostcall.HostError
+	var he *abi.HostError
 	if !errors.As(err, &he) {
 		return err
 	}
 	switch he.Code {
-	case "db.etag_mismatch":
+	case abi.ErrCodeDBEtagMismatch:
 		return ErrEtagMismatch
-	case "db.no_rows_affected":
+	case abi.ErrCodeNoRowsAffected:
 		return ErrNotFound
-	case "db.unique_violation", "db.foreign_key_violation":
+	case abi.ErrCodeDBUniqueViolation, abi.ErrCodeDBForeignKeyViolation:
 		return &PGError{
 			Code:           detailString(he.Details, "sqlstate"),
 			ConstraintName: detailString(he.Details, "constraint"),
@@ -95,16 +95,16 @@ func IsEtagMismatch(err error) bool { return errors.Is(err, ErrEtagMismatch) }
 
 // IsUniqueViolation reports whether err is a host.db.exec unique
 // constraint violation — checked against the underlying
-// *hostcall.HostError so it classifies both a raw host error and one
+// *abi.HostError so it classifies both a raw host error and one
 // already wrapped into *PGError identically.
 func IsUniqueViolation(err error) bool {
-	return hostErrorCodeIs(err, "db.unique_violation")
+	return hostErrorCodeIs(err, abi.ErrCodeDBUniqueViolation)
 }
 
 // IsForeignKeyViolation reports whether err is a host.db.exec
 // foreign-key (or restrict) constraint violation.
 func IsForeignKeyViolation(err error) bool {
-	return hostErrorCodeIs(err, "db.foreign_key_violation")
+	return hostErrorCodeIs(err, abi.ErrCodeDBForeignKeyViolation)
 }
 
 // IsDeadlock reports whether err is a host.db.exec failure caused by a
@@ -113,11 +113,11 @@ func IsForeignKeyViolation(err error) bool {
 // generic db.exec_error code — so this checks the error's own
 // "sqlstate" Details field rather than the ABI code alone.
 func IsDeadlock(err error) bool {
-	var he *hostcall.HostError
-	return errors.As(err, &he) && he.Code == "db.exec_error" && detailString(he.Details, "sqlstate") == "40P01"
+	var he *abi.HostError
+	return errors.As(err, &he) && he.Code == abi.ErrCodeExecError && detailString(he.Details, "sqlstate") == "40P01"
 }
 
 func hostErrorCodeIs(err error, code string) bool {
-	var he *hostcall.HostError
+	var he *abi.HostError
 	return errors.As(err, &he) && he.Code == code
 }
