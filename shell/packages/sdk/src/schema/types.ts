@@ -25,10 +25,8 @@ export type CRUDAction = (typeof CRUD_ACTIONS)[number];
 export const RouteSchemaSchema = v.looseObject({
   method: v.string(),
   path: v.string(),
-  // Genuinely nullable, not just optional: Go's Permissions []string carries
-  // no `omitempty` tag, but an EnableOps-auto-generated CRUD route never
-  // sets it — its zero-value nil slice marshals as JSON `null`, not `[]`.
-  permissions: v.nullable(v.array(v.string())),
+  // The engine always sends an array: a nil Go slice encodes as `[]`.
+  permissions: v.array(v.string()),
   model: v.optional(v.string()),
   crud_action: v.optional(v.picklist(CRUD_ACTIONS)),
   name: v.optional(v.string()),

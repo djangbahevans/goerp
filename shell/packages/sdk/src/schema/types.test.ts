@@ -5,8 +5,9 @@ import { FieldDefSchema, ModuleSchemaSchema, RouteSchemaSchema, WorkflowTransiti
 const baseRoute = { method: "GET", path: "/x", permissions: [], response_is_list: false };
 
 describe("RouteSchemaSchema", () => {
-  it("requires permissions to be present, but accepts null — Go's zero-value nil slice marshals as JSON null, not []", () => {
-    expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, permissions: null }).success).toBe(true);
+  it("requires permissions to be an array: [] and a string array parse, null and a missing member do not", () => {
+    expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, permissions: null }).success).toBe(false);
+    expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, permissions: [] }).success).toBe(true);
     expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, permissions: ["a:b"] }).success).toBe(true);
     const { permissions: _permissions, ...withoutPermissions } = baseRoute;
     expect(v.safeParse(RouteSchemaSchema, withoutPermissions).success).toBe(false);
