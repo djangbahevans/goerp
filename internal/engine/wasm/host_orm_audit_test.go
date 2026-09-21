@@ -70,6 +70,14 @@ func createFixtureAuditTables(t *testing.T, conn *sql.DB, slug string) {
 	)`); err != nil {
 		t.Fatalf("create gadget table: %v", err)
 	}
+	createFixtureAuditLogTable(t, conn, slug)
+}
+
+func createFixtureAuditLogTable(t *testing.T, conn *sql.DB, slug string) {
+	t.Helper()
+	ctx := context.Background()
+	schemaName := "tenant_" + slug
+
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.audit_log (
 		id          UUID NOT NULL DEFAULT uuidv7(),
 		table_name  TEXT NOT NULL,

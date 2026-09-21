@@ -487,7 +487,15 @@ func TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStat
 	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decode confirm response: %v", err)
 	}
-	if updated["state"] != "confirmed" {
-		t.Errorf("state = %v, want confirmed", updated["state"])
+	if _, present := updated["state"]; present {
+		t.Errorf("response state = %v, want it omitted for a caller without sales:order:state_read", updated["state"])
+	}
+
+	var stored string
+	if err := conn.QueryRow(`SELECT state FROM `+tenantschema.Name(slug)+`."order" WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("read stored state: %v", err)
+	}
+	if stored != "confirmed" {
+		t.Errorf("stored state = %q, want confirmed", stored)
 	}
 }

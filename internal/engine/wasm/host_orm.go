@@ -584,7 +584,11 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 	}
 
 	if md.Backend == model.BackendTransient {
-		return transientRead(ctx, cacheClient, modCtx, input.Model, input.IDs)
+		out, hostErr := transientRead(ctx, cacheClient, modCtx, input.Model, input.IDs)
+		if hostErr == nil && !o.skipFieldSecurity {
+			applyFieldMasking(modCtx, input.Model, out.Records)
+		}
+		return out, hostErr
 	}
 
 	pkCol, ok := primaryKeyColumn(md)

@@ -83,6 +83,7 @@ func transientCreate(ctx context.Context, cacheClient *cache.Client, modCtx *Mod
 		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
+	applyFieldMasking(modCtx, qualifiedModel, []map[string]any{record})
 	return ORMCreateOutput{Record: record}, nil
 }
 
@@ -144,6 +145,7 @@ func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *Modu
 		return ORMWriteOutput{}, diagnoseTransientZeroRowWrite(ctx, cacheClient, key)
 	}
 
+	applyFieldMasking(modCtx, qualifiedModel, []map[string]any{record})
 	return ORMWriteOutput{Record: record}, nil
 }
 
