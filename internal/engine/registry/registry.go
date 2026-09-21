@@ -308,8 +308,8 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 			for _, op := range md.EnabledOps {
 				ops = append(ops, op.Name)
 			}
-			models[name+"."+md.Name] = schemaHashModel{
-				Name:        md.Name,
+			models[md.QualifiedName(name)] = schemaHashModel{
+				Name:        md.ResourceName(),
 				Label:       md.Label,
 				LabelPlural: md.LabelPlural,
 				Fields:      fields,

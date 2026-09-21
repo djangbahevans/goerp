@@ -67,7 +67,7 @@ func RegisterModelRoutes(table *RouteTable, moduleName, moduleType string, model
 	claimedActions := explicitActionIdentities(table, moduleName)
 
 	for _, md := range models {
-		qualifiedModel := moduleName + "." + md.Name
+		qualifiedModel := md.QualifiedName(moduleName)
 
 		for _, op := range md.EnabledOps {
 			method, relPath := deriveCRUDPath(md, op)
@@ -122,7 +122,7 @@ func RegisterModelWorkflowActions(table *RouteTable, moduleName, moduleType stri
 	claimedActions := explicitActionIdentities(table, moduleName)
 
 	for _, md := range models {
-		qualifiedModel := moduleName + "." + md.Name
+		qualifiedModel := md.QualifiedName(moduleName)
 		plural := "/" + pluralPathSegment(md)
 
 		for _, f := range md.Fields {
@@ -211,21 +211,10 @@ func pluralPathSegment(md model.ModelDeclaration) string {
 
 	label := md.LabelPlural
 	if label == "" {
-		label = bareNameSegment(md.Name)
+		label = md.ResourceName()
 	}
 
 	return inflect.Parameterize(inflect.Pluralize(label))
-}
-
-// bareNameSegment returns the last dot-separated segment of a model
-// name — the fallback used whenever a human-facing label derived from
-// the model's own name isn't set (pluralPathSegment's LabelPlural
-// fallback above; route_view.go's displayLabel).
-func bareNameSegment(name string) string {
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		return name[i+1:]
-	}
-	return name
 }
 
 // storageBackendString maps model.ModelBackend's zero-value-is-the-

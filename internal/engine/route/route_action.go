@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -35,9 +34,7 @@ func resolveActionRoutes(moduleName string, explicit []ExplicitRoute, models []m
 
 	declared := make(map[string]model.ModelDeclaration, len(models))
 	for _, md := range models {
-		for _, name := range actionModelNames(moduleName, md) {
-			declared[name] = md
-		}
+		declared[md.QualifiedName(moduleName)] = md
 	}
 
 	resolved := slices.Clone(explicit)
@@ -50,7 +47,7 @@ func resolveActionRoutes(moduleName string, explicit []ExplicitRoute, models []m
 		if !ok {
 			return nil, fmt.Errorf("route: module %q: action %q names model %q, which the module does not declare", moduleName, r.Name, r.Model)
 		}
-		id := actionIdentity{md.Name, r.Name}
+		id := actionIdentity{r.Model, r.Name}
 		if seen[id] {
 			return nil, fmt.Errorf("route: module %q: action %q on model %q is registered more than once", moduleName, r.Name, r.Model)
 		}
@@ -115,25 +112,8 @@ func isReservedAction(name string) bool {
 	}
 }
 
-// actionModelNames lists the names an engine.Action may use for md: its
-// module-qualified name, plus md.Name itself when the declaration is
-// already qualified with the module name (go-sdk-reference.md §22 declares
-// models as "sales.order").
-func actionModelNames(moduleName string, md model.ModelDeclaration) []string {
-	names := []string{moduleName + "." + md.Name}
-	if strings.HasPrefix(md.Name, moduleName+".") {
-		names = append(names, md.Name)
-	}
-	return names
-}
-
 func actionClaimed(claimed map[actionIdentity]bool, moduleName string, md model.ModelDeclaration, action string) bool {
-	for _, name := range actionModelNames(moduleName, md) {
-		if claimed[actionIdentity{name, action}] {
-			return true
-		}
-	}
-	return false
+	return claimed[actionIdentity{md.QualifiedName(moduleName), action}]
 }
 
 // explicitActionIdentities lists the (model, action name) of every

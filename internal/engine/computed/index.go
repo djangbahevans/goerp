@@ -96,7 +96,7 @@ func New() *Index {
 // declaration should recompute nothing rather than panic.
 func (idx *Index) Register(moduleName string, decls []model.ModelDeclaration) {
 	for _, decl := range decls {
-		qualifiedModel := moduleName + "." + decl.Name
+		qualifiedModel := decl.QualifiedName(moduleName)
 
 		for _, field := range decl.Fields {
 			if !field.Def.IsComputed {
@@ -193,7 +193,7 @@ func (idx *Index) Lookup(qualifiedModel string, changedFields []string) []Depend
 	var out []Dependent
 
 	add := func(dep Dependent) {
-		key := dependentKey{model: dep.ModuleName + "." + dep.ModelDecl.Name, field: dep.Field}
+		key := dependentKey{model: dep.ModelDecl.QualifiedName(dep.ModuleName), field: dep.Field}
 		if seen[key] {
 			return
 		}
@@ -228,7 +228,7 @@ func (idx *Index) LookupViaChild(qualifiedChildModel string, changedFields []str
 
 	for _, field := range changedFields {
 		for _, dep := range idx.viaChild[qualifiedChildModel][field] {
-			key := dependentKey{model: dep.ModuleName + "." + dep.ModelDecl.Name, field: dep.Field}
+			key := dependentKey{model: dep.ModelDecl.QualifiedName(dep.ModuleName), field: dep.Field}
 			if seen[key] {
 				continue
 			}

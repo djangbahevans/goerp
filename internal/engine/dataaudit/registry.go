@@ -66,7 +66,7 @@ func (r *Registry) Register(moduleName string, audited []manifest.AuditedTable, 
 		for _, c := range a.ExcludeColumns {
 			excludeCols[c] = true
 		}
-		r.byModel[moduleName+"."+decl.Name] = tableAudit{ExcludeColumns: excludeCols}
+		r.byModel[decl.QualifiedName(moduleName)] = tableAudit{ExcludeColumns: excludeCols}
 	}
 }
 

@@ -300,3 +300,22 @@ func TestModelDeclaration_MsgpackRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestModelDeclaration_QualifiedAndResourceName(t *testing.T) {
+	tests := []struct {
+		name, module, wantQualified, wantResource string
+	}{
+		{"order", "sales", "sales.order", "order"},
+		{"sales.order", "sales", "sales.order", "order"},
+		{"order_line", "sales", "sales.order_line", "order_line"},
+	}
+	for _, tt := range tests {
+		d := ModelDeclaration{Name: tt.name}
+		if got := d.QualifiedName(tt.module); got != tt.wantQualified {
+			t.Errorf("Define(%q).QualifiedName(%q) = %q, want %q", tt.name, tt.module, got, tt.wantQualified)
+		}
+		if got := d.ResourceName(); got != tt.wantResource {
+			t.Errorf("Define(%q).ResourceName() = %q, want %q", tt.name, got, tt.wantResource)
+		}
+	}
+}

@@ -58,7 +58,7 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 			continue
 		}
 
-		qualifiedModel := moduleName + "." + md.Name
+		qualifiedModel := md.QualifiedName(moduleName)
 		hasOp := func(op model.Op) bool {
 			for _, o := range md.EnabledOps {
 				if o.Name == op.Name {
@@ -196,7 +196,7 @@ func displayLabel(md model.ModelDeclaration, label string) string {
 	if label != "" {
 		return label
 	}
-	return bareNameSegment(md.Name)
+	return md.ResourceName()
 }
 
 // cloneNav returns an independent copy of navigation — including each

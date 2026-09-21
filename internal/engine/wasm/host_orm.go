@@ -624,13 +624,8 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 // against the calling module's own declared models — a module can only
 // address its own models through host.orm, never another module's.
 func resolveModel(modCtx *ModuleContext, qualifiedName string) (model.ModelDeclaration, bool) {
-	prefix := modCtx.ModuleName + "."
-	if !strings.HasPrefix(qualifiedName, prefix) {
-		return model.ModelDeclaration{}, false
-	}
-	bareName := strings.TrimPrefix(qualifiedName, prefix)
 	for _, md := range modCtx.ModelDecls() {
-		if md.Name == bareName {
+		if md.QualifiedName(modCtx.ModuleName) == qualifiedName {
 			return md, true
 		}
 	}

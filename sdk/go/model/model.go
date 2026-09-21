@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type ModelDeclaration struct {
 	Name                string            `msgpack:"name"`
@@ -54,6 +57,25 @@ func Define(name string, opts ...ModelOption) *ModelDeclaration {
 		opt(d)
 	}
 	return d
+}
+
+// QualifiedName returns the declaration's module-qualified name,
+// "<module>.<resource>", whether Name is spelled bare or already carries
+// the module prefix.
+func (d ModelDeclaration) QualifiedName(module string) string {
+	if strings.HasPrefix(d.Name, module+".") {
+		return d.Name
+	}
+	return module + "." + d.Name
+}
+
+// ResourceName returns the declaration's bare resource name, the last
+// dotted segment of Name.
+func (d ModelDeclaration) ResourceName() string {
+	if i := strings.LastIndex(d.Name, "."); i >= 0 {
+		return d.Name[i+1:]
+	}
+	return d.Name
 }
 
 func Table(tableName string) ModelOption {

@@ -73,3 +73,22 @@ func TestToAtlasSchema_EnumField_UndeclaredTypeErrors(t *testing.T) {
 		t.Fatal("expected an error for a field referencing an undeclared enum type")
 	}
 }
+
+func TestToAtlasSchema_RelationsResolveForEitherDeclarationSpelling(t *testing.T) {
+	for _, names := range [][2]string{{"customer", "order"}, {"sales.customer", "sales.order"}} {
+		customer := model.Define(names[0], model.Table("customers")).WithStandardFields().
+			Field("order_ids", model.One2Many("sales.order", "customer_id"))
+		order := model.Define(names[1], model.Table("orders")).WithStandardFields().
+			Field("customer_id", model.Many2One("sales.customer")).
+			Field("parent_id", model.Many2One("sales.order").Tree())
+
+		s, err := ToAtlasSchema("tenant_acme", "sales", []model.ModelDeclaration{*customer, *order}, nil)
+		if err != nil {
+			t.Fatalf("declared as %v: ToAtlasSchema() error: %v", names, err)
+		}
+		tbl, ok := s.Table("orders")
+		if !ok || len(tbl.ForeignKeys) != 2 {
+			t.Fatalf("declared as %v: orders foreign keys = %v, want 2", names, tbl)
+		}
+	}
+}
