@@ -73,7 +73,7 @@ type Manifest struct {
 	ConflictsWith            []string              `json:"conflicts_with,omitempty"`
 	Capabilities             []string              `json:"capabilities" validate:"required"`
 	HTTPAllowlist            []string              `json:"http_allowlist,omitempty"`
-	Wasm                     bool                  `json:"wasm,omitempty"`
+	Wasm                     bool                  `json:"wasm,omitzero"`
 	Emits                    []EventDeclaration    `json:"emits,omitempty" validate:"dive"`
 	Subscribes               []EventSubscription   `json:"subscribes,omitempty" validate:"dive"`
 	Permissions              []Permission          `json:"permissions,omitempty"`
@@ -134,7 +134,7 @@ type EventDeclaration struct {
 
 type EventSubscription struct {
 	Name                string       `json:"name"`
-	Version             int          `json:"version,omitempty"`
+	Version             int          `json:"version,omitzero"`
 	Handler             string       `json:"handler,omitempty"`
 	Async               bool         `json:"async"`
 	IdempotencyKeyField string       `json:"idempotency_key_field,omitempty"`
@@ -145,7 +145,7 @@ type RetryPolicy struct {
 	MaxAttempts    int    `json:"max_attempts" validate:"required,min=1,max=25"`
 	Backoff        string `json:"backoff" validate:"required,oneof=none linear exponential"`
 	InitialDelayMS int    `json:"initial_delay_ms" validate:"required,min=100"`
-	MaxDelayMS     int    `json:"max_delay_ms,omitempty"`
+	MaxDelayMS     int    `json:"max_delay_ms,omitzero"`
 	// Jitter is a pointer so an omitted field is distinguishable from an
 	// explicit false — manifest-spec.md's documented default is true.
 	Jitter *bool `json:"jitter,omitempty"`
@@ -179,13 +179,13 @@ type View struct {
 	LabelField        string         `json:"label_field,omitempty"`
 	RowClick          string         `json:"row_click,omitempty"`
 	RowClickParam     string         `json:"row_click_param,omitempty"`
-	Selectable        bool           `json:"selectable,omitempty"`
+	Selectable        *bool          `json:"selectable,omitempty"`
 	Filters           []Filter       `json:"filters,omitempty"`
 	Actions           []Action       `json:"actions,omitempty"`
 	BulkActions       []BulkAction   `json:"bulk_actions,omitempty"`
 	GroupByOptions    []string       `json:"group_by_options,omitempty"`
 	PageSizes         []int          `json:"page_sizes,omitempty"`
-	DefaultPageSize   int            `json:"default_page_size,omitempty"`
+	DefaultPageSize   int            `json:"default_page_size,omitzero"`
 	Density           string         `json:"density,omitempty"`
 	EmptyState        *EmptyState    `json:"empty_state,omitempty"`
 	CreateRoute       string         `json:"create_route,omitempty"`
@@ -196,8 +196,8 @@ type View struct {
 	Tabs              []FormTab      `json:"tabs,omitempty"`
 	HeaderActions     []Action       `json:"header_actions,omitempty"`
 	Sidebar           *FormSidebar   `json:"sidebar,omitempty"`
-	Chatter           bool           `json:"chatter,omitempty"`
-	Autosave          bool           `json:"autosave,omitempty"`
+	Chatter           *bool          `json:"chatter,omitempty"`
+	Autosave          bool           `json:"autosave,omitzero"`
 	ReadonlyCondition string         `json:"readonly_condition,omitempty"`
 }
 
@@ -224,14 +224,14 @@ type ListColumn struct {
 	Field              string       `json:"field"`
 	Label              string       `json:"label,omitempty"`
 	Type               string       `json:"type,omitempty"`
-	Sortable           bool         `json:"sortable,omitempty"`
-	Width              int          `json:"width,omitempty"`
-	MinWidth           int          `json:"min_width,omitempty"`
-	MaxWidth           int          `json:"max_width,omitempty"`
-	Truncate           bool         `json:"truncate,omitempty"`
+	Sortable           bool         `json:"sortable,omitzero"`
+	Width              int          `json:"width,omitzero"`
+	MinWidth           int          `json:"min_width,omitzero"`
+	MaxWidth           int          `json:"max_width,omitzero"`
+	Truncate           *bool        `json:"truncate,omitempty"`
 	Align              string       `json:"align,omitempty"`
-	Primary            bool         `json:"primary,omitempty"`
-	Hidden             bool         `json:"hidden,omitempty"`
+	Primary            bool         `json:"primary,omitzero"`
+	Hidden             bool         `json:"hidden,omitzero"`
 	Href               string       `json:"href,omitempty"`
 	Condition          string       `json:"condition,omitempty"`
 	BadgeConfig        *BadgeConfig `json:"badge_config,omitempty"`
@@ -257,7 +257,7 @@ type Filter struct {
 	Type           string         `json:"type,omitempty"`
 	Options        []FilterOption `json:"options,omitempty"`
 	Default        any            `json:"default,omitempty"`
-	Multiple       bool           `json:"multiple,omitempty"`
+	Multiple       bool           `json:"multiple,omitzero"`
 	Resource       string         `json:"resource,omitempty"`
 	ResourceFilter map[string]any `json:"resource_filter,omitempty"`
 	Condition      string         `json:"condition,omitempty"`
@@ -269,7 +269,7 @@ type FilterOption struct {
 	Label    string `json:"label"`
 	Icon     string `json:"icon,omitempty"`
 	Color    string `json:"color,omitempty"`
-	Disabled bool   `json:"disabled,omitempty"`
+	Disabled bool   `json:"disabled,omitzero"`
 }
 
 type Action struct {
@@ -293,7 +293,7 @@ type ConfirmDialog struct {
 	Message      string        `json:"message"`
 	ConfirmLabel string        `json:"confirm_label,omitempty"`
 	CancelLabel  string        `json:"cancel_label,omitempty"`
-	Destructive  bool          `json:"destructive,omitempty"`
+	Destructive  bool          `json:"destructive,omitzero"`
 	Input        *ConfirmInput `json:"input,omitempty"`
 }
 
@@ -301,7 +301,7 @@ type ConfirmInput struct {
 	Field       string         `json:"field"`
 	Label       string         `json:"label"`
 	Type        string         `json:"type"`
-	Required    bool           `json:"required,omitempty"`
+	Required    bool           `json:"required,omitzero"`
 	Placeholder string         `json:"placeholder,omitempty"`
 	Options     []SelectOption `json:"options,omitempty"`
 }
@@ -311,13 +311,13 @@ type SelectOption struct {
 	Label    string `json:"label"`
 	Icon     string `json:"icon,omitempty"`
 	Color    string `json:"color,omitempty"`
-	Disabled bool   `json:"disabled,omitempty"`
+	Disabled bool   `json:"disabled,omitzero"`
 }
 
 type BulkAction struct {
 	Action
-	MinSelected int `json:"min_selected,omitempty"`
-	MaxSelected int `json:"max_selected,omitempty"`
+	MinSelected int `json:"min_selected,omitzero"`
+	MaxSelected int `json:"max_selected,omitzero"`
 }
 
 type EmptyState struct {
@@ -345,7 +345,7 @@ type FormTab struct {
 	BadgeCountRoute  string         `json:"badge_count_route,omitempty"`
 	View             string         `json:"view,omitempty"`
 	Filter           map[string]any `json:"filter,omitempty"`
-	ShowCreateAction bool           `json:"show_create_action,omitempty"`
+	ShowCreateAction bool           `json:"show_create_action,omitzero"`
 	Sections         []FormSection  `json:"sections,omitempty"`
 	Component        string         `json:"component,omitempty"`
 }
@@ -355,15 +355,15 @@ type FormSection struct {
 	Label              string      `json:"label,omitempty"`
 	Type               string      `json:"type,omitempty"`
 	Columns            any         `json:"columns,omitempty"`
-	Collapsible        bool        `json:"collapsible,omitempty"`
-	CollapsedByDefault bool        `json:"collapsed_by_default,omitempty"`
+	Collapsible        bool        `json:"collapsible,omitzero"`
+	CollapsedByDefault bool        `json:"collapsed_by_default,omitzero"`
 	Condition          string      `json:"condition,omitempty"`
 	Fields             []FormField `json:"fields,omitempty"`
 	Field              string      `json:"field,omitempty"`
 	InlineKey          string      `json:"inline_key,omitempty"`
-	InlineEdit         bool        `json:"inline_edit,omitempty"`
+	InlineEdit         bool        `json:"inline_edit,omitzero"`
 	AddLabel           string      `json:"add_label,omitempty"`
-	MaxRows            int         `json:"max_rows,omitempty"`
+	MaxRows            int         `json:"max_rows,omitzero"`
 	Sort               string      `json:"sort,omitempty"`
 	CreateRoute        string      `json:"create_route,omitempty"`
 	UpdateRoute        string      `json:"update_route,omitempty"`
@@ -374,28 +374,28 @@ type FormField struct {
 	Field              string         `json:"field"`
 	Label              string         `json:"label,omitempty"`
 	Type               string         `json:"type,omitempty"`
-	Required           bool           `json:"required,omitempty"`
-	Readonly           bool           `json:"readonly,omitempty"`
+	Required           bool           `json:"required,omitzero"`
+	Readonly           bool           `json:"readonly,omitzero"`
 	ReadonlyCondition  string         `json:"readonly_condition,omitempty"`
-	Hidden             bool           `json:"hidden,omitempty"`
+	Hidden             bool           `json:"hidden,omitzero"`
 	Condition          string         `json:"condition,omitempty"`
 	Placeholder        string         `json:"placeholder,omitempty"`
 	HelpText           string         `json:"help_text,omitempty"`
-	Span               int            `json:"span,omitempty"`
-	Autofocus          bool           `json:"autofocus,omitempty"`
-	Computed           bool           `json:"computed,omitempty"`
+	Span               int            `json:"span,omitzero"`
+	Autofocus          bool           `json:"autofocus,omitzero"`
+	Computed           bool           `json:"computed,omitzero"`
 	Options            []FieldOption  `json:"options,omitempty"`
 	Resource           string         `json:"resource,omitempty"`
 	ResourceFilter     map[string]any `json:"resource_filter,omitempty"`
 	ResourceLabelField string         `json:"resource_label_field,omitempty"`
-	Multiple           bool           `json:"multiple,omitempty"`
-	Creatable          bool           `json:"creatable,omitempty"`
-	Min                float64        `json:"min,omitempty"`
-	Max                float64        `json:"max,omitempty"`
-	Step               float64        `json:"step,omitempty"`
-	Rows               int            `json:"rows,omitempty"`
+	Multiple           bool           `json:"multiple,omitzero"`
+	Creatable          bool           `json:"creatable,omitzero"`
+	Min                float64        `json:"min,omitzero"`
+	Max                float64        `json:"max,omitzero"`
+	Step               float64        `json:"step,omitzero"`
+	Rows               int            `json:"rows,omitzero"`
 	Accept             string         `json:"accept,omitempty"`
-	MaxFileSizeMB      int            `json:"max_file_size_mb,omitempty"`
+	MaxFileSizeMB      int            `json:"max_file_size_mb,omitzero"`
 	CurrencyField      string         `json:"currency_field,omitempty"`
 	Align              string         `json:"align,omitempty"`
 	Component          string         `json:"component,omitempty"`
@@ -403,8 +403,8 @@ type FormField struct {
 	Format             string         `json:"format,omitempty"`
 	Suffix             string         `json:"suffix,omitempty"`
 	Prefix             string         `json:"prefix,omitempty"`
-	CopyToClipboard    bool           `json:"copy_to_clipboard,omitempty"`
-	OpenInNewTab       bool           `json:"open_in_new_tab,omitempty"`
+	CopyToClipboard    bool           `json:"copy_to_clipboard,omitzero"`
+	OpenInNewTab       *bool          `json:"open_in_new_tab,omitempty"`
 }
 
 type FieldOption struct {
@@ -412,11 +412,11 @@ type FieldOption struct {
 	Label    string `json:"label"`
 	Icon     string `json:"icon,omitempty"`
 	Color    string `json:"color,omitempty"`
-	Disabled bool   `json:"disabled,omitempty"`
+	Disabled bool   `json:"disabled,omitzero"`
 }
 
 type FormSidebar struct {
-	Width    int                  `json:"width,omitempty"`
+	Width    int                  `json:"width,omitzero"`
 	Sections []FormSidebarSection `json:"sections,omitempty"`
 }
 
@@ -443,7 +443,7 @@ type NavItem struct {
 	Permission      string         `json:"permission,omitempty"`
 	BadgeCountRoute string         `json:"badge_count_route,omitempty"`
 	Condition       string         `json:"condition,omitempty"`
-	External        bool           `json:"external,omitempty"`
+	External        bool           `json:"external,omitzero"`
 }
 
 type SearchIndex struct {
@@ -477,25 +477,25 @@ type Report struct {
 	Contexts       []string          `json:"contexts,omitempty"`
 	Paper          string            `json:"paper,omitempty"`
 	Orientation    string            `json:"orientation,omitempty"`
-	MarginTopMM    int               `json:"margin_top_mm,omitempty"`
-	MarginBottomMM int               `json:"margin_bottom_mm,omitempty"`
-	MarginLeftMM   int               `json:"margin_left_mm,omitempty"`
-	MarginRightMM  int               `json:"margin_right_mm,omitempty"`
+	MarginTopMM    int               `json:"margin_top_mm,omitzero"`
+	MarginBottomMM int               `json:"margin_bottom_mm,omitzero"`
+	MarginLeftMM   int               `json:"margin_left_mm,omitzero"`
+	MarginRightMM  int               `json:"margin_right_mm,omitzero"`
 	Parameters     []ReportParameter `json:"parameters,omitempty"`
-	Scheduled      bool              `json:"scheduled,omitempty"`
-	Batch          bool              `json:"batch,omitempty"`
-	BatchLimit     int               `json:"batch_limit,omitempty"`
+	Scheduled      bool              `json:"scheduled,omitzero"`
+	Batch          bool              `json:"batch,omitzero"`
+	BatchLimit     int               `json:"batch_limit,omitzero"`
 }
 
 type ReportParameter struct {
 	Name     string        `json:"name"`
 	Label    string        `json:"label"`
 	Type     string        `json:"type"`
-	Required bool          `json:"required,omitempty"`
+	Required bool          `json:"required,omitzero"`
 	Default  any           `json:"default,omitempty"`
 	Options  []FieldOption `json:"options,omitempty"`
 	Resource string        `json:"resource,omitempty"`
-	Multiple bool          `json:"multiple,omitempty"`
+	Multiple bool          `json:"multiple,omitzero"`
 	HelpText string        `json:"help_text,omitempty"`
 }
 
@@ -522,11 +522,11 @@ type JobType struct {
 	Label          string `json:"label"`
 	Handler        string `json:"handler"`
 	Queue          string `json:"queue"`
-	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
-	MaxAttempts    int    `json:"max_attempts,omitempty"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitzero"`
+	MaxAttempts    int    `json:"max_attempts,omitzero"`
 	UniqueBy       string `json:"unique_by,omitempty"`
 	Description    string `json:"description,omitempty"`
-	Priority       int    `json:"priority,omitempty"`
+	Priority       int    `json:"priority,omitzero"`
 }
 
 type WorkflowType struct {
@@ -534,7 +534,7 @@ type WorkflowType struct {
 	Label        string   `json:"label"`
 	Description  string   `json:"description,omitempty"`
 	InputModel   string   `json:"input_model,omitempty"`
-	TimeoutHours int      `json:"timeout_hours,omitempty"`
+	TimeoutHours int      `json:"timeout_hours,omitzero"`
 	TaskQueue    string   `json:"task_queue,omitempty"`
 	Activities   []string `json:"activities,omitempty"`
 }
@@ -556,10 +556,10 @@ type CronJob struct {
 	Schedule         string `json:"schedule"`
 	Handler          string `json:"handler"`
 	Description      string `json:"description,omitempty"`
-	EnabledByDefault bool   `json:"enabled_by_default,omitempty"`
-	TimeoutSeconds   int    `json:"timeout_seconds,omitempty"`
+	EnabledByDefault *bool  `json:"enabled_by_default,omitempty"`
+	TimeoutSeconds   int    `json:"timeout_seconds,omitzero"`
 	Queue            string `json:"queue,omitempty"`
-	PerTenant        bool   `json:"per_tenant,omitempty"`
+	PerTenant        *bool  `json:"per_tenant,omitempty"`
 }
 
 type ConfigEntry struct {
@@ -569,16 +569,16 @@ type ConfigEntry struct {
 	Type            string        `json:"type"`
 	FieldType       string        `json:"field_type,omitempty"`
 	Default         any           `json:"default"`
-	Required        bool          `json:"required,omitempty"`
+	Required        bool          `json:"required,omitzero"`
 	Options         []FieldOption `json:"options,omitempty"`
-	Min             float64       `json:"min,omitempty"`
-	Max             float64       `json:"max,omitempty"`
+	Min             float64       `json:"min,omitzero"`
+	Max             float64       `json:"max,omitzero"`
 	Category        string        `json:"category,omitempty"`
-	Public          bool          `json:"public,omitempty"`
-	RestartRequired bool          `json:"restart_required,omitempty"`
+	Public          bool          `json:"public,omitzero"`
+	RestartRequired bool          `json:"restart_required,omitzero"`
 	ValidationRegex string        `json:"validation_regex,omitempty"`
-	Encrypted       bool          `json:"encrypted,omitempty"`
-	Generated       bool          `json:"generated,omitempty"`
+	Encrypted       bool          `json:"encrypted,omitzero"`
+	Generated       bool          `json:"generated,omitzero"`
 }
 
 type RetentionPolicy struct {
@@ -588,13 +588,13 @@ type RetentionPolicy struct {
 	Condition    string `json:"condition,omitempty"`
 	ArchiveTable string `json:"archive_table,omitempty"`
 	Description  string `json:"description,omitempty"`
-	DryRunSafe   bool   `json:"dry_run_safe,omitempty"`
+	DryRunSafe   bool   `json:"dry_run_safe,omitzero"`
 }
 
 type Hook struct {
 	Hook        string `json:"hook"`
 	Handler     string `json:"handler"`
-	Priority    int    `json:"priority,omitempty"`
+	Priority    int    `json:"priority,omitzero"`
 	Description string `json:"description,omitempty"`
 }
 
@@ -603,13 +603,13 @@ type L10nConfig struct {
 	CountryName            string       `json:"country_name,omitempty"`
 	CurrencyCode           string       `json:"currency_code,omitempty"`
 	Languages              []string     `json:"languages,omitempty"`
-	FiscalYearStartMonth   int          `json:"fiscal_year_start_month,omitempty"`
-	FiscalYearStartDay     int          `json:"fiscal_year_start_day,omitempty"`
+	FiscalYearStartMonth   int          `json:"fiscal_year_start_month,omitzero"`
+	FiscalYearStartDay     int          `json:"fiscal_year_start_day,omitzero"`
 	TaxCalculationRounding string       `json:"tax_calculation_rounding,omitempty"`
 	ChartOfAccounts        string       `json:"chart_of_accounts,omitempty"`
-	SyscohadaCompatible    bool         `json:"syscohada_compatible,omitempty"`
+	SyscohadaCompatible    bool         `json:"syscohada_compatible,omitzero"`
 	TinLabel               string       `json:"tin_label,omitempty"`
-	TinRequired            bool         `json:"tin_required,omitempty"`
+	TinRequired            bool         `json:"tin_required,omitzero"`
 	TinFormat              string       `json:"tin_format,omitempty"`
 	VatLabel               string       `json:"vat_label,omitempty"`
 	InvoiceSequenceFormat  string       `json:"invoice_sequence_format,omitempty"`
@@ -617,18 +617,18 @@ type L10nConfig struct {
 }
 
 type L10nProvides struct {
-	ChartOfAccounts   bool `json:"chart_of_accounts,omitempty"`
-	TaxConfiguration  bool `json:"tax_configuration,omitempty"`
-	InvoiceFormat     bool `json:"invoice_format,omitempty"`
-	PayrollRules      bool `json:"payroll_rules,omitempty"`
-	BankConfiguration bool `json:"bank_configuration,omitempty"`
+	ChartOfAccounts   bool `json:"chart_of_accounts,omitzero"`
+	TaxConfiguration  bool `json:"tax_configuration,omitzero"`
+	InvoiceFormat     bool `json:"invoice_format,omitzero"`
+	PayrollRules      bool `json:"payroll_rules,omitzero"`
+	BankConfiguration bool `json:"bank_configuration,omitzero"`
 }
 
 type SchemaConfig struct {
 	OwnedModels       []string `json:"owned_models"`
 	ExtendsModule     *string  `json:"extends_module,omitempty"`
 	ExtendsModels     []string `json:"extends_models,omitempty"`
-	HasDataMigrations bool     `json:"has_data_migrations,omitempty"`
+	HasDataMigrations bool     `json:"has_data_migrations,omitzero"`
 }
 
 type FrontendConfig struct {

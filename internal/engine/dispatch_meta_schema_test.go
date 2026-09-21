@@ -333,3 +333,49 @@ func TestDispatchSchemaRoute_NoTokenReturns401(t *testing.T) {
 		t.Errorf("error.code = %q, want %q", code, "unauthenticated")
 	}
 }
+
+func TestDispatchSchemaRoute_OmitsZeroValueBooleanAndNumericMembers(t *testing.T) {
+	e := newSchemaFixtureEngine(t)
+
+	w := httptest.NewRecorder()
+	e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Modules map[string]struct {
+			Views      []map[string]any `json:"views"`
+			Navigation []struct {
+				Children []map[string]any `json:"children"`
+			} `json:"navigation"`
+			Models map[string]struct {
+				Fields []map[string]any `json:"fields"`
+			} `json:"models"`
+		} `json:"modules"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	mod := body.Modules["widgets"]
+
+	for _, member := range []string{"selectable", "default_page_size", "chatter", "autosave"} {
+		if _, ok := mod.Views[0][member]; ok {
+			t.Errorf("view serves %q, want it omitted; view: %v", member, mod.Views[0])
+		}
+	}
+	if _, ok := mod.Navigation[0].Children[0]["external"]; ok {
+		t.Errorf("navigation item serves \"external\", want it omitted")
+	}
+
+	fields := map[string]map[string]any{}
+	for _, f := range mod.Models["widgets.widget"].Fields {
+		fields[f["name"].(string)] = f
+	}
+	if fields["name"]["required"] != true {
+		t.Errorf("required field serves required = %v, want true", fields["name"]["required"])
+	}
+	if _, ok := fields["owner"]["required"]; ok {
+		t.Errorf("optional field serves \"required\", want it omitted")
+	}
+}

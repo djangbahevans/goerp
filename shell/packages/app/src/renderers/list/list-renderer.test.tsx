@@ -414,6 +414,29 @@ describe("ListRenderer", () => {
     expect(screen.queryByText(/selected/)).toBeNull();
   });
 
+  it("renders no checkbox column when the view sets selectable to false", async () => {
+    useInfiniteListMock.mockReturnValue({
+      data: {
+        pages: [{ data: [{ id: "1", name: "Ada", ssn: "000-00-0000" }], meta: { cursor: null, hasMore: false } }],
+      },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      error: null,
+    });
+
+    await renderListRenderer({}, fullAccess, "/", {
+      ...view,
+      selectable: false,
+      bulk_actions: [{ label: "Add Tag", type: "custom", component: "BulkTagAction" }],
+    });
+
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
   describe("bulk action conditions", () => {
     function rows() {
       useInfiniteListMock.mockReturnValue({
