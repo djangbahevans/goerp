@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
-	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/rs/zerolog/log"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -48,7 +48,7 @@ type activityDispatchHandler struct {
 }
 
 // activityDispatchRequest is the JSON body a workflow-worker process POSTs
-// (workflow-guide.md §2), covering every field engine.ActivityRequest needs.
+// (workflow-guide.md §2), covering every field abiv1.ActivityRequest needs.
 type activityDispatchRequest struct {
 	Module     string         `json:"module"`
 	Activity   string         `json:"activity"`
@@ -61,7 +61,7 @@ type activityDispatchRequest struct {
 	Attempt    int32          `json:"attempt"`
 }
 
-// activityDispatchResult is engine.ActivityResult, JSON-transcoded for the
+// activityDispatchResult is abiv1.ActivityResult, JSON-transcoded for the
 // wire back to workflow-worker.
 type activityDispatchResult struct {
 	Output       any            `json:"output,omitempty"`
@@ -171,7 +171,7 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		inst.SetModuleContext(nil)
 	}()
 
-	activityReq := engine.ActivityRequest{
+	activityReq := abiv1.ActivityRequest{
 		Activity:   req.Activity,
 		Payload:    msgpackPayload,
 		TenantID:   req.TenantID,
@@ -198,7 +198,7 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var result engine.ActivityResult
+	var result abiv1.ActivityResult
 	if err := msgpack.Unmarshal(respBytes, &result); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "decode activity result: "+err.Error())
 		return

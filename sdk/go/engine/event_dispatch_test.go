@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/events"
 )
 
-func writeWireEvent(t *testing.T, wire wireEvent) (ptr, length uint32) {
+func writeWireEvent(t *testing.T, wire abi.EventEnvelope) (ptr, length uint32) {
 	t.Helper()
 	data, err := marshal(wire)
 	if err != nil {
@@ -28,7 +29,7 @@ func TestDispatchEvent_SuccessReturnsZero(t *testing.T) {
 		return nil
 	})
 
-	ptr, length := writeWireEvent(t, wireEvent{
+	ptr, length := writeWireEvent(t, abi.EventEnvelope{
 		ID: "evt_1", Name: "sale.order.confirmed", Version: 2,
 		EmitterModule: "sales", TenantID: "tenant_1", TraceID: "trace_1",
 		EmittedAt: time.Unix(1000, 0).UTC(), Payload: []byte("payload"),
@@ -56,7 +57,7 @@ func TestDispatchEvent_RoutesByName(t *testing.T) {
 	OnEvent("sale.order.confirmed", func(evt *events.Event) error { calledA = true; return nil })
 	OnEvent("sale.order.cancelled", func(evt *events.Event) error { calledB = true; return nil })
 
-	ptr, length := writeWireEvent(t, wireEvent{Name: "sale.order.cancelled"})
+	ptr, length := writeWireEvent(t, abi.EventEnvelope{Name: "sale.order.cancelled"})
 	if status := DispatchEvent(ptr, length); status != 0 {
 		t.Fatalf("status = %d, want 0", status)
 	}
@@ -71,7 +72,7 @@ func TestDispatchEvent_RoutesByName(t *testing.T) {
 func TestDispatchEvent_UnregisteredNameReturnsRetryable(t *testing.T) {
 	withFreshEventHandlers(t)
 
-	ptr, length := writeWireEvent(t, wireEvent{Name: "does.not.exist"})
+	ptr, length := writeWireEvent(t, abi.EventEnvelope{Name: "does.not.exist"})
 	if status := DispatchEvent(ptr, length); status != 1 {
 		t.Fatalf("status = %d, want 1 (retryable)", status)
 	}
@@ -95,7 +96,7 @@ func TestDispatchEvent_PlainErrorReturnsRetryable(t *testing.T) {
 		return errors.New("transient db error")
 	})
 
-	ptr, length := writeWireEvent(t, wireEvent{Name: "sale.order.confirmed"})
+	ptr, length := writeWireEvent(t, abi.EventEnvelope{Name: "sale.order.confirmed"})
 	if status := DispatchEvent(ptr, length); status != 1 {
 		t.Fatalf("status = %d, want 1 (retryable)", status)
 	}
@@ -108,7 +109,7 @@ func TestDispatchEvent_PermanentErrorReturnsPermanent(t *testing.T) {
 		return events.PermanentError(errors.New("malformed payload"))
 	})
 
-	ptr, length := writeWireEvent(t, wireEvent{Name: "sale.order.confirmed"})
+	ptr, length := writeWireEvent(t, abi.EventEnvelope{Name: "sale.order.confirmed"})
 	if status := DispatchEvent(ptr, length); status != 2 {
 		t.Fatalf("status = %d, want 2 (permanent)", status)
 	}
@@ -121,7 +122,7 @@ func TestDispatchEvent_RetryAfterDegradesToRetryable(t *testing.T) {
 		return events.RetryAfter(time.Hour, errors.New("rate limited"))
 	})
 
-	ptr, length := writeWireEvent(t, wireEvent{Name: "sale.order.confirmed"})
+	ptr, length := writeWireEvent(t, abi.EventEnvelope{Name: "sale.order.confirmed"})
 	if status := DispatchEvent(ptr, length); status != 1 {
 		t.Fatalf("status = %d, want 1 (RetryAfter degrades to ordinary retryable, its custom delay is not honored by this ABI)", status)
 	}

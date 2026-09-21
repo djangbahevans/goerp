@@ -41,6 +41,7 @@ import (
 
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
@@ -118,7 +119,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
-	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -1276,12 +1276,12 @@ func (e *Engine) invokeHandler(
 		return EngineResponse{}, fmt.Errorf("handler %s trapped: %w", handlerName, err)
 	}
 
-	// Decode into the Go Module SDK's own wire type (sdk/go/engine.Response)
+	// Decode into the Go Module SDK's own wire type (contract/abi/v1.Response)
 	// rather than EngineResponse directly — Body is `any` on the wire (a
 	// module returns engine.OK(myStruct), not raw bytes), while
 	// EngineResponse.Body is already-serialized bytes ready for
 	// writeResponse's w.Write. The re-encode below bridges the two.
-	var wire sdkengine.Response
+	var wire abiv1.Response
 	if err := msgpack.Unmarshal(respBytes, &wire); err != nil {
 		return EngineResponse{}, fmt.Errorf("unmarshal response: %w", err)
 	}

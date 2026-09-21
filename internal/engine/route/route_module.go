@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djangbahevans/goerp/sdk/go/engine"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 type ExplicitRoute struct {
@@ -29,11 +29,11 @@ type ExplicitRoute struct {
 }
 
 // ExplicitRoutesFrom converts a module's deserialized get_routes output
-// (sdk/go/engine.RouteDeclaration, the wire shape) into the engine's own
+// (contract/abi/v1.RouteDeclaration, the wire shape) into the engine's own
 // ExplicitRoute — the one place this field-by-field mapping happens, so
 // every LoadAll/LoadCascading/registry.buildRouteTable call site stays in
 // sync instead of repeating the same conversion three times.
-func ExplicitRoutesFrom(decls []engine.RouteDeclaration) []ExplicitRoute {
+func ExplicitRoutesFrom(decls []abiv1.RouteDeclaration) []ExplicitRoute {
 	out := make([]ExplicitRoute, len(decls))
 	for i, d := range decls {
 		var rl *RateLimitConfig

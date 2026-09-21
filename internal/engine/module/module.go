@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
-	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/tetratelabs/wazero"
 )
@@ -34,7 +34,7 @@ type LoadedModule struct {
 	SchemaVersion string
 	TenantSyncs   map[string]SchemaSyncStatus
 
-	ExplicitRoutes []engine.RouteDeclaration
+	ExplicitRoutes []abiv1.RouteDeclaration
 	ModelDecls     []model.ModelDeclaration
 	TypeDecls      []model.TypeDeclaration
 	DataMigrations []model.DataMigration

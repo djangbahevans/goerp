@@ -72,10 +72,10 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 	req := EngineRequest{
 		ID:            requestIDFromContext(r.Context()),
 		UserID:        authCtx.UserID,
-		PermissionSet: authCtx.PermissionSet,
 		TenantID:      tenantCtx.TenantID,
 		TenantSlug:    tenantCtx.Slug,
 		TraceID:       traceID,
+		PermissionSet: authCtx.PermissionSet,
 	}
 	modCtx := e.newModuleContext(r.Context(), req, mod)
 	defer modCtx.RollbackAll()

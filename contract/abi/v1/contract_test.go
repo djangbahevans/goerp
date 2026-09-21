@@ -165,3 +165,64 @@ func TestImportsOnlyStandardLibrary(t *testing.T) {
 		}
 	}
 }
+
+func wireKeys(t *testing.T, v any) map[string]any {
+	t.Helper()
+	b, err := msgpack.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decodeMap(t, b)
+}
+
+func TestInvocationWireFields(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want []string
+	}{
+		{"EventEnvelope", EventEnvelope{UserID: "u", TraceID: "t"}, []string{
+			"id", "name", "version", "emitter_module", "tenant_id", "user_id", "trace_id", "emitted_at", "payload"}},
+		{"EventEnvelope omits empty user and trace", EventEnvelope{}, []string{
+			"id", "name", "version", "emitter_module", "tenant_id", "emitted_at", "payload"}},
+		{"Request", Request{}, []string{
+			"id", "method", "path", "params", "query", "headers", "body", "user_id", "tenant_id", "tenant_slug",
+			"locale", "timezone", "currency", "direction", "trace_id", "requested_at"}},
+		{"Response", Response{}, []string{"status", "headers", "body"}},
+		{"ActivityRequest", ActivityRequest{}, []string{
+			"activity", "payload", "tenant_id", "user_id", "trace_id", "workflow_id", "run_id", "attempt"}},
+		{"ActivityResult", ActivityResult{Output: []byte("o"), Error: "e", ErrorType: "t", ErrorDetails: map[string]any{"k": 1}}, []string{
+			"output", "error", "non_retryable", "error_type", "error_details"}},
+		{"ActivityResult omits empty members", ActivityResult{}, []string{"non_retryable"}},
+		{"MigrationJobPayload", MigrationJobPayload{}, []string{"handler", "tenant_id", "from_version", "to_version"}},
+		{"RouteDeclaration", RouteDeclaration{
+			RateLimit: &RateLimitDecl{}, Model: "m", Name: "n", CRUDAction: "list",
+			Embedded: []EmbeddedDecl{{}}, PathParams: map[string]string{"id": "uuid"},
+		}, []string{
+			"method", "path", "auth", "permissions", "rate_limit", "max_body_bytes", "timeout_ms", "streaming",
+			"websocket", "raw_body", "model", "name", "crud_action", "response_is_list", "embedded", "path_params"}},
+		{"RouteDeclaration omits optional members", RouteDeclaration{}, []string{
+			"method", "path", "auth", "permissions", "max_body_bytes", "timeout_ms", "streaming", "websocket",
+			"raw_body", "response_is_list"}},
+		{"RateLimitDecl", RateLimitDecl{}, []string{"requests", "window_seconds", "scope"}},
+		{"EmbeddedDecl", EmbeddedDecl{}, []string{"field", "resource", "is_list"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireKeys(t, wireKeys(t, tt.v), tt.want...)
+		})
+	}
+}
+
+func TestRateLimitScopeValues(t *testing.T) {
+	for scope, want := range map[RateLimitScope]string{
+		RateLimitScopeUser:   "user",
+		RateLimitScopeTenant: "tenant",
+		RateLimitScopeIP:     "ip",
+		RateLimitScopeAPIKey: "api_key",
+	} {
+		if string(scope) != want {
+			t.Errorf("scope %q, want %q", scope, want)
+		}
+	}
+}

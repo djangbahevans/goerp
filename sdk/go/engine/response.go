@@ -1,10 +1,8 @@
 package engine
 
-type Response struct {
-	StatusCode int               `msgpack:"status"`
-	Headers    map[string]string `msgpack:"headers"`
-	Body       any               `msgpack:"body"`
-}
+import abi "github.com/djangbahevans/goerp/contract/abi/v1"
+
+type Response = abi.Response
 
 func OK(body any) *Response {
 	return &Response{StatusCode: 200, Body: body}

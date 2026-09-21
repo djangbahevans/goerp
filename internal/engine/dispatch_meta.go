@@ -179,10 +179,10 @@ func (e *Engine) sharerCanReadRecord(ctx context.Context, authCtx *authcheck.Aut
 	modCtx := e.newModuleContext(ctx, EngineRequest{
 		ID:            requestIDFromContext(ctx),
 		UserID:        authCtx.UserID,
-		PermissionSet: authCtx.PermissionSet,
 		TenantID:      tenantCtx.TenantID,
 		TenantSlug:    tenantCtx.Slug,
 		TraceID:       traceID,
+		PermissionSet: authCtx.PermissionSet,
 	}, mod)
 	defer modCtx.RollbackAll()
 

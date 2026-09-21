@@ -2,27 +2,10 @@ package engine
 
 import (
 	"errors"
-	"time"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/events"
 )
-
-// wireEvent is the msgpack shape DispatchEvent decodes — mirrors
-// internal/engine/event.Envelope byte-for-byte. Independently defined,
-// not shared via import, since the engine and a compiled module are
-// separate binaries; keep both in sync by hand if this shape ever
-// changes.
-type wireEvent struct {
-	ID            string    `msgpack:"id"`
-	Name          string    `msgpack:"name"`
-	Version       int       `msgpack:"version"`
-	EmitterModule string    `msgpack:"emitter_module"`
-	TenantID      string    `msgpack:"tenant_id"`
-	UserID        string    `msgpack:"user_id,omitempty"`
-	TraceID       string    `msgpack:"trace_id,omitempty"`
-	EmittedAt     time.Time `msgpack:"emitted_at"`
-	Payload       []byte    `msgpack:"payload"`
-}
 
 // DispatchEvent is what a module's handle_event export calls
 // (manifest-spec.md §26): decode the incoming wire envelope, look up the
@@ -37,7 +20,7 @@ type wireEvent struct {
 func DispatchEvent(ptr, length uint32) uint32 {
 	buf := ReadMem(ptr, length)
 
-	var wire wireEvent
+	var wire abi.EventEnvelope
 	if err := unmarshal(buf, &wire); err != nil {
 		return 1
 	}
