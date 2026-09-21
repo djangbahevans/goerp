@@ -287,7 +287,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 
 	applyFieldMasking(modCtx, input.Model, records)
 
-	if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
+	if err := expandRelations(ctx, tx, modCtx, md, columns, records, true); err != nil {
 		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 
@@ -641,7 +641,7 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		applyFieldMasking(modCtx, input.Model, records)
 	}
 
-	if err := expandRelations(ctx, tx, modCtx, md, columns, records); err != nil {
+	if err := expandRelations(ctx, tx, modCtx, md, columns, records, !o.skipFieldSecurity); err != nil {
 		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 
@@ -771,14 +771,10 @@ func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested
 // itself, not from which module declared the field.
 //
 // Only checks the record's own top-level keys — it does not recurse into
-// a Many2One's expanded {id, display_name} object (expandRelations,
-// host_orm_relations.go) or an engine.Embeds-declared sub-record (not
-// yet implemented). In practice this is a narrow gap: expandRelations
-// only ever selects a target model's primary key and display_name, so a
-// restricted field can't leak through it unless display_name itself
-// carries an unusual .Access() rule — that specific case is unenforced
-// today. Recursive enforcement for both is deferred until engine.Embeds
-// exists and there's a real shape to test against.
+// an engine.Embeds-declared sub-record (not yet implemented). A Many2One's
+// expanded {id, display_name} object is masked separately by
+// expandRelations (host_orm_relations.go), against the target model's
+// own rules.
 func applyFieldMasking(modCtx *ModuleContext, qualifiedModel string, records []map[string]any) {
 	reg := modCtx.FieldSecRegistry()
 	if reg == nil {

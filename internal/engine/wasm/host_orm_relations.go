@@ -29,21 +29,32 @@ const displayNameField = "display_name"
 // a related row the caller's RLS policy excludes resolves to a null
 // {field}, never an error (multitenancy-internals.md "Fail-closed, not
 // fail-open").
-func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, columns []string, records []map[string]any) error {
+//
+// A relation's target may belong to any loaded module; a target whose
+// module isn't loaded (an absent soft dependency) leaves {field}_id in
+// place and sets {field} to null. When maskRelated is true, the target
+// model's own read rules apply to each expanded object.
+func expandRelations(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, columns []string, records []map[string]any, maskRelated bool) error {
 	for _, colName := range columns {
 		f, ok := fieldByName(md, colName)
 		if !ok || f.Def.Kind != model.KindMany2One {
 			continue
 		}
-		if err := expandOneRelation(ctx, tx, modCtx, f, records); err != nil {
+		if err := expandOneRelation(ctx, tx, modCtx, f, records, maskRelated); err != nil {
 			return fmt.Errorf("expand relation %s: %w", f.Name, err)
 		}
 	}
 	return nil
 }
 
-func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f model.NamedField, records []map[string]any) error {
-	targetMD, ok := resolveModel(modCtx, f.Def.RelatedModel)
+func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f model.NamedField, records []map[string]any, maskRelated bool) error {
+	readKey := strings.TrimSuffix(f.Name, "_id")
+
+	targetMD, targetLoaded, ok := resolveRelationTarget(modCtx, f.Def.RelatedModel)
+	if !targetLoaded {
+		nullRelation(records, f.Name, readKey)
+		return nil
+	}
 	if !ok {
 		return fmt.Errorf("related_model %q not found", f.Def.RelatedModel)
 	}
@@ -60,14 +71,8 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 	}
 
 	fkValues := distinctNonNilStrings(records, f.Name)
-	readKey := strings.TrimSuffix(f.Name, "_id")
-
 	if len(fkValues) == 0 {
-		for _, record := range records {
-			if _, ok := record[f.Name]; ok {
-				record[readKey] = nil
-			}
-		}
+		nullRelation(records, f.Name, readKey)
 		return nil
 	}
 
@@ -95,9 +100,19 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 		return err
 	}
 
+	pkValues := make([]any, len(related))
+	for i, r := range related {
+		pkValues[i] = r[targetPK]
+	}
+	if maskRelated {
+		applyFieldMasking(modCtx, f.Def.RelatedModel, related)
+		for i, r := range related {
+			r[targetPK] = pkValues[i]
+		}
+	}
 	byPK := make(map[string]map[string]any, len(related))
-	for _, r := range related {
-		byPK[fmt.Sprintf("%v", r[targetPK])] = r
+	for i, r := range related {
+		byPK[fmt.Sprintf("%v", pkValues[i])] = r
 	}
 
 	for _, record := range records {
@@ -118,6 +133,36 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 	}
 
 	return nil
+}
+
+// resolveRelationTarget resolves a Many2One's related model against the
+// calling module's own models first, then every loaded module's.
+// targetLoaded is false only when the model's module is positively absent
+// from the loaded modules; ok is false when the module is loaded (or
+// can't be checked: a malformed name, or a request with no registry
+// snapshot) but declares no such model.
+func resolveRelationTarget(modCtx *ModuleContext, qualifiedName string) (md model.ModelDeclaration, targetLoaded, ok bool) {
+	if md, ok := resolveModel(modCtx, qualifiedName); ok {
+		return md, true, true
+	}
+	moduleName, _, hasModule := strings.Cut(qualifiedName, ".")
+	targets := modCtx.ComputeTargets()
+	if !hasModule || targets == nil {
+		return model.ModelDeclaration{}, true, false
+	}
+	if _, loaded := targets[moduleName]; !loaded {
+		return model.ModelDeclaration{}, false, false
+	}
+	md, ok = resolveAnyModel(modCtx, qualifiedName)
+	return md, true, ok
+}
+
+func nullRelation(records []map[string]any, fkName, readKey string) {
+	for _, record := range records {
+		if _, ok := record[fkName]; ok {
+			record[readKey] = nil
+		}
+	}
 }
 
 func fieldByName(md model.ModelDeclaration, name string) (model.NamedField, bool) {
