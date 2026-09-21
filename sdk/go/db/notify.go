@@ -1,16 +1,11 @@
 package db
 
-import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+)
 
-// dbNotifyInput mirrors host.db.notify's own wire shape
-// (internal/engine/wasm/host_db_notify.go), duplicated rather than
-// imported per this package's own convention (compiles into a module's
-// own wasip1 binary).
-type dbNotifyInput struct {
-	Channel string `msgpack:"channel"`
-	Payload string `msgpack:"payload"`
-	TxID    string `msgpack:"tx_id,omitempty"`
-}
+type dbNotifyInput = abi.DBNotifyInput
 
 // Notify sends a Postgres NOTIFY on channel via host.db.notify, delivered
 // immediately.

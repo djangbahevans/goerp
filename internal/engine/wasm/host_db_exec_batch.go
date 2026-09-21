@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero/api"
@@ -24,46 +25,13 @@ import (
 // and etag/audit mechanisms this reuses are exactly host.db.exec's own,
 // per goerp#461's own scope.
 
-type dbExecBatchOpts struct {
-	ContinueOnError bool   `msgpack:"continue_on_error"`
-	TimeoutMs       int64  `msgpack:"timeout_ms"`
-	Returning       string `msgpack:"returning"`
-	SkipAudit       bool   `msgpack:"skip_audit"`
-	SkipEtag        bool   `msgpack:"skip_etag"`
-}
+type dbExecBatchOpts = abiv1.DBExecBatchOpts
 
-type dbExecBatchInput struct {
-	SQL       string          `msgpack:"sql"`
-	ParamSets [][]any         `msgpack:"param_sets"`
-	TxID      string          `msgpack:"tx_id"`
-	Opts      dbExecBatchOpts `msgpack:"opts"`
-}
+type dbExecBatchInput = abiv1.DBExecBatchInput
 
-// batchRowError is one parameter set's own failure — host.db.exec's own
-// error code/message/details for that row, plus its position in
-// param_sets.
-type batchRowError struct {
-	Index   int            `msgpack:"index"`
-	Code    string         `msgpack:"code"`
-	Message string         `msgpack:"message"`
-	Details map[string]any `msgpack:"details,omitempty"`
-}
+type batchRowError = abiv1.DBBatchRowError
 
-// dbExecBatchOutput is only ever returned on a fully-successful batch —
-// any parameter-set failure returns via a db.batch_error/
-// db.batch_partial_error *abi.HostError instead (host.db.exec_batch's own
-// error-model contract: an error replaces the normal response, it never
-// accompanies one), so this shape has no failed_count/errors fields of
-// its own — a genuinely successful batch has zero failures by
-// construction. db.batch_partial_error's own Details carries the
-// equivalent total_rows_affected/failed_count/errors/returning summary
-// for the partial-failure case; see host-abi-reference.md's own
-// "host.db.exec_batch" section.
-type dbExecBatchOutput struct {
-	TotalRowsAffected int     `msgpack:"total_rows_affected"`
-	Returning         [][]any `msgpack:"returning,omitempty"`
-	DurationMs        float64 `msgpack:"duration_ms"`
-}
+type dbExecBatchOutput = abiv1.DBExecBatchOutput
 
 func makeDBExecBatch(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {

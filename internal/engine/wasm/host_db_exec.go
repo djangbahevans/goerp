@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/dbscope"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -34,26 +35,11 @@ const defaultExecTimeout = defaultQueryTimeout
 // that only gets positional any[][] rows.
 var returningColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-type dbExecOpts struct {
-	TimeoutMs  int64  `msgpack:"timeout_ms"`
-	Returning  string `msgpack:"returning"`
-	SkipAudit  bool   `msgpack:"skip_audit"`
-	SkipEtag   bool   `msgpack:"skip_etag"`
-	ExpectRows bool   `msgpack:"expect_rows"`
-}
+type dbExecOpts = abiv1.DBExecOpts
 
-type dbExecInput struct {
-	SQL    string     `msgpack:"sql"`
-	Params []any      `msgpack:"params"`
-	TxID   string     `msgpack:"tx_id"`
-	Opts   dbExecOpts `msgpack:"opts"`
-}
+type dbExecInput = abiv1.DBExecInput
 
-type dbExecOutput struct {
-	RowsAffected int     `msgpack:"rows_affected"`
-	Returning    [][]any `msgpack:"returning,omitempty"`
-	DurationMs   float64 `msgpack:"duration_ms"`
-}
+type dbExecOutput = abiv1.DBExecOutput
 
 func makeDBExec(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {

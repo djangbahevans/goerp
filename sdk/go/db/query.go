@@ -1,6 +1,9 @@
 package db
 
-import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+)
 
 // QueryResult is one host.db.query/query_replica response — Rows[i][j]
 // corresponds to ColumnNames[j], matching host-abi-reference.md's own
@@ -8,9 +11,9 @@ import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 // caller typically wants either shape and building a map from this is
 // one loop (see Rows.AsMaps below).
 type QueryResult struct {
-	Rows        [][]any  `msgpack:"rows"`
-	ColumnNames []string `msgpack:"column_names"`
-	DurationMs  float64  `msgpack:"duration_ms"`
+	Rows        [][]any
+	ColumnNames []string
+	DurationMs  float64
 }
 
 // AsMaps converts Rows into one map[string]any per row, keyed by
@@ -30,17 +33,7 @@ func (r *QueryResult) AsMaps() []map[string]any {
 	return maps
 }
 
-type dbQueryOpts struct {
-	TimeoutMs int64 `msgpack:"timeout_ms"`
-	ReadOnly  bool  `msgpack:"read_only"`
-}
-
-type dbQueryInput struct {
-	SQL    string      `msgpack:"sql"`
-	Params []any       `msgpack:"params"`
-	TxID   string      `msgpack:"tx_id"`
-	Opts   dbQueryOpts `msgpack:"opts"`
-}
+type dbQueryInput = abi.DBQueryInput
 
 // QueryOption configures Query/QueryReplica — WithTimeout, WithReadOnly.
 // Scoping a query to an open transaction is a tx.Query[T]/tx.QueryOne[T]
@@ -116,11 +109,11 @@ func query(invoke hostcall.Invoke, sql string, params []any, opts []QueryOption,
 		opt(&in)
 	}
 
-	var out QueryResult
+	var out abi.DBQueryOutput
 	if err := hostcall.Do(invoke, in, &out); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return &QueryResult{Rows: out.Rows, ColumnNames: out.ColumnNames, DurationMs: out.DurationMs}, nil
 }
 
 // firstRow returns res's own first row scanned into a T, or ErrNotFound

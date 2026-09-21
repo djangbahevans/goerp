@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tetratelabs/wazero/api"
@@ -69,19 +70,13 @@ import (
 // itself (translateMigrationDDLError's undefined_column case below).
 
 const (
-	migrationDDLOpDropColumn = "drop_column"
-	migrationDDLOpDropTable  = "drop_table"
+	migrationDDLOpDropColumn = abiv1.DBMigrationDDLOpDropColumn
+	migrationDDLOpDropTable  = abiv1.DBMigrationDDLOpDropTable
 )
 
-type dbMigrationDDLInput struct {
-	Op     string `msgpack:"op"`
-	Table  string `msgpack:"table"`
-	Column string `msgpack:"column,omitempty"`
-}
+type dbMigrationDDLInput = abiv1.DBMigrationDDLInput
 
-type dbMigrationDDLOutput struct {
-	DurationMs float64 `msgpack:"duration_ms"`
-}
+type dbMigrationDDLOutput = abiv1.DBMigrationDDLOutput
 
 func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {

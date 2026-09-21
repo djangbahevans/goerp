@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
@@ -20,20 +21,9 @@ var ErrLockTimeout = errors.New("db: lock not acquired within timeout")
 // IsLockTimeout reports whether err is (or wraps) ErrLockTimeout.
 func IsLockTimeout(err error) bool { return errors.Is(err, ErrLockTimeout) }
 
-// dbLockInput/dbLockOutput mirror host.db.lock's own wire shape
-// (internal/engine/wasm/host_db_lock.go), duplicated rather than
-// imported per this package's own convention (compiles into a module's
-// own wasip1 binary).
-type dbLockInput struct {
-	Key       string `msgpack:"key"`
-	TxID      string `msgpack:"tx_id"`
-	TimeoutMs int64  `msgpack:"timeout_ms"`
-}
+type dbLockInput = abi.DBLockInput
 
-type dbLockOutput struct {
-	Acquired   bool    `msgpack:"acquired"`
-	DurationMs float64 `msgpack:"duration_ms"`
-}
+type dbLockOutput = abi.DBLockOutput
 
 // Lock acquires a Postgres advisory lock scoped to tx via host.db.lock,
 // blocking up to defaultLockTimeoutMs. Released automatically when tx

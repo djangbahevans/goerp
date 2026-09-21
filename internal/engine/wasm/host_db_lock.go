@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cespare/xxhash/v2"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tetratelabs/wazero/api"
@@ -16,17 +17,9 @@ import (
 // lockTimeoutSQLState is Postgres's SQLSTATE for a lock_timeout cancellation.
 const lockTimeoutSQLState = "55P03"
 
-type dbLockInput struct {
-	Key       string `msgpack:"key"`
-	TxID      string `msgpack:"tx_id"`
-	TimeoutMs int64  `msgpack:"timeout_ms"`
-	Shared    bool   `msgpack:"shared"`
-}
+type dbLockInput = abiv1.DBLockInput
 
-type dbLockOutput struct {
-	Acquired   bool    `msgpack:"acquired"`
-	DurationMs float64 `msgpack:"duration_ms"`
-}
+type dbLockOutput = abiv1.DBLockOutput
 
 // makeDBLock builds host.db.lock — a tenant-namespaced Postgres advisory
 // lock scoped to the caller's own open host.db.begin transaction. TimeoutMs
