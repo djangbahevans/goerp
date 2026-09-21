@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -42,26 +43,11 @@ func registerHostStorage(ctx context.Context, rt wazero.Runtime, r *Runtime, bac
 	return err
 }
 
-type storageUploadOpts struct {
-	Public       bool   `msgpack:"public"`
-	MaxSizeBytes int64  `msgpack:"max_size_bytes"`
-	Purpose      string `msgpack:"purpose"`
-}
+type storageUploadOpts = abiv1.StorageUploadOpts
 
-type storageUploadInput struct {
-	Filename    string            `msgpack:"filename"`
-	ContentType string            `msgpack:"content_type"`
-	Data        []byte            `msgpack:"data"`
-	Opts        storageUploadOpts `msgpack:"opts"`
-}
+type storageUploadInput = abiv1.StorageUploadInput
 
-type storageUploadOutput struct {
-	FileID         string `msgpack:"file_id"`
-	StorageKey     string `msgpack:"storage_key"`
-	SizeBytes      int64  `msgpack:"size_bytes"`
-	ChecksumSHA256 string `msgpack:"checksum_sha256"`
-	URL            string `msgpack:"url,omitempty"`
-}
+type storageUploadOutput = abiv1.StorageUploadOutput
 
 func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.Store, limits storageUploadLimits) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {

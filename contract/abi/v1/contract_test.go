@@ -350,3 +350,44 @@ func TestORMRequestsOmitEmptyOptionalMembers(t *testing.T) {
 		})
 	}
 }
+
+func TestStorageSearchAuthzEventWireFields(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want []string
+	}{
+		{"StorageUploadOpts", StorageUploadOpts{}, []string{"public", "max_size_bytes", "purpose"}},
+		{"StorageUploadInput", StorageUploadInput{}, []string{"filename", "content_type", "data", "opts"}},
+		{"StorageUploadOutput", StorageUploadOutput{URL: "u"}, []string{"file_id", "storage_key", "size_bytes", "checksum_sha256", "url"}},
+		{"StorageUploadOutput omits empty url", StorageUploadOutput{}, []string{"file_id", "storage_key", "size_bytes", "checksum_sha256"}},
+		{"SearchQueryOpts", SearchQueryOpts{Filter: "f", Sort: []string{"s"}, Limit: 1, Offset: 1, Facets: []string{"x"}},
+			[]string{"filter", "sort", "limit", "offset", "facets"}},
+		{"SearchQueryOpts omits empty members", SearchQueryOpts{}, nil},
+		{"SearchQueryInput", SearchQueryInput{}, []string{"index", "query", "opts"}},
+		{"SearchQueryOutput", SearchQueryOutput{FacetDistribution: map[string]map[string]int{"a": {"b": 1}}},
+			[]string{"hits", "total_hits", "processing_time_ms", "facet_distribution"}},
+		{"AuthzFieldCheckInput", AuthzFieldCheckInput{}, []string{"user_id", "model", "field", "kind"}},
+		{"AuthzFieldCheckOutput", AuthzFieldCheckOutput{}, []string{"allowed"}},
+		{"EventEmitTxInput", EventEmitTxInput{DelayMs: 1, IdempotencyKey: "k", Sync: true},
+			[]string{"tx_id", "name", "version", "payload", "delay_ms", "idempotency_key", "sync"}},
+		{"EventEmitTxInput omits empty members", EventEmitTxInput{}, []string{"tx_id", "name", "version", "payload"}},
+		{"EventEmitInput", EventEmitInput{DelayMs: 1, IdempotencyKey: "k", Sync: true},
+			[]string{"name", "version", "payload", "delay_ms", "idempotency_key", "sync"}},
+		{"EventEmitTxOutput", EventEmitTxOutput{}, []string{"event_id"}},
+		{"EventEmitOutput", EventEmitOutput{}, []string{"event_id"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireKeys(t, wireKeys(t, tt.v), tt.want...)
+		})
+	}
+}
+
+// The kind is encoded as its integer value, which the engine and the SDK
+// share.
+func TestAuthzFieldCheckKindValues(t *testing.T) {
+	if AuthzFieldCheckRead != 0 || AuthzFieldCheckWrite != 1 {
+		t.Fatalf("read=%d write=%d, want 0 and 1", AuthzFieldCheckRead, AuthzFieldCheckWrite)
+	}
+}

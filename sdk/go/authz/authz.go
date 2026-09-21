@@ -3,27 +3,24 @@
 // FieldCheck, calling host.authz.field_check via sdk/go/internal/hostcall.
 package authz
 
-import "github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+import (
+	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+)
 
 // AccessKind selects which of a field's two FieldSecurityRule
 // permissions FieldCheck evaluates.
-type AccessKind int
+type AccessKind = abi.AuthzFieldCheckKind
 
 const (
-	Read AccessKind = iota
-	Write
+	Read  = abi.AuthzFieldCheckRead
+	Write = abi.AuthzFieldCheckWrite
 )
 
-type fieldCheckInput struct {
-	UserID string     `msgpack:"user_id"`
-	Model  string     `msgpack:"model"`
-	Field  string     `msgpack:"field"`
-	Kind   AccessKind `msgpack:"kind"`
-}
+type fieldCheckInput = abi.AuthzFieldCheckInput
 
-type fieldCheckOutput struct {
-	Allowed bool `msgpack:"allowed"`
-}
+type fieldCheckOutput = abi.AuthzFieldCheckOutput
 
 // FieldCheck reports whether userID — the calling module's own request
 // user — may access modelName.fieldName per the field's declared

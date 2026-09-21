@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -40,26 +41,11 @@ func registerHostSearch(ctx context.Context, rt wazero.Runtime, r *Runtime, db *
 	return err
 }
 
-type SearchQueryOpts struct {
-	Filter string   `msgpack:"filter,omitempty"`
-	Sort   []string `msgpack:"sort,omitempty"`
-	Limit  int      `msgpack:"limit,omitempty"`
-	Offset int      `msgpack:"offset,omitempty"`
-	Facets []string `msgpack:"facets,omitempty"`
-}
+type SearchQueryOpts = abiv1.SearchQueryOpts
 
-type SearchQueryInput struct {
-	Index string          `msgpack:"index"`
-	Query string          `msgpack:"query"`
-	Opts  SearchQueryOpts `msgpack:"opts"`
-}
+type SearchQueryInput = abiv1.SearchQueryInput
 
-type SearchQueryOutput struct {
-	Hits              []map[string]any          `msgpack:"hits"`
-	TotalHits         int64                     `msgpack:"total_hits"`
-	ProcessingTimeMs  int                       `msgpack:"processing_time_ms"`
-	FacetDistribution map[string]map[string]int `msgpack:"facet_distribution,omitempty"`
-}
+type SearchQueryOutput = abiv1.SearchQueryOutput
 
 func makeSearchQuery(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
