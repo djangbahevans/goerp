@@ -653,7 +653,7 @@ type metaSchemaModel struct {
 type metaSchemaField struct {
 	Name         string              `json:"name"`
 	Type         string              `json:"type"`
-	Required     bool                `json:"required,omitempty"`
+	Required     bool                `json:"required,omitzero"`
 	RelatedModel string              `json:"related_model,omitempty"`
 	InverseField string              `json:"inverse_field,omitempty"`
 	Workflow     *metaSchemaWorkflow `json:"workflow,omitempty"`
