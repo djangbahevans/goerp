@@ -29,5 +29,8 @@ func hostORMWriteMany(ptr, size uint32) uint64
 //go:wasmimport host.orm write_where
 func hostORMWriteWhere(ptr, size uint32) uint64
 
+//go:wasmimport host.orm mutate
+func hostORMMutate(ptr, size uint32) uint64
+
 //go:wasmimport host.orm unlink
 func hostORMUnlink(ptr, size uint32) uint64

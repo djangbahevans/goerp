@@ -1065,9 +1065,6 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 		}
 	}
 
-	fieldSecReg := modCtx.FieldSecRegistry()
-	permReg := modCtx.PermissionRegistry()
-
 	for k, v := range record {
 		def, known := fields[k]
 		if !known {
@@ -1083,19 +1080,31 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is a One2Many relation and cannot be written directly", Details: map[string]any{"field": k}}
 		}
 
-		if fieldSecReg != nil {
-			if rule, ok := fieldSecReg.Rule(qualifiedModel, k); ok && rule.WritePermission != "" && !callerHasPermission(modCtx, permReg, rule.WritePermission) {
-				if rule.OnDeniedWrite == fieldsec.Ignore {
-					continue
-				}
-				return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldWriteDenied, Message: "field " + k + " requires permission " + rule.WritePermission, Details: map[string]any{"field": k}}
+		if rule, denied := writeDeniedBy(modCtx, qualifiedModel, k); denied {
+			if rule.OnDeniedWrite == fieldsec.Ignore {
+				continue
 			}
+			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldWriteDenied, Message: "field " + k + " requires permission " + rule.WritePermission, Details: map[string]any{"field": k}}
 		}
 
 		cols = append(cols, quoteIdentORM(k))
 		args = append(args, v)
 	}
 	return cols, args, nil
+}
+
+// writeDeniedBy returns field's field-security rule and true when it
+// carries a write permission the caller lacks.
+func writeDeniedBy(modCtx *ModuleContext, qualifiedModel, field string) (fieldsec.FieldSecurityRule, bool) {
+	reg := modCtx.FieldSecRegistry()
+	if reg == nil {
+		return fieldsec.FieldSecurityRule{}, false
+	}
+	rule, ok := reg.Rule(qualifiedModel, field)
+	if !ok || rule.WritePermission == "" || callerHasPermission(modCtx, modCtx.PermissionRegistry(), rule.WritePermission) {
+		return fieldsec.FieldSecurityRule{}, false
+	}
+	return rule, true
 }
 
 // createOneRecordTx inserts one row on tx — the shared core of
@@ -1566,6 +1575,15 @@ func insertAuditLogRows(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, 
 	return nil
 }
 
+func isAuditedModel(modCtx *ModuleContext, qualifiedModel string) bool {
+	reg := modCtx.DataAuditRegistry()
+	if reg == nil {
+		return false
+	}
+	_, audited := reg.Lookup(qualifiedModel)
+	return audited
+}
+
 // fetchRowForAuditBeforeWrite fetches qualifiedModel's row by pkValue
 // before an UPDATE runs, so writeAuditLogEntry has a real old_data
 // snapshot to record — but only when the table is actually audited, so
@@ -1578,11 +1596,7 @@ func insertAuditLogRows(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, 
 // orm.etag_mismatch diagnosis (diagnoseZeroRowWrite) and this helper
 // must not shadow that with a generic error first.
 func fetchRowForAuditBeforeWrite(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, pkCol, pkValue string) (map[string]any, *abi.HostError) {
-	reg := modCtx.DataAuditRegistry()
-	if reg == nil {
-		return nil, nil
-	}
-	if _, audited := reg.Lookup(qualifiedModel); !audited {
+	if !isAuditedModel(modCtx, qualifiedModel) {
 		return nil, nil
 	}
 	row, hostErr := fetchRowByPK(ctx, tx, md, pkCol, pkValue)
@@ -1640,8 +1654,14 @@ func fkReferencingIDs(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclarat
 // Many2One-hop compute function sees the dependent record's current
 // column values rather than a stale copy.
 func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any) (map[string]any, *abi.HostError) {
+	return selectRowByPK(ctx, tx, md, pkCol, pkValue, "")
+}
+
+// selectRowByPK reads one row by primary key; lockClause (e.g. "FOR
+// UPDATE") is appended verbatim.
+func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, lockClause string) (map[string]any, *abi.HostError) {
 	table := quoteIdentORM(tableNameForORM(md))
-	sqlStr := fmt.Sprintf("SELECT * FROM %s WHERE %s = $1", table, quoteIdentORM(pkCol))
+	sqlStr := strings.TrimSpace(fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 %s", table, quoteIdentORM(pkCol), lockClause))
 	rows, err := tx.QueryContext(ctx, sqlStr, pkValue)
 	if err != nil {
 		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
@@ -1738,7 +1758,11 @@ func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, i
 // needing a manifest declaration. No idempotency-key dedup either: every
 // write is already its own distinct transaction.
 func emitRecordEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName, modelName string, record map[string]any) error {
-	payload, err := msgpack.Marshal(map[string]any{"model": modelName, "record": record})
+	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, eventName, map[string]any{"model": modelName, "record": record})
+}
+
+func emitRecordEventPayload(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName string, body map[string]any) error {
+	payload, err := msgpack.Marshal(body)
 	if err != nil {
 		return err
 	}

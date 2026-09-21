@@ -1,8 +1,8 @@
 // Command ormcallerfixture is a real Go module compiled to wasip1 WASM
 // for internal/engine/wasm's own host.orm module-side caller tests
-// (goerp#433) — it exercises all 10 sdk/go/orm functions
+// (goerp#433) — it exercises all 11 sdk/go/orm functions
 // (Create/Read/Write/Search/SearchRead/CreateBatch/FirstOrCreate/
-// WriteMany/WriteWhere/Unlink) against a real "testmodule.widget" model,
+// WriteMany/WriteWhere/Mutate/Unlink) against a real "testmodule.widget" model,
 // through the real sdk/go/orm package, rather than a hand-assembled
 // bytecode stand-in.
 //
@@ -101,6 +101,15 @@ func runOrmFlow() uint64 {
 	writeWhereOut, err := orm.WriteWhere(widgetModel, "record.price = 300", map[string]any{"name": "Bulk"})
 	record("write_where", strconv.Itoa(writeWhereOut.Count), err)
 
+	mutated, err := orm.Mutate[widget](widgetModel, id2, orm.Decrement("price", int64(50)), orm.Where("record.price >= 50"))
+	record("mutate", strconv.FormatInt(mutated.Price, 10), err)
+
+	_, err = orm.Mutate[widget](widgetModel, id2, orm.Decrement("price", int64(1000)), orm.Where("record.price >= 1000"))
+	if orm.IsPreconditionFailed(err) {
+		err = nil
+	}
+	record("mutate_guard", "", err)
+
 	unlinkOut, err := orm.Unlink(widgetModel, []string{id1})
 	record("unlink", strconv.Itoa(unlinkOut.Count), err)
 
@@ -171,6 +180,12 @@ func runOrmTxFlow() uint64 {
 			return err
 		}
 		record("write_where_tx", strconv.Itoa(writeWhereOut.Count), nil)
+
+		mutated, err := orm.MutateTx[widget](tx, widgetModel, id2, orm.Increment("price", int64(5)))
+		if err != nil {
+			return err
+		}
+		record("mutate_tx", strconv.FormatInt(mutated.Price, 10), nil)
 
 		unlinkOut, err := orm.UnlinkTx(tx, widgetModel, []string{id2})
 		if err != nil {

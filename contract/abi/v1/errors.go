@@ -105,6 +105,7 @@ const (
 	ErrCodeValidationFailed          = "orm.validation_failed"
 	ErrCodeUniqueViolation           = "orm.unique_violation"
 	ErrCodeEtagMismatch              = "orm.etag_mismatch"
+	ErrCodePreconditionFailed        = "orm.precondition_failed"
 	ErrCodeForeignKeyViolation       = "orm.foreign_key_violation"
 	ErrCodeConflictTargetInvalid     = "orm.conflict_target_invalid"
 	ErrCodeFieldNotWritable          = "orm.field_not_writable"

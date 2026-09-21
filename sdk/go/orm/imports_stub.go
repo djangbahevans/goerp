@@ -41,6 +41,10 @@ func hostORMWriteWhere(ptr, size uint32) uint64 {
 	panic("sdk/go/orm: host.orm.write_where is only available in a wasip1 build")
 }
 
+func hostORMMutate(ptr, size uint32) uint64 {
+	panic("sdk/go/orm: host.orm.mutate is only available in a wasip1 build")
+}
+
 func hostORMUnlink(ptr, size uint32) uint64 {
 	panic("sdk/go/orm: host.orm.unlink is only available in a wasip1 build")
 }
