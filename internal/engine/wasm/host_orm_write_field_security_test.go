@@ -53,6 +53,12 @@ func createWriteFieldSecFixtureTable(t *testing.T, primaryDB *sql.DB, slug strin
 // model — grantedPermissions is the subset of the two declared
 // permissions this caller satisfies.
 func newWriteFieldSecModuleContext(slug string, grantedPermissions ...string) *ModuleContext {
+	return newWriteFieldSecModuleContextForTenant(slug, "tenant-id-1", grantedPermissions...)
+}
+
+// newWriteFieldSecModuleContextForTenant lets a test that reads back river_job
+// events use a tenant ID no other test shares.
+func newWriteFieldSecModuleContextForTenant(slug, tenantID string, grantedPermissions ...string) *ModuleContext {
 	decl := writeFieldSecTestModelDecl()
 
 	fieldSecReg := fieldsec.New()
@@ -74,7 +80,7 @@ func newWriteFieldSecModuleContext(slug string, grantedPermissions ...string) *M
 	}
 
 	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, permSet,
-		"tenant-id-1", slug, "trace-1", abi.CapDBWrite, nil,
+		tenantID, slug, "trace-1", abi.CapDBWrite, nil,
 		ModuleSnapshot{
 			ModelDecls:         []model.ModelDeclaration{decl},
 			FieldSecRegistry:   fieldSecReg,

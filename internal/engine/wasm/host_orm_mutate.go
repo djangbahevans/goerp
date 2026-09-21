@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
@@ -133,9 +134,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "UPDATE", oldData, updated); hostErr != nil {
 		return ORMMutateOutput{}, hostErr
 	}
-	if err := emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.updated", map[string]any{
-		"model": input.Model, "record": updated, "changed_fields": plan.fields,
-	}); err != nil {
+	if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, updated, plan.fields); err != nil {
 		return ORMMutateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
@@ -206,6 +205,7 @@ func planMutation(modCtx *ModuleContext, qualifiedModel string, md model.ModelDe
 	if len(plan.cols) == 0 {
 		return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "mutate has no fields to update"}
 	}
+	slices.Sort(plan.fields)
 	return plan, nil
 }
 
