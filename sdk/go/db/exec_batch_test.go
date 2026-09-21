@@ -1,6 +1,7 @@
 package db
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"testing"
 
 	"github.com/vmihailenco/msgpack/v5"
@@ -29,7 +30,7 @@ func TestExecBatchResultFromDetails_RealMsgpackRoundTrip(t *testing.T) {
 		"total_rows_affected": 3,
 		"failed_count":        1,
 		"errors": []wireBatchRowError{
-			{Index: 1, Code: "db.unique_violation", Message: "duplicate key", Details: map[string]any{"constraint": "widget_name_key"}},
+			{Index: 1, Code: abi.ErrCodeDBUniqueViolation, Message: "duplicate key", Details: map[string]any{"constraint": "widget_name_key"}},
 		},
 	}}
 	data, err := msgpack.Marshal(original)
@@ -52,7 +53,7 @@ func TestExecBatchResultFromDetails_RealMsgpackRoundTrip(t *testing.T) {
 		t.Fatalf("Errors = %v, want 1 entry", got.Errors)
 	}
 	rowErr := got.Errors[0]
-	if rowErr.Index != 1 || rowErr.Code != "db.unique_violation" || rowErr.Message != "duplicate key" {
+	if rowErr.Index != 1 || rowErr.Code != abi.ErrCodeDBUniqueViolation || rowErr.Message != "duplicate key" {
 		t.Errorf("Errors[0] = %+v", rowErr)
 	}
 	if rowErr.Details["constraint"] != "widget_name_key" {

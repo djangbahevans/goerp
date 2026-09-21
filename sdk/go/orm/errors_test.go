@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 func TestIsNotFound_MatchesErrNotFound(t *testing.T) {
@@ -26,14 +26,14 @@ func TestHostErrorCodeMatchers_MatchTheirOwnCodeOnly(t *testing.T) {
 		matcher func(error) bool
 		code    string
 	}{
-		{"IsEtagMismatch", IsEtagMismatch, "orm.etag_mismatch"},
-		{"IsValidationFailed", IsValidationFailed, "orm.validation_failed"},
-		{"IsUniqueViolation", IsUniqueViolation, "orm.unique_violation"},
-		{"IsFieldNotWritable", IsFieldNotWritable, "orm.field_not_writable"},
+		{"IsEtagMismatch", IsEtagMismatch, abi.ErrCodeEtagMismatch},
+		{"IsValidationFailed", IsValidationFailed, abi.ErrCodeValidationFailed},
+		{"IsUniqueViolation", IsUniqueViolation, abi.ErrCodeUniqueViolation},
+		{"IsFieldNotWritable", IsFieldNotWritable, abi.ErrCodeFieldNotWritable},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			he := &hostcall.HostError{Code: c.code, Message: "boom"}
+			he := &abi.HostError{Code: c.code, Message: "boom"}
 			if !c.matcher(he) {
 				t.Errorf("%s(%s) = false, want true", c.name, c.code)
 			}
@@ -41,7 +41,7 @@ func TestHostErrorCodeMatchers_MatchTheirOwnCodeOnly(t *testing.T) {
 				t.Errorf("%s(wrapped %s) = false, want true", c.name, c.code)
 			}
 
-			other := &hostcall.HostError{Code: "orm.not_found", Message: "record not found"}
+			other := &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
 			if c.matcher(other) {
 				t.Errorf("%s(orm.not_found) = true, want false", c.name)
 			}

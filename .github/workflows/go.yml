@@ -39,6 +39,7 @@ jobs:
             engine:
               - "internal/engine/**"
               - "testdata/**"
+              - "contract/**"
               - "internal/module/**"
               - "sdk/go/**"
               - "cmd/engine/**"
@@ -84,6 +85,11 @@ jobs:
 
       - name: Build Everything
         run: go build ./...
+
+      # contract/ holds the wire types modules import, so it must build for
+      # the target modules compile to, not just the host.
+      - name: Build Contract for WASM
+        run: GOOS=wasip1 GOARCH=wasm go build ./contract/...
 
       - name: Run govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
@@ -150,7 +156,7 @@ jobs:
             ${{ runner.os }}-npm-
 
       - name: Run Engine Tests
-        run: go test -v -race -timeout 30m -coverprofile=coverage-engine.txt -covermode=atomic ./internal/engine/... ./internal/module/... ./sdk/... ./cmd/engine/...
+        run: go test -v -race -timeout 30m -coverprofile=coverage-engine.txt -covermode=atomic ./internal/engine/... ./internal/module/... ./sdk/... ./contract/... ./cmd/engine/...
 
       # Catches module-level regressions the engine tests above don't exercise.
       - name: Run WASM Module Test Suite
