@@ -1,6 +1,7 @@
 package orm
 
 import (
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
@@ -8,22 +9,11 @@ import (
 // ExecResult is WriteMany/WriteWhere's return shape — how many rows
 // changed and which ones, without the cost of returning every full
 // record body for a call that could touch many rows.
-type ExecResult struct {
-	Count int      `msgpack:"count"`
-	IDs   []string `msgpack:"ids"`
-}
+type ExecResult = abi.ORMExecResult
 
-type ormWriteInput struct {
-	Model        string         `msgpack:"model"`
-	ID           string         `msgpack:"id"`
-	Record       map[string]any `msgpack:"record"`
-	ExpectedEtag *string        `msgpack:"expected_etag,omitempty"`
-	TxID         string         `msgpack:"tx_id"`
-}
+type ormWriteInput = abi.ORMWriteInput
 
-type ormWriteOutput struct {
-	Record map[string]any `msgpack:"record"`
-}
+type ormWriteOutput = abi.ORMWriteOutput
 
 // Write updates one record by ID via host.orm.write. A nil expectedEtag
 // writes unconditionally; a non-nil expectedEtag enforces optimistic
@@ -45,12 +35,7 @@ func write(txID, model, id string, vals map[string]any, expectedEtag *string) er
 	return hostcall.Do(hostORMWrite, ormWriteInput{Model: model, ID: id, Record: vals, ExpectedEtag: expectedEtag, TxID: txID}, &out)
 }
 
-type ormWriteManyInput struct {
-	Model  string         `msgpack:"model"`
-	IDs    []string       `msgpack:"ids"`
-	Record map[string]any `msgpack:"record"`
-	TxID   string         `msgpack:"tx_id"`
-}
+type ormWriteManyInput = abi.ORMWriteManyInput
 
 // WriteMany applies the same field changes to every ID via
 // host.orm.write_many — no etag check, since a bulk write has no single
@@ -70,12 +55,7 @@ func writeMany(txID, model string, ids []string, vals map[string]any) (ExecResul
 	return out, err
 }
 
-type ormWriteWhereInput struct {
-	Model  string         `msgpack:"model"`
-	Domain string         `msgpack:"domain"`
-	Record map[string]any `msgpack:"record"`
-	TxID   string         `msgpack:"tx_id"`
-}
+type ormWriteWhereInput = abi.ORMWriteWhereInput
 
 // WriteWhere applies the same field changes to every record matching
 // domain via host.orm.write_where — WriteMany with the ID list resolved

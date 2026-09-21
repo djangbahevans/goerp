@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/vmihailenco/msgpack/v5"
@@ -15,28 +16,9 @@ import (
 // and run its .Computed() function," so the two call sites never diverge
 // on how a nested ModuleContext gets built.
 
-// computeRequest/computeResponse mirror sdk/go/orm's own computeRequest/
-// computeResponse (sdk/go/orm/computed.go) field-for-field via matching
-// msgpack tags — the engine-side counterpart of a wire type it can't
-// import directly (sdk/go/orm compiles into a module's WASM binary, not
-// the engine).
-type computeRequest struct {
-	FnName   string         `msgpack:"fn_name"`
-	Record   map[string]any `msgpack:"record"`
-	TenantID string         `msgpack:"tenant_id,omitempty"`
-	UserID   string         `msgpack:"user_id,omitempty"`
-	TraceID  string         `msgpack:"trace_id,omitempty"`
-}
+type computeRequest = abiv1.ComputeRequest
 
-type computeResponse struct {
-	Value any           `msgpack:"value,omitempty"`
-	Error *computeError `msgpack:"error,omitempty"`
-}
-
-type computeError struct {
-	Code    string `msgpack:"code"`
-	Message string `msgpack:"message"`
-}
+type computeResponse = abiv1.ComputeResponse
 
 // borrowModuleInstance borrows a fresh instance from moduleName's own
 // pool and builds a nested ModuleContext scoped to that module's own

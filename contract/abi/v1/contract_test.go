@@ -284,3 +284,69 @@ func TestDBRequestsOmitEmptyOptionalMembers(t *testing.T) {
 		})
 	}
 }
+
+func TestORMWireFields(t *testing.T) {
+	etag := ""
+	tests := []struct {
+		name string
+		v    any
+		want []string
+	}{
+		{"ORMSearchInput", ORMSearchInput{Order: "o", Limit: 1, Offset: 1}, []string{"model", "domain", "order", "limit", "offset", "tx_id"}},
+		{"ORMSearchOutput", ORMSearchOutput{}, []string{"ids", "count"}},
+		{"ORMSearchReadInput", ORMSearchReadInput{Fields: []string{"a"}, Order: "o", Limit: 1, Offset: 1, Cursor: "c"},
+			[]string{"model", "domain", "fields", "order", "limit", "offset", "cursor", "tx_id"}},
+		{"ORMSearchReadOutput", ORMSearchReadOutput{NextCursor: "c"}, []string{"records", "next_cursor"}},
+		{"ORMReadInput", ORMReadInput{Fields: []string{"a"}}, []string{"model", "ids", "fields", "tx_id"}},
+		{"ORMReadOutput", ORMReadOutput{}, []string{"records"}},
+		{"ORMOnConflict", ORMOnConflict{}, []string{"fields", "policy"}},
+		{"ORMCreateInput", ORMCreateInput{OnConflict: &ORMOnConflict{}}, []string{"model", "record", "on_conflict", "tx_id"}},
+		{"ORMCreateOutput", ORMCreateOutput{}, []string{"record"}},
+		{"ORMCreateBatchInput", ORMCreateBatchInput{OnConflict: &ORMOnConflict{}}, []string{"model", "records", "on_conflict", "tx_id"}},
+		{"ORMCreateBatchOutput", ORMCreateBatchOutput{}, []string{"records"}},
+		{"ORMFirstOrCreateInput", ORMFirstOrCreateInput{}, []string{"model", "unique_vals", "create_vals", "tx_id"}},
+		{"ORMFirstOrCreateOutput", ORMFirstOrCreateOutput{}, []string{"record", "created"}},
+		{"ORMWriteInput", ORMWriteInput{ExpectedEtag: &etag}, []string{"model", "id", "record", "expected_etag", "tx_id"}},
+		{"ORMWriteOutput", ORMWriteOutput{}, []string{"record"}},
+		{"ORMWriteManyInput", ORMWriteManyInput{}, []string{"model", "ids", "record", "tx_id"}},
+		{"ORMWriteWhereInput", ORMWriteWhereInput{}, []string{"model", "domain", "record", "tx_id"}},
+		{"ORMExecResult", ORMExecResult{}, []string{"count", "ids"}},
+		{"ORMUnlinkInput", ORMUnlinkInput{}, []string{"model", "ids", "tx_id"}},
+		{"ComputeRequest", ComputeRequest{TenantID: "t", UserID: "u", TraceID: "r"}, []string{"fn_name", "record", "tenant_id", "user_id", "trace_id"}},
+		{"ComputeResponse", ComputeResponse{Value: 1, Error: &ComputeError{}}, []string{"value", "error"}},
+		{"ComputeError", ComputeError{}, []string{"code", "message"}},
+		{"ConstraintRequest", ConstraintRequest{TenantID: "t", UserID: "u", TraceID: "r"}, []string{"model", "phase", "record", "tenant_id", "user_id", "trace_id"}},
+		{"ConstraintResponse", ConstraintResponse{Field: "f", Message: "m", Error: &ConstraintError{}}, []string{"allowed", "field", "message", "error"}},
+		{"ConstraintError", ConstraintError{}, []string{"code", "message"}},
+		{"PreviewRequest", PreviewRequest{TenantID: "t", UserID: "u", TraceID: "r"}, []string{"model", "record", "tenant_id", "user_id", "trace_id"}},
+		{"PreviewResponse", PreviewResponse{Record: map[string]any{"a": 1}, Error: &PreviewError{}}, []string{"record", "error"}},
+		{"PreviewError", PreviewError{}, []string{"code", "message"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireKeys(t, wireKeys(t, tt.v), tt.want...)
+		})
+	}
+}
+
+func TestORMRequestsOmitEmptyOptionalMembers(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want []string
+	}{
+		{"ORMSearchInput", ORMSearchInput{}, []string{"model", "domain", "tx_id"}},
+		{"ORMSearchReadInput", ORMSearchReadInput{}, []string{"model", "domain", "tx_id"}},
+		{"ORMCreateInput", ORMCreateInput{}, []string{"model", "record", "tx_id"}},
+		{"ORMWriteInput", ORMWriteInput{}, []string{"model", "id", "record", "tx_id"}},
+		{"ComputeRequest", ComputeRequest{}, []string{"fn_name", "record"}},
+		{"ComputeResponse", ComputeResponse{}, nil},
+		{"ConstraintResponse", ConstraintResponse{}, []string{"allowed"}},
+		{"PreviewResponse", PreviewResponse{}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireKeys(t, wireKeys(t, tt.v), tt.want...)
+		})
+	}
+}

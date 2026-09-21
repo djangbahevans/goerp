@@ -3,41 +3,18 @@ package orm
 import (
 	"fmt"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// ormSearchInput omits host.orm.search's own offset field — Search has
-// no public Offset SearchOption (go-sdk-reference.md §6a steers callers
-// toward Cursor instead, the same reasoning SearchRead's own option set
-// already follows), so it's never non-zero here.
-type ormSearchInput struct {
-	Model  string `msgpack:"model"`
-	Domain string `msgpack:"domain"`
-	Order  string `msgpack:"order,omitempty"`
-	Limit  int    `msgpack:"limit,omitempty"`
-	TxID   string `msgpack:"tx_id"`
-}
+type ormSearchInput = abi.ORMSearchInput
 
-type ormSearchOutput struct {
-	IDs   []string `msgpack:"ids"`
-	Count int64    `msgpack:"count"`
-}
+type ormSearchOutput = abi.ORMSearchOutput
 
-type ormSearchReadInput struct {
-	Model  string   `msgpack:"model"`
-	Domain string   `msgpack:"domain"`
-	Fields []string `msgpack:"fields,omitempty"`
-	Order  string   `msgpack:"order,omitempty"`
-	Limit  int      `msgpack:"limit,omitempty"`
-	Cursor string   `msgpack:"cursor,omitempty"`
-	TxID   string   `msgpack:"tx_id"`
-}
+type ormSearchReadInput = abi.ORMSearchReadInput
 
-type ormSearchReadOutput struct {
-	Records    []map[string]any `msgpack:"records"`
-	NextCursor string           `msgpack:"next_cursor,omitempty"`
-}
+type ormSearchReadOutput = abi.ORMSearchReadOutput
 
 // searchOpts is Search/SearchRead's shared option state.
 type searchOpts struct {
