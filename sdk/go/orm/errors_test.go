@@ -31,6 +31,7 @@ func TestHostErrorCodeMatchers_MatchTheirOwnCodeOnly(t *testing.T) {
 		{"IsValidationFailed", IsValidationFailed, abi.ErrCodeValidationFailed},
 		{"IsUniqueViolation", IsUniqueViolation, abi.ErrCodeUniqueViolation},
 		{"IsFieldNotWritable", IsFieldNotWritable, abi.ErrCodeFieldNotWritable},
+		{"IsFieldWriteDenied", IsFieldWriteDenied, abi.ErrCodeFieldWriteDenied},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

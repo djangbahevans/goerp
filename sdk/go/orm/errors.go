@@ -32,10 +32,18 @@ func IsValidationFailed(err error) bool { return hostErrorCodeIs(err, abi.ErrCod
 // failure caused by a unique constraint — orm.unique_violation.
 func IsUniqueViolation(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeUniqueViolation) }
 
-// IsFieldNotWritable reports whether err is a host.orm.create/write
-// failure caused by the caller supplying a value for a computed,
-// relation-owned, or otherwise non-writable field — orm.field_not_writable.
+// IsFieldNotWritable reports whether err is a host.orm.create/write/mutate
+// failure caused by the caller supplying a value for a field no caller can
+// write directly — a computed, readonly, or relation-owned field —
+// orm.field_not_writable. A field the caller merely lacks permission to
+// write is IsFieldWriteDenied.
 func IsFieldNotWritable(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeFieldNotWritable) }
+
+// IsFieldWriteDenied reports whether err is a host.orm.create/write/mutate
+// failure caused by the caller lacking the write permission of a field
+// declared OnDeniedWrite(model.Reject) — orm.field_write_denied. The
+// offending field is in the error's Details["field"].
+func IsFieldWriteDenied(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeFieldWriteDenied) }
 
 func hostErrorCodeIs(err error, code string) bool {
 	var he *abi.HostError
