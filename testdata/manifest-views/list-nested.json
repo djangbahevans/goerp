@@ -1,0 +1,40 @@
+{
+  "name": "orders_list",
+  "type": "list",
+  "resource": "sales.order",
+  "label": "Orders",
+  "columns": [
+    {"field": "number", "label": "Number", "type": "text", "sortable": true, "primary": true, "width": null, "hidden": false},
+    {
+      "field": "risk",
+      "label": "Risk",
+      "type": "custom",
+      "component": "RiskMeter",
+      "component_props": {"max": 10, "thresholds": [3, 7]}
+    }
+  ],
+  "actions": [
+    {
+      "label": "Reports",
+      "type": "menu",
+      "icon": "file-text",
+      "style": "secondary",
+      "items": [
+        {"label": "Sales summary", "type": "report", "report": "sales.summary", "format": "xlsx"},
+        {"type": "separator"},
+        {"label": "Import", "type": "import", "route": "sales.importOrders"}
+      ]
+    }
+  ],
+  "bulk_actions": [
+    {
+      "label": "Archive",
+      "type": "route",
+      "route": "sales.archiveOrders",
+      "min_selected": 1,
+      "max_selected": 50,
+      "confirm": {"title": "Archive orders?", "message": "They stay searchable.", "destructive": false}
+    },
+    {"label": "Export", "type": "export", "route": "sales.exportOrders", "format": "csv"}
+  ]
+}

@@ -198,12 +198,7 @@ func TestHub_CloseClosesEveryRegisteredConnection(t *testing.T) {
 		}
 	}
 
-	hub.mu.RLock()
-	n := len(hub.conns)
-	hub.mu.RUnlock()
-	if n != 0 {
-		t.Errorf("hub still has %d registered connection(s) after Close, want 0", n)
-	}
+	waitForConnCount(t, hub, 0)
 }
 
 func TestHub_BroadcastToChannelWithNoSubscribersReachesZero(t *testing.T) {
@@ -247,6 +242,24 @@ func waitForSubscriberCount(t *testing.T, hub *Hub, channel string, n int) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("channel %q subscriber count did not reach %d in time", channel, n)
+}
+
+// waitForConnCount polls rather than asserting once: Serve unregisters a
+// connection on its own goroutine after its read loop ends, which can be after
+// the client has already observed the close.
+func waitForConnCount(t *testing.T, hub *Hub, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		hub.mu.RLock()
+		got := len(hub.conns)
+		hub.mu.RUnlock()
+		if got == n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("hub connection count did not reach %d in time", n)
 }
 
 func waitForSubscriber(t *testing.T, hub *Hub, channel string) {

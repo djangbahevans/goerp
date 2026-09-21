@@ -51,7 +51,7 @@ func TestViewPreservesUnmodeledMembers(t *testing.T) {
 
 			wantExtra := map[string]any{}
 			for member, value := range declared {
-				if isViewExtraMember(declared["type"].(string), member) {
+				if _, modeled := typedMemberNames(reflect.TypeFor[viewAlias]())[member]; !modeled || viewForceExtra(declared["type"].(string))(member) {
 					wantExtra[member] = value
 				}
 			}

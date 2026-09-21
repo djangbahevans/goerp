@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	manifestjson "encoding/json/v2"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -504,21 +505,54 @@ func TestDispatchSchemaRoute_ServesManifestViewsUnchanged(t *testing.T) {
 			t.Errorf("served unexpected view %q", name)
 			continue
 		}
-		for member, wantValue := range want {
-			gotValue, present := got[member]
-			switch {
-			case present && !reflect.DeepEqual(gotValue, wantValue):
-				t.Errorf("%s: %q = %v, want %v", name, member, gotValue, wantValue)
-			case !present && !isEmptyJSONValue(wantValue):
-				t.Errorf("%s: member %q (%v) is missing from the served view", name, member, wantValue)
-			}
-		}
-		for member := range got {
-			if _, ok := want[member]; !ok {
-				t.Errorf("%s: served member %q that the view does not declare", name, member)
-			}
+		for _, mismatch := range servedMismatches(name, want, got) {
+			t.Error(mismatch)
 		}
 	}
+}
+
+// servedMismatches lists where got differs from want, treating a declared
+// value that isEmptyJSONValue as optional: a modeled member's omitempty or
+// omitzero tag drops it from the served JSON.
+func servedMismatches(path string, want, got any) []string {
+	switch w := want.(type) {
+	case map[string]any:
+		g, ok := got.(map[string]any)
+		if !ok {
+			return []string{fmt.Sprintf("%s = %v, want an object", path, got)}
+		}
+		var out []string
+		for member, wantValue := range w {
+			gotValue, present := g[member]
+			if !present {
+				if !isEmptyJSONValue(wantValue) {
+					out = append(out, fmt.Sprintf("%s.%s (%v) is missing from the served view", path, member, wantValue))
+				}
+				continue
+			}
+			out = append(out, servedMismatches(path+"."+member, wantValue, gotValue)...)
+		}
+		for member := range g {
+			if _, ok := w[member]; !ok {
+				out = append(out, fmt.Sprintf("%s.%s is served but not declared", path, member))
+			}
+		}
+		return out
+	case []any:
+		g, ok := got.([]any)
+		if !ok || len(g) != len(w) {
+			return []string{fmt.Sprintf("%s = %v, want %v", path, got, want)}
+		}
+		var out []string
+		for i := range w {
+			out = append(out, servedMismatches(fmt.Sprintf("%s[%d]", path, i), w[i], g[i])...)
+		}
+		return out
+	}
+	if !reflect.DeepEqual(want, got) {
+		return []string{fmt.Sprintf("%s = %v, want %v", path, got, want)}
+	}
+	return nil
 }
 
 // isEmptyJSONValue reports whether v is a null, false, empty array or empty

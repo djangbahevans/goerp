@@ -1,0 +1,41 @@
+{
+  "name": "orders_form",
+  "type": "form",
+  "resource": "sales.order",
+  "label": "Order",
+  "sections": [
+    {
+      "name": "main",
+      "label": "Main",
+      "type": "fields",
+      "columns": 2,
+      "fields": [
+        {"field": "ordered_at", "label": "Ordered", "type": "date_range", "range_start_field": "start_date", "range_end_field": "end_date"},
+        {"field": "ship_to", "label": "Ship to", "type": "address", "address_fields": {"street": "ship_street", "city": "ship_city", "country": "ship_country"}},
+        {"field": "notice", "type": "label", "label_text": "Totals are computed at confirmation."},
+        {"field": "total_display", "label": "Total", "type": "computed_display", "expression": "sum(lines.amount)"},
+        {"field": "terms", "label": "Terms", "type": "code", "language": "markdown"},
+        {"field": "barcode", "label": "Barcode", "type": "barcode", "on_scan_route": "sales.findByBarcode", "formats": ["ean13", "code128"]}
+      ]
+    },
+    {"name": "insights", "label": "Insights", "type": "custom", "component": "OrderInsights"}
+  ],
+  "tabs": [
+    {
+      "label": "Lines",
+      "type": "sub_list",
+      "field": "line_ids",
+      "columns": [
+        {"field": "product", "label": "Product"},
+        {"field": "stock", "label": "Stock", "type": "custom", "component": "StockBadge", "component_props": {"low": 5}}
+      ]
+    }
+  ],
+  "header_actions": [
+    {
+      "label": "More",
+      "type": "menu",
+      "items": [{"label": "Print", "type": "report", "report": "sales.order_slip", "format": "pdf"}]
+    }
+  ]
+}
