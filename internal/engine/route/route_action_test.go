@@ -60,11 +60,11 @@ func TestRegisterRoutes_ActionOverridesEnableOpsByIdentity(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutes_ActionPathIgnoresDeclaredPathAndMethod(t *testing.T) {
+func TestRegisterRoutes_ActionPathIgnoresDeclaredPath(t *testing.T) {
 	table := New()
 	md := model.Define("widget", model.LabelPlural("Sales Orders")).EnableOps(model.List)
 	r := actionRoute("testmodule.widget", "list")
-	r.Method, r.Path = "GET", "/widgets"
+	r.Path = "/widgets"
 
 	if _, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{r}, []model.ModelDeclaration{*md}); err != nil {
 		t.Fatalf("RegisterRoutes: %v", err)
@@ -216,5 +216,145 @@ func TestRegisterRoutes_ActionSuppressesEnableOpsForModuleQualifiedDeclarationNa
 	}
 	if len(suppressed) != 1 {
 		t.Fatalf("suppressed = %v, want one", suppressed)
+	}
+}
+
+func lookupAction(t *testing.T, table *RouteTable, method, path string) *RouteEntry {
+	t.Helper()
+	entry, _, result, _ := table.Lookup(method, path)
+	if result != RouteFound {
+		t.Fatalf("%s %s: result = %v, want RouteFound", method, path, result)
+	}
+	return entry
+}
+
+func TestRegisterRoutes_CustomActionScopeAndMethod(t *testing.T) {
+	md := model.Define("widget", model.LabelPlural("Sales Orders"))
+	cases := []struct {
+		name         string
+		route        ExplicitRoute
+		wantMethod   string
+		wantPath     string
+		wantIDParam  bool
+		wantNotFound [2]string
+	}{
+		{"record default", actionRoute("testmodule.widget", "confirm"), "POST", "/testmodule/sales-orders/{id}/confirm", true, [2]string{"POST", "/testmodule/sales-orders/confirm"}},
+		{"record with method", ExplicitRoute{Model: "testmodule.widget", Name: "confirm", Method: "PUT", Auth: "required"}, "PUT", "/testmodule/sales-orders/{id}/confirm", true, [2]string{"POST", "/testmodule/sales-orders/{id}/confirm"}},
+		{"collection default method", ExplicitRoute{Model: "testmodule.widget", Name: "bulk_import", Scope: "collection", Auth: "required"}, "POST", "/testmodule/sales-orders/bulk_import", false, [2]string{"POST", "/testmodule/sales-orders/{id}/bulk_import"}},
+		{"collection with method", ExplicitRoute{Model: "testmodule.widget", Name: "export", Scope: "collection", Method: "GET", Auth: "required"}, "GET", "/testmodule/sales-orders/export", false, [2]string{"POST", "/testmodule/sales-orders/export"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			table := New()
+			if _, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{tc.route}, []model.ModelDeclaration{*md}); err != nil {
+				t.Fatalf("RegisterRoutes: %v", err)
+			}
+
+			entry := lookupAction(t, table, tc.wantMethod, tc.wantPath)
+			gotKind, hasID := entry.Manifest.PathParams["id"]
+			if hasID != tc.wantIDParam || (hasID && gotKind != "uuid") {
+				t.Fatalf("PathParams = %v, want id=uuid present=%v", entry.Manifest.PathParams, tc.wantIDParam)
+			}
+			if _, _, result, _ := table.Lookup(tc.wantNotFound[0], tc.wantNotFound[1]); result == RouteFound {
+				t.Fatalf("%s %s: found a route the action must not expose", tc.wantNotFound[0], tc.wantNotFound[1])
+			}
+		})
+	}
+}
+
+func TestRegisterRoutes_ActionKeepsDeclaredOptions(t *testing.T) {
+	table := New()
+	md := model.Define("widget")
+	r := actionRoute("testmodule.widget", "confirm")
+	r.Permissions = []string{"testmodule:widget:confirm"}
+	r.PathParams = map[string]string{"id": "slug"}
+
+	if _, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{r}, []model.ModelDeclaration{*md}); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+	entry := lookupAction(t, table, "POST", "/testmodule/widgets/{id}/confirm")
+	if entry.Manifest.Auth != "required" || len(entry.Manifest.Permissions) != 1 {
+		t.Fatalf("manifest = %+v, want declared auth and permissions kept", entry.Manifest)
+	}
+	if entry.Manifest.PathParams["id"] != "slug" {
+		t.Fatalf("PathParams = %v, want the declared id kind kept", entry.Manifest.PathParams)
+	}
+}
+
+func TestRegisterRoutes_ReservedActionHasNoAutoPathParams(t *testing.T) {
+	table := New()
+	md := model.Define("widget")
+
+	if _, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{actionRoute("testmodule.widget", "get")}, []model.ModelDeclaration{*md}); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+	if got := lookupAction(t, table, "GET", "/testmodule/widgets/{id}").Manifest.PathParams; len(got) != 0 {
+		t.Fatalf("PathParams = %v, want none, matching the EnableOps route it overrides", got)
+	}
+}
+
+func TestRegisterRoutes_ReservedActionWithMethodFails(t *testing.T) {
+	table := New()
+	md := model.Define("widget")
+	r := actionRoute("testmodule.widget", "list")
+	r.Method = "POST"
+
+	_, err := RegisterRoutes(table, "testmodule", "domain", []ExplicitRoute{r}, []model.ModelDeclaration{*md})
+	if err == nil {
+		t.Fatal("RegisterRoutes succeeded, want an error")
+	}
+	for _, want := range []string{`"testmodule"`, `"testmodule.widget"`, `"list"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not name %s", err, want)
+		}
+	}
+}
+
+func TestRegisterRoutes_DuplicateActionIdentityFails(t *testing.T) {
+	table := New()
+	md := model.Define("widget")
+	explicit := []ExplicitRoute{actionRoute("testmodule.widget", "confirm"), actionRoute("testmodule.widget", "confirm")}
+
+	_, err := RegisterRoutes(table, "testmodule", "domain", explicit, []model.ModelDeclaration{*md})
+	if err == nil {
+		t.Fatal("RegisterRoutes succeeded, want an error")
+	}
+	for _, want := range []string{`"testmodule"`, `"testmodule.widget"`, `"confirm"`, "more than once"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %s", err, want)
+		}
+	}
+}
+
+func TestRegisterRoutes_InvalidMethodOrScopeFails(t *testing.T) {
+	md := model.Define("widget")
+	cases := []struct {
+		name  string
+		route ExplicitRoute
+		want  string
+	}{
+		{"lowercase method", ExplicitRoute{Model: "testmodule.widget", Name: "confirm", Method: "put"}, `unsupported method "put"`},
+		{"unknown method", ExplicitRoute{Model: "testmodule.widget", Name: "confirm", Method: "PUTT"}, `unsupported method "PUTT"`},
+		{"unknown scope", ExplicitRoute{Model: "testmodule.widget", Name: "confirm", Scope: "collectoin"}, `unknown scope "collectoin"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := RegisterRoutes(New(), "testmodule", "domain", []ExplicitRoute{tc.route}, []model.ModelDeclaration{*md})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), `"confirm"`) {
+				t.Fatalf("error = %v, want one naming the action and containing %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRegisterRoutes_DuplicateActionThroughBothModelNamesFails(t *testing.T) {
+	md := model.Define("testmodule.widget")
+	explicit := []ExplicitRoute{actionRoute("testmodule.widget", "confirm"), actionRoute("testmodule.testmodule.widget", "confirm")}
+
+	_, err := RegisterRoutes(New(), "testmodule", "domain", explicit, []model.ModelDeclaration{*md})
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Fatalf("error = %v, want a duplicate-action error", err)
 	}
 }

@@ -26,6 +26,11 @@ type RouteDeclaration struct {
 	Model        string         `msgpack:"model,omitempty"`
 	Name         string         `msgpack:"name,omitempty"`
 
+	// Scope is an engine.Action route's declared scope ("record" or
+	// "collection"); empty selects the default. On an action route, Method is
+	// the declared method of a custom action and empty otherwise.
+	Scope string `msgpack:"scope,omitempty"`
+
 	CRUDAction     string            `msgpack:"crud_action,omitempty"`
 	ResponseIsList bool              `msgpack:"response_is_list"`
 	Embedded       []EmbeddedDecl    `msgpack:"embedded,omitempty"`

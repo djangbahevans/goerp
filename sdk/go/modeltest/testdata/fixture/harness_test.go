@@ -106,3 +106,34 @@ func TestCustomActionIsExposedAtDerivedPathAndReachesItsHandler(t *testing.T) {
 			resp.JSON("id"), resp.JSON("model"), resp.JSON("action"), id)
 	}
 }
+
+func TestActionRouteRequiresAuthenticationByDefault(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	if resp := h.Anonymous().GET("/widgets/gizmo-boxes"); resp.StatusCode != 401 {
+		t.Fatalf("anonymous list action status = %d, want 401", resp.StatusCode)
+	}
+	if resp := h.Anonymous().POST("/widgets/gizmo-boxes/"+uuid.NewString()+"/ship", nil); resp.StatusCode != 401 {
+		t.Fatalf("anonymous custom action status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestCollectionActionUsesDeclaredMethod(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.PUT("/widgets/gizmo-boxes/restock", nil)
+	if resp.StatusCode != 200 || resp.JSON("action") != "restock" {
+		t.Fatalf("PUT status = %d action = %v, want 200 restock", resp.StatusCode, resp.JSON("action"))
+	}
+	if resp := h.POST("/widgets/gizmo-boxes/restock", nil); resp.StatusCode == 200 {
+		t.Fatal("POST reached a collection action declared with PUT")
+	}
+}
+
+func TestRecordActionRejectsANonUUIDID(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	if resp := h.POST("/widgets/gizmo-boxes/not-a-uuid/ship", nil); resp.StatusCode != 400 {
+		t.Fatalf("status = %d, want 400 for a non-UUID id", resp.StatusCode)
+	}
+}
