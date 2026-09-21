@@ -13,33 +13,15 @@ import (
 	"reflect"
 	"strings"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// searchQueryOpts/searchQueryInput/searchQueryOutput are host.search.query's
-// msgpack wire shape. Filter/Sort/Facets are ignored (and
-// FacetDistribution always empty) until Meilisearch replaces the initial
-// trigram backend.
-type searchQueryOpts struct {
-	Filter string   `msgpack:"filter,omitempty"`
-	Sort   []string `msgpack:"sort,omitempty"`
-	Limit  int      `msgpack:"limit,omitempty"`
-	Offset int      `msgpack:"offset,omitempty"`
-	Facets []string `msgpack:"facets,omitempty"`
-}
+type searchQueryOpts = abi.SearchQueryOpts
 
-type searchQueryInput struct {
-	Index string          `msgpack:"index"`
-	Query string          `msgpack:"query"`
-	Opts  searchQueryOpts `msgpack:"opts"`
-}
+type searchQueryInput = abi.SearchQueryInput
 
-type searchQueryOutput struct {
-	Hits              []map[string]any          `msgpack:"hits"`
-	TotalHits         int64                     `msgpack:"total_hits"`
-	ProcessingTimeMs  int                       `msgpack:"processing_time_ms"`
-	FacetDistribution map[string]map[string]int `msgpack:"facet_distribution,omitempty"`
-}
+type searchQueryOutput = abi.SearchQueryOutput
 
 // SearchOption configures Query.
 type SearchOption func(*searchQueryInput)

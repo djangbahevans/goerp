@@ -3,37 +3,19 @@ package events
 import (
 	"time"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-type eventEmitTxInput struct {
-	TxID           string `msgpack:"tx_id"`
-	Name           string `msgpack:"name"`
-	Version        int    `msgpack:"version"`
-	Payload        []byte `msgpack:"payload"`
-	DelayMs        int    `msgpack:"delay_ms,omitempty"`
-	IdempotencyKey string `msgpack:"idempotency_key,omitempty"`
-	Sync           bool   `msgpack:"sync,omitempty"`
-}
+type eventEmitTxInput = abi.EventEmitTxInput
 
-type eventEmitInput struct {
-	Name           string `msgpack:"name"`
-	Version        int    `msgpack:"version"`
-	Payload        []byte `msgpack:"payload"`
-	DelayMs        int    `msgpack:"delay_ms,omitempty"`
-	IdempotencyKey string `msgpack:"idempotency_key,omitempty"`
-	Sync           bool   `msgpack:"sync,omitempty"`
-}
+type eventEmitInput = abi.EventEmitInput
 
-type eventEmitOutput struct {
-	EventID string `msgpack:"event_id"`
-}
+type eventEmitOutput = abi.EventEmitOutput
 
-type eventEmitTxOutput struct {
-	EventID string `msgpack:"event_id"`
-}
+type eventEmitTxOutput = abi.EventEmitTxOutput
 
 // EmitOption configures Emit/EmitTx — WithVersion, WithDelay, WithSync,
 // WithIdempotencyKey.

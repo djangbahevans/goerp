@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -17,24 +18,16 @@ func registerHostAuthz(ctx context.Context, rt wazero.Runtime, r *Runtime) error
 	return err
 }
 
-// authzFieldCheckKind mirrors sdk/go/authz.AccessKind's wire values.
-type authzFieldCheckKind int
+type authzFieldCheckKind = abiv1.AuthzFieldCheckKind
 
 const (
-	authzFieldCheckRead authzFieldCheckKind = iota
-	authzFieldCheckWrite
+	authzFieldCheckRead  = abiv1.AuthzFieldCheckRead
+	authzFieldCheckWrite = abiv1.AuthzFieldCheckWrite
 )
 
-type authzFieldCheckInput struct {
-	UserID string              `msgpack:"user_id"`
-	Model  string              `msgpack:"model"`
-	Field  string              `msgpack:"field"`
-	Kind   authzFieldCheckKind `msgpack:"kind"`
-}
+type authzFieldCheckInput = abiv1.AuthzFieldCheckInput
 
-type authzFieldCheckOutput struct {
-	Allowed bool `msgpack:"allowed"`
-}
+type authzFieldCheckOutput = abiv1.AuthzFieldCheckOutput
 
 // makeAuthzFieldCheck reports whether modCtx's caller may read or write
 // modelName.fieldName, per the field's declared FieldSecurityRule (if

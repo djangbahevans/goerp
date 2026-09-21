@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
@@ -45,35 +46,11 @@ func registerHostEvent(ctx context.Context, rt wazero.Runtime, r *Runtime, inser
 	return err
 }
 
-type eventEmitTxInput struct {
-	TxID           string `msgpack:"tx_id"`
-	Name           string `msgpack:"name"`
-	Version        int    `msgpack:"version"`
-	Payload        []byte `msgpack:"payload"`
-	DelayMs        int    `msgpack:"delay_ms,omitempty"`
-	IdempotencyKey string `msgpack:"idempotency_key,omitempty"`
-	// Sync exists on this input purely so emit_tx can reject it outright
-	// (event-system.md §8: "EmitTx rejects WithSync() at call time... an
-	// error returned before anything is inserted") — emit_tx never honors
-	// it. host.event.emit is the only host function that can.
-	Sync bool `msgpack:"sync,omitempty"`
-}
+type eventEmitTxInput = abiv1.EventEmitTxInput
 
-// eventEmitInput is host.event.emit's (non-transactional) wire input —
-// the same shape as eventEmitTxInput minus TxID, since there is no
-// transaction to scope the insert to.
-type eventEmitInput struct {
-	Name           string `msgpack:"name"`
-	Version        int    `msgpack:"version"`
-	Payload        []byte `msgpack:"payload"`
-	DelayMs        int    `msgpack:"delay_ms,omitempty"`
-	IdempotencyKey string `msgpack:"idempotency_key,omitempty"`
-	Sync           bool   `msgpack:"sync,omitempty"`
-}
+type eventEmitInput = abiv1.EventEmitInput
 
-type eventEmitTxOutput struct {
-	EventID string `msgpack:"event_id"`
-}
+type eventEmitTxOutput = abiv1.EventEmitTxOutput
 
 func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -174,11 +151,7 @@ func deriveEventID(reg *event.EventRegistry, moduleName, tenantID, name string, 
 	return uuid.NewSHA1(idempotencyKeyNamespace, []byte(tenantID+"|"+name+"|"+idempotencyKey))
 }
 
-// eventEmitOutput is host.event.emit's wire output — the same shape as
-// eventEmitTxOutput.
-type eventEmitOutput struct {
-	EventID string `msgpack:"event_id"`
-}
+type eventEmitOutput = abiv1.EventEmitOutput
 
 // makeEventEmit builds host.event.emit, the non-transactional emit host
 // function — the only one that can honor events.WithSync(): dispatching
