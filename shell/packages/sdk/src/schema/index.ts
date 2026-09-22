@@ -6,6 +6,7 @@ import { ViewPathRegistry } from "./resolve-view-path.js";
 import { ResourceMetadataRegistry } from "./resource-metadata-registry.js";
 import { ResourceRegistry } from "./resource-registry.js";
 import { schemaRegistry } from "./schema-registry.js";
+import { ViewExtensionRegistry } from "./view-extension-registry.js";
 
 export type { BatchLoader } from "./batch-loader-registry.js";
 export { BatchLoaderRegistry } from "./batch-loader-registry.js";
@@ -36,8 +37,12 @@ export type {
   ModelDef,
   ModuleSchema,
   RouteSchema,
+  ViewExtensionDef,
+  ViewExtensionRef,
   WorkflowTransition,
 } from "./types.js";
+export type { ViewExtensionEntry } from "./view-extension-registry.js";
+export { buildViewExtensionRegistry, ViewExtensionRegistry } from "./view-extension-registry.js";
 export type { NavigationGroup, NavigationItem, ResolvedView, ViewRegistry } from "./view-registry.js";
 export { buildEmptyViewRegistry, buildViewRegistry, filterViewByCapability } from "./view-registry.js";
 export {
@@ -55,5 +60,6 @@ export const resourceMetadataRegistry = new ResourceMetadataRegistry(schemaRegis
 export const viewPathRegistry = new ViewPathRegistry(schemaRegistry);
 export const modelRegistry = new ModelRegistry(schemaRegistry);
 export const viewDeclarationRegistry = new ViewDeclarationRegistry(schemaRegistry);
+export const viewExtensionRegistry = new ViewExtensionRegistry(schemaRegistry);
 export const componentRegistry = new ComponentRegistry();
 export const batchLoaderRegistry = new BatchLoaderRegistry();

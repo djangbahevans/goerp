@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { optionalNullable as opt } from "./optional-nullable.js";
 
 // shell-architecture.md §9's MetaSchema/ModuleSchema/RouteSchema, defined
 // as valibot schemas rather than plain interfaces so schema-registry.ts can
@@ -82,6 +83,34 @@ export const ModelDefSchema = v.looseObject({
 });
 export type ModelDef = v.InferOutput<typeof ModelDefSchema>;
 
+// manifest-spec.md §11's ViewExtensionRef.
+export const ViewExtensionRefSchema = v.looseObject({
+  extends: v.string(),
+  extension: v.string(),
+});
+export type ViewExtensionRef = v.InferOutput<typeof ViewExtensionRefSchema>;
+
+// manifest-spec.md §11's ViewExtensionDef. `tab`/`section`/`fields`/
+// `columns`/`filter`/`action`/`bulk_action` stay v.unknown() here, same as
+// ModuleSchemaSchema.views below — view-extension-registry.ts only reads
+// `type`/`target_section`/`position`, and each consumer (form-tabs.tsx for
+// "tab") validates its own type-specific member against the schema it
+// already owns (FormTabSchema) rather than this module re-declaring it.
+export const ViewExtensionDefSchema = v.looseObject({
+  name: v.string(),
+  type: v.string(),
+  target_section: opt(v.string()),
+  position: opt(v.picklist(["append", "prepend"])),
+  tab: v.optional(v.unknown()),
+  section: v.optional(v.unknown()),
+  fields: v.optional(v.unknown()),
+  columns: v.optional(v.unknown()),
+  filter: v.optional(v.unknown()),
+  action: v.optional(v.unknown()),
+  bulk_action: v.optional(v.unknown()),
+});
+export type ViewExtensionDef = v.InferOutput<typeof ViewExtensionDefSchema>;
+
 export const ModuleSchemaSchema = v.looseObject({
   name: v.string(),
   version: v.string(),
@@ -89,6 +118,14 @@ export const ModuleSchemaSchema = v.looseObject({
   routes: v.array(RouteSchemaSchema),
   views: v.array(v.unknown()),
   navigation: v.array(v.unknown()),
+  // manifest-spec.md §11 — the engine always sends an array, [] when this
+  // module declares none (dispatch_meta.go's metaSchemaModule).
+  view_extensions: v.array(ViewExtensionRefSchema),
+  view_extension_definitions: v.array(ViewExtensionDefSchema),
+  // This module's index in the engine's dependency-ordered load sequence —
+  // view-extension-registry.ts orders extensions by it so they apply
+  // dependencies-first.
+  load_order: v.number(),
   models: v.record(v.string(), ModelDefSchema),
   permissions: v.array(v.unknown()),
   frontend: v.nullable(v.looseObject({ bundle_url: v.string(), bundle_sha256: v.string() })),

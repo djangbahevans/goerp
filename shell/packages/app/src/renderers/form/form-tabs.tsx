@@ -1,13 +1,62 @@
 import { PermissionContext } from "@goerp/sdk/auth";
 import { TabPanel, Tabs } from "@goerp/sdk/components";
-import { filterViewByCapability, resourceRegistry, viewDeclarationRegistry } from "@goerp/sdk/schema";
+import {
+  componentRegistry,
+  filterViewByCapability,
+  resourceRegistry,
+  summarizeIssues,
+  viewDeclarationRegistry,
+  viewExtensionRegistry,
+} from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { useContext, useState } from "react";
+import * as v from "valibot";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
 import { ViewDispatch } from "../view-dispatch.js";
 import { FormSectionRenderer } from "./form-sections.js";
-import type { FormTab } from "./form-view-types.js";
+import { type FormTab, FormTabSchema } from "./form-view-types.js";
+
+// A "tab"-typed view extension merged into this form's own tabs
+// (view-system.md §10). sourceModule is the module that DECLARED the
+// extension — an unqualified tab.view resolves relative to it, not to the
+// target form's own module, the same way an own tab's tab.view resolves
+// relative to the form's module.
+type MergedTab = FormTab & { sourceModule?: string };
+
+// useExtensionTabs resolves the "tab"-typed extensions targeting
+// `{module}.{viewName}`, already ordered dependencies-first by
+// viewExtensionRegistry, into ready-to-render MergedTab entries split by
+// position. An entry whose definition didn't resolve, isn't a "tab" type,
+// or whose `tab` member doesn't match FormTabSchema is skipped — nothing
+// renders, nothing throws (view-system.md §10).
+function useExtensionTabs(module: string, viewName: string) {
+  return useQuery({
+    queryKey: ["form-tab-extensions", module, viewName],
+    queryFn: async () => {
+      const entries = await viewExtensionRegistry.forTarget(module, viewName);
+      const prepend: MergedTab[] = [];
+      const append: MergedTab[] = [];
+
+      for (const entry of entries) {
+        if (entry.definition?.type !== "tab") continue;
+
+        const result = v.safeParse(FormTabSchema, entry.definition.tab);
+        if (!result.success) {
+          console.warn(
+            `useExtensionTabs: "${entry.ref.extension}" in module "${entry.module}" declares a "tab" extension whose tab member doesn't match FormTab (manifest-spec.md §11) — ${summarizeIssues(result.issues)}`,
+          );
+          continue;
+        }
+
+        const merged: MergedTab = { ...result.output, sourceModule: entry.module };
+        (entry.definition.position === "prepend" ? prepend : append).push(merged);
+      }
+
+      return { prepend, append };
+    },
+  });
+}
 
 // A literal, or a `record.{field}` reference — a tab `filter` value isn't a
 // domain expression, so nothing richer is interpreted here.
@@ -45,25 +94,41 @@ function useTabbedView(viewRef: string | undefined, module: string) {
   });
 }
 
+// The module an unqualified tab.view/tab.component resolves relative to —
+// the declaring module for an extension tab (sourceModule), the form's own
+// module for a native one. Same fallback resolveViewDeclaration itself
+// applies when a viewRef carries no "{module}." prefix.
+function tabDeclaringModule(tab: MergedTab, formModule: string): string {
+  return tab.sourceModule ?? formModule;
+}
+
 function ViewTabContent({
   tab,
   module,
   record,
   recordId,
 }: {
-  tab: FormTab;
+  tab: MergedTab;
   module: string;
   record: Row;
   recordId?: string | undefined;
 }) {
-  const { data: view, isLoading, isError } = useTabbedView(tab.view, module);
+  const declaringModule = tabDeclaringModule(tab, module);
+  const { data: view, isLoading, isError } = useTabbedView(tab.view, declaringModule);
   if (isLoading) return <p>Loading…</p>;
   if (isError || !view) return <p role="alert">"{tab.view}" doesn't resolve to a view.</p>;
+
+  // The embedded view's own module — the view name may be cross-module
+  // qualified ("hr.employees_list" embedded in a contacts form), and an
+  // unqualified ref inside that resolved view must in turn resolve against
+  // the view's owning module, not the target form's.
+  const dotIndex = (tab.view as string).indexOf(".");
+  const owningModule = dotIndex < 0 ? declaringModule : (tab.view as string).slice(0, dotIndex);
 
   return (
     <ViewDispatch
       view={view}
-      module={module}
+      module={owningModule}
       recordId={recordId}
       baseFilter={resolveTabFilter(tab.filter, record)}
       embedded
@@ -143,10 +208,23 @@ function FieldsTabContent({
   );
 }
 
+// Own tab or extension tab — record is always the TARGET form's own record
+// (view-system.md §10: "record is the CONTACT record (not an employee
+// record)" for an hr extension tab on the contacts form), so an extension
+// component never needs a different prop than a module's own component tab.
+function ComponentTabContent({ tab, record }: { tab: MergedTab; record: Row }) {
+  const Component = componentRegistry.tryResolve(tab.component);
+  if (!Component) {
+    return <div role="alert">"{tab.component}" isn't a registered component — this tab can't be shown.</div>;
+  }
+  return <Component record={record} />;
+}
+
 export interface FormTabsRendererProps {
   tabs: FormTab[];
   resource: string;
   module: string;
+  viewName: string;
   record: Row;
   recordId?: string | undefined;
   onChange: (patch: Record<string, unknown>) => void;
@@ -157,6 +235,7 @@ export function FormTabsRenderer({
   tabs,
   resource,
   module,
+  viewName,
   record,
   recordId,
   onChange,
@@ -167,9 +246,17 @@ export function FormTabsRenderer({
   if (!permissions) {
     throw new Error("FormTabsRenderer must be used within a PermissionProvider");
   }
+
+  const { data: extensionTabs } = useExtensionTabs(module, viewName);
+  // view-system.md §10: "target_section: tabs, position: append places the
+  // tab after the form's own tabs, prepend before them" — extension entries
+  // arrive already ordered dependencies-first (viewExtensionRegistry), so
+  // multiple prepends/appends land in that same order relative to each other.
+  const allTabs: MergedTab[] = [...(extensionTabs?.prepend ?? []), ...tabs, ...(extensionTabs?.append ?? [])];
+
   // Filtered once: a restricted tab can neither show a button nor become
   // active (hiding just the button would still let a stale activeId render it).
-  const visibleTabs = tabs.filter(
+  const visibleTabs = allTabs.filter(
     (tab) =>
       (!tab.permission || permissions.check(tab.permission)) &&
       conditions.isVisible(tab.condition, `tab "${tab.label}" condition`, record),
@@ -203,10 +290,7 @@ export function FormTabsRenderer({
               formReadonly={formReadonly}
             />
           )}
-          {tab.type === "component" && (
-            // No module component registry exists yet.
-            <p>Custom tab "{tab.component}" — no component registry to resolve it from yet.</p>
-          )}
+          {tab.type === "component" && <ComponentTabContent tab={tab} record={record} />}
         </TabPanel>
       ))}
     </Tabs>

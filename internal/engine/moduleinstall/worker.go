@@ -395,6 +395,11 @@ func (w *Worker) publish(ctx context.Context, m *module.LoadedModule) (committed
 		if merged == nil {
 			merged = make(map[string]*module.LoadedModule, 1)
 		}
+		// A module installed after boot depends only on modules already
+		// loaded (nothing yet could depend on it), so appending it after
+		// the current highest LoadOrder keeps load_order dependencies-first
+		// without re-running moduleboot.Order across the whole registry.
+		m.LoadOrder = len(merged)
 		merged[m.Manifest.Name] = m
 		return merged, nil
 	})

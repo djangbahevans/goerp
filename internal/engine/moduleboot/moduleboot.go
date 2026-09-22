@@ -323,11 +323,11 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 	modules := make(map[string]*module.LoadedModule, len(sources))
 	table := route.New()
 
-	for _, src := range sources {
+	for i, src := range sources {
 		mf, err := manifest.Load(src.ManifestBytes)
 		if err == nil {
 			if upstream, blocked := failedDependency(mf.DependsOn, modules); blocked {
-				m := &module.LoadedModule{Manifest: *mf, PackagePath: src.PackagePath}
+				m := &module.LoadedModule{Manifest: *mf, PackagePath: src.PackagePath, LoadOrder: i}
 				m.FailDependency(upstream)
 				modules[src.Name] = m
 				continue
@@ -335,6 +335,7 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 		}
 
 		m := loader.LoadModule(ctx, rt, poolCfg, src)
+		m.LoadOrder = i
 		if m.Status != module.StatusFailed {
 			explicit := route.ExplicitRoutesFrom(m.ExplicitRoutes)
 			if suppressed, err := route.RegisterRoutes(table, src.Name, m.Manifest.Type, explicit, m.ModelDecls); err != nil {

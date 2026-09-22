@@ -464,6 +464,33 @@ func TestLoadCascading_DependentOfFailedModuleIsSkipped(t *testing.T) {
 	}
 }
 
+func TestLoadCascading_SetsLoadOrderFromSourcesIndex(t *testing.T) {
+	rt := newTestRuntime(t)
+	garbage := []byte("not a wasm binary")
+
+	// "a" fails; "b" depends on it and is cascade-failed; "c" loads
+	// normally. LoadOrder must reflect each module's position in the
+	// already dependency-ordered sources slice regardless of which branch
+	// (direct load vs. cascaded failure) assigns it.
+	ordered := []loader.Source{
+		{Name: "a", ManifestBytes: manifestJSON(t, "a", garbage, nil), WasmBytes: garbage},
+		{Name: "b", ManifestBytes: manifestJSON(t, "b", okModule, []string{"a"}), WasmBytes: okModule},
+		{Name: "c", ManifestBytes: manifestJSON(t, "c", okModule, nil), WasmBytes: okModule},
+	}
+
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), ordered)
+
+	if got := modules["a"].LoadOrder; got != 0 {
+		t.Errorf("a.LoadOrder = %d, want 0", got)
+	}
+	if got := modules["b"].LoadOrder; got != 1 {
+		t.Errorf("b.LoadOrder = %d, want 1", got)
+	}
+	if got := modules["c"].LoadOrder; got != 2 {
+		t.Errorf("c.LoadOrder = %d, want 2", got)
+	}
+}
+
 func TestLoadCascading_TransitiveDependentIsAlsoSkipped(t *testing.T) {
 	rt := newTestRuntime(t)
 	garbage := []byte("not a wasm binary")

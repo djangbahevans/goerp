@@ -1,5 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
-import type { ResourceRegistryEntry } from "@goerp/sdk/schema";
+import { componentRegistry, type ResourceRegistryEntry, type ViewExtensionEntry } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -16,35 +16,42 @@ import type { Row } from "../list/list-view-types.js";
 import { FormTabsRenderer, resolveRecordExpression } from "./form-tabs.js";
 import type { FormTab } from "./form-view-types.js";
 
-const { resolveViewMock, resolveResourceMock, useInfiniteListMock, useRelationLabelsMock } = vi.hoisted(() => ({
-  resolveViewMock: vi.fn(),
-  // Every CRUD path present by default — a no-op for filterViewByCapability,
-  // preserving this file's existing assertions about unfiltered view
-  // content. Capability filtering itself is form-tabs.test.tsx's own
-  // concern to cover, not every other test in this file's.
-  resolveResourceMock: vi.fn<() => Promise<ResourceRegistryEntry | undefined>>(async () => ({
-    module: "sales",
-    resource: "sales.order",
-    listPath: "/orders",
-    getPath: "/orders/{id}",
-    createPath: "/orders",
-    updatePath: "/orders/{id}",
-    deletePath: "/orders/{id}",
-    pivotPath: null,
-    listMethod: "GET",
-    createMethod: "POST",
-    updateMethod: "PUT",
-    deleteMethod: "DELETE",
-  })),
-  useInfiniteListMock: vi.fn(),
-  useRelationLabelsMock: vi.fn(() => new Map()),
-}));
+const { resolveViewMock, resolveResourceMock, forTargetMock, useInfiniteListMock, useRelationLabelsMock } = vi.hoisted(
+  () => ({
+    resolveViewMock: vi.fn(),
+    // Every CRUD path present by default — a no-op for filterViewByCapability,
+    // preserving this file's existing assertions about unfiltered view
+    // content. Capability filtering itself is form-tabs.test.tsx's own
+    // concern to cover, not every other test in this file's.
+    resolveResourceMock: vi.fn<() => Promise<ResourceRegistryEntry | undefined>>(async () => ({
+      module: "sales",
+      resource: "sales.order",
+      listPath: "/orders",
+      getPath: "/orders/{id}",
+      createPath: "/orders",
+      updatePath: "/orders/{id}",
+      deletePath: "/orders/{id}",
+      pivotPath: null,
+      listMethod: "GET",
+      createMethod: "POST",
+      updateMethod: "PUT",
+      deleteMethod: "DELETE",
+    })),
+    // No extensions target the current view by default — form-tabs.test.tsx's
+    // own view-extension-registry.test.ts tests the join/ordering logic
+    // this mock stands in for.
+    forTargetMock: vi.fn<() => Promise<ViewExtensionEntry[]>>(async () => []),
+    useInfiniteListMock: vi.fn(),
+    useRelationLabelsMock: vi.fn(() => new Map()),
+  }),
+);
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
   return {
     ...actual,
     viewDeclarationRegistry: { resolve: resolveViewMock },
     resourceRegistry: { resolve: resolveResourceMock },
+    viewExtensionRegistry: { forTarget: forTargetMock },
   };
 });
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
@@ -56,6 +63,7 @@ afterEach(() => {
   cleanup();
   resolveViewMock.mockReset();
   resolveResourceMock.mockClear();
+  forTargetMock.mockClear();
   useInfiniteListMock.mockReset();
 });
 
@@ -96,6 +104,7 @@ async function renderTabs(tabs: FormTab[], record: Row = {}) {
             tabs={tabs}
             resource="contacts.contact"
             module="contacts"
+            viewName="contacts_form"
             record={record}
             recordId="01j"
             onChange={vi.fn()}
@@ -321,6 +330,106 @@ describe("FormTabsRenderer", () => {
   });
 });
 
+describe("FormTabsRenderer view extensions", () => {
+  afterEach(() => {
+    forTargetMock.mockReset();
+    componentRegistry.unregister("hr.EmploymentTab");
+  });
+
+  it("renders a 'view'-type extension tab appended after the form's own tabs, dispatched to the resolved view", async () => {
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_form", extension: "hr_employees_tab" },
+        definition: {
+          name: "hr_employees_tab",
+          type: "tab",
+          target_section: "tabs",
+          position: "append",
+          tab: { label: "Employees", type: "view", view: "hr.employees_list" },
+        },
+      },
+    ]);
+    resolveViewMock.mockResolvedValue({
+      name: "employees_list",
+      type: "list",
+      resource: "hr.employee",
+      label: "Employees",
+    });
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [{ id: "e1" }], meta: { cursor: null, hasMore: false } }] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    await renderTabs([{ label: "General", type: "fields", sections: [] }]);
+
+    await screen.findByRole("tab", { name: "Employees" });
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["General", "Employees"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Employees" }));
+    expect(await screen.findByRole("table", { name: "Employees" })).toBeTruthy();
+    // The extending module ("hr"), not the target form's module
+    // ("contacts"), is what an unqualified ref inside a cross-module
+    // extension tab would resolve against — asserted indirectly here via
+    // resolveViewMock having been reached with the fully-qualified ref.
+    expect(resolveViewMock).toHaveBeenCalledWith("hr.employees_list", "hr");
+  });
+
+  it("renders a 'component'-type extension tab with the target form's own record", async () => {
+    const EmploymentTab = ({ record }: { record: Row }) => <p>Employment for {String(record.name)}</p>;
+    componentRegistry.register("hr.EmploymentTab", EmploymentTab);
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_form", extension: "hr_employment_tab" },
+        definition: {
+          name: "hr_employment_tab",
+          type: "tab",
+          target_section: "tabs",
+          position: "prepend",
+          tab: { label: "Employment", type: "component", component: "hr.EmploymentTab" },
+        },
+      },
+    ]);
+
+    await renderTabs([{ label: "General", type: "fields", sections: [] }], { name: "Ada" });
+
+    await screen.findByRole("tab", { name: "Employment" });
+    const tabs = screen.getAllByRole("tab");
+    // position: "prepend" — the extension tab appears before the form's own.
+    expect(tabs.map((t) => t.textContent)).toEqual(["Employment", "General"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Employment" }));
+    expect(await screen.findByText("Employment for Ada")).toBeTruthy();
+  });
+
+  it("renders unchanged when the extension's target view/definition doesn't resolve", async () => {
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_form", extension: "hr_missing" },
+        definition: undefined,
+      },
+    ]);
+
+    await renderTabs([{ label: "General", type: "fields", sections: [] }]);
+
+    await waitFor(() => expect(forTargetMock).toHaveBeenCalled());
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["General"]);
+  });
+});
+
 describe("FormTabsRenderer conditions", () => {
   const tabs: FormTab[] = [
     { label: "General", type: "fields", sections: [] },
@@ -356,6 +465,7 @@ describe("FormTabsRenderer conditions", () => {
             ]}
             resource="contacts.contact"
             module="contacts"
+            viewName="contacts_form"
             record={record}
             recordId="01j"
             onChange={vi.fn()}

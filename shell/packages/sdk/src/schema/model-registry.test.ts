@@ -26,6 +26,9 @@ const schema: MetaSchema = {
       navigation: [],
       permissions: [],
       frontend: null,
+      view_extensions: [],
+      view_extension_definitions: [],
+      load_order: 0,
       public_config: {},
       routes: [],
       models: {
@@ -41,6 +44,9 @@ const schema: MetaSchema = {
       navigation: [],
       permissions: [],
       frontend: null,
+      view_extensions: [],
+      view_extension_definitions: [],
+      load_order: 0,
       public_config: {},
       routes: [],
       models: {
