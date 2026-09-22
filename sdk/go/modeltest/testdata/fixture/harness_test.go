@@ -1,6 +1,7 @@
 package fixture
 
 import (
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/djangbahevans/goerp/sdk/go/modeltest"
@@ -194,4 +195,46 @@ func TestWorkflowTransitionRouteIsServedByTheEngine(t *testing.T) {
 		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
 	}
 	h.DB.AssertExists("widgets_gadget", map[string]any{"id": id, "state": "done"})
+}
+
+// TestKindProbe_FieldKindsRoundTrip pins goerp#960's own empirical
+// findings as regression coverage: kindProbeRow (cmd/module/main.go)
+// only compiles and decodes because each field's Go type already
+// matches what orm's setFieldValue actually receives for that
+// FieldKind — a future engine change to host.orm's msgpack decode that
+// shifted one of these types would make this round trip fail, not
+// silently drift.
+func TestKindProbe_FieldKindsRoundTrip(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.POST("/widgets/kind-probe", map[string]any{})
+	if resp.StatusCode != 201 {
+		t.Fatalf("status = %d, want 201; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+
+	if got := resp.JSON("decimal"); got != "123.45" {
+		t.Errorf("decimal = %v, want \"123.45\" (model.Decimal decodes as a Go string)", got)
+	}
+	if got := resp.JSON("timestamp"); got != "2024-03-15T10:30:00Z" {
+		t.Errorf("timestamp = %v, want 2024-03-15T10:30:00Z (model.TimestampTZ decodes as time.Time)", got)
+	}
+	if got := resp.JSON("date"); got != "2024-03-15T00:00:00Z" {
+		t.Errorf("date = %v, want 2024-03-15T00:00:00Z (model.Date decodes as time.Time)", got)
+	}
+	if got := resp.JSON("time"); got != "13:45:00" {
+		t.Errorf("time = %v, want \"13:45:00\" (model.Time decodes as a Go string)", got)
+	}
+
+	jsonbRaw, _ := resp.JSON("jsonb").(string)
+	var jsonb map[string]any
+	if err := json.Unmarshal([]byte(jsonbRaw), &jsonb); err != nil {
+		t.Fatalf("jsonb = %q is not valid JSON: %v", jsonbRaw, err)
+	}
+	if jsonb["key"] != "value" || jsonb["n"] != float64(1) {
+		t.Errorf("jsonb decoded = %+v, want {key: value, n: 1}", jsonb)
+	}
+
+	if got := resp.JSON("bytea"); got != "hello-bytes" {
+		t.Errorf("bytea = %v, want \"hello-bytes\" (model.Bytea decodes as []byte)", got)
+	}
 }
