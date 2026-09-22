@@ -68,6 +68,11 @@ export const ListColumnSchema = v.looseObject({
   currency_field: opt(v.string()),
   component: opt(v.string()),
   component_props: opt(v.record(v.string(), v.unknown())),
+  // Set only on a view-extension "columns" definition's own column
+  // (view-system.md §10) — gates it directly since its field is namespaced
+  // ({module}:{field}), not a real field the target resource's own
+  // field-level access (checkField) can resolve.
+  permission: opt(v.string()),
 });
 export type ListColumn = v.InferOutput<typeof ListColumnSchema>;
 
@@ -108,6 +113,10 @@ export const ListFilterSchema = v.looseObject({
   resource_filter: opt(v.record(v.string(), v.unknown())),
   condition: opt(v.string()),
   search_params: opt(v.string()),
+  // Set only on a view-extension "filter" definition's own filter
+  // (view-system.md §10) — same reasoning as ListColumnSchema's own
+  // `permission`.
+  permission: opt(v.string()),
 });
 export type ListFilter = v.InferOutput<typeof ListFilterSchema>;
 

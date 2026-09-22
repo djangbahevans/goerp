@@ -92,6 +92,15 @@ func compileListFilter(q url.Values, qualifiedModel string, md model.ModelDeclar
 		if op == "" {
 			op = "eq"
 		}
+		// A colon-namespaced key (view-system.md §10's "Adding filters to
+		// another module's list") names a field an extending module owns,
+		// not this model — ignored here rather than failing, so an
+		// EnableOps list endpoint doesn't 400 just because an extension
+		// module isn't loaded, or hasn't been asked to apply it itself.
+		// An un-namespaced unknown field is still a real error below.
+		if strings.Contains(field, ":") {
+			continue
+		}
 		if !declared[field] {
 			return "", &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + field + " is not declared on " + qualifiedModel}
 		}

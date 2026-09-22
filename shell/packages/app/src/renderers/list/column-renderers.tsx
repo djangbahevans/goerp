@@ -123,6 +123,25 @@ export interface RenderCellOptions {
   relationLabel?: string;
 }
 
+// view-system.md §10's "Adding columns to another module's list": an
+// extension batch loader that already fetched the full related record can
+// return `{id, display}` directly for a "relation" column instead of a
+// bare id — the shell renders `display` as-is rather than round-tripping
+// through relationBatchSpecs/useRelationLabels for a label it already has.
+interface RelationValueObject {
+  id: string;
+  display: string;
+}
+
+function isRelationValueObject(value: unknown): value is RelationValueObject {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { display?: unknown }).display === "string"
+  );
+}
+
 export function renderCellContent(column: ListColumn, row: Row, options: RenderCellOptions = {}): ReactNode {
   const value = row[column.field];
   const type = column.type ?? "text";
@@ -229,7 +248,11 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
       );
 
     case "relation": {
-      const display = column.display_field ? row[column.display_field] : (options.relationLabel ?? value);
+      const display = column.display_field
+        ? row[column.display_field]
+        : isRelationValueObject(value)
+          ? value.display
+          : (options.relationLabel ?? value);
       return display == null ? "" : String(display);
     }
 
