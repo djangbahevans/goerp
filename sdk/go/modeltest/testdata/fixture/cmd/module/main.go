@@ -10,25 +10,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/events"
-	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/djangbahevans/goerp/sdk/go/modeltest/testdata/fixture/schema"
 )
-
-var schema = model.Schema{
-	Models: []*model.ModelDeclaration{
-		model.Define("widgets.widget", model.Label("Widget"), model.LabelPlural("Widgets"), model.Table("widgets")).
-			WithStandardFields().
-			Field("name", model.Text().Required()),
-		model.Define("widgets.gadget").
-			WithStandardFields().
-			Field("name", model.Text().Required()).
-			Field("state", model.Selection("draft", "done").Default("'draft'").Workflow(
-				model.Transition("draft", "done", "finish"))).
-			EnableOps(model.List, model.Get, model.Create),
-		model.Define("widgets.gizmo", model.LabelPlural("Gizmo Boxes")).
-			WithStandardFields().
-			EnableOps(model.List),
-	},
-}
 
 type createWidgetBody struct {
 	Name string `json:"name"`
@@ -136,7 +119,7 @@ func getRoutes() uint64 {
 
 //go:wasmexport get_model_declarations
 func getModelDeclarations() uint64 {
-	return engine.WriteModels(schema)
+	return engine.WriteModels(schema.Schema)
 }
 
 //go:wasmexport get_data_migrations

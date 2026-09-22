@@ -1,10 +1,13 @@
 package module
 
 import (
+	"context"
 	"encoding/json/v2"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
@@ -20,6 +23,7 @@ func TestCreateScaffoldsExpectedLayout(t *testing.T) {
 		"go.mod",
 		"manifest.json",
 		filepath.Join("cmd", "module", "main.go"),
+		filepath.Join("schema", "schema.go"),
 		filepath.Join("translations", "en.json"),
 	} {
 		if _, err := os.Stat(filepath.Join(dir, path)); err != nil {
@@ -29,6 +33,46 @@ func TestCreateScaffoldsExpectedLayout(t *testing.T) {
 
 	if info, err := os.Stat(filepath.Join(dir, "internal")); err != nil || !info.IsDir() {
 		t.Errorf("expected internal/ directory to exist")
+	}
+}
+
+// TestCreateScaffoldsCompilableSchemaPackage is goerp#958's own acceptance
+// criterion: a freshly scaffolded module's schema/schema.go compiles and
+// cmd/module/main.go imports it and calls engine.WriteModels(schema.Schema).
+// A scaffolded module's go.mod carries no require for this repo's own SDK
+// (Create never runs `go get`/`go mod tidy` — that's on whoever scaffolds
+// the module, same as today), so this test adds a go.work workspace over
+// the scaffold and this repo's checkout to resolve the SDK import instead
+// of editing the scaffolded go.mod itself.
+func TestCreateScaffoldsCompilableSchemaPackage(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "demo_module")
+	if err := Create(dir, "demo_module", "domain", "github.com/acmecorp"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	workInit := exec.CommandContext(ctx, "go", "work", "init", ".", repoRoot)
+	workInit.Dir = dir
+	if out, err := workInit.CombinedOutput(); err != nil {
+		t.Fatalf("go work init: %v\n%s", err, out)
+	}
+
+	cmd := exec.CommandContext(ctx, "go", "build", "-buildmode=c-shared", "-o", os.DevNull, "./cmd/module")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build ./cmd/module: %v\n%s", err, out)
 	}
 }
 

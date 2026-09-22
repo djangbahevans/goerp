@@ -11,6 +11,34 @@ import (
 
 const scaffoldGoVersion = "1.27.0"
 
+// scaffoldSchemaGo is the module's own model.Schema declaration — an
+// importable package (go-sdk-reference.md §22) so goerp module
+// generate can build and run it in isolation, without pulling in the
+// rest of the module.
+const scaffoldSchemaGo = `package schema
+
+import "github.com/djangbahevans/goerp/sdk/go/model"
+
+var Schema = model.Schema{}
+`
+
+// scaffoldMainGo is a %s-templated string — modulePath fills the schema
+// package's import path.
+const scaffoldMainGo = `package main
+
+import (
+	"github.com/djangbahevans/goerp/sdk/go/engine"
+	"%s/schema"
+)
+
+//go:wasmexport get_model_declarations
+func getModelDeclarations() uint64 {
+	return engine.WriteModels(schema.Schema)
+}
+
+func main() {}
+`
+
 func Create(dir, name, moduleType, org string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create module directory: %w", err)
@@ -32,10 +60,17 @@ func Create(dir, name, moduleType, org string) error {
 		return err
 	}
 
+	if err := os.MkdirAll(filepath.Join(dir, "schema"), 0o755); err != nil {
+		return fmt.Errorf("create schema directory: %w", err)
+	}
+	if err := writeFile(filepath.Join(dir, "schema", "schema.go"), []byte(scaffoldSchemaGo)); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(filepath.Join(dir, "cmd", "module"), 0o755); err != nil {
 		return fmt.Errorf("create cmd/module directory: %w", err)
 	}
-	if err := writeFile(filepath.Join(dir, "cmd", "module", "main.go"), []byte("package main\n\nfunc main() {}\n")); err != nil {
+	if err := writeFile(filepath.Join(dir, "cmd", "module", "main.go"), fmt.Appendf(nil, scaffoldMainGo, modulePath)); err != nil {
 		return err
 	}
 
