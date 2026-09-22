@@ -42,6 +42,7 @@ func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql
 		NewFunctionBuilder().WithFunc(makeORMSearch(r, db)).Export("search").
 		NewFunctionBuilder().WithFunc(makeORMSearchRead(r, db)).Export("search_read").
 		NewFunctionBuilder().WithFunc(makeORMRead(r, db, cacheClient)).Export("read").
+		NewFunctionBuilder().WithFunc(makeORMAggregate(r, db)).Export("aggregate").
 		NewFunctionBuilder().WithFunc(makeORMCreate(r, db, insertClient, cacheClient)).Export("create").
 		NewFunctionBuilder().WithFunc(makeORMCreateBatch(r, db, insertClient)).Export("create_batch").
 		NewFunctionBuilder().WithFunc(makeORMFirstOrCreate(r, db, insertClient)).Export("first_or_create").
@@ -286,10 +287,11 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 	return ORMSearchReadOutput{Records: records, NextCursor: nextCursor}, nil
 }
 
-// aggregateSQLFuncs maps a PivotValue.aggregation name (manifest-spec.md
-// §9.5) to the SQL aggregate function it compiles to. "count_distinct"
-// isn't here — it needs a DISTINCT keyword inside the call, not just a
-// different function name, so ORMAggregate special-cases it.
+// aggregateSQLFuncs maps a PivotValue/ORMAggregateValue aggregation name
+// (manifest-spec.md §9.5) to the SQL aggregate function it compiles to.
+// "count_distinct" isn't here — it needs a DISTINCT keyword inside the
+// call, not just a different function name, so ORMPivot and ORMAggregate
+// each special-case it.
 var aggregateSQLFuncs = map[string]string{
 	"sum":   "SUM",
 	"count": "COUNT",
@@ -298,20 +300,20 @@ var aggregateSQLFuncs = map[string]string{
 	"max":   "MAX",
 }
 
-type ORMAggregateValue struct {
+type PivotValue struct {
 	Field       string
 	Aggregation string
 }
 
-type ORMAggregateInput struct {
+type ORMPivotInput struct {
 	Model   string
 	Domain  string
 	Rows    []string
 	Columns []string
-	Values  []ORMAggregateValue
+	Values  []PivotValue
 }
 
-type ORMAggregateOutput struct {
+type ORMPivotOutput struct {
 	// Cells mirror the wire shape verbatim (view-system.md §8) — each is
 	// {"row": []any, "column": []any, "values": map[string]any}, with a
 	// nil entry marking a GROUP BY ROLLUP subtotal above that axis
@@ -319,37 +321,38 @@ type ORMAggregateOutput struct {
 	Cells []map[string]any
 }
 
-// ORMAggregate is the engine-native counterpart to ORMSearchRead for a
+// ORMPivot is the engine-native counterpart to ORMSearchRead for a
 // Pivot-enabled model's GET {resource}/pivot route (dispatchORMPivot) —
 // there is no WASM-guest-callable host.orm import for this, unlike every
 // other function in this file: a module has no way to run a real
 // Postgres-side GROUP BY today (sdk/go/orm only exposes row-shaped
-// Search/SearchRead/Read), so aggregation is engine-native only, gated
-// behind EnableOps(model.Pivot) the same way List/Get already are.
+// Search/SearchRead/Read and, for a single ungrouped total,
+// host.orm.aggregate), so grouped aggregation is engine-native only,
+// gated behind EnableOps(model.Pivot) the same way List/Get already are.
 //
 // One query produces every row/column subtotal a collapsed PivotGrid
 // group needs: GROUP BY ROLLUP(rows...), ROLLUP(columns...) generates the
 // finest-grain groups plus every coarser rollup (including the grand
 // total) in a single pass, and GROUPING() on each dimension column
 // disambiguates "rolled up" from "genuinely NULL in the data".
-func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMAggregateInput) (ORMAggregateOutput, *abi.HostError) {
+func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMPivotInput) (ORMPivotOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
-		return ORMAggregateOutput{}, abi.CapabilityDenied("db.read")
+		return ORMPivotOutput{}, abi.CapabilityDenied("db.read")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to aggregate"}
+		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to aggregate"}
 	}
 
 	if len(input.Rows) == 0 && len(input.Columns) == 0 {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "pivot requires at least one rows or columns field"}
+		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "pivot requires at least one rows or columns field"}
 	}
 	if len(input.Values) == 0 {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "pivot requires at least one values entry"}
+		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "pivot requires at least one values entry"}
 	}
 
 	declared := make(map[string]model.FieldDef, len(md.Fields))
@@ -381,28 +384,31 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 	dimFields = append(dimFields, input.Columns...)
 	for _, f := range dimFields {
 		if hostErr := checkField(f); hostErr != nil {
-			return ORMAggregateOutput{}, hostErr
+			return ORMPivotOutput{}, hostErr
 		}
 	}
 	for _, v := range input.Values {
 		if hostErr := checkField(v.Field); hostErr != nil {
-			return ORMAggregateOutput{}, hostErr
+			return ORMPivotOutput{}, hostErr
 		}
 		if v.Aggregation != "count_distinct" {
 			if _, ok := aggregateSQLFuncs[v.Aggregation]; !ok {
-				return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unknown aggregation " + v.Aggregation, Details: map[string]any{"aggregation": v.Aggregation}}
+				return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unknown aggregation " + v.Aggregation, Details: map[string]any{"aggregation": v.Aggregation}}
 			}
+		}
+		if (v.Aggregation == "sum" || v.Aggregation == "avg" || v.Aggregation == "min" || v.Aggregation == "max") && !isNumericKind(declared[v.Field].Kind) {
+			return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + v.Field + " is not numeric", Details: map[string]any{"field": v.Field}}
 		}
 	}
 
 	whereFrag, args, hostErr := compileDomain(input.Domain)
 	if hostErr != nil {
-		return ORMAggregateOutput{}, hostErr
+		return ORMPivotOutput{}, hostErr
 	}
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, "")
 	if hostErr != nil {
-		return ORMAggregateOutput{}, hostErr
+		return ORMPivotOutput{}, hostErr
 	}
 	defer finish()
 
@@ -445,13 +451,13 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 		strings.Join(selectExprs, ", "), table, whereFrag, groupByClause)
 	sqlRows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 	defer sqlRows.Close()
 
 	records, err := scanRowsToMaps(sqlRows)
 	if err != nil {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	cells := make([]map[string]any, 0, len(records))
@@ -465,7 +471,7 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 		cells = append(cells, map[string]any{"row": rowVals, "column": colVals, "values": valuesOut})
 	}
 
-	return ORMAggregateOutput{Cells: cells}, nil
+	return ORMPivotOutput{Cells: cells}, nil
 }
 
 // dimensionValues reads fields' grouped values out of one aggregation

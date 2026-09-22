@@ -101,6 +101,22 @@ func runOrmFlow() uint64 {
 	writeWhereOut, err := orm.WriteWhere(widgetModel, "record.price = 300", map[string]any{"name": "Bulk"})
 	record("write_where", strconv.Itoa(writeWhereOut.Count), err)
 
+	// Three widgets exist at this point: id1=200, id2=300, id3=300.
+	count, err := orm.Count(widgetModel, "")
+	record("count", strconv.FormatInt(count, 10), err)
+
+	sum, err := orm.Sum(widgetModel, "price", "")
+	record("sum", strconv.FormatFloat(sum, 'f', 0, 64), err)
+
+	min, err := orm.Min(widgetModel, "price", "")
+	record("min", strconv.FormatFloat(min, 'f', 0, 64), err)
+
+	max, err := orm.Max(widgetModel, "price", "")
+	record("max", strconv.FormatFloat(max, 'f', 0, 64), err)
+
+	avg, err := orm.Avg(widgetModel, "price", "")
+	record("avg", strconv.FormatFloat(avg, 'f', 2, 64), err)
+
 	mutated, err := orm.Mutate[widget](widgetModel, id2, orm.Decrement("price", int64(50)), orm.Where("record.price >= 50"))
 	record("mutate", strconv.FormatInt(mutated.Price, 10), err)
 
@@ -155,6 +171,12 @@ func runOrmTxFlow() uint64 {
 		if err != nil {
 			return err
 		}
+
+		countTx, err := orm.CountTx(tx, widgetModel, "record.name = 'Tx Widget A'")
+		if err != nil {
+			return err
+		}
+		record("count_tx", strconv.FormatInt(countTx, 10), nil)
 
 		if err := orm.WriteTx(tx, widgetModel, id1, map[string]any{"price": int64(750)}, nil); err != nil {
 			return err

@@ -187,7 +187,7 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 // route (view-system.md §8 "use_wasm: false"): ?rows=a,b&columns=c&
 // values=field:agg,... plus the same filter[...] query params dispatchORMList
 // accepts, reusing compileListFilter as-is. The actual GROUP BY ROLLUP
-// aggregation is wasm.ORMAggregate's job — this only parses the wire format.
+// aggregation is wasm.ORMPivot's job — this only parses the wire format.
 func (e *Engine) dispatchORMPivot(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext) {
 	q := r.URL.Query()
 
@@ -211,7 +211,7 @@ func (e *Engine) dispatchORMPivot(ctx context.Context, w http.ResponseWriter, r 
 		return
 	}
 
-	out, hostErr := wasm.ORMAggregate(ctx, e.primaryDB, modCtx, wasm.ORMAggregateInput{
+	out, hostErr := wasm.ORMPivot(ctx, e.primaryDB, modCtx, wasm.ORMPivotInput{
 		Model:   entry.Manifest.Model,
 		Domain:  domainExpr,
 		Rows:    rows,
@@ -237,21 +237,21 @@ func splitNonEmpty(raw string) []string {
 
 // parsePivotValues parses ?values=field:agg,field:agg,... (view-system.md
 // §8) into structured pairs — malformed syntax (no ":", or an empty
-// field/aggregation) is orm.validation_failed, the same code ORMAggregate
+// field/aggregation) is orm.validation_failed, the same code ORMPivot
 // uses for an unrecognized aggregation name, since both are caller input
 // errors rather than a specific-field lookup failure.
-func parsePivotValues(raw string) ([]wasm.ORMAggregateValue, *abi.HostError) {
+func parsePivotValues(raw string) ([]wasm.PivotValue, *abi.HostError) {
 	if raw == "" {
 		return nil, nil
 	}
 	parts := strings.Split(raw, ",")
-	values := make([]wasm.ORMAggregateValue, 0, len(parts))
+	values := make([]wasm.PivotValue, 0, len(parts))
 	for _, part := range parts {
 		field, agg, ok := strings.Cut(part, ":")
 		if !ok || field == "" || agg == "" {
 			return nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "values entry " + part + " must be field:aggregation"}
 		}
-		values = append(values, wasm.ORMAggregateValue{Field: field, Aggregation: agg})
+		values = append(values, wasm.PivotValue{Field: field, Aggregation: agg})
 	}
 	return values, nil
 }

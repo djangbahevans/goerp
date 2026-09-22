@@ -130,6 +130,11 @@ func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) 
 		"first_or_create": "false", // "Widget A" already exists from the create step
 		"write_many":      "2",
 		"write_where":     "2",
+		"count":           "3",
+		"sum":             "800",
+		"min":             "200",
+		"max":             "300",
+		"avg":             "266.67",
 		"mutate":          "250",
 		"mutate_guard":    "",
 		"unlink":          "1",
@@ -143,8 +148,8 @@ func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) 
 			t.Errorf("step %q detail = %q, want %q", s.Step, s.Detail, want)
 		}
 	}
-	if len(report.Steps) != 12 {
-		t.Errorf("got %d steps, want 12 (one per host.orm.* function the fixture calls, plus a failing-guard mutate): %+v", len(report.Steps), report.Steps)
+	if len(report.Steps) != 17 {
+		t.Errorf("got %d steps, want 17 (one per host.orm.* function the fixture calls, plus a failing-guard mutate): %+v", len(report.Steps), report.Steps)
 	}
 }
 
@@ -207,6 +212,7 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 		"read_one_tx":        "Tx Widget A",
 		"write_tx":           "",
 		"create_batch_tx":    "1",
+		"count_tx":           "1", // CountTx, run before WriteTx renamed anything else matching
 		"write_many_tx":      "1",
 		"write_where_tx":     "1",
 		"mutate_tx":          "65",
@@ -223,8 +229,8 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 			t.Errorf("step %q detail = %q, want %q", s.Step, s.Detail, want)
 		}
 	}
-	if len(report.Steps) != 10 {
-		t.Errorf("got %d steps, want 10: %+v", len(report.Steps), report.Steps)
+	if len(report.Steps) != 11 {
+		t.Errorf("got %d steps, want 11: %+v", len(report.Steps), report.Steps)
 	}
 
 	// The whole point of _Tx: only WithTx's own commit persists anything.

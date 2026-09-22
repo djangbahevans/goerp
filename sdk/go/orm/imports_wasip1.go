@@ -11,6 +11,9 @@ func hostORMSearchRead(ptr, size uint32) uint64
 //go:wasmimport host.orm read
 func hostORMRead(ptr, size uint32) uint64
 
+//go:wasmimport host.orm aggregate
+func hostORMAggregate(ptr, size uint32) uint64
+
 //go:wasmimport host.orm create
 func hostORMCreate(ptr, size uint32) uint64
 

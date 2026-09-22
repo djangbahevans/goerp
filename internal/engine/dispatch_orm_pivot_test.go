@@ -287,6 +287,15 @@ func TestDispatchORMRoute_Pivot_UnknownAggregationReturns400(t *testing.T) {
 	}
 }
 
+func TestDispatchORMRoute_Pivot_SumOnNonNumericFieldReturns400(t *testing.T) {
+	f := newDispatchORMPivotFixture(t)
+
+	w, _ := f.dispatch("/testmodule/sales/pivot?rows=amount&values=region:sum")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestDispatchORMRoute_Pivot_ReadDeniedFieldReturns403(t *testing.T) {
 	f := newDispatchORMPivotFixture(t)
 

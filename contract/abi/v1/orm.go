@@ -190,6 +190,30 @@ type ORMRecordDeletedPayload struct {
 	Record map[string]any `msgpack:"record"`
 }
 
+// ORMAggregateValue is one {field, aggregation} pair of host.orm.aggregate.
+// Field is empty only for "count", which then counts every row the
+// domain and the caller's row-level security admit rather than a
+// specific column's non-null values.
+type ORMAggregateValue struct {
+	Field       string `msgpack:"field,omitempty"`
+	Aggregation string `msgpack:"aggregation"`
+}
+
+// ORMAggregateInput is the request of host.orm.aggregate.
+type ORMAggregateInput struct {
+	Model  string              `msgpack:"model"`
+	Domain string              `msgpack:"domain,omitempty"`
+	Values []ORMAggregateValue `msgpack:"values"`
+	TxID   string              `msgpack:"tx_id"`
+}
+
+// ORMAggregateOutput is the response of host.orm.aggregate: the ungrouped
+// grand total for each requested value, keyed by "<field>_<aggregation>"
+// ("_count" when Field is empty).
+type ORMAggregateOutput struct {
+	Values map[string]any `msgpack:"values"`
+}
+
 // ORMUnlinkInput is the request of host.orm.unlink.
 type ORMUnlinkInput struct {
 	Model string   `msgpack:"model"`

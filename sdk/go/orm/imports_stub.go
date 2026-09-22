@@ -17,6 +17,10 @@ func hostORMRead(ptr, size uint32) uint64 {
 	panic("sdk/go/orm: host.orm.read is only available in a wasip1 build")
 }
 
+func hostORMAggregate(ptr, size uint32) uint64 {
+	panic("sdk/go/orm: host.orm.aggregate is only available in a wasip1 build")
+}
+
 func hostORMCreate(ptr, size uint32) uint64 {
 	panic("sdk/go/orm: host.orm.create is only available in a wasip1 build")
 }
