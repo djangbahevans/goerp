@@ -7,10 +7,13 @@
 package main
 
 import (
+	"time"
+
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/events"
 	"github.com/djangbahevans/goerp/sdk/go/modeltest/testdata/fixture/schema"
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
 type createWidgetBody struct {
@@ -30,6 +33,28 @@ type widgetRow struct {
 	Name string `db:"name"`
 }
 
+// kindProbeRow's field types are goerp#960's own empirically-observed
+// result — the Go type orm's setFieldValue actually receives at raw for
+// each of these six kinds, confirmed by /kind-probe's round trip below
+// decoding successfully (a wrong type here fails setFieldValue's
+// AssignableTo/ConvertibleTo check with a "cannot assign %s into %s"
+// error naming the real type). Decimal and Time decode as plain
+// strings, not a numeric or a time.Time — Postgres NUMERIC and TIME
+// values arrive pre-formatted rather than as Go's own numeric/time
+// types. JSONB decodes as raw []byte (the column's own JSON text, not a
+// parsed map[string]any) — a generated field of this kind still has to
+// be unmarshaled by the caller. TimestampTZ and Date both decode as
+// time.Time; Bytea decodes as []byte, same as JSONB.
+type kindProbeRow struct {
+	ID        string    `db:"id"`
+	Decimal   string    `db:"decimal_field"`
+	Timestamp time.Time `db:"timestamp_field"`
+	Date      time.Time `db:"date_field"`
+	Time      string    `db:"time_field"`
+	JSONB     []byte    `db:"jsonb_field"`
+	Bytea     []byte    `db:"bytea_field"`
+}
+
 func init() {
 	engine.Action("widgets.gizmo", engine.List, func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"served_by": "module", "action": req.Action})
@@ -42,6 +67,41 @@ func init() {
 	engine.Action("widgets.gizmo", "restock", func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"action": req.Action})
 	}, engine.Scope(engine.CollectionAction), engine.Method(engine.MethodPut))
+
+	engine.POST("/kind-probe", func(req *engine.Request) *engine.Response {
+		vals := map[string]any{
+			"decimal_field":   123.45,
+			"timestamp_field": time.Date(2024, 3, 15, 10, 30, 0, 0, time.UTC),
+			"date_field":      time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC),
+			"time_field":      "13:45:00",
+			"jsonb_field":     map[string]any{"key": "value", "n": float64(1)},
+			"bytea_field":     []byte("hello-bytes"),
+		}
+
+		created, err := orm.Create[kindProbeRow]("widgets.kind_probe", vals)
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.kind_probe_create_failed", "message": err.Error()},
+			}}
+		}
+
+		read, err := orm.ReadOne[kindProbeRow]("widgets.kind_probe", created.ID, nil)
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.kind_probe_read_failed", "message": err.Error()},
+			}}
+		}
+
+		return engine.Created(map[string]any{
+			"id":        read.ID,
+			"decimal":   read.Decimal,
+			"timestamp": read.Timestamp.Format(time.RFC3339),
+			"date":      read.Date.Format(time.RFC3339),
+			"time":      read.Time,
+			"jsonb":     string(read.JSONB),
+			"bytea":     string(read.Bytea),
+		})
+	}, engine.Auth(engine.AuthNone))
 
 	engine.GET("/ping", func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"status": "ok"})

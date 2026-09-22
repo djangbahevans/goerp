@@ -20,5 +20,17 @@ var Schema = model.Schema{
 		model.Define("widgets.gizmo", model.LabelPlural("Gizmo Boxes")).
 			WithStandardFields().
 			EnableOps(model.List),
+		// kind_probe exists solely to round-trip the six field kinds
+		// goerp#960 empirically characterizes (Decimal, TimestampTZ,
+		// Date, Time, JSONB, Bytea) through a real Postgres read —
+		// nothing in the rest of this fixture exercises them.
+		model.Define("widgets.kind_probe", model.Table("widgets_kind_probes")).
+			WithStandardFields().
+			Field("decimal_field", model.Decimal(10, 2).Required()).
+			Field("timestamp_field", model.TimestampTZ().Required()).
+			Field("date_field", model.Date().Required()).
+			Field("time_field", model.Time().Required()).
+			Field("jsonb_field", model.JSONB().Required()).
+			Field("bytea_field", model.Bytea().Required()),
 	},
 }
