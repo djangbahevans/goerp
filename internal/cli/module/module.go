@@ -10,6 +10,7 @@ func NewCmd() *cobra.Command {
 
 	cmd.AddCommand(newBuildCmd())
 	cmd.AddCommand(newCreateCmd())
+	cmd.AddCommand(newGenerateCmd())
 	cmd.AddCommand(newInstallCmd())
 	cmd.AddCommand(newTestCmd())
 
