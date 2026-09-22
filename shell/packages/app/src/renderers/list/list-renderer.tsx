@@ -1,3 +1,4 @@
+import { PermissionContext } from "@goerp/sdk/auth";
 import { ActionButton, ActionMenu, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
@@ -6,14 +7,15 @@ import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
 import { ListFilters } from "./list-filters.js";
-import type { ListColumn, ListViewDeclaration, Row } from "./list-view-types.js";
+import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
 import { SavedFiltersChip } from "./saved-filters-chip.js";
+import { extensionsOrEmpty, useExtensionColumnRowData, useListExtensions } from "./use-list-extensions.js";
 import { useDefaultFilterApplication, useListState } from "./use-list-state.js";
 import { useSelection } from "./use-selection.js";
 import type { TreeRow } from "./use-tree-rows.js";
@@ -188,10 +190,37 @@ const DEFAULT_COLUMN_WIDTH = 160;
 // single checkbox plus padding instead of arbitrary cell content).
 const CHECKBOX_COLUMN_WIDTH = 44;
 
+// An extension column/filter's own `permission` gates it directly — unlike
+// a module's own column (field-level access via useVisibleColumns'
+// checkField), an extension's field is namespaced ({module}:{field}), not
+// a real field the target resource's own field security can resolve.
+function isPermitted<T extends { permission?: string | undefined }>(
+  entry: T,
+  check: (permission: string) => boolean,
+): boolean {
+  return !entry.permission || check(entry.permission);
+}
+
 export function ListRenderer({ view, module, recordId, embedded, baseFilter, showCreateAction }: ListRendererProps) {
   const listState = useListState(embedded, defaultSortOf(view));
   const conditions = useConditionEvaluator(view.name);
-  const { columns, hiddenColumns, revealedFields, toggleColumn } = useVisibleColumns(view);
+  const { columns: ownColumns, hiddenColumns, revealedFields, toggleColumn } = useVisibleColumns(view);
+  const permissions = useContext(PermissionContext);
+  if (!permissions) {
+    throw new Error("ListRenderer must be used within a PermissionProvider");
+  }
+  const { data: extensionsData } = useListExtensions(module, view.name);
+  const extensions = extensionsOrEmpty(extensionsData);
+  const columns: ListColumn[] = [
+    ...extensions.prependColumns.filter((c) => isPermitted(c, permissions.check)),
+    ...ownColumns,
+    ...extensions.appendColumns.filter((c) => isPermitted(c, permissions.check)),
+  ];
+  const filters: ListFilter[] = [
+    ...extensions.prependFilters.filter((f) => isPermitted(f, permissions.check)),
+    ...(view.filters ?? []),
+    ...extensions.appendFilters.filter((f) => isPermitted(f, permissions.check)),
+  ];
   const selection = useSelection();
   const navigate = useNavigate();
   const groupBySelectId = useId();
@@ -317,7 +346,6 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
     filter,
     listState.sort,
   );
-  const visibleRows = isTree ? treeRows : toFlatTreeRows(rootRows);
   // Root pages (unflattened, so "Load more" doesn't invalidate an earlier
   // page's already-resolved labels) plus each expanded node's own children
   // fetch — see fetchedPages' own doc comment for why each needs to stay
@@ -325,6 +353,24 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   const relationLabels = useRelationLabels(
     relationBatchSpecs(`${module}.${view.name}`, columns, isTree ? [...pages, ...fetchedPages] : pages),
   );
+  // view-system.md §10 "Adding columns to another module's list" —
+  // batch-loaded once per already-fetched page, keyed by row id, and
+  // merged into each row before rendering so a namespaced column reads its
+  // value the same way any other column reads row[field].
+  const extensionColumnData = useExtensionColumnRowData(
+    module,
+    view.name,
+    columns,
+    isTree ? [...pages, ...fetchedPages] : pages,
+  );
+  const baseRows = isTree ? treeRows : toFlatTreeRows(rootRows);
+  const visibleRows =
+    extensionColumnData.size === 0
+      ? baseRows
+      : baseRows.map((treeRow) => {
+          const extra = typeof treeRow.row.id === "string" ? extensionColumnData.get(treeRow.row.id) : undefined;
+          return extra ? { ...treeRow, row: { ...treeRow.row, ...extra } } : treeRow;
+        });
 
   if (isLoading) {
     return <Skeleton type="table" columns={columns.length} />;
@@ -362,10 +408,15 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
   // A tree_field view always renders as one hierarchy — group_by_options
   // and tree_field are mutually exclusive in practice (list-view-types.ts's
   // own comment), so tree mode skips groupRows entirely rather than trying
-  // to combine the two bucketings of the same rows.
+  // to combine the two bucketings of the same rows. Derived from
+  // visibleRows (not rootRows/treeRows directly) so a row's extension
+  // column data — merged into visibleRows above — survives grouping too.
   const rowGroups = isTree
-    ? [{ key: "", rows: treeRows }]
-    : groupRows(rootRows, listState.groupBy).map((group) => ({ key: group.key, rows: toFlatTreeRows(group.rows) }));
+    ? [{ key: "", rows: visibleRows }]
+    : groupRows(
+        visibleRows.map((treeRow) => treeRow.row),
+        listState.groupBy,
+      ).map((group) => ({ key: group.key, rows: toFlatTreeRows(group.rows) }));
 
   function navigateToRow(row: Row) {
     const href = rowClickHref(rowClickPath, row, rowClickParam);
@@ -374,12 +425,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
 
   return (
     <>
-      <ListFilters
-        filters={view.filters ?? []}
-        values={listState.filter}
-        onChange={listState.setFilter}
-        viewName={view.name}
-      />
+      <ListFilters filters={filters} values={listState.filter} onChange={listState.setFilter} viewName={view.name} />
       <div className="flex items-center justify-between gap-2">
         <ListActions
           actions={view.actions ?? []}

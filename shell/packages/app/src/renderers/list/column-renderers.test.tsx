@@ -203,6 +203,21 @@ describe("renderCellContent", () => {
     expect(cell(column, { customer_id: "01j..." }).textContent).toBe("01j...");
   });
 
+  // view-system.md §10: an extension batch loader that already fetched the
+  // related record can hand back {id, display} directly instead of a bare
+  // id, so the shell renders it without a second id-to-label round trip.
+  it("relation: renders an {id, display} field value (a view-extension batch loader's own shape) directly, even with a relationLabel option present", () => {
+    const column = { field: "hr:manager_id", type: "relation" as const };
+    const html = render(
+      renderCellContent(
+        column,
+        { "hr:manager_id": { id: "01j...", display: "Grace Hopper" } },
+        { relationLabel: "stale" },
+      ),
+    ).container;
+    expect(html.textContent).toBe("Grace Hopper");
+  });
+
   it("file: renders a download link with the file name", () => {
     const html = cell({ field: "doc", type: "file" }, { doc: { url: "https://x.com/f.pdf", name: "contract.pdf" } });
     const link = html.querySelector("a");

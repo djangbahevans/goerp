@@ -1,5 +1,6 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import type { UseSavedFiltersResult } from "@goerp/sdk/react";
+import type { ViewExtensionEntry } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -21,9 +22,17 @@ const {
   resolveViewPathMock,
   resolveResourceMock,
   getMock,
+  forTargetMock,
+  extensionLoaderHasMock,
+  extensionLoaderResolveMock,
 } = vi.hoisted(() => ({
   useInfiniteListMock: vi.fn(),
   useRelationLabelsMock: vi.fn((_specs: { ids: string[] }[]) => new Map()),
+  // No extensions target the current view by default — this file's own
+  // "ListRenderer view extensions" describe block overrides per test.
+  forTargetMock: vi.fn<() => Promise<ViewExtensionEntry[]>>(async () => []),
+  extensionLoaderHasMock: vi.fn<(key: string) => boolean>(() => false),
+  extensionLoaderResolveMock: vi.fn(),
   // No saved filters and already resolved by default — real network
   // access would otherwise hang indefinitely in this test environment
   // (apiClient's own internal retry logic, independent of TanStack
@@ -69,6 +78,14 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
     ...actual,
     viewPathRegistry: { resolve: resolveViewPathMock },
     resourceRegistry: { ...actual.resourceRegistry, resolve: resolveResourceMock },
+    viewExtensionRegistry: { forTarget: forTargetMock },
+  };
+});
+vi.mock("@goerp/sdk/module", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goerp/sdk/module")>();
+  return {
+    ...actual,
+    extensionBatchLoaderRegistry: { has: extensionLoaderHasMock, resolve: extensionLoaderResolveMock },
   };
 });
 
@@ -89,6 +106,11 @@ afterEach(() => {
   resolveResourceMock.mockClear();
   getMock.mockReset();
   getMock.mockResolvedValue({ data: [], meta: { cursor: null, hasMore: false } });
+  forTargetMock.mockReset();
+  forTargetMock.mockResolvedValue([]);
+  extensionLoaderHasMock.mockReset();
+  extensionLoaderHasMock.mockReturnValue(false);
+  extensionLoaderResolveMock.mockReset();
 });
 
 const view: ListViewDeclaration = {
@@ -1393,5 +1415,203 @@ describe("ListRenderer", () => {
     expect(screen.queryByRole("link", { name: "Ada" })).toBeNull();
 
     warn.mockRestore();
+  });
+});
+
+describe("ListRenderer view extensions", () => {
+  function permissionWrapperWithPermission(permissions: string[]) {
+    const value = createPermissionContextValue({
+      permissions: new Set(permissions),
+      fieldAccess: { "contacts.contact": { name: { read: true, write: true }, ssn: { read: true, write: true } } },
+      modulesEnabled: new Set(),
+    });
+    return function Wrapper({ children }: { children: ReactNode }) {
+      return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
+    };
+  }
+
+  const oneRow = {
+    data: { pages: [{ data: [{ id: "1", name: "Ada" }], meta: { cursor: null, hasMore: false } }] },
+    isLoading: false,
+    isError: false,
+    isFetchingNextPage: false,
+    hasNextPage: false,
+    fetchNextPage: vi.fn(),
+    refetch: vi.fn(),
+    error: null,
+  };
+
+  it("columns: appends a permitted extension column after the view's own, populated from its batch loader", async () => {
+    useInfiniteListMock.mockReturnValue(oneRow);
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_list", extension: "hr_department_column" },
+        definition: {
+          name: "hr_department_column",
+          type: "columns",
+          target_section: "columns",
+          position: "append",
+          columns: [{ field: "hr:department", label: "Department", type: "text", permission: "hr:employee:read" }],
+        },
+      },
+    ]);
+    extensionLoaderHasMock.mockImplementation((key: string) => key === "contacts.contacts_list");
+    extensionLoaderResolveMock.mockReturnValue(async () => new Map([["1", { "hr:department": "Engineering" }]]));
+
+    await renderListRenderer({}, permissionWrapperWithPermission(["hr:employee:read"]), "/", {
+      ...view,
+      columns: [{ field: "name", label: "Name" }],
+    });
+
+    await screen.findByRole("columnheader", { name: "Department" });
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers.map((h) => h.textContent)).toEqual(["Name", "Department"]);
+    await waitFor(() => expect(extensionLoaderResolveMock).toHaveBeenCalledWith("contacts.contacts_list"));
+    expect(await screen.findByRole("cell", { name: "Engineering" })).toBeTruthy();
+  });
+
+  it("columns: a relation-type extension column renders the batch loader's own {id, display} value directly", async () => {
+    useInfiniteListMock.mockReturnValue(oneRow);
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_list", extension: "hr_manager_column" },
+        definition: {
+          name: "hr_manager_column",
+          type: "columns",
+          target_section: "columns",
+          position: "append",
+          columns: [{ field: "hr:manager_id", label: "Manager", type: "relation", permission: "hr:employee:read" }],
+        },
+      },
+    ]);
+    extensionLoaderHasMock.mockImplementation((key: string) => key === "contacts.contacts_list");
+    extensionLoaderResolveMock.mockReturnValue(
+      async () => new Map([["1", { "hr:manager_id": { id: "e42", display: "Grace Hopper" } }]]),
+    );
+
+    await renderListRenderer({}, permissionWrapperWithPermission(["hr:employee:read"]), "/", {
+      ...view,
+      columns: [{ field: "name", label: "Name" }],
+    });
+
+    expect(await screen.findByRole("cell", { name: "Grace Hopper" })).toBeTruthy();
+  });
+
+  it("columns: does not render an extension column the current user lacks permission for, and never calls its loader", async () => {
+    useInfiniteListMock.mockReturnValue(oneRow);
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_list", extension: "hr_department_column" },
+        definition: {
+          name: "hr_department_column",
+          type: "columns",
+          target_section: "columns",
+          position: "append",
+          columns: [{ field: "hr:department", label: "Department", type: "text", permission: "hr:employee:read" }],
+        },
+      },
+    ]);
+    extensionLoaderHasMock.mockImplementation((key: string) => key === "contacts.contacts_list");
+    extensionLoaderResolveMock.mockReturnValue(async () => new Map([["1", { "hr:department": "Engineering" }]]));
+
+    await renderListRenderer({}, permissionWrapperWithPermission([]), "/", {
+      ...view,
+      columns: [{ field: "name", label: "Name" }],
+    });
+
+    const headers = await screen.findAllByRole("columnheader");
+    expect(headers.map((h) => h.textContent)).toEqual(["Name"]);
+    expect(extensionLoaderResolveMock).not.toHaveBeenCalled();
+  });
+
+  it("columns: renders unchanged when the extending module isn't loaded (no matching batch loader registered)", async () => {
+    useInfiniteListMock.mockReturnValue(oneRow);
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_list", extension: "hr_department_column" },
+        definition: {
+          name: "hr_department_column",
+          type: "columns",
+          target_section: "columns",
+          position: "append",
+          columns: [{ field: "hr:department", label: "Department", type: "text", permission: "hr:employee:read" }],
+        },
+      },
+    ]);
+    extensionLoaderHasMock.mockReturnValue(false); // module not loaded — no loader registered
+
+    await renderListRenderer({}, permissionWrapperWithPermission(["hr:employee:read"]), "/", {
+      ...view,
+      columns: [{ field: "name", label: "Name" }],
+    });
+
+    await screen.findByRole("columnheader", { name: "Department" });
+    expect(extensionLoaderResolveMock).not.toHaveBeenCalled();
+    // The column renders (namespaced field, unresolved) but blank — no crash.
+    expect(screen.queryByRole("cell", { name: "Engineering" })).toBeNull();
+  });
+
+  it("filter: renders a permitted extension filter in the filter panel", async () => {
+    useInfiniteListMock.mockReturnValue(oneRow);
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_list", extension: "hr_department_filter" },
+        definition: {
+          name: "hr_department_filter",
+          type: "filter",
+          target_section: "filters",
+          position: "append",
+          filter: {
+            field: "hr:department_id",
+            label: "Department",
+            type: "text",
+            permission: "hr:employee:read",
+          },
+        },
+      },
+    ]);
+
+    await renderListRenderer({}, permissionWrapperWithPermission(["hr:employee:read"]), "/", {
+      ...view,
+      columns: [{ field: "name", label: "Name" }],
+    });
+
+    expect(await screen.findByLabelText("Department")).toBeTruthy();
+  });
+
+  it("filter: hides an extension filter the current user lacks permission for", async () => {
+    useInfiniteListMock.mockReturnValue(oneRow);
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_list", extension: "hr_department_filter" },
+        definition: {
+          name: "hr_department_filter",
+          type: "filter",
+          target_section: "filters",
+          position: "append",
+          filter: { field: "hr:department_id", label: "Department", type: "text", permission: "hr:employee:read" },
+        },
+      },
+    ]);
+
+    await renderListRenderer({}, permissionWrapperWithPermission([]), "/", {
+      ...view,
+      columns: [{ field: "name", label: "Name" }],
+    });
+
+    await waitFor(() => expect(forTargetMock).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Department")).toBeNull();
   });
 });

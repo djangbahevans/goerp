@@ -246,6 +246,13 @@ type ListColumn struct {
 	DisplayField       string       `json:"display_field,omitempty"`
 	ResourceLabelField string       `json:"resource_label_field,omitempty"`
 	CurrencyField      string       `json:"currency_field,omitempty"`
+	// Permission gates a view-extension "columns" definition's own
+	// contributed column (view-system.md §10 "Adding columns to another
+	// module's list") — the field it contributes is namespaced
+	// ({module}:{field}), not a real field on the target resource, so the
+	// shell checks this permission string directly instead of the target
+	// model's own field-level access. Unset on a module's own column.
+	Permission string `json:"permission,omitempty"`
 
 	// Extra holds the members the engine does not model, kept verbatim.
 	Extra map[string]jsontext.Value `json:"-"`
@@ -270,6 +277,11 @@ type Filter struct {
 	ResourceFilter map[string]any `json:"resource_filter,omitempty"`
 	Condition      string         `json:"condition,omitempty"`
 	SearchParams   string         `json:"search_params,omitempty"`
+	// Permission gates a view-extension "filter" definition's own
+	// contributed filter (view-system.md §10 "Adding filters to another
+	// module's list") — same reasoning as ListColumn.Permission. Unset on
+	// a module's own filter.
+	Permission string `json:"permission,omitempty"`
 }
 
 type FilterOption struct {
