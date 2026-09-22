@@ -517,6 +517,73 @@ func TestLoadCascading_TransitiveDependentIsAlsoSkipped(t *testing.T) {
 	}
 }
 
+// viewExtensionManifestJSON builds a manifest declaring one view (when
+// views is non-nil) plus one view_extensions/view_extension_definitions
+// pair (when extends/def are non-empty) — used to prove LoadCascading
+// runs loader.ValidateViewExtensions the same way loader.LoadAll does
+// (goerp#887).
+func viewExtensionManifestJSON(t *testing.T, name string, wasmBytes []byte, dependsOn []string, views []map[string]any, extends string, def map[string]any) []byte {
+	t.Helper()
+	sum := sha256.Sum256(wasmBytes)
+	if dependsOn == nil {
+		dependsOn = []string{}
+	}
+
+	fields := map[string]any{
+		"name": name, "display_name": name, "type": "domain", "version": "1.0.0",
+		"description": "a test module", "abi_version": "1", "engine": ">=0.5.0 <1.0.0",
+		"depends_on": dependsOn, "capabilities": []string{},
+		"schema":   map[string]any{"owned_models": []string{}},
+		"checksum": fmt.Sprintf("sha256:%x", sum),
+	}
+	if views != nil {
+		fields["views"] = views
+	}
+	if extends != "" {
+		fields["view_extensions"] = []map[string]any{{"extends": extends, "extension": def["name"]}}
+		fields["view_extension_definitions"] = []map[string]any{def}
+	}
+
+	data, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal manifest fixture: %v", err)
+	}
+	return data
+}
+
+func TestLoadCascading_ViewExtensionTargetViewMissing_Fails(t *testing.T) {
+	rt := newTestRuntime(t)
+
+	ordered := []loader.Source{
+		{
+			Name:          "contacts",
+			ManifestBytes: viewExtensionManifestJSON(t, "contacts", okModule, nil, nil, "", nil), // no views at all
+			WasmBytes:     okModule,
+		},
+		{
+			Name: "hr",
+			ManifestBytes: viewExtensionManifestJSON(t, "hr", okModule, []string{"contacts"}, nil,
+				"contacts.contacts_list",
+				map[string]any{
+					"name": "hr_employee_column", "type": "columns", "target_section": "columns", "position": "append",
+					"columns": []map[string]any{{"field": "hr:employee_id"}},
+				},
+			),
+			WasmBytes: okModule,
+		},
+	}
+
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), ordered)
+
+	hr := modules["hr"]
+	if hr.Status != module.StatusFailed {
+		t.Fatalf("hr.Status = %v, want StatusFailed", hr.Status)
+	}
+	if !strings.Contains(hr.FailureReason, "no view named") {
+		t.Errorf("hr.FailureReason = %q, want it to mention the missing view", hr.FailureReason)
+	}
+}
+
 func notificationManifestJSON(t *testing.T, name string, wasmBytes []byte, templates map[string]string) []byte {
 	t.Helper()
 	sum := sha256.Sum256(wasmBytes)

@@ -94,7 +94,11 @@ func TestLoadModule_RouteForbiddenTypes_RejectRoutes(t *testing.T) {
 			okModule,
 			map[string]any{
 				"type":            "field_extension",
-				"view_extensions": []map[string]any{{"extends": "core", "extension": "ext"}},
+				"depends_on":      []string{"core"},
+				"view_extensions": []map[string]any{{"extends": "core.core_list", "extension": "ext"}},
+				"view_extension_definitions": []map[string]any{
+					{"name": "ext", "type": "columns", "target_section": "columns", "position": "append", "columns": []map[string]any{{"field": "ext:thing"}}},
+				},
 				"schema": map[string]any{
 					"owned_models":   []string{},
 					"extends_module": "core",
@@ -107,7 +111,11 @@ func TestLoadModule_RouteForbiddenTypes_RejectRoutes(t *testing.T) {
 			oneRouteModule,
 			map[string]any{
 				"type":            "field_extension",
-				"view_extensions": []map[string]any{{"extends": "core", "extension": "ext"}},
+				"depends_on":      []string{"core"},
+				"view_extensions": []map[string]any{{"extends": "core.core_list", "extension": "ext"}},
+				"view_extension_definitions": []map[string]any{
+					{"name": "ext", "type": "columns", "target_section": "columns", "position": "append", "columns": []map[string]any{{"field": "ext:thing"}}},
+				},
 				"schema": map[string]any{
 					"owned_models":   []string{},
 					"extends_module": "core",
