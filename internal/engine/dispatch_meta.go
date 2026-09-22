@@ -609,12 +609,23 @@ type metaSchemaResponse struct {
 }
 
 type metaSchemaModule struct {
-	Name         string                     `json:"name"`
-	Version      string                     `json:"version"`
-	DisplayName  string                     `json:"display_name"`
-	Routes       []metaSchemaRoute          `json:"routes"`
-	Views        []manifest.View            `json:"views"`
-	Navigation   []manifest.NavGroup        `json:"navigation"`
+	Name        string              `json:"name"`
+	Version     string              `json:"version"`
+	DisplayName string              `json:"display_name"`
+	Routes      []metaSchemaRoute   `json:"routes"`
+	Views       []manifest.View     `json:"views"`
+	Navigation  []manifest.NavGroup `json:"navigation"`
+	// ViewExtensions and ViewExtensionDefinitions are this module's
+	// declared view_extensions/view_extension_definitions (manifest-spec.md
+	// §11), serialized as [] rather than omitted when the module declares
+	// none — the shell indexes every module's slice unconditionally when
+	// building its view-extension registry (view-system.md §10).
+	ViewExtensions           []manifest.ViewExtensionRef `json:"view_extensions"`
+	ViewExtensionDefinitions []manifest.ViewExtensionDef `json:"view_extension_definitions"`
+	// LoadOrder is module.LoadedModule.LoadOrder — this module's index in
+	// the engine's dependency-ordered load sequence, so the shell can apply
+	// view extensions dependencies-first without re-deriving the graph.
+	LoadOrder    int                        `json:"load_order"`
 	Models       map[string]metaSchemaModel `json:"models"`
 	Permissions  []metaSchemaPermission     `json:"permissions"`
 	Frontend     *metaSchemaFrontend        `json:"frontend"`
@@ -834,17 +845,29 @@ func (e *Engine) dispatchSchemaRoute(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		viewExtensions := m.Manifest.ViewExtensions
+		if viewExtensions == nil {
+			viewExtensions = []manifest.ViewExtensionRef{}
+		}
+		viewExtensionDefs := m.Manifest.ViewExtensionDefinitions
+		if viewExtensionDefs == nil {
+			viewExtensionDefs = []manifest.ViewExtensionDef{}
+		}
+
 		modules[name] = &metaSchemaModule{
-			Name:         name,
-			Version:      m.Manifest.Version,
-			DisplayName:  m.Manifest.DisplayName,
-			Routes:       []metaSchemaRoute{},
-			Views:        m.Manifest.Views,
-			Navigation:   m.Manifest.Navigation,
-			Models:       models,
-			Permissions:  m.Manifest.Permissions,
-			Frontend:     nil, // goerp#588 — no bundle-serving mechanism exists yet
-			PublicConfig: publicConfig,
+			Name:                     name,
+			Version:                  m.Manifest.Version,
+			DisplayName:              m.Manifest.DisplayName,
+			Routes:                   []metaSchemaRoute{},
+			Views:                    m.Manifest.Views,
+			Navigation:               m.Manifest.Navigation,
+			ViewExtensions:           viewExtensions,
+			ViewExtensionDefinitions: viewExtensionDefs,
+			LoadOrder:                m.LoadOrder,
+			Models:                   models,
+			Permissions:              m.Manifest.Permissions,
+			Frontend:                 nil, // goerp#588 — no bundle-serving mechanism exists yet
+			PublicConfig:             publicConfig,
 		}
 	}
 

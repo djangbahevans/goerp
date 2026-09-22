@@ -82,6 +82,9 @@ describe("ModuleSchemaSchema", () => {
     routes: [],
     views: [],
     navigation: [],
+    view_extensions: [],
+    view_extension_definitions: [],
+    load_order: 0,
     models: {},
     permissions: [],
     frontend: null,
@@ -100,5 +103,38 @@ describe("ModuleSchemaSchema", () => {
   it("leaves views/navigation/permissions unvalidated — each renderer's own manifest-types.ts job", () => {
     const loose = { ...baseModule, views: [{ anything: "goes" }], navigation: ["x"], permissions: [1, 2] };
     expect(v.safeParse(ModuleSchemaSchema, loose).success).toBe(true);
+  });
+
+  it("rejects a module missing load_order", () => {
+    const { load_order, ...withoutLoadOrder } = baseModule;
+    expect(v.safeParse(ModuleSchemaSchema, withoutLoadOrder).success).toBe(false);
+  });
+
+  it("accepts declared view_extensions/view_extension_definitions, leaving each definition's type-specific member unvalidated", () => {
+    const withExtensions = {
+      ...baseModule,
+      view_extensions: [{ extends: "contacts.contacts_form", extension: "hr_employees_tab" }],
+      view_extension_definitions: [
+        {
+          name: "hr_employees_tab",
+          type: "tab",
+          target_section: "tabs",
+          position: "append",
+          tab: { label: "Employees", type: "view", view: "hr.employees_list" },
+        },
+      ],
+    };
+    const result = v.safeParse(ModuleSchemaSchema, withExtensions);
+    expect(result.success).toBe(true);
+    expect(result.success && result.output.view_extensions[0]?.extends).toBe("contacts.contacts_form");
+    expect(result.success && result.output.view_extension_definitions[0]?.position).toBe("append");
+  });
+
+  it("rejects a view_extension_definitions entry with an unrecognized position", () => {
+    const invalid = {
+      ...baseModule,
+      view_extension_definitions: [{ name: "x", type: "tab", position: "replace" }],
+    };
+    expect(v.safeParse(ModuleSchemaSchema, invalid).success).toBe(false);
   });
 });

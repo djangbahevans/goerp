@@ -33,6 +33,12 @@ type LoadedModule struct {
 	LoadedAt      time.Time
 	SchemaVersion string
 	TenantSyncs   map[string]SchemaSyncStatus
+	// LoadOrder is this module's index in the engine's dependency-ordered
+	// load sequence (moduleboot.Order) — dependencies always get a lower
+	// index than the modules that depend on them. Exposed in /_meta/schema
+	// so the shell can apply view extensions dependencies-first without
+	// re-deriving the dependency graph itself.
+	LoadOrder int
 
 	ExplicitRoutes []abiv1.RouteDeclaration
 	ModelDecls     []model.ModelDeclaration

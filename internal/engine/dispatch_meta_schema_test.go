@@ -227,6 +227,76 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 	}
 }
 
+func TestDispatchSchemaRoute_ReflectsViewExtensionsAndLoadOrder(t *testing.T) {
+	loadedModules := map[string]*module.LoadedModule{
+		"contacts": {
+			Status:    module.StatusReady,
+			LoadOrder: 0,
+			Manifest:  manifest.Manifest{Name: "contacts", DisplayName: "Contacts", Type: "standard", Version: "1.0.0"},
+		},
+		"hr": {
+			Status:    module.StatusReady,
+			LoadOrder: 1,
+			Manifest: manifest.Manifest{
+				Name: "hr", DisplayName: "HR", Type: "standard", Version: "1.0.0",
+				ViewExtensions: []manifest.ViewExtensionRef{
+					{Extends: "contacts.contacts_form", Extension: "hr_employees_tab"},
+				},
+				ViewExtensionDefinitions: []manifest.ViewExtensionDef{
+					{
+						Name: "hr_employees_tab", Type: "tab", TargetSection: "tabs", Position: "append",
+						Tab: &manifest.FormTab{Label: "Employees", Type: "view", View: "hr.employees_list"},
+					},
+				},
+			},
+		},
+	}
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(loadedModules); err != nil {
+		t.Fatalf("registry Update() error: %v", err)
+	}
+	e := &Engine{moduleRegistry: reg}
+
+	w := httptest.NewRecorder()
+	e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp metaSchemaResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	contacts, ok := resp.Modules["contacts"]
+	if !ok {
+		t.Fatalf("modules missing \"contacts\"")
+	}
+	if contacts.LoadOrder != 0 {
+		t.Errorf("contacts.LoadOrder = %d, want 0", contacts.LoadOrder)
+	}
+	if contacts.ViewExtensions == nil || len(contacts.ViewExtensions) != 0 {
+		t.Errorf("contacts.ViewExtensions = %v, want non-nil empty slice", contacts.ViewExtensions)
+	}
+	if contacts.ViewExtensionDefinitions == nil || len(contacts.ViewExtensionDefinitions) != 0 {
+		t.Errorf("contacts.ViewExtensionDefinitions = %v, want non-nil empty slice", contacts.ViewExtensionDefinitions)
+	}
+
+	hr, ok := resp.Modules["hr"]
+	if !ok {
+		t.Fatalf("modules missing \"hr\"")
+	}
+	if hr.LoadOrder != 1 {
+		t.Errorf("hr.LoadOrder = %d, want 1", hr.LoadOrder)
+	}
+	if len(hr.ViewExtensions) != 1 || hr.ViewExtensions[0].Extends != "contacts.contacts_form" {
+		t.Errorf("hr.ViewExtensions = %+v, want one ref extending contacts.contacts_form", hr.ViewExtensions)
+	}
+	if len(hr.ViewExtensionDefinitions) != 1 || hr.ViewExtensionDefinitions[0].Tab == nil || hr.ViewExtensionDefinitions[0].Tab.View != "hr.employees_list" {
+		t.Errorf("hr.ViewExtensionDefinitions = %+v, want one tab def targeting hr.employees_list", hr.ViewExtensionDefinitions)
+	}
+}
+
 func TestMetaSchemaViewFor(t *testing.T) {
 	views := []manifest.View{
 		{Name: "widgets.kanban", Type: "kanban", Resource: "widgets.widget"},
@@ -412,7 +482,7 @@ func TestDispatchSchemaRoute_NilSlicesEncodeAsEmptyArrays(t *testing.T) {
 	}
 	mod := body.Modules["bare"]
 
-	for _, member := range []string{"views", "navigation", "permissions", "routes"} {
+	for _, member := range []string{"views", "navigation", "permissions", "routes", "view_extensions", "view_extension_definitions"} {
 		if _, ok := mod[member].([]any); !ok {
 			t.Errorf("%s = %#v, want a JSON array", member, mod[member])
 		}

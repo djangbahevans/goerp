@@ -97,17 +97,20 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
             ))}
           </div>
 
-          {view.tabs && view.tabs.length > 0 && (
-            <FormTabsRenderer
-              tabs={view.tabs}
-              resource={view.resource}
-              module={module}
-              record={record}
-              recordId={recordId}
-              onChange={setField}
-              formReadonly={formReadonly}
-            />
-          )}
+          {/* No `view.tabs.length` gate — a view extension (view-system.md
+              §10) can add a tab even when this view declares none of its
+              own; FormTabsRenderer itself renders null once both its own
+              and extension tabs resolve to nothing visible. */}
+          <FormTabsRenderer
+            tabs={view.tabs ?? []}
+            resource={view.resource}
+            module={module}
+            viewName={view.name}
+            record={record}
+            recordId={recordId}
+            onChange={setField}
+            formReadonly={formReadonly}
+          />
 
           {view.chatter !== false && (
             // Real chatter panel needs an activities API that doesn't exist yet (goerp#649).

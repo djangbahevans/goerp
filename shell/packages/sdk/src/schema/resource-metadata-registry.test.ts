@@ -47,6 +47,9 @@ const schema: MetaSchema = {
       display_name: "Contacts",
       permissions: [],
       frontend: null,
+      view_extensions: [],
+      view_extension_definitions: [],
+      load_order: 0,
       public_config: {},
       routes: [
         route({ method: "GET", path: "/contacts", model: "contacts.contact", crud_action: "list" }),

@@ -824,6 +824,29 @@ func TestWorker_Publish_RegistryUpdateSucceedsDespiteRebuildAllFailure(t *testin
 	}
 }
 
+// TestWorker_Publish_AppendsLoadOrderAfterExistingModules guards
+// dispatch_meta.go's load_order exposure (goerp#886): a module installed
+// after boot depends only on modules already in the registry, so publish
+// must give it an index higher than every module already present rather
+// than leaving it at its zero value, which would collide with a
+// boot-time module's own LoadOrder 0.
+func TestWorker_Publish_AppendsLoadOrderAfterExistingModules(t *testing.T) {
+	env := newTestEnv(t)
+	w, reg := newWorker(t, env, map[string]*module.LoadedModule{
+		"base": {Status: module.StatusReady, LoadOrder: 0, Manifest: manifest.Manifest{Name: "base", Version: "1.0.0"}},
+	})
+
+	m := &module.LoadedModule{Status: module.StatusReady, Manifest: manifest.Manifest{Name: "installed_later", Version: "1.0.0"}}
+	if _, err := w.publish(context.Background(), m); err != nil {
+		t.Fatalf("publish() error: %v", err)
+	}
+
+	got := reg.Snapshot().Modules()["installed_later"].LoadOrder
+	if got != 1 {
+		t.Errorf("LoadOrder = %d, want 1 (after the one preloaded module)", got)
+	}
+}
+
 // TestWorker_Run_InstallInProgressRejection_RemovesPackageFile guards the
 // distinction run's cleanup defer draws between its two "already
 // unavailable" rejections: errAlreadyLoaded (this exact name/version may

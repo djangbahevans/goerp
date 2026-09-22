@@ -22,6 +22,9 @@ describe("resolveViewPath", () => {
         models: {},
         permissions: [],
         frontend: null,
+        view_extensions: [],
+        view_extension_definitions: [],
+        load_order: 0,
         public_config: {},
       },
     });
@@ -41,6 +44,9 @@ describe("resolveViewPath", () => {
         models: {},
         permissions: [],
         frontend: null,
+        view_extensions: [],
+        view_extension_definitions: [],
+        load_order: 0,
         public_config: {},
       },
     });
@@ -70,6 +76,9 @@ describe("ViewPathRegistry", () => {
         models: {},
         permissions: [],
         frontend: null,
+        view_extensions: [],
+        view_extension_definitions: [],
+        load_order: 0,
         public_config: {},
       },
     });
