@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	jsonv1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -355,9 +354,33 @@ func insertArgs(md model.ModelDeclaration, record map[string]any) ([]any, error)
 	return args, nil
 }
 
+// importNumber mirrors encoding/json (v1)'s Number type — a decoded JSON
+// number kept as its original text so sqlValue below can pick int64 or
+// float64 without the precision loss a float64-only decode would cause on
+// a bigint/id column.
+type importNumber string
+
+func (n importNumber) String() string { return string(n) }
+
+// MarshalJSON writes n as a bare JSON number rather than a quoted string —
+// mirrors v1's json.Number, which sqlValue's map[string]any/[]any re-encode
+// path (the "case map[string]any, []any" below) depends on to round-trip a
+// decoded large integer exactly.
+func (n importNumber) MarshalJSON() ([]byte, error) {
+	return []byte(n), nil
+}
+
+func (n importNumber) Int64() (int64, error) {
+	return strconv.ParseInt(string(n), 10, 64)
+}
+
+func (n importNumber) Float64() (float64, error) {
+	return strconv.ParseFloat(string(n), 64)
+}
+
 // numberPreservingUnmarshalers restores v1's Decoder.UseNumber() behavior
 // for a map[string]any/[]any-typed decode target — sqlValue below needs a
-// JSON number as jsonv1.Number, not v2's own any-decode default of
+// JSON number as importNumber, not v2's own any-decode default of
 // float64, to avoid precision loss on a bigint/id column. Falling back to
 // errors.ErrUnsupported for every other kind lets v2's own any-decoder
 // recurse through objects/arrays, re-invoking this same unmarshaler at
@@ -370,19 +393,19 @@ var numberPreservingUnmarshalers = json.UnmarshalFromFunc(func(dec *jsontext.Dec
 	if err != nil {
 		return err
 	}
-	*v = jsonv1.Number(tok.String())
+	*v = importNumber(tok.String())
 	return nil
 })
 
 func sqlValue(v any) (any, error) {
 	switch vv := v.(type) {
-	case jsonv1.Number:
+	case importNumber:
 		if i, err := vv.Int64(); err == nil {
 			return i, nil
 		}
 		f, err := vv.Float64()
 		if err != nil {
-			return nil, fmt.Errorf("decode number %q: %w", vv.String(), err)
+			return nil, fmt.Errorf("decode number %q: %w", vv, err)
 		}
 		return f, nil
 	case float64:
