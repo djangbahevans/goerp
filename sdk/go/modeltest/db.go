@@ -2,7 +2,7 @@ package modeltest
 
 import (
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"os"
