@@ -81,6 +81,58 @@ func TestDecodeRecords_OneBadRecordFailsWholeBatch(t *testing.T) {
 	}
 }
 
+type orderRecord struct {
+	ID       string       `db:"id"`
+	Customer *RelationRef `db:"customer"`
+}
+
+type orderRecordNonPointer struct {
+	ID       string      `db:"id"`
+	Customer RelationRef `db:"customer"`
+}
+
+func TestDecodeRecords_NestedMapDecodesIntoPointerStructField(t *testing.T) {
+	recs := []map[string]any{
+		{"id": "1", "customer": map[string]any{"id": "cust-1", "display_name": "Acme"}},
+	}
+	got, err := decodeRecords[orderRecord](recs)
+	if err != nil {
+		t.Fatalf("decodeRecords: %v", err)
+	}
+	if got[0].Customer == nil {
+		t.Fatal("Customer = nil, want populated *RelationRef")
+	}
+	if want := (RelationRef{ID: "cust-1", DisplayName: "Acme"}); *got[0].Customer != want {
+		t.Errorf("Customer = %+v, want %+v", *got[0].Customer, want)
+	}
+}
+
+func TestDecodeRecords_NullNestedMapLeavesPointerFieldNil(t *testing.T) {
+	recs := []map[string]any{
+		{"id": "1", "customer": nil},
+	}
+	got, err := decodeRecords[orderRecord](recs)
+	if err != nil {
+		t.Fatalf("decodeRecords: %v", err)
+	}
+	if got[0].Customer != nil {
+		t.Errorf("Customer = %+v, want nil", got[0].Customer)
+	}
+}
+
+func TestDecodeRecords_NestedMapDecodesIntoNonPointerStructField(t *testing.T) {
+	recs := []map[string]any{
+		{"id": "1", "customer": map[string]any{"id": "cust-1", "display_name": "Acme"}},
+	}
+	got, err := decodeRecords[orderRecordNonPointer](recs)
+	if err != nil {
+		t.Fatalf("decodeRecords: %v", err)
+	}
+	if want := (RelationRef{ID: "cust-1", DisplayName: "Acme"}); got[0].Customer != want {
+		t.Errorf("Customer = %+v, want %+v", got[0].Customer, want)
+	}
+}
+
 func TestToSnakeCase(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"CustomerName", "customer_name"},
