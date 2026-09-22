@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +20,7 @@ func TestTenantCreate_NoWaitSuccess(t *testing.T) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.UnmarshalRead(r.Body, &gotBody)
 		w.WriteHeader(http.StatusAccepted)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"slug":"acmecorp","workflow_id":"provision-tenant-acmecorp"},"error":null}`))
@@ -63,7 +63,7 @@ func TestTenantCreate_CustomNamePassedThrough(t *testing.T) {
 		var body struct {
 			Name string `json:"name"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		gotName = body.Name
 		w.WriteHeader(http.StatusAccepted)
 		w.Header().Set("Content-Type", "application/json")

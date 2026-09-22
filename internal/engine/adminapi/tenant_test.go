@@ -3,7 +3,7 @@ package adminapi
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -46,7 +46,7 @@ func newTestTenantMux(t *testing.T) *http.ServeMux {
 func decodeEnvelope(t *testing.T, w *httptest.ResponseRecorder) envelope {
 	t.Helper()
 	var env envelope
-	if err := json.NewDecoder(w.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(w.Body, &env); err != nil {
 		t.Fatalf("decode envelope: %v (body: %s)", err, w.Body.String())
 	}
 	return env
@@ -674,7 +674,7 @@ func TestStatusRoute_ReportsSyncRatio(t *testing.T) {
 			ModulesTotal  int `json:"modules_total"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(w.Body, &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if env.Data.ModulesSynced != 2 {
@@ -778,7 +778,7 @@ func TestStatusRoute_ReportsTableCountAdminUserAndDuration(t *testing.T) {
 			} `json:"admin_user"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(w.Body, &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if env.Data.SchemaTableCount != 7 {
@@ -830,7 +830,7 @@ func TestStatusRoute_NoAdminUserOmitsAdminUserField(t *testing.T) {
 			AdminUser *struct{} `json:"admin_user"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(w.Body, &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if env.Data.AdminUser != nil {
@@ -879,7 +879,7 @@ func TestListRoute_ReportsUsersColumn(t *testing.T) {
 			} `json:"tenants"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(w.Body, &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 

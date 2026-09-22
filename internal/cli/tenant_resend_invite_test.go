@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +15,7 @@ func TestTenantResendInvite_Success(t *testing.T) {
 		var body struct {
 			Email string `json:"email"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		gotEmail = body.Email
 
 		w.Header().Set("Content-Type", "application/json")

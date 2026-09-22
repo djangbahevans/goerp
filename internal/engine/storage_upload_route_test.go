@@ -2,7 +2,7 @@ package engine
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"mime/multipart"
 	"net/http"

@@ -1,8 +1,7 @@
 package engine
 
 import (
-	"encoding/json"
-	manifestjson "encoding/json/v2"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -524,7 +523,7 @@ func TestDispatchSchemaRoute_ServesManifestViewsUnchanged(t *testing.T) {
 			t.Fatalf("read %s: %v", p, err)
 		}
 		var view manifest.View
-		if err := manifestjson.Unmarshal(data, &view); err != nil {
+		if err := json.Unmarshal(data, &view); err != nil {
 			t.Fatalf("decode %s: %v", p, err)
 		}
 		var members map[string]any

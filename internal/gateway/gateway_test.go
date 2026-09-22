@@ -8,7 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/json"
+	"encoding/json/v2"
 	"encoding/pem"
 	"io"
 	"log"
@@ -269,7 +269,7 @@ func TestGateway_ValidCertMissingToken_ReturnsGatewayAuthFailed(t *testing.T) {
 	}
 
 	var env authErrorEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &env); err != nil {
 		t.Fatalf("decode error envelope: %v", err)
 	}
 	if env.Error.Code != gatewayAuthFailedCode {

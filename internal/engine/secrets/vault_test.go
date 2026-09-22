@@ -2,7 +2,7 @@ package secrets
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -48,7 +48,7 @@ func newFakeVaultServer(t *testing.T) (*httptest.Server, *fakeVault) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.MarshalWrite(w, map[string]any{
 			"data": map[string]any{"data": map[string]any{"value": value}},
 		})
 	})
@@ -58,11 +58,11 @@ func newFakeVaultServer(t *testing.T) (*httptest.Server, *fakeVault) {
 				Value string `json:"value"`
 			} `json:"data"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		fv.mu.Lock()
 		fv.data[r.URL.Path] = body.Data.Value
 		fv.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": 1}})
+		_ = json.MarshalWrite(w, map[string]any{"data": map[string]any{"version": 1}})
 	})
 
 	srv := httptest.NewServer(mux)
@@ -71,7 +71,7 @@ func newFakeVaultServer(t *testing.T) (*httptest.Server, *fakeVault) {
 }
 
 func writeLoginResponse(w http.ResponseWriter, token string) {
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	_ = json.MarshalWrite(w, map[string]any{
 		"auth": map[string]any{
 			"client_token":   token,
 			"lease_duration": 3600,

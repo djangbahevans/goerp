@@ -9,7 +9,7 @@ import (
 	crand "crypto/rand"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"testing"
 	"time"
@@ -234,7 +234,7 @@ func TestWorkerRun_ProducesDecryptableArchiveExcludingRestrictedField(t *testing
 	defer zf.Close()
 
 	var rec exportRecord
-	if err := json.NewDecoder(zf).Decode(&rec); err != nil {
+	if err := json.UnmarshalRead(zf, &rec); err != nil {
 		t.Fatalf("decode exported record: %v", err)
 	}
 	if rec.Record["name"] != "Widget A" {

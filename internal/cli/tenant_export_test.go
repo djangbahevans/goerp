@@ -3,7 +3,7 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +30,7 @@ func TestTenantExport_WaitDownloadsAndVerifiesArchive(t *testing.T) {
 	}
 	mux = http.NewServeMux()
 	mux.HandleFunc("POST /admin/tenants/acmecorp/export", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotExportBody)
+		_ = json.UnmarshalRead(r.Body, &gotExportBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(`{"data":{"job_id":"job_7"},"error":null}`))

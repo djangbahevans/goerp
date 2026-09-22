@@ -6,7 +6,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 	"time"
 )
@@ -49,7 +49,7 @@ func TestBuildArchive_ContainsManifestAndModuleFiles(t *testing.T) {
 	}
 	defer mf.Close()
 	var decoded manifest
-	if err := json.NewDecoder(mf).Decode(&decoded); err != nil {
+	if err := json.UnmarshalRead(mf, &decoded); err != nil {
 		t.Fatalf("decode manifest.json: %v", err)
 	}
 	if decoded.TenantSlug != "acme" {

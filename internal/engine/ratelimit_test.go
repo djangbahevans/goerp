@@ -2,7 +2,7 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -65,7 +65,7 @@ func TestRateLimitMiddleware_AllowsWithinLimitThenRejects(t *testing.T) {
 	}
 
 	var body routeErrorEnvelope
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+	if err := json.UnmarshalRead(w.Body, &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if body.Error.Code != "rate_limit_exceeded" {

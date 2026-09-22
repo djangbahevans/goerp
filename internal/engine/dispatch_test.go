@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -177,7 +177,7 @@ func TestDispatchHandler_NilSnapshotReturns503(t *testing.T) {
 func assertRouteErrorCode(t *testing.T, w *httptest.ResponseRecorder, wantCode string) {
 	t.Helper()
 	var body routeErrorEnvelope
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+	if err := json.UnmarshalRead(w.Body, &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if body.Error.Code != wantCode {
