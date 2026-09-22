@@ -1,7 +1,6 @@
 package module
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -135,7 +134,10 @@ func runCmd(ctx context.Context, dir string, extraEnv []string, name string, arg
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
 
-	var output bytes.Buffer
+	// A plain bytes.Buffer isn't safe here: os/exec pumps Stdout and
+	// Stderr on separate goroutines whenever either isn't a raw *os.File,
+	// and both write into output below — see generate.go's syncBuffer.
+	var output syncBuffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 
