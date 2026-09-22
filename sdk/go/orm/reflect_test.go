@@ -133,6 +133,50 @@ func TestDecodeRecords_NestedMapDecodesIntoNonPointerStructField(t *testing.T) {
 	}
 }
 
+// gadgetState mirrors goerp#961's own generated Selection/Enum field
+// shape — a named string type, never the built-in string itself.
+type gadgetState string
+
+type gadgetRecord struct {
+	ID    string      `db:"id"`
+	State gadgetState `db:"state"`
+}
+
+type gadgetRecordPointer struct {
+	ID    string       `db:"id"`
+	State *gadgetState `db:"state"`
+}
+
+func TestDecodeRecords_StringDecodesIntoNamedStringType(t *testing.T) {
+	got, err := decodeRecords[gadgetRecord]([]map[string]any{{"id": "1", "state": "draft"}})
+	if err != nil {
+		t.Fatalf("decodeRecords: %v", err)
+	}
+	if got[0].State != gadgetState("draft") {
+		t.Errorf("State = %v, want draft", got[0].State)
+	}
+}
+
+func TestDecodeRecords_StringDecodesIntoPointerNamedStringType(t *testing.T) {
+	got, err := decodeRecords[gadgetRecordPointer]([]map[string]any{{"id": "1", "state": "done"}})
+	if err != nil {
+		t.Fatalf("decodeRecords: %v", err)
+	}
+	if got[0].State == nil || *got[0].State != gadgetState("done") {
+		t.Errorf("State = %v, want *done", got[0].State)
+	}
+}
+
+func TestDecodeRecords_NullNamedStringTypeLeavesPointerFieldNil(t *testing.T) {
+	got, err := decodeRecords[gadgetRecordPointer]([]map[string]any{{"id": "1", "state": nil}})
+	if err != nil {
+		t.Fatalf("decodeRecords: %v", err)
+	}
+	if got[0].State != nil {
+		t.Errorf("State = %v, want nil", got[0].State)
+	}
+}
+
 func TestToSnakeCase(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"CustomerName", "customer_name"},

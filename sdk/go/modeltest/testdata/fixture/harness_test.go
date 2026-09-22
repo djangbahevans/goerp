@@ -237,4 +237,41 @@ func TestKindProbe_FieldKindsRoundTrip(t *testing.T) {
 	if got := resp.JSON("bytea"); got != "hello-bytes" {
 		t.Errorf("bytea = %v, want \"hello-bytes\" (model.Bytea decodes as []byte)", got)
 	}
+	if got := resp.JSON("priority"); got != "medium" {
+		t.Errorf("priority = %v, want \"medium\" (model.Enum decodes into its generated named string type)", got)
+	}
+	if got := resp.JSON("has_note"); got != false {
+		t.Errorf("has_note = %v, want false (optional_note was never set — a NULL optional column must decode without error)", got)
+	}
+	if got := resp.JSON("has_gadget_expansion"); got != false {
+		t.Errorf("has_gadget_expansion = %v, want false (created_by_gadget_id was never set — no relation to expand)", got)
+	}
+}
+
+// TestKindProbe_RelationRoundTrip is goerp#961's own AC for the
+// generated Many2One shape: a real orm.SearchRead decodes
+// *orm.RelationRef correctly for a row whose relation is set (resolving
+// to the target's display_name) and for one whose relation is left
+// unset (resolving to nil, not an error).
+func TestKindProbe_RelationRoundTrip(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.POST("/widgets/kind-probe-relation", map[string]any{})
+	if resp.StatusCode != 201 {
+		t.Fatalf("status = %d, want 201; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+
+	if got := resp.JSON("with_relation.gadget_id"); got == nil || got == "" {
+		t.Errorf("with_relation.gadget_id = %v, want the created gadget's id", got)
+	}
+	if got := resp.JSON("with_relation.gadget_display_name"); got != "Acme" {
+		t.Errorf("with_relation.gadget_display_name = %v, want \"Acme\"", got)
+	}
+
+	if got := resp.JSON("without_relation.gadget_id"); got != nil {
+		t.Errorf("without_relation.gadget_id = %v, want nil (no relation set)", got)
+	}
+	if got := resp.JSON("without_relation.gadget_display_name"); got != nil {
+		t.Errorf("without_relation.gadget_display_name = %v, want nil (*orm.RelationRef must decode to nil, not error, when there's nothing to expand)", got)
+	}
 }

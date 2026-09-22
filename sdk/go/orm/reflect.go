@@ -158,11 +158,26 @@ func setFieldValue(field reflect.Value, raw any) error {
 	}
 	if rv.Type().ConvertibleTo(field.Type()) {
 		switch field.Kind() {
-		case reflect.String, reflect.Bool, reflect.Struct:
+		case reflect.String:
+			if rv.Kind() == reflect.String {
+				// A named string type (goerp#961's generated
+				// Selection/Enum fields, e.g. GadgetState) can never
+				// pass the AssignableTo check above — it's a distinct
+				// type from the plain string raw always decodes as.
+				// Safe to convert here specifically because rv's own
+				// Kind is String too: msgpack/JSON decode never hands
+				// back anything but the built-in string, so this isn't
+				// the coincidental-method-set-match ambiguity the
+				// blanket restriction below exists to avoid.
+				field.Set(rv.Convert(field.Type()))
+				return nil
+			}
+		case reflect.Bool, reflect.Struct:
 			// A ConvertibleTo pass for these kinds is almost always a
 			// coincidental method-set match, not a real, intended
-			// conversion — restrict conversion to the numeric kinds it's
-			// actually meant for.
+			// conversion — restrict conversion to the numeric kinds
+			// (and String's own real case, above) it's actually meant
+			// for.
 		default:
 			field.Set(rv.Convert(field.Type()))
 			return nil

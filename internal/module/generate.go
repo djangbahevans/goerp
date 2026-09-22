@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
-	"go/format"
 	"io"
 	"os"
 	"os/exec"
@@ -64,13 +63,13 @@ type GenerateResult struct {
 // changes, and a models/*.gen.go file for a model no longer in the
 // schema is removed.
 func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateResult, error) {
-	modulePath, err := moduleImportPath(ctx, dir)
+	importPath, err := moduleImportPath(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
 
-	schemaImportPath := modulePath + "/schema"
-	modelsImportPath := modulePath + "/models"
+	schemaImportPath := importPath + "/schema"
+	modelsImportPath := importPath + "/models"
 
 	if err := checkSchemaImportBoundary(ctx, dir, schemaImportPath, modelsImportPath); err != nil {
 		return nil, err
@@ -90,7 +89,7 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 		}
 		owner[name] = m.Name
 
-		content, err := renderModelFile(m)
+		content, err := renderModelFile(m, sch.Types)
 		if err != nil {
 			return nil, fmt.Errorf("render models/%s: %w", name, err)
 		}
@@ -147,38 +146,6 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 	return &GenerateResult{Stale: stale}, nil
 }
 
-// renderModelFile is a placeholder shape — one empty exported struct per
-// model, named from its ResourceName(). What the struct actually looks
-// like per FieldKind (naming, nullability, db tags, Many2One/Selection/
-// Enum handling) is goerp#961's job, built on top of this pipeline.
-func renderModelFile(m *model.ModelDeclaration) ([]byte, error) {
-	structName := exportedPlaceholderName(m.ResourceName())
-
-	var buf bytes.Buffer
-	buf.WriteString(generatedFileHeader)
-	buf.WriteString("package models\n\n")
-	fmt.Fprintf(&buf, "// %s corresponds to model %q.\n", structName, m.Name)
-	buf.WriteString("//\n// Field and struct generation per FieldKind is not implemented yet (goerp#961).\n")
-	fmt.Fprintf(&buf, "type %s struct{}\n", structName)
-
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return nil, err
-	}
-	return formatted, nil
-}
-
-// exportedPlaceholderName capitalizes resource's first letter — not the
-// initialism-aware PascalCase conversion goerp#961 will apply, just
-// enough to produce a valid, exported placeholder identifier.
-func exportedPlaceholderName(resource string) string {
-	if resource == "" {
-		return "Model"
-	}
-	r := []rune(resource)
-	return strings.ToUpper(string(r[0])) + string(r[1:])
-}
-
 // existingGenFiles reads modelsDir's own *.gen.go files, keyed by base
 // name. A modelsDir that doesn't exist yet (nothing generated so far)
 // is not an error — it reads as an empty map.
@@ -205,44 +172,84 @@ func existingGenFiles(modelsDir string) (map[string][]byte, error) {
 	return out, nil
 }
 
-// moduleImportPath resolves dir's own module path (the go.mod "module"
-// directive) — the prefix schemaImportPath/modelsImportPath and the
-// driver's own import of the schema package are built from. `go list -m`
-// with no pattern lists every *main* module — one line, unless dir sits
-// in a go.work workspace naming more than one, in which case the line
-// whose own directory is dir is the one actually rooted there.
+// moduleImportPath resolves dir's own Go import path: the enclosing
+// module's own path (the go.mod "module" directive) joined with dir's
+// position under that module's root. dir is not always a module root
+// itself — a real GoERP module scaffolded by `goerp module create` is,
+// but the SDK's own in-repo fixture (sdk/go/modeltest/testdata/fixture)
+// is a subdirectory of this repo's own module, and schemaImportPath/
+// modelsImportPath must reflect that or the driver's own import of the
+// schema package resolves to the wrong package entirely.
+//
+// `go list -m` with no pattern lists every *main* module — one line,
+// unless dir sits in a go.work workspace naming more than one. Every
+// line whose own directory contains dir is a candidate (a workspace can
+// list one main module nested inside another's directory tree); the
+// most specific — the one whose own directory is deepest, i.e. longest
+// — is the one that actually governs dir.
 func moduleImportPath(ctx context.Context, dir string) (string, error) {
 	out, err := runCmdOutput(ctx, dir, nil, "go", "list", "-m", "-f", "{{.Dir}}\t{{.Path}}")
 	if err != nil {
 		return "", fmt.Errorf("resolve module path: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) == 1 {
-		if fields := strings.SplitN(lines[0], "\t", 2); len(fields) == 2 {
-			return fields[1], nil
-		}
-	}
-
-	// EvalSymlinks, not just Abs: dir and go list's own reported .Dir can
-	// reach the same directory through different symlinks (e.g. a
-	// TMPDIR that's itself a symlink) and still need to compare equal.
-	absDir, err := filepath.EvalSymlinks(dir)
+	// Abs before resolveSymlinksOrSelf: dir may be relative (e.g. "." or
+	// a caller-relative path), and EvalSymlinks doesn't itself
+	// absolutize — it only resolves the symlinks in whatever path it's
+	// given. Both steps matter: Abs so a relative dir compares correctly
+	// against go list's own absolute .Dir, symlink resolution so the two
+	// sides agree even when reached through different symlinks (e.g. a
+	// symlinked TMPDIR).
+	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve module path: %w", err)
 	}
-	for _, line := range lines {
-		fields := strings.SplitN(line, "\t", 2)
+	absDir = resolveSymlinksOrSelf(absDir)
+
+	var bestModDir, bestModPath string
+	for line := range strings.Lines(strings.TrimSpace(out)) {
+		fields := strings.SplitN(strings.TrimSuffix(line, "\n"), "\t", 2)
 		if len(fields) != 2 {
 			continue
 		}
-		lineDir, err := filepath.EvalSymlinks(fields[0])
-		if err == nil && lineDir == absDir {
-			return fields[1], nil
+		modDir := resolveSymlinksOrSelf(fields[0])
+		if rel, err := filepath.Rel(modDir, absDir); err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		if len(modDir) > len(bestModDir) {
+			bestModDir, bestModPath = modDir, fields[1]
 		}
 	}
+	if bestModDir == "" {
+		return "", fmt.Errorf("resolve module path: no main module in %s's workspace contains %s", dir, absDir)
+	}
 
-	return "", fmt.Errorf("resolve module path: no main module in %s's workspace is rooted at %s", dir, absDir)
+	return joinModuleAndSubdir(bestModPath, bestModDir, absDir)
+}
+
+// resolveSymlinksOrSelf resolves path's own symlinks, or returns path
+// unchanged if that fails (e.g. it doesn't exist) — the two dir-related
+// paths moduleImportPath compares (absDir, and each candidate module's
+// own .Dir) both need this same treatment to agree.
+func resolveSymlinksOrSelf(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
+}
+
+// joinModuleAndSubdir appends absDir's own position under modDir (an
+// already-symlink-resolved module root) to modPath, using Go's forward-
+// slash import-path separator regardless of OS.
+func joinModuleAndSubdir(modPath, modDir, absDir string) (string, error) {
+	rel, err := filepath.Rel(modDir, absDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve module path: %w", err)
+	}
+	if rel == "." {
+		return modPath, nil
+	}
+	return modPath + "/" + filepath.ToSlash(rel), nil
 }
 
 // checkSchemaImportBoundary enforces the one import-boundary rule from
@@ -284,7 +291,15 @@ func collectSchema(ctx context.Context, dir, schemaImportPath string) (model.Sch
 		return model.Schema{}, fmt.Errorf("write driver source: %w", err)
 	}
 
-	wasmPath := filepath.Join(scratchDir, "driver.wasm")
+	// wasmPath must be absolute: runCmd sets cmd.Dir to dir, so a path
+	// already joined with dir (scratchDir is dir + a generated suffix)
+	// would otherwise be resolved relative to dir a second time — the
+	// same double-join bug wasmbuild.go's own BuildWasm comment warns
+	// about, hit for real here since dir isn't always the caller's cwd.
+	wasmPath, err := filepath.Abs(filepath.Join(scratchDir, "driver.wasm"))
+	if err != nil {
+		return model.Schema{}, fmt.Errorf("resolve driver binary path: %w", err)
+	}
 	driverPkg := "./" + filepath.Base(scratchDir)
 
 	if err := runCmd(ctx, dir, []string{"GOOS=wasip1", "GOARCH=wasm"}, "go", "build", "-o", wasmPath, driverPkg); err != nil {

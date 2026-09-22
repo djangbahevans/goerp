@@ -7,11 +7,13 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/events"
+	"github.com/djangbahevans/goerp/sdk/go/modeltest/testdata/fixture/models"
 	"github.com/djangbahevans/goerp/sdk/go/modeltest/testdata/fixture/schema"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
@@ -26,33 +28,6 @@ type createWidgetBody struct {
 type echoBody struct {
 	Tags []string          `json:"tags"`
 	Meta map[string]string `json:"meta"`
-}
-
-type widgetRow struct {
-	ID   string `db:"id"`
-	Name string `db:"name"`
-}
-
-// kindProbeRow's field types are goerp#960's own empirically-observed
-// result — the Go type orm's setFieldValue actually receives at raw for
-// each of these six kinds, confirmed by /kind-probe's round trip below
-// decoding successfully (a wrong type here fails setFieldValue's
-// AssignableTo/ConvertibleTo check with a "cannot assign %s into %s"
-// error naming the real type). Decimal and Time decode as plain
-// strings, not a numeric or a time.Time — Postgres NUMERIC and TIME
-// values arrive pre-formatted rather than as Go's own numeric/time
-// types. JSONB decodes as raw []byte (the column's own JSON text, not a
-// parsed map[string]any) — a generated field of this kind still has to
-// be unmarshaled by the caller. TimestampTZ and Date both decode as
-// time.Time; Bytea decodes as []byte, same as JSONB.
-type kindProbeRow struct {
-	ID        string    `db:"id"`
-	Decimal   string    `db:"decimal_field"`
-	Timestamp time.Time `db:"timestamp_field"`
-	Date      time.Time `db:"date_field"`
-	Time      string    `db:"time_field"`
-	JSONB     []byte    `db:"jsonb_field"`
-	Bytea     []byte    `db:"bytea_field"`
 }
 
 func init() {
@@ -76,16 +51,17 @@ func init() {
 			"time_field":      "13:45:00",
 			"jsonb_field":     map[string]any{"key": "value", "n": float64(1)},
 			"bytea_field":     []byte("hello-bytes"),
+			"priority":        "medium",
 		}
 
-		created, err := orm.Create[kindProbeRow]("widgets.kind_probe", vals)
+		created, err := orm.Create[models.KindProbe]("widgets.kind_probe", vals)
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.kind_probe_create_failed", "message": err.Error()},
 			}}
 		}
 
-		read, err := orm.ReadOne[kindProbeRow]("widgets.kind_probe", created.ID, nil)
+		read, err := orm.ReadOne[models.KindProbe]("widgets.kind_probe", created.ID, nil)
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.kind_probe_read_failed", "message": err.Error()},
@@ -93,14 +69,90 @@ func init() {
 		}
 
 		return engine.Created(map[string]any{
-			"id":        read.ID,
-			"decimal":   read.Decimal,
-			"timestamp": read.Timestamp.Format(time.RFC3339),
-			"date":      read.Date.Format(time.RFC3339),
-			"time":      read.Time,
-			"jsonb":     string(read.JSONB),
-			"bytea":     string(read.Bytea),
+			"id":                   read.ID,
+			"decimal":              read.DecimalField,
+			"timestamp":            read.TimestampField.Format(time.RFC3339),
+			"date":                 read.DateField.Format(time.RFC3339),
+			"time":                 read.TimeField,
+			"jsonb":                string(read.JsonbField),
+			"bytea":                string(read.ByteaField),
+			"priority":             string(read.Priority),
+			"has_note":             read.OptionalNote != nil,
+			"has_gadget_expansion": read.CreatedByGadget != nil,
 		})
+	}, engine.Auth(engine.AuthNone))
+
+	// /kind-probe-relation exercises the generated *orm.RelationRef
+	// expansion field (goerp#961 §3.4) end to end: a gadget created with
+	// a real display_name, a kind_probe row whose Many2One FK points at
+	// it, read back via orm.SearchRead (not just ReadOne, per goerp#961's
+	// own AC) — and, in the same call, a second kind_probe row with the
+	// relation left unset, to confirm the expansion field decodes to nil
+	// rather than erroring when there's nothing to expand.
+	engine.POST("/kind-probe-relation", func(req *engine.Request) *engine.Response {
+		gadget, err := orm.Create[models.Gadget]("widgets.gadget", map[string]any{
+			"name":         "Acme Gadget",
+			"display_name": "Acme",
+		})
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.gadget_create_failed", "message": err.Error()},
+			}}
+		}
+
+		baseVals := map[string]any{
+			"decimal_field":   "1.00",
+			"timestamp_field": time.Now().UTC(),
+			"date_field":      time.Now().UTC(),
+			"time_field":      "00:00:00",
+			"jsonb_field":     map[string]any{},
+			"bytea_field":     []byte(""),
+			"priority":        "low",
+		}
+
+		withRelationVals := map[string]any{"created_by_gadget_id": gadget.ID}
+		for k, v := range baseVals {
+			withRelationVals[k] = v
+		}
+		withRelation, err := orm.Create[models.KindProbe]("widgets.kind_probe", withRelationVals)
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.kind_probe_create_failed", "message": err.Error()},
+			}}
+		}
+
+		withoutRelation, err := orm.Create[models.KindProbe]("widgets.kind_probe", baseVals)
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.kind_probe_create_failed", "message": err.Error()},
+			}}
+		}
+
+		rows, _, err := orm.SearchRead[models.KindProbe]("widgets.kind_probe",
+			fmt.Sprintf("record.id = '%s' OR record.id = '%s'", withRelation.ID, withoutRelation.ID), nil)
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.kind_probe_search_failed", "message": err.Error()},
+			}}
+		}
+
+		body := map[string]any{}
+		for _, row := range rows {
+			entry := map[string]any{"gadget_id": row.CreatedByGadgetID}
+			if row.CreatedByGadget != nil {
+				entry["gadget_display_name"] = row.CreatedByGadget.DisplayName
+			} else {
+				entry["gadget_display_name"] = nil
+			}
+			switch row.ID {
+			case withRelation.ID:
+				body["with_relation"] = entry
+			case withoutRelation.ID:
+				body["without_relation"] = entry
+			}
+		}
+
+		return engine.Created(body)
 	}, engine.Auth(engine.AuthNone))
 
 	engine.GET("/ping", func(req *engine.Request) *engine.Response {
@@ -142,7 +194,7 @@ func init() {
 			}}
 		}
 
-		row, err := tx.ExecReturning[widgetRow](`INSERT INTO widgets (tenant_id, name) VALUES ($1, $2)`, req.TenantID, body.Name)
+		row, err := tx.ExecReturning[models.Widget](`INSERT INTO widgets (tenant_id, name) VALUES ($1, $2)`, req.TenantID, body.Name)
 		if err != nil {
 			_ = tx.Rollback()
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
