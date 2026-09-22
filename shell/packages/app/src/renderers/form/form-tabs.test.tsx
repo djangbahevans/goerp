@@ -340,6 +340,7 @@ describe("FormTabsRenderer view extensions", () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_form", extension: "hr_employees_tab" },
         definition: {
@@ -389,6 +390,7 @@ describe("FormTabsRenderer view extensions", () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_form", extension: "hr_employment_tab" },
         definition: {
@@ -412,10 +414,96 @@ describe("FormTabsRenderer view extensions", () => {
     expect(await screen.findByText("Employment for Ada")).toBeTruthy();
   });
 
+  it("disambiguates two extension tabs sharing a label with '(ModuleDisplayName)' (view-system.md §17)", async () => {
+    const HrEmploymentTab = () => <p>HR employment details</p>;
+    const PayrollEmploymentTab = () => <p>Payroll employment details</p>;
+    componentRegistry.register("hr.EmploymentTab", HrEmploymentTab);
+    componentRegistry.register("payroll.EmploymentTab", PayrollEmploymentTab);
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        moduleDisplayName: "HR",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_form", extension: "hr_employment_tab" },
+        definition: {
+          name: "hr_employment_tab",
+          type: "tab",
+          target_section: "tabs",
+          position: "append",
+          tab: { label: "Employment", type: "component", component: "hr.EmploymentTab" },
+        },
+      },
+      {
+        module: "payroll",
+        moduleDisplayName: "Payroll",
+        loadOrder: 2,
+        ref: { extends: "contacts.contacts_form", extension: "payroll_employment_tab" },
+        definition: {
+          name: "payroll_employment_tab",
+          type: "tab",
+          target_section: "tabs",
+          position: "append",
+          tab: { label: "Employment", type: "component", component: "payroll.EmploymentTab" },
+        },
+      },
+    ]);
+
+    await renderTabs([{ label: "General", type: "fields", sections: [] }]);
+
+    await screen.findByRole("tab", { name: "Employment (HR)" });
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["General", "Employment (HR)", "Employment (Payroll)"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Employment (Payroll)" }));
+    expect(await screen.findByText("Payroll employment details")).toBeTruthy();
+
+    componentRegistry.unregister("payroll.EmploymentTab");
+  });
+
+  it("keeps a lone extension tab's plain label when no other visible tab shares it", async () => {
+    forTargetMock.mockResolvedValue([
+      {
+        module: "hr",
+        moduleDisplayName: "HR",
+        loadOrder: 1,
+        ref: { extends: "contacts.contacts_form", extension: "hr_employees_tab" },
+        definition: {
+          name: "hr_employees_tab",
+          type: "tab",
+          target_section: "tabs",
+          position: "append",
+          tab: { label: "Employees", type: "view", view: "hr.employees_list" },
+        },
+      },
+    ]);
+    resolveViewMock.mockResolvedValue({
+      name: "employees_list",
+      type: "list",
+      resource: "hr.employee",
+      label: "Employees",
+    });
+    useInfiniteListMock.mockReturnValue({
+      data: { pages: [{ data: [], meta: { cursor: null, hasMore: false } }] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    await renderTabs([{ label: "General", type: "fields", sections: [] }]);
+
+    await screen.findByRole("tab", { name: "Employees" });
+    expect(screen.queryByRole("tab", { name: "Employees (HR)" })).toBeNull();
+  });
+
   it("renders unchanged when the extension's target view/definition doesn't resolve", async () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_form", extension: "hr_missing" },
         definition: undefined,

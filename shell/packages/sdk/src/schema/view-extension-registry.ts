@@ -11,6 +11,7 @@ import type { MetaSchema, ViewExtensionDef, ViewExtensionRef } from "./types.js"
 // throwing (view-system.md §10: "nothing renders, nothing throws").
 export interface ViewExtensionEntry {
   module: string;
+  moduleDisplayName: string;
   loadOrder: number;
   ref: ViewExtensionRef;
   definition: ViewExtensionDef | undefined;
@@ -31,6 +32,7 @@ export function buildViewExtensionRegistry(schema: MetaSchema): Map<string, View
     for (const ref of moduleSchema.view_extensions) {
       const entry: ViewExtensionEntry = {
         module: moduleName,
+        moduleDisplayName: moduleSchema.display_name,
         loadOrder: moduleSchema.load_order,
         ref,
         definition: defsByName.get(ref.extension),

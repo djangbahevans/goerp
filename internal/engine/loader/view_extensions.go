@@ -26,6 +26,24 @@ var viewExtensionAreaNames = map[string]struct{ section, viewType string }{
 	"bulk_action": {"bulk_actions", "list"},
 }
 
+// AppliedViewExtension is one extension that survived ValidateViewExtensions
+// with an actual effect — its target view and target_section both resolved,
+// so it genuinely lands in the applied set, unlike an extension skipped for
+// an absent soft dependency or an unresolved target_section (goerp#890's
+// conflict pass only makes sense over extensions that actually apply).
+type AppliedViewExtension struct {
+	Module        string // the extending module
+	LoadOrder     int    // the extending module's dependency-load order
+	TargetView    string // "{module}.{view_name}", i.e. ref.Extends
+	TargetSection string
+	Position      string
+	Type          string
+	// TabLabel is the tab's label when Type == "tab", "" otherwise —
+	// LogViewExtensionConflicts' log line names the colliding tabs by
+	// label (view-system.md §17 "View extension conflict detection").
+	TabLabel string
+}
+
 // ValidateViewExtensions checks every loaded module's view_extensions
 // against the loaded module set's actual views (manifest-spec.md §11
 // "Extension rules", §28 hard-error/warning rows; view-system.md §10
@@ -45,10 +63,17 @@ var viewExtensionAreaNames = map[string]struct{ section, viewType string }{
 // LoadModule (route.SynthesizeViews' EnableViews-derived views appended
 // in), so no separate EnableViews resolution is needed here.
 //
+// Returns every extension that actually applied — callers pass this to
+// LogViewExtensionConflicts (goerp#890) to warn about two modules
+// contributing to the same target location, without that pass
+// re-deriving which extensions survived validation.
+//
 // Exported so a caller loading modules one at a time (not via LoadAll)
 // can still run this same validation once its own loop finishes, the
 // same pattern as ValidateEventSubscriptions.
-func ValidateViewExtensions(modules map[string]*module.LoadedModule) {
+func ValidateViewExtensions(modules map[string]*module.LoadedModule) []AppliedViewExtension {
+	var applied []AppliedViewExtension
+
 	for name, m := range modules {
 		if m.Status == module.StatusFailed {
 			continue
@@ -98,6 +123,11 @@ func ValidateViewExtensions(modules map[string]*module.LoadedModule) {
 						Msg("view extension target_section not found on target view; extension skipped")
 				case section.Type == "sub_list":
 					m.Fail(fmt.Sprintf("view_extensions: extension %q: target_section %q on %q is a sub_list section — fields extensions cannot add fields to another module's sub_list", def.Name, def.TargetSection, ref.Extends))
+				default:
+					applied = append(applied, AppliedViewExtension{
+						Module: name, LoadOrder: m.LoadOrder, TargetView: ref.Extends,
+						TargetSection: def.TargetSection, Position: def.Position, Type: def.Type,
+					})
 				}
 				if m.Status == module.StatusFailed {
 					break
@@ -113,9 +143,20 @@ func ValidateViewExtensions(modules map[string]*module.LoadedModule) {
 			case view.Type != area.viewType:
 				log.Warn().Str("module", name).Str("extension", def.Name).Str("extends", ref.Extends).Str("target_section", def.TargetSection).Str("view_type", view.Type).
 					Msg("view extension target_section names the right area, but the target view is the wrong type for it; extension skipped")
+			default:
+				tabLabel := ""
+				if def.Type == "tab" && def.Tab != nil {
+					tabLabel = def.Tab.Label
+				}
+				applied = append(applied, AppliedViewExtension{
+					Module: name, LoadOrder: m.LoadOrder, TargetView: ref.Extends,
+					TargetSection: def.TargetSection, Position: def.Position, Type: def.Type, TabLabel: tabLabel,
+				})
 			}
 		}
 	}
+
+	return applied
 }
 
 // findView returns the view named name from views, if any.
