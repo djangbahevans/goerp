@@ -154,13 +154,13 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s", strings.Join(selectExprs, ", "), table, whereFrag)
 	sqlRows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMAggregateOutput{}, ormSQLError(err)
 	}
 	defer sqlRows.Close()
 
 	records, err := scanRowsToMaps(sqlRows)
 	if err != nil {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMAggregateOutput{}, ormSQLError(err)
 	}
 
 	// A query with no GROUP BY always returns exactly one row, already

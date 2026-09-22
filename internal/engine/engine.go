@@ -714,10 +714,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore, roleCache, rolePermissionMap, apiKeyStore, cfg.EnableAPIKeys, mfaTokenCodec, mfaStore, mfaPolicyStore)
 
 	adminapi.RegisterActivityDispatchRoute(adminServer.UnauthenticatedRouter(), adminapi.ActivityDispatchDeps{
-		Registry:    moduleRegistry,
-		Tenants:     tenantStore,
-		TxLimiter:   runtime.TxLimiter(),
-		Credentials: workflowWorkers,
+		Registry:            moduleRegistry,
+		Tenants:             tenantStore,
+		TxLimiter:           runtime.TxLimiter(),
+		Credentials:         workflowWorkers,
+		ORMBulkMaxRows:      runtime.ORMBulkMaxRows(),
+		ORMStatementTimeout: runtime.ORMStatementTimeout(),
 	})
 
 	server.SetModulesFn(func() (httpx.ModulesReport, []httpx.FailedModule) {
@@ -1244,6 +1246,8 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 		SearchIndexRegistry: searchIndexRegistry,
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
+		ORMBulkMaxRows:      e.wasmRuntime.ORMBulkMaxRows(),
+		ORMStatementTimeout: e.wasmRuntime.ORMStatementTimeout(),
 	})
 }
 

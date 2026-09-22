@@ -135,7 +135,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMMutateOutput{}, hostErr
 	}
 	if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, updated, plan.fields); err != nil {
-		return ORMMutateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return ORMMutateOutput{}, ormSQLErrorRetryable(err)
 	}
 
 	if err := commit(); err != nil {

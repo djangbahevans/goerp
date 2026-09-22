@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -29,10 +30,12 @@ type CredentialValidator interface {
 // module's WASM pool, build its execution context, and authenticate the
 // calling workflow-worker process.
 type ActivityDispatchDeps struct {
-	Registry    *registry.ModuleRegistry
-	Tenants     *tenant.Store
-	TxLimiter   *wasm.TransactionLimiter
-	Credentials CredentialValidator
+	Registry            *registry.ModuleRegistry
+	Tenants             *tenant.Store
+	TxLimiter           *wasm.TransactionLimiter
+	Credentials         CredentialValidator
+	ORMBulkMaxRows      int
+	ORMStatementTimeout time.Duration
 }
 
 // RegisterActivityDispatchRoute wires POST /admin/_internal/activity-dispatch
@@ -156,14 +159,16 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 	// credential auth, not a user session) — permSet stays nil, same as
 	// Roles above.
 	moduleCtx := wasm.NewModuleContext(req.WorkflowID, mod.Manifest.Name, req.UserID, "", nil, nil, req.TenantID, t.Slug, req.TraceID, mod.Capabilities, h.deps.TxLimiter, wasm.ModuleSnapshot{
-		ModelDecls:         mod.ModelDecls,
-		FieldSecRegistry:   snap.FieldSecRegistry(),
-		EventRegistry:      snap.EventRegistry(),
-		ComputedIndex:      snap.ComputedIndex(),
-		ComputeTargets:     registry.ComputeTargets(snap),
-		PermissionRegistry: snap.PermissionRegistry(),
-		OwnedModels:        mod.Manifest.Schema.OwnedModels,
-		ExtendsModels:      mod.Manifest.Schema.ExtendsModels,
+		ModelDecls:          mod.ModelDecls,
+		FieldSecRegistry:    snap.FieldSecRegistry(),
+		EventRegistry:       snap.EventRegistry(),
+		ComputedIndex:       snap.ComputedIndex(),
+		ComputeTargets:      registry.ComputeTargets(snap),
+		PermissionRegistry:  snap.PermissionRegistry(),
+		OwnedModels:         mod.Manifest.Schema.OwnedModels,
+		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
+		ORMBulkMaxRows:      h.deps.ORMBulkMaxRows,
+		ORMStatementTimeout: h.deps.ORMStatementTimeout,
 	})
 	inst.SetModuleContext(moduleCtx)
 	defer func() {

@@ -33,6 +33,8 @@ type Runtime struct {
 	syncEventDispatcher   SyncEventDispatcher
 	syncSubscriberTimeout time.Duration
 	replicaDB             atomic.Pointer[sql.DB]
+	ormBulkMaxRows        int
+	ormStatementTimeout   time.Duration
 }
 
 // SetSyncEventDispatcher wires the resolver host.event.emit's inline
@@ -109,6 +111,8 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		registry:              newInstanceRegistry(),
 		txLimiter:             NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
 		syncSubscriberTimeout: cfg.SyncSubscriberTimeout,
+		ormBulkMaxRows:        cfg.ORMBulkMaxRows,
+		ormStatementTimeout:   cfg.ORMStatementTimeout,
 	}
 
 	if err := abi.RegisterAll(ctx, rt); err != nil {

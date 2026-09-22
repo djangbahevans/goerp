@@ -78,7 +78,7 @@ func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 		var exists bool
 		sqlStr := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s = $1)", table, quoteIdentORM(targetPK))
 		if err := tx.QueryRowContext(ctx, sqlStr, idVal).Scan(&exists); err != nil {
-			return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+			return ormSQLError(err)
 		}
 		if !exists {
 			return &abi.HostError{Code: abi.ErrCodeDynamicLinkTargetNotFound, Message: f.Name + " does not exist in model " + typeName, Details: map[string]any{"field": f.Name}}

@@ -3,6 +3,7 @@ package wasm
 import (
 	"database/sql"
 	"sync"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
@@ -87,6 +88,16 @@ type ModuleSnapshot struct {
 	// single explicit-consent statement has no use for).
 	OwnedModels   []string
 	ExtendsModels []string
+
+	// ORMBulkMaxRows caps create_batch/write_many/write_where/unlink at
+	// this many records/IDs per call. Zero defaults to
+	// defaultORMBulkMaxRows via ModuleContext.ormBulkMaxRows.
+	ORMBulkMaxRows int
+
+	// ORMStatementTimeout bounds every statement of an ORM-owned
+	// transaction. Zero defaults to defaultORMStatementTimeout via
+	// ModuleContext.ormStatementTimeout.
+	ORMStatementTimeout time.Duration
 }
 
 type ModuleContext struct {
@@ -200,6 +211,32 @@ func (mc *ModuleContext) OwnedModels() []string {
 // extended-model names (dotted "{module}.{resource}" form).
 func (mc *ModuleContext) ExtendsModels() []string {
 	return mc.snapshot.ExtendsModels
+}
+
+// defaultORMBulkMaxRows/defaultORMStatementTimeout mirror
+// config.Config's own GOERP_ORM_BULK_MAX_ROWS/GOERP_ORM_STATEMENT_TIMEOUT
+// defaults, for a ModuleContext built with a zero-value ModuleSnapshot.
+const (
+	defaultORMBulkMaxRows      = 1000
+	defaultORMStatementTimeout = 30 * time.Second
+)
+
+// ormBulkMaxRows is host.orm's own bulk-operation row/ID ceiling for this
+// request — see ModuleSnapshot.ORMBulkMaxRows.
+func (mc *ModuleContext) ormBulkMaxRows() int {
+	if mc.snapshot.ORMBulkMaxRows > 0 {
+		return mc.snapshot.ORMBulkMaxRows
+	}
+	return defaultORMBulkMaxRows
+}
+
+// ormStatementTimeout is host.orm's own per-statement timeout for this
+// request — see ModuleSnapshot.ORMStatementTimeout.
+func (mc *ModuleContext) ormStatementTimeout() time.Duration {
+	if mc.snapshot.ORMStatementTimeout > 0 {
+		return mc.snapshot.ORMStatementTimeout
+	}
+	return defaultORMStatementTimeout
 }
 
 // RollbackAll rolls back every transaction still open in this context,
