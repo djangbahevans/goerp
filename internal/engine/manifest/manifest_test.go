@@ -306,7 +306,7 @@ func TestLoadManifestModuleTypeConstraintsViolations(t *testing.T) {
 		"bridge has_ui forbidden": {
 			"bridge",
 			func(f map[string]any) {
-				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "y", "label": "z"}}
+				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "demo.y", "label": "z"}}
 			},
 			`must not declare views or a frontend bundle`,
 		},
@@ -338,7 +338,7 @@ func TestLoadManifestModuleTypeConstraintsViolations(t *testing.T) {
 		"report_bundle has_ui forbidden": {
 			"report_bundle",
 			func(f map[string]any) {
-				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "y", "label": "z"}}
+				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "demo.y", "label": "z"}}
 			},
 			`must not declare views or a frontend bundle`,
 		},
@@ -360,7 +360,7 @@ func TestLoadManifestModuleTypeConstraintsViolations(t *testing.T) {
 		"automation has_ui forbidden": {
 			"automation",
 			func(f map[string]any) {
-				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "y", "label": "z"}}
+				f["views"] = []map[string]any{{"name": "x", "type": "list", "resource": "demo.y", "label": "z"}}
 			},
 			`must not declare views or a frontend bundle`,
 		},
