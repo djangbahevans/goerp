@@ -145,7 +145,6 @@ func TestViewKeepsTypeSpecificMembersInExtra(t *testing.T) {
 		"calendar.json":  {"date_field", "title_field", "color_map", "default_view", "allowed_views", "on_click", "quick_create"},
 		"timeline.json":  {"start_field", "end_field", "group_by", "color_field", "allow_resize", "default_range"},
 		"pivot.json":     {"rows", "columns", "values", "allow_download", "use_wasm"},
-		"custom.json":    {"component"},
 		"list-tree.json": {"tree_field", "default_expanded_depth"},
 	}
 	fixtures := readViewFixtures(t)

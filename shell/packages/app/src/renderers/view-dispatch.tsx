@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import * as v from "valibot";
 import { CalendarViewDeclarationSchema } from "./calendar/calendar-manifest-types.js";
 import { CalendarRenderer } from "./calendar/calendar-renderer.js";
+import { CustomViewRenderer } from "./custom/custom-view-renderer.js";
+import { CustomViewDeclarationSchema } from "./custom/custom-view-types.js";
 import { FormRenderer } from "./form/form-renderer.js";
 import { FormViewDeclarationSchema } from "./form/form-view-types.js";
 import { KanbanViewDeclarationSchema } from "./kanban/kanban-manifest-types.js";
@@ -15,7 +17,7 @@ import { PivotRenderer } from "./pivot/pivot-renderer.js";
 import { TimelineViewDeclarationSchema } from "./timeline/timeline-manifest-types.js";
 import { TimelineRenderer } from "./timeline/timeline-renderer.js";
 
-export const KNOWN_VIEW_TYPES = new Set(["list", "pivot", "kanban", "calendar", "timeline", "form"]);
+export const KNOWN_VIEW_TYPES = new Set(["list", "pivot", "kanban", "calendar", "timeline", "form", "custom"]);
 export const AnyViewDeclarationSchema = v.variant("type", [
   ListViewDeclarationSchema,
   PivotViewDeclarationSchema,
@@ -23,6 +25,7 @@ export const AnyViewDeclarationSchema = v.variant("type", [
   CalendarViewDeclarationSchema,
   TimelineViewDeclarationSchema,
   FormViewDeclarationSchema,
+  CustomViewDeclarationSchema,
 ]);
 
 export interface ViewDispatchProps {
@@ -97,5 +100,7 @@ export function ViewDispatch({ view, module, recordId, embedded, baseFilter, sho
       // embedded/baseFilter/showCreateAction (embedded is already excluded
       // above), so it only declares module/recordId.
       return <FormRenderer view={validated} module={module} {...recordIdProp} />;
+    case "custom":
+      return <CustomViewRenderer view={validated} {...rendererProps} />;
   }
 }
