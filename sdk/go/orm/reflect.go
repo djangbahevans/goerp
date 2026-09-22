@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Struct-tag-driven record mapping — sdk/go/db/reflect.go's own
@@ -27,12 +28,21 @@ type ormField struct {
 	index int
 }
 
+// ormFieldsCache memoizes ormFields per type — setFieldValue recurses into
+// it once per nested-struct value, not once per type, so an uncached
+// result set with N rows and a nested relation field would otherwise
+// redo this reflection/regexp pass N times.
+var ormFieldsCache sync.Map // reflect.Type -> []ormField
+
 // ormFields returns t's own db-tag-mapped fields, in declaration order —
 // every exported field, skipping any tagged `db:"-"`. t must be a struct
 // type (not a pointer).
 func ormFields(t reflect.Type) ([]ormField, error) {
 	if t.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("orm: %s is not a struct", t)
+	}
+	if cached, ok := ormFieldsCache.Load(t); ok {
+		return cached.([]ormField), nil
 	}
 	fields := make([]ormField, 0, t.NumField())
 	for i := range t.NumField() {
@@ -50,6 +60,7 @@ func ormFields(t reflect.Type) ([]ormField, error) {
 		}
 		fields = append(fields, ormField{key: key, index: i})
 	}
+	ormFieldsCache.Store(t, fields)
 	return fields, nil
 }
 
@@ -128,6 +139,16 @@ func setFieldValue(field reflect.Value, raw any) error {
 		}
 		field.Set(elem)
 		return nil
+	}
+
+	if field.Kind() == reflect.Struct {
+		if nested, ok := raw.(map[string]any); ok {
+			fields, err := ormFields(field.Type())
+			if err != nil {
+				return err
+			}
+			return populateRecord(field, fields, nested)
+		}
 	}
 
 	rv := reflect.ValueOf(raw)
