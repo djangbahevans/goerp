@@ -3,7 +3,7 @@ package registry
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"sync"
@@ -295,9 +295,9 @@ type schemaHashModule struct {
 // ETag-like cache-busting signal for the shell and goerp codegen --watch
 // rather than diffing the full response on every poll. Hashes a
 // JSON-marshaled, key-sorted snapshot of every field the response
-// reports (encoding/json sorts map keys and struct fields serialize in
-// declaration order, so the input bytes are deterministic without any
-// hand-rolled delimiter scheme).
+// reports (json.Deterministic(true) sorts map keys and struct fields
+// serialize in declaration order, so the input bytes are deterministic
+// without any hand-rolled delimiter scheme).
 func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *route.RouteTable) string {
 	prefixes := make(map[string]string, len(modules))
 	hashModules := make(map[string]schemaHashModule, len(modules))
@@ -368,7 +368,7 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 		hashModules[r.Entry.ModuleName] = hm
 	}
 
-	data, err := json.Marshal(hashModules)
+	data, err := json.Marshal(hashModules, json.Deterministic(true))
 	if err != nil {
 		// hashModules contains only strings, bools, slices, and maps of
 		// those — never a channel, func, or cyclic value — so

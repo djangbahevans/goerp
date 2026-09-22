@@ -2,7 +2,7 @@ package engine
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"net/http"
@@ -147,7 +147,7 @@ func normalizeParquetValue(v any) any {
 	case []byte:
 		return string(val)
 	default:
-		encoded, err := json.Marshal(val)
+		encoded, err := json.Marshal(val, json.Deterministic(true))
 		if err != nil {
 			return fmt.Sprintf("%v", val)
 		}
