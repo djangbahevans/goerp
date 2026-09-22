@@ -106,9 +106,13 @@ func ValidateViewExtensions(modules map[string]*module.LoadedModule) {
 			}
 
 			area, known := viewExtensionAreaNames[def.Type]
-			if !known || def.TargetSection != area.section || view.Type != area.viewType {
+			switch {
+			case !known || def.TargetSection != area.section:
 				log.Warn().Str("module", name).Str("extension", def.Name).Str("extends", ref.Extends).Str("target_section", def.TargetSection).
 					Msg("view extension target_section not found on target view; extension skipped")
+			case view.Type != area.viewType:
+				log.Warn().Str("module", name).Str("extension", def.Name).Str("extends", ref.Extends).Str("target_section", def.TargetSection).Str("view_type", view.Type).
+					Msg("view extension target_section names the right area, but the target view is the wrong type for it; extension skipped")
 			}
 		}
 	}
