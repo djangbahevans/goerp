@@ -148,7 +148,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMCreateOutput{}, hostErr
 	}
 
-	row, inserted, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
+	row, inserted, updatedFields, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
 	if hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
@@ -181,12 +181,14 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMCreateOutput{}, hostErr
 	}
 
-	eventName := "orm.record.created"
-	if !inserted {
-		eventName = "orm.record.updated"
-	}
-	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, eventName, input.Model, row); err != nil {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	if inserted {
+		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, row); err != nil {
+			return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		}
+	} else {
+		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, row, updatedFields); err != nil {
+			return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		}
 	}
 
 	if err := commit(); err != nil {
@@ -229,11 +231,12 @@ func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.
 // sequential-in-one-tx satisfies the real AC ("all-or-nothing, one
 // failure aborts the whole batch") via ordinary rollback while trivially
 // handling records with different field sets, which a single multi-row
-// statement would need a uniform column list for. Emits at most two
-// batched events (not one per record) — orm.record.created listing every
-// genuinely-inserted record, orm.record.updated listing any
-// OnConflictUpdate rows — matching the doc's explicit "batched into one
-// event with all IDs for create_batch, not one event per row".
+// statement would need a uniform column list for. Emits one batched
+// orm.record.created event listing every genuinely-inserted record —
+// matching the doc's explicit "batched into one event with all IDs for
+// create_batch, not one event per row" — and one orm.record.updated event
+// per OnConflictUpdate row, since each such row's changed_fields can
+// differ.
 func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMCreateBatchInput) (ORMCreateBatchOutput, *abi.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return ORMCreateBatchOutput{}, abi.CapabilityDenied("db.write")
@@ -256,7 +259,12 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 	}
 	defer rollback()
 
-	var all, createdForEvent, updatedForEvent []map[string]any
+	type updatedRow struct {
+		row           map[string]any
+		changedFields []string
+	}
+	var all, createdForEvent []map[string]any
+	var updatedForEvent []updatedRow
 	for _, rec := range input.Records {
 		record := make(map[string]any, len(rec))
 		maps.Copy(record, rec)
@@ -278,7 +286,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			return ORMCreateBatchOutput{}, hostErr
 		}
 
-		row, inserted, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
+		row, inserted, updatedFields, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
 		if hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
@@ -304,7 +312,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		if inserted {
 			createdForEvent = append(createdForEvent, row)
 		} else {
-			updatedForEvent = append(updatedForEvent, row)
+			updatedForEvent = append(updatedForEvent, updatedRow{row: row, changedFields: updatedFields})
 		}
 	}
 
@@ -313,8 +321,12 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 	}
-	if len(updatedForEvent) > 0 {
-		if err := emitBatchRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.updated", input.Model, updatedForEvent); err != nil {
+	// One orm.record.updated per row rather than one batched event —
+	// each row's changed_fields can differ across the batch, and this
+	// keeps orm.record.updated's payload shape {model, record,
+	// changed_fields} the same everywhere it's emitted from.
+	for _, u := range updatedForEvent {
+		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, u.row, u.changedFields); err != nil {
 			return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 	}
@@ -460,7 +472,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
 
-	row, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil, nil)
+	row, _, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil, nil)
 	if hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -1120,16 +1132,19 @@ func writeDeniedBy(modCtx *ModuleContext, qualifiedModel, field string) (fieldse
 // idiom for "this row was inserted by this command, not updated via the
 // ON CONFLICT DO UPDATE arm" (xmax is 0 only for a row this exact command
 // just inserted). inserted tells the caller which event type to emit for
-// this row. An OnConflictIgnore hit returns (nil, false, nil) — a
-// skipped conflict is not an error, just nothing to report.
-func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption, serverFilled []string) (map[string]any, bool, *abi.HostError) {
+// this row; updatedFields is nil when inserted is true, and otherwise the
+// sorted fields the DO UPDATE arm actually overwrote (excluding
+// serverFilled), for that event's changed_fields. An OnConflictIgnore hit
+// returns (nil, false, nil, nil) — a skipped conflict is not an error,
+// just nothing to report.
+func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption, serverFilled []string) (row map[string]any, inserted bool, updatedFields []string, hostErr *abi.HostError) {
 	fields, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record)
 	if hostErr != nil {
-		return nil, false, hostErr
+		return nil, false, nil, hostErr
 	}
 	cols := quoteIdentsORM(fields)
 	if len(cols) == 0 {
-		return nil, false, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to insert"}
+		return nil, false, nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to insert"}
 	}
 	placeholders := make([]string, len(args))
 	for i := range args {
@@ -1143,7 +1158,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 	if onConflict != nil {
 		targetCols, hostErr := validateOnConflictTarget(md, qualifiedModel, onConflict.Fields, "on_conflict.fields")
 		if hostErr != nil {
-			return nil, false, hostErr
+			return nil, false, nil, hostErr
 		}
 		quotedTarget := make([]string, len(targetCols))
 		for i, c := range targetCols {
@@ -1154,18 +1169,25 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 			insertSQL += fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", strings.Join(quotedTarget, ", "))
 		case "update":
 			setClauses := make([]string, 0, len(cols))
-			for _, c := range cols {
-				if slices.ContainsFunc(serverFilled, func(f string) bool { return c == quoteIdentORM(f) }) {
+			for i, f := range fields {
+				if slices.Contains(serverFilled, f) {
 					continue
 				}
-				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", c, c))
+				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", cols[i], cols[i]))
+				updatedFields = append(updatedFields, f)
 			}
 			if len(setClauses) == 0 {
+				// Every assigned field was server-filled — there's no
+				// field EXCLUDED actually differs by, but DO UPDATE
+				// still needs a SET clause, so the target column is
+				// rewritten onto itself. updatedFields stays empty:
+				// nothing meaningfully changed.
 				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", quotedTarget[0], quotedTarget[0]))
 			}
+			slices.Sort(updatedFields)
 			insertSQL += fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", strings.Join(quotedTarget, ", "), strings.Join(setClauses, ", "))
 		default:
-			return nil, false, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "on_conflict.policy must be \"ignore\" or \"update\", got " + onConflict.Policy}
+			return nil, false, nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "on_conflict.policy must be \"ignore\" or \"update\", got " + onConflict.Policy}
 		}
 	}
 
@@ -1173,24 +1195,27 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 
 	rows, err := tx.QueryContext(ctx, insertSQL, args...)
 	if err != nil {
-		return nil, false, translateWriteError(err, md)
+		return nil, false, nil, translateWriteError(err, md)
 	}
 	created, err := scanRowsToMaps(rows)
 	if err != nil {
-		return nil, false, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return nil, false, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 	}
 	if len(created) == 0 {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	if len(created) != 1 {
-		return nil, false, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "insert did not return exactly one row"}
+		return nil, false, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "insert did not return exactly one row"}
 	}
 
-	row := created[0]
-	inserted, _ := row["__inserted"].(bool)
+	row = created[0]
+	inserted, _ = row["__inserted"].(bool)
 	delete(row, "__inserted")
+	if inserted {
+		updatedFields = nil
+	}
 
-	return row, inserted, nil
+	return row, inserted, updatedFields, nil
 }
 
 // validateOnConflictTarget resolves fields against a real declared unique
