@@ -5,11 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	// Stays on v1: manifest.json may be hand-authored or from an older
-	// toolchain, where v2's stricter invalid-UTF-8/duplicate-key rejection
-	// could newly break a module that built fine before (package.go and
-	// wasmbuild.go read it under this same reasoning).
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,14 +30,9 @@ type FrontendBuildResult struct {
 func BuildFrontend(ctx context.Context, dir string, debug bool) (*FrontendBuildResult, error) {
 	manifestPath := filepath.Join(dir, "manifest.json")
 
-	raw, err := os.ReadFile(manifestPath)
+	decoded, err := readManifestJSON(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("read manifest: %w", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
+		return nil, err
 	}
 
 	frontend, _ := decoded["frontend"].(map[string]any)

@@ -4,8 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	// Stays on v1 — see build.go's identical import comment.
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -103,14 +101,9 @@ func Package(ctx context.Context, dir string, opts PackageOptions) (*PackageResu
 }
 
 func readNameVersion(manifestPath string) (name, version string, err error) {
-	raw, err := os.ReadFile(manifestPath)
+	decoded, err := readManifestJSON(manifestPath)
 	if err != nil {
-		return "", "", fmt.Errorf("read manifest: %w", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return "", "", fmt.Errorf("parse manifest: %w", err)
+		return "", "", err
 	}
 
 	name, _ = decoded["name"].(string)
@@ -123,14 +116,9 @@ func readNameVersion(manifestPath string) (name, version string, err error) {
 }
 
 func patchManifestField(manifestPath, field, value string) error {
-	raw, err := os.ReadFile(manifestPath)
+	decoded, err := readManifestJSON(manifestPath)
 	if err != nil {
-		return fmt.Errorf("read manifest: %w", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return fmt.Errorf("parse manifest: %w", err)
+		return err
 	}
 
 	decoded[field] = value

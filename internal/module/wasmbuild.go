@@ -2,8 +2,6 @@ package module
 
 import (
 	"context"
-	// Stays on v1 — see build.go's identical import comment.
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,14 +22,9 @@ type WasmBuildResult struct {
 func BuildWasm(ctx context.Context, dir string, debug bool) (*WasmBuildResult, error) {
 	manifestPath := filepath.Join(dir, "manifest.json")
 
-	raw, err := os.ReadFile(manifestPath)
+	decoded, err := readManifestJSON(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("read manifest: %w", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
+		return nil, err
 	}
 
 	// manifest-spec.md §2: wasm defaults to true when omitted.
