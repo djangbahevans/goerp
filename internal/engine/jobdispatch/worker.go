@@ -191,6 +191,8 @@ func (w *Worker) newModuleContext(mod *module.LoadedModule, args jobqueue.WASMJo
 		SearchIndexRegistry: snap.SearchIndexRegistry(),
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
+		ORMBulkMaxRows:      w.Runtime.ORMBulkMaxRows(),
+		ORMStatementTimeout: w.Runtime.ORMStatementTimeout(),
 	})
 	mc.IsDataMigrationJob = args.IsDataMigration
 	return mc

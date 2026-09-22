@@ -112,6 +112,16 @@ const (
 	ErrCodeFieldWriteDenied          = "orm.field_write_denied"
 	ErrCodeCycleDetected             = "orm.cycle_detected"
 	ErrCodeDynamicLinkTargetNotFound = "orm.dynamic_link_target_not_found"
+	// ErrCodeBatchTooLarge rejects a create_batch/write_many/write_where/
+	// unlink call whose records/IDs (or, for write_where, matched rows)
+	// exceed GOERP_ORM_BULK_MAX_ROWS — before any write, Details carry
+	// "limit" and "count".
+	ErrCodeBatchTooLarge = "orm.batch_too_large"
+	// ErrCodeORMTimeout is distinct from the generic ErrCodeTimeout and
+	// from ErrCodeDBTimeout above — a statement of an ORM-owned
+	// transaction cancelled by GOERP_ORM_STATEMENT_TIMEOUT (SQLSTATE
+	// 57014), not a host.db.query call's own timeout_ms.
+	ErrCodeORMTimeout = "orm.timeout"
 )
 
 // Transient-model error codes (go-sdk-reference.md §22 "Transient models").

@@ -61,6 +61,8 @@ const (
 	ErrCodeFieldWriteDenied           = abiv1.ErrCodeFieldWriteDenied
 	ErrCodeCycleDetected              = abiv1.ErrCodeCycleDetected
 	ErrCodeDynamicLinkTargetNotFound  = abiv1.ErrCodeDynamicLinkTargetNotFound
+	ErrCodeBatchTooLarge              = abiv1.ErrCodeBatchTooLarge
+	ErrCodeORMTimeout                 = abiv1.ErrCodeORMTimeout
 	ErrCodeTransientNotListable       = abiv1.ErrCodeTransientNotListable
 	ErrCodeInvalidTransition          = abiv1.ErrCodeInvalidTransition
 	ErrCodeNoTransaction              = abiv1.ErrCodeNoTransaction

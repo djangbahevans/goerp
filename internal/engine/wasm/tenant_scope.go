@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"strconv"
 	"strings"
 )
 
@@ -29,5 +30,16 @@ func applyTenantScope(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext) er
 		"tenant_"+modCtx.TenantSlug+", public",
 		modCtx.UserID, modCtx.ContactID, strings.Join(modCtx.Roles, ","),
 	)
+	return err
+}
+
+// applyORMStatementTimeout sets statement_timeout for the rest of tx's
+// lifetime. A separate statement from applyTenantScope's own, safely so:
+// tx is already open by the time either runs, and Go's database/sql pins
+// one physical connection to an open *sql.Tx regardless of PgBouncer's
+// pooling mode.
+func applyORMStatementTimeout(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext) error {
+	ms := modCtx.ormStatementTimeout().Milliseconds()
+	_, err := tx.ExecContext(ctx, `SELECT set_config('statement_timeout', $1, true)`, strconv.FormatInt(ms, 10))
 	return err
 }

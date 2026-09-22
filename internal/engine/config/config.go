@@ -78,6 +78,10 @@ type Config struct {
 	DBSchemaSyncDSN             string `env:"GOERP_DB_SCHEMA_SYNC_DSN"`
 	DBMaxConcurrentTransactions int    `env:"GOERP_DB_MAX_CONCURRENT_TRANSACTIONS" envDefault:"100" validate:"min=1"`
 
+	// host.orm bulk operation bounds (create_batch/write_many/write_where/unlink)
+	ORMBulkMaxRows      int           `env:"GOERP_ORM_BULK_MAX_ROWS" envDefault:"1000" validate:"min=1"`
+	ORMStatementTimeout time.Duration `env:"GOERP_ORM_STATEMENT_TIMEOUT" envDefault:"30s"`
+
 	// Redis
 	RedisAddr           string   `env:"GOERP_REDIS_ADDR" envDefault:"localhost:6379" validate:"hostname_port"`
 	RedisSentinelAddrs  []string `env:"GOERP_REDIS_SENTINEL_ADDRS" validate:"dive,hostname_port"`

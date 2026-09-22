@@ -3,6 +3,7 @@ package wasm
 import (
 	"database/sql"
 	"sync"
+	"time"
 
 	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero/api"
@@ -47,6 +48,20 @@ func (r *Runtime) InstanceForModule(m api.Module) *ModuleInstance {
 // host.db.begin's usage of it.
 func (r *Runtime) TxLimiter() *TransactionLimiter {
 	return r.txLimiter
+}
+
+// ORMBulkMaxRows returns the runtime's own GOERP_ORM_BULK_MAX_ROWS, so
+// Engine's per-request ModuleContext construction can thread it through
+// to ModuleSnapshot.ORMBulkMaxRows the same way TxLimiter is.
+func (r *Runtime) ORMBulkMaxRows() int {
+	return r.ormBulkMaxRows
+}
+
+// ORMStatementTimeout returns the runtime's own
+// GOERP_ORM_STATEMENT_TIMEOUT, threaded through to
+// ModuleSnapshot.ORMStatementTimeout the same way ORMBulkMaxRows is.
+func (r *Runtime) ORMStatementTimeout() time.Duration {
+	return r.ormStatementTimeout
 }
 
 // EventInsertClient returns the same never-started river.Client[*sql.Tx]

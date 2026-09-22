@@ -69,6 +69,44 @@ func TestLoadDurationField(t *testing.T) {
 	}
 }
 
+func TestLoadORMBulkBounds(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.ORMBulkMaxRows != 1000 {
+		t.Errorf("ORMBulkMaxRows default = %d, want 1000", cfg.ORMBulkMaxRows)
+	}
+	if cfg.ORMStatementTimeout.String() != "30s" {
+		t.Errorf("ORMStatementTimeout default = %s, want 30s", cfg.ORMStatementTimeout)
+	}
+
+	t.Setenv("GOERP_ORM_BULK_MAX_ROWS", "50")
+	t.Setenv("GOERP_ORM_STATEMENT_TIMEOUT", "5s")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.ORMBulkMaxRows != 50 {
+		t.Errorf("ORMBulkMaxRows override = %d, want 50", cfg.ORMBulkMaxRows)
+	}
+	if cfg.ORMStatementTimeout.String() != "5s" {
+		t.Errorf("ORMStatementTimeout override = %s, want 5s", cfg.ORMStatementTimeout)
+	}
+}
+
+func TestLoadInvalidORMBulkMaxRows(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("GOERP_ORM_BULK_MAX_ROWS", "0")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected a validation error for GOERP_ORM_BULK_MAX_ROWS=0, got nil")
+	}
+}
+
 func TestLoadStringSlice(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("GOERP_REDIS_SENTINEL_ADDRS", "host1:26379,host2:26379,host3:26379")

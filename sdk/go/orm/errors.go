@@ -45,6 +45,19 @@ func IsFieldNotWritable(err error) bool { return hostErrorCodeIs(err, abi.ErrCod
 // offending field is in the error's Details["field"].
 func IsFieldWriteDenied(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeFieldWriteDenied) }
 
+// IsBatchTooLarge reports whether err is a create_batch/write_many/
+// write_where/unlink failure caused by the call's records/IDs (or, for
+// write_where, matched rows) exceeding GOERP_ORM_BULK_MAX_ROWS —
+// orm.batch_too_large. No record is written when this fires. The limit
+// and the requested count are in the error's Details["limit"]/["count"].
+func IsBatchTooLarge(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeBatchTooLarge) }
+
+// IsTimeout reports whether err is a host.orm failure caused by a
+// statement of an ORM-owned transaction exceeding
+// GOERP_ORM_STATEMENT_TIMEOUT — orm.timeout. The transaction is always
+// rolled back when this fires; the same call may succeed on retry.
+func IsTimeout(err error) bool { return hostErrorCodeIs(err, abi.ErrCodeORMTimeout) }
+
 func hostErrorCodeIs(err error, code string) bool {
 	var he *abi.HostError
 	return errors.As(err, &he) && he.Code == code

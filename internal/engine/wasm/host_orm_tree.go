@@ -117,7 +117,7 @@ func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 
 			var wouldCycle bool
 			if err := tx.QueryRowContext(ctx, "SELECT $1::ltree <@ $2::ltree", newParentPath, oldPath).Scan(&wouldCycle); err != nil {
-				return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+				return ormSQLError(err)
 			}
 			if wouldCycle {
 				return &abi.HostError{Code: abi.ErrCodeCycleDetected, Message: "reparenting " + id + " under " + fmt.Sprint(newParentID) + " would make it its own ancestor", Details: map[string]any{"field": f.Name}}
@@ -131,7 +131,7 @@ func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 			table, pathCol, pathCol, pathCol, pathCol,
 		)
 		if _, err := tx.ExecContext(ctx, updateSQL, oldPath, newPrefix); err != nil {
-			return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+			return ormSQLError(err)
 		}
 	}
 	return nil
@@ -161,7 +161,7 @@ func lookupOwnTreePath(ctx context.Context, tx *sql.Tx, table, pkColQuoted, tree
 		if err == sql.ErrNoRows {
 			return "", nil
 		}
-		return "", &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return "", ormSQLError(err)
 	}
 	return path.String, nil
 }

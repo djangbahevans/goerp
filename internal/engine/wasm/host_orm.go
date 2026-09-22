@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -17,11 +18,41 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
 )
+
+// pgStatementTimeoutSQLState is Postgres's SQLSTATE for a cancelled
+// statement (57014) — in practice, almost always statement_timeout.
+const pgStatementTimeoutSQLState = "57014"
+
+// ormTimeoutHostError is host.orm's response to a cancelled statement —
+// retryable, since the same call with more time may well succeed.
+func ormTimeoutHostError() *abi.HostError {
+	return &abi.HostError{Code: abi.ErrCodeORMTimeout, Message: "statement exceeded host.orm's statement timeout", Retry: true}
+}
+
+// ormSQLError maps a query/exec failure on an ORM-owned transaction to
+// orm.timeout or the generic abi.unavailable — the read-side counterpart
+// to translateWriteError's own pgStatementTimeoutSQLState case.
+func ormSQLError(err error) *abi.HostError {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == pgStatementTimeoutSQLState {
+		return ormTimeoutHostError()
+	}
+	return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+}
+
+// ormSQLErrorRetryable is ormSQLError for a call site that already
+// always sets Retry: true on the generic case.
+func ormSQLErrorRetryable(err error) *abi.HostError {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == pgStatementTimeoutSQLState {
+		return ormTimeoutHostError()
+	}
+	return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+}
 
 // registerHostORM attaches host.orm's read half (search/search_read/read,
 // this file), write half (create/write/unlink, host_orm_write.go), and
@@ -131,13 +162,13 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORM
 	var count int64
 	countSQL := fmt.Sprintf("SELECT count(*) FROM %s WHERE %s", table, whereFrag)
 	if err := tx.QueryRowContext(ctx, countSQL, args...).Scan(&count); err != nil {
-		return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMSearchOutput{}, ormSQLError(err)
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s%s", pkColQuoted, table, whereFrag, orderLimitOffsetClause(input.Order, input.Limit, input.Offset))
 	rows, err := tx.QueryContext(ctx, listSQL, args...)
 	if err != nil {
-		return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMSearchOutput{}, ormSQLError(err)
 	}
 	defer rows.Close()
 
@@ -145,12 +176,12 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORM
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+			return ORMSearchOutput{}, ormSQLError(err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMSearchOutput{}, ormSQLError(err)
 	}
 
 	return ORMSearchOutput{IDs: ids, Count: count}, nil
@@ -250,19 +281,19 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		strings.Join(selectCols, ", "), table, whereFrag, orderLimitOffsetClause(order, limit, input.Offset))
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMSearchReadOutput{}, ormSQLError(err)
 	}
 	defer rows.Close()
 
 	records, err := scanRowsToMaps(rows)
 	if err != nil {
-		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMSearchReadOutput{}, ormSQLError(err)
 	}
 
 	applyFieldMasking(modCtx, input.Model, records)
 
 	if err := expandRelations(ctx, tx, modCtx, md, columns, records, true); err != nil {
-		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMSearchReadOutput{}, ormSQLError(err)
 	}
 
 	// A page has a next one only if it came back full — whether or not
@@ -451,13 +482,13 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 		strings.Join(selectExprs, ", "), table, whereFrag, groupByClause)
 	sqlRows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMPivotOutput{}, ormSQLError(err)
 	}
 	defer sqlRows.Close()
 
 	records, err := scanRowsToMaps(sqlRows)
 	if err != nil {
-		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMPivotOutput{}, ormSQLError(err)
 	}
 
 	cells := make([]map[string]any, 0, len(records))
@@ -607,13 +638,13 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		strings.Join(selectCols, ", "), table, quoteIdentORM(pkCol), strings.Join(placeholders, ", "))
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMReadOutput{}, ormSQLError(err)
 	}
 	defer rows.Close()
 
 	records, err := scanRowsToMaps(rows)
 	if err != nil {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMReadOutput{}, ormSQLError(err)
 	}
 
 	if !o.skipFieldSecurity {
@@ -621,7 +652,7 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 	}
 
 	if err := expandRelations(ctx, tx, modCtx, md, columns, records, !o.skipFieldSecurity); err != nil {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMReadOutput{}, ormSQLError(err)
 	}
 
 	return ORMReadOutput{Records: records}, nil
@@ -847,13 +878,18 @@ func resolveORMReadTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, tx
 // search_path/ABAC session-variable scoping host.db.begin uses
 // (multitenancy-internals.md §5a "Layer 1"), so the RLS policies
 // goerp#71/#72 install apply automatically — host.orm does nothing extra
-// for row filtering, the table already enforces it.
+// for row filtering, the table already enforces it. Also sets this
+// request's own statement_timeout via applyORMStatementTimeout.
 func beginTenantScopedRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext) (*sql.Tx, error) {
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
 	if err := applyTenantScope(ctx, tx, modCtx); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := applyORMStatementTimeout(ctx, tx, modCtx); err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}

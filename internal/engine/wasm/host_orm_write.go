@@ -51,6 +51,16 @@ import (
 // fields on a Transient model are likewise out of scope here — recompute
 // is wired only for the Postgres-backed create/write cores below.
 
+// batchTooLargeHostError rejects a call whose records/IDs/matched rows
+// exceed GOERP_ORM_BULK_MAX_ROWS, before any write.
+func batchTooLargeHostError(limit, count int) *abi.HostError {
+	return &abi.HostError{
+		Code:    abi.ErrCodeBatchTooLarge,
+		Message: fmt.Sprintf("this call touches %d rows, over the %d-row limit (GOERP_ORM_BULK_MAX_ROWS)", count, limit),
+		Details: map[string]any{"limit": limit, "count": count},
+	}
+}
+
 type OnConflictOption = abiv1.ORMOnConflict
 
 type ORMCreateInput = abiv1.ORMCreateInput
@@ -183,7 +193,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 
 	if inserted {
 		if err := emitRecordCreatedEvent(ctx, insertClient, tx, modCtx, input.Model, row); err != nil {
-			return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return ORMCreateOutput{}, ormSQLErrorRetryable(err)
 		}
 	} else {
 		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, row, updatedFields); err != nil {
@@ -252,6 +262,9 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 	if len(input.Records) == 0 {
 		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "records must not be empty"}
 	}
+	if maxRows := modCtx.ormBulkMaxRows(); len(input.Records) > maxRows {
+		return ORMCreateBatchOutput{}, batchTooLargeHostError(maxRows, len(input.Records))
+	}
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
@@ -318,7 +331,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 
 	if len(createdForEvent) > 0 {
 		if err := emitRecordCreatedBatchEvent(ctx, insertClient, tx, modCtx, input.Model, createdForEvent); err != nil {
-			return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return ORMCreateBatchOutput{}, ormSQLErrorRetryable(err)
 		}
 	}
 	// One orm.record.updated per row rather than one batched event —
@@ -431,17 +444,17 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 
 	lockKey := modCtx.TenantSlug + ":" + input.Model + ":" + hex.EncodeToString(lockKeyBytes)
 	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return ORMFirstOrCreateOutput{}, ormSQLErrorRetryable(err)
 	}
 
 	table := quoteIdentORM(tableNameForORM(md))
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1", table, whereFrag), whereArgs...)
 	if err != nil {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMFirstOrCreateOutput{}, ormSQLError(err)
 	}
 	found, err := scanRowsToMaps(rows)
 	if err != nil {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ORMFirstOrCreateOutput{}, ormSQLError(err)
 	}
 
 	if len(found) > 0 {
@@ -595,7 +608,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 	}
 
 	if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, updated, changedFields); err != nil {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return ORMWriteOutput{}, ormSQLErrorRetryable(err)
 	}
 
 	if err := commit(); err != nil {
@@ -648,6 +661,9 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 	}
 	if md.Backend == model.BackendTransient {
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "write_many is not supported for Transient-backed models"}
+	}
+	if maxRows := modCtx.ormBulkMaxRows(); len(input.IDs) > maxRows {
+		return ExecResult{}, batchTooLargeHostError(maxRows, len(input.IDs))
 	}
 	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
 		return ExecResult{}, hostErr
@@ -760,22 +776,30 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 	}
 	defer rollback()
 
+	// Selects at most maxRows+1 IDs — enough to tell "exactly at the
+	// limit" apart from "over it" without pulling an unbounded result set
+	// into memory first, the same reasoning ORMSearch's own Limit option
+	// follows.
+	maxRows := modCtx.ormBulkMaxRows()
 	table := quoteIdentORM(tableNameForORM(md))
 	pkColQuoted := quoteIdentORM(pkCol)
-	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s", pkColQuoted, table, whereFrag), whereArgs...)
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT %d", pkColQuoted, table, whereFrag, maxRows+1), whereArgs...)
 	if err != nil {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ExecResult{}, ormSQLError(err)
 	}
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+			return ExecResult{}, ormSQLError(err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ExecResult{}, ormSQLError(err)
+	}
+	if len(ids) > maxRows {
+		return ExecResult{}, batchTooLargeHostError(maxRows, len(ids))
 	}
 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
@@ -832,6 +856,9 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
 		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+	}
+	if maxRows := modCtx.ormBulkMaxRows(); len(input.IDs) > maxRows {
+		return ExecResult{}, batchTooLargeHostError(maxRows, len(input.IDs))
 	}
 
 	if md.Backend == model.BackendTransient {
@@ -907,7 +934,7 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 			return ExecResult{}, hostErr
 		}
 		if err := emitRecordDeletedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, map[string]any{"id": deletedID}); err != nil {
-			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return ExecResult{}, ormSQLErrorRetryable(err)
 		}
 
 		affected = append(affected, deletedID)
@@ -923,7 +950,9 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 // the caller's own host.db.commit/rollback responsibility. For an owned
 // transaction, commit/rollback are tx.Commit/tx.Rollback directly, so
 // existing call sites keep their own "defer rollback, explicit commit on
-// success" shape unchanged.
+// success" shape unchanged. A borrowed transaction keeps host.db.begin's
+// own timeout behavior, not GOERP_ORM_STATEMENT_TIMEOUT — only an owned
+// transaction goes through beginTenantScopedWrite's applyORMStatementTimeout.
 func resolveORMWriteTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, commit func() error, rollback func(), hostErr *abi.HostError) {
 	if txID != "" {
 		tx, ok := modCtx.Transaction(txID)
@@ -940,13 +969,18 @@ func resolveORMWriteTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, t
 }
 
 // beginTenantScopedWrite is beginTenantScopedRead without ReadOnly — same
-// session-var scoping so RLS applies automatically to writes too.
+// session-var scoping so RLS applies automatically to writes too, and the
+// same statement_timeout (goerp#898).
 func beginTenantScopedWrite(ctx context.Context, db *sql.DB, modCtx *ModuleContext) (*sql.Tx, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	if err := applyTenantScope(ctx, tx, modCtx); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := applyORMStatementTimeout(ctx, tx, modCtx); err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}
@@ -1040,7 +1074,7 @@ func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelNam
 		periodKey := orm.ResolvePeriodKey(f.Def.SequenceFormat, time.Now())
 		next, err := orm.AcquireNext(ctx, tx, tenantSlug, modelName, f.Name, periodKey)
 		if err != nil {
-			return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return ormSQLErrorRetryable(err)
 		}
 		record[f.Name] = next
 	}
@@ -1199,7 +1233,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 	}
 	created, err := scanRowsToMaps(rows)
 	if err != nil {
-		return nil, false, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return nil, false, nil, ormSQLError(err)
 	}
 	if len(created) == 0 {
 		return nil, false, nil, nil
@@ -1287,7 +1321,7 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	}
 	updated, err := scanRowsToMaps(rows)
 	if err != nil {
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return nil, nil, ormSQLError(err)
 	}
 
 	if len(updated) == 0 {
@@ -1325,7 +1359,7 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 			return ExecResult{}, hostErr
 		}
 		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, updated, changedFields); err != nil {
-			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return ExecResult{}, ormSQLErrorRetryable(err)
 		}
 		affected = append(affected, id)
 	}
@@ -1432,7 +1466,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 		}
 		depIDs, err := fkReferencingIDs(ctx, tx, dep.ModelDecl, depPK, dep.ViaFKField, row[writtenPK])
 		if err != nil {
-			return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+			return ormSQLError(err)
 		}
 
 		for _, depID := range depIDs {
@@ -1540,7 +1574,7 @@ func writeAuditLogEntry(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, 
 	}
 
 	if err := insertAuditLogRow(ctx, tx, modCtx, tableNameForORM(md), recordID, operation, excludeCols, oldData, newData); err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ormSQLError(err)
 	}
 	return nil
 }
@@ -1725,11 +1759,11 @@ func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, p
 	sqlStr := strings.TrimSpace(fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 %s", table, quoteIdentORM(pkCol), lockClause))
 	rows, err := tx.QueryContext(ctx, sqlStr, pkValue)
 	if err != nil {
-		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return nil, ormSQLError(err)
 	}
 	records, err := scanRowsToMaps(rows)
 	if err != nil {
-		return nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return nil, ormSQLError(err)
 	}
 	if len(records) == 0 {
 		return nil, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
@@ -1753,7 +1787,7 @@ func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclarati
 	table := quoteIdentORM(tableNameForORM(md))
 
 	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.skip_etag_trigger', 'true', true)"); err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ormSQLError(err)
 	}
 
 	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2", table, quoteIdentORM(field), quoteIdentORM(pkCol))
@@ -1762,7 +1796,7 @@ func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclarati
 	}
 
 	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.skip_etag_trigger', 'false', true)"); err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ormSQLError(err)
 	}
 	return nil
 }
@@ -1773,6 +1807,8 @@ func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclarati
 func translateWriteError(err error, md model.ModelDeclaration) *abi.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
+		case pgStatementTimeoutSQLState:
+			return ormTimeoutHostError()
 		case "23505": // unique_violation
 			for _, idx := range md.Indexes {
 				if idx.Def.IsUnique && idx.Name == pgErr.ConstraintName {
@@ -1804,7 +1840,7 @@ func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, i
 	var exists bool
 	checkSQL := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s = $1)", table, pkColQuoted)
 	if err := tx.QueryRowContext(ctx, checkSQL, id).Scan(&exists); err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return ormSQLError(err)
 	}
 	if exists {
 		return &abi.HostError{Code: abi.ErrCodeEtagMismatch, Message: "record has been modified since it was last read"}
