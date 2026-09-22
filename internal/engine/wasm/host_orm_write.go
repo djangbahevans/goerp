@@ -182,7 +182,7 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	}
 
 	if inserted {
-		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, row); err != nil {
+		if err := emitRecordCreatedEvent(ctx, insertClient, tx, modCtx, input.Model, row); err != nil {
 			return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 	} else {
@@ -317,7 +317,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 	}
 
 	if len(createdForEvent) > 0 {
-		if err := emitBatchRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, createdForEvent); err != nil {
+		if err := emitRecordCreatedBatchEvent(ctx, insertClient, tx, modCtx, input.Model, createdForEvent); err != nil {
 			return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 	}
@@ -487,7 +487,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
 
-	if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.created", input.Model, row); err != nil {
+	if err := emitRecordCreatedEvent(ctx, insertClient, tx, modCtx, input.Model, row); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	if err := commit(); err != nil {
@@ -906,7 +906,7 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "DELETE", existing, nil); hostErr != nil {
 			return ExecResult{}, hostErr
 		}
-		if err := emitRecordEvent(ctx, insertClient, tx, modCtx, "orm.record.deleted", qualifiedModel, map[string]any{"id": deletedID}); err != nil {
+		if err := emitRecordDeletedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, map[string]any{"id": deletedID}); err != nil {
 			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 
@@ -1376,8 +1376,8 @@ func callerWrittenFields(md model.ModelDeclaration, assigned []string) []string 
 // emitRecordUpdatedEvent emits orm.record.updated with the fields the call
 // wrote alongside the full stored record.
 func emitRecordUpdatedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any, changedFields []string) error {
-	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.updated", map[string]any{
-		"model": modelName, "record": record, "changed_fields": changedFields,
+	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.updated", abiv1.ORMRecordUpdatedPayload{
+		Model: modelName, Record: record, ChangedFields: changedFields,
 	})
 }
 
@@ -1812,17 +1812,22 @@ func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, i
 	return &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
 }
 
-// emitRecordEvent inserts an orm.record.* EventDelivery job on tx,
-// bypassing host.event.emit_tx's module-declared-emits gate entirely —
-// these are engine-emitted lifecycle events, not module-authored ones,
-// the same reasoning event-system.md gives system.* events for not
-// needing a manifest declaration. No idempotency-key dedup either: every
-// write is already its own distinct transaction.
-func emitRecordEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName, modelName string, record map[string]any) error {
-	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, eventName, map[string]any{"model": modelName, "record": record})
+// emitRecordCreatedEvent inserts an orm.record.created EventDelivery job
+// on tx for a single created row. Bypasses host.event.emit_tx's
+// module-declared-emits gate — engine-emitted, not module-authored.
+func emitRecordCreatedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any) error {
+	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.created", abiv1.ORMRecordCreatedPayload{Model: modelName, Record: record})
 }
 
-func emitRecordEventPayload(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName string, body map[string]any) error {
+// emitRecordDeletedEvent inserts an orm.record.deleted EventDelivery job
+// on tx — one per deleted ID, even for a multi-ID unlink.
+func emitRecordDeletedEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, record map[string]any) error {
+	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.deleted", abiv1.ORMRecordDeletedPayload{Model: modelName, Record: record})
+}
+
+// emitRecordEventPayload marshals body — one of the abiv1.ORMRecord*Payload
+// types — as an EventDelivery job's payload.
+func emitRecordEventPayload(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName string, body any) error {
 	payload, err := msgpack.Marshal(body)
 	if err != nil {
 		return err
@@ -1832,16 +1837,11 @@ func emitRecordEventPayload(ctx context.Context, insertClient *river.Client[*sql
 		modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0, nil)
 }
 
-// emitBatchRecordEvent is emitRecordEvent's plural form for
-// ORMCreateBatch — one event listing every record in records, matching
-// the doc's "batched into one event with all IDs for create_batch, not
-// one event per row".
-func emitBatchRecordEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, eventName, modelName string, records []map[string]any) error {
-	payload, err := msgpack.Marshal(map[string]any{"model": modelName, "records": records})
-	if err != nil {
-		return err
-	}
-	eventID := uuid.Must(uuid.NewV7())
-	return insertEventDeliveryTx(ctx, insertClient, tx, eventID, eventName, 1,
-		modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0, nil)
+// emitRecordCreatedBatchEvent is emitRecordCreatedEvent's plural form for
+// ORMCreateBatch's inserted rows — one event listing every row, matching
+// the doc's "batched into one event ... not one event per row".
+// create_batch's OnConflictUpdate rows go through emitRecordUpdatedEvent
+// instead, one event per row.
+func emitRecordCreatedBatchEvent(ctx context.Context, insertClient *river.Client[*sql.Tx], tx *sql.Tx, modCtx *ModuleContext, modelName string, records []map[string]any) error {
+	return emitRecordEventPayload(ctx, insertClient, tx, modCtx, "orm.record.created", abiv1.ORMRecordCreatedPayload{Model: modelName, Records: records})
 }

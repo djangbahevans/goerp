@@ -165,6 +165,31 @@ type ORMExecResult struct {
 	IDs   []string `msgpack:"ids"`
 }
 
+// ORMRecordCreatedPayload is the payload of orm.record.created. Record is
+// set for a single create; Records instead for a create_batch batch, one
+// event for the whole batch. Mutually exclusive.
+type ORMRecordCreatedPayload struct {
+	Model   string           `msgpack:"model"`
+	Record  map[string]any   `msgpack:"record,omitempty"`
+	Records []map[string]any `msgpack:"records,omitempty"`
+}
+
+// ORMRecordUpdatedPayload is the payload of orm.record.updated — always
+// one record. ChangedFields lists the fields the call actually wrote,
+// sorted, excluding engine-managed columns.
+type ORMRecordUpdatedPayload struct {
+	Model         string         `msgpack:"model"`
+	Record        map[string]any `msgpack:"record"`
+	ChangedFields []string       `msgpack:"changed_fields"`
+}
+
+// ORMRecordDeletedPayload is the payload of orm.record.deleted, one per
+// deleted ID. Record holds only the deleted id.
+type ORMRecordDeletedPayload struct {
+	Model  string         `msgpack:"model"`
+	Record map[string]any `msgpack:"record"`
+}
+
 // ORMUnlinkInput is the request of host.orm.unlink.
 type ORMUnlinkInput struct {
 	Model string   `msgpack:"model"`

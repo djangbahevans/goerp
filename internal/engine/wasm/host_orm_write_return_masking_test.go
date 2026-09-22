@@ -3,7 +3,6 @@ package wasm
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -108,22 +107,10 @@ func assertStoredWidgetUnchanged(t *testing.T, primaryDB *sql.DB, slug, id strin
 
 func latestEventRecord(t *testing.T, primaryDB *sql.DB, eventName, tenantID string) map[string]any {
 	t.Helper()
-	var payloadB64 string
-	if err := primaryDB.QueryRow(
-		`SELECT args->>'payload' FROM river_job
-		 WHERE kind = 'event_delivery' AND args->>'event_name' = $1 AND args->>'tenant_id' = $2
-		 ORDER BY id DESC LIMIT 1`, eventName, tenantID,
-	).Scan(&payloadB64); err != nil {
-		t.Fatalf("read %s event: %v", eventName, err)
-	}
-	payload, err := base64.StdEncoding.DecodeString(payloadB64)
-	if err != nil {
-		t.Fatalf("decode event payload: %v", err)
-	}
 	var body struct {
 		Record map[string]any `msgpack:"record"`
 	}
-	if err := msgpack.Unmarshal(payload, &body); err != nil {
+	if err := msgpack.Unmarshal(rawEventPayload(t, primaryDB, eventName, tenantID), &body); err != nil {
 		t.Fatalf("unmarshal event payload: %v", err)
 	}
 	return body.Record
