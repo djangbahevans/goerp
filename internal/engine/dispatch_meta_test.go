@@ -3,7 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -126,7 +126,7 @@ func TestDispatchPermissionsRoute_FullRoundTrip(t *testing.T) {
 	}
 
 	var resp metaPermissionsResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	if err := json.UnmarshalRead(w.Body, &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
@@ -186,7 +186,7 @@ func TestDispatchPermissionsRoute_ModuleNotEntitledIsExcluded(t *testing.T) {
 	}
 
 	var resp metaPermissionsResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	if err := json.UnmarshalRead(w.Body, &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if slices.Contains(resp.ModulesEnabled, "unentitled") {

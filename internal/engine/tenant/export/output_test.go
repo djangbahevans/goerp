@@ -1,7 +1,8 @@
 package tenantexport
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 )
 
@@ -40,7 +41,7 @@ func TestDecryptOutput_TenantExportKindDecryptsKeyOnly(t *testing.T) {
 func TestDecryptOutput_OtherKindReturnsOutputUnchanged(t *testing.T) {
 	keys := testRowKeySet(t)
 
-	raw := json.RawMessage(`{"anything": "goes here, not even valid tenant.export shape"}`)
+	raw := jsontext.Value(`{"anything": "goes here, not even valid tenant.export shape"}`)
 	got, err := DecryptOutput(keys, "tenant.offboard_immediate", raw)
 	if err != nil {
 		t.Fatalf("DecryptOutput() error: %v", err)

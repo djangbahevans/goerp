@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +15,7 @@ func TestTenantSuspend_Success(t *testing.T) {
 		var body struct {
 			Reason string `json:"reason"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		gotReason = body.Reason
 
 		w.Header().Set("Content-Type", "application/json")

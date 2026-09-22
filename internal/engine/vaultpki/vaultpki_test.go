@@ -2,7 +2,7 @@ package vaultpki
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,8 +23,8 @@ func newFakePKIServer(t *testing.T) (*httptest.Server, *fakePKIServer) {
 	fp := &fakePKIServer{mux: http.NewServeMux()}
 
 	fp.mux.HandleFunc("PUT /v1/pki/issue/operator", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&fp.lastIssueBody)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.UnmarshalRead(r.Body, &fp.lastIssueBody)
+		_ = json.MarshalWrite(w, map[string]any{
 			"data": map[string]any{
 				"certificate":   "-----BEGIN CERTIFICATE-----\nfake-leaf\n-----END CERTIFICATE-----",
 				"private_key":   "-----BEGIN PRIVATE KEY-----\nfake-key\n-----END PRIVATE KEY-----",
@@ -33,11 +33,11 @@ func newFakePKIServer(t *testing.T) (*httptest.Server, *fakePKIServer) {
 		})
 	})
 	fp.mux.HandleFunc("PUT /v1/pki/revoke", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&fp.lastRevokeBody)
+		_ = json.UnmarshalRead(r.Body, &fp.lastRevokeBody)
 		if serial, ok := fp.lastRevokeBody["serial_number"].(string); ok {
 			fp.revoked = append(fp.revoked, serial)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+		_ = json.MarshalWrite(w, map[string]any{"data": map[string]any{}})
 	})
 	fp.mux.HandleFunc("GET /v1/pki/crl/pem", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-pem-file")

@@ -2,7 +2,8 @@ package adminapi
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -288,7 +289,7 @@ func TestJobsShowRoute_AppliesOutputDecryptor(t *testing.T) {
 	var gotKind string
 	RegisterJobsRoutes(mux, JobsDeps{
 		Client: client,
-		OutputDecryptor: func(kind string, output json.RawMessage) (json.RawMessage, error) {
+		OutputDecryptor: func(kind string, output jsontext.Value) (jsontext.Value, error) {
 			gotKind = kind
 			var result outputTestResult
 			if err := json.Unmarshal(output, &result); err != nil {

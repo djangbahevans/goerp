@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -300,7 +300,7 @@ func (f *chainFixture) chain(builtins map[string]http.Handler) http.Handler {
 func decodeErrorCode(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
 	var body routeErrorEnvelope
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+	if err := json.UnmarshalRead(w.Body, &body); err != nil {
 		t.Fatalf("decode error response: %v", err)
 	}
 	return body.Error.Code

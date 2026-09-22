@@ -2,7 +2,7 @@ package adminapi
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -120,7 +120,7 @@ func TestIssueCertRoute_Success(t *testing.T) {
 			SerialNumber string `json:"serial_number"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(w.Body, &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if env.Data.Certificate != "cert-pem" || env.Data.PrivateKey != "key-pem" || env.Data.SerialNumber != "11:22:33" {

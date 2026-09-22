@@ -2,7 +2,7 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -205,7 +205,7 @@ func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 	}
 
 	var report httpx.HealthReport
-	if err := json.NewDecoder(resp.Body).Decode(&report); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &report); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 

@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net"
 	"net/http"
@@ -295,7 +295,7 @@ func TestSMTPMailer_AgainstRealMailpit(t *testing.T) {
 			Snippet string `json:"Snippet"`
 		} `json:"messages"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &result); err != nil {
 		t.Fatalf("decode mailpit response: %v", err)
 	}
 	if len(result.Messages) == 0 {

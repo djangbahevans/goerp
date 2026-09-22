@@ -2,7 +2,7 @@ package httpx
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -48,7 +48,7 @@ func TestHandleHealthNoHealthFn(t *testing.T) {
 	}
 
 	var report HealthReport
-	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+	if err := json.UnmarshalRead(w.Body, &report); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if report.Status != "healthy" {
@@ -97,7 +97,7 @@ func TestHandleHealthOnlyRedisDown(t *testing.T) {
 	}
 
 	var report HealthReport
-	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+	if err := json.UnmarshalRead(w.Body, &report); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if report.Status != "degraded" {
@@ -115,7 +115,7 @@ func TestHandleReadyNoReadyFn(t *testing.T) {
 	}
 
 	var report ReadyReport
-	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+	if err := json.UnmarshalRead(w.Body, &report); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if !report.Ready {
@@ -145,7 +145,7 @@ func TestHandleReadyFailure(t *testing.T) {
 	}
 
 	var report ReadyReport
-	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+	if err := json.UnmarshalRead(w.Body, &report); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if report.Ready {
@@ -159,7 +159,7 @@ func TestHandleReadyNoModulesFnDefaultsToEmpty(t *testing.T) {
 	w := doRequest(t, s, http.MethodGet, "/_ready")
 
 	var report ReadyReport
-	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+	if err := json.UnmarshalRead(w.Body, &report); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if report.Modules != (ModulesReport{}) {
@@ -180,7 +180,7 @@ func TestHandleReadyReportsModulesFromModulesFn(t *testing.T) {
 	w := doRequest(t, s, http.MethodGet, "/_ready")
 
 	var report ReadyReport
-	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+	if err := json.UnmarshalRead(w.Body, &report); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if report.Modules != (ModulesReport{Total: 2, Ready: 1, Failed: 1}) {
@@ -202,7 +202,7 @@ func TestHandleReadyReportsModulesEvenWhenNotReady(t *testing.T) {
 	w := doRequest(t, s, http.MethodGet, "/_ready")
 
 	var report ReadyReport
-	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+	if err := json.UnmarshalRead(w.Body, &report); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if report.Modules.Total != 1 {
