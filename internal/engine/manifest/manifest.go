@@ -109,7 +109,12 @@ type Manifest struct {
 // UnmarshalJSON defaults Wasm to true (manifest-spec.md §2's documented
 // default) when the manifest omits the field — plain json.Unmarshal into a
 // bool zero-values it to false, which would misreport every module that
-// relies on the documented default as having no WASM binary.
+// relies on the documented default as having no WASM binary. It also
+// resolves each permission's omitted `category` to this manifest's own
+// `display_name` (manifest-spec.md §7) here, at parse time, so every later
+// reader — validatePermissions, /_meta/schema, /_meta/permissions, a
+// role-editor consumer — sees one already-resolved value rather than each
+// needing its own "empty means display_name" fallback.
 func (m *Manifest) UnmarshalJSON(data []byte) error {
 	type Alias Manifest
 
@@ -117,6 +122,12 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 
 	if err := json.Unmarshal(data, aux); err != nil {
 		return err
+	}
+
+	for i := range aux.Permissions {
+		if aux.Permissions[i].Category == "" {
+			aux.Permissions[i].Category = aux.DisplayName
+		}
 	}
 
 	*m = Manifest(*aux)
