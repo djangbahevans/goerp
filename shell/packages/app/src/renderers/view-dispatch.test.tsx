@@ -20,6 +20,9 @@ vi.mock("./timeline/timeline-renderer.js", () => ({
 vi.mock("./form/form-renderer.js", () => ({
   FormRenderer: (props: unknown) => <div data-testid="form">{JSON.stringify(props)}</div>,
 }));
+vi.mock("./custom/custom-view-renderer.js", () => ({
+  CustomViewRenderer: (props: unknown) => <div data-testid="custom">{JSON.stringify(props)}</div>,
+}));
 
 afterEach(cleanup);
 
@@ -69,5 +72,29 @@ describe("ViewDispatch — other view types unaffected", () => {
       <ViewDispatch view={{ name: "x", type: "gantt", resource: "contacts.contact", label: "X" }} module="contacts" />,
     );
     expect(screen.getByText(/isn't implemented yet/)).not.toBeNull();
+  });
+});
+
+describe("ViewDispatch — custom", () => {
+  const customView = {
+    name: "dashboard",
+    type: "custom",
+    resource: "sales.order",
+    label: "Dashboard",
+    component: "SalesDashboard",
+  };
+
+  it("dispatches a custom view to CustomViewRenderer with the validated declaration", () => {
+    render(<ViewDispatch view={customView} module="sales" />);
+    const props = JSON.parse(screen.getByTestId("custom").textContent ?? "{}");
+    expect(props.view.component).toBe("SalesDashboard");
+  });
+
+  it("degrades the same way every other view type does when a custom declaration is missing its component", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(<ViewDispatch view={{ ...customView, component: undefined }} module="sales" />);
+    expect(screen.getByRole("alert").textContent).toContain("doesn't match the custom view schema");
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

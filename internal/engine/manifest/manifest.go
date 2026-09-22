@@ -199,6 +199,10 @@ type View struct {
 	Chatter           *bool          `json:"chatter,omitempty"`
 	Autosave          bool           `json:"autosave,omitzero"`
 	ReadonlyCondition string         `json:"readonly_condition,omitempty"`
+	// Component names the registered React component a `"custom"`-type
+	// view renders as its full page (view-system.md §9 "Custom views and
+	// components"). Required, and validated as such, only for that type.
+	Component string `json:"component,omitempty"`
 
 	// Extra holds the members the engine does not model (the type-specific
 	// members of kanban, calendar, timeline, pivot and custom views), kept
