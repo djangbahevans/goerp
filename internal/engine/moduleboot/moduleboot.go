@@ -316,14 +316,15 @@ func Order(sources []loader.Source) ([]loader.Source, error) {
 
 // LoadCascading loads sources — already ordered by Order — via
 // loader.LoadModule, matching loader.LoadAll's route-registration,
-// event-subscription and view-extension validation (including the
-// cross-module conflict warning, goerp#890), except: before loading a
-// source, it skips it (via LoadedModule.FailDependency) if any of its
-// depends_on is already StatusFailed, cascading through transitive
-// dependents too.
+// permission-name-collision (goerp#884), event-subscription and
+// view-extension validation (including the cross-module conflict warning,
+// goerp#890), except: before loading a source, it skips it (via
+// LoadedModule.FailDependency) if any of its depends_on is already
+// StatusFailed, cascading through transitive dependents too.
 func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sources []loader.Source) map[string]*module.LoadedModule {
 	modules := make(map[string]*module.LoadedModule, len(sources))
 	table := route.New()
+	permOwners := make(map[string]string) // permission name -> declaring module
 
 	for i, src := range sources {
 		mf, err := manifest.Load(src.ManifestBytes)
@@ -346,6 +347,15 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 				for _, s := range suppressed {
 					log.Warn().Str("module", src.Name).Str("model", s.Model).Str("op", s.Op).
 						Msg(s.LogMessage())
+				}
+			}
+		}
+		if m.Status != module.StatusFailed {
+			if owner, name, ok := loader.FindPermissionCollision(permOwners, m.Manifest.Permissions); ok {
+				m.Fail(fmt.Sprintf("permission %q already declared by module %q", name, owner))
+			} else {
+				for _, p := range m.Manifest.Permissions {
+					permOwners[p.Name] = src.Name
 				}
 			}
 		}

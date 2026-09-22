@@ -232,7 +232,7 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 			}
 		}
 		if m.Status != module.StatusFailed {
-			if owner, name, ok := findPermissionCollision(permOwners, m.Manifest.Permissions); ok {
+			if owner, name, ok := FindPermissionCollision(permOwners, m.Manifest.Permissions); ok {
 				m.Fail(fmt.Sprintf("permission %q already declared by module %q", name, owner))
 			} else {
 				for _, p := range m.Manifest.Permissions {
@@ -249,19 +249,21 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 	return modules
 }
 
-// findPermissionCollision checks candidate's permission names against
-// owners (permission name -> declaring module, built incrementally by
-// LoadAll as each module loads) and returns the first name already claimed
-// by a different module, plus that module's name. permission.
-// PermissionRegistry.Register is deliberately not this enforcement point —
-// it's rebuilt from scratch on every registry.Update (including a hot
-// reload of one module), and leaves an already-indexed name unchanged so
-// that rebuild is idempotent for the reloaded module's own permissions;
-// that same leniency would silently paper over a genuine cross-module
-// collision instead of surfacing it. LoadAll's incremental, load-order-
-// sensitive check here is what manifest-spec.md §28 actually requires: the
-// later module fails, the earlier one is unaffected.
-func findPermissionCollision(owners map[string]string, candidate []manifest.Permission) (owner, name string, ok bool) {
+// FindPermissionCollision checks candidate's permission names against
+// owners (permission name -> declaring module, built incrementally as each
+// module loads) and returns the first name already claimed by a different
+// module, plus that module's name. Exported so moduleboot.LoadCascading —
+// the engine's real production entry point, which duplicates this loop
+// rather than calling LoadAll — can apply the identical check; see LoadAll
+// below for the reference caller. permission.PermissionRegistry.Register is
+// deliberately not this enforcement point — it's rebuilt from scratch on
+// every registry.Update (including a hot reload of one module), and leaves
+// an already-indexed name unchanged so that rebuild is idempotent for the
+// reloaded module's own permissions; that same leniency would silently
+// paper over a genuine cross-module collision instead of surfacing it. This
+// incremental, load-order-sensitive check is what manifest-spec.md §28
+// actually requires: the later module fails, the earlier one is unaffected.
+func FindPermissionCollision(owners map[string]string, candidate []manifest.Permission) (owner, name string, ok bool) {
 	for _, p := range candidate {
 		if o, exists := owners[p.Name]; exists {
 			return o, p.Name, true
