@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/tetratelabs/wazero"
@@ -346,7 +347,8 @@ func runCmdOutput(ctx context.Context, dir string, extraEnv []string, name strin
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
 
-	var stdout, combined bytes.Buffer
+	var stdout bytes.Buffer
+	var combined syncBuffer
 	cmd.Stdout = io.MultiWriter(&stdout, &combined)
 	cmd.Stderr = &combined
 
@@ -355,4 +357,26 @@ func runCmdOutput(ctx context.Context, dir string, extraEnv []string, name strin
 	}
 
 	return stdout.String(), nil
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent writes — os/exec pumps
+// Stdout and Stderr on separate goroutines whenever either isn't a raw
+// *os.File, so a buffer shared between the two (as combined is above,
+// via Stdout's io.MultiWriter and Stderr directly) needs its own lock
+// rather than bytes.Buffer's own none.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
