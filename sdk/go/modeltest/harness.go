@@ -14,7 +14,7 @@ package modeltest
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -275,7 +275,7 @@ func compileModuleUnderTest(t *testing.T, ctx context.Context, moduleDir string)
 	}
 	decoded["checksum"] = result.WasmSHA256
 	moduleName, _ = decoded["name"].(string)
-	manifestBytes, err = json.Marshal(decoded)
+	manifestBytes, err = json.Marshal(decoded, json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("modeltest: re-marshal manifest.json: %v", err)
 	}

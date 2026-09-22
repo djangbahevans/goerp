@@ -34,6 +34,14 @@ type createWidgetBody struct {
 	Name string `json:"name"`
 }
 
+// echoBody is /echo's request shape (goerp#948) — a nil Tags/Meta must
+// arrive here as an empty slice/map, not nil, once modeltest's own
+// request encoding moves off encoding/json (v1)'s null-for-nil default.
+type echoBody struct {
+	Tags []string          `json:"tags"`
+	Meta map[string]string `json:"meta"`
+}
+
 type widgetRow struct {
 	ID   string `db:"id"`
 	Name string `db:"name"`
@@ -54,6 +62,16 @@ func init() {
 
 	engine.GET("/ping", func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"status": "ok"})
+	}, engine.Auth(engine.AuthNone))
+
+	engine.POST("/echo", func(req *engine.Request) *engine.Response {
+		var body echoBody
+		if err := req.ParseJSON(&body); err != nil {
+			return &engine.Response{StatusCode: 400, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.invalid_body", "message": err.Error()},
+			}}
+		}
+		return engine.OK(map[string]any{"tags_is_nil": body.Tags == nil, "meta_is_nil": body.Meta == nil})
 	}, engine.Auth(engine.AuthNone))
 
 	engine.GET("/", func(req *engine.Request) *engine.Response {

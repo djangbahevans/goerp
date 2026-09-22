@@ -19,6 +19,25 @@ func TestPing(t *testing.T) {
 	}
 }
 
+func TestPOST_NilSliceAndMapReachHandlerAsEmptyNotNull(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	type echoBody struct {
+		Tags []string          `json:"tags"`
+		Meta map[string]string `json:"meta"`
+	}
+	resp := h.POST("/widgets/echo", echoBody{})
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	if got := resp.JSON("tags_is_nil"); got != false {
+		t.Errorf("tags_is_nil = %v, want false", got)
+	}
+	if got := resp.JSON("meta_is_nil"); got != false {
+		t.Errorf("meta_is_nil = %v, want false", got)
+	}
+}
+
 func TestCreateWidget_InsertsRowAndEmitsEvent(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
