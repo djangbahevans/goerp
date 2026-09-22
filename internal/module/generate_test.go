@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"fmt"
 	"go/format"
 	"os"
 	"os/exec"
@@ -119,6 +120,178 @@ func writeGenerateFixture(t *testing.T, schemaGo string) string {
 	workInit.Dir = dir
 	if out, err := workInit.CombinedOutput(); err != nil {
 		t.Fatalf("go work init: %v\n%s", err, out)
+	}
+
+	return dir
+}
+
+// TestGenerate_DirIsSubdirectoryOfLargerModule pins a real regression:
+// dir isn't always a Go module root itself — a real GoERP module
+// scaffolded by `goerp module create` is, but a module nested inside a
+// larger repo (the SDK's own sdk/go/modeltest/testdata/fixture, a
+// subdirectory of this very module) isn't. schemaImportPath/
+// modelsImportPath have to reflect dir's own position under the
+// module's root, or the driver's own import of the schema package
+// resolves to the wrong package (or, before this was fixed, to no
+// package at all).
+func TestGenerate_DirIsSubdirectoryOfLargerModule(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	moduleRoot := t.TempDir()
+	targetDir := filepath.Join(moduleRoot, "services", "widgets")
+	if err := os.MkdirAll(filepath.Join(targetDir, "schema"), 0o755); err != nil {
+		t.Fatalf("mkdir schema: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleRoot, "go.mod"), []byte("module generate-subdir-fixture\n\ngo 1.27.0\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "schema", "schema.go"), []byte(generateFixtureSchemaOneModel), 0o644); err != nil {
+		t.Fatalf("write schema.go: %v", err)
+	}
+
+	workCtx, workCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer workCancel()
+	workInit := exec.CommandContext(workCtx, "go", "work", "init", ".", repoRoot)
+	workInit.Dir = moduleRoot
+	if out, err := workInit.CombinedOutput(); err != nil {
+		t.Fatalf("go work init: %v\n%s", err, out)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	result, err := Generate(ctx, targetDir, GenerateOptions{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(result.Stale) != 1 || result.Stale[0] != filepath.Join("models", "widget.gen.go") {
+		t.Fatalf("Stale = %v, want [models/widget.gen.go]", result.Stale)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "models", "widget.gen.go")); err != nil {
+		t.Errorf("expected models/widget.gen.go under targetDir: %v", err)
+	}
+}
+
+// TestModuleImportPath_NestedMainModulesPicksMostSpecific pins a real
+// bug a code review caught: a go.work workspace can list one main
+// module nested inside another's directory tree (e.g. a vendored
+// sub-repo), so more than one candidate line from `go list -m` can
+// "contain" dir. Picking the first match in whatever order `go list -m`
+// happens to emit risked resolving schemaImportPath/modelsImportPath
+// against the wrong (outer, less specific) module. The innermost
+// (longest/deepest) containing module root is the one that actually
+// governs dir.
+func TestModuleImportPath_NestedMainModulesPicksMostSpecific(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	outerRoot := t.TempDir()
+	innerRoot := filepath.Join(outerRoot, "vendor", "inner")
+	targetDir := filepath.Join(innerRoot, "services", "widgets")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir targetDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outerRoot, "go.mod"), []byte("module generate-nested-outer\n\ngo 1.27.0\n"), 0o644); err != nil {
+		t.Fatalf("write outer go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(innerRoot, "go.mod"), []byte("module generate-nested-inner\n\ngo 1.27.0\n"), 0o644); err != nil {
+		t.Fatalf("write inner go.mod: %v", err)
+	}
+
+	workCtx, workCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer workCancel()
+	workInit := exec.CommandContext(workCtx, "go", "work", "init", outerRoot, innerRoot, repoRoot)
+	workInit.Dir = outerRoot
+	if out, err := workInit.CombinedOutput(); err != nil {
+		t.Fatalf("go work init: %v\n%s", err, out)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	got, err := moduleImportPath(ctx, targetDir)
+	if err != nil {
+		t.Fatalf("moduleImportPath: %v", err)
+	}
+	want := "generate-nested-inner/services/widgets"
+	if got != want {
+		t.Errorf("moduleImportPath = %q, want %q (the innermost containing module, not the outer one)", got, want)
+	}
+}
+
+// TestGenerate_DirReachedThroughSymlink pins a real regression in
+// moduleImportPath's single-main-module fast path (the common,
+// non-workspace case — exactly one line from `go list -m`): it compared
+// an EvalSymlinks-resolved dir against go list's own *unresolved*
+// module directory, so a module reached through a symlink got a
+// corrupted import path (containing "..") fed straight into
+// schemaImportPath and the generated WASI driver's own import line. The
+// go.work multi-module branch (writeGenerateFixture's own setup always
+// has two main modules, so it can't reach this branch) already resolved
+// both sides correctly; this pins the single-module fast path to match,
+// using a `replace`-based fixture (one main module, not a workspace) so
+// the fast path is what actually runs.
+func TestGenerate_DirReachedThroughSymlink(t *testing.T) {
+	dir := writeGenerateFixtureSingleModule(t, generateFixtureSchemaOneModel)
+
+	symlinkParent := t.TempDir()
+	symlinkPath := filepath.Join(symlinkParent, "via-symlink")
+	if err := os.Symlink(dir, symlinkPath); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	result, err := Generate(ctx, symlinkPath, GenerateOptions{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(result.Stale) != 1 || result.Stale[0] != filepath.Join("models", "widget.gen.go") {
+		t.Fatalf("Stale = %v, want [models/widget.gen.go]", result.Stale)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "models", "widget.gen.go")); err != nil {
+		t.Errorf("expected models/widget.gen.go under the real (non-symlinked) dir: %v", err)
+	}
+}
+
+// writeGenerateFixtureSingleModule is writeGenerateFixture's single-
+// main-module counterpart: a `replace` directive resolves the SDK
+// dependency against this repo's own checkout instead of a go.work
+// workspace, so `go list -m` reports exactly one main module — the fast
+// path TestGenerate_DirReachedThroughSymlink needs to actually exercise.
+func writeGenerateFixtureSingleModule(t *testing.T, schemaGo string) string {
+	t.Helper()
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "demo_module")
+	if err := os.MkdirAll(filepath.Join(dir, "schema"), 0o755); err != nil {
+		t.Fatalf("mkdir schema: %v", err)
+	}
+	goMod := fmt.Sprintf("module generate-fixture-single\n\ngo 1.27.0\n\nrequire github.com/djangbahevans/goerp v0.0.0\n\nreplace github.com/djangbahevans/goerp => %s\n", repoRoot)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "schema", "schema.go"), []byte(schemaGo), 0o644); err != nil {
+		t.Fatalf("write schema.go: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	tidy := exec.CommandContext(ctx, "go", "mod", "tidy")
+	tidy.Dir = dir
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("go mod tidy: %v\n%s", err, out)
 	}
 
 	return dir
