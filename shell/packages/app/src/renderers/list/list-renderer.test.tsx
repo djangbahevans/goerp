@@ -1446,6 +1446,7 @@ describe("ListRenderer view extensions", () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_list", extension: "hr_department_column" },
         definition: {
@@ -1477,6 +1478,7 @@ describe("ListRenderer view extensions", () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_list", extension: "hr_manager_column" },
         definition: {
@@ -1506,6 +1508,7 @@ describe("ListRenderer view extensions", () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_list", extension: "hr_department_column" },
         definition: {
@@ -1535,6 +1538,7 @@ describe("ListRenderer view extensions", () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_list", extension: "hr_department_column" },
         definition: {
@@ -1564,6 +1568,7 @@ describe("ListRenderer view extensions", () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_list", extension: "hr_department_filter" },
         definition: {
@@ -1594,6 +1599,7 @@ describe("ListRenderer view extensions", () => {
     forTargetMock.mockResolvedValue([
       {
         module: "hr",
+        moduleDisplayName: "HR",
         loadOrder: 1,
         ref: { extends: "contacts.contacts_list", extension: "hr_department_filter" },
         definition: {

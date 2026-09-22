@@ -52,6 +52,21 @@ describe("buildViewExtensionRegistry", () => {
     expect(entries?.[0]?.definition).toBe(employeesTabDef);
   });
 
+  it("carries the extending module's display_name for tab-label disambiguation (view-system.md §17)", () => {
+    const registry = buildViewExtensionRegistry(
+      schema({
+        contacts: module("contacts", 0),
+        hr: {
+          ...module("hr", 1, [{ extends: "contacts.contacts_form", extension: "hr_employees_tab" }], [employeesTabDef]),
+          display_name: "HR",
+        },
+      }),
+    );
+
+    const entries = registry.get("contacts.contacts_form");
+    expect(entries?.[0]?.moduleDisplayName).toBe("HR");
+  });
+
   it("leaves definition undefined when `extension` names nothing in the declaring module's own definitions — skipped, not thrown, by callers", () => {
     const registry = buildViewExtensionRegistry(
       schema({

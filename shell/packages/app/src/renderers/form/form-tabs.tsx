@@ -21,8 +21,11 @@ import { type FormTab, FormTabSchema } from "./form-view-types.js";
 // (view-system.md §10). sourceModule is the module that DECLARED the
 // extension — an unqualified tab.view resolves relative to it, not to the
 // target form's own module, the same way an own tab's tab.view resolves
-// relative to the form's module.
-type MergedTab = FormTab & { sourceModule?: string };
+// relative to the form's module. sourceModuleDisplayName is that module's
+// display_name, used to disambiguate two extension tabs sharing a label
+// (view-system.md §17 "View extension conflict detection": "Employment
+// (HR)" / "Employment (Payroll)").
+type MergedTab = FormTab & { sourceModule?: string; sourceModuleDisplayName?: string };
 
 // useExtensionTabs resolves the "tab"-typed extensions targeting
 // `{module}.{viewName}`, already ordered dependencies-first by
@@ -49,12 +52,38 @@ function useExtensionTabs(module: string, viewName: string) {
           continue;
         }
 
-        const merged: MergedTab = { ...result.output, sourceModule: entry.module };
+        const merged: MergedTab = {
+          ...result.output,
+          sourceModule: entry.module,
+          sourceModuleDisplayName: entry.moduleDisplayName,
+        };
         (entry.definition.position === "prepend" ? prepend : append).push(merged);
       }
 
       return { prepend, append };
     },
+  });
+}
+
+// disambiguateExtensionTabLabels appends " (ModuleDisplayName)" to a tab's
+// label when it's an extension tab (sourceModule set) and two or more
+// extension tabs in this same visible set share that plain label
+// (view-system.md §17 "View extension conflict detection": "Employment
+// (HR)" / "Employment (Payroll)"). A native (non-extension) tab, or a
+// lone extension tab with a unique label, keeps its label unchanged.
+// Returned in the same order as tabs — index-aligned, not keyed by label,
+// since two colliding tabs share the very key that would otherwise index them.
+function disambiguateExtensionTabLabels(tabs: MergedTab[]): string[] {
+  const extensionLabelCounts = new Map<string, number>();
+  for (const tab of tabs) {
+    if (tab.sourceModule === undefined) continue;
+    extensionLabelCounts.set(tab.label, (extensionLabelCounts.get(tab.label) ?? 0) + 1);
+  }
+
+  return tabs.map((tab) => {
+    if (tab.sourceModule === undefined) return tab.label;
+    if ((extensionLabelCounts.get(tab.label) ?? 0) <= 1) return tab.label;
+    return `${tab.label} (${tab.sourceModuleDisplayName ?? tab.sourceModule})`;
   });
 }
 
@@ -262,19 +291,22 @@ export function FormTabsRenderer({
       conditions.isVisible(tab.condition, `tab "${tab.label}" condition`, record),
   );
 
-  // No stable id on FormTab — label is what key/TabPanel id already used.
-  const [activeId, setActiveId] = useState<string | undefined>(() => visibleTabs[0]?.label);
+  // No stable id on FormTab — the (possibly disambiguated) display label is
+  // what key/TabPanel id use, since two colliding plain labels would
+  // otherwise collapse to the same id.
+  const displayLabels = disambiguateExtensionTabLabels(visibleTabs);
+  const [activeId, setActiveId] = useState<string | undefined>(() => displayLabels[0]);
   if (visibleTabs.length === 0) return null;
 
   // tab.badge_count_route isn't fetched/rendered — no badge yet.
-  const items = visibleTabs.map((tab) => ({ id: tab.label, label: tab.label }));
+  const items = displayLabels.map((label) => ({ id: label, label }));
   const firstId = items[0]?.id ?? "";
   const currentActiveId = items.some((item) => item.id === activeId) ? (activeId as string) : firstId;
 
   return (
     <Tabs items={items} activeId={currentActiveId} onChange={setActiveId}>
-      {visibleTabs.map((tab) => (
-        <TabPanel key={tab.label} id={tab.label}>
+      {visibleTabs.map((tab, i) => (
+        <TabPanel key={displayLabels[i]} id={displayLabels[i] as string}>
           {tab.type === "sub_list" && (
             <SubListTabContent tab={tab} resource={resource} module={module} record={record} recordId={recordId} />
           )}

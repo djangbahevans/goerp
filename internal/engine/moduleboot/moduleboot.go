@@ -316,10 +316,11 @@ func Order(sources []loader.Source) ([]loader.Source, error) {
 
 // LoadCascading loads sources — already ordered by Order — via
 // loader.LoadModule, matching loader.LoadAll's route-registration,
-// event-subscription and view-extension validation, except: before
-// loading a source, it skips it (via LoadedModule.FailDependency) if any
-// of its depends_on is already StatusFailed, cascading through
-// transitive dependents too.
+// event-subscription and view-extension validation (including the
+// cross-module conflict warning, goerp#890), except: before loading a
+// source, it skips it (via LoadedModule.FailDependency) if any of its
+// depends_on is already StatusFailed, cascading through transitive
+// dependents too.
 func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sources []loader.Source) map[string]*module.LoadedModule {
 	modules := make(map[string]*module.LoadedModule, len(sources))
 	table := route.New()
@@ -360,7 +361,7 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 	}
 
 	loader.ValidateEventSubscriptions(modules)
-	loader.ValidateViewExtensions(modules)
+	loader.LogViewExtensionConflicts(loader.ValidateViewExtensions(modules))
 
 	return modules
 }
