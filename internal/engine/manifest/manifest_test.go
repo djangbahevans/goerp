@@ -243,7 +243,11 @@ func validTypeFields(moduleType string) map[string]any {
 	case "automation":
 		fields["subscribes"] = []map[string]any{{"name": "demo.order.created"}}
 	case "field_extension":
-		fields["view_extensions"] = []map[string]any{{"extends": "core", "extension": "ext"}}
+		fields["depends_on"] = []string{"core"}
+		fields["view_extensions"] = []map[string]any{{"extends": "core.core_list", "extension": "ext"}}
+		fields["view_extension_definitions"] = []map[string]any{
+			{"name": "ext", "type": "columns", "target_section": "columns", "position": "append", "columns": []map[string]any{{"field": "ext:thing"}}},
+		}
 		fields["schema"] = map[string]any{
 			"owned_models":   []string{},
 			"extends_module": "core",
@@ -378,7 +382,10 @@ func TestLoadManifestModuleTypeConstraintsViolations(t *testing.T) {
 		},
 		"field_extension requires view_extensions or view_extension_definitions": {
 			"field_extension",
-			func(f map[string]any) { delete(f, "view_extensions") },
+			func(f map[string]any) {
+				delete(f, "view_extensions")
+				delete(f, "view_extension_definitions")
+			},
 			`requires view_extensions or view_extension_definitions`,
 		},
 		"field_extension requires extends_module": {

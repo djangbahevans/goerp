@@ -234,6 +234,7 @@ func LoadAll(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sou
 	}
 
 	ValidateEventSubscriptions(modules)
+	ValidateViewExtensions(modules)
 
 	return modules
 }
