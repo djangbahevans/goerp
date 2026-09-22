@@ -84,6 +84,22 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 	usesTime, usesOrm := false, false
 	siblingEmitted := map[string]bool{}
 
+	// usedFieldNames catches two fields whose generated Go names
+	// collide — go/format.Source only parses and formats, it doesn't
+	// type-check, so a struct with two identically-named fields (the
+	// most plausible trigger: a Many2One field's stripped `_id`
+	// expansion name landing on an unrelated sibling field's own name)
+	// would otherwise pass straight through as gofmt-clean, non-
+	// compiling output (goerp#970).
+	usedFieldNames := map[string]string{}
+	claimFieldName := func(goName, source string) error {
+		if prior, ok := usedFieldNames[goName]; ok {
+			return fmt.Errorf("%s and %s both generate the Go field name %q — rename one", prior, source, goName)
+		}
+		usedFieldNames[goName] = source
+		return nil
+	}
+
 	for _, f := range m.Fields {
 		if f.Def.Kind == model.KindOne2Many {
 			continue // no backing column (go-sdk-reference.md §22 "One2Many")
@@ -100,23 +116,43 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 				return nil, fmt.Errorf("field %q: DynamicLink names an unknown sibling field %q", f.Name, siblingName)
 			}
 			if !siblingEmitted[siblingName] {
-				writeField(&body, sibling.Name, "string", sibling.Def.IsRequired)
+				siblingGoName := pascalCase(sibling.Name)
+				if err := claimFieldName(siblingGoName, fmt.Sprintf("field %q", sibling.Name)); err != nil {
+					return nil, err
+				}
+				writeField(&body, siblingGoName, sibling.Name, "string", sibling.Def.IsRequired)
 				siblingEmitted[siblingName] = true
 			}
-			writeField(&body, f.Name, "string", f.Def.IsRequired)
+			selfGoName := pascalCase(f.Name)
+			if err := claimFieldName(selfGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
+				return nil, err
+			}
+			writeField(&body, selfGoName, f.Name, "string", f.Def.IsRequired)
 
 		case model.KindMany2One:
 			if !strings.HasSuffix(f.Name, "_id") {
 				return nil, fmt.Errorf("field %q: a Many2One field's name must end in \"_id\" (go-sdk-reference.md §22 \"Many2One\")", f.Name)
 			}
-			writeField(&body, f.Name, "string", f.Def.IsRequired || f.Def.IsPrimaryKey)
+			fkGoName := pascalCase(f.Name)
+			if err := claimFieldName(fkGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
+				return nil, err
+			}
+			writeField(&body, fkGoName, f.Name, "string", f.Def.IsRequired || f.Def.IsPrimaryKey)
 
 			expansionName := strings.TrimSuffix(f.Name, "_id")
-			fmt.Fprintf(&body, "\t%s *orm.RelationRef `db:%q`\n", pascalCase(expansionName), expansionName)
+			expansionGoName := pascalCase(expansionName)
+			if err := claimFieldName(expansionGoName, fmt.Sprintf("field %q's Many2One expansion %q", f.Name, expansionName)); err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(&body, "\t%s *orm.RelationRef `db:%q`\n", expansionGoName, expansionName)
 			usesOrm = true
 
 		case model.KindSelection:
-			if err := writeNamedTypeField(&body, &aux, structName, f.Name, f.Def.SelectionValues, f.Def.IsRequired || f.Def.IsPrimaryKey); err != nil {
+			fieldGoName := pascalCase(f.Name)
+			if err := claimFieldName(fieldGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
+				return nil, err
+			}
+			if err := writeNamedTypeField(&body, &aux, structName, f.Name, fieldGoName, f.Def.SelectionValues, f.Def.IsRequired || f.Def.IsPrimaryKey); err != nil {
 				return nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
 
@@ -125,7 +161,11 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 			if err != nil {
 				return nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
-			if err := writeNamedTypeField(&body, &aux, structName, f.Name, values, f.Def.IsRequired || f.Def.IsPrimaryKey); err != nil {
+			fieldGoName := pascalCase(f.Name)
+			if err := claimFieldName(fieldGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
+				return nil, err
+			}
+			if err := writeNamedTypeField(&body, &aux, structName, f.Name, fieldGoName, values, f.Def.IsRequired || f.Def.IsPrimaryKey); err != nil {
 				return nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
 
@@ -134,10 +174,14 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 			if err != nil {
 				return nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
+			fieldGoName := pascalCase(f.Name)
+			if err := claimFieldName(fieldGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
+				return nil, err
+			}
 			if goType == "time.Time" {
 				usesTime = true
 			}
-			writeField(&body, f.Name, goType, f.Def.IsRequired || f.Def.IsPrimaryKey)
+			writeField(&body, fieldGoName, f.Name, goType, f.Def.IsRequired || f.Def.IsPrimaryKey)
 		}
 	}
 
@@ -173,15 +217,17 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 	return formatted, nil
 }
 
-// writeField renders one struct field line: PascalCase Go name, goType
-// (pointer-prefixed unless required), and an explicit db tag using
-// fieldName verbatim — never left to orm's own snake_case fallback
-// (sdk/go/orm/reflect.go's ormFields).
-func writeField(buf *bytes.Buffer, fieldName, goType string, required bool) {
+// writeField renders one struct field line: goName (already PascalCase
+// — the caller's own claimFieldName call already computed it, so this
+// doesn't recompute it and risk the claimed name and the emitted name
+// silently diverging), goType (pointer-prefixed unless required), and
+// an explicit db tag using fieldName verbatim — never left to orm's own
+// snake_case fallback (sdk/go/orm/reflect.go's ormFields).
+func writeField(buf *bytes.Buffer, goName, fieldName, goType string, required bool) {
 	if !required {
 		goType = "*" + goType
 	}
-	fmt.Fprintf(buf, "\t%s %s `db:%q`\n", pascalCase(fieldName), goType, fieldName)
+	fmt.Fprintf(buf, "\t%s %s `db:%q`\n", goName, goType, fieldName)
 }
 
 // baseGoType is the field-kind -> Go type table goerp#960 empirically
@@ -228,8 +274,7 @@ func enumValues(types []model.TypeDeclaration, enumType string) ([]string, error
 // "<Type><Value>" constant name convention, each value run through the
 // same pascalCase pass as a field name — plus the struct field itself,
 // typed as that named type.
-func writeNamedTypeField(body, aux *bytes.Buffer, structName, fieldName string, values []string, required bool) error {
-	fieldGoName := pascalCase(fieldName)
+func writeNamedTypeField(body, aux *bytes.Buffer, structName, fieldName, fieldGoName string, values []string, required bool) error {
 	if fieldGoName == "" {
 		return fmt.Errorf("no usable Go identifier for field name %q", fieldName)
 	}

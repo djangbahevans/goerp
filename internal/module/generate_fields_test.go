@@ -255,6 +255,43 @@ func TestRenderModelFile_Many2OneFieldNotEndingInID_Errors(t *testing.T) {
 	}
 }
 
+// TestRenderModelFile_Many2OneExpansionCollidesWithSiblingField_Errors
+// (goerp#970) pins a real bug: renderModelFile guarded the ResourceName()
+// collision and the Many2One "_id"-suffix requirement, but not two
+// *fields* on one model whose generated Go names collide.
+// go/format.Source only parses and formats — it doesn't type-check — so
+// a struct with two fields both named Manager (a manager_id Many2One's
+// stripped expansion name landing on an unrelated sibling manager
+// field) used to pass straight through as gofmt-clean, non-compiling
+// output.
+func TestRenderModelFile_Many2OneExpansionCollidesWithSiblingField_Errors(t *testing.T) {
+	m := model.Define("hr.employee").
+		Field("manager_id", model.Many2One("hr.employee")).
+		Field("manager", model.Text())
+
+	_, err := renderModelFile(m, nil)
+	if err == nil {
+		t.Fatal("expected an error for manager_id's Many2One expansion colliding with the sibling manager field")
+	}
+	if !strings.Contains(err.Error(), "manager_id") || !strings.Contains(err.Error(), `"manager"`) || !strings.Contains(err.Error(), "Manager") {
+		t.Errorf("error = %q, want it to name both manager_id and manager and the colliding Go name Manager", err)
+	}
+}
+
+// TestRenderModelFile_FieldNamesCollidingOnPascalCase_Errors (goerp#970)
+// covers the same guard's other trigger: two field names that are
+// spelled differently but PascalCase to the same Go identifier, not
+// just the Many2One-expansion-specific case above.
+func TestRenderModelFile_FieldNamesCollidingOnPascalCase_Errors(t *testing.T) {
+	m := model.Define("widgets.widget").
+		Field("display_name", model.Text()).
+		Field("display-name", model.Text())
+
+	if _, err := renderModelFile(m, nil); err == nil {
+		t.Fatal("expected an error for two field names that PascalCase to the same Go identifier")
+	}
+}
+
 // TestRenderModelFile_SelectionValueWithNonIdentifierChars pins a real
 // bug: pascalCase used to split only on "_", so a Selection/Enum value
 // spelled with a hyphen or space (e.g. "in-progress" — nothing in the
