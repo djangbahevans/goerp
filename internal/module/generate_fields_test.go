@@ -599,3 +599,135 @@ func TestRenderModelFile_ScanRelationExpansion(t *testing.T) {
 		t.Errorf("Many2One expansion should not get a field descriptor:\n%s", src)
 	}
 }
+
+// TestRenderModelFile_ValuesBuilder_EmitsSetXPerWritableField pins
+// issue #978's own scope example — a SetX method per writable field,
+// each going through orm.Set (or orm.SetBytes for BytesField), and
+// StringField/OrderedField/TimeField's own SetX addressing the embedded
+// Field via ".Field", since the wrapper type itself doesn't satisfy
+// Set's Field[T, TValue] parameter.
+func TestRenderModelFile_ValuesBuilder_EmitsSetXPerWritableField(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("name", model.Text().Required()).
+		Field("code", model.UUID().Required()).
+		Field("quantity", model.Integer().Required()).
+		Field("opened_at", model.TimestampTZ().Required()).
+		Field("attachment", model.Bytea()).
+		Field("state", model.Selection("draft", "done").Required())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, "type GadgetValues struct {") || !strings.Contains(src, "orm.Values[Gadget]") {
+		t.Errorf("missing GadgetValues struct embedding orm.Values[Gadget]:\n%s", src)
+	}
+	if !strings.Contains(src, "func NewGadgetValues() *GadgetValues {") ||
+		!strings.Contains(src, "return &GadgetValues{Values: *orm.NewValues[Gadget]()}") {
+		t.Errorf("missing NewGadgetValues constructor:\n%s", src)
+	}
+
+	for _, want := range []string{
+		// StringField — .Field required.
+		"func (v *GadgetValues) SetName(x string) *GadgetValues {",
+		"orm.Set(&v.Values, GadgetFields.Name.Field, x)",
+		// plain Field — no .Field.
+		"func (v *GadgetValues) SetCode(x string) *GadgetValues {",
+		"orm.Set(&v.Values, GadgetFields.Code, x)",
+		// OrderedField — .Field required.
+		"func (v *GadgetValues) SetQuantity(x int32) *GadgetValues {",
+		"orm.Set(&v.Values, GadgetFields.Quantity.Field, x)",
+		// TimeField — .Field required.
+		"func (v *GadgetValues) SetOpenedAt(x time.Time) *GadgetValues {",
+		"orm.Set(&v.Values, GadgetFields.OpenedAt.Field, x)",
+		// BytesField — orm.SetBytes, no .Field.
+		"func (v *GadgetValues) SetAttachment(x []byte) *GadgetValues {",
+		"orm.SetBytes(&v.Values, GadgetFields.Attachment, x)",
+		// Selection's named type — plain Field, no .Field.
+		"func (v *GadgetValues) SetState(x GadgetState) *GadgetValues {",
+		"orm.Set(&v.Values, GadgetFields.State, x)",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("output missing %q:\n%s", want, src)
+		}
+	}
+}
+
+// TestRenderModelFile_ValuesBuilder_SkipsReadonlyAndComputedFields pins
+// the other half of #978's AC: a Readonly or Computed field gets no
+// SetX — the compile-time counterpart to host.orm's own runtime
+// orm.field_not_writable rejection.
+func TestRenderModelFile_ValuesBuilder_SkipsReadonlyAndComputedFields(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("name", model.Text().Required()).
+		Field("locked_note", model.Text().Readonly()).
+		Field("total", model.Float().Computed("compute_total").Store(true))
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, "func (v *GadgetValues) SetName(x string) *GadgetValues {") {
+		t.Errorf("writable field Name should still get a SetX method:\n%s", src)
+	}
+	if strings.Contains(src, "SetLockedNote") {
+		t.Errorf("Readonly field should not get a SetX method:\n%s", src)
+	}
+	if strings.Contains(src, "SetTotal") {
+		t.Errorf("Computed field should not get a SetX method:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_ValuesBuilder_Many2OneExpansionHasNoSetter pins
+// that only the FK ID field is writable — the *orm.RelationRef
+// expansion isn't a real column and gets no field descriptor (already
+// pinned by TestRenderModelFile_ScanRelationExpansion) or SetX.
+func TestRenderModelFile_ValuesBuilder_Many2OneExpansionHasNoSetter(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("customer_id", model.Many2One("contacts.contact").Required())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, "func (v *GadgetValues) SetCustomerID(x string) *GadgetValues {") {
+		t.Errorf("missing SetCustomerID for the Many2One FK field:\n%s", src)
+	}
+	if strings.Contains(src, "SetCustomer(") {
+		t.Errorf("Many2One expansion should not get a SetX method:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_ValuesBuilder_DynamicLinkFieldsAreWritable pins
+// that both a DynamicLink field and its sibling Selection field, sharing
+// one struct field, still each get exactly one SetX method — not
+// duplicated the way TestRenderModelFile_TwoDynamicLinkFieldsSharingOneSibling_NoDuplicateField
+// pins for the struct field itself.
+func TestRenderModelFile_ValuesBuilder_DynamicLinkFieldsAreWritable(t *testing.T) {
+	m := model.Define("widgets.link").
+		Field("reference_type", model.Selection("sales.order", "contacts.contact").Required()).
+		Field("source_id", model.DynamicLink("reference_type").Required()).
+		Field("target_id", model.DynamicLink("reference_type").Required())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if n := strings.Count(src, "func (v *LinkValues) SetReferenceType("); n != 1 {
+		t.Errorf("SetReferenceType emitted %d times, want exactly 1:\n%s", n, src)
+	}
+	if !strings.Contains(src, "func (v *LinkValues) SetSourceID(x string) *LinkValues {") {
+		t.Errorf("missing SetSourceID:\n%s", src)
+	}
+	if !strings.Contains(src, "func (v *LinkValues) SetTargetID(x string) *LinkValues {") {
+		t.Errorf("missing SetTargetID:\n%s", src)
+	}
+}
