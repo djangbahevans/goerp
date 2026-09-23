@@ -49,12 +49,6 @@ CREATE TABLE IF NOT EXISTS system.sessions (
 )
 `
 
-// addSessionsPersistentColumn brings a system.sessions table bootstrapped
-// before the persistent column existed up to date; a no-op on a fresh one.
-const addSessionsPersistentColumn = `
-ALTER TABLE system.sessions ADD COLUMN IF NOT EXISTS persistent BOOLEAN NOT NULL DEFAULT TRUE
-`
-
 const createSessionsRefreshHashIndex = `
 CREATE INDEX IF NOT EXISTS idx_sessions_refresh_hash ON system.sessions(refresh_hash)
     WHERE revoked_at IS NULL AND rotated_at IS NULL
@@ -89,9 +83,6 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createSessionsTable); err != nil {
 			return fmt.Errorf("create sessions table: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, addSessionsPersistentColumn); err != nil {
-			return fmt.Errorf("add sessions persistent column: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, createSessionsRefreshHashIndex); err != nil {
 			return fmt.Errorf("create sessions refresh_hash index: %w", err)
