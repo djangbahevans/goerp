@@ -188,6 +188,7 @@ type View struct {
 	DefaultSortDir    string         `json:"default_sort_dir,omitempty"`
 	DefaultFilters    map[string]any `json:"default_filters,omitempty"`
 	LabelField        string         `json:"label_field,omitempty"`
+	SearchParam       string         `json:"search_param,omitempty"`
 	RowClick          string         `json:"row_click,omitempty"`
 	RowClickParam     string         `json:"row_click_param,omitempty"`
 	Selectable        *bool          `json:"selectable,omitempty"`

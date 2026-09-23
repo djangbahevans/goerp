@@ -77,7 +77,14 @@ const schema: MetaSchema = {
         // A second list view for the same resource — the first one found wins.
         view({ name: "contacts_list_alt", type: "list", resource: "contacts.contact" }),
         // Explicit label_field, takes priority over the primary column.
-        view({ name: "tags_list", type: "list", resource: "contacts.tag", label_field: "slug" }),
+        // Explicit search_param, overriding the "q" default.
+        view({
+          name: "tags_list",
+          type: "list",
+          resource: "contacts.tag",
+          label_field: "slug",
+          search_param: "search",
+        }),
         // No primary column, label_field, or .Primary() field — falls
         // through to the "name" convention fallback.
         view({ name: "imports_list", type: "list", resource: "contacts.import_job" }),
@@ -141,7 +148,7 @@ const schema: MetaSchema = {
 };
 
 describe("buildResourceMetadataRegistry", () => {
-  it("resolves routes, default views, labelField (explicit label_field), and fields for a registered resource", () => {
+  it("resolves routes, default views, labelField, searchParam, and fields for a registered resource", () => {
     const registry = buildResourceMetadataRegistry(schema);
 
     expect(registry.get("contacts.tag")).toEqual({
@@ -152,7 +159,7 @@ describe("buildResourceMetadataRegistry", () => {
       defaultListView: "tags_list",
       defaultFormView: "",
       labelField: "slug",
-      searchParam: "q",
+      searchParam: "search",
       fields: [
         { name: "slug", type: "text" },
         { name: "internal_code", type: "text", is_primary: true },
@@ -163,6 +170,16 @@ describe("buildResourceMetadataRegistry", () => {
   it("resolves labelField from the primary:true column when no label_field is declared", () => {
     const registry = buildResourceMetadataRegistry(schema);
     expect(registry.get("contacts.contact")?.labelField).toBe("display_name");
+  });
+
+  it('falls back to the default searchParam of "q" when the list view declares none', () => {
+    const registry = buildResourceMetadataRegistry(schema);
+    expect(registry.get("contacts.contact")?.searchParam).toBe("q");
+  });
+
+  it("resolves searchParam from the default list view's search_param when declared", () => {
+    const registry = buildResourceMetadataRegistry(schema);
+    expect(registry.get("contacts.tag")?.searchParam).toBe("search");
   });
 
   it("prefers the list view's primary:true column over the model's .Primary() field", () => {
@@ -217,6 +234,11 @@ describe("buildResourceMetadataRegistry", () => {
   it("resolves labelField from the model's .Primary() field when there's no list view at all", () => {
     const registry = buildResourceMetadataRegistry(schema);
     expect(registry.get("contacts.lead")?.labelField).toBe("full_name");
+  });
+
+  it('falls back to the default searchParam of "q" when there\'s no list view at all', () => {
+    const registry = buildResourceMetadataRegistry(schema);
+    expect(registry.get("contacts.lead")?.searchParam).toBe("q");
   });
 });
 

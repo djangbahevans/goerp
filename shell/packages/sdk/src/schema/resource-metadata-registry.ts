@@ -9,6 +9,7 @@ interface ResourceViewDeclaration {
   type: string;
   resource: string;
   label_field?: string;
+  search_param?: string;
   columns?: { field: string; primary?: boolean }[];
 }
 
@@ -112,7 +113,7 @@ export function buildResourceMetadataRegistry(schema: MetaSchema): Map<string, R
         defaultListView: views?.list?.name ?? "",
         defaultFormView: views?.form?.name ?? "",
         labelField: resolveLabelField(views?.list, model.fields),
-        searchParam: DEFAULT_SEARCH_PARAM,
+        searchParam: views?.list?.search_param ?? DEFAULT_SEARCH_PARAM,
         fields: model.fields,
       });
     }
