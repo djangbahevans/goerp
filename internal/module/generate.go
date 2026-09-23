@@ -80,8 +80,14 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 		return nil, err
 	}
 
+	genCtx, err := loadGenContext(dir, sch)
+	if err != nil {
+		return nil, err
+	}
+
 	want := make(map[string][]byte, len(sch.Models))
 	owner := make(map[string]string, len(sch.Models))
+	var markers []crossModuleMarker
 	for _, m := range sch.Models {
 		name := m.ResourceName() + ".gen.go"
 		if prior, ok := owner[name]; ok {
@@ -89,11 +95,25 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 		}
 		owner[name] = m.Name
 
-		content, err := renderModelFile(m, sch.Types)
+		content, mks, err := renderModelFile(m, sch.Types, genCtx)
 		if err != nil {
 			return nil, fmt.Errorf("render models/%s: %w", name, err)
 		}
 		want[name] = content
+		markers = append(markers, mks...)
+	}
+
+	if len(markers) > 0 {
+		if prior, ok := owner[crossModuleRefsFileName]; ok {
+			return nil, fmt.Errorf("models/%s: reserved for cross-module Many2One markers, but model %q also resolves to it — rename that model", crossModuleRefsFileName, prior)
+		}
+		owner[crossModuleRefsFileName] = "<cross-module refs>"
+
+		content, err := renderCrossModuleRefsFile(markers)
+		if err != nil {
+			return nil, fmt.Errorf("render models/%s: %w", crossModuleRefsFileName, err)
+		}
+		want[crossModuleRefsFileName] = content
 	}
 
 	modelsDir := filepath.Join(dir, "models")
@@ -144,6 +164,61 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 	}
 
 	return &GenerateResult{Stale: stale}, nil
+}
+
+// loadGenContext reads dir's manifest.json and combines it with sch's own
+// models into the genContext each model file's Many2One fields resolve
+// their orm.Ref[T] target against (goerp#979) — the declaring module's own
+// name, its sibling models by bare resource name, and its declared
+// depends_on/soft_depends_on. It reads the manifest's raw JSON rather than
+// the engine's own manifest.Load, the same way BuildFrontend
+// (readManifestJSON) does — Generate needs three fields off a manifest
+// that may not yet satisfy manifest.Load's full validation (a module
+// mid-authoring, or a bare schema-only test fixture), not a fully
+// validated Manifest.
+func loadGenContext(dir string, sch model.Schema) (genContext, error) {
+	decoded, err := readManifestJSON(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return genContext{}, err
+	}
+
+	moduleName, _ := decoded["name"].(string)
+	if moduleName == "" {
+		return genContext{}, fmt.Errorf("manifest is missing name")
+	}
+	dependsOn := stringSlice(decoded["depends_on"])
+	softDependsOn := stringSlice(decoded["soft_depends_on"])
+
+	modelsByResource := make(map[string]*model.ModelDeclaration, len(sch.Models))
+	for _, m := range sch.Models {
+		modelsByResource[m.ResourceName()] = m
+	}
+
+	return genContext{
+		moduleName:       moduleName,
+		modelsByResource: modelsByResource,
+		dependsOn:        dependsOn,
+		softDependsOn:    softDependsOn,
+	}, nil
+}
+
+// stringSlice converts a decoded JSON array value (as readManifestJSON's
+// map[string]any yields it) into a []string, skipping any non-string
+// element rather than erroring — the same lenient decoding
+// patchManifestField/readNameVersion already apply to other manifest
+// fields.
+func stringSlice(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, e := range arr {
+		if s, ok := e.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // existingGenFiles reads modelsDir's own *.gen.go files, keyed by base

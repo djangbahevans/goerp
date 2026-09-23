@@ -5,10 +5,33 @@ import (
 	"fmt"
 	"go/format"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
+
+// genContext carries the module-level information a single model's Many2One
+// fields need to resolve their Ref[T] type argument (goerp#979): the
+// declaring module's own name, its sibling models (for a same-module
+// target's real struct name), and its manifest's depends_on/soft_depends_on
+// (for validating a cross-module target).
+type genContext struct {
+	moduleName       string
+	modelsByResource map[string]*model.ModelDeclaration
+	dependsOn        []string
+	softDependsOn    []string
+}
+
+// crossModuleMarker describes one generated local marker type for a
+// cross-module Many2One target — goName is its Go identifier
+// ("ContactsContactRef"), resourceName its module-qualified resource name
+// ("contacts.contact"). Generate collects these across every model in the
+// module and renders them once, deduplicated, into a shared file.
+type crossModuleMarker struct {
+	goName       string
+	resourceName string
+}
 
 // commonInitialisms is golint's own commonInitialisms list — id -> ID,
 // url -> URL, not Id/Url (go-sdk-reference.md §22/goerp#961).
@@ -51,10 +74,10 @@ func pascalCase(s string) string {
 // field descriptors (<Struct>Fields, <Struct>AllFields), and Scan method
 // (go-sdk-reference.md §22/§26, goerp#973/#974). types is schema.Schema's
 // own Types slice, needed to resolve an Enum field's declared values.
-func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) ([]byte, error) {
+func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, ctx genContext) ([]byte, []crossModuleMarker, error) {
 	structName := pascalCase(m.ResourceName())
 	if structName == "" {
-		return nil, fmt.Errorf("model %q has no usable resource name to generate a struct from", m.Name)
+		return nil, nil, fmt.Errorf("model %q has no usable resource name to generate a struct from", m.Name)
 	}
 
 	// A DynamicLink field's sibling Selection field is emitted alongside
@@ -72,6 +95,7 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 	var body, aux, fieldsDecl, fieldsInit, allFields, scanBody, valuesSetters bytes.Buffer
 	usesTime := false
 	siblingEmitted := map[string]bool{}
+	var markers []crossModuleMarker
 
 	// usedFieldNames catches two fields whose generated Go names
 	// collide — go/format.Source only parses and formats, it doesn't
@@ -110,50 +134,56 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 			siblingName := f.Def.ReferenceTypeField
 			sibling, ok := fieldByName[siblingName]
 			if !ok {
-				return nil, fmt.Errorf("field %q: DynamicLink names an unknown sibling field %q", f.Name, siblingName)
+				return nil, nil, fmt.Errorf("field %q: DynamicLink names an unknown sibling field %q", f.Name, siblingName)
 			}
 			if !siblingEmitted[siblingName] {
 				siblingGoName := pascalCase(sibling.Name)
 				if err := claimFieldName(siblingGoName, fmt.Sprintf("field %q", sibling.Name)); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				emitScalarField(siblingGoName, sibling.Name, "string", "string", "Field", sibling.Def.IsRequired || sibling.Def.IsPrimaryKey, isWritable(sibling.Def))
 				siblingEmitted[siblingName] = true
 			}
 			selfGoName := pascalCase(f.Name)
 			if err := claimFieldName(selfGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			emitScalarField(selfGoName, f.Name, "string", "string", "Field", f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
 
 		case model.KindMany2One:
 			if !strings.HasSuffix(f.Name, "_id") {
-				return nil, fmt.Errorf("field %q: a Many2One field's name must end in \"_id\" (go-sdk-reference.md §22 \"Many2One\")", f.Name)
+				return nil, nil, fmt.Errorf("field %q: a Many2One field's name must end in \"_id\" (go-sdk-reference.md §22 \"Many2One\")", f.Name)
 			}
 			fkGoName := pascalCase(f.Name)
 			if err := claimFieldName(fkGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			emitScalarField(fkGoName, f.Name, "string", "string", "Field", f.Def.IsRequired || f.Def.IsPrimaryKey, isWritable(f.Def))
 
 			expansionName := strings.TrimSuffix(f.Name, "_id")
 			expansionGoName := pascalCase(expansionName)
 			if err := claimFieldName(expansionGoName, fmt.Sprintf("field %q's Many2One expansion %q", f.Name, expansionName)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			fmt.Fprintf(&body, "\t%s *orm.RelationRef `db:%q`\n", expansionGoName, expansionName)
-			// No field descriptor/AllFields entry — not Condition-bearing
-			// (see #979/G for its eventual Ref[...] descriptor).
-			writeScanRelationField(&scanBody, structName, expansionGoName, expansionName)
+			targetGoType, marker, err := resolveMany2OneTarget(ctx, f.Def.RelatedModel)
+			if err != nil {
+				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
+			}
+			if marker != nil {
+				markers = append(markers, *marker)
+			}
+			fmt.Fprintf(&body, "\t%s orm.Ref[%s] `db:%q`\n", expansionGoName, targetGoType, expansionName)
+			// No field descriptor/AllFields entry — not Condition-bearing.
+			writeScanRelationField(&scanBody, structName, expansionGoName, expansionName, targetGoType)
 
 		case model.KindSelection:
 			fieldGoName := pascalCase(f.Name)
 			if err := claimFieldName(fieldGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			typeName, err := writeNamedTypeField(&body, &aux, structName, f.Name, fieldGoName, f.Def.SelectionValues, f.Def.IsRequired || f.Def.IsPrimaryKey)
 			if err != nil {
-				return nil, fmt.Errorf("field %q: %w", f.Name, err)
+				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
 			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, fieldGoName, f.Name, typeName, "Field")
 			writeScanNamedTypeField(&scanBody, structName, fieldGoName, f.Name, typeName, f.Def.IsRequired || f.Def.IsPrimaryKey)
@@ -164,15 +194,15 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 		case model.KindEnum:
 			values, err := enumValues(types, f.Def.EnumType)
 			if err != nil {
-				return nil, fmt.Errorf("field %q: %w", f.Name, err)
+				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
 			fieldGoName := pascalCase(f.Name)
 			if err := claimFieldName(fieldGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			typeName, err := writeNamedTypeField(&body, &aux, structName, f.Name, fieldGoName, values, f.Def.IsRequired || f.Def.IsPrimaryKey)
 			if err != nil {
-				return nil, fmt.Errorf("field %q: %w", f.Name, err)
+				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
 			writeFieldDescriptor(&fieldsDecl, &fieldsInit, &allFields, structName, fieldGoName, f.Name, typeName, "Field")
 			writeScanNamedTypeField(&scanBody, structName, fieldGoName, f.Name, typeName, f.Def.IsRequired || f.Def.IsPrimaryKey)
@@ -183,11 +213,11 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 		default:
 			goType, wireType, wrapper, err := fieldGoType(f.Def.Kind)
 			if err != nil {
-				return nil, fmt.Errorf("field %q: %w", f.Name, err)
+				return nil, nil, fmt.Errorf("field %q: %w", f.Name, err)
 			}
 			fieldGoName := pascalCase(f.Name)
 			if err := claimFieldName(fieldGoName, fmt.Sprintf("field %q", f.Name)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if goType == "time.Time" {
 				usesTime = true
@@ -248,9 +278,40 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration) (
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return formatted, nil
+	return formatted, markers, nil
+}
+
+// resolveMany2OneTarget resolves relatedModel (module-qualified, e.g.
+// "contacts.contact") into the Go type argument a Many2One field's
+// orm.Ref[T] expansion uses. A same-module target (relatedModel's module
+// segment matches ctx.moduleName) resolves to that model's own generated
+// struct name, found among ctx.modelsByResource — no marker returned. A
+// cross-module target must belong to a module listed in ctx.dependsOn or
+// ctx.softDependsOn (go-sdk-reference.md §22 "Many2One"); it resolves to a
+// generated local marker type's name, returned alongside a
+// crossModuleMarker describing it for the caller to collect.
+func resolveMany2OneTarget(ctx genContext, relatedModel string) (goType string, marker *crossModuleMarker, err error) {
+	targetModule, targetResource, ok := strings.Cut(relatedModel, ".")
+	if !ok {
+		return "", nil, fmt.Errorf("related_model %q must be module-qualified as {module}.{model} (go-sdk-reference.md §22 \"Many2One\")", relatedModel)
+	}
+
+	if targetModule == ctx.moduleName {
+		targetMD, ok := ctx.modelsByResource[targetResource]
+		if !ok {
+			return "", nil, fmt.Errorf("related_model %q names a model not declared in this module's own schema", relatedModel)
+		}
+		return pascalCase(targetMD.ResourceName()), nil, nil
+	}
+
+	if !slices.Contains(ctx.dependsOn, targetModule) && !slices.Contains(ctx.softDependsOn, targetModule) {
+		return "", nil, fmt.Errorf("related_model %q belongs to module %q, which is not in depends_on or soft_depends_on (go-sdk-reference.md §22 \"Many2One\")", relatedModel, targetModule)
+	}
+
+	goType = pascalCase(targetModule) + pascalCase(targetResource) + "Ref"
+	return goType, &crossModuleMarker{goName: goType, resourceName: relatedModel}, nil
 }
 
 // writeField renders one struct field line: goType is pointer-prefixed
@@ -413,14 +474,16 @@ func writeScanNamedTypeField(buf *bytes.Buffer, structName, goName, fieldName, t
 
 // writeScanRelationField appends a Many2One expansion field's decode
 // block: the nested {id, display_name} object host_orm_relations.go
-// attaches under readKey, extracted into an *orm.RelationRef — always
-// optional, since the expansion is nil whenever there's nothing to
-// resolve (fail-closed, not an error).
-func writeScanRelationField(buf *bytes.Buffer, structName, goName, readKey string) {
+// attaches under readKey, extracted into an orm.Ref[targetGoType] —
+// always optional, since the expansion stays the zero value (a nil
+// RelationRef) whenever there's nothing to resolve (fail-closed, not an
+// error).
+func writeScanRelationField(buf *bytes.Buffer, structName, goName, readKey, targetGoType string) {
+	refType := fmt.Sprintf("orm.Ref[%s]", targetGoType)
 	fmt.Fprintf(buf, "\tif v, ok := row[%q]; ok && v != nil {\n", readKey)
 	fmt.Fprintf(buf, "\t\tnested, ok := v.(map[string]any)\n")
 	fmt.Fprintf(buf, "\t\tif !ok {\n")
-	fmt.Fprintf(buf, "\t\t\treturn orm.NewDecodeError(%q, %q, %q, v)\n", structName, goName, "*orm.RelationRef")
+	fmt.Fprintf(buf, "\t\t\treturn orm.NewDecodeError(%q, %q, %q, v)\n", structName, goName, refType)
 	fmt.Fprintf(buf, "\t\t}\n")
 	fmt.Fprintf(buf, "\t\tref := orm.RelationRef{}\n")
 	fmt.Fprintf(buf, "\t\tif id, ok := nested[\"id\"].(string); ok {\n")
@@ -429,7 +492,7 @@ func writeScanRelationField(buf *bytes.Buffer, structName, goName, readKey strin
 	fmt.Fprintf(buf, "\t\tif dn, ok := nested[\"display_name\"].(string); ok {\n")
 	fmt.Fprintf(buf, "\t\t\tref.DisplayName = dn\n")
 	fmt.Fprintf(buf, "\t\t}\n")
-	fmt.Fprintf(buf, "\t\tx.%s = &ref\n", goName)
+	fmt.Fprintf(buf, "\t\tx.%s = %s{RelationRef: &ref}\n", goName, refType)
 	fmt.Fprintf(buf, "\t}\n")
 }
 
@@ -468,4 +531,54 @@ func writeNamedTypeField(body, aux *bytes.Buffer, structName, fieldName, fieldGo
 	}
 	fmt.Fprintf(body, "\t%s %s `db:%q`\n", fieldGoName, goType, fieldName)
 	return typeName, nil
+}
+
+// crossModuleRefsFileName is the generated file collecting every
+// cross-module Many2One marker type this module's own models reference —
+// one shared file rather than one per referencing model, since two
+// models in the same module can target the same cross-module resource
+// and a marker type may only be declared once per package.
+const crossModuleRefsFileName = "cross_module_refs.gen.go"
+
+// renderCrossModuleRefsFile renders crossModuleRefsFileName's content: one
+// zero-field marker type plus ResourceName() method per marker, sorted by
+// Go name for deterministic output. Each marker satisfies orm.Model —
+// nothing else — so orm.Ref[Marker] compiles but orm.FetchRef[Marker]
+// does not: a marker carries no column data for a Scan method to
+// populate (go-sdk-reference.md §22 "Many2One", goerp#979).
+func renderCrossModuleRefsFile(markers []crossModuleMarker) ([]byte, error) {
+	sorted := slices.Clone(markers)
+	slices.SortFunc(sorted, func(a, b crossModuleMarker) int { return strings.Compare(a.goName, b.goName) })
+
+	// Two distinct resource names must never collapse into one marker —
+	// pascalCase(module)+pascalCase(resource) isn't injective (e.g.
+	// "a_b"+"c" and "a"+"b_c" both pascalCase to "ABC"), so a same-goName
+	// run with differing resourceName is a real naming collision, not a
+	// duplicate reference to dedup away.
+	deduped := sorted[:0]
+	for i, mk := range sorted {
+		if i > 0 && mk.goName == sorted[i-1].goName {
+			if mk.resourceName != sorted[i-1].resourceName {
+				return nil, fmt.Errorf("related_model %q and %q both generate the marker type name %q — rename one module or model", sorted[i-1].resourceName, mk.resourceName, mk.goName)
+			}
+			continue
+		}
+		deduped = append(deduped, mk)
+	}
+	sorted = deduped
+
+	var buf bytes.Buffer
+	buf.WriteString(generatedFileHeader)
+	buf.WriteString("// Local marker types for this module's own cross-module Many2One\n")
+	buf.WriteString("// targets — not imported from the target module, which may not even\n")
+	buf.WriteString("// share a source tree with this one (go-sdk-reference.md §22\n")
+	buf.WriteString("// \"Many2One\", goerp#979).\n")
+	buf.WriteString("package models\n\n")
+
+	for _, mk := range sorted {
+		fmt.Fprintf(&buf, "type %s struct{}\n\n", mk.goName)
+		fmt.Fprintf(&buf, "func (%s) ResourceName() string { return %q }\n\n", mk.goName, mk.resourceName)
+	}
+
+	return format.Source(buf.Bytes())
 }

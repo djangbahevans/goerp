@@ -27,7 +27,7 @@ type KindProbe struct {
 	FloatField        float64           `db:"float_field"`
 	OptionalNote      *string           `db:"optional_note"`
 	CreatedByGadgetID *string           `db:"created_by_gadget_id"`
-	CreatedByGadget   *orm.RelationRef  `db:"created_by_gadget"`
+	CreatedByGadget   orm.Ref[Gadget]   `db:"created_by_gadget"`
 	Priority          KindProbePriority `db:"priority"`
 }
 
@@ -220,7 +220,7 @@ func (x *KindProbe) Scan(row map[string]any) error {
 	if v, ok := row["created_by_gadget"]; ok && v != nil {
 		nested, ok := v.(map[string]any)
 		if !ok {
-			return orm.NewDecodeError("KindProbe", "CreatedByGadget", "*orm.RelationRef", v)
+			return orm.NewDecodeError("KindProbe", "CreatedByGadget", "orm.Ref[Gadget]", v)
 		}
 		ref := orm.RelationRef{}
 		if id, ok := nested["id"].(string); ok {
@@ -229,7 +229,7 @@ func (x *KindProbe) Scan(row map[string]any) error {
 		if dn, ok := nested["display_name"].(string); ok {
 			ref.DisplayName = dn
 		}
-		x.CreatedByGadget = &ref
+		x.CreatedByGadget = orm.Ref[Gadget]{RelationRef: &ref}
 	}
 	if v, ok := row["priority"]; ok {
 		s, ok := v.(string)

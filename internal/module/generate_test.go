@@ -55,6 +55,19 @@ var Schema = model.Schema{
 }
 `
 
+const generateFixtureSchemaCrossModuleMany2One = `package schema
+
+import "github.com/djangbahevans/goerp/sdk/go/model"
+
+var Schema = model.Schema{
+	Models: []*model.ModelDeclaration{
+		model.Define("widgets.gadget", model.Table("gadgets")).
+			WithStandardFields().
+			Field("owner_id", model.Many2One("contacts.contact").Required()),
+	},
+}
+`
+
 const generateFixtureSchemaEmpty = `package schema
 
 import "github.com/djangbahevans/goerp/sdk/go/model"
@@ -72,6 +85,18 @@ var Schema = model.Schema{
 	},
 }
 `
+
+// generateFixtureManifest is the minimal manifest.json loadGenContext
+// needs — a bare "name"/"depends_on"/"soft_depends_on", not a
+// manifest.Load-valid Manifest — for a fixture module named moduleName,
+// depending on every module in dependsOn.
+func generateFixtureManifest(moduleName string, dependsOn ...string) string {
+	deps := `"` + strings.Join(dependsOn, `","`) + `"`
+	if len(dependsOn) == 0 {
+		deps = ""
+	}
+	return fmt.Sprintf(`{"name": %q, "depends_on": [%s]}`, moduleName, deps)
+}
 
 func generateFixtureSchemaImportingModels(modulePath string) string {
 	return `package schema
@@ -96,6 +121,15 @@ var Schema = model.Schema{}
 // the same way).
 func writeGenerateFixture(t *testing.T, schemaGo string) string {
 	t.Helper()
+	return writeGenerateFixtureWithManifest(t, schemaGo, generateFixtureManifest("widgets"))
+}
+
+// writeGenerateFixtureWithManifest is writeGenerateFixture with an
+// explicit manifest.json body, for a test that needs to control the
+// fixture module's own name or depends_on (e.g. a cross-module Many2One
+// target, goerp#979).
+func writeGenerateFixtureWithManifest(t *testing.T, schemaGo, manifestJSON string) string {
+	t.Helper()
 
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -111,6 +145,9 @@ func writeGenerateFixture(t *testing.T, schemaGo string) string {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "schema", "schema.go"), []byte(schemaGo), 0o644); err != nil {
 		t.Fatalf("write schema.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifestJSON), 0o644); err != nil {
+		t.Fatalf("write manifest.json: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -150,6 +187,9 @@ func TestGenerate_DirIsSubdirectoryOfLargerModule(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(targetDir, "schema", "schema.go"), []byte(generateFixtureSchemaOneModel), 0o644); err != nil {
 		t.Fatalf("write schema.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "manifest.json"), []byte(generateFixtureManifest("widgets")), 0o644); err != nil {
+		t.Fatalf("write manifest.json: %v", err)
 	}
 
 	workCtx, workCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -284,6 +324,9 @@ func writeGenerateFixtureSingleModule(t *testing.T, schemaGo string) string {
 	if err := os.WriteFile(filepath.Join(dir, "schema", "schema.go"), []byte(schemaGo), 0o644); err != nil {
 		t.Fatalf("write schema.go: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(generateFixtureManifest("widgets")), 0o644); err != nil {
+		t.Fatalf("write manifest.json: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -351,6 +394,89 @@ func TestGenerate_OneModel_WritesGenFile(t *testing.T) {
 	}
 	if string(formatted) != string(data) {
 		t.Errorf("widget.gen.go is not gofmt-clean:\ngot:\n%s\nwant:\n%s", data, formatted)
+	}
+}
+
+// TestGenerate_CrossModuleMany2One_WritesSharedRefsFile pins goerp#979's
+// cross-module half end to end: a Many2One targeting a module listed in
+// depends_on gets a local marker type, generated once into a shared
+// cross_module_refs.gen.go rather than duplicated per referencing model
+// — and the referencing model's own file never imports the target
+// module's package, since modules build independently with no shared
+// source tree.
+func TestGenerate_CrossModuleMany2One_WritesSharedRefsFile(t *testing.T) {
+	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaCrossModuleMany2One, generateFixtureManifest("widgets", "contacts"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	result, err := Generate(ctx, dir, GenerateOptions{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	wantStale := []string{filepath.Join("models", "cross_module_refs.gen.go"), filepath.Join("models", "gadget.gen.go")}
+	if len(result.Stale) != len(wantStale) || result.Stale[0] != wantStale[0] || result.Stale[1] != wantStale[1] {
+		t.Fatalf("Stale = %v, want %v", result.Stale, wantStale)
+	}
+
+	gadgetSrc, err := os.ReadFile(filepath.Join(dir, "models", "gadget.gen.go"))
+	if err != nil {
+		t.Fatalf("read gadget.gen.go: %v", err)
+	}
+	if !strings.Contains(normalizeSpaces(string(gadgetSrc)), "Owner orm.Ref[ContactsContactRef]") {
+		t.Errorf("gadget.gen.go missing orm.Ref[ContactsContactRef] expansion field:\n%s", gadgetSrc)
+	}
+	if strings.Contains(string(gadgetSrc), `"github.com/djangbahevans/goerp`) && strings.Contains(string(gadgetSrc), "/contacts/") {
+		t.Errorf("gadget.gen.go must not import the target module's own package:\n%s", gadgetSrc)
+	}
+
+	refsSrc, err := os.ReadFile(filepath.Join(dir, "models", "cross_module_refs.gen.go"))
+	if err != nil {
+		t.Fatalf("read cross_module_refs.gen.go: %v", err)
+	}
+	if !strings.Contains(string(refsSrc), "type ContactsContactRef struct{}") {
+		t.Errorf("cross_module_refs.gen.go missing marker type:\n%s", refsSrc)
+	}
+	if !strings.Contains(string(refsSrc), `func (ContactsContactRef) ResourceName() string { return "contacts.contact" }`) {
+		t.Errorf("cross_module_refs.gen.go missing ResourceName():\n%s", refsSrc)
+	}
+}
+
+// TestGenerate_CrossModuleMany2One_TargetModuleNotDeclared_Fails pins
+// that Generate rejects a Many2One targeting a module the manifest
+// doesn't list in depends_on or soft_depends_on, rather than silently
+// generating a marker for an undeclared dependency.
+func TestGenerate_CrossModuleMany2One_TargetModuleNotDeclared_Fails(t *testing.T) {
+	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaCrossModuleMany2One, generateFixtureManifest("widgets"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	if _, err := Generate(ctx, dir, GenerateOptions{}); err == nil {
+		t.Fatal("expected an error for a Many2One target whose module isn't in depends_on or soft_depends_on")
+	}
+}
+
+// TestGenerate_ManifestMissingName_Fails pins a real bug a code review
+// caught: loadGenContext used to fall back to moduleName == "" for a
+// manifest.json with no (or a non-string) "name" field, rather than
+// erroring the way the sibling readNameVersion helper already does for
+// the same condition — a same-module Many2One field then wrongly took
+// the cross-module branch, producing a confusing "not in depends_on"
+// error instead of a clear one naming the actual problem.
+func TestGenerate_ManifestMissingName_Fails(t *testing.T) {
+	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaOneModel, `{"depends_on": []}`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	_, err := Generate(ctx, dir, GenerateOptions{})
+	if err == nil {
+		t.Fatal("expected an error for a manifest.json with no \"name\" field")
+	}
+	if !strings.Contains(err.Error(), "name") {
+		t.Errorf("error = %q, want it to name the missing manifest field", err)
 	}
 }
 
