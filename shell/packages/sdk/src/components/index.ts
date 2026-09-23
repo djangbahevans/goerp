@@ -63,6 +63,8 @@ export type { PageHeaderProps } from "./page-header.js";
 export { PageHeader } from "./page-header.js";
 export type { PageLayoutProps } from "./page-layout.js";
 export { PageLayout } from "./page-layout.js";
+export type { PasswordFieldProps } from "./password-field.js";
+export { PasswordField } from "./password-field.js";
 export type { ProgressBarProps } from "./progress-bar.js";
 export { ProgressBar } from "./progress-bar.js";
 export type { RelationFieldProps, RelationValue } from "./relation-field.js";
