@@ -2,6 +2,7 @@ package module
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,6 +43,185 @@ func TestPascalCase(t *testing.T) {
 			t.Errorf("pascalCase(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
+}
+
+// TestModelPackageIdentifiers_FixedSet pins the always-present identifier
+// set every model contributes (goerp#981) — struct name plus the four
+// generated descriptor/builder names — regardless of what fields it
+// declares.
+func TestModelPackageIdentifiers_FixedSet(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("name", model.Text().Required())
+
+	ids, err := modelPackageIdentifiers(m, nil)
+	if err != nil {
+		t.Fatalf("modelPackageIdentifiers: %v", err)
+	}
+
+	want := []string{"Gadget", "GadgetFields", "GadgetAllFields", "GadgetValues", "NewGadgetValues"}
+	for _, id := range want {
+		if !slices.Contains(ids, id) {
+			t.Errorf("modelPackageIdentifiers = %v, missing %q", ids, id)
+		}
+	}
+}
+
+// TestModelPackageIdentifiers_SelectionAndEnum pins the per-field
+// contribution goerp#981's own scope names explicitly: a Selection or
+// Enum field's own named type and every one of its value constants.
+func TestModelPackageIdentifiers_SelectionAndEnum(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("state", model.Selection("draft", "done").Required()).
+		Field("priority", model.Enum("gadget_priority_enum").Required())
+
+	types := []model.TypeDeclaration{
+		model.EnumType("gadget_priority_enum", "low", "high"),
+	}
+
+	ids, err := modelPackageIdentifiers(m, types)
+	if err != nil {
+		t.Fatalf("modelPackageIdentifiers: %v", err)
+	}
+
+	want := []string{
+		"GadgetState", "GadgetStateDraft", "GadgetStateDone",
+		"GadgetPriority", "GadgetPriorityLow", "GadgetPriorityHigh",
+	}
+	for _, id := range want {
+		if !slices.Contains(ids, id) {
+			t.Errorf("modelPackageIdentifiers = %v, missing %q", ids, id)
+		}
+	}
+}
+
+// TestModelPackageIdentifiers_UnknownEnumType_Errors pins that an Enum
+// field naming an undeclared type errors the same way renderModelFile
+// itself does, rather than silently omitting that field's identifiers
+// from generate.go's collision check.
+func TestModelPackageIdentifiers_UnknownEnumType_Errors(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("priority", model.Enum("does_not_exist").Required())
+
+	if _, err := modelPackageIdentifiers(m, nil); err == nil {
+		t.Fatal("expected an error for an Enum field naming an undeclared type")
+	}
+}
+
+// TestModelPackageIdentifiers_DynamicLinkSiblingNotClaimed pins a real
+// bug: modelPackageIdentifiers used to classify a DynamicLink field's
+// sibling Selection field as a real Selection field, claiming a named
+// type and per-value constants (e.g. "AttachmentReferenceType") that
+// renderModelFile never actually generates for it — a false collision
+// risk (or false "already claimed" bookkeeping) against a schema that
+// compiles fine, for the exact attachment pattern
+// sdk/go/modeltest/testdata/fixture/schema/schema.go itself declares.
+func TestModelPackageIdentifiers_DynamicLinkSiblingNotClaimed(t *testing.T) {
+	m := model.Define("widgets.attachment").
+		Field("reference_type", model.Selection("widgets.widget", "widgets.gadget").Required()).
+		Field("reference_id", model.DynamicLink("reference_type").Required())
+
+	ids, err := modelPackageIdentifiers(m, nil)
+	if err != nil {
+		t.Fatalf("modelPackageIdentifiers: %v", err)
+	}
+
+	for _, phantom := range []string{"AttachmentReferenceType", "AttachmentReferenceTypeWidgetsWidget", "AttachmentReferenceTypeWidgetsGadget"} {
+		if slices.Contains(ids, phantom) {
+			t.Errorf("modelPackageIdentifiers = %v, wrongly claims %q — a DynamicLink's sibling Selection field is a plain string, not a named type", ids, phantom)
+		}
+	}
+}
+
+// TestModelPackageIdentifiers_MatchesRenderModelFileOutput cross-checks
+// modelPackageIdentifiers against renderModelFile's own real output for a
+// representative fixture spanning every field kind that contributes a
+// package-level identifier — insurance against the two silently drifting
+// apart, since modelPackageIdentifiers exists specifically so generate.go
+// can check for collisions without rendering every model first
+// (goerp#981's own "not renderModelFile itself" design), which only pays
+// off if it stays accurate.
+func TestModelPackageIdentifiers_MatchesRenderModelFileOutput(t *testing.T) {
+	m := model.Define("widgets.gadget", model.Table("gadgets")).
+		WithStandardFields().
+		Field("name", model.Text().Required()).
+		Field("state", model.Selection("draft", "done").Required()).
+		Field("priority", model.Enum("gadget_priority_enum").Required()).
+		// A DynamicLink's sibling Selection field is emitted as a plain
+		// string, not a named type (go-sdk-reference.md §22
+		// "DynamicLink") — included here so a future
+		// modelPackageIdentifiers change that forgets that exclusion (as
+		// a real one once did) fails this test instead of only silently
+		// claiming phantom identifiers.
+		Field("reference_type", model.Selection("widgets.widget", "widgets.gadget").Required()).
+		Field("reference_id", model.DynamicLink("reference_type").Required())
+
+	types := []model.TypeDeclaration{
+		model.EnumType("gadget_priority_enum", "low", "high"),
+	}
+
+	ids, err := modelPackageIdentifiers(m, types)
+	if err != nil {
+		t.Fatalf("modelPackageIdentifiers: %v", err)
+	}
+
+	out, _, err := renderModelFile(m, types, testGenContext())
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := string(out)
+
+	for _, id := range ids {
+		if !strings.Contains(src, id) {
+			t.Errorf("modelPackageIdentifiers claims %q, but it doesn't appear in renderModelFile's own output:\n%s", id, src)
+		}
+	}
+
+	// The reverse direction: every package-level identifier
+	// renderModelFile's real output actually declares must be claimed
+	// too, or a future renderModelFile change that starts emitting a new
+	// kind of identifier could under-claim silently (generate.go's
+	// collision check would miss it entirely) without failing this test.
+	for _, decl := range topLevelDeclarations(t, src) {
+		if !slices.Contains(ids, decl) {
+			t.Errorf("renderModelFile declares %q, but modelPackageIdentifiers doesn't claim it", decl)
+		}
+	}
+}
+
+// topLevelDeclarations extracts every package-level identifier a
+// generated model file declares — a type, a var, a package-level func
+// (no receiver), or a const inside a "const (" block — for
+// TestModelPackageIdentifiers_MatchesRenderModelFileOutput's own reverse-
+// direction check.
+var (
+	topLevelTypeOrVarRe = regexp.MustCompile(`^(?:type|var)\s+(\w+)\b`)
+	topLevelFuncRe      = regexp.MustCompile(`^func\s+(\w+)\(`)
+	constNameRe         = regexp.MustCompile(`^\t(\w+)\s`)
+)
+
+func topLevelDeclarations(t *testing.T, src string) []string {
+	t.Helper()
+	var decls []string
+	inConstBlock := false
+	for line := range strings.Lines(src) {
+		switch {
+		case strings.HasPrefix(line, "const ("):
+			inConstBlock = true
+		case inConstBlock && strings.HasPrefix(line, ")"):
+			inConstBlock = false
+		case inConstBlock:
+			if m := constNameRe.FindStringSubmatch(line); m != nil {
+				decls = append(decls, m[1])
+			}
+		default:
+			if m := topLevelTypeOrVarRe.FindStringSubmatch(line); m != nil {
+				decls = append(decls, m[1])
+			} else if m := topLevelFuncRe.FindStringSubmatch(line); m != nil {
+				decls = append(decls, m[1])
+			}
+		}
+	}
+	return decls
 }
 
 func TestRenderModelFile_BasicFieldKinds(t *testing.T) {
@@ -212,7 +392,7 @@ func TestRenderCrossModuleRefsFile_DistinctResourcesCollidingOnGoName_Errors(t *
 		{goName: "ABCRef", resourceName: "a.b_c"},
 	}
 
-	if _, err := renderCrossModuleRefsFile(markers); err == nil {
+	if _, _, err := renderCrossModuleRefsFile(markers); err == nil {
 		t.Fatal("expected an error for two distinct related_model values colliding on the same generated Go name")
 	}
 }
@@ -227,7 +407,7 @@ func TestRenderCrossModuleRefsFile_SameResourceReferencedTwice_Dedups(t *testing
 		{goName: "ContactsContactRef", resourceName: "contacts.contact"},
 	}
 
-	out, err := renderCrossModuleRefsFile(markers)
+	out, _, err := renderCrossModuleRefsFile(markers)
 	if err != nil {
 		t.Fatalf("renderCrossModuleRefsFile: %v", err)
 	}
@@ -446,6 +626,41 @@ func TestRenderModelFile_SelectionValueWithNonIdentifierChars(t *testing.T) {
 	}
 	if !strings.Contains(src, `GadgetStateNeedsReview GadgetState = "needs review"`) {
 		t.Errorf("missing GadgetStateNeedsReview constant:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_SelectionDuplicateConstantName_Errors pins a real
+// bug a review caught: two Selection/Enum values that pascalCase to the
+// same Go identifier — either literally duplicated ("draft", "draft") or
+// merely colliding under pascalCase ("in-progress", "in_progress") —
+// went unchecked here, producing a duplicate const declaration
+// go/format.Source doesn't catch (it only formats, never type-checks).
+// Left unguarded, that within-model problem would only surface later as
+// generate.go's own coarser, confusingly self-referential cross-model
+// identifier check instead of this precise, field-level error.
+func TestRenderModelFile_SelectionDuplicateConstantName_Errors(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("state", model.Selection("in-progress", "in_progress").Required())
+
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
+		t.Fatal("expected an error for two Selection values colliding on the same generated constant name")
+	}
+}
+
+// TestRenderModelFile_SelectionFieldNameCollidesWithFieldsDescriptor_Errors
+// pins a real bug a review caught: a Selection/Enum field literally named
+// "fields" (or "all_fields"/"values") pascalCases to "Fields", so its own
+// generated named type ("GadgetFields") collided with the model's own
+// fixed GadgetFields descriptor var — go/format.Source doesn't catch it
+// (it only formats, never type-checks), and it would only have surfaced
+// later as generate.go's own coarser, confusingly self-referential
+// cross-model identifier check instead of this precise, field-level one.
+func TestRenderModelFile_SelectionFieldNameCollidesWithFieldsDescriptor_Errors(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("fields", model.Selection("a", "b").Required())
+
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
+		t.Fatal("expected an error for a Selection field named \"fields\" colliding with the generated GadgetFields descriptor")
 	}
 }
 

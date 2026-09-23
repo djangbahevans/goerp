@@ -55,6 +55,25 @@ var Schema = model.Schema{
 }
 `
 
+// generateFixtureSchemaPackageIdentifierCollision is goerp#981's own
+// pathological example: "gadget_fields" pascalCases to "GadgetFields" —
+// the same Go identifier "gadget"'s own generated var GadgetFields
+// already claims — a collision between two unrelated models' package-
+// level output, neither of which does anything wrong on its own.
+const generateFixtureSchemaPackageIdentifierCollision = `package schema
+
+import "github.com/djangbahevans/goerp/sdk/go/model"
+
+var Schema = model.Schema{
+	Models: []*model.ModelDeclaration{
+		model.Define("widgets.gadget", model.Table("gadgets")).
+			WithStandardFields(),
+		model.Define("widgets.gadget_fields", model.Table("gadget_fields")).
+			WithStandardFields(),
+	},
+}
+`
+
 const generateFixtureSchemaCrossModuleMany2One = `package schema
 
 import "github.com/djangbahevans/goerp/sdk/go/model"
@@ -608,6 +627,78 @@ func TestGenerate_ResourceNameCollision_Fails(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "models")); statErr == nil {
 		t.Error("models/ was created despite the collision error")
+	}
+}
+
+// TestGenerate_PackageIdentifierCollision_Fails pins goerp#981's own AC:
+// two models whose generated package-level identifiers collide fail
+// before either file exists on disk, with a clear error naming both
+// models — a second, additive check alongside
+// TestGenerate_ResourceNameCollision_Fails's own filename-only one, which
+// this particular fixture wouldn't trip (the two models' own
+// models/*.gen.go filenames, "gadget.gen.go" and "gadget_fields.gen.go",
+// don't collide — only their generated Go identifiers do).
+func TestGenerate_PackageIdentifierCollision_Fails(t *testing.T) {
+	dir := writeGenerateFixture(t, generateFixtureSchemaPackageIdentifierCollision)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	_, err := Generate(ctx, dir, GenerateOptions{})
+	if err == nil {
+		t.Fatal("expected an error for two models whose generated identifiers collide")
+	}
+	if !strings.Contains(err.Error(), "widgets.gadget") || !strings.Contains(err.Error(), "widgets.gadget_fields") || !strings.Contains(err.Error(), "GadgetFields") {
+		t.Errorf("error = %q, want it to name both widgets.gadget and widgets.gadget_fields and the colliding identifier GadgetFields", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "models")); statErr == nil {
+		t.Error("models/ was created despite the collision error")
+	}
+}
+
+// generateFixtureSchemaWithinModelFieldCollision has two Selection fields
+// on the same model whose names pascalCase to the same Go identifier
+// ("ref-type" and "ref_type" both → "RefType") — a within-model
+// collision renderModelFile's own claimFieldName already catches, with a
+// precise field-level message.
+const generateFixtureSchemaWithinModelFieldCollision = `package schema
+
+import "github.com/djangbahevans/goerp/sdk/go/model"
+
+var Schema = model.Schema{
+	Models: []*model.ModelDeclaration{
+		model.Define("widgets.gadget", model.Table("gadgets")).
+			WithStandardFields().
+			Field("ref-type", model.Selection("a", "b").Required()).
+			Field("ref_type", model.Selection("a", "b").Required()),
+	},
+}
+`
+
+// TestGenerate_WithinModelFieldCollision_ReportsFieldLevelError pins a
+// real bug a review caught: modelPackageIdentifiers's own cross-model
+// check used to run before renderModelFile, so a within-model collision
+// surfaced as a confusing self-referential "both widgets.gadget and
+// widgets.gadget generate the Go identifier" error naming the same model
+// twice and neither actual field, instead of claimFieldName's own precise
+// "field %q and field %q both generate the Go field name %q". Generate
+// now runs renderModelFile first specifically so its field-level error
+// always wins for a collision within one model.
+func TestGenerate_WithinModelFieldCollision_ReportsFieldLevelError(t *testing.T) {
+	dir := writeGenerateFixture(t, generateFixtureSchemaWithinModelFieldCollision)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	_, err := Generate(ctx, dir, GenerateOptions{})
+	if err == nil {
+		t.Fatal("expected an error for two fields on one model colliding on the same Go identifier")
+	}
+	if !strings.Contains(err.Error(), `"ref-type"`) || !strings.Contains(err.Error(), `"ref_type"`) {
+		t.Errorf("error = %q, want it to name both colliding fields ref-type and ref_type", err)
+	}
+	if strings.Contains(err.Error(), `both "widgets.gadget" and "widgets.gadget"`) {
+		t.Errorf("error = %q, is the confusing self-referential model-vs-model message, not the field-level one", err)
 	}
 }
 
