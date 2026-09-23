@@ -5,6 +5,7 @@ package models
 import (
 	"time"
 
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -341,6 +342,17 @@ func (v *KindProbeValues) SetCreatedByGadgetID(x string) *KindProbeValues {
 func (v *KindProbeValues) SetPriority(x KindProbePriority) *KindProbeValues {
 	orm.Set(&v.Values, KindProbeFields.Priority, x)
 	return v
+}
+
+// Query returns a fresh KindProbe query — sugar over orm.From[KindProbe]().
+func (KindProbe) Query() *orm.Query[KindProbe] { return orm.From[KindProbe]() }
+
+// Delete deletes x by its primary key — sugar over orm.Unlink[KindProbe].
+func (x KindProbe) Delete() (orm.ExecResult, error) { return orm.Unlink[KindProbe](x.ID) }
+
+// DeleteTx is Delete, scoped to tx's own open transaction.
+func (x KindProbe) DeleteTx(tx *db.Tx) (orm.ExecResult, error) {
+	return orm.UnlinkTx[KindProbe](tx, x.ID)
 }
 
 type KindProbePriority string

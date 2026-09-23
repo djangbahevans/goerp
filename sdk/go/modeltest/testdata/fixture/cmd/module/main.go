@@ -167,6 +167,57 @@ func init() {
 		return engine.Created(body)
 	}, engine.Auth(engine.AuthNone))
 
+	// /gadget-query-delete exercises goerp#980's generated instance
+	// convenience methods end to end: Gadget{}.Query() must produce
+	// identical results to orm.From[models.Gadget]() (the AC's own
+	// example), and Delete() must actually soft-delete the record via
+	// orm.Unlink — Gadget has a deleted_at column (WithStandardFields), so
+	// Unlink sets it rather than removing the row, and a plain query still
+	// returns it (host.orm applies no default deleted_at IS NULL filter).
+	engine.POST("/gadget-query-delete", func(req *engine.Request) *engine.Response {
+		vals := models.NewGadgetValues().
+			SetName("QueryDeleteGadget").
+			SetDisplayName("QueryDeleteGadget")
+
+		gadget, err := orm.Create[models.Gadget](&vals.Values)
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.gadget_create_failed", "message": err.Error()},
+			}}
+		}
+
+		viaMethod, _, err := models.Gadget{}.Query().Where(models.GadgetFields.Name.Eq("QueryDeleteGadget")).All()
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.gadget_query_failed", "message": err.Error()},
+			}}
+		}
+		viaFrom, _, err := orm.From[models.Gadget]().Where(models.GadgetFields.Name.Eq("QueryDeleteGadget")).All()
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.gadget_query_failed", "message": err.Error()},
+			}}
+		}
+
+		if _, err := gadget.Delete(); err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.gadget_delete_failed", "message": err.Error()},
+			}}
+		}
+		afterDelete, err := orm.Get[models.Gadget](gadget.ID)
+		if err != nil {
+			return &engine.Response{StatusCode: 500, Body: map[string]any{
+				"error": map[string]any{"code": "widgets.gadget_get_failed", "message": err.Error()},
+			}}
+		}
+
+		return engine.Created(map[string]any{
+			"query_method_ids": idsOf(viaMethod),
+			"from_func_ids":    idsOf(viaFrom),
+			"soft_deleted":     afterDelete.DeletedAt != nil,
+		})
+	}, engine.Auth(engine.AuthNone))
+
 	engine.GET("/ping", func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"status": "ok"})
 	}, engine.Auth(engine.AuthNone))
@@ -259,6 +310,16 @@ func allocate(size uint32) uint32 {
 //go:wasmexport deallocate
 func deallocate(ptr, size uint32) {
 	engine.Deallocate(ptr, size)
+}
+
+// idsOf collects the ID of each gadget in gadgets, for comparing
+// Gadget{}.Query()'s result against orm.From[models.Gadget]()'s own.
+func idsOf(gadgets []models.Gadget) []string {
+	ids := make([]string, len(gadgets))
+	for i, g := range gadgets {
+		ids[i] = g.ID
+	}
+	return ids
 }
 
 func main() {}

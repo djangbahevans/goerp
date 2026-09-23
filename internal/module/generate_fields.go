@@ -226,12 +226,18 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 		}
 	}
 
+	pkGoName, hasDeletablePK := primaryKeyGoField(m)
+
 	var buf bytes.Buffer
 	buf.WriteString(generatedFileHeader)
 	buf.WriteString("package models\n\n")
 	buf.WriteString("import (\n")
 	if usesTime {
 		buf.WriteString("\t\"time\"\n\n")
+	}
+	if hasDeletablePK {
+		// DeleteTx below takes a *db.Tx.
+		buf.WriteString("\t\"github.com/djangbahevans/goerp/sdk/go/db\"\n")
 	}
 	// Always needed: ResourceName/Fields/AllFields/Scan below reference
 	// orm regardless of which field kinds this model declares.
@@ -270,6 +276,39 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 	fmt.Fprintf(&buf, "type %sValues struct {\n\torm.Values[%s]\n}\n\n", structName, structName)
 	fmt.Fprintf(&buf, "func New%sValues() *%sValues {\n\treturn &%sValues{Values: *orm.NewValues[%s]()}\n}\n\n", structName, structName, structName, structName)
 	buf.Write(valuesSetters.Bytes())
+
+	// Every instance convenience method below reserves its own Go name
+	// against usedFieldNames up front — a schema field that happens to
+	// pascalCase to "Query", "Delete", or "DeleteTx" would otherwise
+	// silently produce a struct with both a field and a method of the
+	// same name, the same collision claimFieldName already guards every
+	// ordinary field name against.
+	reserveMethodName := func(name string) error {
+		if prior, ok := usedFieldNames[name]; ok {
+			return fmt.Errorf("%s and the generated %s() method both generate the Go name %q — rename that field", prior, name, name)
+		}
+		usedFieldNames[name] = name + "()"
+		return nil
+	}
+
+	if err := reserveMethodName("Query"); err != nil {
+		return nil, nil, err
+	}
+	fmt.Fprintf(&buf, "// Query returns a fresh %s query — sugar over orm.From[%s]().\n", structName, structName)
+	fmt.Fprintf(&buf, "func (%s) Query() *orm.Query[%s] { return orm.From[%s]() }\n\n", structName, structName, structName)
+
+	if hasDeletablePK {
+		if err := reserveMethodName("Delete"); err != nil {
+			return nil, nil, err
+		}
+		if err := reserveMethodName("DeleteTx"); err != nil {
+			return nil, nil, err
+		}
+		fmt.Fprintf(&buf, "// Delete deletes x by its primary key — sugar over orm.Unlink[%s].\n", structName)
+		fmt.Fprintf(&buf, "func (x %s) Delete() (orm.ExecResult, error) { return orm.Unlink[%s](x.%s) }\n\n", structName, structName, pkGoName)
+		fmt.Fprintf(&buf, "// DeleteTx is Delete, scoped to tx's own open transaction.\n")
+		fmt.Fprintf(&buf, "func (x %s) DeleteTx(tx *db.Tx) (orm.ExecResult, error) { return orm.UnlinkTx[%s](tx, x.%s) }\n\n", structName, structName, pkGoName)
+	}
 
 	if aux.Len() > 0 {
 		buf.WriteString("\n")
@@ -379,6 +418,49 @@ func writeFieldDescriptor(decl, init, allFields *bytes.Buffer, structName, goNam
 		fmt.Fprintf(init, "\t%s: orm.NewField[%s, %s](%q),\n", goName, structName, goType, fieldName)
 	}
 	fmt.Fprintf(allFields, "\t%sFields.%s,\n", structName, goName)
+}
+
+// primaryKeyGoField finds m's own primary-key field for the generated
+// Delete()/DeleteTx's single orm.Unlink/UnlinkTx argument — a single
+// pre-pass over m.Fields, the same single-source-of-truth shape
+// internal/engine/schema/rls.go's own primaryKeyColumnName already uses
+// for .Shareable(), instead of re-detecting IsPrimaryKey scattered across
+// renderModelFile's per-field-kind switch. ok is false when there's no
+// primary key, more than one (a composite key — rls.go's own
+// primaryKeyColumnName rejects this too, since orm.Unlink has no
+// multi-field ID concept), or its resolved struct field isn't a plain Go
+// string (a Selection/Enum's own named type, or a non-string scalar
+// kind) — Delete() is then simply not generated rather than emitted as
+// code that fails to compile.
+func primaryKeyGoField(m *model.ModelDeclaration) (goName string, ok bool) {
+	var pk *model.NamedField
+	for i, f := range m.Fields {
+		if !f.Def.IsPrimaryKey {
+			continue
+		}
+		if pk != nil {
+			return "", false
+		}
+		pk = &m.Fields[i]
+	}
+	if pk == nil {
+		return "", false
+	}
+
+	switch pk.Def.Kind {
+	case model.KindMany2One, model.KindDynamicLink:
+		// Both always generate as a plain Go string (their expansion/
+		// sibling machinery is irrelevant to the FK/self column itself).
+		return pascalCase(pk.Name), true
+	case model.KindSelection, model.KindEnum:
+		return "", false // named type, not a plain string
+	default:
+		goType, _, _, err := fieldGoType(pk.Def.Kind)
+		if err != nil || goType != "string" {
+			return "", false
+		}
+		return pascalCase(pk.Name), true
+	}
 }
 
 // isWritable reports whether def's field gets a <Struct>Values.SetX

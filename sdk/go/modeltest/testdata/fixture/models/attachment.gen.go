@@ -5,6 +5,7 @@ package models
 import (
 	"time"
 
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -182,4 +183,15 @@ func (v *AttachmentValues) SetReferenceType(x string) *AttachmentValues {
 func (v *AttachmentValues) SetReferenceID(x string) *AttachmentValues {
 	orm.Set(&v.Values, AttachmentFields.ReferenceID, x)
 	return v
+}
+
+// Query returns a fresh Attachment query — sugar over orm.From[Attachment]().
+func (Attachment) Query() *orm.Query[Attachment] { return orm.From[Attachment]() }
+
+// Delete deletes x by its primary key — sugar over orm.Unlink[Attachment].
+func (x Attachment) Delete() (orm.ExecResult, error) { return orm.Unlink[Attachment](x.ID) }
+
+// DeleteTx is Delete, scoped to tx's own open transaction.
+func (x Attachment) DeleteTx(tx *db.Tx) (orm.ExecResult, error) {
+	return orm.UnlinkTx[Attachment](tx, x.ID)
 }

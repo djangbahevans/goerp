@@ -5,6 +5,7 @@ package models
 import (
 	"time"
 
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -167,3 +168,12 @@ func (v *WidgetValues) SetName(x string) *WidgetValues {
 	orm.Set(&v.Values, WidgetFields.Name.Field, x)
 	return v
 }
+
+// Query returns a fresh Widget query — sugar over orm.From[Widget]().
+func (Widget) Query() *orm.Query[Widget] { return orm.From[Widget]() }
+
+// Delete deletes x by its primary key — sugar over orm.Unlink[Widget].
+func (x Widget) Delete() (orm.ExecResult, error) { return orm.Unlink[Widget](x.ID) }
+
+// DeleteTx is Delete, scoped to tx's own open transaction.
+func (x Widget) DeleteTx(tx *db.Tx) (orm.ExecResult, error) { return orm.UnlinkTx[Widget](tx, x.ID) }

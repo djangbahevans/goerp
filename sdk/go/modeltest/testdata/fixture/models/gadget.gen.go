@@ -5,6 +5,7 @@ package models
 import (
 	"time"
 
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -200,6 +201,15 @@ func (v *GadgetValues) SetState(x GadgetState) *GadgetValues {
 	orm.Set(&v.Values, GadgetFields.State, x)
 	return v
 }
+
+// Query returns a fresh Gadget query — sugar over orm.From[Gadget]().
+func (Gadget) Query() *orm.Query[Gadget] { return orm.From[Gadget]() }
+
+// Delete deletes x by its primary key — sugar over orm.Unlink[Gadget].
+func (x Gadget) Delete() (orm.ExecResult, error) { return orm.Unlink[Gadget](x.ID) }
+
+// DeleteTx is Delete, scoped to tx's own open transaction.
+func (x Gadget) DeleteTx(tx *db.Tx) (orm.ExecResult, error) { return orm.UnlinkTx[Gadget](tx, x.ID) }
 
 type GadgetState string
 
