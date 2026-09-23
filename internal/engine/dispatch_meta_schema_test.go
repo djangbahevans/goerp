@@ -105,7 +105,7 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	var resp metaSchemaResponse
+	var resp registry.SchemaResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 	if len(md.EnabledOps) != 1 || md.EnabledOps[0] != "list" {
 		t.Errorf("model enabled_ops = %v, want [list]", md.EnabledOps)
 	}
-	var nameField, ownerField *metaSchemaField
+	var nameField, ownerField *registry.SchemaField
 	for i, f := range md.Fields {
 		switch f.Name {
 		case "name":
@@ -177,7 +177,7 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 		t.Errorf("owner field = %+v, want type=many2one related_model=widgets.owner", ownerField)
 	}
 
-	var handWritten, enableOpsRoute, customAction *metaSchemaRoute
+	var handWritten, enableOpsRoute, customAction *registry.SchemaRoute
 	for i, r := range mod.Routes {
 		switch {
 		case r.Path == "/widgets/ping":
@@ -262,7 +262,7 @@ func TestDispatchSchemaRoute_ReflectsViewExtensionsAndLoadOrder(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	var resp metaSchemaResponse
+	var resp registry.SchemaResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -296,35 +296,6 @@ func TestDispatchSchemaRoute_ReflectsViewExtensionsAndLoadOrder(t *testing.T) {
 	}
 }
 
-func TestMetaSchemaViewFor(t *testing.T) {
-	views := []manifest.View{
-		{Name: "widgets.kanban", Type: "kanban", Resource: "widgets.widget"},
-		{Name: "widgets.list", Type: "list", Resource: "widgets.widget"},
-		{Name: "widgets.form", Type: "form", Resource: "widgets.widget"},
-		{Name: "other.list", Type: "list", Resource: "other.thing"},
-	}
-
-	cases := []struct {
-		crudAction string
-		want       string
-	}{
-		{"list", "widgets.kanban"}, // first list-shaped match wins by declaration order
-		{"get", "widgets.form"},
-		{"create", "widgets.form"},
-		{"update", "widgets.form"},
-		{"delete", ""}, // no view claims delete
-	}
-	for _, c := range cases {
-		if got := metaSchemaViewFor(views, "widgets.widget", c.crudAction); got != c.want {
-			t.Errorf("metaSchemaViewFor(%q) = %q, want %q", c.crudAction, got, c.want)
-		}
-	}
-
-	if got := metaSchemaViewFor(views, "unknown.model", "list"); got != "" {
-		t.Errorf("metaSchemaViewFor for unknown model = %q, want \"\"", got)
-	}
-}
-
 func TestDispatchSchemaRoute_RootPathIsExpanded(t *testing.T) {
 	loadedModules := map[string]*module.LoadedModule{
 		"contacts": {
@@ -342,7 +313,7 @@ func TestDispatchSchemaRoute_RootPathIsExpanded(t *testing.T) {
 	w := httptest.NewRecorder()
 	e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
 
-	var resp metaSchemaResponse
+	var resp registry.SchemaResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -369,7 +340,7 @@ func TestDispatchSchemaRoute_ExcludesFailedModules(t *testing.T) {
 	w := httptest.NewRecorder()
 	e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
 
-	var resp metaSchemaResponse
+	var resp registry.SchemaResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

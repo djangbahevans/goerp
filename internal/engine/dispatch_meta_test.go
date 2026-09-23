@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -640,35 +639,6 @@ func TestDispatchSharesCreateRoute_RejectsExpiryNotInTheFuture(t *testing.T) {
 	}
 	if len(shares) != 0 {
 		t.Errorf("record_shares rows = %d, want 0 after a rejected request", len(shares))
-	}
-}
-
-func TestMetaSchemaModelFrom_SharePermissions(t *testing.T) {
-	tests := []struct {
-		name string
-		md   model.ModelDeclaration
-		want []string
-	}{
-		{"both levels, in declared order", model.ModelDeclaration{Shareable: true, SharePerms: []model.SharePermission{model.WriteShare, model.ReadShare}}, []string{"write", "read"}},
-		{"one level", model.ModelDeclaration{Shareable: true, SharePerms: []model.SharePermission{model.ReadShare}}, []string{"read"}},
-		{"shareable with no levels", model.ModelDeclaration{Shareable: true}, nil},
-		{"not shareable", model.ModelDeclaration{SharePerms: []model.SharePermission{model.ReadShare}}, nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := metaSchemaModelFrom(tt.md)
-			if !slices.Equal(got.SharePermissions, tt.want) {
-				t.Errorf("SharePermissions = %v, want %v", got.SharePermissions, tt.want)
-			}
-			out, err := json.Marshal(got)
-			if err != nil {
-				t.Fatalf("Marshal() error: %v", err)
-			}
-			hasKey := strings.Contains(string(out), `"share_permissions"`)
-			if hasKey != (len(tt.want) > 0) {
-				t.Errorf("share_permissions key present = %v for %v, want %v; body: %s", hasKey, tt.want, len(tt.want) > 0, out)
-			}
-		})
 	}
 }
 

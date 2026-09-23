@@ -20,6 +20,7 @@ import (
 type RegistrySnapshot struct {
 	modules          map[string]*module.LoadedModule
 	schemaHash       string
+	schemaResponse   *SchemaResponse
 	routeTable       *route.RouteTable
 	eventRegistry    *event.EventRegistry
 	permRegistry     *permission.PermissionRegistry
@@ -45,6 +46,13 @@ func (s *RegistrySnapshot) Modules() map[string]*module.LoadedModule {
 // navigation declaration changed (computeSchemaHash).
 func (s *RegistrySnapshot) SchemaHash() string {
 	return s.schemaHash
+}
+
+// SchemaResponse returns this snapshot's precomputed GET /_meta/schema
+// response body (goerp#591) — built once per publish (buildSchemaResponse,
+// called from UpdateWithLocked) rather than rebuilt on every request.
+func (s *RegistrySnapshot) SchemaResponse() *SchemaResponse {
+	return s.schemaResponse
 }
 
 // RouteTable returns this snapshot's route table — module-declared routes
