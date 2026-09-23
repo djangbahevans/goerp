@@ -139,6 +139,27 @@ func TestViewStillValidatesModeledMembers(t *testing.T) {
 	}
 }
 
+func TestViewSearchParamRoundTrips(t *testing.T) {
+	view := View{Name: "l", Type: "list", Resource: "m.r", Label: "L", SearchParam: "search"}
+
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	served := decodeAny(t, encoded)
+	if served["search_param"] != "search" {
+		t.Errorf("served search_param = %v, want %q", served["search_param"], "search")
+	}
+
+	var decoded View
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if decoded.SearchParam != "search" {
+		t.Errorf("decoded SearchParam = %q, want %q", decoded.SearchParam, "search")
+	}
+}
+
 func TestViewKeepsTypeSpecificMembersInExtra(t *testing.T) {
 	want := map[string][]string{
 		"kanban.json":    {"group_by", "card_fields", "group_values", "quick_create", "allow_drag", "max_cards_per_column"},
