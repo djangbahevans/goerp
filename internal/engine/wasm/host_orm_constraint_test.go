@@ -8,14 +8,18 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/google/uuid"
 )
 
 // newConstraintTestModuleContext wires ComputedIndex/ComputeTargets the
 // same way host_orm_compute_test.go's own fixtures do, but constraint
 // hooks (unlike compute functions) don't need a ComputedIndex at all —
 // runConstraintHook only ever borrows the calling module's own instance.
+// TenantID is a fresh UUID, not slug (goerp#992: tenant_id is Readonly,
+// so a create omitting it gets it auto-filled straight from
+// ModuleContext.TenantID — the non-UUID slug can't go into that column).
 func newConstraintTestModuleContext(slug string, decls []model.ModelDeclaration, target ComputeTarget) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
@@ -40,7 +44,7 @@ func TestORMCreate_ConstraintHook_UnregisteredPhase_Allowed(t *testing.T) {
 	// ("testmodule.order", OnDelete) — create should proceed unaffected.
 	out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.order",
-		Record: map[string]any{"id": "40000000-0000-0000-0000-000000000001", "tenant_id": "00000000-0000-0000-0000-000000000001", "state": "confirmed"},
+		Record: map[string]any{"state": "confirmed"},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMCreate: %+v", hostErr)
@@ -64,15 +68,16 @@ func TestORMUnlink_ConstraintHook_Rejects_NoRowDeleted(t *testing.T) {
 	mc := newConstraintTestModuleContext(slug, decls, target)
 	insertClient := r.EventInsertClient()
 
-	orderID := "40000000-0000-0000-0000-000000000002"
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.order",
-		Record: map[string]any{"id": orderID, "tenant_id": "00000000-0000-0000-0000-000000000001", "state": "confirmed"},
-	}); hostErr != nil {
+		Record: map[string]any{"state": "confirmed"},
+	})
+	if hostErr != nil {
 		t.Fatalf("ORMCreate: %+v", hostErr)
 	}
+	orderID, _ := createOut.Record["id"].(string)
 
-	_, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
+	_, hostErr = ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
 		Model: "testmodule.order",
 		IDs:   []string{orderID},
 	})
@@ -109,13 +114,14 @@ func TestORMUnlink_ConstraintHook_Allows_RowDeleted(t *testing.T) {
 	mc := newConstraintTestModuleContext(slug, decls, target)
 	insertClient := r.EventInsertClient()
 
-	orderID := "40000000-0000-0000-0000-000000000003"
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.order",
-		Record: map[string]any{"id": orderID, "tenant_id": "00000000-0000-0000-0000-000000000001", "state": "draft"},
-	}); hostErr != nil {
+		Record: map[string]any{"state": "draft"},
+	})
+	if hostErr != nil {
 		t.Fatalf("ORMCreate: %+v", hostErr)
 	}
+	orderID, _ := createOut.Record["id"].(string)
 
 	out, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
 		Model: "testmodule.order",
@@ -154,17 +160,18 @@ func TestORMWrite_ConstraintHook_NoLivePool_Allowed(t *testing.T) {
 	decls := []model.ModelDeclaration{itemModelDecl()}
 	// No ComputeTargets entry at all for "testmodule" — the equivalent of
 	// a module with no live pool.
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 	insertClient := r.EventInsertClient()
 
-	itemID := "40000000-0000-0000-0000-000000000004"
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": itemID, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget"},
-	}); hostErr != nil {
+		Record: map[string]any{"name": "Widget"},
+	})
+	if hostErr != nil {
 		t.Fatalf("ORMCreate: %+v", hostErr)
 	}
+	itemID, _ := createOut.Record["id"].(string)
 
 	out, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
 		Model:  "testmodule.item",

@@ -129,41 +129,6 @@ func NewWidgetValues() *WidgetValues {
 	return &WidgetValues{Values: *orm.NewValues[Widget]()}
 }
 
-func (v *WidgetValues) SetID(x string) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.ID, x)
-	return v
-}
-
-func (v *WidgetValues) SetTenantID(x string) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.TenantID, x)
-	return v
-}
-
-func (v *WidgetValues) SetCreatedAt(x time.Time) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.CreatedAt.Field, x)
-	return v
-}
-
-func (v *WidgetValues) SetUpdatedAt(x time.Time) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.UpdatedAt.Field, x)
-	return v
-}
-
-func (v *WidgetValues) SetDeletedAt(x time.Time) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.DeletedAt.Field, x)
-	return v
-}
-
-func (v *WidgetValues) SetCreatedBy(x string) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.CreatedBy, x)
-	return v
-}
-
-func (v *WidgetValues) SetEtag(x string) *WidgetValues {
-	orm.Set(&v.Values, WidgetFields.Etag.Field, x)
-	return v
-}
-
 func (v *WidgetValues) SetName(x string) *WidgetValues {
 	orm.Set(&v.Values, WidgetFields.Name.Field, x)
 	return v

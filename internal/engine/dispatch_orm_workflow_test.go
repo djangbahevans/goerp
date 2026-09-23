@@ -61,7 +61,7 @@ func createFixtureOrdersSchema(t *testing.T, conn *sql.DB, slug string) {
 	})
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.order (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		tenant_id UUID NOT NULL,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -171,20 +171,28 @@ func (f *dispatchWorkflowFixture) request(method, target string, body []byte, en
 	return r.WithContext(ctx)
 }
 
-func (f *dispatchWorkflowFixture) createOrder(t *testing.T, id string) {
+func (f *dispatchWorkflowFixture) createOrder(t *testing.T) string {
 	t.Helper()
-	body, _ := json.Marshal(map[string]any{"id": id, "tenant_id": f.tenantID, "name": "Order " + id})
+	body, _ := json.Marshal(map[string]any{"name": "Order"})
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders", body, f.entryCreate, nil))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create order status = %d, want 201; body: %s", w.Code, w.Body.String())
 	}
+	var created map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatal("created order has no id")
+	}
+	return id
 }
 
 func TestDispatchORMRoute_WorkflowTransition_ValidTransitionWritesNewState(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
-	id := "55555555-5555-5555-5555-555555555551"
-	f.createOrder(t, id)
+	id := f.createOrder(t)
 
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, f.entryConfirm, map[string]string{"id": id}))
@@ -203,8 +211,7 @@ func TestDispatchORMRoute_WorkflowTransition_ValidTransitionWritesNewState(t *te
 
 func TestDispatchORMRoute_WorkflowTransition_WrongCurrentState_409(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
-	id := "55555555-5555-5555-5555-555555555552"
-	f.createOrder(t, id) // starts in "draft"
+	id := f.createOrder(t) // starts in "draft"
 
 	// cancel requires "confirmed"; the record is still "draft".
 	w := httptest.NewRecorder()
@@ -224,8 +231,7 @@ func TestDispatchORMRoute_WorkflowTransition_WrongCurrentState_409(t *testing.T)
 
 func TestDispatchORMRoute_WorkflowTransition_ChainedTransitionsApplyInOrder(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
-	id := "55555555-5555-5555-5555-555555555553"
-	f.createOrder(t, id)
+	id := f.createOrder(t)
 
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, f.entryConfirm, map[string]string{"id": id}))
@@ -291,8 +297,7 @@ func TestDispatchORMRoute_WorkflowTransition_MissingIDPathParam_400(t *testing.T
 // whose etag is still its schema default ("").
 func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_OnlyOneWins(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
-	id := "55555555-5555-5555-5555-555555555554"
-	f.createOrder(t, id)
+	id := f.createOrder(t)
 
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/sales/orders/"+id+"/confirm", nil, f.entryConfirm, map[string]string{"id": id}))
@@ -343,8 +348,7 @@ func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_
 // valid from "draft", the state every order starts in.
 func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
-	id := "55555555-5555-5555-5555-555555555555"
-	f.createOrder(t, id)
+	id := f.createOrder(t)
 
 	codes := make([]int, 2)
 	bodies := make([]string, 2)
@@ -470,12 +474,19 @@ func TestDispatchORMRoute_WorkflowTransition_FieldReadPermissionDoesNotBlockStat
 		return r.WithContext(ctx)
 	}
 
-	id := "66666666-6666-6666-6666-666666666661"
-	createBody, _ := json.Marshal(map[string]any{"id": id, "tenant_id": tenantID, "name": "Order"})
+	createBody, _ := json.Marshal(map[string]any{"name": "Order"})
 	w := httptest.NewRecorder()
 	e.dispatchORMRoute(w, req(http.MethodPost, "/sales/orders", createBody, entryCreate, nil))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatal("created order has no id")
 	}
 
 	w = httptest.NewRecorder()

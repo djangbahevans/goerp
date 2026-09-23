@@ -118,41 +118,6 @@ func NewGizmoValues() *GizmoValues {
 	return &GizmoValues{Values: *orm.NewValues[Gizmo]()}
 }
 
-func (v *GizmoValues) SetID(x string) *GizmoValues {
-	orm.Set(&v.Values, GizmoFields.ID, x)
-	return v
-}
-
-func (v *GizmoValues) SetTenantID(x string) *GizmoValues {
-	orm.Set(&v.Values, GizmoFields.TenantID, x)
-	return v
-}
-
-func (v *GizmoValues) SetCreatedAt(x time.Time) *GizmoValues {
-	orm.Set(&v.Values, GizmoFields.CreatedAt.Field, x)
-	return v
-}
-
-func (v *GizmoValues) SetUpdatedAt(x time.Time) *GizmoValues {
-	orm.Set(&v.Values, GizmoFields.UpdatedAt.Field, x)
-	return v
-}
-
-func (v *GizmoValues) SetDeletedAt(x time.Time) *GizmoValues {
-	orm.Set(&v.Values, GizmoFields.DeletedAt.Field, x)
-	return v
-}
-
-func (v *GizmoValues) SetCreatedBy(x string) *GizmoValues {
-	orm.Set(&v.Values, GizmoFields.CreatedBy, x)
-	return v
-}
-
-func (v *GizmoValues) SetEtag(x string) *GizmoValues {
-	orm.Set(&v.Values, GizmoFields.Etag.Field, x)
-	return v
-}
-
 // Query returns a fresh Gizmo query — sugar over orm.From[Gizmo]().
 func (Gizmo) Query() *orm.Query[Gizmo] { return orm.From[Gizmo]() }
 

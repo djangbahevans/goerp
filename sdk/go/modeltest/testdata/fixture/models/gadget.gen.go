@@ -152,41 +152,6 @@ func NewGadgetValues() *GadgetValues {
 	return &GadgetValues{Values: *orm.NewValues[Gadget]()}
 }
 
-func (v *GadgetValues) SetID(x string) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.ID, x)
-	return v
-}
-
-func (v *GadgetValues) SetTenantID(x string) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.TenantID, x)
-	return v
-}
-
-func (v *GadgetValues) SetCreatedAt(x time.Time) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.CreatedAt.Field, x)
-	return v
-}
-
-func (v *GadgetValues) SetUpdatedAt(x time.Time) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.UpdatedAt.Field, x)
-	return v
-}
-
-func (v *GadgetValues) SetDeletedAt(x time.Time) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.DeletedAt.Field, x)
-	return v
-}
-
-func (v *GadgetValues) SetCreatedBy(x string) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.CreatedBy, x)
-	return v
-}
-
-func (v *GadgetValues) SetEtag(x string) *GadgetValues {
-	orm.Set(&v.Values, GadgetFields.Etag.Field, x)
-	return v
-}
-
 func (v *GadgetValues) SetName(x string) *GadgetValues {
 	orm.Set(&v.Values, GadgetFields.Name.Field, x)
 	return v

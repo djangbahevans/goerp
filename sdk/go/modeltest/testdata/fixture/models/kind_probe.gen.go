@@ -254,41 +254,6 @@ func NewKindProbeValues() *KindProbeValues {
 	return &KindProbeValues{Values: *orm.NewValues[KindProbe]()}
 }
 
-func (v *KindProbeValues) SetID(x string) *KindProbeValues {
-	orm.Set(&v.Values, KindProbeFields.ID, x)
-	return v
-}
-
-func (v *KindProbeValues) SetTenantID(x string) *KindProbeValues {
-	orm.Set(&v.Values, KindProbeFields.TenantID, x)
-	return v
-}
-
-func (v *KindProbeValues) SetCreatedAt(x time.Time) *KindProbeValues {
-	orm.Set(&v.Values, KindProbeFields.CreatedAt.Field, x)
-	return v
-}
-
-func (v *KindProbeValues) SetUpdatedAt(x time.Time) *KindProbeValues {
-	orm.Set(&v.Values, KindProbeFields.UpdatedAt.Field, x)
-	return v
-}
-
-func (v *KindProbeValues) SetDeletedAt(x time.Time) *KindProbeValues {
-	orm.Set(&v.Values, KindProbeFields.DeletedAt.Field, x)
-	return v
-}
-
-func (v *KindProbeValues) SetCreatedBy(x string) *KindProbeValues {
-	orm.Set(&v.Values, KindProbeFields.CreatedBy, x)
-	return v
-}
-
-func (v *KindProbeValues) SetEtag(x string) *KindProbeValues {
-	orm.Set(&v.Values, KindProbeFields.Etag.Field, x)
-	return v
-}
-
 func (v *KindProbeValues) SetDecimalField(x string) *KindProbeValues {
 	orm.Set(&v.Values, KindProbeFields.DecimalField.Field, x)
 	return v

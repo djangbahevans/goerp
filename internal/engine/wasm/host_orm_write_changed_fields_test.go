@@ -61,7 +61,7 @@ func assertChangedFields(t *testing.T, got []string, want ...string) {
 func TestORMWrite_EmitsChangedFieldsWithoutEtag(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "writechanged", 10)
+	_, mc, tenantID := setupMutateStockTenant(t, primaryDB, "writechanged", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
 	if _, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
@@ -71,7 +71,7 @@ func TestORMWrite_EmitsChangedFieldsWithoutEtag(t *testing.T) {
 		t.Fatalf("ORMWrite: %+v", hostErr)
 	}
 
-	events := updatedEventPayloads(t, primaryDB, slug)
+	events := updatedEventPayloads(t, primaryDB, tenantID)
 	if len(events) != 1 {
 		t.Fatalf("orm.record.updated events = %d, want 1", len(events))
 	}
@@ -112,7 +112,7 @@ func TestORMWrite_IgnoredFieldIsNotListedAsChanged(t *testing.T) {
 func TestORMWriteManyAndWhere_EachEventCarriesChangedFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "writemanychanged", 10)
+	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "writemanychanged", 10)
 	second := "50000000-0000-0000-0000-000000000002"
 	if _, err := primaryDB.Exec(`INSERT INTO tenant_`+slug+`.stocks (id, name, on_hand) VALUES ($1, 'Washer', 4)`, second); err != nil {
 		t.Fatalf("seed second stock: %v", err)
@@ -126,7 +126,7 @@ func TestORMWriteManyAndWhere_EachEventCarriesChangedFields(t *testing.T) {
 	}); hostErr != nil {
 		t.Fatalf("ORMWriteMany: %+v", hostErr)
 	}
-	events := updatedEventPayloads(t, primaryDB, slug)
+	events := updatedEventPayloads(t, primaryDB, tenantID)
 	if len(events) != 2 {
 		t.Fatalf("after write_many: events = %d, want 2", len(events))
 	}
@@ -140,7 +140,7 @@ func TestORMWriteManyAndWhere_EachEventCarriesChangedFields(t *testing.T) {
 	}); hostErr != nil {
 		t.Fatalf("ORMWriteWhere: %+v", hostErr)
 	}
-	events = updatedEventPayloads(t, primaryDB, slug)
+	events = updatedEventPayloads(t, primaryDB, tenantID)
 	if len(events) != 3 {
 		t.Fatalf("after write_where: events = %d, want 3", len(events))
 	}

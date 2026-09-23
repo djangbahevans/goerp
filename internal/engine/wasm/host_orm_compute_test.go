@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/google/uuid"
 )
 
 // orderModelDecl declares a same-record computed field: amount_total
@@ -24,7 +25,7 @@ func orderModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
 		Name: "order",
 		Fields: []model.NamedField{
-			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+			{Name: "id", Def: model.UUID().Required().PrimaryKey().Default("uuidv7()")},
 			{Name: "tenant_id", Def: model.UUID().Required()},
 			{Name: "quantity", Def: model.Integer()},
 			{Name: "unit_price", Def: model.Integer()},
@@ -41,7 +42,7 @@ func contactModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
 		Name: "contact",
 		Fields: []model.NamedField{
-			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+			{Name: "id", Def: model.UUID().Required().PrimaryKey().Default("uuidv7()")},
 			{Name: "tenant_id", Def: model.UUID().Required()},
 			{Name: "credit_limit", Def: model.Integer()},
 		},
@@ -52,7 +53,7 @@ func hopOrderModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
 		Name: "hop_order",
 		Fields: []model.NamedField{
-			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+			{Name: "id", Def: model.UUID().Required().PrimaryKey().Default("uuidv7()")},
 			{Name: "tenant_id", Def: model.UUID().Required()},
 			{Name: "customer_id", Def: model.Many2One("testmodule.contact")},
 			{Name: "touched_flag", Def: model.BigInt().Computed("_compute_hop_marker").Store(true).Depends("customer.credit_limit")},
@@ -66,7 +67,7 @@ func createFixtureOrdersTable(t *testing.T, conn *sql.DB, slug string) {
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.order (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		tenant_id UUID NOT NULL,
 		quantity INTEGER,
 		unit_price INTEGER,
@@ -83,14 +84,14 @@ func createFixtureContactAndHopOrderTables(t *testing.T, conn *sql.DB, slug stri
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.contact (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		tenant_id UUID NOT NULL,
 		credit_limit INTEGER
 	)`); err != nil {
 		t.Fatalf("create contact table: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.hop_order (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		tenant_id UUID NOT NULL,
 		customer_id UUID,
 		touched_flag BIGINT
@@ -153,7 +154,7 @@ func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -162,11 +163,9 @@ func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 
 	insertClient := r.EventInsertClient()
 
-	orderID := "10000000-0000-0000-0000-000000000001"
 	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model: "testmodule.order",
 		Record: map[string]any{
-			"id": orderID, "tenant_id": "00000000-0000-0000-0000-000000000001",
 			"quantity": int64(3), "unit_price": int64(25),
 		},
 	})
@@ -176,6 +175,7 @@ func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 	if got := createOut.Record["amount_total"]; got != int64(75) {
 		t.Errorf("amount_total after create = %v, want 75", got)
 	}
+	orderID, _ := createOut.Record["id"].(string)
 
 	writeOut, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
 		Model:  "testmodule.order",
@@ -205,7 +205,7 @@ func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -213,22 +213,24 @@ func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 		})
 
 	insertClient := r.EventInsertClient()
-	tenantID := "00000000-0000-0000-0000-000000000001"
-	contactID := "20000000-0000-0000-0000-000000000001"
-	orderID := "20000000-0000-0000-0000-000000000002"
 
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	contactOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.contact",
-		Record: map[string]any{"id": contactID, "tenant_id": tenantID, "credit_limit": int64(1000)},
-	}); hostErr != nil {
+		Record: map[string]any{"credit_limit": int64(1000)},
+	})
+	if hostErr != nil {
 		t.Fatalf("create contact: %+v", hostErr)
 	}
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	contactID, _ := contactOut.Record["id"].(string)
+
+	orderOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.hop_order",
-		Record: map[string]any{"id": orderID, "tenant_id": tenantID, "customer_id": contactID},
-	}); hostErr != nil {
+		Record: map[string]any{"customer_id": contactID},
+	})
+	if hostErr != nil {
 		t.Fatalf("create hop_order: %+v", hostErr)
 	}
+	orderID, _ := orderOut.Record["id"].(string)
 
 	// touched_flag starts unset — only writing the *related* contact
 	// (not the order itself) should trigger recompute, through the
@@ -268,16 +270,14 @@ func TestORMWrite_ComputedField_RejectedAsFieldNotWritable(t *testing.T) {
 
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{orderModelDecl()}
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 
 	insertClient := r.EventInsertClient()
-	orderID := "30000000-0000-0000-0000-000000000001"
 
 	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model: "testmodule.order",
 		Record: map[string]any{
-			"id": orderID, "tenant_id": "00000000-0000-0000-0000-000000000001",
 			"quantity": int64(1), "unit_price": int64(1), "amount_total": int64(999),
 		},
 	})

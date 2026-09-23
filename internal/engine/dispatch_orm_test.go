@@ -90,7 +90,7 @@ func createFixtureWidgetsSchema(t *testing.T, conn *sql.DB, slug string) {
 	})
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.widget (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		tenant_id UUID NOT NULL,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -208,7 +208,7 @@ func (f *dispatchORMFixture) request(method, target string, body []byte, entry *
 func TestDispatchORMRoute_Create_Then_Get(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	createBody, _ := json.Marshal(map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A", "code": "W-1"})
+	createBody, _ := json.Marshal(map[string]any{"name": "Widget A", "code": "W-1"})
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", createBody, f.entryCreate, nil))
 
@@ -294,14 +294,14 @@ func TestDispatchORMRoute_Create_ReadonlyField_400(t *testing.T) {
 func TestDispatchORMRoute_Create_UniqueViolation_409(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	firstBody, _ := json.Marshal(map[string]any{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A", "code": "DUPLICATE"})
+	firstBody, _ := json.Marshal(map[string]any{"name": "Widget A", "code": "DUPLICATE"})
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", firstBody, f.entryCreate, nil))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("first create status = %d, want 201; body: %s", w.Code, w.Body.String())
 	}
 
-	secondBody, _ := json.Marshal(map[string]any{"id": "33333333-3333-3333-3333-333333333333", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget B", "code": "DUPLICATE"})
+	secondBody, _ := json.Marshal(map[string]any{"name": "Widget B", "code": "DUPLICATE"})
 	w = httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", secondBody, f.entryCreate, nil))
 	if w.Code != http.StatusConflict {
@@ -312,12 +312,18 @@ func TestDispatchORMRoute_Create_UniqueViolation_409(t *testing.T) {
 func TestDispatchORMRoute_Update_EtagMismatch_409(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	createBody, _ := json.Marshal(map[string]any{"id": "44444444-4444-4444-4444-444444444444", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A"})
+	createBody, _ := json.Marshal(map[string]any{"name": "Widget A"})
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", createBody, f.entryCreate, nil))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
 	var created map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
-	id := created["id"].(string)
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatal("created record has no id")
+	}
 
 	updateBody, _ := json.Marshal(map[string]any{"name": "Widget A Renamed"})
 	r := f.request(http.MethodPut, "/testmodule/widgets/"+id, updateBody, f.entryUpdate, map[string]string{"id": id})
@@ -342,12 +348,18 @@ func TestDispatchORMRoute_Update_EtagMismatch_409(t *testing.T) {
 func TestDispatchORMRoute_Delete_SetsDeletedAt(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	createBody, _ := json.Marshal(map[string]any{"id": "55555555-5555-5555-5555-555555555555", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A"})
+	createBody, _ := json.Marshal(map[string]any{"name": "Widget A"})
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", createBody, f.entryCreate, nil))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
 	var created map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &created)
-	id := created["id"].(string)
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatal("created record has no id")
+	}
 
 	w = httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodDelete, "/testmodule/widgets/"+id, nil, f.entryDelete, map[string]string{"id": id}))
@@ -368,9 +380,8 @@ func TestDispatchORMRoute_Delete_SetsDeletedAt(t *testing.T) {
 func TestDispatchORMRoute_List_ReturnsEnvelope(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	ids := []string{"66666666-6666-6666-6666-666666666666", "77777777-7777-7777-7777-777777777777"}
 	for i, code := range []string{"L-1", "L-2"} {
-		body, _ := json.Marshal(map[string]any{"id": ids[i], "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Widget %d", i), "code": code})
+		body, _ := json.Marshal(map[string]any{"name": fmt.Sprintf("Widget %d", i), "code": code})
 		w := httptest.NewRecorder()
 		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
 		if w.Code != http.StatusCreated {
@@ -406,9 +417,8 @@ func TestDispatchORMRoute_List_ReturnsEnvelope(t *testing.T) {
 func TestDispatchORMRoute_List_FilterQueryParamFiltersResults(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	ids := []string{"88888888-8888-8888-8888-888888888888", "99999999-9999-9999-9999-999999999999"}
 	for i, code := range []string{"F-1", "F-2"} {
-		body, _ := json.Marshal(map[string]any{"id": ids[i], "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Filtered %d", i), "code": code})
+		body, _ := json.Marshal(map[string]any{"name": fmt.Sprintf("Filtered %d", i), "code": code})
 		w := httptest.NewRecorder()
 		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
 		if w.Code != http.StatusCreated {
@@ -456,7 +466,7 @@ func TestDispatchORMRoute_List_UndeclaredFilterFieldReturns400(t *testing.T) {
 func TestDispatchORMRoute_List_FormatParquet_ReturnsParquetContentType(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	body, _ := json.Marshal(map[string]any{"id": "aaaaaaaa-0000-0000-0000-000000000001", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Parquet Widget", "code": "PQ-1"})
+	body, _ := json.Marshal(map[string]any{"name": "Parquet Widget", "code": "PQ-1"})
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
 	if w.Code != http.StatusCreated {
@@ -502,9 +512,8 @@ func TestDispatchORMRoute_List_AcceptParquetHeader_ReturnsParquetContentType(t *
 func TestDispatchORMRoute_List_FormatParquet_FilterAppliesIdentically(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	ids := []string{"bbbbbbbb-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000002"}
 	for i, code := range []string{"PF-1", "PF-2"} {
-		body, _ := json.Marshal(map[string]any{"id": ids[i], "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Filtered Parquet %d", i), "code": code})
+		body, _ := json.Marshal(map[string]any{"name": fmt.Sprintf("Filtered Parquet %d", i), "code": code})
 		w := httptest.NewRecorder()
 		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
 		if w.Code != http.StatusCreated {
@@ -551,9 +560,8 @@ func TestDispatchORMRoute_List_FormatParquet_FilterAppliesIdentically(t *testing
 func TestDispatchORMRoute_List_FormatParquet_CursorHeadersPageThroughResults(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	ids := []string{"cccccccc-0000-0000-0000-000000000001", "cccccccc-0000-0000-0000-000000000002"}
 	for i, code := range []string{"PC-1", "PC-2"} {
-		body, _ := json.Marshal(map[string]any{"id": ids[i], "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Cursor Parquet %d", i), "code": code})
+		body, _ := json.Marshal(map[string]any{"name": fmt.Sprintf("Cursor Parquet %d", i), "code": code})
 		w := httptest.NewRecorder()
 		f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
 		if w.Code != http.StatusCreated {
@@ -655,7 +663,7 @@ func TestDispatchHandler_EngineNativeRouteReachesDispatchORMRoute(t *testing.T) 
 	f := newDispatchORMFixture(t)
 	h := f.e.buildDispatchHandler(nil)
 
-	createBody, _ := json.Marshal(map[string]any{"id": "55555555-5555-5555-5555-555555555555", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A", "code": "W-92"})
+	createBody, _ := json.Marshal(map[string]any{"name": "Widget A", "code": "W-92"})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, f.request(http.MethodPost, "/testmodule/widgets", createBody, f.entryCreate, nil))
 
@@ -703,7 +711,7 @@ func TestDispatchHandler_EngineNativeOversizedBodyReturns413(t *testing.T) {
 	}
 	entry.Manifest.MaxBodyBytes = 8
 
-	body, _ := json.Marshal(map[string]any{"id": "66666666-6666-6666-6666-666666666666", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A"})
+	body, _ := json.Marshal(map[string]any{"name": "Widget A"})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, f.request(http.MethodPost, "/testmodule/widgets", body, entry, nil))
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/google/uuid"
 )
 
 // This file holds .Tree() companion-path maintenance for host.orm's write
@@ -32,21 +33,41 @@ func ltreeLabel(pkValue any) string {
 // every .Tree() field on md directly into record, before the INSERT —
 // the same "inject a value the caller didn't supply, immediately before
 // createOneRecordTx" shape acquireSequenceFields (host_orm_write.go,
-// goerp#340) already uses for Sequence fields. Primary keys are
-// caller-supplied in this codebase's convention, so a self-referencing
-// label can be computed before the row exists — no follow-up UPDATE
-// needed. If a declared parent doesn't exist, this leaves the path
-// unset and lets the Many2One field's own FK constraint (Tree is just a
-// modifier on Many2One) surface the real error at INSERT time, rather
-// than duplicating that check here.
-func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, record map[string]any) *abi.HostError {
+// goerp#340) already uses for Sequence fields. A self-referencing label
+// needs the row's own primary key before the row exists (no follow-up
+// UPDATE) — the primary key itself is Readonly (goerp#992) and normally
+// left to Postgres's own DEFAULT, but that default only resolves at
+// INSERT time, too late for this function's own needs, so a model that
+// declares any .Tree() field gets its primary key generated here in Go
+// instead (the same uuid.NewV7 rotation already used for etag) whenever
+// the caller omitted it — genPK is that value when generated, "" when
+// record already had its own (this function has no legitimate reason to
+// ever see a client-populated pkCol under #992, but doesn't assume so
+// either), for the caller to fold into its own serverFilled list. If a
+// declared parent doesn't exist, this leaves the path unset and lets
+// the Many2One field's own FK constraint (Tree is just a modifier on
+// Many2One) surface the real error at INSERT time, rather than
+// duplicating that check here.
+func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, record map[string]any) (genPK string, hostErr *abi.HostError) {
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return nil
+		return "", nil
+	}
+	hasTreeField := false
+	for _, f := range md.Fields {
+		if f.Def.IsTree {
+			hasTreeField = true
+			break
+		}
+	}
+	if !hasTreeField {
+		return "", nil
 	}
 	ownPK, ok := record[pkCol]
 	if !ok {
-		return nil
+		genPK = uuid.Must(uuid.NewV7()).String()
+		record[pkCol] = genPK
+		ownPK = genPK
 	}
 	ownLabel := ltreeLabel(ownPK)
 
@@ -60,9 +81,9 @@ func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDecla
 			continue
 		}
 
-		parentPath, hostErr := lookupTreePath(ctx, tx, md, f.Name, parentID)
-		if hostErr != nil {
-			return hostErr
+		parentPath, lookupErr := lookupTreePath(ctx, tx, md, f.Name, parentID)
+		if lookupErr != nil {
+			return genPK, lookupErr
 		}
 		if parentPath == "" {
 			// No such parent row — leave the path unset; the ordinary
@@ -72,7 +93,7 @@ func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDecla
 		}
 		record[f.Name+"_path"] = parentPath + "." + ownLabel
 	}
-	return nil
+	return genPK, nil
 }
 
 // maintainTreePathOnWrite reparents a single row: cycle-checks the new

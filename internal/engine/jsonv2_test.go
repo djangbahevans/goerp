@@ -40,7 +40,7 @@ func TestDispatchORMRoute_Create_InvalidUTF8IsBadRequest(t *testing.T) {
 func TestDispatchORMRoute_Create_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	f := newDispatchORMFixture(t)
 
-	body := []byte(`{"id":"11111111-1111-1111-1111-111111111111","tenant_id":"00000000-0000-0000-0000-000000000001","name":"<script>&</script>","code":"W-1"}`)
+	body := []byte(`{"name":"<script>&</script>","code":"W-1"}`)
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(http.MethodPost, "/testmodule/widgets", body, f.entryCreate, nil))
 
