@@ -50,7 +50,11 @@ export function PasswordStrengthMeter({
   minLength = 12,
   onValidityChange,
 }: PasswordStrengthMeterProps): ReactNode {
-  const score = password === "" ? undefined : zxcvbn.check(password).score;
+  // Memoized on password alone — an unrelated sibling field re-rendering
+  // this component (e.g. the confirm-password field on the same form)
+  // shouldn't re-run zxcvbn's CPU-heavy dictionary scan for an unchanged
+  // password.
+  const score = useMemo(() => (password === "" ? undefined : zxcvbn.check(password).score), [password]);
   const lengthSatisfied = password.length >= minLength;
   const valid = lengthSatisfied && score !== undefined && score >= 2;
 
