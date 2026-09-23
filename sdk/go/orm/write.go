@@ -21,18 +21,19 @@ type ormWriteOutput = abi.ORMWriteOutput
 // record that has never been written since it was created (the etag
 // column's own default) — and a mismatch fails with orm.etag_mismatch
 // (check via IsEtagMismatch).
-func Write(model, id string, vals map[string]any, expectedEtag *string) error {
-	return write("", model, id, vals, expectedEtag)
+func Write[T Model](id string, vals *Values[T], expectedEtag *string) error {
+	return write("", id, vals, expectedEtag)
 }
 
 // WriteTx is Write, scoped to tx's own open transaction.
-func WriteTx(tx *db.Tx, model, id string, vals map[string]any, expectedEtag *string) error {
-	return write(tx.TxID(), model, id, vals, expectedEtag)
+func WriteTx[T Model](tx *db.Tx, id string, vals *Values[T], expectedEtag *string) error {
+	return write(tx.TxID(), id, vals, expectedEtag)
 }
 
-func write(txID, model, id string, vals map[string]any, expectedEtag *string) error {
+func write[T Model](txID, id string, vals *Values[T], expectedEtag *string) error {
 	var out ormWriteOutput
-	return hostcall.Do(hostORMWrite, ormWriteInput{Model: model, ID: id, Record: vals, ExpectedEtag: expectedEtag, TxID: txID}, &out)
+	in := ormWriteInput{Model: resourceName[T](), ID: id, Record: vals.raw(), ExpectedEtag: expectedEtag, TxID: txID}
+	return hostcall.Do(hostORMWrite, in, &out)
 }
 
 type ormWriteManyInput = abi.ORMWriteManyInput
@@ -40,37 +41,48 @@ type ormWriteManyInput = abi.ORMWriteManyInput
 // WriteMany applies the same field changes to every ID via
 // host.orm.write_many — no etag check, since a bulk write has no single
 // etag to check against.
-func WriteMany(model string, ids []string, vals map[string]any) (ExecResult, error) {
-	return writeMany("", model, ids, vals)
+func WriteMany[T Model](ids []string, vals *Values[T]) (ExecResult, error) {
+	return writeMany("", ids, vals)
 }
 
 // WriteManyTx is WriteMany, scoped to tx's own open transaction.
-func WriteManyTx(tx *db.Tx, model string, ids []string, vals map[string]any) (ExecResult, error) {
-	return writeMany(tx.TxID(), model, ids, vals)
+func WriteManyTx[T Model](tx *db.Tx, ids []string, vals *Values[T]) (ExecResult, error) {
+	return writeMany(tx.TxID(), ids, vals)
 }
 
-func writeMany(txID, model string, ids []string, vals map[string]any) (ExecResult, error) {
+func writeMany[T Model](txID string, ids []string, vals *Values[T]) (ExecResult, error) {
 	var out ExecResult
-	err := hostcall.Do(hostORMWriteMany, ormWriteManyInput{Model: model, IDs: ids, Record: vals, TxID: txID}, &out)
+	in := ormWriteManyInput{Model: resourceName[T](), IDs: ids, Record: vals.raw(), TxID: txID}
+	err := hostcall.Do(hostORMWriteMany, in, &out)
 	return out, err
 }
 
 type ormWriteWhereInput = abi.ORMWriteWhereInput
 
 // WriteWhere applies the same field changes to every record matching
-// domain via host.orm.write_where — WriteMany with the ID list resolved
-// server-side from domain instead of supplied by the caller.
-func WriteWhere(model, domain string, vals map[string]any) (ExecResult, error) {
-	return writeWhere("", model, domain, vals)
+// cond via host.orm.write_where — WriteMany with the ID list resolved
+// server-side from cond instead of supplied by the caller. cond must be
+// a BoundCondition[T] — the explicit Bind()/Unbounded() acknowledgment
+// that a Condition[T] alone doesn't give, so a forgotten filter can't
+// silently touch every row:
+//
+//	var c orm.Condition[Widget]
+//	orm.WriteWhere(c, vals)        // compile error: Condition[Widget] is
+//	                                // not BoundCondition[Widget]
+//	orm.WriteWhere(c.Bind(), vals) // fine — c explicitly acknowledged
+//	orm.WriteWhere(orm.Unbounded[Widget](), vals) // fine — every record, explicitly
+func WriteWhere[T Model](cond BoundCondition[T], vals *Values[T]) (ExecResult, error) {
+	return writeWhere("", cond, vals)
 }
 
 // WriteWhereTx is WriteWhere, scoped to tx's own open transaction.
-func WriteWhereTx(tx *db.Tx, model, domain string, vals map[string]any) (ExecResult, error) {
-	return writeWhere(tx.TxID(), model, domain, vals)
+func WriteWhereTx[T Model](tx *db.Tx, cond BoundCondition[T], vals *Values[T]) (ExecResult, error) {
+	return writeWhere(tx.TxID(), cond, vals)
 }
 
-func writeWhere(txID, model, domain string, vals map[string]any) (ExecResult, error) {
+func writeWhere[T Model](txID string, cond BoundCondition[T], vals *Values[T]) (ExecResult, error) {
 	var out ExecResult
-	err := hostcall.Do(hostORMWriteWhere, ormWriteWhereInput{Model: model, Domain: domain, Record: vals, TxID: txID}, &out)
+	in := ormWriteWhereInput{Model: resourceName[T](), Domain: cond.expr, Record: vals.raw(), TxID: txID}
+	err := hostcall.Do(hostORMWriteWhere, in, &out)
 	return out, err
 }
