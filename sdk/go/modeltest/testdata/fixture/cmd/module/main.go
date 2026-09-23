@@ -7,6 +7,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -44,19 +45,20 @@ func init() {
 	}, engine.Scope(engine.CollectionAction), engine.Method(engine.MethodPut))
 
 	engine.POST("/kind-probe", func(req *engine.Request) *engine.Response {
-		vals := map[string]any{
-			"decimal_field":   123.45,
-			"timestamp_field": time.Date(2024, 3, 15, 10, 30, 0, 0, time.UTC),
-			"date_field":      time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC),
-			"time_field":      "13:45:00",
-			"jsonb_field":     map[string]any{"key": "value", "n": float64(1)},
-			"bytea_field":     []byte("hello-bytes"),
-			"integer_field":   int32(42),
-			"float_field":     3.5,
-			"priority":        "medium",
-		}
+		jsonbField, _ := json.Marshal(map[string]any{"key": "value", "n": float64(1)})
 
-		created, err := orm.Create[models.KindProbe]("widgets.kind_probe", vals)
+		vals := orm.NewValues[models.KindProbe]()
+		orm.Set(vals, models.KindProbeFields.DecimalField.Field, "123.45")
+		orm.Set(vals, models.KindProbeFields.TimestampField.Field, time.Date(2024, 3, 15, 10, 30, 0, 0, time.UTC))
+		orm.Set(vals, models.KindProbeFields.DateField.Field, time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC))
+		orm.Set(vals, models.KindProbeFields.TimeField, "13:45:00")
+		orm.SetBytes(vals, models.KindProbeFields.JsonbField, jsonbField)
+		orm.SetBytes(vals, models.KindProbeFields.ByteaField, []byte("hello-bytes"))
+		orm.Set(vals, models.KindProbeFields.IntegerField.Field, int32(42))
+		orm.Set(vals, models.KindProbeFields.FloatField.Field, 3.5)
+		orm.Set(vals, models.KindProbeFields.Priority, "medium")
+
+		created, err := orm.Create[models.KindProbe](vals)
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.kind_probe_create_failed", "message": err.Error()},
@@ -94,40 +96,44 @@ func init() {
 	// relation left unset, to confirm the expansion field decodes to nil
 	// rather than erroring when there's nothing to expand.
 	engine.POST("/kind-probe-relation", func(req *engine.Request) *engine.Response {
-		gadget, err := orm.Create[models.Gadget]("widgets.gadget", map[string]any{
-			"name":         "Acme Gadget",
-			"display_name": "Acme",
-		})
+		gadgetVals := orm.NewValues[models.Gadget]()
+		orm.Set(gadgetVals, models.GadgetFields.Name.Field, "Acme Gadget")
+		orm.Set(gadgetVals, models.GadgetFields.DisplayName.Field, "Acme")
+
+		gadget, err := orm.Create[models.Gadget](gadgetVals)
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.gadget_create_failed", "message": err.Error()},
 			}}
 		}
 
-		baseVals := map[string]any{
-			"decimal_field":   "1.00",
-			"timestamp_field": time.Now().UTC(),
-			"date_field":      time.Now().UTC(),
-			"time_field":      "00:00:00",
-			"jsonb_field":     map[string]any{},
-			"bytea_field":     []byte(""),
-			"integer_field":   int32(0),
-			"float_field":     0.0,
-			"priority":        "low",
+		emptyJSONObject, _ := json.Marshal(map[string]any{})
+
+		// setBaseKindProbeVals fills the fields common to both rows below —
+		// with/withoutRelation only differ in created_by_gadget_id.
+		setBaseKindProbeVals := func(v *orm.Values[models.KindProbe]) *orm.Values[models.KindProbe] {
+			orm.Set(v, models.KindProbeFields.DecimalField.Field, "1.00")
+			orm.Set(v, models.KindProbeFields.TimestampField.Field, time.Now().UTC())
+			orm.Set(v, models.KindProbeFields.DateField.Field, time.Now().UTC())
+			orm.Set(v, models.KindProbeFields.TimeField, "00:00:00")
+			orm.SetBytes(v, models.KindProbeFields.JsonbField, emptyJSONObject)
+			orm.SetBytes(v, models.KindProbeFields.ByteaField, []byte(""))
+			orm.Set(v, models.KindProbeFields.IntegerField.Field, int32(0))
+			orm.Set(v, models.KindProbeFields.FloatField.Field, 0.0)
+			orm.Set(v, models.KindProbeFields.Priority, "low")
+			return v
 		}
 
-		withRelationVals := map[string]any{"created_by_gadget_id": gadget.ID}
-		for k, v := range baseVals {
-			withRelationVals[k] = v
-		}
-		withRelation, err := orm.Create[models.KindProbe]("widgets.kind_probe", withRelationVals)
+		withRelationVals := orm.NewValues[models.KindProbe]()
+		orm.Set(withRelationVals, models.KindProbeFields.CreatedByGadgetID, gadget.ID)
+		withRelation, err := orm.Create[models.KindProbe](setBaseKindProbeVals(withRelationVals))
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.kind_probe_create_failed", "message": err.Error()},
 			}}
 		}
 
-		withoutRelation, err := orm.Create[models.KindProbe]("widgets.kind_probe", baseVals)
+		withoutRelation, err := orm.Create[models.KindProbe](setBaseKindProbeVals(orm.NewValues[models.KindProbe]()))
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.kind_probe_create_failed", "message": err.Error()},
