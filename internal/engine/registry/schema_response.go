@@ -121,9 +121,10 @@ type SchemaTransition struct {
 // match the documented wire shape.
 type SchemaPermission = manifest.Permission
 
-// SchemaFrontend is shell-architecture.md §9's ModuleSchema.frontend.
-// Always nil today — goerp#588 (engine-side bundle extraction/serving)
-// doesn't exist yet, so no module has a bundle_url to report.
+// SchemaFrontend is shell-architecture.md §9's ModuleSchema.frontend — nil
+// for a module whose manifest declares no frontend bundle (or bundle:
+// false); populated with the currently-loaded version's URL/digest
+// (goerp#588) otherwise.
 type SchemaFrontend struct {
 	BundleURL    string `json:"bundle_url"`
 	BundleSHA256 string `json:"bundle_sha256"`
@@ -175,7 +176,7 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 			LoadOrder:                m.LoadOrder,
 			Models:                   models,
 			Permissions:              m.Manifest.Permissions,
-			Frontend:                 nil, // goerp#588 — no bundle-serving mechanism exists yet
+			Frontend:                 schemaFrontendFor(name, &m.Manifest),
 			PublicConfig:             publicConfig,
 		}
 	}
@@ -277,6 +278,26 @@ func schemaWorkflowFrom(def model.FieldDef) *SchemaWorkflow {
 // "form" view claims "get"/"create"/"update". This doesn't yet honor a
 // view's own FetchRoute/CreateRoute/UpdateRoute/DeleteRoute override
 // fields — refine once a view actually uses one.
+// schemaFrontendFor builds moduleName's SchemaFrontend entry, or nil when
+// mf declares no frontend bundle. moduleName has already loaded
+// successfully by the time buildSchemaResponse reaches this (a
+// StatusFailed module is skipped before this call), so mf.Frontend's own
+// BundleSHA256 has already passed loader.LoadModule's verifyBundle check —
+// BundleFilename erroring here would mean that check somehow didn't run,
+// treated the same as "no bundle" rather than panicking a live /_meta/schema
+// request over it.
+func schemaFrontendFor(moduleName string, mf *manifest.Manifest) *SchemaFrontend {
+	filename, err := module.BundleFilename(mf)
+	if err != nil || filename == "" {
+		return nil
+	}
+
+	return &SchemaFrontend{
+		BundleURL:    "/modules/" + moduleName + "/frontend/" + filename,
+		BundleSHA256: mf.Frontend.BundleSHA256,
+	}
+}
+
 func schemaViewFor(views []manifest.View, modelName, crudAction string) string {
 	for _, v := range views {
 		if v.Resource != modelName {

@@ -440,7 +440,7 @@ func TestLoadCascading_DependentOfFailedModuleIsSkipped(t *testing.T) {
 		{Name: "standalone", ManifestBytes: manifestJSON(t, "standalone", okModule, nil), WasmBytes: okModule},
 	}
 
-	modules := LoadCascading(context.Background(), rt, testPoolCfg(), ordered)
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), nil, ordered)
 
 	widgets, ok := modules["widgets"]
 	if !ok || widgets.Status != module.StatusFailed {
@@ -478,7 +478,7 @@ func TestLoadCascading_SetsLoadOrderFromSourcesIndex(t *testing.T) {
 		{Name: "c", ManifestBytes: manifestJSON(t, "c", okModule, nil), WasmBytes: okModule},
 	}
 
-	modules := LoadCascading(context.Background(), rt, testPoolCfg(), ordered)
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), nil, ordered)
 
 	if got := modules["a"].LoadOrder; got != 0 {
 		t.Errorf("a.LoadOrder = %d, want 0", got)
@@ -501,7 +501,7 @@ func TestLoadCascading_TransitiveDependentIsAlsoSkipped(t *testing.T) {
 		{Name: "c", ManifestBytes: manifestJSON(t, "c", okModule, []string{"b"}), WasmBytes: okModule},
 	}
 
-	modules := LoadCascading(context.Background(), rt, testPoolCfg(), ordered)
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), nil, ordered)
 
 	if modules["a"].Status != module.StatusFailed {
 		t.Fatalf("a.Status = %v, want StatusFailed", modules["a"].Status)
@@ -573,7 +573,7 @@ func TestLoadCascading_ViewExtensionTargetViewMissing_Fails(t *testing.T) {
 		},
 	}
 
-	modules := LoadCascading(context.Background(), rt, testPoolCfg(), ordered)
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), nil, ordered)
 
 	hr := modules["hr"]
 	if hr.Status != module.StatusFailed {
@@ -632,7 +632,7 @@ func TestLoadCascading_SetsNotifTemplatesOnSuccess(t *testing.T) {
 		},
 	}
 
-	modules := LoadCascading(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), nil, sources)
 
 	m, ok := modules["widgets"]
 	if !ok || m.Status == module.StatusFailed {
@@ -662,7 +662,7 @@ func TestLoadCascading_FailsModuleWhenDeclaredTemplateMissing(t *testing.T) {
 		},
 	}
 
-	modules := LoadCascading(context.Background(), rt, testPoolCfg(), sources)
+	modules := LoadCascading(context.Background(), rt, testPoolCfg(), nil, sources)
 
 	m, ok := modules["widgets"]
 	if !ok || m.Status != module.StatusFailed {

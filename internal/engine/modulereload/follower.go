@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/loader"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -76,6 +77,26 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		return err
 	}
 
+	// Downloads the frontend bundle (goerp#588) alongside wasm+manifest
+	// when the just-downloaded manifest declares one, from
+	// module.BundleStorageKey(moduleName, ...) — the leader already
+	// published it there under Leader.Run's own PublishBundle call, keyed
+	// by module name and filename rather than objectKey, so it's
+	// reachable independent of parsing manifestBytes any further than
+	// this. A manifest that fails to parse here is silently skipped —
+	// loader.LoadModule below parses it again and fails the load with the
+	// same error, so BundleBytes staying nil in that case never produces
+	// a misleading failure.
+	var bundleBytes []byte
+	if mf, err := manifest.Load(manifestBytes); err == nil {
+		if filename, err := module.BundleFilename(mf); err == nil && filename != "" {
+			bundleBytes, err = f.download(ctx, module.BundleStorageKey(moduleName, filename))
+			if err != nil {
+				return fmt.Errorf("download published bundle: %w", err)
+			}
+		}
+	}
+
 	// loader.LoadModule re-verifies the checksum against manifestBytes'
 	// own Checksum field — the defense-in-depth against a corrupted or
 	// tampered download this ticket's own acceptance criteria call for.
@@ -88,6 +109,7 @@ func (f *Follower) Run(ctx context.Context, moduleName, version, objectKey strin
 		Name:          moduleName,
 		ManifestBytes: manifestBytes,
 		WasmBytes:     wasmBytes,
+		BundleBytes:   bundleBytes,
 	})
 	if mod.Status == module.StatusFailed {
 		return fmt.Errorf("load module: %s", mod.FailureReason)
