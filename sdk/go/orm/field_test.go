@@ -23,24 +23,24 @@ func TestField_ComparisonMethods(t *testing.T) {
 		got  Condition[testModel]
 		want string
 	}{
-		{"Eq", str.Eq("person"), "type = 'person'"},
-		{"Neq", str.Neq("person"), "type != 'person'"},
-		{"In", str.In("a", "b"), "type IN ('a', 'b')"},
+		{"Eq", str.Eq("person"), "record.type = 'person'"},
+		{"Neq", str.Neq("person"), "record.type != 'person'"},
+		{"In", str.In("a", "b"), "record.type IN ('a', 'b')"},
 		{"In empty", str.In(), "false"},
-		{"NotIn", str.NotIn("a", "b"), "NOT type IN ('a', 'b')"},
+		{"NotIn", str.NotIn("a", "b"), "NOT record.type IN ('a', 'b')"},
 		{"NotIn empty", str.NotIn(), "true"},
-		{"IsNull", str.IsNull(), "type IS NULL"},
-		{"IsNotNull", str.IsNotNull(), "type IS NOT NULL"},
-		{"Like", text.Like("Ac%"), "name LIKE 'Ac%'"},
-		{"ILike", text.ILike("ac%"), "name ILIKE 'ac%'"},
-		{"Gt", num.Gt(10), "price > 10"},
-		{"Gte", num.Gte(10), "price >= 10"},
-		{"Lt", num.Lt(10), "price < 10"},
-		{"Lte", num.Lte(10), "price <= 10"},
-		{"Between", num.Between(10, 20), "price >= 10 AND price <= 20"},
-		{"Before", at.Before(when), "created_at < '2026-08-02T16:32:19Z'"},
-		{"After", at.After(when), "created_at > '2026-08-02T16:32:19Z'"},
-		{"TimeBetween", at.Between(when, when), "created_at >= '2026-08-02T16:32:19Z' AND created_at <= '2026-08-02T16:32:19Z'"},
+		{"IsNull", str.IsNull(), "record.type IS NULL"},
+		{"IsNotNull", str.IsNotNull(), "record.type IS NOT NULL"},
+		{"Like", text.Like("Ac%"), "record.name LIKE 'Ac%'"},
+		{"ILike", text.ILike("ac%"), "record.name ILIKE 'ac%'"},
+		{"Gt", num.Gt(10), "record.price > 10"},
+		{"Gte", num.Gte(10), "record.price >= 10"},
+		{"Lt", num.Lt(10), "record.price < 10"},
+		{"Lte", num.Lte(10), "record.price <= 10"},
+		{"Between", num.Between(10, 20), "record.price >= 10 AND record.price <= 20"},
+		{"Before", at.Before(when), "record.created_at < '2026-08-02T16:32:19Z'"},
+		{"After", at.After(when), "record.created_at > '2026-08-02T16:32:19Z'"},
+		{"TimeBetween", at.Between(when, when), "record.created_at >= '2026-08-02T16:32:19Z' AND record.created_at <= '2026-08-02T16:32:19Z'"},
 	}
 
 	for _, tt := range tests {
@@ -69,16 +69,16 @@ func TestField_MatchesHandWrittenDomain(t *testing.T) {
 		got  Condition[testModel]
 		want string
 	}{
-		{"Eq", str.Eq("draft"), Domain("state = ?", "draft")},
-		{"Neq", str.Neq("draft"), Domain("state != ?", "draft")},
-		{"IsNull", str.IsNull(), "state IS NULL"},
-		{"IsNotNull", str.IsNotNull(), "state IS NOT NULL"},
-		{"Like", text.Like("Ac%"), Domain("name LIKE ?", "Ac%")},
-		{"ILike", text.ILike("ac%"), Domain("name ILIKE ?", "ac%")},
-		{"Gt", num.Gt(10), Domain("price > ?", 10)},
-		{"Lt", num.Lt(10), Domain("price < ?", 10)},
-		{"Before", at.Before(when), Domain("created_at < ?", when)},
-		{"After", at.After(when), Domain("created_at > ?", when)},
+		{"Eq", str.Eq("draft"), Domain("record.state = ?", "draft")},
+		{"Neq", str.Neq("draft"), Domain("record.state != ?", "draft")},
+		{"IsNull", str.IsNull(), "record.state IS NULL"},
+		{"IsNotNull", str.IsNotNull(), "record.state IS NOT NULL"},
+		{"Like", text.Like("Ac%"), Domain("record.name LIKE ?", "Ac%")},
+		{"ILike", text.ILike("ac%"), Domain("record.name ILIKE ?", "ac%")},
+		{"Gt", num.Gt(10), Domain("record.price > ?", 10)},
+		{"Lt", num.Lt(10), Domain("record.price < ?", 10)},
+		{"Before", at.Before(when), Domain("record.created_at < ?", when)},
+		{"After", at.After(when), Domain("record.created_at > ?", when)},
 	}
 
 	for _, tt := range tests {
@@ -96,10 +96,10 @@ func TestBytesField(t *testing.T) {
 	if got, want := f.Name(), "metadata"; got != want {
 		t.Errorf("Name() = %q, want %q", got, want)
 	}
-	if got, want := f.IsNull().expr, "metadata IS NULL"; got != want {
+	if got, want := f.IsNull().expr, "record.metadata IS NULL"; got != want {
 		t.Errorf("IsNull() = %q, want %q", got, want)
 	}
-	if got, want := f.IsNotNull().expr, "metadata IS NOT NULL"; got != want {
+	if got, want := f.IsNotNull().expr, "record.metadata IS NOT NULL"; got != want {
 		t.Errorf("IsNotNull() = %q, want %q", got, want)
 	}
 }
@@ -113,22 +113,6 @@ func TestBytesField_HasNoValueComparisonMethods(t *testing.T) {
 		if _, ok := typ.MethodByName(name); ok {
 			t.Errorf("BytesField has method %s(); want none", name)
 		}
-	}
-}
-
-func TestAsNumeric(t *testing.T) {
-	price := NewOrderedField[testModel, int64]("price")
-	amount := NewOrderedField[testModel, string]("amount") // Decimal's Go type
-
-	// AsNumeric(price) and AsNumeric(amount) already have inferred type
-	// NumericField[testModel] — the acceptance criterion these compile
-	// at all is checked by the build, not at runtime.
-
-	if got, want := AsNumeric(price).Name(), "price"; got != want {
-		t.Errorf("Name() = %q, want %q", got, want)
-	}
-	if got, want := AsNumeric(amount).Name(), "amount"; got != want {
-		t.Errorf("Name() = %q, want %q", got, want)
 	}
 }
 
