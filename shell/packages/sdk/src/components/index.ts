@@ -65,6 +65,8 @@ export type { PageLayoutProps } from "./page-layout.js";
 export { PageLayout } from "./page-layout.js";
 export type { PasswordFieldProps } from "./password-field.js";
 export { PasswordField } from "./password-field.js";
+export type { PasswordStrengthMeterProps } from "./password-strength-meter.js";
+export { PasswordStrengthMeter } from "./password-strength-meter.js";
 export type { ProgressBarProps } from "./progress-bar.js";
 export { ProgressBar } from "./progress-bar.js";
 export type { RelationFieldProps, RelationValue } from "./relation-field.js";
