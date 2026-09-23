@@ -43,6 +43,10 @@ export function PasswordField({
         />
         <button
           type="button"
+          // Native mousedown-focuses-button behavior would otherwise move
+          // focus off the input on click, violating "toggling never moves
+          // focus away from the input" (password-field.md States table).
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => setRevealed((v) => !v)}
           disabled={disabled}
           aria-label={revealed ? "Hide password" : "Show password"}

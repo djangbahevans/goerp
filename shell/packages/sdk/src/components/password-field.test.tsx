@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PasswordField } from "./password-field.js";
 
@@ -12,12 +13,16 @@ describe("PasswordField", () => {
     expect(input.autocomplete).toBe("current-password");
   });
 
-  it("toggles the native input type without clearing the value or moving focus", () => {
+  it("toggles the native input type without clearing the value or moving focus", async () => {
+    // userEvent (not fireEvent) simulates the browser's native
+    // mousedown-focuses-button behavior, so this is the only way to catch a
+    // missing onMouseDown preventDefault guard on the toggle button.
+    const user = userEvent.setup();
     render(<PasswordField label="Password" value="hunter2" autoComplete="current-password" onChange={vi.fn()} />);
     const input = screen.getByLabelText("Password") as HTMLInputElement;
     input.focus();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+    await user.click(screen.getByRole("button", { name: "Show password" }));
 
     expect(input.type).toBe("text");
     expect(input.value).toBe("hunter2");

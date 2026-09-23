@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { PasswordField } from "./password-field.js";
 
 const meta: Meta<typeof PasswordField> = {
@@ -44,7 +44,8 @@ export const Focus: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByLabelText("Password"));
+    await userEvent.tab();
+    await expect(canvas.getByLabelText("Password")).toHaveFocus();
   },
 };
 
