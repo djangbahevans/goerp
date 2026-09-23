@@ -4,6 +4,8 @@ package models
 
 import (
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
 // Attachment corresponds to model "widgets.attachment".
@@ -17,4 +19,114 @@ type Attachment struct {
 	Etag          string     `db:"etag"`
 	ReferenceType string     `db:"reference_type"`
 	ReferenceID   string     `db:"reference_id"`
+}
+
+func (Attachment) ResourceName() string { return "widgets.attachment" }
+
+// AttachmentFields is one orm field descriptor per Condition-bearing column —
+// a Many2One's *orm.RelationRef expansion has none (see the struct above).
+var AttachmentFields = struct {
+	ID            orm.Field[Attachment, string]
+	TenantID      orm.Field[Attachment, string]
+	CreatedAt     orm.TimeField[Attachment]
+	UpdatedAt     orm.TimeField[Attachment]
+	DeletedAt     orm.TimeField[Attachment]
+	CreatedBy     orm.Field[Attachment, string]
+	Etag          orm.StringField[Attachment]
+	ReferenceType orm.Field[Attachment, string]
+	ReferenceID   orm.Field[Attachment, string]
+}{
+	ID:            orm.NewField[Attachment, string]("id"),
+	TenantID:      orm.NewField[Attachment, string]("tenant_id"),
+	CreatedAt:     orm.NewTimeField[Attachment]("created_at"),
+	UpdatedAt:     orm.NewTimeField[Attachment]("updated_at"),
+	DeletedAt:     orm.NewTimeField[Attachment]("deleted_at"),
+	CreatedBy:     orm.NewField[Attachment, string]("created_by"),
+	Etag:          orm.NewStringField[Attachment]("etag"),
+	ReferenceType: orm.NewField[Attachment, string]("reference_type"),
+	ReferenceID:   orm.NewField[Attachment, string]("reference_id"),
+}
+
+// AttachmentAllFields is Query[Attachment]'s default Select() list — every
+// Condition-bearing field, in declaration order.
+var AttachmentAllFields = []orm.AnyField[Attachment]{
+	AttachmentFields.ID,
+	AttachmentFields.TenantID,
+	AttachmentFields.CreatedAt,
+	AttachmentFields.UpdatedAt,
+	AttachmentFields.DeletedAt,
+	AttachmentFields.CreatedBy,
+	AttachmentFields.Etag,
+	AttachmentFields.ReferenceType,
+	AttachmentFields.ReferenceID,
+}
+
+// Scan populates x from row, a single record as host.orm returns it
+// (map[string]any, msgpack-decoded). Returns *orm.DecodeError naming
+// the field and value's actual type on a mismatch.
+func (x *Attachment) Scan(row map[string]any) error {
+	if v, ok := row["id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "ID", "string", v)
+		}
+		x.ID = val
+	}
+	if v, ok := row["tenant_id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "TenantID", "string", v)
+		}
+		x.TenantID = val
+	}
+	if v, ok := row["created_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "CreatedAt", "time.Time", v)
+		}
+		x.CreatedAt = val
+	}
+	if v, ok := row["updated_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "UpdatedAt", "time.Time", v)
+		}
+		x.UpdatedAt = val
+	}
+	if v, ok := row["deleted_at"]; ok && v != nil {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "DeletedAt", "*time.Time", v)
+		}
+		x.DeletedAt = &val
+	}
+	if v, ok := row["created_by"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "CreatedBy", "*string", v)
+		}
+		x.CreatedBy = &val
+	}
+	if v, ok := row["etag"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "Etag", "string", v)
+		}
+		x.Etag = val
+	}
+	if v, ok := row["reference_type"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "ReferenceType", "string", v)
+		}
+		x.ReferenceType = val
+	}
+	if v, ok := row["reference_id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Attachment", "ReferenceID", "string", v)
+		}
+		x.ReferenceID = val
+	}
+	return nil
 }

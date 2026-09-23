@@ -4,6 +4,8 @@ package models
 
 import (
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
 // Gadget corresponds to model "widgets.gadget".
@@ -18,6 +20,127 @@ type Gadget struct {
 	Name        string       `db:"name"`
 	DisplayName *string      `db:"display_name"`
 	State       *GadgetState `db:"state"`
+}
+
+func (Gadget) ResourceName() string { return "widgets.gadget" }
+
+// GadgetFields is one orm field descriptor per Condition-bearing column —
+// a Many2One's *orm.RelationRef expansion has none (see the struct above).
+var GadgetFields = struct {
+	ID          orm.Field[Gadget, string]
+	TenantID    orm.Field[Gadget, string]
+	CreatedAt   orm.TimeField[Gadget]
+	UpdatedAt   orm.TimeField[Gadget]
+	DeletedAt   orm.TimeField[Gadget]
+	CreatedBy   orm.Field[Gadget, string]
+	Etag        orm.StringField[Gadget]
+	Name        orm.StringField[Gadget]
+	DisplayName orm.StringField[Gadget]
+	State       orm.Field[Gadget, GadgetState]
+}{
+	ID:          orm.NewField[Gadget, string]("id"),
+	TenantID:    orm.NewField[Gadget, string]("tenant_id"),
+	CreatedAt:   orm.NewTimeField[Gadget]("created_at"),
+	UpdatedAt:   orm.NewTimeField[Gadget]("updated_at"),
+	DeletedAt:   orm.NewTimeField[Gadget]("deleted_at"),
+	CreatedBy:   orm.NewField[Gadget, string]("created_by"),
+	Etag:        orm.NewStringField[Gadget]("etag"),
+	Name:        orm.NewStringField[Gadget]("name"),
+	DisplayName: orm.NewStringField[Gadget]("display_name"),
+	State:       orm.NewField[Gadget, GadgetState]("state"),
+}
+
+// GadgetAllFields is Query[Gadget]'s default Select() list — every
+// Condition-bearing field, in declaration order.
+var GadgetAllFields = []orm.AnyField[Gadget]{
+	GadgetFields.ID,
+	GadgetFields.TenantID,
+	GadgetFields.CreatedAt,
+	GadgetFields.UpdatedAt,
+	GadgetFields.DeletedAt,
+	GadgetFields.CreatedBy,
+	GadgetFields.Etag,
+	GadgetFields.Name,
+	GadgetFields.DisplayName,
+	GadgetFields.State,
+}
+
+// Scan populates x from row, a single record as host.orm returns it
+// (map[string]any, msgpack-decoded). Returns *orm.DecodeError naming
+// the field and value's actual type on a mismatch.
+func (x *Gadget) Scan(row map[string]any) error {
+	if v, ok := row["id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "ID", "string", v)
+		}
+		x.ID = val
+	}
+	if v, ok := row["tenant_id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "TenantID", "string", v)
+		}
+		x.TenantID = val
+	}
+	if v, ok := row["created_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "CreatedAt", "time.Time", v)
+		}
+		x.CreatedAt = val
+	}
+	if v, ok := row["updated_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "UpdatedAt", "time.Time", v)
+		}
+		x.UpdatedAt = val
+	}
+	if v, ok := row["deleted_at"]; ok && v != nil {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "DeletedAt", "*time.Time", v)
+		}
+		x.DeletedAt = &val
+	}
+	if v, ok := row["created_by"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "CreatedBy", "*string", v)
+		}
+		x.CreatedBy = &val
+	}
+	if v, ok := row["etag"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "Etag", "string", v)
+		}
+		x.Etag = val
+	}
+	if v, ok := row["name"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "Name", "string", v)
+		}
+		x.Name = val
+	}
+	if v, ok := row["display_name"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "DisplayName", "*string", v)
+		}
+		x.DisplayName = &val
+	}
+	if v, ok := row["state"]; ok && v != nil {
+		s, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gadget", "State", "*GadgetState", v)
+		}
+		val := GadgetState(s)
+		x.State = &val
+	}
+	return nil
 }
 
 type GadgetState string

@@ -4,6 +4,8 @@ package models
 
 import (
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
 // Gizmo corresponds to model "widgets.gizmo".
@@ -15,4 +17,94 @@ type Gizmo struct {
 	DeletedAt *time.Time `db:"deleted_at"`
 	CreatedBy *string    `db:"created_by"`
 	Etag      string     `db:"etag"`
+}
+
+func (Gizmo) ResourceName() string { return "widgets.gizmo" }
+
+// GizmoFields is one orm field descriptor per Condition-bearing column —
+// a Many2One's *orm.RelationRef expansion has none (see the struct above).
+var GizmoFields = struct {
+	ID        orm.Field[Gizmo, string]
+	TenantID  orm.Field[Gizmo, string]
+	CreatedAt orm.TimeField[Gizmo]
+	UpdatedAt orm.TimeField[Gizmo]
+	DeletedAt orm.TimeField[Gizmo]
+	CreatedBy orm.Field[Gizmo, string]
+	Etag      orm.StringField[Gizmo]
+}{
+	ID:        orm.NewField[Gizmo, string]("id"),
+	TenantID:  orm.NewField[Gizmo, string]("tenant_id"),
+	CreatedAt: orm.NewTimeField[Gizmo]("created_at"),
+	UpdatedAt: orm.NewTimeField[Gizmo]("updated_at"),
+	DeletedAt: orm.NewTimeField[Gizmo]("deleted_at"),
+	CreatedBy: orm.NewField[Gizmo, string]("created_by"),
+	Etag:      orm.NewStringField[Gizmo]("etag"),
+}
+
+// GizmoAllFields is Query[Gizmo]'s default Select() list — every
+// Condition-bearing field, in declaration order.
+var GizmoAllFields = []orm.AnyField[Gizmo]{
+	GizmoFields.ID,
+	GizmoFields.TenantID,
+	GizmoFields.CreatedAt,
+	GizmoFields.UpdatedAt,
+	GizmoFields.DeletedAt,
+	GizmoFields.CreatedBy,
+	GizmoFields.Etag,
+}
+
+// Scan populates x from row, a single record as host.orm returns it
+// (map[string]any, msgpack-decoded). Returns *orm.DecodeError naming
+// the field and value's actual type on a mismatch.
+func (x *Gizmo) Scan(row map[string]any) error {
+	if v, ok := row["id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gizmo", "ID", "string", v)
+		}
+		x.ID = val
+	}
+	if v, ok := row["tenant_id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gizmo", "TenantID", "string", v)
+		}
+		x.TenantID = val
+	}
+	if v, ok := row["created_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Gizmo", "CreatedAt", "time.Time", v)
+		}
+		x.CreatedAt = val
+	}
+	if v, ok := row["updated_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Gizmo", "UpdatedAt", "time.Time", v)
+		}
+		x.UpdatedAt = val
+	}
+	if v, ok := row["deleted_at"]; ok && v != nil {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Gizmo", "DeletedAt", "*time.Time", v)
+		}
+		x.DeletedAt = &val
+	}
+	if v, ok := row["created_by"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gizmo", "CreatedBy", "*string", v)
+		}
+		x.CreatedBy = &val
+	}
+	if v, ok := row["etag"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Gizmo", "Etag", "string", v)
+		}
+		x.Etag = val
+	}
+	return nil
 }

@@ -358,3 +358,177 @@ func TestRenderModelFile_UnsupportedFieldKind_Errors(t *testing.T) {
 		t.Fatal("expected an error for an unsupported field kind")
 	}
 }
+
+// TestRenderModelFile_GeneratesResourceNameMethod pins goerp#977's own
+// AC: every generated struct implements orm.Model via ResourceName().
+func TestRenderModelFile_GeneratesResourceNameMethod(t *testing.T) {
+	m := model.Define("widgets.widget", model.Table("widgets")).
+		WithStandardFields()
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, `func (Widget) ResourceName() string { return "widgets.widget" }`) {
+		t.Errorf("missing ResourceName() method:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_FieldDescriptorsPickWrapperPerKind pins goerp#977's
+// kind-to-descriptor table (go-sdk-reference.md §22/§26): each base kind
+// gets the wrapper type carrying its own extra operators, and
+// <Struct>AllFields lists every one of them in declaration order.
+func TestRenderModelFile_FieldDescriptorsPickWrapperPerKind(t *testing.T) {
+	m := model.Define("widgets.widget").
+		Field("name", model.Text().Required()).
+		Field("code", model.UUID().Required()).
+		Field("quantity", model.Integer().Required()).
+		Field("weight", model.Float().Required()).
+		Field("is_active", model.Boolean().Required()).
+		Field("opened_at", model.TimestampTZ().Required()).
+		Field("attachment", model.Bytea())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	for _, want := range []string{
+		"Name orm.StringField[Widget]",
+		"Code orm.Field[Widget, string]",
+		"Quantity orm.OrderedField[Widget, int32]",
+		"Weight orm.OrderedField[Widget, float64]",
+		"IsActive orm.Field[Widget, bool]",
+		"OpenedAt orm.TimeField[Widget]",
+		"Attachment orm.BytesField[Widget]",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("WidgetFields missing %q:\n%s", want, src)
+		}
+	}
+
+	if !strings.Contains(src, "var WidgetAllFields = []orm.AnyField[Widget]{") {
+		t.Errorf("missing WidgetAllFields slice:\n%s", src)
+	}
+	for _, want := range []string{
+		"WidgetFields.Name,", "WidgetFields.Code,", "WidgetFields.Quantity,",
+		"WidgetFields.Weight,", "WidgetFields.IsActive,", "WidgetFields.OpenedAt,",
+		"WidgetFields.Attachment,",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("WidgetAllFields missing entry %q:\n%s", want, src)
+		}
+	}
+}
+
+// TestRenderModelFile_ScanRequiredField pins Scan's required-field
+// shape: an absent/NULL value is left unscanned rather than erroring —
+// the field simply keeps its zero value, matching a query that didn't
+// select it — but a present, type-mismatched value still produces
+// *orm.DecodeError.
+func TestRenderModelFile_ScanRequiredField(t *testing.T) {
+	m := model.Define("widgets.widget").
+		Field("quantity", model.Integer().Required())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, `if v, ok := row["quantity"]; ok {`) {
+		t.Errorf("required field's Scan block should not guard on v != nil:\n%s", src)
+	}
+	if !strings.Contains(src, `val, ok := v.(int32)`) {
+		t.Errorf("missing int32 type assertion:\n%s", src)
+	}
+	if !strings.Contains(src, `return orm.NewDecodeError("Widget", "Quantity", "int32", v)`) {
+		t.Errorf("missing DecodeError construction:\n%s", src)
+	}
+	if !strings.Contains(src, "x.Quantity = val") {
+		t.Errorf("missing field assignment:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_ScanOptionalField pins Scan's optional-field
+// shape: guarded on "ok && v != nil" and assigned via &val, matching the
+// struct field's own pointer type.
+func TestRenderModelFile_ScanOptionalField(t *testing.T) {
+	m := model.Define("widgets.widget").
+		Field("nickname", model.Text())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, `if v, ok := row["nickname"]; ok && v != nil {`) {
+		t.Errorf("optional field's Scan block should guard on v != nil:\n%s", src)
+	}
+	if !strings.Contains(src, `return orm.NewDecodeError("Widget", "Nickname", "*string", v)`) {
+		t.Errorf("optional field's DecodeError should name the pointer type:\n%s", src)
+	}
+	if !strings.Contains(src, "x.Nickname = &val") {
+		t.Errorf("missing pointer field assignment:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_ScanNamedTypeField pins Scan's Selection/Enum
+// shape: the raw value asserts as a plain string, then converts to the
+// field's own named type.
+func TestRenderModelFile_ScanNamedTypeField(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("state", model.Selection("draft", "done").Required())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, `s, ok := v.(string)`) {
+		t.Errorf("named-type field should assert against string:\n%s", src)
+	}
+	if !strings.Contains(src, "x.State = GadgetState(s)") {
+		t.Errorf("missing named-type conversion:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_ScanRelationExpansion pins Scan's Many2One
+// expansion shape: always guarded on v != nil regardless of the FK's own
+// required-ness, decoding the nested {id, display_name} object into an
+// *orm.RelationRef — and that the expansion gets no field descriptor
+// (it's not Condition-bearing).
+func TestRenderModelFile_ScanRelationExpansion(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("customer_id", model.Many2One("contacts.contact").Required())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, `if v, ok := row["customer"]; ok && v != nil {`) {
+		t.Errorf("missing relation expansion Scan guard:\n%s", src)
+	}
+	if !strings.Contains(src, "nested, ok := v.(map[string]any)") {
+		t.Errorf("missing nested map assertion:\n%s", src)
+	}
+	if !strings.Contains(src, `ref.ID = id`) || !strings.Contains(src, "ref.DisplayName = dn") {
+		t.Errorf("missing RelationRef field extraction:\n%s", src)
+	}
+	if !strings.Contains(src, "x.Customer = &ref") {
+		t.Errorf("missing expansion field assignment:\n%s", src)
+	}
+	if strings.Contains(src, "GadgetFields.Customer,") {
+		t.Errorf("Many2One expansion should not get an AllFields entry:\n%s", src)
+	}
+	if strings.Contains(src, "Customer orm.") {
+		t.Errorf("Many2One expansion should not get a field descriptor:\n%s", src)
+	}
+}

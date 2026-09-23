@@ -29,6 +29,200 @@ type KindProbe struct {
 	Priority          KindProbePriority `db:"priority"`
 }
 
+func (KindProbe) ResourceName() string { return "widgets.kind_probe" }
+
+// KindProbeFields is one orm field descriptor per Condition-bearing column —
+// a Many2One's *orm.RelationRef expansion has none (see the struct above).
+var KindProbeFields = struct {
+	ID                orm.Field[KindProbe, string]
+	TenantID          orm.Field[KindProbe, string]
+	CreatedAt         orm.TimeField[KindProbe]
+	UpdatedAt         orm.TimeField[KindProbe]
+	DeletedAt         orm.TimeField[KindProbe]
+	CreatedBy         orm.Field[KindProbe, string]
+	Etag              orm.StringField[KindProbe]
+	DecimalField      orm.OrderedField[KindProbe, string]
+	TimestampField    orm.TimeField[KindProbe]
+	DateField         orm.TimeField[KindProbe]
+	TimeField         orm.Field[KindProbe, string]
+	JsonbField        orm.BytesField[KindProbe]
+	ByteaField        orm.BytesField[KindProbe]
+	OptionalNote      orm.StringField[KindProbe]
+	CreatedByGadgetID orm.Field[KindProbe, string]
+	Priority          orm.Field[KindProbe, KindProbePriority]
+}{
+	ID:                orm.NewField[KindProbe, string]("id"),
+	TenantID:          orm.NewField[KindProbe, string]("tenant_id"),
+	CreatedAt:         orm.NewTimeField[KindProbe]("created_at"),
+	UpdatedAt:         orm.NewTimeField[KindProbe]("updated_at"),
+	DeletedAt:         orm.NewTimeField[KindProbe]("deleted_at"),
+	CreatedBy:         orm.NewField[KindProbe, string]("created_by"),
+	Etag:              orm.NewStringField[KindProbe]("etag"),
+	DecimalField:      orm.NewOrderedField[KindProbe, string]("decimal_field"),
+	TimestampField:    orm.NewTimeField[KindProbe]("timestamp_field"),
+	DateField:         orm.NewTimeField[KindProbe]("date_field"),
+	TimeField:         orm.NewField[KindProbe, string]("time_field"),
+	JsonbField:        orm.NewBytesField[KindProbe]("jsonb_field"),
+	ByteaField:        orm.NewBytesField[KindProbe]("bytea_field"),
+	OptionalNote:      orm.NewStringField[KindProbe]("optional_note"),
+	CreatedByGadgetID: orm.NewField[KindProbe, string]("created_by_gadget_id"),
+	Priority:          orm.NewField[KindProbe, KindProbePriority]("priority"),
+}
+
+// KindProbeAllFields is Query[KindProbe]'s default Select() list — every
+// Condition-bearing field, in declaration order.
+var KindProbeAllFields = []orm.AnyField[KindProbe]{
+	KindProbeFields.ID,
+	KindProbeFields.TenantID,
+	KindProbeFields.CreatedAt,
+	KindProbeFields.UpdatedAt,
+	KindProbeFields.DeletedAt,
+	KindProbeFields.CreatedBy,
+	KindProbeFields.Etag,
+	KindProbeFields.DecimalField,
+	KindProbeFields.TimestampField,
+	KindProbeFields.DateField,
+	KindProbeFields.TimeField,
+	KindProbeFields.JsonbField,
+	KindProbeFields.ByteaField,
+	KindProbeFields.OptionalNote,
+	KindProbeFields.CreatedByGadgetID,
+	KindProbeFields.Priority,
+}
+
+// Scan populates x from row, a single record as host.orm returns it
+// (map[string]any, msgpack-decoded). Returns *orm.DecodeError naming
+// the field and value's actual type on a mismatch.
+func (x *KindProbe) Scan(row map[string]any) error {
+	if v, ok := row["id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "ID", "string", v)
+		}
+		x.ID = val
+	}
+	if v, ok := row["tenant_id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "TenantID", "string", v)
+		}
+		x.TenantID = val
+	}
+	if v, ok := row["created_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "CreatedAt", "time.Time", v)
+		}
+		x.CreatedAt = val
+	}
+	if v, ok := row["updated_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "UpdatedAt", "time.Time", v)
+		}
+		x.UpdatedAt = val
+	}
+	if v, ok := row["deleted_at"]; ok && v != nil {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "DeletedAt", "*time.Time", v)
+		}
+		x.DeletedAt = &val
+	}
+	if v, ok := row["created_by"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "CreatedBy", "*string", v)
+		}
+		x.CreatedBy = &val
+	}
+	if v, ok := row["etag"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "Etag", "string", v)
+		}
+		x.Etag = val
+	}
+	if v, ok := row["decimal_field"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "DecimalField", "string", v)
+		}
+		x.DecimalField = val
+	}
+	if v, ok := row["timestamp_field"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "TimestampField", "time.Time", v)
+		}
+		x.TimestampField = val
+	}
+	if v, ok := row["date_field"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "DateField", "time.Time", v)
+		}
+		x.DateField = val
+	}
+	if v, ok := row["time_field"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "TimeField", "string", v)
+		}
+		x.TimeField = val
+	}
+	if v, ok := row["jsonb_field"]; ok {
+		val, ok := v.([]byte)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "JsonbField", "[]byte", v)
+		}
+		x.JsonbField = val
+	}
+	if v, ok := row["bytea_field"]; ok {
+		val, ok := v.([]byte)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "ByteaField", "[]byte", v)
+		}
+		x.ByteaField = val
+	}
+	if v, ok := row["optional_note"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "OptionalNote", "*string", v)
+		}
+		x.OptionalNote = &val
+	}
+	if v, ok := row["created_by_gadget_id"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "CreatedByGadgetID", "*string", v)
+		}
+		x.CreatedByGadgetID = &val
+	}
+	if v, ok := row["created_by_gadget"]; ok && v != nil {
+		nested, ok := v.(map[string]any)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "CreatedByGadget", "*orm.RelationRef", v)
+		}
+		ref := orm.RelationRef{}
+		if id, ok := nested["id"].(string); ok {
+			ref.ID = id
+		}
+		if dn, ok := nested["display_name"].(string); ok {
+			ref.DisplayName = dn
+		}
+		x.CreatedByGadget = &ref
+	}
+	if v, ok := row["priority"]; ok {
+		s, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "Priority", "KindProbePriority", v)
+		}
+		x.Priority = KindProbePriority(s)
+	}
+	return nil
+}
+
 type KindProbePriority string
 
 const (
