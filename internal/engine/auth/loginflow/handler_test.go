@@ -282,6 +282,83 @@ func TestServeHTTP_SuccessWeb_SetsCookiesNotTokenBody(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_RememberControlsSessionPersistence(t *testing.T) {
+	cases := []struct {
+		name           string
+		remember       bool
+		headers        map[string]string
+		wantPersistent bool
+	}{
+		{name: "web with remember", remember: true, wantPersistent: true},
+		{name: "web without remember", remember: false, wantPersistent: false},
+		{name: "non-browser without remember", remember: false, headers: map[string]string{"X-Client-Type": "cli"}, wantPersistent: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+
+			rec := f.doLogin(t, map[string]any{
+				"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug, "remember": tc.remember,
+			}, tc.headers)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+			}
+
+			var persistent bool
+			var ttl time.Duration
+			if err := f.conn.QueryRow(
+				`SELECT persistent, EXTRACT(EPOCH FROM expires_at - created_at)::bigint * 1000000000 FROM system.sessions WHERE user_id = $1`, f.userID,
+			).Scan(&persistent, &ttl); err != nil {
+				t.Fatalf("query session: %v", err)
+			}
+			if persistent != tc.wantPersistent {
+				t.Errorf("session persistent = %v, want %v", persistent, tc.wantPersistent)
+			}
+			wantTTL := authtoken.NonPersistentRefreshTTL
+			if tc.wantPersistent {
+				wantTTL = authtoken.PersistentRefreshTTL
+			}
+			if diff := ttl - wantTTL; diff < -time.Minute || diff > time.Minute {
+				t.Errorf("session lifetime = %v, want ~%v", ttl, wantTTL)
+			}
+
+			for _, c := range rec.Result().Cookies() {
+				if c.Name != "refresh_token" {
+					continue
+				}
+				if tc.wantPersistent && c.MaxAge != int(authtoken.PersistentRefreshTTL.Seconds()) {
+					t.Errorf("refresh_token MaxAge = %d, want %d", c.MaxAge, int(authtoken.PersistentRefreshTTL.Seconds()))
+				}
+				if !tc.wantPersistent && c.MaxAge != 0 {
+					t.Errorf("refresh_token MaxAge = %d, want 0 (browser-session cookie)", c.MaxAge)
+				}
+			}
+		})
+	}
+}
+
+func TestServeHTTP_MFAEnrolled_TokenCarriesRemember(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.mfaStore.Insert(context.Background(), f.userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
+		t.Fatalf("Insert() mfa credential error: %v", err)
+	}
+
+	rec := f.doLogin(t, map[string]any{
+		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug, "remember": true,
+	}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	token, _ := decodeBody(t, rec)["mfa_token"].(string)
+	claims, err := f.handler.mfaTokens.Verify(token)
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+	if !claims.Remember {
+		t.Error("mfa_token Remember = false, want true")
+	}
+}
+
 func TestServeHTTP_WrongPassword_ReturnsInvalidCredentialsAndIncrementsCounter(t *testing.T) {
 	f := newFixture(t)
 

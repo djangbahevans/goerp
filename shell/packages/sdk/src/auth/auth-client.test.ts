@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
-import { fetchCurrentSession, login, logout, submitMFACode, updateProfile } from "./auth-client.js";
+import { fetchCurrentSession, fetchTenantContext, login, logout, submitMFACode, updateProfile } from "./auth-client.js";
 
-function jsonResponse(status: number, body: unknown, statusText = ""): Response {
+function jsonResponse(status: number, body: unknown, statusText = "", headers: Record<string, string> = {}): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText,
+    headers: new Headers(headers),
     json: async () => body,
   } as Response;
 }
@@ -138,6 +139,34 @@ describe("login", () => {
     });
   });
 
+  it("sends remember, defaulting it to false", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => jsonResponse(200, { expires_in: 900 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login(credentials);
+    await login({ ...credentials, remember: true });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body as string)).toEqual({ ...credentials, remember: false });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body as string)).toEqual({ ...credentials, remember: true });
+  });
+
+  it("surfaces a 429's Retry-After as details.retryAfter", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(429, { error: { code: "rate_limit_exceeded", message: "too many requests" } }, "", {
+          "Retry-After": "42",
+        }),
+      ),
+    );
+
+    await expect(login(credentials)).rejects.toMatchObject({
+      code: "rate_limit_exceeded",
+      httpStatus: 429,
+      details: { retryAfter: 42 },
+    });
+  });
+
   it("rejects with an AppError even when the error body isn't JSON", async () => {
     vi.stubGlobal(
       "fetch",
@@ -145,6 +174,7 @@ describe("login", () => {
         ok: false,
         status: 500,
         statusText: "Internal Server Error",
+        headers: new Headers(),
         json: async () => {
           throw new Error("not json");
         },
@@ -154,6 +184,45 @@ describe("login", () => {
     const err = await login(credentials).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
     expect((err as AppError).httpStatus).toBe(500);
+  });
+});
+
+describe("fetchTenantContext", () => {
+  it("maps a resolved tenant", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { tenant: { slug: "acme", name: "Acme Corp" }, registration_enabled: true })),
+    );
+
+    expect(await fetchTenantContext()).toEqual({
+      tenant: { slug: "acme", name: "Acme Corp" },
+      registrationEnabled: true,
+    });
+  });
+
+  it("maps a shared-domain response's null tenant", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { tenant: null, registration_enabled: false })),
+    );
+
+    expect(await fetchTenantContext()).toEqual({ tenant: null, registrationEnabled: false });
+  });
+
+  it("resolves to null on a non-200 or network failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { error: { code: "tenant_suspended" } })),
+    );
+    expect(await fetchTenantContext()).toBeNull();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("network");
+      }),
+    );
+    expect(await fetchTenantContext()).toBeNull();
   });
 });
 

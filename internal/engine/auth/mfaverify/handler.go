@@ -185,6 +185,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		DeviceID:        deviceID,
 		UserAgent:       r.UserAgent(),
 		IPAddress:       loginsession.ClientIP(r),
+		Persistent:      nonBrowser || claims.Remember,
 		MFAMethod:       req.Type,
 		MFAVerifiedAt:   &now,
 		MFACredentialID: credentialID,

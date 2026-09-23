@@ -24,10 +24,21 @@ import (
 )
 
 const (
-	accessTokenTTL  = 15 * time.Minute
-	refreshTokenTTL = 30 * 24 * time.Hour
-	issuerName      = "goerp"
+	accessTokenTTL = 15 * time.Minute
+	// PersistentRefreshTTL applies to a "remember this device" login (and
+	// every non-browser login); NonPersistentRefreshTTL to a browser login
+	// without it. Both roll forward on each rotation.
+	PersistentRefreshTTL    = 30 * 24 * time.Hour
+	NonPersistentRefreshTTL = 12 * time.Hour
+	issuerName              = "goerp"
 )
+
+func refreshExpiry(persistent bool) time.Time {
+	if persistent {
+		return time.Now().Add(PersistentRefreshTTL)
+	}
+	return time.Now().Add(NonPersistentRefreshTTL)
+}
 
 // Claims is the access token's JSON shape, auth-internals.md §4 "Access
 // token structure". AMR/MFAVerifiedAt reflect LoginParams' MFA fields —
@@ -68,6 +79,7 @@ type LoginParams struct {
 	UserAgent   string
 	IPAddress   string
 	CountryCode string
+	Persistent  bool
 
 	// MFAMethod/MFAVerifiedAt/MFACredentialID are set only when this login
 	// already completed MFA verification before Issue is called — e.g.
@@ -100,6 +112,7 @@ type Tokens struct {
 	AccessToken  string
 	RefreshToken string
 	ExpiresIn    int // access token lifetime in seconds
+	Persistent   bool
 }
 
 // Issue mints a new access/refresh token pair and records the refresh
@@ -138,7 +151,8 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 		UserAgent:       p.UserAgent,
 		IPAddress:       p.IPAddress,
 		CountryCode:     p.CountryCode,
-		ExpiresAt:       now.Add(refreshTokenTTL),
+		ExpiresAt:       refreshExpiry(p.Persistent),
+		Persistent:      p.Persistent,
 		MFAMethod:       p.MFAMethod,
 		MFAVerifiedAt:   p.MFAVerifiedAt,
 		MFACredentialID: p.MFACredentialID,
@@ -155,6 +169,7 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    int(accessTokenTTL.Seconds()),
+		Persistent:   p.Persistent,
 	}, nil
 }
 
@@ -269,7 +284,7 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 	}
 	newSessionID := uuid.NewString()
 
-	result, err := i.sessions.Rotate(ctx, presentedHash, newSessionID, newHash, p.DeviceID, time.Now().Add(refreshTokenTTL), p.UserAgent, p.IPAddress, p.CountryCode)
+	result, err := i.sessions.Rotate(ctx, presentedHash, newSessionID, newHash, p.DeviceID, refreshExpiry, p.UserAgent, p.IPAddress, p.CountryCode)
 	if err != nil {
 		return nil, 0, fmt.Errorf("rotate session: %w", err)
 	}
@@ -295,5 +310,6 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 		AccessToken:  accessToken,
 		RefreshToken: newToken,
 		ExpiresIn:    int(accessTokenTTL.Seconds()),
+		Persistent:   result.Persistent,
 	}, session.RotateOK, nil
 }

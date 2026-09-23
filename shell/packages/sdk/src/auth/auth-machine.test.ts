@@ -35,6 +35,14 @@ describe("authTransition", () => {
     expect(next).toEqual({ status: "checking" });
   });
 
+  it("mfa_required → checking on login_started, abandoning the challenge", () => {
+    const next = authTransition(
+      { status: "mfa_required", challengeToken: "tok", methods: ["totp"] },
+      { type: "login_started" },
+    );
+    expect(next).toEqual({ status: "checking" });
+  });
+
   it("checking → authenticated on login_succeeded", () => {
     const next = authTransition({ status: "checking" }, { type: "login_succeeded", user, tenant });
     expect(next).toEqual({ status: "authenticated", user, tenant });

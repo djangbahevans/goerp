@@ -1,5 +1,12 @@
 import { AppError } from "../error/app-error.js";
-import type { CurrentTenant, CurrentUser, LoginCredentials, MFAMethod, UpdateProfileInput } from "./types.js";
+import type {
+  CurrentTenant,
+  CurrentUser,
+  LoginCredentials,
+  MFAMethod,
+  TenantContext,
+  UpdateProfileInput,
+} from "./types.js";
 
 interface MeResponseBody {
   user: {
@@ -37,6 +44,8 @@ function mapTenant(tenant: MeResponseBody["tenant"]): CurrentTenant {
   return { id: tenant.id, slug: tenant.slug, name: tenant.name, plan: tenant.plan };
 }
 
+// A 429's Retry-After header (whole seconds) surfaces as
+// details.retryAfter, so a caller can show a lockout countdown.
 async function readError(response: Response): Promise<AppError> {
   let code = "unknown_error";
   let message = response.statusText || "request failed";
@@ -47,7 +56,9 @@ async function readError(response: Response): Promise<AppError> {
   } catch {
     // Non-JSON or empty body — fall back to the status text above.
   }
-  return new AppError({ code, message, httpStatus: response.status });
+  const retryAfter = Number.parseInt(response.headers.get("Retry-After") ?? "", 10);
+  const details = Number.isFinite(retryAfter) ? { retryAfter } : null;
+  return new AppError({ code, message, httpStatus: response.status, details });
 }
 
 // fetchCurrentSession backs the checking state (GET /auth/me,
@@ -70,6 +81,26 @@ export async function fetchCurrentSession(): Promise<{ user: CurrentUser; tenant
   }
 }
 
+// fetchTenantContext backs GET /auth/tenant-context. Any failure resolves
+// to null — the login page then falls back to asking for the company slug,
+// the same form a shared-domain deployment gets.
+export async function fetchTenantContext(): Promise<TenantContext | null> {
+  try {
+    const response = await fetch("/auth/tenant-context", { credentials: "include" });
+    if (!response.ok) return null;
+    const body = (await response.json()) as {
+      tenant: { slug: string; name: string } | null;
+      registration_enabled: boolean;
+    };
+    return {
+      tenant: body.tenant ? { slug: body.tenant.slug, name: body.tenant.name } : null,
+      registrationEnabled: body.registration_enabled === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export type LoginResult =
   | { kind: "authenticated" }
   | { kind: "mfa_required"; challengeToken: string; methods: MFAMethod[] };
@@ -83,7 +114,12 @@ export async function login(credentials: LoginCredentials): Promise<LoginResult>
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(credentials),
+    body: JSON.stringify({
+      email: credentials.email,
+      password: credentials.password,
+      tenant: credentials.tenant,
+      remember: credentials.remember ?? false,
+    }),
   });
   if (!response.ok) throw await readError(response);
 

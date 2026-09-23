@@ -157,7 +157,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// fresh access token carrying the updated amr/mfa_verified_at claims
 	// — same session, refresh token unchanged.
 	now := time.Now()
-	if err := h.sessions.UpdateMFAAssurance(ctx, authCtx.SessionID, req.Type, now, credentialID); err != nil {
+	persistent, err := h.sessions.UpdateMFAAssurance(ctx, authCtx.SessionID, req.Type, now, credentialID)
+	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
@@ -172,15 +173,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeAccessToken(w, r, accessToken, expiresIn)
+	writeAccessToken(w, r, accessToken, expiresIn, persistent)
 }
 
 // writeAccessToken writes the reverified access token: a JSON body for a
 // non-browser client, or a refreshed __Host-access_token cookie for a
 // browser client. Unlike loginsession.WriteResponse, this never touches
 // the refresh_token or device_id cookies — reverify never changes
-// either, only the access token itself.
-func writeAccessToken(w http.ResponseWriter, r *http.Request, accessToken string, expiresIn int) {
+// either, only the access token itself. A non-persistent session gets a
+// browser-session cookie, matching loginsession.SetTokenCookies.
+func writeAccessToken(w http.ResponseWriter, r *http.Request, accessToken string, expiresIn int, persistent bool) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if loginsession.IsNonBrowser(r) {
@@ -191,11 +193,15 @@ func writeAccessToken(w http.ResponseWriter, r *http.Request, accessToken string
 		return
 	}
 
+	cookieMaxAge := 0
+	if persistent {
+		cookieMaxAge = expiresIn
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "__Host-access_token",
 		Value:    accessToken,
 		Path:     "/",
-		MaxAge:   expiresIn,
+		MaxAge:   cookieMaxAge,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,

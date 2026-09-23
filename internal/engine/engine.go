@@ -62,6 +62,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/auth/tenantcontext"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
@@ -758,6 +759,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
+	tenantContextHandler := tenantcontext.NewHandler(tenantResolver)
 	storageUploadHandler := storageupload.NewHandler(tenantResolver, authChecker, storageBackend, filesStore, storageupload.Limits{
 		MaxFileBytes: cfg.StorageMaxFileBytes,
 		AllowedTypes: cfg.StorageAllowedTypes,
@@ -770,6 +772,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"PATCH /auth/me":                   authMeUpdateHandler,
 		"POST /auth/refresh":               authRefreshHandler,
 		"POST /auth/login":                 loginHandler,
+		"GET /auth/tenant-context":         tenantContextHandler,
 		"POST /auth/logout":                authLogoutHandler,
 		"POST /auth/mfa/verify":            mfaVerifyHandler,
 		"POST /auth/mfa/reverify":          mfaReverifyHandler,

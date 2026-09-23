@@ -17,7 +17,9 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
       return state.status === "checking" ? { status: "unauthenticated" } : state;
 
     case "login_started":
-      return state.status === "unauthenticated" ? { status: "checking" } : state;
+      // A fresh login from mfa_required abandons that challenge — the user
+      // navigated back to the login form instead of completing it.
+      return state.status === "unauthenticated" || state.status === "mfa_required" ? { status: "checking" } : state;
 
     case "login_succeeded":
       return state.status === "checking" ? { status: "authenticated", user: event.user, tenant: event.tenant } : state;
