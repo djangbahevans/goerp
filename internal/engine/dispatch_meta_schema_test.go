@@ -31,7 +31,7 @@ func newSchemaFixtureEngine(t *testing.T) *Engine {
 	t.Helper()
 
 	widgetModel := model.Define("widget").WithStandardFields().
-		Field("name", model.Text().Required()).
+		Field("name", model.Text().Required().Primary()).
 		Field("owner", model.Many2One("widgets.owner")).
 		EnableOps(model.List)
 
@@ -449,6 +449,12 @@ func TestDispatchSchemaRoute_OmitsZeroValueBooleanAndNumericMembers(t *testing.T
 	}
 	if _, ok := fields["owner"]["required"]; ok {
 		t.Errorf("optional field serves \"required\", want it omitted")
+	}
+	if fields["name"]["is_primary"] != true {
+		t.Errorf("Primary() field serves is_primary = %v, want true", fields["name"]["is_primary"])
+	}
+	if _, ok := fields["owner"]["is_primary"]; ok {
+		t.Errorf("non-Primary() field serves \"is_primary\", want it omitted")
 	}
 }
 

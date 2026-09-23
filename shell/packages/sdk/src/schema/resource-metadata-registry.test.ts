@@ -56,6 +56,12 @@ const schema: MetaSchema = {
         route({ method: "GET", path: "/contacts/{id}", model: "contacts.contact", crud_action: "get" }),
         route({ method: "GET", path: "/contacts/tags", model: "contacts.tag", crud_action: "list" }),
         route({ method: "GET", path: "/contacts/tags/{id}", model: "contacts.tag", crud_action: "get" }),
+        // Has a list route but no view and no nav item at all — a valid
+        // relation-picker target per view-system.md's "Label field when
+        // there's no list view at all".
+        route({ method: "GET", path: "/contacts/leads", model: "contacts.lead", crud_action: "list" }),
+        route({ method: "GET", path: "/contacts/imports", model: "contacts.import_job", crud_action: "list" }),
+        route({ method: "GET", path: "/contacts/sessions", model: "contacts.session", crud_action: "list" }),
       ],
       views: [
         view({
@@ -72,14 +78,12 @@ const schema: MetaSchema = {
         view({ name: "contacts_list_alt", type: "list", resource: "contacts.contact" }),
         // Explicit label_field, takes priority over the primary column.
         view({ name: "tags_list", type: "list", resource: "contacts.tag", label_field: "slug" }),
-        // Registered via navigation, but has no primary column or explicit
-        // label_field — falls through to the "name" convention fallback.
+        // No primary column, label_field, or .Primary() field — falls
+        // through to the "name" convention fallback.
         view({ name: "imports_list", type: "list", resource: "contacts.import_job" }),
-        // Registered via navigation, but no primary column, label_field, or
+        // No primary column, label_field, .Primary() field, or
         // display_name/name/title field — falls all the way back to "id".
         view({ name: "sessions_list", type: "list", resource: "contacts.session" }),
-        // Never referenced by any nav item — must be absent from the registry.
-        view({ name: "audit_list", type: "list", resource: "contacts.audit_log" }),
       ],
       navigation: [
         navGroup([{ label: "Contacts", view: "contacts_list", route: "/contacts" }]),
@@ -96,10 +100,19 @@ const schema: MetaSchema = {
           name: "contact",
           fields: [
             { name: "display_name", type: "text" },
-            { name: "email", type: "text" },
+            { name: "email", type: "text", is_primary: true },
           ],
         }),
-        "contacts.tag": model({ name: "tag", label: "Tag", fields: [{ name: "slug", type: "text" }] }),
+        "contacts.tag": model({
+          name: "tag",
+          label: "Tag",
+          fields: [
+            { name: "slug", type: "text" },
+            // .Primary() field, distinct from the view's explicit
+            // label_field ("slug") — proves label_field still wins.
+            { name: "internal_code", type: "text", is_primary: true },
+          ],
+        }),
         "contacts.import_job": model({
           name: "import_job",
           fields: [
@@ -115,6 +128,13 @@ const schema: MetaSchema = {
           ],
         }),
         "contacts.audit_log": model({ name: "audit_log", fields: [{ name: "id", type: "text" }] }),
+        "contacts.lead": model({
+          name: "lead",
+          fields: [
+            { name: "id", type: "text" },
+            { name: "full_name", type: "text", is_primary: true },
+          ],
+        }),
       },
     },
   },
@@ -133,13 +153,30 @@ describe("buildResourceMetadataRegistry", () => {
       defaultFormView: "",
       labelField: "slug",
       searchParam: "q",
-      fields: [{ name: "slug", type: "text" }],
+      fields: [
+        { name: "slug", type: "text" },
+        { name: "internal_code", type: "text", is_primary: true },
+      ],
     });
   });
 
   it("resolves labelField from the primary:true column when no label_field is declared", () => {
     const registry = buildResourceMetadataRegistry(schema);
     expect(registry.get("contacts.contact")?.labelField).toBe("display_name");
+  });
+
+  it("prefers the list view's primary:true column over the model's .Primary() field", () => {
+    // contacts.contact's "email" field is marked .Primary(), but its list
+    // view's "display_name" column is primary:true — the column wins.
+    const registry = buildResourceMetadataRegistry(schema);
+    expect(registry.get("contacts.contact")?.labelField).toBe("display_name");
+  });
+
+  it("prefers an explicit label_field over the model's .Primary() field", () => {
+    // contacts.tag's "internal_code" field is marked .Primary(), but its
+    // list view declares label_field: "slug" — the explicit field wins.
+    const registry = buildResourceMetadataRegistry(schema);
+    expect(registry.get("contacts.tag")?.labelField).toBe("slug");
   });
 
   it("picks the first list/form view declared for a resource", () => {
@@ -158,7 +195,7 @@ describe("buildResourceMetadataRegistry", () => {
     expect(registry.get("contacts.session")?.labelField).toBe("id");
   });
 
-  it("excludes a resource with no NavItem referencing any of its views", () => {
+  it("excludes a resource with no list route", () => {
     const registry = buildResourceMetadataRegistry(schema);
     expect(registry.has("contacts.audit_log")).toBe(false);
   });
@@ -166,6 +203,20 @@ describe("buildResourceMetadataRegistry", () => {
   it("still registers a resource whose only nav item sits behind a system-only permission", () => {
     const registry = buildResourceMetadataRegistry(schema);
     expect(registry.has("contacts.tag")).toBe(true);
+  });
+
+  it("registers a resource with a list route but no view and no NavItem", () => {
+    const registry = buildResourceMetadataRegistry(schema);
+    expect(registry.get("contacts.lead")).toMatchObject({
+      listRoute: "GET /contacts/leads",
+      defaultListView: "",
+      defaultFormView: "",
+    });
+  });
+
+  it("resolves labelField from the model's .Primary() field when there's no list view at all", () => {
+    const registry = buildResourceMetadataRegistry(schema);
+    expect(registry.get("contacts.lead")?.labelField).toBe("full_name");
   });
 });
 
@@ -179,7 +230,7 @@ describe("ResourceMetadataRegistry", () => {
     await expect(registry.resolve("contacts.contact")).resolves.toMatchObject({ labelField: "display_name" });
   });
 
-  it("resolves undefined for a resource with no nav-item registration", async () => {
+  it("resolves undefined for a resource with no list route", async () => {
     const registry = new ResourceMetadataRegistry(fakeSchema());
     await expect(registry.resolve("contacts.audit_log")).resolves.toBeUndefined();
   });

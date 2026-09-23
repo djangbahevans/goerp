@@ -67,6 +67,9 @@ export const FieldDefSchema = v.looseObject({
   // "one2many" only — the many2one field on related_model pointing back
   // at this model.
   inverse_field: v.optional(v.string()),
+  // Set on at most one field per model — its .Primary() declaration, the
+  // model's display/label field.
+  is_primary: v.optional(v.boolean()),
   workflow: v.optional(FieldWorkflowSchema),
 });
 export type FieldDef = v.InferOutput<typeof FieldDefSchema>;
