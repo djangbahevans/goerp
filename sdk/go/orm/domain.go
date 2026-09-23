@@ -2,6 +2,7 @@ package orm
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -67,7 +68,28 @@ func domainLiteral(v any) string {
 	case float64:
 		return strconv.FormatFloat(x, 'f', -1, 64)
 	default:
-		return quoteDomainString(fmt.Sprint(x))
+		return domainLiteralFallback(v)
+	}
+}
+
+// domainLiteralFallback handles a v whose concrete type didn't match any
+// case above — most commonly a defined type over int32/int64/float64
+// (field.go's Ordered/Numeric constraints deliberately allow these via
+// "~", for a future named ID/Money-style field kind; Selection/Enum's
+// generated named string types are also defined types, but string's own
+// fmt.Sprint already renders correctly as a quoted literal, so only the
+// numeric kinds need unwrapping here). Anything else — including a
+// defined string type — falls through to a quoted string of its
+// fmt.Sprint form.
+func domainLiteralFallback(v any) string {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(rv.Int(), 10)
+	case reflect.Float64:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 64)
+	default:
+		return quoteDomainString(fmt.Sprint(v))
 	}
 }
 

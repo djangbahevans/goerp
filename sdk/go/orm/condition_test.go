@@ -7,7 +7,7 @@ func TestCondition_And(t *testing.T) {
 	b := NewField[testModel, bool]("is_active").Eq(true)
 
 	got := a.And(b).expr
-	want := "type = 'person' AND is_active = true"
+	want := "(type = 'person') AND (is_active = true)"
 	if got != want {
 		t.Errorf("And() = %q, want %q", got, want)
 	}
@@ -24,18 +24,19 @@ func TestCondition_Or(t *testing.T) {
 	}
 }
 
-// TestCondition_OrThenAnd pins Or's defensive parenthesization: without
-// it, "type = 'person' OR type = 'company' AND is_active = true" would
-// parse (AND binds tighter than OR, manifest-spec.md §8) as "type =
-// 'person' OR (type = 'company' AND is_active = true)" — not the
-// "(either type) AND is_active" grouping the call chain expresses.
+// TestCondition_OrThenAnd pins And's defensive parenthesization of an
+// Or-built operand: without it, "(type = 'person') OR (type = 'company')
+// AND is_active = true" would parse (AND binds tighter than OR,
+// manifest-spec.md §8) as "(type = 'person') OR ((type = 'company') AND
+// is_active = true)" — not the "(either type) AND is_active" grouping
+// the call chain expresses.
 func TestCondition_OrThenAnd(t *testing.T) {
 	person := NewField[testModel, string]("type").Eq("person")
 	company := NewField[testModel, string]("type").Eq("company")
 	active := NewField[testModel, bool]("is_active").Eq(true)
 
 	got := person.Or(company).And(active).expr
-	want := "(type = 'person') OR (type = 'company') AND is_active = true"
+	want := "((type = 'person') OR (type = 'company')) AND (is_active = true)"
 	if got != want {
 		t.Errorf("Or().And() = %q, want %q", got, want)
 	}

@@ -8,12 +8,17 @@ type Condition[TModel Model] struct {
 	expr string
 }
 
-// And combines c and other with the domain language's AND operator. AND
-// binds tighter than OR in the domain grammar (manifest-spec.md §8, same
-// as SQL), so a chain of And calls never needs parentheses to keep its
-// intended grouping.
+// And combines c and other with the domain language's AND operator,
+// parenthesizing both sides. AND binds tighter than OR in the domain
+// grammar (manifest-spec.md §8, same as SQL) so a bare chain of Ands
+// would never need this — but either operand can itself already be an
+// Or-built Condition, whose own top-level OR would otherwise be silently
+// absorbed into this AND (person.Or(company).And(active) must group as
+// "(person OR company) AND active", not "person OR (company AND
+// active)"), so both sides are wrapped unconditionally rather than only
+// when the caller remembers an operand might be compound.
 func (c Condition[TModel]) And(other Condition[TModel]) Condition[TModel] {
-	return Condition[TModel]{expr: c.expr + " AND " + other.expr}
+	return Condition[TModel]{expr: "(" + c.expr + ") AND (" + other.expr + ")"}
 }
 
 // Or combines c and other with the domain language's OR operator,
