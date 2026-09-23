@@ -70,6 +70,22 @@ func pascalCase(s string) string {
 	return b.String()
 }
 
+// dynamicLinkSiblings returns the set of field names that are some
+// DynamicLink field's own ReferenceTypeField — emitted alongside their
+// DynamicLink partner as a plain string, not on their own
+// (go-sdk-reference.md §22 "DynamicLink"). Shared between renderModelFile
+// and modelPackageIdentifiers so the two can't disagree on which fields
+// that exclusion applies to.
+func dynamicLinkSiblings(fields []model.NamedField) map[string]bool {
+	siblings := map[string]bool{}
+	for _, f := range fields {
+		if f.Def.Kind == model.KindDynamicLink {
+			siblings[f.Def.ReferenceTypeField] = true
+		}
+	}
+	return siblings
+}
+
 // renderModelFile writes m's generated struct, ResourceName() method,
 // field descriptors (<Struct>Fields, <Struct>AllFields), and Scan method
 // (go-sdk-reference.md §22/§26, goerp#973/#974). types is schema.Schema's
@@ -80,17 +96,11 @@ func renderModelFile(m *model.ModelDeclaration, types []model.TypeDeclaration, c
 		return nil, nil, fmt.Errorf("model %q has no usable resource name to generate a struct from", m.Name)
 	}
 
-	// A DynamicLink field's sibling Selection field is emitted alongside
-	// it as a plain string (go-sdk-reference.md §22 "DynamicLink"), not
-	// on its own when the loop reaches it.
 	fieldByName := make(map[string]model.NamedField, len(m.Fields))
-	siblingOfDynamicLink := map[string]bool{}
 	for _, f := range m.Fields {
 		fieldByName[f.Name] = f
-		if f.Def.Kind == model.KindDynamicLink {
-			siblingOfDynamicLink[f.Def.ReferenceTypeField] = true
-		}
 	}
+	siblingOfDynamicLink := dynamicLinkSiblings(m.Fields)
 
 	var body, aux, fieldsDecl, fieldsInit, allFields, scanBody, valuesSetters bytes.Buffer
 	usesTime := false
@@ -589,6 +599,72 @@ func enumValues(types []model.TypeDeclaration, enumType string) ([]string, error
 	return nil, fmt.Errorf("enum type %q not declared in schema.Types", enumType)
 }
 
+// reservedStructNameSuffixes is every fixed structName+X package-level
+// identifier a model always generates (<Struct>Fields/AllFields/Values),
+// keyed by X — a Selection/Enum field whose own Go name is exactly one
+// of these (writeNamedTypeField) would otherwise generate a named type
+// colliding with it.
+var reservedStructNameSuffixes = map[string]bool{"Fields": true, "AllFields": true, "Values": true}
+
+// modelPackageIdentifiers lists every package-level Go identifier m's own
+// renderModelFile call emits, for generate.go's cross-model collision
+// check (goerp#981) — see renderModelFile's own doc comment for what
+// those identifiers are.
+func modelPackageIdentifiers(m *model.ModelDeclaration, types []model.TypeDeclaration) ([]string, error) {
+	structName := pascalCase(m.ResourceName())
+	if structName == "" {
+		return nil, fmt.Errorf("model %q has no usable resource name to generate a struct from", m.Name)
+	}
+
+	siblingOfDynamicLink := dynamicLinkSiblings(m.Fields)
+
+	ids := []string{
+		structName,
+		structName + "Fields",
+		structName + "AllFields",
+		structName + "Values",
+		"New" + structName + "Values",
+	}
+
+	for _, f := range m.Fields {
+		if siblingOfDynamicLink[f.Name] {
+			continue // emitted as a plain string, not a named type
+		}
+		var values []string
+		switch f.Def.Kind {
+		case model.KindSelection:
+			values = f.Def.SelectionValues
+		case model.KindEnum:
+			var err error
+			values, err = enumValues(types, f.Def.EnumType)
+			if err != nil {
+				return nil, fmt.Errorf("field %q: %w", f.Name, err)
+			}
+		default:
+			continue
+		}
+		typeName := structName + pascalCase(f.Name)
+		ids = append(ids, typeName)
+		ids = append(ids, namedTypeConstantNames(typeName, values)...)
+	}
+
+	return ids, nil
+}
+
+// namedTypeConstantNames returns typeName's own per-value constant names
+// (e.g. "GadgetStateDraft" for typeName "GadgetState", value "draft") —
+// shared between writeNamedTypeField (which writes them) and
+// modelPackageIdentifiers (which only needs their names, for generate.go's
+// package-wide collision check, goerp#981), so the two can never drift
+// apart on what a Selection/Enum field's constants are actually named.
+func namedTypeConstantNames(typeName string, values []string) []string {
+	names := make([]string, len(values))
+	for i, v := range values {
+		names[i] = typeName + pascalCase(v)
+	}
+	return names
+}
+
 // writeNamedTypeField is Selection and KindEnum's shared generation
 // shape: a named string type plus one constant per value
 // (go-sdk-reference.md §22/goerp#961), plus the struct field itself.
@@ -598,12 +674,28 @@ func writeNamedTypeField(body, aux *bytes.Buffer, structName, fieldName, fieldGo
 	if fieldGoName == "" {
 		return "", fmt.Errorf("no usable Go identifier for field name %q", fieldName)
 	}
+	// A field named e.g. "fields" or "values" would otherwise generate a
+	// named type colliding with the model's own fixed <Struct>Fields/
+	// AllFields/Values descriptors — reserved package-level identifiers
+	// (modelPackageIdentifiers) every model already carries.
+	if reservedStructNameSuffixes[fieldGoName] {
+		return "", fmt.Errorf("field %q: generates the Go identifier %q, which collides with the generated <Struct>%s descriptor — rename this field", fieldName, structName+fieldGoName, fieldGoName)
+	}
 	typeName := structName + fieldGoName
+
+	constNames := namedTypeConstantNames(typeName, values)
+	seenConst := make(map[string]string, len(values))
+	for i, name := range constNames {
+		if prior, ok := seenConst[name]; ok {
+			return "", fmt.Errorf("field %q: values %q and %q both generate the Go constant name %q — rename one value", fieldName, prior, values[i], name)
+		}
+		seenConst[name] = values[i]
+	}
 
 	fmt.Fprintf(aux, "type %s string\n\n", typeName)
 	aux.WriteString("const (\n")
-	for _, v := range values {
-		fmt.Fprintf(aux, "\t%s%s %s = %q\n", typeName, pascalCase(v), typeName, v)
+	for i, v := range values {
+		fmt.Fprintf(aux, "\t%s %s = %q\n", constNames[i], typeName, v)
 	}
 	aux.WriteString(")\n\n")
 
@@ -622,21 +714,21 @@ func writeNamedTypeField(body, aux *bytes.Buffer, structName, fieldName, fieldGo
 // and a marker type may only be declared once per package.
 const crossModuleRefsFileName = "cross_module_refs.gen.go"
 
-// renderCrossModuleRefsFile renders crossModuleRefsFileName's content: one
-// zero-field marker type plus ResourceName() method per marker, sorted by
-// Go name for deterministic output. Each marker satisfies orm.Model —
-// nothing else — so orm.Ref[Marker] compiles but orm.FetchRef[Marker]
-// does not: a marker carries no column data for a Scan method to
-// populate (go-sdk-reference.md §22 "Many2One", goerp#979).
-func renderCrossModuleRefsFile(markers []crossModuleMarker) ([]byte, error) {
+// dedupeCrossModuleMarkers sorts markers by goName and collapses any run
+// of entries sharing one goName down to a single entry — safe only when
+// they also share one resourceName (the same cross-module target
+// referenced by more than one Many2One field), since
+// pascalCase(module)+pascalCase(resource) isn't injective (e.g. "a_b"+"c"
+// and "a"+"b_c" both produce "ABC"): a same-goName run with differing
+// resourceName is a real naming collision, not a duplicate reference,
+// and errors instead. Shared between renderCrossModuleRefsFile (which
+// needs the deduped list to render) and Generate (which only needs the
+// deduped names, for its own package-wide identifier collision check),
+// so the two can't disagree on what counts as a duplicate.
+func dedupeCrossModuleMarkers(markers []crossModuleMarker) ([]crossModuleMarker, error) {
 	sorted := slices.Clone(markers)
 	slices.SortFunc(sorted, func(a, b crossModuleMarker) int { return strings.Compare(a.goName, b.goName) })
 
-	// Two distinct resource names must never collapse into one marker —
-	// pascalCase(module)+pascalCase(resource) isn't injective (e.g.
-	// "a_b"+"c" and "a"+"b_c" both pascalCase to "ABC"), so a same-goName
-	// run with differing resourceName is a real naming collision, not a
-	// duplicate reference to dedup away.
 	deduped := sorted[:0]
 	for i, mk := range sorted {
 		if i > 0 && mk.goName == sorted[i-1].goName {
@@ -647,7 +739,19 @@ func renderCrossModuleRefsFile(markers []crossModuleMarker) ([]byte, error) {
 		}
 		deduped = append(deduped, mk)
 	}
-	sorted = deduped
+	return deduped, nil
+}
+
+// renderCrossModuleRefsFile renders crossModuleRefsFileName's content —
+// see dedupeCrossModuleMarkers for the dedup/collision rule applied to
+// markers first. It also returns that deduped list, so a caller that
+// needs it too (Generate, for its own identifier collision check) gets
+// it from this one dedup pass rather than computing it again separately.
+func renderCrossModuleRefsFile(markers []crossModuleMarker) ([]byte, []crossModuleMarker, error) {
+	sorted, err := dedupeCrossModuleMarkers(markers)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var buf bytes.Buffer
 	buf.WriteString(generatedFileHeader)
@@ -662,5 +766,9 @@ func renderCrossModuleRefsFile(markers []crossModuleMarker) ([]byte, error) {
 		fmt.Fprintf(&buf, "func (%s) ResourceName() string { return %q }\n\n", mk.goName, mk.resourceName)
 	}
 
-	return format.Source(buf.Bytes())
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, nil, err
+	}
+	return formatted, sorted, nil
 }

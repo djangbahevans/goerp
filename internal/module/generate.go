@@ -87,6 +87,20 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 
 	want := make(map[string][]byte, len(sch.Models))
 	owner := make(map[string]string, len(sch.Models))
+	// identifiers is owner's cross-model counterpart: owner catches a
+	// filename collision, identifiers catches two models' package-level
+	// Go output colliding within the shared models package (goerp#981).
+	identifiers := make(map[string]string, len(sch.Models))
+	claimIdentifiers := func(owningModel string, ids []string) error {
+		for _, id := range ids {
+			if prior, ok := identifiers[id]; ok {
+				return fmt.Errorf("models/: both %q and %q generate the Go identifier %q — rename one", prior, owningModel, id)
+			}
+			identifiers[id] = owningModel
+		}
+		return nil
+	}
+
 	var markers []crossModuleMarker
 	for _, m := range sch.Models {
 		name := m.ResourceName() + ".gen.go"
@@ -95,10 +109,25 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 		}
 		owner[name] = m.Name
 
+		// renderModelFile runs first: it catches any within-model naming
+		// problem (a field collision, an unnamed field) via its own
+		// claimFieldName/writeNamedTypeField checks with a precise,
+		// field-level error, before modelPackageIdentifiers's
+		// necessarily coarser cross-model check ever sees this model's
+		// identifiers.
 		content, mks, err := renderModelFile(m, sch.Types, genCtx)
 		if err != nil {
 			return nil, fmt.Errorf("render models/%s: %w", name, err)
 		}
+
+		ids, err := modelPackageIdentifiers(m, sch.Types)
+		if err != nil {
+			return nil, fmt.Errorf("render models/%s: %w", name, err)
+		}
+		if err := claimIdentifiers(m.Name, ids); err != nil {
+			return nil, err
+		}
+
 		want[name] = content
 		markers = append(markers, mks...)
 	}
@@ -109,9 +138,16 @@ func Generate(ctx context.Context, dir string, opts GenerateOptions) (*GenerateR
 		}
 		owner[crossModuleRefsFileName] = "<cross-module refs>"
 
-		content, err := renderCrossModuleRefsFile(markers)
+		content, deduped, err := renderCrossModuleRefsFile(markers)
 		if err != nil {
 			return nil, fmt.Errorf("render models/%s: %w", crossModuleRefsFileName, err)
+		}
+		markerNames := make([]string, len(deduped))
+		for i, mk := range deduped {
+			markerNames[i] = mk.goName
+		}
+		if err := claimIdentifiers("<cross-module refs>", markerNames); err != nil {
+			return nil, err
 		}
 		want[crossModuleRefsFileName] = content
 	}
