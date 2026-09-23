@@ -183,13 +183,25 @@ func (d *ModelDeclaration) RoutePrefix(path string) *ModelDeclaration {
 	return d
 }
 
+// WithStandardFields adds every model's seven engine-managed columns, all
+// Readonly (goerp#992): id, created_at, updated_at, deleted_at, and etag
+// are always Postgres-assigned (Default()/an UPDATE trigger — see
+// internal/engine/wasm/host_orm_write.go's ORMCreate/ORMWrite paths) and
+// never appear in a client's own create/write payload in the first place;
+// tenant_id and created_by are always filled by the engine itself from
+// the authenticated request's own context (fillCreateServerFields) before
+// a create's field validation ever runs — buildAssignment's own Readonly
+// check exempts exactly those two engine-filled names (its serverFilled
+// parameter) so this doesn't reject the engine's own values, only a
+// client-supplied one. None of the seven has a legitimate reason for a
+// client-supplied value to differ from what the engine would assign.
 func (d *ModelDeclaration) WithStandardFields() *ModelDeclaration {
 	return d.
-		Field("id", UUID().PrimaryKey().Default("uuidv7()")).
-		Field("tenant_id", UUID().Required()).
-		Field("created_at", TimestampTZ().Required().Default("NOW()")).
-		Field("updated_at", TimestampTZ().Required().Default("NOW()")).
-		Field("deleted_at", TimestampTZ()).
-		Field("created_by", UUID()).
-		Field("etag", Text().Required().Default("''"))
+		Field("id", UUID().PrimaryKey().Default("uuidv7()").Readonly()).
+		Field("tenant_id", UUID().Required().Readonly()).
+		Field("created_at", TimestampTZ().Required().Default("NOW()").Readonly()).
+		Field("updated_at", TimestampTZ().Required().Default("NOW()").Readonly()).
+		Field("deleted_at", TimestampTZ().Readonly()).
+		Field("created_by", UUID().Readonly()).
+		Field("etag", Text().Required().Default("''").Readonly())
 }

@@ -113,7 +113,7 @@ func createFixtureItemsTable(t *testing.T, conn *sql.DB, slug string) {
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.item (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		tenant_id UUID NOT NULL,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1521,7 +1521,7 @@ func TestORMCreate_FillsTenantAndCreatedByFromTheRequest(t *testing.T) {
 
 	out, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": uuid.NewString(), "name": "Widget A"},
+		Record: map[string]any{"name": "Widget A"},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMCreate: %v", hostErr)
@@ -1531,19 +1531,25 @@ func TestORMCreate_FillsTenantAndCreatedByFromTheRequest(t *testing.T) {
 	}
 }
 
-func TestORMCreate_KeepsSuppliedTenantAndCreatedBy(t *testing.T) {
+// TestORMCreate_RejectsSuppliedTenantAndCreatedBy pins goerp#992's
+// Readonly decision: tenant_id/created_by are always engine-filled from
+// the request's own context (fillCreateServerFields) when omitted, and a
+// client that supplies either directly now gets orm.field_not_writable —
+// the same rejection any other Readonly field gets — not the old
+// "supplied value is kept" behavior.
+func TestORMCreate_RejectsSuppliedTenantAndCreatedBy(t *testing.T) {
 	r, mc, _, _ := newServerFieldsFixture(t, "33333333-3333-3333-3333-333333333333")
 
 	const tenant, creator = "44444444-4444-4444-4444-444444444444", "55555555-5555-5555-5555-555555555555"
-	out, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, ORMCreateInput{
+	_, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": uuid.NewString(), "name": "Widget A", "tenant_id": tenant, "created_by": creator},
+		Record: map[string]any{"name": "Widget A", "tenant_id": tenant, "created_by": creator},
 	})
-	if hostErr != nil {
-		t.Fatalf("ORMCreate: %v", hostErr)
+	if hostErr == nil {
+		t.Fatal("ORMCreate: want orm.field_not_writable for a client-supplied tenant_id/created_by, got success")
 	}
-	if out.Record["tenant_id"] != tenant || out.Record["created_by"] != creator {
-		t.Errorf("tenant_id/created_by = %v/%v, want the supplied %s/%s", out.Record["tenant_id"], out.Record["created_by"], tenant, creator)
+	if hostErr.Code != abi.ErrCodeFieldNotWritable {
+		t.Errorf("hostErr.Code = %q, want %q", hostErr.Code, abi.ErrCodeFieldNotWritable)
 	}
 }
 
@@ -1552,7 +1558,7 @@ func TestORMCreate_LeavesCreatedByNullForANonUUIDPrincipal(t *testing.T) {
 
 	out, hostErr := ORMCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), nil, mc, ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": uuid.NewString(), "name": "Widget A"},
+		Record: map[string]any{"name": "Widget A"},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMCreate: %v", hostErr)
@@ -1567,7 +1573,7 @@ func TestORMCreateBatch_FillsTenantOnEveryRecord(t *testing.T) {
 
 	out, hostErr := ORMCreateBatch(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), mc, ORMCreateBatchInput{
 		Model:   "testmodule.item",
-		Records: []map[string]any{{"id": uuid.NewString(), "name": "A"}, {"id": uuid.NewString(), "name": "B"}},
+		Records: []map[string]any{{"name": "A"}, {"name": "B"}},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMCreateBatch: %v", hostErr)
@@ -1587,11 +1593,10 @@ func TestORMCreate_UpsertKeepsTheOriginalCreatedBy(t *testing.T) {
 	r, mc, tenantID, slug := newServerFieldsFixture(t, creator)
 	db := openTestPrimaryDB(t)
 	onConflict := &OnConflictOption{Policy: "update", Fields: []string{"code"}}
-	id := uuid.NewString()
 
 	_, hostErr := ORMCreate(context.Background(), r, db, r.EventInsertClient(), nil, mc, ORMCreateInput{
 		Model:      "testmodule.item",
-		Record:     map[string]any{"id": id, "name": "Widget A", "code": "W-1"},
+		Record:     map[string]any{"name": "Widget A", "code": "W-1"},
 		OnConflict: onConflict,
 	})
 	if hostErr != nil {
@@ -1602,7 +1607,7 @@ func TestORMCreate_UpsertKeepsTheOriginalCreatedBy(t *testing.T) {
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{itemModelDecl()}})
 	second, hostErr := ORMCreate(context.Background(), r, db, r.EventInsertClient(), nil, other, ORMCreateInput{
 		Model:      "testmodule.item",
-		Record:     map[string]any{"id": id, "name": "Widget A renamed", "code": "W-1"},
+		Record:     map[string]any{"name": "Widget A renamed", "code": "W-1"},
 		OnConflict: onConflict,
 	})
 	if hostErr != nil {
