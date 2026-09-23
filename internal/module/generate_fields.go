@@ -549,7 +549,23 @@ const crossModuleRefsFileName = "cross_module_refs.gen.go"
 func renderCrossModuleRefsFile(markers []crossModuleMarker) ([]byte, error) {
 	sorted := slices.Clone(markers)
 	slices.SortFunc(sorted, func(a, b crossModuleMarker) int { return strings.Compare(a.goName, b.goName) })
-	sorted = slices.CompactFunc(sorted, func(a, b crossModuleMarker) bool { return a.goName == b.goName })
+
+	// Two distinct resource names must never collapse into one marker —
+	// pascalCase(module)+pascalCase(resource) isn't injective (e.g.
+	// "a_b"+"c" and "a"+"b_c" both pascalCase to "ABC"), so a same-goName
+	// run with differing resourceName is a real naming collision, not a
+	// duplicate reference to dedup away.
+	deduped := sorted[:0]
+	for i, mk := range sorted {
+		if i > 0 && mk.goName == sorted[i-1].goName {
+			if mk.resourceName != sorted[i-1].resourceName {
+				return nil, fmt.Errorf("related_model %q and %q both generate the marker type name %q — rename one module or model", sorted[i-1].resourceName, mk.resourceName, mk.goName)
+			}
+			continue
+		}
+		deduped = append(deduped, mk)
+	}
+	sorted = deduped
 
 	var buf bytes.Buffer
 	buf.WriteString(generatedFileHeader)

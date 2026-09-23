@@ -458,6 +458,28 @@ func TestGenerate_CrossModuleMany2One_TargetModuleNotDeclared_Fails(t *testing.T
 	}
 }
 
+// TestGenerate_ManifestMissingName_Fails pins a real bug a code review
+// caught: loadGenContext used to fall back to moduleName == "" for a
+// manifest.json with no (or a non-string) "name" field, rather than
+// erroring the way the sibling readNameVersion helper already does for
+// the same condition — a same-module Many2One field then wrongly took
+// the cross-module branch, producing a confusing "not in depends_on"
+// error instead of a clear one naming the actual problem.
+func TestGenerate_ManifestMissingName_Fails(t *testing.T) {
+	dir := writeGenerateFixtureWithManifest(t, generateFixtureSchemaOneModel, `{"depends_on": []}`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	_, err := Generate(ctx, dir, GenerateOptions{})
+	if err == nil {
+		t.Fatal("expected an error for a manifest.json with no \"name\" field")
+	}
+	if !strings.Contains(err.Error(), "name") {
+		t.Errorf("error = %q, want it to name the missing manifest field", err)
+	}
+}
+
 func TestGenerate_SecondRunLeavesMtimeUnchanged(t *testing.T) {
 	dir := writeGenerateFixture(t, generateFixtureSchemaOneModel)
 

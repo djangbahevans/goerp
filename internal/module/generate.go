@@ -183,6 +183,9 @@ func loadGenContext(dir string, sch model.Schema) (genContext, error) {
 	}
 
 	moduleName, _ := decoded["name"].(string)
+	if moduleName == "" {
+		return genContext{}, fmt.Errorf("manifest is missing name")
+	}
 	dependsOn := stringSlice(decoded["depends_on"])
 	softDependsOn := stringSlice(decoded["soft_depends_on"])
 

@@ -197,6 +197,45 @@ func TestRenderModelFile_Many2OneCrossModuleGeneratesFKAndMarkerRefExpansion(t *
 	}
 }
 
+// TestRenderCrossModuleRefsFile_DistinctResourcesCollidingOnGoName_Errors
+// pins a real bug a code review caught: pascalCase(module)+
+// pascalCase(resource) isn't injective — "a_b"+"c" and "a"+"b_c" both
+// produce "ABC" — so deduping crossModuleMarker entries by goName alone
+// would silently collapse two distinct cross-module targets into one
+// marker type, defeating the whole point of a typed Ref[T] for whichever
+// target got dropped. A same-goName run must error unless every entry
+// also shares the same resourceName (a true duplicate reference, safe to
+// dedup).
+func TestRenderCrossModuleRefsFile_DistinctResourcesCollidingOnGoName_Errors(t *testing.T) {
+	markers := []crossModuleMarker{
+		{goName: "ABCRef", resourceName: "a_b.c"},
+		{goName: "ABCRef", resourceName: "a.b_c"},
+	}
+
+	if _, err := renderCrossModuleRefsFile(markers); err == nil {
+		t.Fatal("expected an error for two distinct related_model values colliding on the same generated Go name")
+	}
+}
+
+// TestRenderCrossModuleRefsFile_SameResourceReferencedTwice_Dedups pins
+// the safe case the collision guard above must not reject: the same
+// cross-module target referenced by more than one Many2One field
+// generates exactly one marker type, not a duplicate declaration.
+func TestRenderCrossModuleRefsFile_SameResourceReferencedTwice_Dedups(t *testing.T) {
+	markers := []crossModuleMarker{
+		{goName: "ContactsContactRef", resourceName: "contacts.contact"},
+		{goName: "ContactsContactRef", resourceName: "contacts.contact"},
+	}
+
+	out, err := renderCrossModuleRefsFile(markers)
+	if err != nil {
+		t.Fatalf("renderCrossModuleRefsFile: %v", err)
+	}
+	if n := strings.Count(string(out), "type ContactsContactRef struct{}"); n != 1 {
+		t.Errorf("ContactsContactRef declared %d times, want exactly 1:\n%s", n, out)
+	}
+}
+
 // TestRenderModelFile_Many2OneSameModuleGeneratesRealTargetStruct pins
 // goerp#979's other half: a same-module Many2One target (its related_model
 // belongs to the declaring model's own module) resolves Ref[T] to that
