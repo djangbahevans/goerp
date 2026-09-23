@@ -14,17 +14,17 @@ type ormUnlinkInput = abi.ORMUnlinkInput
 // SQL-backed model. A model.Transient() model has no transaction to roll
 // back: a missing ID partway through still aborts the call, but any
 // earlier ID in the same list is already deleted for good, not undone.
-func Unlink(model string, ids []string) (ExecResult, error) {
-	return unlink("", model, ids)
+func Unlink[T Model](ids ...string) (ExecResult, error) {
+	return unlink[T]("", ids)
 }
 
 // UnlinkTx is Unlink, scoped to tx's own open transaction.
-func UnlinkTx(tx *db.Tx, model string, ids []string) (ExecResult, error) {
-	return unlink(tx.TxID(), model, ids)
+func UnlinkTx[T Model](tx *db.Tx, ids ...string) (ExecResult, error) {
+	return unlink[T](tx.TxID(), ids)
 }
 
-func unlink(txID, model string, ids []string) (ExecResult, error) {
+func unlink[T Model](txID string, ids []string) (ExecResult, error) {
 	var out ExecResult
-	err := hostcall.Do(hostORMUnlink, ormUnlinkInput{Model: model, IDs: ids, TxID: txID}, &out)
+	err := hostcall.Do(hostORMUnlink, ormUnlinkInput{Model: resourceName[T](), IDs: ids, TxID: txID}, &out)
 	return out, err
 }
