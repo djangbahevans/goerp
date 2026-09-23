@@ -1,10 +1,8 @@
 // Command ormcallerfixture is a real Go module compiled to wasip1 WASM
 // for internal/engine/wasm's own host.orm module-side caller tests
-// (goerp#433) — it exercises all 11 sdk/go/orm functions
-// (Create/Read/Write/Search/SearchRead/CreateBatch/FirstOrCreate/
-// WriteMany/WriteWhere/Mutate/Unlink) against a real "testmodule.widget" model,
-// through the real sdk/go/orm package, rather than a hand-assembled
-// bytecode stand-in.
+// (goerp#433) — it exercises the typed sdk/go/orm v2 surface (goerp#982)
+// against a real "testmodule.widget" model, through the real sdk/go/orm
+// package, rather than a hand-assembled bytecode stand-in.
 //
 // Must be built with:
 //
@@ -21,43 +19,82 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-const widgetModel = "testmodule.widget"
-
-// widget mirrors "testmodule.widget"'s own declared fields, the shape
-// every orm.*[T] function here maps a record into.
-type widget struct {
+// Widget mirrors "testmodule.widget"'s own declared fields (widgetModelDecl,
+// internal/engine/wasm/host_orm_test.go) in the same shape goerp module
+// generate emits onto a real generated model struct — hand-written here
+// since this fixture predates the generator and isn't its output, but
+// price stays *int32 (not required) to match the declared field exactly.
+type Widget struct {
 	ID    string
 	Name  string
-	Price int64
+	Price *int32
 }
 
+func (Widget) ResourceName() string { return "testmodule.widget" }
+
+var WidgetFields = struct {
+	ID    orm.Field[Widget, string]
+	Name  orm.StringField[Widget]
+	Price orm.OrderedField[Widget, int32]
+}{
+	ID:    orm.NewField[Widget, string]("id"),
+	Name:  orm.NewStringField[Widget]("name"),
+	Price: orm.NewOrderedField[Widget, int32]("price"),
+}
+
+var WidgetAllFields = []orm.AnyField[Widget]{WidgetFields.ID, WidgetFields.Name, WidgetFields.Price}
+
 // Scan implements sdk/go/orm's reflection-free decode contract
-// (goerp#974) by hand — the same shape goerp module generate will emit
-// onto every generated model struct (goerp#977); hand-written here since
-// widget predates the generator and isn't its output.
-func (w *widget) Scan(row map[string]any) error {
+// (goerp#974), the same shape goerp module generate emits (goerp#977).
+func (w *Widget) Scan(row map[string]any) error {
 	if v, ok := row["id"]; ok {
 		s, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("widget", "ID", "string", v)
+			return orm.NewDecodeError("Widget", "ID", "string", v)
 		}
 		w.ID = s
 	}
 	if v, ok := row["name"]; ok {
 		s, ok := v.(string)
 		if !ok {
-			return orm.NewDecodeError("widget", "Name", "string", v)
+			return orm.NewDecodeError("Widget", "Name", "string", v)
 		}
 		w.Name = s
 	}
-	if v, ok := row["price"]; ok {
+	if v, ok := row["price"]; ok && v != nil {
 		n, ok := v.(int64)
 		if !ok {
-			return orm.NewDecodeError("widget", "Price", "int64", v)
+			return orm.NewDecodeError("Widget", "Price", "*int32", v)
 		}
-		w.Price = n
+		converted := int32(n)
+		w.Price = &converted
 	}
 	return nil
+}
+
+// WidgetValues is a typed builder for Widget's writable fields — the same
+// shape goerp module generate emits (goerp#978).
+type WidgetValues struct {
+	orm.Values[Widget]
+}
+
+func NewWidgetValues() *WidgetValues {
+	return &WidgetValues{Values: *orm.NewValues[Widget]()}
+}
+
+func (v *WidgetValues) SetID(x string) *WidgetValues {
+	orm.Set(&v.Values, WidgetFields.ID, x)
+	return v
+}
+
+func (v *WidgetValues) SetName(x string) *WidgetValues {
+	orm.Set(&v.Values, WidgetFields.Name.Field, x)
+	return v
+}
+
+func (v *WidgetValues) SetPrice(x int32) *WidgetValues {
+	orm.Set(&v.Values, WidgetFields.Price.Field, x)
+	return v
 }
 
 type stepResult struct {
@@ -81,6 +118,16 @@ func writeReport(r flowReport) uint64 {
 	return uint64(ptr)<<32 | uint64(len(data))
 }
 
+// priceOf reads *w.Price, or -1 if unset — every step below sets it
+// before reading it back, so this only guards against a real decode bug
+// rather than a legitimately-absent value.
+func priceOf(w Widget) int64 {
+	if w.Price == nil {
+		return -1
+	}
+	return int64(*w.Price)
+}
+
 //go:wasmexport run_orm_flow
 func runOrmFlow() uint64 {
 	var report flowReport
@@ -94,68 +141,71 @@ func runOrmFlow() uint64 {
 	}
 
 	id1 := uuid.NewString()
-	created, err := orm.Create[widget](widgetModel, map[string]any{"id": id1, "name": "Widget A", "price": int64(100)})
+	createVals := NewWidgetValues().SetID(id1).SetName("Widget A").SetPrice(100)
+	created, err := orm.Create[Widget](&createVals.Values)
 	if !record("create", created.Name, err) {
 		return writeReport(report)
 	}
 
-	readOut, err := orm.Read[widget](widgetModel, []string{id1}, nil)
+	readOut, err := orm.GetMany[Widget]([]string{id1})
 	record("read", strconv.Itoa(len(readOut)), err)
 
-	err = orm.Write(widgetModel, id1, map[string]any{"price": int64(200)}, nil)
+	writeVals := NewWidgetValues().SetPrice(200)
+	err = orm.Write[Widget](id1, &writeVals.Values, nil)
 	record("write", "", err)
 
-	searchIDs, err := orm.Search(widgetModel, "record.price = 200")
+	searchIDs, err := orm.From[Widget]().Where(WidgetFields.Price.Eq(200)).IDs()
 	record("search", strconv.Itoa(len(searchIDs)), err)
 
-	searchReadOut, _, err := orm.SearchRead[widget](widgetModel, "record.price = 200", []string{"id", "name", "price"})
+	searchReadOut, _, err := orm.From[Widget]().Where(WidgetFields.Price.Eq(200)).Select(WidgetAllFields...).All()
 	record("search_read", strconv.Itoa(len(searchReadOut)), err)
 
 	id2, id3 := uuid.NewString(), uuid.NewString()
-	batchOut, err := orm.CreateBatch[widget](widgetModel, []map[string]any{
-		{"id": id2, "name": "Widget B", "price": int64(50)},
-		{"id": id3, "name": "Widget C", "price": int64(50)},
-	})
+	batchVals2 := NewWidgetValues().SetID(id2).SetName("Widget B").SetPrice(50)
+	batchVals3 := NewWidgetValues().SetID(id3).SetName("Widget C").SetPrice(50)
+	batchOut, err := orm.CreateBatch[Widget]([]*orm.Values[Widget]{&batchVals2.Values, &batchVals3.Values})
 	record("create_batch", strconv.Itoa(len(batchOut)), err)
 
-	focRecord, focCreated, err := orm.FirstOrCreate[widget](widgetModel,
-		map[string]any{"name": "Widget A"},
-		map[string]any{"id": uuid.NewString(), "price": int64(999)})
+	focUnique := NewWidgetValues().SetName("Widget A")
+	focCreate := NewWidgetValues().SetID(uuid.NewString()).SetPrice(999)
+	focRecord, focCreated, err := orm.FirstOrCreate[Widget](&focUnique.Values, &focCreate.Values)
 	_ = focRecord
 	record("first_or_create", strconv.FormatBool(focCreated), err)
 
-	writeManyOut, err := orm.WriteMany(widgetModel, []string{id2, id3}, map[string]any{"price": int64(300)})
+	writeManyVals := NewWidgetValues().SetPrice(300)
+	writeManyOut, err := orm.WriteMany[Widget]([]string{id2, id3}, &writeManyVals.Values)
 	record("write_many", strconv.Itoa(writeManyOut.Count), err)
 
-	writeWhereOut, err := orm.WriteWhere(widgetModel, "record.price = 300", map[string]any{"name": "Bulk"})
+	writeWhereVals := NewWidgetValues().SetName("Bulk")
+	writeWhereOut, err := orm.WriteWhere[Widget](WidgetFields.Price.Eq(300).Bind(), &writeWhereVals.Values)
 	record("write_where", strconv.Itoa(writeWhereOut.Count), err)
 
 	// Three widgets exist at this point: id1=200, id2=300, id3=300.
-	count, err := orm.Count(widgetModel, "")
+	count, err := orm.Count[Widget](orm.MatchAll[Widget]())
 	record("count", strconv.FormatInt(count, 10), err)
 
-	sum, err := orm.Sum(widgetModel, "price", "")
+	sum, err := orm.Sum(WidgetFields.Price, orm.MatchAll[Widget]())
 	record("sum", strconv.FormatFloat(sum, 'f', 0, 64), err)
 
-	min, err := orm.Min(widgetModel, "price", "")
+	min, err := orm.Min[Widget](WidgetFields.Price, orm.MatchAll[Widget]())
 	record("min", strconv.FormatFloat(min, 'f', 0, 64), err)
 
-	max, err := orm.Max(widgetModel, "price", "")
+	max, err := orm.Max[Widget](WidgetFields.Price, orm.MatchAll[Widget]())
 	record("max", strconv.FormatFloat(max, 'f', 0, 64), err)
 
-	avg, err := orm.Avg(widgetModel, "price", "")
+	avg, err := orm.Avg(WidgetFields.Price, orm.MatchAll[Widget]())
 	record("avg", strconv.FormatFloat(avg, 'f', 2, 64), err)
 
-	mutated, err := orm.Mutate[widget](widgetModel, id2, orm.Decrement("price", int64(50)), orm.Where("record.price >= 50"))
-	record("mutate", strconv.FormatInt(mutated.Price, 10), err)
+	mutated, err := orm.Mutate[Widget](id2, orm.Decrement(WidgetFields.Price.Field, int32(50)), orm.Where(WidgetFields.Price.Gte(50)))
+	record("mutate", strconv.FormatInt(priceOf(mutated), 10), err)
 
-	_, err = orm.Mutate[widget](widgetModel, id2, orm.Decrement("price", int64(1000)), orm.Where("record.price >= 1000"))
+	_, err = orm.Mutate[Widget](id2, orm.Decrement(WidgetFields.Price.Field, int32(1000)), orm.Where(WidgetFields.Price.Gte(1000)))
 	if orm.IsPreconditionFailed(err) {
 		err = nil
 	}
 	record("mutate_guard", "", err)
 
-	unlinkOut, err := orm.Unlink(widgetModel, []string{id1})
+	unlinkOut, err := orm.Unlink[Widget](id1)
 	record("unlink", strconv.Itoa(unlinkOut.Count), err)
 
 	return writeReport(report)
@@ -168,6 +218,12 @@ func runOrmFlow() uint64 {
 // instance, proving the whole stack (SDK wrapper -> wire tx_id ->
 // borrowed-transaction dispatch) round-trips correctly rather than just
 // each layer in isolation.
+//
+// count_tx is the only in-tx count taken (old pre-#975 orm distinguished
+// an aggregate-based CountTx from a search-based SearchCountTx; v2's only
+// transaction-participating count is Query.Tx(tx).Count(), so the two
+// collapsed into one call) — its result is also reused for with_tx's own
+// detail after the transaction commits.
 //
 //go:wasmexport run_orm_tx_flow
 func runOrmTxFlow() uint64 {
@@ -182,72 +238,70 @@ func runOrmTxFlow() uint64 {
 	}
 
 	id1, id2 := uuid.NewString(), uuid.NewString()
-	var searchCountInTx int64
+	var countInTx int64
 	err := db.WithTx(func(tx *db.Tx) error {
-		created, err := orm.CreateTx[widget](tx, widgetModel, map[string]any{"id": id1, "name": "Tx Widget A", "price": int64(700)})
+		createVals := NewWidgetValues().SetID(id1).SetName("Tx Widget A").SetPrice(700)
+		created, err := orm.CreateTx[Widget](tx, &createVals.Values)
 		if err != nil {
 			return err
 		}
 		record("create_tx", created.Name, nil)
 
-		readBack, err := orm.ReadOneTx[widget](tx, widgetModel, id1, nil)
+		readBack, err := orm.GetTx[Widget](tx, id1)
 		if err != nil {
 			return err
 		}
 		record("read_one_tx", readBack.Name, nil)
 
-		searchCountInTx, err = orm.SearchCountTx(tx, widgetModel, "record.name = 'Tx Widget A'")
+		countInTx, err = orm.From[Widget]().Tx(tx).Where(WidgetFields.Name.Eq("Tx Widget A")).Count()
 		if err != nil {
 			return err
 		}
+		record("count_tx", strconv.FormatInt(countInTx, 10), nil)
 
-		countTx, err := orm.CountTx(tx, widgetModel, "record.name = 'Tx Widget A'")
-		if err != nil {
-			return err
-		}
-		record("count_tx", strconv.FormatInt(countTx, 10), nil)
-
-		if err := orm.WriteTx(tx, widgetModel, id1, map[string]any{"price": int64(750)}, nil); err != nil {
+		writeVals := NewWidgetValues().SetPrice(750)
+		if err := orm.WriteTx[Widget](tx, id1, &writeVals.Values, nil); err != nil {
 			return err
 		}
 		record("write_tx", "", nil)
 
-		batchOut, err := orm.CreateBatchTx[widget](tx, widgetModel, []map[string]any{
-			{"id": id2, "name": "Tx Widget B", "price": int64(50)},
-		})
+		batchVals := NewWidgetValues().SetID(id2).SetName("Tx Widget B").SetPrice(50)
+		batchOut, err := orm.CreateBatchTx[Widget](tx, []*orm.Values[Widget]{&batchVals.Values})
 		if err != nil {
 			return err
 		}
 		record("create_batch_tx", strconv.Itoa(len(batchOut)), nil)
 
-		writeManyOut, err := orm.WriteManyTx(tx, widgetModel, []string{id2}, map[string]any{"price": int64(60)})
+		writeManyVals := NewWidgetValues().SetPrice(60)
+		writeManyOut, err := orm.WriteManyTx[Widget](tx, []string{id2}, &writeManyVals.Values)
 		if err != nil {
 			return err
 		}
 		record("write_many_tx", strconv.Itoa(writeManyOut.Count), nil)
 
-		writeWhereOut, err := orm.WriteWhereTx(tx, widgetModel, "record.price = 60", map[string]any{"name": "Tx Widget B Renamed"})
+		writeWhereVals := NewWidgetValues().SetName("Tx Widget B Renamed")
+		writeWhereOut, err := orm.WriteWhereTx[Widget](tx, WidgetFields.Price.Eq(60).Bind(), &writeWhereVals.Values)
 		if err != nil {
 			return err
 		}
 		record("write_where_tx", strconv.Itoa(writeWhereOut.Count), nil)
 
-		mutated, err := orm.MutateTx[widget](tx, widgetModel, id2, orm.Increment("price", int64(5)))
+		mutated, err := orm.MutateTx[Widget](tx, id2, orm.Increment(WidgetFields.Price.Field, int32(5)))
 		if err != nil {
 			return err
 		}
-		record("mutate_tx", strconv.FormatInt(mutated.Price, 10), nil)
+		record("mutate_tx", strconv.FormatInt(priceOf(mutated), 10), nil)
 
-		unlinkOut, err := orm.UnlinkTx(tx, widgetModel, []string{id2})
+		unlinkOut, err := orm.UnlinkTx[Widget](tx, id2)
 		if err != nil {
 			return err
 		}
 		record("unlink_tx", strconv.Itoa(unlinkOut.Count), nil)
 
 		// Matches "name", which CreateTx already inserted on this same tx.
-		_, focCreated, err := orm.FirstOrCreateTx[widget](tx, widgetModel,
-			map[string]any{"name": "Tx Widget A"},
-			map[string]any{"id": uuid.NewString(), "price": int64(999)})
+		focUnique := NewWidgetValues().SetName("Tx Widget A")
+		focCreate := NewWidgetValues().SetID(uuid.NewString()).SetPrice(999)
+		_, focCreated, err := orm.FirstOrCreateTx[Widget](tx, &focUnique.Values, &focCreate.Values)
 		if err != nil {
 			return err
 		}
@@ -255,7 +309,7 @@ func runOrmTxFlow() uint64 {
 
 		return nil
 	})
-	record("with_tx", strconv.FormatInt(searchCountInTx, 10), err)
+	record("with_tx", strconv.FormatInt(countInTx, 10), err)
 
 	return writeReport(report)
 }

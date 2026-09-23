@@ -69,7 +69,6 @@ type ormFlowReport struct {
 // story. Without that fix, this test's "unlink" step decodes a corrupted
 // ExecResult even though the engine computed and sent the real one.
 func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) {
-	t.Skip("blocked on goerp#982 — ormcallerfixture still uses the pre-#975 orm API")
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 	wasmBytes := compileOrmCallerFixture(t)
@@ -160,7 +159,6 @@ func TestOrmCallerFixture_AllFunctions_RoundTripThroughRealModule(t *testing.T) 
 // (the create, the batch create, the writes) is only actually persisted
 // once WithTx's own commit runs — never by any individual orm.*Tx call.
 func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
-	t.Skip("blocked on goerp#982 — ormcallerfixture still uses the pre-#975 orm API")
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 	wasmBytes := compileOrmCallerFixture(t)
@@ -214,13 +212,13 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 		"read_one_tx":        "Tx Widget A",
 		"write_tx":           "",
 		"create_batch_tx":    "1",
-		"count_tx":           "1", // CountTx, run before WriteTx renamed anything else matching
+		"count_tx":           "1", // Query.Tx(tx).Count(), run before WriteTx renamed anything else matching
 		"write_many_tx":      "1",
 		"write_where_tx":     "1",
 		"mutate_tx":          "65",
 		"unlink_tx":          "1",
 		"first_or_create_tx": "false", // hits the row create_tx already inserted on this same transaction
-		"with_tx":            "1",     // SearchCountTx, run before WriteTx renamed anything else matching
+		"with_tx":            "1",     // reuses count_tx's own in-tx count value, recorded after WithTx returns
 	}
 	for _, s := range report.Steps {
 		if !s.OK {
