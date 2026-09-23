@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantsync "github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -66,7 +67,13 @@ type Worker struct {
 	RoleStore   *role.Store
 	SyncPool    *schema.SchemaSyncPool
 	DiffEngine  *schema.SchemaDiffEngine
-	Workers     *workflowworker.Manager
+	// Storage publishes a successfully-loaded module's frontend bundle
+	// (goerp#588) — the same warn-only object storage dependency every
+	// other publisher of this bundle (moduleboot.LoadCascading,
+	// modulereload.Leader) already has. Nil just skips publish with a
+	// warning rather than failing the install over it.
+	Storage storage.Backend
+	Workers *workflowworker.Manager
 	// RiverClient inserts the data migration jobs jobdispatch.EnqueueApplicableDataMigration
 	// builds after a successful sync. An explicit field rather than
 	// river.ClientFromContext(ctx): existing tests call run directly with
@@ -156,6 +163,22 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 	m := loader.LoadModule(ctx, w.Runtime, w.PoolCfg, *src)
 	if m.Status == module.StatusFailed {
 		return Result{}, fmt.Errorf("load module: %s", m.FailureReason)
+	}
+
+	// Publishes m's frontend bundle (goerp#588), if it declares one, to the
+	// same content-addressed storage key moduleboot.LoadCascading and
+	// modulereload.Leader publish under — makes it servable from GET
+	// /modules/{module}/frontend/{file} regardless of which of the three
+	// load paths actually loaded this module. A publish failure (including
+	// w.Storage being nil, a warn-only Engine dependency) is logged, not
+	// fatal to the install — m is still a fully valid, servable-everywhere-
+	// except-its-frontend-bundle module otherwise.
+	if err := module.PublishBundle(ctx, w.Storage, m.Manifest.Name, &m.Manifest, src.BundleBytes); err != nil {
+		if errors.Is(err, module.ErrNoStorageBackend) {
+			log.Warn().Str("module", m.Manifest.Name).Msg("module install: frontend bundle declared but no object storage backend is configured; bundle will not be servable")
+		} else {
+			log.Warn().Err(err).Str("module", m.Manifest.Name).Msg("module install: publish frontend bundle to object storage failed")
+		}
 	}
 
 	// From here on, m owns a live pool and compiled module (LoadModule's

@@ -130,7 +130,7 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 		t.Errorf("display_name = %q, want %q", mod.DisplayName, "Widgets")
 	}
 	if mod.Frontend != nil {
-		t.Errorf("frontend = %+v, want nil (goerp#588 not built yet)", mod.Frontend)
+		t.Errorf("frontend = %+v, want nil for a module declaring no frontend bundle", mod.Frontend)
 	}
 
 	if len(mod.Views) != 1 || mod.Views[0].Name != "widgets.list" {
@@ -223,6 +223,48 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 	}
 	if customAction.CrudAction != "" {
 		t.Errorf("custom action route crud_action = %q, want empty", customAction.CrudAction)
+	}
+}
+
+func TestDispatchSchemaRoute_ExposesFrontendBundle(t *testing.T) {
+	loadedModules := map[string]*module.LoadedModule{
+		"widgets": {
+			Status: module.StatusReady,
+			Manifest: manifest.Manifest{
+				Name: "widgets", DisplayName: "Widgets", Type: "standard", Version: "1.0.0",
+				Frontend: &manifest.FrontendConfig{
+					Bundle:       new(true),
+					BundleSHA256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd",
+				},
+			},
+		},
+	}
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(loadedModules); err != nil {
+		t.Fatalf("registry Update() error: %v", err)
+	}
+	e := &Engine{moduleRegistry: reg}
+
+	w := httptest.NewRecorder()
+	e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp registry.SchemaResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	frontend := resp.Modules["widgets"].Frontend
+	if frontend == nil {
+		t.Fatal("frontend is nil, want a populated SchemaFrontend")
+	}
+	if want := "/modules/widgets/frontend/bundle.0123456789ab.js"; frontend.BundleURL != want {
+		t.Errorf("BundleURL = %q, want %q", frontend.BundleURL, want)
+	}
+	if want := "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd"; frontend.BundleSHA256 != want {
+		t.Errorf("BundleSHA256 = %q, want %q", frontend.BundleSHA256, want)
 	}
 }
 

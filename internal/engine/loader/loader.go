@@ -49,6 +49,14 @@ type Source struct {
 	Name          string
 	ManifestBytes []byte
 	WasmBytes     []byte
+	// BundleBytes is the frontend bundle's raw bytes (frontend/dist/
+	// bundle.<hash>.js in the .erp archive layout), nil when the module's
+	// package carries none. Verified against manifest.Frontend.BundleSHA256
+	// by LoadModule the same way WasmBytes is verified against Checksum —
+	// present regardless of whether the manifest actually declares
+	// frontend.bundle: true, so LoadModule can tell "declared but missing"
+	// (a load failure) apart from "not declared" (nothing to verify).
+	BundleBytes []byte
 	// PackagePath is the .erp package file or loose module directory src
 	// was read from on disk. Copied onto the returned LoadedModule
 	// unchanged — LoadModule itself never reads it.
@@ -81,6 +89,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	m.Manifest = *mf
 
 	if err := verifyChecksum(mf.Checksum, src.WasmBytes); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
+	if err := verifyBundle(mf, src.BundleBytes); err != nil {
 		m.Fail(err.Error())
 		return m
 	}
@@ -336,6 +349,24 @@ func verifyChecksum(checksum string, wasmBytes []byte) error {
 		return fmt.Errorf("checksum mismatch: manifest declares %s, binary hashes to sha256:%x", checksum, got)
 	}
 	return nil
+}
+
+// verifyBundle enforces the load-time half of goerp#588's bundle contract:
+// mf.Frontend.Bundle true requires a non-empty bundleBytes whose SHA-256
+// matches mf.Frontend.BundleSHA256 exactly — verifyChecksum's own pattern,
+// applied to the frontend bundle instead of the WASM binary. A module that
+// declares no frontend bundle (mf.Frontend nil or Bundle false) never
+// fails here regardless of bundleBytes — moduleboot's discovery functions
+// populate BundleBytes on a best-effort basis whenever a bundle file is
+// present in the package, independent of what the manifest declares.
+func verifyBundle(mf *manifest.Manifest, bundleBytes []byte) error {
+	if mf.Frontend == nil || mf.Frontend.Bundle == nil || !*mf.Frontend.Bundle {
+		return nil
+	}
+	if len(bundleBytes) == 0 {
+		return fmt.Errorf("frontend.bundle is true but the package has no frontend bundle")
+	}
+	return verifyChecksum(mf.Frontend.BundleSHA256, bundleBytes)
 }
 
 func callGetRoutes(ctx context.Context, inst *wasm.ModuleInstance) ([]abiv1.RouteDeclaration, error) {

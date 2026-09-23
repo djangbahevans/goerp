@@ -666,7 +666,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		MaxSize:       cfg.PoolMaxSize,
 		BorrowTimeout: cfg.PoolBorrowTimeout,
 	}
-	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, ordered)
+	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, storageBackend, ordered)
 
 	moduleRegistry := &registry.ModuleRegistry{}
 	// Wired before the first Update so a request arriving the instant
@@ -897,6 +897,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		RoleStore:   roleStore,
 		SyncPool:    syncPool,
 		DiffEngine:  diffEngine,
+		Storage:     storageBackend,
 		Workers:     workflowWorkers,
 		Hub:         wsHub,
 	}
@@ -1096,6 +1097,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.
 	builtinRoutes["GET /_meta/schema"] = http.HandlerFunc(e.dispatchSchemaRoute)
+
+	// GET /modules/{module}/frontend/{file} (goerp#588) — same reason as
+	// /_meta/schema above: dispatchFrontendBundleRoute is an *Engine
+	// method (it reads e.storageBackend).
+	builtinRoutes["GET /modules/{module}/frontend/{file}"] = http.HandlerFunc(e.dispatchFrontendBundleRoute)
 
 	// GET /_ws (goerp#616) — same reason as /_meta/permissions above:
 	// dispatchWSRoute is an *Engine method.

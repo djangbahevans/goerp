@@ -406,12 +406,13 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 // /auth/logout, /auth/mfa/verify, /auth/mfa/reverify,
 // /admin/users/{id}/mfa/reset, /admin/users/{id}/roles[/{role}],
 // /admin/tenant/plan, /_meta/permissions, /_meta/shares,
-// /_meta/saved-filters, /_meta/schema, and /storage/upload resolve through
-// the exact same RouteTable.Lookup module routes do — no second router.
-// Safe against collision by construction:
-// RegisterModuleRoutes already rejects any module route whose top path
-// segment starts with "_", or is exactly "auth", "admin", or "storage",
-// as a reserved engine namespace.
+// /_meta/saved-filters, /_meta/schema, /storage/upload, and
+// /modules/{module}/frontend/{file} resolve through the exact same
+// RouteTable.Lookup module routes do — no second router. Safe against
+// collision by construction: RegisterModuleRoutes already rejects any
+// module route whose top path segment starts with "_", or is exactly
+// "auth", "admin", "storage", or "modules", as a reserved engine
+// namespace.
 //
 // /admin/users/{id}/mfa/reset and /admin/users/{id}/roles[/{role}] are
 // tenant-facing routes despite their "/admin/" prefix — see
@@ -539,6 +540,17 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 	table.Register("POST", "/storage/upload", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/storage/upload",
+	})
+
+	// /modules/{module}/frontend/{file} (goerp#588) — same EngineBuiltin
+	// posture as /storage/upload above: anonymous and tenant-independent,
+	// since a module's frontend bundle is module code, not tenant data.
+	// "modules" joins auth/admin/storage as a reserved top-level segment
+	// (route.RegisterModuleRoutes), so no module route can ever collide
+	// with this one.
+	table.Register("GET", "/modules/{module}/frontend/{file}", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		PathTemplate: "/modules/{module}/frontend/{file}",
 	})
 }
 

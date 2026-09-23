@@ -149,6 +149,19 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 		return fmt.Errorf("publish manifest to object storage: %w", err)
 	}
 
+	// Publishes mod's frontend bundle (goerp#588), if it declares one, to
+	// module.BundleStorageKey(moduleName, ...) — a module-name-and-filename
+	// key, deliberately not objectKey-derived (unlike the wasm/manifest
+	// pair above): GET /modules/{module}/frontend/{file} must reconstruct
+	// this same key purely from its URL, so a previous version's bundle
+	// stays servable for a client still holding its URL even after this
+	// reload replaces objectKey's own wasm/manifest pair. l.Storage is
+	// already confirmed non-nil at the top of Run, so the only error
+	// PublishBundle can return here is a real upload failure.
+	if err := module.PublishBundle(ctx, l.Storage, moduleName, &m, src.BundleBytes); err != nil {
+		return fmt.Errorf("publish frontend bundle to object storage: %w", err)
+	}
+
 	oldMod := currentModules(l.Registry)[moduleName]
 
 	tenants, err := l.TenantStore.ActiveTenants(ctx)

@@ -26,6 +26,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
 )
@@ -106,12 +107,45 @@ func DiscoverOne(path string) (*loader.Source, error) {
 		return nil, fmt.Errorf("read %s/module.wasm: %w", name, err)
 	}
 
+	bundleBytes, err := readDirBundle(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+
 	return &loader.Source{
 		Name:          name,
 		ManifestBytes: manifestBytes,
 		WasmBytes:     wasmBytes,
+		BundleBytes:   bundleBytes,
 		PackagePath:   path,
 	}, nil
+}
+
+// readDirBundle reads the single frontend/dist/bundle.*.js file under a
+// loose module directory at dir (internal/module/package.go's own archive
+// layout, goerp module create's uncompiled output), or returns (nil, nil)
+// when none is present — a backend-only module. More than one match is a
+// hard error: unlike a missing manifest.json/module.wasm (Discover's own
+// "skip one bad entry, keep scanning" case), this can only mean the
+// package itself is malformed, the same severity as any other read failure
+// in this file.
+func readDirBundle(dir string) ([]byte, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "frontend", "dist", "bundle.*.js"))
+	if err != nil {
+		return nil, err
+	}
+	switch len(matches) {
+	case 0:
+		return nil, nil
+	case 1:
+		data, err := os.ReadFile(matches[0])
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", matches[0], err)
+		}
+		return data, nil
+	default:
+		return nil, fmt.Errorf("more than one frontend bundle found: %v", matches)
+	}
 }
 
 var errZipMemberNotFound = errors.New("member not found")
@@ -130,6 +164,36 @@ var errZipMemberNotFound = errors.New("member not found")
 // small, highly-compressible entry could otherwise still expand to
 // gigabytes during io.ReadAll, before any other validation runs.
 const maxZipMemberSize = 128 << 20 // 128 MiB
+
+// readZipBundle finds the single archive member under frontend/dist/ whose
+// name matches bundle.*.js (internal/module/package.go's own archive
+// layout) and returns its bytes, or (nil, nil) when none is present — a
+// backend-only module. More than one match is a hard error, the same
+// severity readZipMember's own read failures already carry — unlike a
+// missing manifest.json/module.wasm, this can only mean the package
+// itself is malformed.
+func readZipBundle(r *zip.Reader) ([]byte, error) {
+	const dir = "frontend/dist/"
+	var match *zip.File
+	for _, f := range r.File {
+		name, ok := strings.CutPrefix(f.Name, dir)
+		if !ok || strings.Contains(name, "/") {
+			continue
+		}
+		if !strings.HasPrefix(name, "bundle.") || !strings.HasSuffix(name, ".js") {
+			continue
+		}
+		if match != nil {
+			return nil, fmt.Errorf("more than one frontend bundle found: %s, %s", match.Name, f.Name)
+		}
+		match = f
+	}
+	if match == nil {
+		return nil, nil
+	}
+
+	return readZipMember(r, match.Name)
+}
 
 func readZipMember(r *zip.Reader, name string) ([]byte, error) {
 	for _, f := range r.File {
@@ -190,6 +254,11 @@ func readPackageSource(path string) (*loader.Source, error) {
 		return nil, err
 	}
 
+	bundleBytes, err := readZipBundle(&r.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+
 	name := strings.TrimSuffix(filepath.Base(path), ".erp")
 	if mf, err := manifest.Load(manifestBytes); err == nil {
 		name = mf.Name
@@ -199,6 +268,7 @@ func readPackageSource(path string) (*loader.Source, error) {
 		Name:          name,
 		ManifestBytes: manifestBytes,
 		WasmBytes:     wasmBytes,
+		BundleBytes:   bundleBytes,
 		PackagePath:   path,
 	}, nil
 }
@@ -242,6 +312,11 @@ func ParsePackage(data []byte) (*loader.Source, *manifest.Manifest, error) {
 		return nil, nil, err
 	}
 
+	bundleBytes, err := readZipBundle(r)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	mf, err := manifest.Load(manifestBytes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid manifest: %w", err)
@@ -251,6 +326,7 @@ func ParsePackage(data []byte) (*loader.Source, *manifest.Manifest, error) {
 		Name:          mf.Name,
 		ManifestBytes: manifestBytes,
 		WasmBytes:     wasmBytes,
+		BundleBytes:   bundleBytes,
 	}, mf, nil
 }
 
@@ -320,8 +396,14 @@ func Order(sources []loader.Source) ([]loader.Source, error) {
 // view-extension validation (including the cross-module conflict warning,
 // goerp#890), except: before loading a source, it skips it (via
 // LoadedModule.FailDependency) if any of its depends_on is already
-// StatusFailed, cascading through transitive dependents too.
-func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, sources []loader.Source) map[string]*module.LoadedModule {
+// StatusFailed, cascading through transitive dependents too. A
+// successfully-loaded module declaring a frontend bundle has that bundle
+// published to storageBackend (goerp#588) — nil storageBackend (a warn-only
+// Engine startup dependency, engine-internals.md §2) just skips publish
+// with a warning rather than failing startup over it, matching how a
+// missing object storage backend degrades every other publisher of this
+// same bundle (moduleinstall.Worker, modulereload.Leader).
+func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, storageBackend storage.Backend, sources []loader.Source) map[string]*module.LoadedModule {
 	modules := make(map[string]*module.LoadedModule, len(sources))
 	table := route.New()
 	permOwners := make(map[string]string) // permission name -> declaring module
@@ -367,6 +449,9 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 				m.NotifTemplates = nt
 			}
 		}
+		if m.Status != module.StatusFailed {
+			publishBundle(ctx, storageBackend, src.Name, &m.Manifest, src.BundleBytes)
+		}
 		modules[src.Name] = m
 	}
 
@@ -374,6 +459,22 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 	loader.LogViewExtensionConflicts(loader.ValidateViewExtensions(modules))
 
 	return modules
+}
+
+// publishBundle wraps module.PublishBundle with the log-and-continue
+// posture every load path applies to a bundle-publish failure: it's never
+// this module's own load that failed, so nothing here calls m.Fail — the
+// bundle simply isn't servable until a future reload republishes it, same
+// as any other warn-only object storage dependency at engine startup.
+func publishBundle(ctx context.Context, storageBackend storage.Backend, moduleName string, mf *manifest.Manifest, bundleBytes []byte) {
+	err := module.PublishBundle(ctx, storageBackend, moduleName, mf, bundleBytes)
+	switch {
+	case err == nil:
+	case errors.Is(err, module.ErrNoStorageBackend):
+		log.Warn().Str("module", moduleName).Msg("frontend bundle declared but no object storage backend is configured; bundle will not be servable")
+	default:
+		log.Warn().Err(err).Str("module", moduleName).Msg("publish frontend bundle to object storage failed")
+	}
 }
 
 func failedDependency(dependsOn []string, modules map[string]*module.LoadedModule) (string, bool) {
