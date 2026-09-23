@@ -37,7 +37,7 @@ func mutateStockModelDecl() model.ModelDeclaration {
 	}
 }
 
-func setupMutateStockTenant(t *testing.T, primaryDB *sql.DB, prefix string, onHand int) (slug string, mc *ModuleContext) {
+func setupMutateStockTenant(t *testing.T, primaryDB *sql.DB, prefix string, onHand int) (slug string, mc *ModuleContext, tenantID string) {
 	t.Helper()
 	slug = fmt.Sprintf("%s%d", prefix, time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
@@ -55,7 +55,8 @@ func setupMutateStockTenant(t *testing.T, primaryDB *sql.DB, prefix string, onHa
 	if _, err := primaryDB.Exec(`INSERT INTO tenant_`+slug+`.stocks (id, name, on_hand, reserved, weight, price) VALUES ($1, 'Bolt', $2, 0, 1.5, 10.00)`, mutateStockID, onHand); err != nil {
 		t.Fatalf("seed stock: %v", err)
 	}
-	return slug, newORMWriteTestModuleContext(slug, []model.ModelDeclaration{mutateStockModelDecl()})
+	mc, tenantID = newORMWriteTestModuleContext(slug, []model.ModelDeclaration{mutateStockModelDecl()})
+	return slug, mc, tenantID
 }
 
 func mutateOps(ops ...abiMutateOp) []abiMutateOp { return ops }
@@ -74,7 +75,7 @@ func storedOnHand(t *testing.T, primaryDB *sql.DB, slug string) int {
 func TestORMMutate_DecrementWithGuard_AppliesAndRotatesEtag(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "mutateok", 10)
+	slug, mc, _ := setupMutateStockTenant(t, primaryDB, "mutateok", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
 	out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
@@ -103,7 +104,7 @@ func TestORMMutate_DecrementWithGuard_AppliesAndRotatesEtag(t *testing.T) {
 func TestORMMutate_ChangedFieldsAreSortedRegardlessOfOpOrder(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "mutatesorted", 10)
+	_, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutatesorted", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
 	if _, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
@@ -113,7 +114,7 @@ func TestORMMutate_ChangedFieldsAreSortedRegardlessOfOpOrder(t *testing.T) {
 		t.Fatalf("ORMMutate: %+v", hostErr)
 	}
 
-	events := updatedEventPayloads(t, primaryDB, slug)
+	events := updatedEventPayloads(t, primaryDB, tenantID)
 	if len(events) != 1 {
 		t.Fatalf("orm.record.updated events = %d, want 1", len(events))
 	}
@@ -123,7 +124,7 @@ func TestORMMutate_ChangedFieldsAreSortedRegardlessOfOpOrder(t *testing.T) {
 func TestORMMutate_FloatAndDecimalFields(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "mutatefloat", 10)
+	slug, mc, _ := setupMutateStockTenant(t, primaryDB, "mutatefloat", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
 	if _, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
@@ -147,7 +148,7 @@ func TestORMMutate_FloatAndDecimalFields(t *testing.T) {
 func TestORMMutate_NullFieldCountsAsZero(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "mutatenull", 10)
+	slug, mc, _ := setupMutateStockTenant(t, primaryDB, "mutatenull", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	if _, err := primaryDB.Exec(`UPDATE tenant_` + slug + `.stocks SET reserved = NULL`); err != nil {
 		t.Fatalf("null reserved: %v", err)
@@ -168,7 +169,7 @@ func TestORMMutate_NullFieldCountsAsZero(t *testing.T) {
 func TestORMMutate_FalseGuard_FailsPreconditionAndLeavesRecordUnchanged(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "mutateguard", 3)
+	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutateguard", 3)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
 	_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
@@ -182,7 +183,7 @@ func TestORMMutate_FalseGuard_FailsPreconditionAndLeavesRecordUnchanged(t *testi
 	if got := storedOnHand(t, primaryDB, slug); got != 3 {
 		t.Errorf("stored on_hand = %d, want 3 (unchanged)", got)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", slug); got != 0 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", tenantID); got != 0 {
 		t.Errorf("orm.record.updated jobs = %d, want 0", got)
 	}
 }
@@ -190,7 +191,7 @@ func TestORMMutate_FalseGuard_FailsPreconditionAndLeavesRecordUnchanged(t *testi
 func TestORMMutate_UnknownRecord_NotFound(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	_, mc := setupMutateStockTenant(t, primaryDB, "mutatemissing", 3)
+	_, mc, _ := setupMutateStockTenant(t, primaryDB, "mutatemissing", 3)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
 	_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
@@ -206,7 +207,7 @@ func TestORMMutate_UnknownRecord_NotFound(t *testing.T) {
 func TestORMMutate_ConcurrentDecrements_NeverGoBelowGuard(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "mutaterace", 10)
+	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutaterace", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
 
@@ -242,7 +243,7 @@ func TestORMMutate_ConcurrentDecrements_NeverGoBelowGuard(t *testing.T) {
 	if got := storedOnHand(t, primaryDB, slug); got != 0 {
 		t.Errorf("final on_hand = %d, want 0", got)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", slug); got != 10 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", tenantID); got != 10 {
 		t.Errorf("orm.record.updated jobs = %d, want 10", got)
 	}
 }
@@ -250,7 +251,7 @@ func TestORMMutate_ConcurrentDecrements_NeverGoBelowGuard(t *testing.T) {
 func TestORMMutate_Validation(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, _ := setupMutateStockTenant(t, primaryDB, "mutatevalid", 10)
+	slug, _, _ := setupMutateStockTenant(t, primaryDB, "mutatevalid", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
 	transient := model.ModelDeclaration{
@@ -271,7 +272,7 @@ func TestORMMutate_Validation(t *testing.T) {
 	}
 	computedOrder := orderModelDecl()
 	decls := []model.ModelDeclaration{mutateStockModelDecl(), transient, virtual, computedOrder}
-	mc := newORMWriteTestModuleContext(slug, decls)
+	mc, _ := newORMWriteTestModuleContext(slug, decls)
 
 	tests := []struct {
 		name  string
@@ -389,7 +390,7 @@ func TestPlanMutation_ReadonlyNumericField_NotWritable(t *testing.T) {
 			{Name: "version", Def: model.Integer().Readonly()},
 		},
 	}
-	mc := newORMWriteTestModuleContext("planreadonly", []model.ModelDeclaration{decl})
+	mc, _ := newORMWriteTestModuleContext("planreadonly", []model.ModelDeclaration{decl})
 
 	_, hostErr := planMutation(mc, "testmodule.counter", decl, []abiMutateOp{{Field: "version", Delta: int64(1)}})
 	if hostErr == nil || hostErr.Code != abi.ErrCodeFieldNotWritable {
@@ -456,7 +457,7 @@ func jsonContains(doc, fragment string) bool {
 func TestORMMutate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
-	slug, mc := setupMutateStockTenant(t, primaryDB, "mutatetx", 10)
+	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutatetx", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
 
@@ -486,7 +487,7 @@ func TestORMMutate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	if got := storedOnHand(t, primaryDB, slug); got != 10 {
 		t.Errorf("on_hand visible to another connection before commit = %d, want 10", got)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", slug); got != 0 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", tenantID); got != 0 {
 		t.Errorf("orm.record.updated jobs before commit = %d, want 0", got)
 	}
 
@@ -564,7 +565,7 @@ func TestORMMutate_RowHiddenByRLS_NotFoundNotPreconditionFailed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	slug, _ := setupMutateStockTenant(t, primaryDB, "mutaterls", 10)
+	slug, _, _ := setupMutateStockTenant(t, primaryDB, "mutaterls", 10)
 	schema := "tenant_" + slug
 	repID := "22222222-2222-2222-2222-222222222222"
 	otherID := "33333333-3333-3333-3333-333333333333"

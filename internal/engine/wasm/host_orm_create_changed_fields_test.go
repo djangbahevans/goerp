@@ -9,18 +9,24 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/google/uuid"
 )
 
 // newORMCreateChangedFieldsModuleContext is newORMWriteTestModuleContext
 // with a UUID-valid UserID, so fillCreateServerFields actually fills
 // created_by (it parses modCtx.UserID as a UUID before filling; the
 // package's usual "user-1" fixture UserID never satisfies that check).
-// TenantID stays the unique slug, like every other test in this package,
-// so an orm.record.updated lookup by tenant_id sees only this test's own
-// rows against the shared dev Postgres.
-func newORMCreateChangedFieldsModuleContext(slug string, decls []model.ModelDeclaration) *ModuleContext {
+// TenantID is a freshly generated UUID (goerp#992 made tenant_id
+// Readonly, so — same as newORMWriteTestModuleContext — it can no longer
+// be the non-UUID slug, since fillCreateServerFields now writes it
+// straight into the real tenant_id column when a create omits it), kept
+// distinct from TenantSlug; a caller filtering river_job by tenant_id
+// for isolation (updatedEventPayloads/countEventDeliveryJobsByName) uses
+// the returned UUID, not the slug.
+func newORMCreateChangedFieldsModuleContext(slug string, decls []model.ModelDeclaration) (mc *ModuleContext, tenantID string) {
+	tenantID = uuid.NewString()
 	return NewModuleContext("req-1", "testmodule", "00000000-0000-0000-0000-0000000000aa", "contact-1", []string{"admin"}, nil,
-		slug, slug, "trace-1", abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
+		tenantID, slug, "trace-1", abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls}), tenantID
 }
 
 func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
@@ -32,11 +38,11 @@ func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMCreateChangedFieldsModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMCreateChangedFieldsModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	insertClient := r.EventInsertClient()
 
 	first := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
-		"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "DUP3",
+		"name": "A", "code": "DUP3",
 	}}
 	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, first); hostErr != nil {
 		t.Fatalf("first create failed: %+v", hostErr)
@@ -44,14 +50,11 @@ func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
 
 	// created_by is omitted here deliberately — fillCreateServerFields
 	// fills it from modCtx.UserID, so it must not show up as a changed
-	// field on the update arm. tenant_id is always supplied explicitly:
-	// this fixture's modCtx.TenantID is the schema-naming slug, not a
-	// UUID, and the column would reject it if fillCreateServerFields had
-	// to fill it in.
+	// field on the update arm. id/tenant_id are now Readonly (goerp#992)
+	// and are always engine-filled instead of supplied.
 	second := ORMCreateInput{
 		Model: "testmodule.item",
 		Record: map[string]any{
-			"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001",
 			"name": "B updated", "code": "DUP3",
 		},
 		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "update"},
@@ -60,7 +63,7 @@ func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
 		t.Fatalf("OnConflictUpdate create failed: %+v", hostErr)
 	}
 
-	events := updatedEventPayloads(t, primaryDB, slug)
+	events := updatedEventPayloads(t, primaryDB, tenantID)
 	if len(events) != 1 {
 		t.Fatalf("orm.record.updated events = %d, want 1", len(events))
 	}
@@ -81,28 +84,28 @@ func TestHostORM_CreateBatch_OnConflictUpdate_OneEventPerUpdatedRowWithOwnChange
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMCreateChangedFieldsModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMCreateChangedFieldsModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	insertClient := r.EventInsertClient()
 
 	seed := ORMCreateBatchInput{Model: "testmodule.item", Records: []map[string]any{
-		{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "BATCH-A"},
-		{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B", "code": "BATCH-B"},
+		{"name": "A", "code": "BATCH-A"},
+		{"name": "B", "code": "BATCH-B"},
 	}}
 	if _, hostErr := ORMCreateBatch(ctx, r, primaryDB, insertClient, mc, seed); hostErr != nil {
 		t.Fatalf("seed create_batch failed: %+v", hostErr)
 	}
 
-	// Each row supplies its own id (buildAssignment includes the primary
-	// key column like any other assigned field — this isn't specific to
-	// #936, and this test doesn't assert anything about "id" itself), so
-	// only "name"/"number" distinguish the two update rows from each
-	// other for the purpose of this assertion.
+	// id/tenant_id are Readonly (goerp#992) and always engine-assigned —
+	// the OnConflict target is "code", not "id", so the update rows below
+	// don't need to know or repeat the seed rows' generated ids; only
+	// "name"/"number" distinguish the two update rows from each other for
+	// the purpose of this assertion.
 	upsert := ORMCreateBatchInput{
 		Model: "testmodule.item",
 		Records: []map[string]any{
-			{"id": "33333333-3333-3333-3333-333333333333", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "C", "code": "BATCH-C"}, // new insert
-			{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A renamed", "code": "BATCH-A"},
-			{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B", "code": "BATCH-B", "number": int64(9)},
+			{"name": "C", "code": "BATCH-C"}, // new insert
+			{"name": "A renamed", "code": "BATCH-A"},
+			{"name": "B", "code": "BATCH-B", "number": int64(9)},
 		},
 		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "update"},
 	}
@@ -110,11 +113,11 @@ func TestHostORM_CreateBatch_OnConflictUpdate_OneEventPerUpdatedRowWithOwnChange
 		t.Fatalf("upsert create_batch failed: %+v", hostErr)
 	}
 
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 2 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 2 {
 		t.Errorf("orm.record.created jobs = %d, want 2 (one batched event for each create_batch call)", got)
 	}
 
-	events := updatedEventPayloads(t, primaryDB, slug)
+	events := updatedEventPayloads(t, primaryDB, tenantID)
 	if len(events) != 2 {
 		t.Fatalf("orm.record.updated events = %d, want 2 (one per updated row, not one batched)", len(events))
 	}

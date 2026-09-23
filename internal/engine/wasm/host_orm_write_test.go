@@ -42,15 +42,19 @@ func newHostORMWriteCaller(t *testing.T, ctx context.Context, r *Runtime, mc *Mo
 	return inst
 }
 
-// newORMWriteTestModuleContext uses tenantSlug as both TenantSlug and
-// TenantID — TenantID only needs to be a unique string per test here
-// (it's stored as a JSONB string in river_job.args, not a real Postgres
-// column), and reusing the already-unique slug keeps each test's
-// EventDelivery job count isolated from every other test sharing the
-// same primaryDB/river_job table.
-func newORMWriteTestModuleContext(tenantSlug string, modelDecls []model.ModelDeclaration) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantSlug, tenantSlug, "trace-1",
-		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: modelDecls})
+// newORMWriteTestModuleContext returns a ModuleContext plus the real UUID
+// it set as TenantID. TenantSlug stays tenantSlug (the per-test schema
+// name), but TenantID is now a freshly generated UUID, not the slug
+// itself: goerp#992 made tenant_id Readonly, so a create that omits it
+// now gets it auto-filled straight from ModuleContext.TenantID
+// (fillCreateServerFields) into the item table's real UUID tenant_id
+// column — a non-UUID slug there would fail to insert. The returned UUID
+// is also what a caller should pass to countEventDeliveryJobsByName for
+// river_job isolation, in place of the slug that filled that role before.
+func newORMWriteTestModuleContext(tenantSlug string, modelDecls []model.ModelDeclaration) (*ModuleContext, string) {
+	tenantID := uuid.NewString()
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, tenantSlug, "trace-1",
+		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: modelDecls}), tenantID
 }
 
 // itemModelDecl is WithStandardFields()-shaped (soft-delete, etag) plus a
@@ -84,7 +88,7 @@ func readonlyFieldModelDecl() model.ModelDeclaration {
 	return model.ModelDeclaration{
 		Name: "locked_item",
 		Fields: []model.NamedField{
-			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+			{Name: "id", Def: model.UUID().Required().PrimaryKey().Default("uuidv7()")},
 			{Name: "tenant_id", Def: model.UUID().Required()},
 			{Name: "name", Def: model.Text().Required()},
 			{Name: "internal_ref", Def: model.Text().Readonly()},
@@ -98,7 +102,7 @@ func createFixtureLockedItemsTable(t *testing.T, conn *sql.DB, slug string) {
 	schemaName := "tenant_" + slug
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.locked_item (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		tenant_id UUID NOT NULL,
 		name TEXT NOT NULL,
 		internal_ref TEXT
@@ -179,14 +183,13 @@ func TestHostORM_Create_Succeeds_AcquiresSequence_EmitsEvent(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
 	var out ORMCreateOutput
 	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A"},
+		Record: map[string]any{"name": "Widget A"},
 	}, &out)
 	if !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
@@ -198,7 +201,7 @@ func TestHostORM_Create_Succeeds_AcquiresSequence_EmitsEvent(t *testing.T) {
 		t.Error("expected a Sequence value to have been acquired for number")
 	}
 
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 1 {
 		t.Errorf("orm.record.created jobs = %d, want 1", got)
 	}
 }
@@ -218,16 +221,15 @@ func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 
 	const txID = "test-tx-1"
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
 	defer func() { _ = tx.Rollback() }()
 
-	id := "11111111-1111-1111-1111-111111111111"
 	out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget A"},
+		Record: map[string]any{"name": "Widget A"},
 		TxID:   txID,
 	})
 	if hostErr != nil {
@@ -236,6 +238,7 @@ func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	if out.Record["name"] != "Widget A" {
 		t.Errorf("Record[name] = %v, want Widget A", out.Record["name"])
 	}
+	id, _ := out.Record["id"].(string)
 
 	if _, ok := mc.Transaction(txID); !ok {
 		t.Fatal("expected the transaction to still be registered after ORMCreate")
@@ -247,7 +250,7 @@ func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	if count != 0 {
 		t.Errorf("row visible to a separate connection before commit, want invisible (count = %d)", count)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 0 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 0 {
 		t.Errorf("orm.record.created jobs = %d, want 0 before commit", got)
 	}
 
@@ -260,7 +263,7 @@ func TestHostORM_Create_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	if count != 1 {
 		t.Errorf("row count after commit = %d, want 1", count)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 1 {
 		t.Errorf("orm.record.created jobs after commit = %d, want 1", got)
 	}
 }
@@ -279,15 +282,16 @@ func TestHostORM_Write_TxID_RollbackUndoesWrite(t *testing.T) {
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 
-	id := "11111111-1111-1111-1111-111111111111"
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Original"},
-	}); hostErr != nil {
+		Record: map[string]any{"name": "Original"},
+	})
+	if hostErr != nil {
 		t.Fatalf("create failed: %+v", hostErr)
 	}
+	id, _ := createOut.Record["id"].(string)
 
 	const txID = "test-tx-2"
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
@@ -324,11 +328,11 @@ func TestHostORM_Create_TxIDNotFound(t *testing.T) {
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 
 	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+		Record: map[string]any{"name": "A"},
 		TxID:   "does-not-exist",
 	})
 	if hostErr == nil {
@@ -348,12 +352,12 @@ func TestHostORM_Create_MissingRequiredField_ValidationFailed(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001"},
+		Record: map[string]any{},
 	}, nil)
 	if env.OK {
 		t.Fatal("expected create to fail on a missing required field")
@@ -375,14 +379,16 @@ func TestHostORM_Create_ReadonlyField_FieldNotWritable(t *testing.T) {
 	createFixtureLockedItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{readonlyFieldModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{readonlyFieldModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
+	// Only internal_ref goes in the record — goerp#992 made id/tenant_id
+	// Readonly too, and buildAssignment iterates a map (unordered), so
+	// including either alongside internal_ref would make which field
+	// name lands in Error.Details["field"] nondeterministic.
 	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model: "testmodule.locked_item",
 		Record: map[string]any{
-			"id":           "11111111-1111-1111-1111-111111111111",
-			"tenant_id":    "00000000-0000-0000-0000-000000000001",
 			"name":         "Widget",
 			"internal_ref": "should not be settable",
 		},
@@ -407,16 +413,17 @@ func TestHostORM_Write_ReadonlyField_FieldNotWritable(t *testing.T) {
 	createFixtureLockedItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{readonlyFieldModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{readonlyFieldModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
+	var createOut ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.locked_item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "Widget"},
-	}, nil); !env.OK {
+		Record: map[string]any{"name": "Widget"},
+	}, &createOut); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
+	id, _ := createOut.Record["id"].(string)
 
 	env := callORMHost(t, ctx, inst, "call_write", ORMWriteInput{
 		Model:  "testmodule.locked_item",
@@ -443,18 +450,18 @@ func TestHostORM_Create_UniqueViolation(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	first := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
-		"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "DUP",
+		"name": "A", "code": "DUP",
 	}}
 	if env := callORMHost(t, ctx, inst, "call_create", first, nil); !env.OK {
 		t.Fatalf("first create failed: %+v", env.Error)
 	}
 
 	second := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
-		"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B", "code": "DUP",
+		"name": "B", "code": "DUP",
 	}}
 	env := callORMHost(t, ctx, inst, "call_create", second, nil)
 	if env.OK {
@@ -477,17 +484,17 @@ func TestHostORM_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
 	var created ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+		Record: map[string]any{"name": "A"},
 	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
+	id, _ := created.Record["id"].(string)
 	originalEtag := created.Record["etag"].(string)
 
 	var out ORMWriteOutput
@@ -504,7 +511,7 @@ func TestHostORM_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
 		t.Error("expected etag to rotate on a successful write")
 	}
 
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", tenantID); got != 1 {
 		t.Errorf("orm.record.updated jobs = %d, want 1", got)
 	}
 }
@@ -526,17 +533,17 @@ func TestHostORM_Write_EmptyEtagFromCreate_EnforcesCAS(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111112"
 	var created ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+		Record: map[string]any{"name": "A"},
 	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
+	id, _ := created.Record["id"].(string)
 	if got := created.Record["etag"].(string); got != "" {
 		t.Fatalf("Record[etag] after create = %q, want the column default \"\"", got)
 	}
@@ -569,16 +576,17 @@ func TestHostORM_Write_StaleEtag_EtagMismatch(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
+	var created ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
-	}, nil); !env.OK {
+		Record: map[string]any{"name": "A"},
+	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
+	id, _ := created.Record["id"].(string)
 
 	env := callORMHost(t, ctx, inst, "call_write", ORMWriteInput{
 		Model: "testmodule.item", ID: id, Record: map[string]any{"name": "A renamed"}, ExpectedEtag: new("stale-etag"),
@@ -600,7 +608,7 @@ func TestHostORM_Write_MissingRecord_NotFound(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_write", ORMWriteInput{
@@ -623,16 +631,17 @@ func TestHostORM_Unlink_SoftDeletesWithStandardFields(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
+	var created ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
-	}, nil); !env.OK {
+		Record: map[string]any{"name": "A"},
+	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
+	id, _ := created.Record["id"].(string)
 
 	var out ExecResult
 	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", IDs: []string{id}}, &out)
@@ -651,7 +660,7 @@ func TestHostORM_Unlink_SoftDeletesWithStandardFields(t *testing.T) {
 		t.Error("expected deleted_at to be set (soft delete), row was hard-deleted or untouched")
 	}
 
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.deleted", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.deleted", tenantID); got != 1 {
 		t.Errorf("orm.record.deleted jobs = %d, want 1", got)
 	}
 }
@@ -665,7 +674,7 @@ func TestHostORM_Unlink_HardDeletesWithoutStandardFields(t *testing.T) {
 	createFixtureHardItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	id := "11111111-1111-1111-1111-111111111111"
@@ -697,7 +706,7 @@ func TestHostORM_Unlink_MissingRecord_NotFound(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.item", IDs: []string{"99999999-9999-9999-9999-999999999999"}}, nil)
@@ -735,7 +744,7 @@ func TestHostORM_Unlink_ForeignKeyViolation(t *testing.T) {
 	}
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{Model: "testmodule.hard_item", IDs: []string{parentID}}, nil)
@@ -756,17 +765,19 @@ func TestHostORM_Unlink_BulkDeletesAllInOneTransaction(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	ids := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
-	for i, id := range ids {
+	ids := make([]string, 2)
+	for i := range ids {
+		var created ORMCreateOutput
 		if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 			Model:  "testmodule.item",
-			Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Item %d", i)},
-		}, nil); !env.OK {
+			Record: map[string]any{"name": fmt.Sprintf("Item %d", i)},
+		}, &created); !env.OK {
 			t.Fatalf("create %d failed: %+v", i, env.Error)
 		}
+		ids[i], _ = created.Record["id"].(string)
 	}
 
 	var out ExecResult
@@ -785,7 +796,7 @@ func TestHostORM_Unlink_BulkDeletesAllInOneTransaction(t *testing.T) {
 	if count != 0 {
 		t.Errorf("remaining non-deleted row count = %d, want 0", count)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.deleted", slug); got != 2 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.deleted", tenantID); got != 2 {
 		t.Errorf("orm.record.deleted jobs = %d, want 2 (one per affected record, not batched)", got)
 	}
 }
@@ -799,16 +810,17 @@ func TestHostORM_Unlink_MissingIDInBatch_AbortsWholeBatch(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
+	var created ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
-	}, nil); !env.OK {
+		Record: map[string]any{"name": "A"},
+	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
+	id, _ := created.Record["id"].(string)
 
 	env := callORMHost(t, ctx, inst, "call_unlink", ORMUnlinkInput{
 		Model: "testmodule.item", IDs: []string{id, "99999999-9999-9999-9999-999999999999"},
@@ -840,14 +852,14 @@ func TestHostORM_CreateBatch_AllOrNothing_OneFailureAbortsWholeBatch(t *testing.
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_create_batch", ORMCreateBatchInput{
 		Model: "testmodule.item",
 		Records: []map[string]any{
-			{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
-			{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001"}, // missing required "name"
+			{"name": "A"},
+			{}, // missing required "name"
 		},
 	}, nil)
 	if env.OK {
@@ -875,15 +887,15 @@ func TestHostORM_CreateBatch_Succeeds_EmitsOneBatchedEvent(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	var out ORMCreateBatchOutput
 	env := callORMHost(t, ctx, inst, "call_create_batch", ORMCreateBatchInput{
 		Model: "testmodule.item",
 		Records: []map[string]any{
-			{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
-			{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B"},
+			{"name": "A"},
+			{"name": "B"},
 		},
 	}, &out)
 	if !env.OK {
@@ -894,7 +906,7 @@ func TestHostORM_CreateBatch_Succeeds_EmitsOneBatchedEvent(t *testing.T) {
 	}
 
 	// One batched event, not one per record.
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 1 {
 		t.Errorf("orm.record.created jobs = %d, want 1 (batched)", got)
 	}
 }
@@ -908,11 +920,11 @@ func TestHostORM_Create_OnConflictIgnore_NoErrorNoEvent(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	first := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
-		"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "DUP",
+		"name": "A", "code": "DUP",
 	}}
 	if env := callORMHost(t, ctx, inst, "call_create", first, nil); !env.OK {
 		t.Fatalf("first create failed: %+v", env.Error)
@@ -920,7 +932,7 @@ func TestHostORM_Create_OnConflictIgnore_NoErrorNoEvent(t *testing.T) {
 
 	second := ORMCreateInput{
 		Model:      "testmodule.item",
-		Record:     map[string]any{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B", "code": "DUP"},
+		Record:     map[string]any{"name": "B", "code": "DUP"},
 		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "ignore"},
 	}
 	var out ORMCreateOutput
@@ -939,7 +951,7 @@ func TestHostORM_Create_OnConflictIgnore_NoErrorNoEvent(t *testing.T) {
 	if count != 1 {
 		t.Errorf("row count = %d, want 1 (the conflicting insert should have been skipped, not applied)", count)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 1 {
 		t.Errorf("orm.record.created jobs = %d, want 1 (only the first create, none for the ignored conflict)", got)
 	}
 }
@@ -953,11 +965,11 @@ func TestHostORM_Create_OnConflictUpdate_EmitsUpdatedNotCreated(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	first := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
-		"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "DUP2",
+		"name": "A", "code": "DUP2",
 	}}
 	if env := callORMHost(t, ctx, inst, "call_create", first, nil); !env.OK {
 		t.Fatalf("first create failed: %+v", env.Error)
@@ -965,7 +977,7 @@ func TestHostORM_Create_OnConflictUpdate_EmitsUpdatedNotCreated(t *testing.T) {
 
 	second := ORMCreateInput{
 		Model:      "testmodule.item",
-		Record:     map[string]any{"id": "22222222-2222-2222-2222-222222222222", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B updated", "code": "DUP2"},
+		Record:     map[string]any{"name": "B updated", "code": "DUP2"},
 		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "update"},
 	}
 	var out ORMCreateOutput
@@ -984,10 +996,10 @@ func TestHostORM_Create_OnConflictUpdate_EmitsUpdatedNotCreated(t *testing.T) {
 	if count != 1 {
 		t.Errorf("row count = %d, want 1 (the conflicting row was updated in place, not duplicated)", count)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 1 {
 		t.Errorf("orm.record.created jobs = %d, want 1 (only the first, real create)", got)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", tenantID); got != 1 {
 		t.Errorf("orm.record.updated jobs = %d, want 1 (the OnConflictUpdate row, not orm.record.created)", got)
 	}
 }
@@ -1001,12 +1013,12 @@ func TestHostORM_Create_OnConflict_InvalidTarget_ConflictTargetInvalid(t *testin
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:      "testmodule.item",
-		Record:     map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+		Record:     map[string]any{"name": "A"},
 		OnConflict: &OnConflictOption{Fields: []string{"name"}, Policy: "ignore"}, // "name" has no unique index
 	}, nil)
 	if env.OK {
@@ -1026,22 +1038,23 @@ func TestHostORM_FirstOrCreate_ExistingRecord_CreatedFalse(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
+	var created ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A", "code": "FOC-1"},
-	}, nil); !env.OK {
+		Record: map[string]any{"name": "A", "code": "FOC-1"},
+	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
+	id, _ := created.Record["id"].(string)
 
 	var out ORMFirstOrCreateOutput
 	env := callORMHost(t, ctx, inst, "call_first_or_create", ORMFirstOrCreateInput{
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"code": "FOC-1"},
-		CreateVals: map[string]any{"id": "99999999-9999-9999-9999-999999999999", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "should not be created"},
+		CreateVals: map[string]any{"name": "should not be created"},
 	}, &out)
 	if !env.OK {
 		t.Fatalf("first_or_create failed: %+v", env.Error)
@@ -1071,13 +1084,13 @@ func TestHostORM_FirstOrCreate_InvalidTarget_ConflictTargetInvalid(t *testing.T)
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_first_or_create", ORMFirstOrCreateInput{
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"name": "A"}, // "name" has no unique index
-		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
+		CreateVals: map[string]any{"name": "A"},
 	}, nil)
 	if env.OK {
 		t.Fatal("expected a unique-vals field set with no matching unique index to fail")
@@ -1096,7 +1109,7 @@ func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	var out ORMFirstOrCreateOutput
@@ -1104,7 +1117,7 @@ func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"code": "FOC-2"},
 		// "code" is absent from CreateVals — the miss-path merge should supply it.
-		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New"},
+		CreateVals: map[string]any{"name": "New"},
 	}, &out)
 	if !env.OK {
 		t.Fatalf("first_or_create failed: %+v", env.Error)
@@ -1116,7 +1129,7 @@ func TestHostORM_FirstOrCreate_MissingRecord_CreatedTrue(t *testing.T) {
 		t.Errorf("Record[code] = %v, want %q (merged in from UniqueVals)", out.Record["code"], "FOC-2")
 	}
 
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", slug); got != 1 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 1 {
 		t.Errorf("orm.record.created jobs = %d, want 1", got)
 	}
 }
@@ -1135,13 +1148,13 @@ func TestHostORM_FirstOrCreate_ConflictingOverlapKey_UniqueValsWins(t *testing.T
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	req := ORMFirstOrCreateInput{
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"code": "FOC-3"},
-		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New", "code": "wrong"},
+		CreateVals: map[string]any{"name": "New", "code": "wrong"},
 	}
 
 	var out1 ORMFirstOrCreateOutput
@@ -1170,13 +1183,13 @@ func TestHostORM_FirstOrCreate_NilUniqueVal_ValidationFailed(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_first_or_create", ORMFirstOrCreateInput{
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"code": nil},
-		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New"},
+		CreateVals: map[string]any{"name": "New"},
 	}, nil)
 	if env.OK {
 		t.Fatal("expected a nil unique_vals entry to fail rather than silently never matching")
@@ -1200,7 +1213,7 @@ func TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction(t *testing.
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 
 	const txID = "test-tx-foc-1"
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
@@ -1209,7 +1222,7 @@ func TestHostORM_FirstOrCreate_TxID_ParticipatesInCallersTransaction(t *testing.
 	out, hostErr := ORMFirstOrCreate(ctx, r, primaryDB, insertClient, mc, ORMFirstOrCreateInput{
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"code": "FOC-TX-1"},
-		CreateVals: map[string]any{"id": "11111111-1111-1111-1111-111111111111", "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "New"},
+		CreateVals: map[string]any{"name": "New"},
 		TxID:       txID,
 	})
 	if hostErr != nil {
@@ -1255,7 +1268,7 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 
 	testRuntime := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := testRuntime.EventInsertClient()
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 
 	const n = 8
 	var wg sync.WaitGroup
@@ -1269,7 +1282,6 @@ func TestHostORM_FirstOrCreate_ConcurrentCallersRacingSameDomain_NeverDuplicates
 				Model:      "testmodule.item",
 				UniqueVals: map[string]any{"code": "FOC-RACE"},
 				CreateVals: map[string]any{
-					"id": fmt.Sprintf("%08d-0000-0000-0000-000000000000", i), "tenant_id": "00000000-0000-0000-0000-000000000001",
 					"name": "Race",
 				},
 			})
@@ -1310,17 +1322,19 @@ func TestHostORM_WriteMany_UpdatesAllInOneTransaction(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	ids := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
-	for i, id := range ids {
+	ids := make([]string, 2)
+	for i := range ids {
+		var created ORMCreateOutput
 		if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 			Model:  "testmodule.item",
-			Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Item %d", i)},
-		}, nil); !env.OK {
+			Record: map[string]any{"name": fmt.Sprintf("Item %d", i)},
+		}, &created); !env.OK {
 			t.Fatalf("create %d failed: %+v", i, env.Error)
 		}
+		ids[i], _ = created.Record["id"].(string)
 	}
 
 	var out ExecResult
@@ -1341,7 +1355,7 @@ func TestHostORM_WriteMany_UpdatesAllInOneTransaction(t *testing.T) {
 	if count != 2 {
 		t.Errorf("renamed row count = %d, want 2", count)
 	}
-	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", slug); got != 2 {
+	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.updated", tenantID); got != 2 {
 		t.Errorf("orm.record.updated jobs = %d, want 2 (one per affected record, not batched)", got)
 	}
 }
@@ -1355,16 +1369,17 @@ func TestHostORM_WriteMany_MissingID_AbortsWholeBatch(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
+	var created ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
-	}, nil); !env.OK {
+		Record: map[string]any{"name": "A"},
+	}, &created); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
+	id, _ := created.Record["id"].(string)
 
 	env := callORMHost(t, ctx, inst, "call_write_many", ORMWriteManyInput{
 		Model: "testmodule.item", IDs: []string{id, "99999999-9999-9999-9999-999999999999"}, Record: map[string]any{"name": "Renamed"},
@@ -1394,29 +1409,29 @@ func TestHostORM_WriteWhere_UpdatesMatchingRows(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	// "code" carries a unique index, so each row (matching or not) needs
 	// its own distinct value — the domain below matches by IN(...) over
 	// two of the three codes rather than a shared value.
-	matching := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
 	matchingCodes := []string{"WHERE-1", "WHERE-2"}
-	for i, id := range matching {
+	for i, code := range matchingCodes {
 		if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 			Model:  "testmodule.item",
-			Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": fmt.Sprintf("Match %d", i), "code": matchingCodes[i]},
+			Record: map[string]any{"name": fmt.Sprintf("Match %d", i), "code": code},
 		}, nil); !env.OK {
 			t.Fatalf("create matching %d failed: %+v", i, env.Error)
 		}
 	}
-	nonMatchingID := "33333333-3333-3333-3333-333333333333"
+	var nonMatching ORMCreateOutput
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": nonMatchingID, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "No match", "code": "WHERE-OTHER"},
-	}, nil); !env.OK {
+		Record: map[string]any{"name": "No match", "code": "WHERE-OTHER"},
+	}, &nonMatching); !env.OK {
 		t.Fatalf("create non-matching failed: %+v", env.Error)
 	}
+	nonMatchingID, _ := nonMatching.Record["id"].(string)
 
 	var out ExecResult
 	env := callORMHost(t, ctx, inst, "call_write_where", ORMWriteWhereInput{
@@ -1447,7 +1462,7 @@ func TestHostORM_WriteWhere_MalformedDomain_DomainInvalid(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
 	env := callORMHost(t, ctx, inst, "call_write_where", ORMWriteWhereInput{
@@ -1470,13 +1485,12 @@ func TestHostORM_WriteWhere_ValueWithSingleQuote_SafelyEscaped(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, _ := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
 	if env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.item",
-		Record: map[string]any{"id": id, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "O'Brien", "code": "INJ-1"},
+		Record: map[string]any{"name": "O'Brien", "code": "INJ-1"},
 	}, nil); !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
@@ -1627,7 +1641,7 @@ func TestORMFirstOrCreate_FillsTenantOnTheCreatedRecord(t *testing.T) {
 	out, hostErr := ORMFirstOrCreate(context.Background(), r, openTestPrimaryDB(t), r.EventInsertClient(), mc, ORMFirstOrCreateInput{
 		Model:      "testmodule.item",
 		UniqueVals: map[string]any{"code": "W-9"},
-		CreateVals: map[string]any{"id": uuid.NewString(), "name": "Widget Z"},
+		CreateVals: map[string]any{"name": "Widget Z"},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMFirstOrCreate: %v", hostErr)

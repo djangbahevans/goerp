@@ -151,8 +151,12 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
-	if hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
+	if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
+	} else if genPK != "" {
+		if pkCol, ok := primaryKeyColumn(md); ok {
+			serverFilled = append(serverFilled, pkCol)
+		}
 	}
 	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
@@ -292,8 +296,12 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 		if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
-		if hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
+		if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
+		} else if genPK != "" {
+			if pkCol, ok := primaryKeyColumn(md); ok {
+				serverFilled = append(serverFilled, pkCol)
+			}
 		}
 		if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
@@ -468,7 +476,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	record := make(map[string]any, len(input.UniqueVals)+len(input.CreateVals))
 	maps.Copy(record, input.CreateVals)
 	maps.Copy(record, input.UniqueVals)
-	fillCreateServerFields(md, modCtx, record)
+	serverFilled := fillCreateServerFields(md, modCtx, record)
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -478,14 +486,18 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
-	if hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
+	if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
+	} else if genPK != "" {
+		if pkCol, ok := primaryKeyColumn(md); ok {
+			serverFilled = append(serverFilled, pkCol)
+		}
 	}
 	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
 
-	row, _, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil, nil)
+	row, _, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil, serverFilled)
 	if hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
@@ -589,7 +601,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, hostErr
 	}
 
-	updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, input.Model, pkCol, input.ID, record, input.ExpectedEtag)
+	updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, input.Model, pkCol, input.ID, record, input.ExpectedEtag, []string{"etag"})
 	if hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
@@ -1296,12 +1308,11 @@ func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, 
 // check" semantics); a non-nil expectedEtag adds it — including when it
 // points to "", which requires the stored etag to still be its
 // never-written default rather than silently matching anything.
-func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag *string) (map[string]any, []string, *abi.HostError) {
-	// A write never server-fills anything into record the way
-	// fillCreateServerFields does for create (goerp#992) — no serverFilled
-	// exemption needed; a client-supplied Readonly field is always
-	// rejected here.
-	assigned, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record, nil)
+func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag *string, serverFilled []string) (map[string]any, []string, *abi.HostError) {
+	// serverFilled names the etag key its own caller already rotated into
+	// record (goerp#992 made etag Readonly) — exempted here for the same
+	// reason fillCreateServerFields's tenant_id/created_by are on create.
+	assigned, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record, serverFilled)
 	if hostErr != nil {
 		return nil, nil, hostErr
 	}
@@ -1354,7 +1365,7 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}
-		updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, qualifiedModel, pkCol, id, record, nil)
+		updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, qualifiedModel, pkCol, id, record, nil, []string{"etag"})
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}

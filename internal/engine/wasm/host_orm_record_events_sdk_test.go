@@ -42,38 +42,44 @@ func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 	createFixtureItemsTable(t, primaryDB, slug)
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	mc := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
+	mc, tenantID := newORMWriteTestModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	insertClient := r.EventInsertClient()
 
-	id1, id2 := "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	var id1 string
 
 	t.Run("created (single)", func(t *testing.T) {
-		if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+		out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
 			Model:  "testmodule.item",
-			Record: map[string]any{"id": id1, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "A"},
-		}); hostErr != nil {
+			Record: map[string]any{"name": "A"},
+		})
+		if hostErr != nil {
 			t.Fatalf("ORMCreate: %+v", hostErr)
 		}
+		id1, _ = out.Record["id"].(string)
 
 		var p events.RecordCreatedPayload
-		mustParsePayload(t, "orm.record.created", rawEventPayload(t, primaryDB, "orm.record.created", slug), &p)
+		mustParsePayload(t, "orm.record.created", rawEventPayload(t, primaryDB, "orm.record.created", tenantID), &p)
 		if p.Model != "testmodule.item" || p.Record["name"] != "A" || p.Records != nil {
 			t.Errorf("got %+v", p)
 		}
 	})
 
 	t.Run("created (batch)", func(t *testing.T) {
-		if _, hostErr := ORMCreateBatch(ctx, r, primaryDB, insertClient, mc, ORMCreateBatchInput{
+		out, hostErr := ORMCreateBatch(ctx, r, primaryDB, insertClient, mc, ORMCreateBatchInput{
 			Model: "testmodule.item",
 			Records: []map[string]any{
-				{"id": id2, "tenant_id": "00000000-0000-0000-0000-000000000001", "name": "B"},
+				{"name": "B"},
 			},
-		}); hostErr != nil {
+		})
+		if hostErr != nil {
 			t.Fatalf("ORMCreateBatch: %+v", hostErr)
+		}
+		if len(out.Records) != 1 {
+			t.Fatalf("len(Records) = %d, want 1", len(out.Records))
 		}
 
 		var p events.RecordCreatedPayload
-		mustParsePayload(t, "orm.record.created", rawEventPayload(t, primaryDB, "orm.record.created", slug), &p)
+		mustParsePayload(t, "orm.record.created", rawEventPayload(t, primaryDB, "orm.record.created", tenantID), &p)
 		if p.Model != "testmodule.item" || p.Record != nil || len(p.Records) != 1 || p.Records[0]["name"] != "B" {
 			t.Errorf("got %+v", p)
 		}
@@ -87,7 +93,7 @@ func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 		}
 
 		var p events.RecordUpdatedPayload
-		mustParsePayload(t, "orm.record.updated", rawEventPayload(t, primaryDB, "orm.record.updated", slug), &p)
+		mustParsePayload(t, "orm.record.updated", rawEventPayload(t, primaryDB, "orm.record.updated", tenantID), &p)
 		if p.Model != "testmodule.item" || p.Record["name"] != "A renamed" || len(p.ChangedFields) != 1 || p.ChangedFields[0] != "name" {
 			t.Errorf("got %+v", p)
 		}
@@ -101,7 +107,7 @@ func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 		}
 
 		var p events.RecordDeletedPayload
-		mustParsePayload(t, "orm.record.deleted", rawEventPayload(t, primaryDB, "orm.record.deleted", slug), &p)
+		mustParsePayload(t, "orm.record.deleted", rawEventPayload(t, primaryDB, "orm.record.deleted", tenantID), &p)
 		if p.Model != "testmodule.item" || p.Record["id"] != id1 {
 			t.Errorf("got %+v", p)
 		}

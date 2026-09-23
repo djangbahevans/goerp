@@ -21,7 +21,7 @@ func writeFieldSecTestModelDecl() model.ModelDeclaration {
 		Name:  "widget",
 		Table: "widgets",
 		Fields: []model.NamedField{
-			{Name: "id", Def: model.UUID().Required().PrimaryKey()},
+			{Name: "id", Def: model.UUID().Required().PrimaryKey().Default("uuidv7()")},
 			{Name: "name", Def: model.Text().Required()},
 			{Name: "discount_percent", Def: model.Integer().
 				Access(model.AccessWrite("sales:order:set_discount")).
@@ -39,7 +39,7 @@ func createWriteFieldSecFixtureTable(t *testing.T, primaryDB *sql.DB, slug strin
 	schema := "tenant_" + slug
 
 	if _, err := primaryDB.ExecContext(ctx, `CREATE TABLE `+schema+`.widgets (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		name TEXT NOT NULL,
 		discount_percent INTEGER,
 		internal_flag BOOLEAN
@@ -100,10 +100,9 @@ func TestORMCreate_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	mc := newWriteFieldSecModuleContext(slug) // no permissions granted
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "11111111-1111-1111-1111-111111111111"
 	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.widget",
-		Record: map[string]any{"id": id, "name": "Widget A", "discount_percent": int64(10)},
+		Record: map[string]any{"name": "Widget A", "discount_percent": int64(10)},
 	}, nil)
 	if env.OK {
 		t.Fatal("expected create to be rejected for the write-denied discount_percent field")
@@ -116,7 +115,7 @@ func TestORMCreate_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	}
 
 	var count int
-	if err := primaryDB.QueryRow("SELECT count(*) FROM tenant_"+slug+".widgets WHERE id = $1", id).Scan(&count); err != nil {
+	if err := primaryDB.QueryRow("SELECT count(*) FROM tenant_" + slug + ".widgets").Scan(&count); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
 	if count != 0 {
@@ -136,11 +135,10 @@ func TestORMCreate_FieldSecurity_IgnoreStripsFieldSilently(t *testing.T) {
 	mc := newWriteFieldSecModuleContext(slug) // no permissions granted
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "22222222-2222-2222-2222-222222222222"
 	var out ORMCreateOutput
 	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.widget",
-		Record: map[string]any{"id": id, "name": "Widget B", "internal_flag": true},
+		Record: map[string]any{"name": "Widget B", "internal_flag": true},
 	}, &out)
 	if !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
@@ -151,6 +149,7 @@ func TestORMCreate_FieldSecurity_IgnoreStripsFieldSilently(t *testing.T) {
 	if out.Record["internal_flag"] != nil {
 		t.Errorf("internal_flag = %v, want nil (silently stripped, never written)", out.Record["internal_flag"])
 	}
+	id, _ := out.Record["id"].(string)
 
 	var flag sql.NullBool
 	if err := primaryDB.QueryRow("SELECT internal_flag FROM tenant_"+slug+".widgets WHERE id = $1", id).Scan(&flag); err != nil {
@@ -173,11 +172,10 @@ func TestORMCreate_FieldSecurity_GrantedPermissionWritesNormally(t *testing.T) {
 	mc := newWriteFieldSecModuleContext(slug, "sales:order:set_discount")
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	id := "33333333-3333-3333-3333-333333333333"
 	var out ORMCreateOutput
 	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
 		Model:  "testmodule.widget",
-		Record: map[string]any{"id": id, "name": "Widget C", "discount_percent": int64(15)},
+		Record: map[string]any{"name": "Widget C", "discount_percent": int64(15)},
 	}, &out)
 	if !env.OK {
 		t.Fatalf("create failed: %+v", env.Error)
@@ -200,11 +198,12 @@ func TestORMWrite_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	granted := newWriteFieldSecModuleContext(slug, "sales:order:set_discount")
 	createInst := newHostORMWriteCaller(t, ctx, r, granted)
 
-	id := "44444444-4444-4444-4444-444444444444"
+	var created ORMCreateOutput
 	callORMHost(t, ctx, createInst, "call_create", ORMCreateInput{
 		Model:  "testmodule.widget",
-		Record: map[string]any{"id": id, "name": "Widget D", "discount_percent": int64(5)},
-	}, nil)
+		Record: map[string]any{"name": "Widget D", "discount_percent": int64(5)},
+	}, &created)
+	id, _ := created.Record["id"].(string)
 
 	// Now write with a caller lacking the permission — the same
 	// buildAssignment chokepoint should reject this too, proving the
