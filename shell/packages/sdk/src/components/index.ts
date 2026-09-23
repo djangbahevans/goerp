@@ -19,6 +19,7 @@ export type { BreadcrumbItem, BreadcrumbProps } from "./breadcrumb.js";
 export { Breadcrumb } from "./breadcrumb.js";
 export type { BulkActionPanelProps } from "./bulk-action-panel.js";
 export { BulkActionPanel } from "./bulk-action-panel.js";
+export { cn } from "./cn.js";
 export type { CodeFieldProps } from "./code-field.js";
 export { CodeField } from "./code-field.js";
 export type { ColorPickerProps } from "./color-picker.js";

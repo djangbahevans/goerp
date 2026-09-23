@@ -68,6 +68,7 @@
     "lucide-react": "^1.42.0",
     "maplibre-gl": "^6.10.0",
     "pmtiles": "^4.5.0",
+    "tailwind-merge": "^3.7.0",
     "valibot": "^1.5.0"
   }
 }
