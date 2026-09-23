@@ -94,6 +94,30 @@ jobs:
       - name: Run govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+      - name: Build goerp CLI Binary
+        run: CGO_ENABLED=0 go build -o goerp ./cmd/goerp
+
+      # Every in-repo module with a schema/schema.go must have its
+      # models/*.gen.go committed and current — a schema change that lands
+      # without the matching `goerp module generate` run fails here instead
+      # of silently drifting until someone notices at runtime.
+      - name: Check In-Repo Module Schemas Are Regenerated
+        run: |
+          set -uo pipefail
+          workspace="$(pwd)"
+          status=0
+          while IFS= read -r manifest; do
+            dir="$(dirname "$manifest")"
+            if [ -f "$dir/schema/schema.go" ]; then
+              echo "::group::goerp module generate --check ($dir)"
+              if ! (cd "$dir" && "$workspace/goerp" module generate --check); then
+                status=1
+              fi
+              echo "::endgroup::"
+            fi
+          done < <(find . -name manifest.json -not -path '*/node_modules/*')
+          exit "$status"
+
   # internal/engine/**, internal/module/**, sdk/go/**, cmd/engine/** —
   # the engine binary and everything it imports. Needs the full
   # compose.dev.yml stack (Postgres/Redis/Meilisearch/SeaweedFS) and is
