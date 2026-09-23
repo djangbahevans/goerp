@@ -93,19 +93,19 @@ func searchCount(txID, model, domain string) (int64, error) {
 }
 
 // SearchRead finds and reads matching records in one call via
-// host.orm.search_read, mapping each into a T via its own db-tag-mapped
-// fields. Returns (records, nextCursor, error); nextCursor is "" when
-// there are no more pages.
-func SearchRead[T any](model, domain string, fields []string, opts ...SearchOption) ([]T, string, error) {
-	return searchRead[T]("", model, domain, fields, opts...)
+// host.orm.search_read, mapping each into a T via its own Scan method.
+// Returns (records, nextCursor, error); nextCursor is "" when there are
+// no more pages.
+func SearchRead[T any, PT ptrScanner[T]](model, domain string, fields []string, opts ...SearchOption) ([]T, string, error) {
+	return searchRead[T, PT]("", model, domain, fields, opts...)
 }
 
 // SearchReadTx is SearchRead, scoped to tx's own open transaction.
-func SearchReadTx[T any](tx *db.Tx, model, domain string, fields []string, opts ...SearchOption) ([]T, string, error) {
-	return searchRead[T](tx.TxID(), model, domain, fields, opts...)
+func SearchReadTx[T any, PT ptrScanner[T]](tx *db.Tx, model, domain string, fields []string, opts ...SearchOption) ([]T, string, error) {
+	return searchRead[T, PT](tx.TxID(), model, domain, fields, opts...)
 }
 
-func searchRead[T any](txID, model, domain string, fields []string, opts ...SearchOption) ([]T, string, error) {
+func searchRead[T any, PT ptrScanner[T]](txID, model, domain string, fields []string, opts ...SearchOption) ([]T, string, error) {
 	var o searchOpts
 	for _, opt := range opts {
 		opt(&o)
@@ -115,7 +115,7 @@ func searchRead[T any](txID, model, domain string, fields []string, opts ...Sear
 	if err := hostcall.Do(hostORMSearchRead, in, &out); err != nil {
 		return nil, "", err
 	}
-	records, err := decodeRecords[T](out.Records)
+	records, err := decodeRecords[T, PT](out.Records)
 	if err != nil {
 		return nil, "", err
 	}

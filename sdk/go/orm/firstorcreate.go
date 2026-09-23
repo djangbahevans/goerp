@@ -16,22 +16,22 @@ type ormFirstOrCreateOutput = abi.ORMFirstOrCreateOutput
 // match a declared unique index (PK or Index(...).Unique()) on model, the
 // same rule OnConflictIgnore/OnConflictUpdate's target fields follow —
 // see go-sdk-reference.md §6a.
-func FirstOrCreate[T any](model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
-	return firstOrCreate[T]("", model, uniqueVals, createVals)
+func FirstOrCreate[T any, PT ptrScanner[T]](model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
+	return firstOrCreate[T, PT]("", model, uniqueVals, createVals)
 }
 
 // FirstOrCreateTx is FirstOrCreate, scoped to tx's own open transaction.
-func FirstOrCreateTx[T any](tx *db.Tx, model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
-	return firstOrCreate[T](tx.TxID(), model, uniqueVals, createVals)
+func FirstOrCreateTx[T any, PT ptrScanner[T]](tx *db.Tx, model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
+	return firstOrCreate[T, PT](tx.TxID(), model, uniqueVals, createVals)
 }
 
-func firstOrCreate[T any](txID, model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
+func firstOrCreate[T any, PT ptrScanner[T]](txID, model string, uniqueVals, createVals map[string]any) (record T, created bool, err error) {
 	var zero T
 	var out ormFirstOrCreateOutput
 	in := ormFirstOrCreateInput{Model: model, UniqueVals: uniqueVals, CreateVals: createVals, TxID: txID}
 	if err := hostcall.Do(hostORMFirstOrCreate, in, &out); err != nil {
 		return zero, false, err
 	}
-	record, err = decodeRecord[T](out.Record)
+	record, err = decodeRecord[T, PT](out.Record)
 	return record, out.Created, err
 }

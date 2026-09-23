@@ -11,39 +11,39 @@ type ormReadInput = abi.ORMReadInput
 type ormReadOutput = abi.ORMReadOutput
 
 // Read fetches records by ID via host.orm.read, mapping each into a T
-// via its own db-tag-mapped fields. An ID matching no record is simply
-// absent from the result — len(result) can be less than len(ids).
-func Read[T any](model string, ids []string, fields []string) ([]T, error) {
-	return read[T]("", model, ids, fields)
+// via its own Scan method. An ID matching no record is simply absent
+// from the result — len(result) can be less than len(ids).
+func Read[T any, PT ptrScanner[T]](model string, ids []string, fields []string) ([]T, error) {
+	return read[T, PT]("", model, ids, fields)
 }
 
 // ReadTx is Read, scoped to tx's own open transaction.
-func ReadTx[T any](tx *db.Tx, model string, ids []string, fields []string) ([]T, error) {
-	return read[T](tx.TxID(), model, ids, fields)
+func ReadTx[T any, PT ptrScanner[T]](tx *db.Tx, model string, ids []string, fields []string) ([]T, error) {
+	return read[T, PT](tx.TxID(), model, ids, fields)
 }
 
-func read[T any](txID, model string, ids []string, fields []string) ([]T, error) {
+func read[T any, PT ptrScanner[T]](txID, model string, ids []string, fields []string) ([]T, error) {
 	var out ormReadOutput
 	if err := hostcall.Do(hostORMRead, ormReadInput{Model: model, IDs: ids, Fields: fields, TxID: txID}, &out); err != nil {
 		return nil, err
 	}
-	return decodeRecords[T](out.Records)
+	return decodeRecords[T, PT](out.Records)
 }
 
 // ReadOne fetches a single record by ID, returning ErrNotFound if it
 // doesn't exist.
-func ReadOne[T any](model, id string, fields []string) (T, error) {
-	return readOne[T]("", model, id, fields)
+func ReadOne[T any, PT ptrScanner[T]](model, id string, fields []string) (T, error) {
+	return readOne[T, PT]("", model, id, fields)
 }
 
 // ReadOneTx is ReadOne, scoped to tx's own open transaction.
-func ReadOneTx[T any](tx *db.Tx, model, id string, fields []string) (T, error) {
-	return readOne[T](tx.TxID(), model, id, fields)
+func ReadOneTx[T any, PT ptrScanner[T]](tx *db.Tx, model, id string, fields []string) (T, error) {
+	return readOne[T, PT](tx.TxID(), model, id, fields)
 }
 
-func readOne[T any](txID, model, id string, fields []string) (T, error) {
+func readOne[T any, PT ptrScanner[T]](txID, model, id string, fields []string) (T, error) {
 	var zero T
-	records, err := read[T](txID, model, []string{id}, fields)
+	records, err := read[T, PT](txID, model, []string{id}, fields)
 	if err != nil {
 		return zero, err
 	}

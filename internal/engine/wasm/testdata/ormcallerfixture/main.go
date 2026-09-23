@@ -23,12 +23,41 @@ import (
 
 const widgetModel = "testmodule.widget"
 
-// widget mirrors "testmodule.widget"'s own declared fields via db tags,
-// the shape every orm.*[T] function here maps a record into.
+// widget mirrors "testmodule.widget"'s own declared fields, the shape
+// every orm.*[T] function here maps a record into.
 type widget struct {
-	ID    string `db:"id"`
-	Name  string `db:"name"`
-	Price int64  `db:"price"`
+	ID    string
+	Name  string
+	Price int64
+}
+
+// Scan implements sdk/go/orm's reflection-free decode contract
+// (goerp#974) by hand — the same shape goerp module generate will emit
+// onto every generated model struct (goerp#977); hand-written here since
+// widget predates the generator and isn't its output.
+func (w *widget) Scan(row map[string]any) error {
+	if v, ok := row["id"]; ok {
+		s, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("widget", "ID", "string", v)
+		}
+		w.ID = s
+	}
+	if v, ok := row["name"]; ok {
+		s, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("widget", "Name", "string", v)
+		}
+		w.Name = s
+	}
+	if v, ok := row["price"]; ok {
+		n, ok := v.(int64)
+		if !ok {
+			return orm.NewDecodeError("widget", "Price", "int64", v)
+		}
+		w.Price = n
+	}
+	return nil
 }
 
 type stepResult struct {

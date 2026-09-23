@@ -45,16 +45,16 @@ func Where(domain string) MutateOption {
 // host.orm.mutate as a single guarded UPDATE, so concurrent callers cannot
 // lose updates or pass a Where guard on stale state. It returns the
 // updated record mapped into a T, without fields the caller cannot read.
-func Mutate[T any](model, id string, opts ...MutateOption) (T, error) {
-	return mutate[T]("", model, id, opts...)
+func Mutate[T any, PT ptrScanner[T]](model, id string, opts ...MutateOption) (T, error) {
+	return mutate[T, PT]("", model, id, opts...)
 }
 
 // MutateTx is Mutate, scoped to tx's own open transaction.
-func MutateTx[T any](tx *db.Tx, model, id string, opts ...MutateOption) (T, error) {
-	return mutate[T](tx.TxID(), model, id, opts...)
+func MutateTx[T any, PT ptrScanner[T]](tx *db.Tx, model, id string, opts ...MutateOption) (T, error) {
+	return mutate[T, PT](tx.TxID(), model, id, opts...)
 }
 
-func mutate[T any](txID, model, id string, opts ...MutateOption) (T, error) {
+func mutate[T any, PT ptrScanner[T]](txID, model, id string, opts ...MutateOption) (T, error) {
 	var zero T
 	var spec mutateSpec
 	for _, opt := range opts {
@@ -65,5 +65,5 @@ func mutate[T any](txID, model, id string, opts ...MutateOption) (T, error) {
 	if err := hostcall.Do(hostORMMutate, in, &out); err != nil {
 		return zero, err
 	}
-	return decodeRecord[T](out.Record)
+	return decodeRecord[T, PT](out.Record)
 }

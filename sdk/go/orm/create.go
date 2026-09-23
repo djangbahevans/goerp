@@ -40,17 +40,17 @@ func OnConflictUpdate(uniqueFields ...string) CreateOption {
 }
 
 // Create inserts one record via host.orm.create, mapping the result into
-// a T via its own db-tag-mapped fields.
-func Create[T any](model string, vals map[string]any, opts ...CreateOption) (T, error) {
-	return create[T]("", model, vals, opts...)
+// a T via its own Scan method.
+func Create[T any, PT ptrScanner[T]](model string, vals map[string]any, opts ...CreateOption) (T, error) {
+	return create[T, PT]("", model, vals, opts...)
 }
 
 // CreateTx is Create, scoped to tx's own open transaction.
-func CreateTx[T any](tx *db.Tx, model string, vals map[string]any, opts ...CreateOption) (T, error) {
-	return create[T](tx.TxID(), model, vals, opts...)
+func CreateTx[T any, PT ptrScanner[T]](tx *db.Tx, model string, vals map[string]any, opts ...CreateOption) (T, error) {
+	return create[T, PT](tx.TxID(), model, vals, opts...)
 }
 
-func create[T any](txID, model string, vals map[string]any, opts ...CreateOption) (T, error) {
+func create[T any, PT ptrScanner[T]](txID, model string, vals map[string]any, opts ...CreateOption) (T, error) {
 	var zero T
 	var o createOpts
 	for _, opt := range opts {
@@ -61,23 +61,23 @@ func create[T any](txID, model string, vals map[string]any, opts ...CreateOption
 	if err := hostcall.Do(hostORMCreate, in, &out); err != nil {
 		return zero, err
 	}
-	return decodeRecord[T](out.Record)
+	return decodeRecord[T, PT](out.Record)
 }
 
 // CreateBatch inserts multiple records in one call via
 // host.orm.create_batch, mapping each result into a T — opts included,
 // since host.orm.create_batch already fully supports on_conflict
 // (host-abi-reference.md §5a).
-func CreateBatch[T any](model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
-	return createBatch[T]("", model, valsList, opts...)
+func CreateBatch[T any, PT ptrScanner[T]](model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
+	return createBatch[T, PT]("", model, valsList, opts...)
 }
 
 // CreateBatchTx is CreateBatch, scoped to tx's own open transaction.
-func CreateBatchTx[T any](tx *db.Tx, model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
-	return createBatch[T](tx.TxID(), model, valsList, opts...)
+func CreateBatchTx[T any, PT ptrScanner[T]](tx *db.Tx, model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
+	return createBatch[T, PT](tx.TxID(), model, valsList, opts...)
 }
 
-func createBatch[T any](txID, model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
+func createBatch[T any, PT ptrScanner[T]](txID, model string, valsList []map[string]any, opts ...CreateOption) ([]T, error) {
 	var o createOpts
 	for _, opt := range opts {
 		opt(&o)
@@ -87,5 +87,5 @@ func createBatch[T any](txID, model string, valsList []map[string]any, opts ...C
 	if err := hostcall.Do(hostORMCreateBatch, in, &out); err != nil {
 		return nil, err
 	}
-	return decodeRecords[T](out.Records)
+	return decodeRecords[T, PT](out.Records)
 }
