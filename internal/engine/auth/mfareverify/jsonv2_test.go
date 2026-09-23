@@ -71,7 +71,7 @@ func TestWriteAccessToken_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/auth/mfa/reverify", nil)
 	req.Header.Set("X-Client-Type", "cli") // non-browser branch, no cookies
-	writeAccessToken(w, req, "<script>&</script>", 900)
+	writeAccessToken(w, req, "<script>&</script>", 900, true)
 
 	body := w.Body.String()
 	wantEscaped := "\\u003cscript\\u003e\\u0026\\u003c/script\\u003e"

@@ -622,6 +622,7 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	// dispatched from engine.go's builtinRoutes map.
 	for _, c := range []struct{ method, path string }{
 		{"GET", "/auth/me"},
+		{"GET", "/auth/tenant-context"},
 		{"POST", "/auth/refresh"},
 		{"POST", "/auth/logout"},
 		{"POST", "/admin/tenant/plan"},

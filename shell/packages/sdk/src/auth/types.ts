@@ -20,6 +20,16 @@ export interface LoginCredentials {
   email: string;
   password: string;
   tenant: string;
+  // "Remember this device" — a 30-day session instead of one that ends with
+  // the browser session.
+  remember?: boolean | undefined;
+}
+
+// The pre-login tenant lookup (GET /auth/tenant-context). tenant is null on
+// a shared-domain deployment, where the Host alone doesn't identify one.
+export interface TenantContext {
+  tenant: { slug: string; name: string } | null;
+  registrationEnabled: boolean;
 }
 
 export type MFAMethod = "totp" | "webauthn" | "recovery_code";

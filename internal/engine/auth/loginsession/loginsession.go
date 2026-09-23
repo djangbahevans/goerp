@@ -91,13 +91,20 @@ func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID str
 // every full-session response carries for a browser client — shared by
 // setCookies (a fresh login) and authrefresh's rotation response, so the
 // cookie flags (Path/MaxAge/Secure/SameSite) can't drift between the two
-// call sites the way two independent copies risked.
+// call sites the way two independent copies risked. A non-persistent
+// session's cookies are browser-session cookies (no Max-Age), so they end
+// when the browser closes; the access token's own exp still bounds it.
 func SetTokenCookies(w http.ResponseWriter, tokens *authtoken.Tokens) {
+	accessMaxAge, refreshMaxAge := 0, 0
+	if tokens.Persistent {
+		accessMaxAge = tokens.ExpiresIn
+		refreshMaxAge = int(authtoken.PersistentRefreshTTL.Seconds())
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "__Host-access_token",
 		Value:    tokens.AccessToken,
 		Path:     "/",
-		MaxAge:   tokens.ExpiresIn,
+		MaxAge:   accessMaxAge,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
@@ -106,7 +113,7 @@ func SetTokenCookies(w http.ResponseWriter, tokens *authtoken.Tokens) {
 		Name:     "refresh_token",
 		Value:    tokens.RefreshToken,
 		Path:     "/auth/refresh",
-		MaxAge:   30 * 24 * 60 * 60,
+		MaxAge:   refreshMaxAge,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,

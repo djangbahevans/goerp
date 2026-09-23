@@ -196,7 +196,7 @@ func TestLoadOrGenerate_KeyIssuesAndVerifiesTokens(t *testing.T) {
 	}
 
 	codec := NewCodec(&set.Active)
-	token, _, err := codec.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io")
+	token, _, err := codec.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", false)
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}

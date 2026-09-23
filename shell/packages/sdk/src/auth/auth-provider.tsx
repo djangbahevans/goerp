@@ -35,11 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (credentials: LoginCredentials): Promise<void> => {
-    // login_started only applies from "unauthenticated" — rejects outright
+    // login_started only applies from "unauthenticated" (or an abandoned
+    // "mfa_required" challenge) — rejects outright
     // if the mount-time session check (or another login) hasn't finished,
     // instead of proceeding to race its own session check against it.
     if (!authMachine.transition({ type: "login_started" })) {
-      throw new Error("login() called while the auth machine wasn't unauthenticated");
+      throw new Error("login() called while the auth machine wasn't unauthenticated or mfa_required");
     }
 
     const result = await loginRequest(credentials).catch((err: unknown) => {

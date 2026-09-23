@@ -402,7 +402,8 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 }
 
 // registerBuiltinRoutes registers the engine's own built-in routes into
-// table, so /_health, /_ready, /auth/login, /auth/me, /auth/refresh,
+// table, so /_health, /_ready, /auth/login, /auth/tenant-context,
+// /auth/me, /auth/refresh,
 // /auth/logout, /auth/mfa/verify, /auth/mfa/reverify,
 // /admin/users/{id}/mfa/reset, /admin/users/{id}/roles[/{role}],
 // /admin/tenant/plan, /_meta/permissions, /_meta/shares,
@@ -451,6 +452,12 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 	table.Register("GET", "/auth/me", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/auth/me",
+	})
+	// Anonymous pre-login tenant lookup for the shell's login page; resolves
+	// the tenant from Host itself, like /auth/me.
+	table.Register("GET", "/auth/tenant-context", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		PathTemplate: "/auth/tenant-context",
 	})
 	// goerp#819: self-service profile save.
 	table.Register("PATCH", "/auth/me", &route.RouteEntry{

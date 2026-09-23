@@ -223,7 +223,7 @@ func (f *fixture) enrollTOTP(t *testing.T) (code string) {
 
 func (f *fixture) issueMFAToken(t *testing.T, origin string) (token, txn string) {
 	t.Helper()
-	token, txn, err := f.mfaTokens.Issue(f.userID, f.tenantID, origin)
+	token, txn, err := f.mfaTokens.Issue(f.userID, f.tenantID, origin, false)
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
@@ -292,6 +292,35 @@ func TestServeHTTP_ValidTOTPCodeIssuesSession(t *testing.T) {
 	}
 	if !mfaCredentialID.Valid || mfaCredentialID.String == "" {
 		t.Error("sessions.mfa_credential_id is NULL/empty, want the matched credential's id")
+	}
+}
+
+func TestServeHTTP_WebSessionPersistenceFollowsTokenRemember(t *testing.T) {
+	for _, remember := range []bool{true, false} {
+		t.Run(fmt.Sprintf("remember=%v", remember), func(t *testing.T) {
+			f := newFixture(t)
+			code := f.enrollTOTP(t)
+			token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, testOrigin, remember)
+			if err != nil {
+				t.Fatalf("Issue() error: %v", err)
+			}
+
+			rec := f.doVerify(t, map[string]any{"mfa_token": token, "type": "totp", "code": code},
+				map[string]string{"Origin": testOrigin, "Content-Type": "application/json"})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+			}
+
+			var persistent bool
+			if err := f.conn.QueryRowContext(t.Context(),
+				`SELECT persistent FROM system.sessions WHERE user_id = $1`, f.userID,
+			).Scan(&persistent); err != nil {
+				t.Fatalf("query session row: %v", err)
+			}
+			if persistent != remember {
+				t.Errorf("sessions.persistent = %v, want %v", persistent, remember)
+			}
+		})
 	}
 }
 

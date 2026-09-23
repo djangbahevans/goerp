@@ -85,6 +85,9 @@ type loginRequest struct {
 	Password string `json:"password"`
 	Tenant   string `json:"tenant"`
 	DeviceID string `json:"device_id"`
+	// Remember is the browser login's "remember this device" choice. A
+	// non-browser client's session is always persistent.
+	Remember bool `json:"remember"`
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -226,7 +229,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(factors) > 0 {
-		mfaToken, _, err := h.mfaTokens.Issue(u.ID, t.ID, r.Header.Get("Origin"))
+		mfaToken, _, err := h.mfaTokens.Issue(u.ID, t.ID, r.Header.Get("Origin"), req.Remember)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 			return
@@ -251,6 +254,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		UserAgent:   r.UserAgent(),
 		IPAddress:   loginsession.ClientIP(r),
 		CountryCode: "",
+		Persistent:  nonBrowser || req.Remember,
 	})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")

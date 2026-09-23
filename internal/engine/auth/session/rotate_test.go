@@ -83,9 +83,11 @@ func newRotateFixture(t *testing.T) *rotateFixture {
 	}
 }
 
+func thirtyDays(bool) time.Time { return time.Now().Add(30 * 24 * time.Hour) }
+
 func (f *rotateFixture) rotate(t *testing.T, presentedHash, requestDeviceID string) RotateResult {
 	t.Helper()
-	result, err := f.store.Rotate(context.Background(), presentedHash, uuid.NewString(), "hash-"+uuid.NewString(), requestDeviceID, time.Now().Add(30*24*time.Hour), "", "", "")
+	result, err := f.store.Rotate(context.Background(), presentedHash, uuid.NewString(), "hash-"+uuid.NewString(), requestDeviceID, thirtyDays, "", "", "")
 	if err != nil {
 		t.Fatalf("Rotate() error: %v", err)
 	}
@@ -142,7 +144,7 @@ func TestRotate_CarriesForwardUserAgentIPAndCountryOnTheNewRow(t *testing.T) {
 	f := newRotateFixture(t)
 	newSessionID := uuid.NewString()
 
-	result, err := f.store.Rotate(context.Background(), f.refreshHash, newSessionID, "hash-"+uuid.NewString(), f.deviceID, time.Now().Add(30*24*time.Hour), "Mozilla/5.0 test-agent", "203.0.113.7", "GH")
+	result, err := f.store.Rotate(context.Background(), f.refreshHash, newSessionID, "hash-"+uuid.NewString(), f.deviceID, thirtyDays, "Mozilla/5.0 test-agent", "203.0.113.7", "GH")
 	if err != nil {
 		t.Fatalf("Rotate() error: %v", err)
 	}
@@ -165,6 +167,49 @@ func TestRotate_CarriesForwardUserAgentIPAndCountryOnTheNewRow(t *testing.T) {
 	}
 	if countryCode.String != "GH" {
 		t.Errorf("country_code = %q, want %q", countryCode.String, "GH")
+	}
+}
+
+func TestRotate_NewRowInheritsPersistentFlagAndItsExpiry(t *testing.T) {
+	for _, persistent := range []bool{true, false} {
+		t.Run(fmt.Sprintf("persistent=%v", persistent), func(t *testing.T) {
+			f := newRotateFixture(t)
+			ctx := t.Context()
+			if _, err := f.conn.ExecContext(ctx, `UPDATE system.sessions SET persistent = $2 WHERE id = $1`, f.firstID, persistent); err != nil {
+				t.Fatalf("set persistent: %v", err)
+			}
+
+			wantExpiry := time.Now().Add(time.Hour).Truncate(time.Second)
+			var gotFlag *bool
+			newSessionID := uuid.NewString()
+			result, err := f.store.Rotate(ctx, f.refreshHash, newSessionID, "hash-"+uuid.NewString(), f.deviceID, func(p bool) time.Time {
+				gotFlag = &p
+				return wantExpiry
+			}, "", "", "")
+			if err != nil {
+				t.Fatalf("Rotate() error: %v", err)
+			}
+			if result.Outcome != RotateOK || result.Persistent != persistent {
+				t.Fatalf("result = %+v, want RotateOK with Persistent=%v", result, persistent)
+			}
+			if gotFlag == nil || *gotFlag != persistent {
+				t.Errorf("newExpiresAt called with %v, want %v", gotFlag, persistent)
+			}
+
+			var rowPersistent bool
+			var expiresAt time.Time
+			if err := f.conn.QueryRowContext(ctx,
+				`SELECT persistent, expires_at FROM system.sessions WHERE id = $1`, newSessionID,
+			).Scan(&rowPersistent, &expiresAt); err != nil {
+				t.Fatalf("query new row: %v", err)
+			}
+			if rowPersistent != persistent {
+				t.Errorf("new row persistent = %v, want %v", rowPersistent, persistent)
+			}
+			if !expiresAt.Equal(wantExpiry) {
+				t.Errorf("new row expires_at = %v, want %v", expiresAt, wantExpiry)
+			}
+		})
 	}
 }
 
@@ -194,7 +239,7 @@ func TestRotate_ReusingRotatedTokenFromSameDeviceDoesNotRevoke(t *testing.T) {
 func TestRotate_ReusingRotatedTokenFromDifferentDeviceRevokesFamily(t *testing.T) {
 	f := newRotateFixture(t)
 	legitimateNewHash := "hash-" + uuid.NewString()
-	first, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.NewString(), legitimateNewHash, f.deviceID, time.Now().Add(30*24*time.Hour), "", "", "")
+	first, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.NewString(), legitimateNewHash, f.deviceID, thirtyDays, "", "", "")
 	if err != nil {
 		t.Fatalf("first Rotate() error: %v", err)
 	}
@@ -255,7 +300,7 @@ func TestRotate_ConcurrentRequestsForSameTokenDoNotRace(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.NewString(), "hash-"+uuid.NewString(), f.deviceID, time.Now().Add(30*24*time.Hour), "", "", "")
+			result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.NewString(), "hash-"+uuid.NewString(), f.deviceID, thirtyDays, "", "", "")
 			if err != nil {
 				t.Errorf("concurrent Rotate() error: %v", err)
 				return

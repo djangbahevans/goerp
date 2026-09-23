@@ -50,6 +50,7 @@ type RotateResult struct {
 	MFAMethod       string
 	MFAVerifiedAt   *time.Time
 	MFACredentialID string
+	Persistent      bool
 }
 
 // Rotate implements auth-internals.md §4 "Refresh token rotation" as one
@@ -64,12 +65,13 @@ type RotateResult struct {
 // Insert's caller-supplied id) rather than by Rotate itself, so token
 // generation stays in authtoken.Issuer, not this package. requestDeviceID
 // is the rotating request's own device_id, or "" if it presented none;
-// newExpiresAt is the new row's refresh-token expiry. userAgent/
+// newExpiresAt computes the new row's refresh-token expiry from the
+// family's persistent flag, which the new row inherits. userAgent/
 // ipAddress/countryCode are the rotating request's own (auth-internals.md
 // §4 step 7b's INSERT lists these as columns to populate on rotation,
 // same as a fresh login) — the new row tracks where the session is
 // currently being used, not frozen at whatever the original login saw.
-func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash, requestDeviceID string, newExpiresAt time.Time, userAgent, ipAddress, countryCode string) (RotateResult, error) {
+func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash, requestDeviceID string, newExpiresAt func(persistent bool) time.Time, userAgent, ipAddress, countryCode string) (RotateResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return RotateResult{Outcome: rotateUnset}, fmt.Errorf("begin rotate transaction: %w", err)
@@ -80,13 +82,14 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 		id, familyID, deviceID, userID, tenantID string
 		revokedAt, rotatedAt, mfaVerifiedAt      sql.NullTime
 		mfaMethod, mfaCredentialID               sql.NullString
+		persistent                               bool
 	)
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, family_id, device_id, user_id, tenant_id, revoked_at, rotated_at,
-		       mfa_verified_at, mfa_method, mfa_credential_id
+		       mfa_verified_at, mfa_method, mfa_credential_id, persistent
 		FROM system.sessions WHERE refresh_hash = $1 FOR UPDATE
 	`, presentedHash).Scan(&id, &familyID, &deviceID, &userID, &tenantID, &revokedAt, &rotatedAt,
-		&mfaVerifiedAt, &mfaMethod, &mfaCredentialID)
+		&mfaVerifiedAt, &mfaMethod, &mfaCredentialID, &persistent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RotateResult{Outcome: RotateNotFound}, nil
 	}
@@ -120,10 +123,10 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO system.sessions
 			(id, user_id, tenant_id, family_id, device_id, refresh_hash, expires_at,
-			 user_agent, ip_address, country_code, mfa_verified_at, mfa_method, mfa_credential_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NULLIF($9, '')::inet, NULLIF($10, ''), $11, NULLIF($12, ''), NULLIF($13, '')::uuid)
-	`, newSessionID, userID, tenantID, familyID, newDeviceID, newHash, newExpiresAt,
-		userAgent, ipAddress, countryCode, mfaVerifiedAt, mfaMethod, mfaCredentialID); err != nil {
+			 user_agent, ip_address, country_code, mfa_verified_at, mfa_method, mfa_credential_id, persistent)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NULLIF($9, '')::inet, NULLIF($10, ''), $11, NULLIF($12, ''), NULLIF($13, '')::uuid, $14)
+	`, newSessionID, userID, tenantID, familyID, newDeviceID, newHash, newExpiresAt(persistent),
+		userAgent, ipAddress, countryCode, mfaVerifiedAt, mfaMethod, mfaCredentialID, persistent); err != nil {
 		return RotateResult{Outcome: rotateUnset}, fmt.Errorf("insert rotated row: %w", err)
 	}
 
@@ -132,9 +135,10 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 	}
 
 	result := RotateResult{
-		Outcome:  RotateOK,
-		UserID:   userID,
-		TenantID: tenantID,
+		Outcome:    RotateOK,
+		UserID:     userID,
+		TenantID:   tenantID,
+		Persistent: persistent,
 	}
 	if mfaMethod.Valid {
 		result.MFAMethod = mfaMethod.String

@@ -1,3 +1,4 @@
+export { fetchTenantContext } from "./auth-client.js";
 export { AuthMachine, authMachine, authTransition } from "./auth-machine.js";
 export { AuthContext, AuthProvider } from "./auth-provider.js";
 export { Can, type CanProps } from "./can.js";
@@ -18,6 +19,7 @@ export type {
   CurrentUser,
   LoginCredentials,
   MFAMethod,
+  TenantContext,
 } from "./types.js";
 export { useAuth } from "./use-auth.js";
 export { useFieldPermission, useOptionalPermission, usePermission } from "./use-permission.js";

@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS system.sessions (
     revoke_reason     TEXT,
     mfa_verified_at   TIMESTAMPTZ,
     mfa_method        TEXT,
-    mfa_credential_id UUID
+    mfa_credential_id UUID,
+    persistent        BOOLEAN NOT NULL DEFAULT TRUE
 )
 `
 
@@ -111,6 +112,10 @@ type Row struct {
 	IPAddress   string
 	CountryCode string
 	ExpiresAt   time.Time
+	// Persistent is false for a browser login without "remember this
+	// device": the refresh cookie is session-scoped and the row gets the
+	// shorter non-persistent TTL, carried forward across every rotation.
+	Persistent bool
 
 	// MFAMethod/MFAVerifiedAt/MFACredentialID are set only for a session
 	// that completed MFA before this row is created (auth-internals.md §8
@@ -130,9 +135,9 @@ type Row struct {
 func (s *Store) Insert(ctx context.Context, row Row) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO system.sessions
-			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at, mfa_verified_at, mfa_method, mfa_credential_id)
-		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, '')::uuid)
-	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt, row.MFAVerifiedAt, row.MFAMethod, row.MFACredentialID)
+			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at, mfa_verified_at, mfa_method, mfa_credential_id, persistent)
+		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, '')::uuid, $13)
+	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt, row.MFAVerifiedAt, row.MFAMethod, row.MFACredentialID, row.Persistent)
 	if err != nil {
 		return fmt.Errorf("insert session row: %w", err)
 	}
@@ -163,25 +168,23 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 // UpdateMFAAssurance sets id's mfa_verified_at/mfa_method/mfa_credential_id
 // columns — auth-internals.md §8 "Step-up re-verification" step 2,
 // refreshing a session's MFA assurance in place without creating a new
-// session row. Returns ErrSessionNotFound if id doesn't match any
-// non-revoked row, same RowsAffected-checking convention Revoke uses.
-func (s *Store) UpdateMFAAssurance(ctx context.Context, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) error {
-	result, err := s.db.ExecContext(ctx, `
+// session row — and returns the row's persistent flag, which the caller
+// needs to scope the reissued access-token cookie. Returns
+// ErrSessionNotFound if id doesn't match any non-revoked row.
+func (s *Store) UpdateMFAAssurance(ctx context.Context, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, err error) {
+	err = s.db.QueryRowContext(ctx, `
 		UPDATE system.sessions
 		SET mfa_verified_at = $2, mfa_method = $3, mfa_credential_id = NULLIF($4, '')::uuid
 		WHERE id = $1 AND revoked_at IS NULL
-	`, id, mfaVerifiedAt, mfaMethod, mfaCredentialID)
+		RETURNING persistent
+	`, id, mfaVerifiedAt, mfaMethod, mfaCredentialID).Scan(&persistent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrSessionNotFound
+	}
 	if err != nil {
-		return fmt.Errorf("update session mfa assurance: %w", err)
+		return false, fmt.Errorf("update session mfa assurance: %w", err)
 	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("update session mfa assurance: %w", err)
-	}
-	if n == 0 {
-		return ErrSessionNotFound
-	}
-	return nil
+	return persistent, nil
 }
 
 // NonRevokedIDsForUser returns the ids of every session row for userID
