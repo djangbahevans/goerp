@@ -237,6 +237,12 @@ func TestKindProbe_FieldKindsRoundTrip(t *testing.T) {
 	if got := resp.JSON("bytea"); got != "hello-bytes" {
 		t.Errorf("bytea = %v, want \"hello-bytes\" (model.Bytea decodes as []byte)", got)
 	}
+	if got := resp.JSON("integer"); got != float64(42) {
+		t.Errorf("integer = %v, want 42 (model.Integer decodes as int32)", got)
+	}
+	if got := resp.JSON("float"); got != float64(3.5) {
+		t.Errorf("float = %v, want 3.5 (model.Float decodes as float64)", got)
+	}
 	if got := resp.JSON("priority"); got != "medium" {
 		t.Errorf("priority = %v, want \"medium\" (model.Enum decodes into its generated named string type)", got)
 	}

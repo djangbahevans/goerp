@@ -32,7 +32,12 @@ var Schema = model.Schema{
 		// generated struct shape has to handle — the six kinds goerp#960
 		// empirically characterizes (Decimal, TimestampTZ, Date, Time,
 		// JSONB, Bytea), a nullable field (optional_note), a Many2One
-		// relation (created_by_gadget_id), and an Enum field (priority).
+		// relation (created_by_gadget_id), an Enum field (priority), and
+		// — goerp#977 — Integer/Float, empirically confirming
+		// generate_fields.go's Scan assertions against int32/float64 the
+		// same way goerp#960 did for the other six (BigInt is already
+		// covered by internal/engine/wasm/testdata/ormcallerfixture's
+		// widget.Price).
 		model.Define("widgets.kind_probe", model.Table("widgets_kind_probes")).
 			WithStandardFields().
 			Field("decimal_field", model.Decimal(10, 2).Required()).
@@ -41,6 +46,8 @@ var Schema = model.Schema{
 			Field("time_field", model.Time().Required()).
 			Field("jsonb_field", model.JSONB().Required()).
 			Field("bytea_field", model.Bytea().Required()).
+			Field("integer_field", model.Integer().Required()).
+			Field("float_field", model.Float().Required()).
 			Field("optional_note", model.Text()).
 			Field("created_by_gadget_id", model.Many2One("widgets.gadget")).
 			Field("priority", model.Enum("kind_probe_priority_enum").Required()),

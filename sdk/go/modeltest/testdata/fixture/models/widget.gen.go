@@ -4,6 +4,8 @@ package models
 
 import (
 	"time"
+
+	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
 // Widget corresponds to model "widgets.widget".
@@ -16,4 +18,100 @@ type Widget struct {
 	CreatedBy *string    `db:"created_by"`
 	Etag      string     `db:"etag"`
 	Name      string     `db:"name"`
+}
+
+func (Widget) ResourceName() string { return "widgets.widget" }
+
+// WidgetFields is one orm field descriptor per Condition-bearing column.
+var WidgetFields = struct {
+	ID        orm.Field[Widget, string]
+	TenantID  orm.Field[Widget, string]
+	CreatedAt orm.TimeField[Widget]
+	UpdatedAt orm.TimeField[Widget]
+	DeletedAt orm.TimeField[Widget]
+	CreatedBy orm.Field[Widget, string]
+	Etag      orm.StringField[Widget]
+	Name      orm.StringField[Widget]
+}{
+	ID:        orm.NewField[Widget, string]("id"),
+	TenantID:  orm.NewField[Widget, string]("tenant_id"),
+	CreatedAt: orm.NewTimeField[Widget]("created_at"),
+	UpdatedAt: orm.NewTimeField[Widget]("updated_at"),
+	DeletedAt: orm.NewTimeField[Widget]("deleted_at"),
+	CreatedBy: orm.NewField[Widget, string]("created_by"),
+	Etag:      orm.NewStringField[Widget]("etag"),
+	Name:      orm.NewStringField[Widget]("name"),
+}
+
+// WidgetAllFields is Query[Widget]'s default Select() list.
+var WidgetAllFields = []orm.AnyField[Widget]{
+	WidgetFields.ID,
+	WidgetFields.TenantID,
+	WidgetFields.CreatedAt,
+	WidgetFields.UpdatedAt,
+	WidgetFields.DeletedAt,
+	WidgetFields.CreatedBy,
+	WidgetFields.Etag,
+	WidgetFields.Name,
+}
+
+// Scan populates x from row, a single record as host.orm returns it.
+func (x *Widget) Scan(row map[string]any) error {
+	if v, ok := row["id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Widget", "ID", "string", v)
+		}
+		x.ID = val
+	}
+	if v, ok := row["tenant_id"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Widget", "TenantID", "string", v)
+		}
+		x.TenantID = val
+	}
+	if v, ok := row["created_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Widget", "CreatedAt", "time.Time", v)
+		}
+		x.CreatedAt = val
+	}
+	if v, ok := row["updated_at"]; ok {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Widget", "UpdatedAt", "time.Time", v)
+		}
+		x.UpdatedAt = val
+	}
+	if v, ok := row["deleted_at"]; ok && v != nil {
+		val, ok := v.(time.Time)
+		if !ok {
+			return orm.NewDecodeError("Widget", "DeletedAt", "*time.Time", v)
+		}
+		x.DeletedAt = &val
+	}
+	if v, ok := row["created_by"]; ok && v != nil {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Widget", "CreatedBy", "*string", v)
+		}
+		x.CreatedBy = &val
+	}
+	if v, ok := row["etag"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Widget", "Etag", "string", v)
+		}
+		x.Etag = val
+	}
+	if v, ok := row["name"]; ok {
+		val, ok := v.(string)
+		if !ok {
+			return orm.NewDecodeError("Widget", "Name", "string", v)
+		}
+		x.Name = val
+	}
+	return nil
 }
