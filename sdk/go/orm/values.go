@@ -31,6 +31,9 @@ func (v *Values[T]) raw() map[string]any {
 // beyond its receiver's, and TValue varies per call while T is fixed on
 // Values[T].
 func Set[T Model, TValue any](v *Values[T], f Field[T, TValue], value TValue) *Values[T] {
+	if v.m == nil {
+		v.m = make(map[string]any)
+	}
 	v.m[f.Name()] = value
 	return v
 }
@@ -38,6 +41,9 @@ func Set[T Model, TValue any](v *Values[T], f Field[T, TValue], value TValue) *V
 // SetBytes is Set's counterpart for BytesField, which has no comparison
 // methods and so can't satisfy Set's Field[T, TValue] parameter.
 func SetBytes[T Model](v *Values[T], f BytesField[T], value []byte) *Values[T] {
+	if v.m == nil {
+		v.m = make(map[string]any)
+	}
 	v.m[f.Name()] = value
 	return v
 }

@@ -92,3 +92,16 @@ func TestValues_NilRawIsSafe(t *testing.T) {
 		t.Errorf("raw() on a nil *Values = %v, want nil", got)
 	}
 }
+
+// TestSet_OnZeroValueValuesDoesNotPanic pins Set/SetBytes against a
+// &Values[T]{} built without NewValues — m is unexported but the struct
+// itself isn't, so this is a legal zero-value composite literal from
+// outside the package, and Set assigning into a nil map would otherwise
+// panic instead of just working.
+func TestSet_OnZeroValueValuesDoesNotPanic(t *testing.T) {
+	v := &Values[valuesTestModel]{}
+	Set(v, valuesTestModelName, "Acme")
+	if v.raw()["name"] != "Acme" {
+		t.Errorf(`raw()["name"] = %v, want "Acme"`, v.raw()["name"])
+	}
+}
