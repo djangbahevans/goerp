@@ -22,8 +22,7 @@ type Widget struct {
 
 func (Widget) ResourceName() string { return "widgets.widget" }
 
-// WidgetFields is one orm field descriptor per Condition-bearing column —
-// a Many2One's *orm.RelationRef expansion has none (see the struct above).
+// WidgetFields is one orm field descriptor per Condition-bearing column.
 var WidgetFields = struct {
 	ID        orm.Field[Widget, string]
 	TenantID  orm.Field[Widget, string]
@@ -44,8 +43,7 @@ var WidgetFields = struct {
 	Name:      orm.NewStringField[Widget]("name"),
 }
 
-// WidgetAllFields is Query[Widget]'s default Select() list — every
-// Condition-bearing field, in declaration order.
+// WidgetAllFields is Query[Widget]'s default Select() list.
 var WidgetAllFields = []orm.AnyField[Widget]{
 	WidgetFields.ID,
 	WidgetFields.TenantID,
@@ -57,9 +55,7 @@ var WidgetAllFields = []orm.AnyField[Widget]{
 	WidgetFields.Name,
 }
 
-// Scan populates x from row, a single record as host.orm returns it
-// (map[string]any, msgpack-decoded). Returns *orm.DecodeError naming
-// the field and value's actual type on a mismatch.
+// Scan populates x from row, a single record as host.orm returns it.
 func (x *Widget) Scan(row map[string]any) error {
 	if v, ok := row["id"]; ok {
 		val, ok := v.(string)

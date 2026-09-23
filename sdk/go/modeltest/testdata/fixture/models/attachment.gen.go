@@ -23,8 +23,7 @@ type Attachment struct {
 
 func (Attachment) ResourceName() string { return "widgets.attachment" }
 
-// AttachmentFields is one orm field descriptor per Condition-bearing column —
-// a Many2One's *orm.RelationRef expansion has none (see the struct above).
+// AttachmentFields is one orm field descriptor per Condition-bearing column.
 var AttachmentFields = struct {
 	ID            orm.Field[Attachment, string]
 	TenantID      orm.Field[Attachment, string]
@@ -47,8 +46,7 @@ var AttachmentFields = struct {
 	ReferenceID:   orm.NewField[Attachment, string]("reference_id"),
 }
 
-// AttachmentAllFields is Query[Attachment]'s default Select() list — every
-// Condition-bearing field, in declaration order.
+// AttachmentAllFields is Query[Attachment]'s default Select() list.
 var AttachmentAllFields = []orm.AnyField[Attachment]{
 	AttachmentFields.ID,
 	AttachmentFields.TenantID,
@@ -61,9 +59,7 @@ var AttachmentAllFields = []orm.AnyField[Attachment]{
 	AttachmentFields.ReferenceID,
 }
 
-// Scan populates x from row, a single record as host.orm returns it
-// (map[string]any, msgpack-decoded). Returns *orm.DecodeError naming
-// the field and value's actual type on a mismatch.
+// Scan populates x from row, a single record as host.orm returns it.
 func (x *Attachment) Scan(row map[string]any) error {
 	if v, ok := row["id"]; ok {
 		val, ok := v.(string)

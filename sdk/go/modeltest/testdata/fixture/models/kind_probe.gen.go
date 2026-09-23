@@ -23,6 +23,8 @@ type KindProbe struct {
 	TimeField         string            `db:"time_field"`
 	JsonbField        []byte            `db:"jsonb_field"`
 	ByteaField        []byte            `db:"bytea_field"`
+	IntegerField      int32             `db:"integer_field"`
+	FloatField        float64           `db:"float_field"`
 	OptionalNote      *string           `db:"optional_note"`
 	CreatedByGadgetID *string           `db:"created_by_gadget_id"`
 	CreatedByGadget   *orm.RelationRef  `db:"created_by_gadget"`
@@ -31,8 +33,7 @@ type KindProbe struct {
 
 func (KindProbe) ResourceName() string { return "widgets.kind_probe" }
 
-// KindProbeFields is one orm field descriptor per Condition-bearing column —
-// a Many2One's *orm.RelationRef expansion has none (see the struct above).
+// KindProbeFields is one orm field descriptor per Condition-bearing column.
 var KindProbeFields = struct {
 	ID                orm.Field[KindProbe, string]
 	TenantID          orm.Field[KindProbe, string]
@@ -47,6 +48,8 @@ var KindProbeFields = struct {
 	TimeField         orm.Field[KindProbe, string]
 	JsonbField        orm.BytesField[KindProbe]
 	ByteaField        orm.BytesField[KindProbe]
+	IntegerField      orm.OrderedField[KindProbe, int32]
+	FloatField        orm.OrderedField[KindProbe, float64]
 	OptionalNote      orm.StringField[KindProbe]
 	CreatedByGadgetID orm.Field[KindProbe, string]
 	Priority          orm.Field[KindProbe, KindProbePriority]
@@ -64,13 +67,14 @@ var KindProbeFields = struct {
 	TimeField:         orm.NewField[KindProbe, string]("time_field"),
 	JsonbField:        orm.NewBytesField[KindProbe]("jsonb_field"),
 	ByteaField:        orm.NewBytesField[KindProbe]("bytea_field"),
+	IntegerField:      orm.NewOrderedField[KindProbe, int32]("integer_field"),
+	FloatField:        orm.NewOrderedField[KindProbe, float64]("float_field"),
 	OptionalNote:      orm.NewStringField[KindProbe]("optional_note"),
 	CreatedByGadgetID: orm.NewField[KindProbe, string]("created_by_gadget_id"),
 	Priority:          orm.NewField[KindProbe, KindProbePriority]("priority"),
 }
 
-// KindProbeAllFields is Query[KindProbe]'s default Select() list — every
-// Condition-bearing field, in declaration order.
+// KindProbeAllFields is Query[KindProbe]'s default Select() list.
 var KindProbeAllFields = []orm.AnyField[KindProbe]{
 	KindProbeFields.ID,
 	KindProbeFields.TenantID,
@@ -85,14 +89,14 @@ var KindProbeAllFields = []orm.AnyField[KindProbe]{
 	KindProbeFields.TimeField,
 	KindProbeFields.JsonbField,
 	KindProbeFields.ByteaField,
+	KindProbeFields.IntegerField,
+	KindProbeFields.FloatField,
 	KindProbeFields.OptionalNote,
 	KindProbeFields.CreatedByGadgetID,
 	KindProbeFields.Priority,
 }
 
-// Scan populates x from row, a single record as host.orm returns it
-// (map[string]any, msgpack-decoded). Returns *orm.DecodeError naming
-// the field and value's actual type on a mismatch.
+// Scan populates x from row, a single record as host.orm returns it.
 func (x *KindProbe) Scan(row map[string]any) error {
 	if v, ok := row["id"]; ok {
 		val, ok := v.(string)
@@ -184,6 +188,20 @@ func (x *KindProbe) Scan(row map[string]any) error {
 			return orm.NewDecodeError("KindProbe", "ByteaField", "[]byte", v)
 		}
 		x.ByteaField = val
+	}
+	if v, ok := row["integer_field"]; ok {
+		val, ok := v.(int64)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "IntegerField", "int32", v)
+		}
+		x.IntegerField = int32(val)
+	}
+	if v, ok := row["float_field"]; ok {
+		val, ok := v.(float64)
+		if !ok {
+			return orm.NewDecodeError("KindProbe", "FloatField", "float64", v)
+		}
+		x.FloatField = val
 	}
 	if v, ok := row["optional_note"]; ok && v != nil {
 		val, ok := v.(string)

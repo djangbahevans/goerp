@@ -210,6 +210,30 @@ func TestRenderModelFile_DynamicLinkGeneratesTwoPlainFields(t *testing.T) {
 	}
 }
 
+// TestRenderModelFile_DynamicLinkPrimaryKeyIsNonPointer pins a real
+// inconsistency a code review caught: DynamicLink's sibling and self
+// fields computed required from IsRequired alone, unlike every other
+// field kind (Selection, Many2One's FK, the default scalar case), which
+// all also treat IsPrimaryKey as required.
+func TestRenderModelFile_DynamicLinkPrimaryKeyIsNonPointer(t *testing.T) {
+	m := model.Define("widgets.link").
+		Field("reference_type", model.Selection("sales.order", "contacts.contact").PrimaryKey()).
+		Field("reference_id", model.DynamicLink("reference_type").PrimaryKey())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, `ReferenceType string `+"`db:\"reference_type\"`") {
+		t.Errorf("PK sibling field should be non-pointer:\n%s", src)
+	}
+	if !strings.Contains(src, `ReferenceID string `+"`db:\"reference_id\"`") {
+		t.Errorf("PK DynamicLink field should be non-pointer:\n%s", src)
+	}
+}
+
 // TestRenderModelFile_TwoDynamicLinkFieldsSharingOneSibling_NoDuplicateField
 // pins a real bug a code review caught: two DynamicLink fields (a
 // polymorphic link's two ends) naming the same sibling Selection field
@@ -388,7 +412,8 @@ func TestRenderModelFile_FieldDescriptorsPickWrapperPerKind(t *testing.T) {
 		Field("weight", model.Float().Required()).
 		Field("is_active", model.Boolean().Required()).
 		Field("opened_at", model.TimestampTZ().Required()).
-		Field("attachment", model.Bytea())
+		Field("attachment", model.Bytea()).
+		Field("price", model.Decimal(10, 2).Required())
 
 	out, err := renderModelFile(m, nil)
 	if err != nil {
@@ -404,6 +429,10 @@ func TestRenderModelFile_FieldDescriptorsPickWrapperPerKind(t *testing.T) {
 		"IsActive orm.Field[Widget, bool]",
 		"OpenedAt orm.TimeField[Widget]",
 		"Attachment orm.BytesField[Widget]",
+		// Decimal is the one kind whose struct/wire Go type (string) and
+		// descriptor wrapper (OrderedField, for Gt/Lt/Between) diverge
+		// from every other string-typed kind (Char/Text/UUID/Sequence).
+		"Price orm.OrderedField[Widget, string]",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("WidgetFields missing %q:\n%s", want, src)
@@ -416,7 +445,7 @@ func TestRenderModelFile_FieldDescriptorsPickWrapperPerKind(t *testing.T) {
 	for _, want := range []string{
 		"WidgetFields.Name,", "WidgetFields.Code,", "WidgetFields.Quantity,",
 		"WidgetFields.Weight,", "WidgetFields.IsActive,", "WidgetFields.OpenedAt,",
-		"WidgetFields.Attachment,",
+		"WidgetFields.Attachment,", "WidgetFields.Price,",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("WidgetAllFields missing entry %q:\n%s", want, src)
@@ -428,10 +457,13 @@ func TestRenderModelFile_FieldDescriptorsPickWrapperPerKind(t *testing.T) {
 // shape: an absent/NULL value is left unscanned rather than erroring —
 // the field simply keeps its zero value, matching a query that didn't
 // select it — but a present, type-mismatched value still produces
-// *orm.DecodeError.
+// *orm.DecodeError. Uses BigInt (int64), the one numeric kind whose
+// declared Go type already matches what it decodes as raw — see
+// TestRenderModelFile_ScanIntegerFieldNarrowsFromInt64 for the kind that
+// doesn't.
 func TestRenderModelFile_ScanRequiredField(t *testing.T) {
 	m := model.Define("widgets.widget").
-		Field("quantity", model.Integer().Required())
+		Field("quantity", model.BigInt().Required())
 
 	out, err := renderModelFile(m, nil)
 	if err != nil {
@@ -442,14 +474,49 @@ func TestRenderModelFile_ScanRequiredField(t *testing.T) {
 	if !strings.Contains(src, `if v, ok := row["quantity"]; ok {`) {
 		t.Errorf("required field's Scan block should not guard on v != nil:\n%s", src)
 	}
-	if !strings.Contains(src, `val, ok := v.(int32)`) {
-		t.Errorf("missing int32 type assertion:\n%s", src)
+	if !strings.Contains(src, `val, ok := v.(int64)`) {
+		t.Errorf("missing int64 type assertion:\n%s", src)
 	}
-	if !strings.Contains(src, `return orm.NewDecodeError("Widget", "Quantity", "int32", v)`) {
+	if !strings.Contains(src, `return orm.NewDecodeError("Widget", "Quantity", "int64", v)`) {
 		t.Errorf("missing DecodeError construction:\n%s", src)
 	}
 	if !strings.Contains(src, "x.Quantity = val") {
 		t.Errorf("missing field assignment:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_ScanIntegerFieldNarrowsFromInt64 pins a real bug a
+// code review caught: msgpack's own int wire format doesn't preserve the
+// host's original int32 width, only the value's magnitude, so a Postgres
+// INTEGER column decodes into the guest as int64, not int32 — confirmed
+// via a real round trip (goerp#977). Scan must assert against int64 and
+// narrow, not assert directly against the struct field's own int32 type
+// (which fails on every real record).
+func TestRenderModelFile_ScanIntegerFieldNarrowsFromInt64(t *testing.T) {
+	m := model.Define("widgets.widget").
+		Field("quantity", model.Integer().Required()).
+		Field("optional_quantity", model.Integer())
+
+	out, err := renderModelFile(m, nil)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, "Quantity int32 ") {
+		t.Errorf("struct field should stay int32:\n%s", src)
+	}
+	if !strings.Contains(src, `val, ok := v.(int64)`) {
+		t.Errorf("Scan should assert against int64, not int32:\n%s", src)
+	}
+	if !strings.Contains(src, `return orm.NewDecodeError("Widget", "Quantity", "int32", v)`) {
+		t.Errorf("DecodeError should still name the struct field's own int32 type:\n%s", src)
+	}
+	if !strings.Contains(src, "x.Quantity = int32(val)") {
+		t.Errorf("missing narrowing conversion for the required field:\n%s", src)
+	}
+	if !strings.Contains(src, "converted := int32(val)") || !strings.Contains(src, "x.OptionalQuantity = &converted") {
+		t.Errorf("missing narrowing conversion for the optional field:\n%s", src)
 	}
 }
 

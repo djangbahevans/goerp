@@ -51,6 +51,8 @@ func init() {
 			"time_field":      "13:45:00",
 			"jsonb_field":     map[string]any{"key": "value", "n": float64(1)},
 			"bytea_field":     []byte("hello-bytes"),
+			"integer_field":   int32(42),
+			"float_field":     3.5,
 			"priority":        "medium",
 		}
 
@@ -76,6 +78,8 @@ func init() {
 			"time":                 read.TimeField,
 			"jsonb":                string(read.JsonbField),
 			"bytea":                string(read.ByteaField),
+			"integer":              read.IntegerField,
+			"float":                read.FloatField,
 			"priority":             string(read.Priority),
 			"has_note":             read.OptionalNote != nil,
 			"has_gadget_expansion": read.CreatedByGadget != nil,
@@ -107,6 +111,8 @@ func init() {
 			"time_field":      "00:00:00",
 			"jsonb_field":     map[string]any{},
 			"bytea_field":     []byte(""),
+			"integer_field":   int32(0),
+			"float_field":     0.0,
 			"priority":        "low",
 		}
 
