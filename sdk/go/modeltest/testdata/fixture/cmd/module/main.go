@@ -83,12 +83,12 @@ func init() {
 			"float":                read.FloatField,
 			"priority":             string(read.Priority),
 			"has_note":             read.OptionalNote != nil,
-			"has_gadget_expansion": read.CreatedByGadget != nil,
+			"has_gadget_expansion": read.CreatedByGadget.RelationRef != nil,
 		})
 	}, engine.Auth(engine.AuthNone))
 
-	// /kind-probe-relation exercises the generated *orm.RelationRef
-	// expansion field (goerp#961 §3.4) end to end: a gadget created with
+	// /kind-probe-relation exercises the generated orm.Ref[Gadget]
+	// expansion field (goerp#961 §3.4, goerp#979) end to end: a gadget created with
 	// a real display_name, a kind_probe row whose Many2One FK points at
 	// it, read back via orm.Query's All (not just Get, per goerp#961's
 	// own AC) — and, in the same call, a second kind_probe row with the
@@ -151,7 +151,7 @@ func init() {
 		body := map[string]any{}
 		for _, row := range rows {
 			entry := map[string]any{"gadget_id": row.CreatedByGadgetID}
-			if row.CreatedByGadget != nil {
+			if row.CreatedByGadget.RelationRef != nil {
 				entry["gadget_display_name"] = row.CreatedByGadget.DisplayName
 			} else {
 				entry["gadget_display_name"] = nil

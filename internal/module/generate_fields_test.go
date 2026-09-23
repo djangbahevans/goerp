@@ -10,6 +10,15 @@ import (
 
 var collapseSpace = regexp.MustCompile(`[ \t]+`)
 
+// testGenContext is the genContext most renderModelFile tests render
+// against: a "widgets" module depending on "contacts" and "hr", covering
+// every cross-module target these tests reference. Tests exercising a
+// same-module Many2One target (goerp#979) build their own genContext with
+// a populated modelsByResource instead.
+func testGenContext() genContext {
+	return genContext{moduleName: "widgets", dependsOn: []string{"contacts", "hr"}}
+}
+
 // normalizeSpaces collapses gofmt's own column-alignment padding (runs
 // of spaces between a struct field's name/type/tag) down to one space,
 // so an assertion on a generated line's content doesn't have to predict
@@ -44,7 +53,7 @@ func TestRenderModelFile_BasicFieldKinds(t *testing.T) {
 		Field("weight", model.Float().Required()).
 		Field("is_active", model.Boolean().Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -87,7 +96,7 @@ func TestRenderModelFile_NullableVsRequired(t *testing.T) {
 		Field("required_name", model.Text().Required()).
 		Field("optional_name", model.Text())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -108,7 +117,7 @@ func TestRenderModelFile_SelectionGeneratesNamedTypeAndConstants(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("state", model.Selection("draft", "needs_review", "done").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -139,7 +148,7 @@ func TestRenderModelFile_EnumResolvesValuesFromSchemaTypes(t *testing.T) {
 		model.EnumType("kind_probe_priority_enum", "low", "high"),
 	}
 
-	out, err := renderModelFile(m, types)
+	out, _, err := renderModelFile(m, types, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -158,16 +167,16 @@ func TestRenderModelFile_UnknownEnumType_Errors(t *testing.T) {
 	m := model.Define("widgets.kind_probe").
 		Field("priority", model.Enum("does_not_exist").Required())
 
-	if _, err := renderModelFile(m, nil); err == nil {
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
 		t.Fatal("expected an error for an Enum field naming an undeclared type")
 	}
 }
 
-func TestRenderModelFile_Many2OneGeneratesFKAndRelationRefExpansion(t *testing.T) {
+func TestRenderModelFile_Many2OneCrossModuleGeneratesFKAndMarkerRefExpansion(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("customer_id", model.Many2One("contacts.contact").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, markers, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -176,11 +185,73 @@ func TestRenderModelFile_Many2OneGeneratesFKAndRelationRefExpansion(t *testing.T
 	if !strings.Contains(src, `CustomerID string `+"`db:\"customer_id\"`") {
 		t.Errorf("missing FK field:\n%s", src)
 	}
-	if !strings.Contains(src, `Customer *orm.RelationRef `+"`db:\"customer\"`") {
-		t.Errorf("missing *orm.RelationRef expansion field:\n%s", src)
+	if !strings.Contains(src, `Customer orm.Ref[ContactsContactRef] `+"`db:\"customer\"`") {
+		t.Errorf("missing orm.Ref[ContactsContactRef] expansion field:\n%s", src)
 	}
 	if !strings.Contains(src, `"github.com/djangbahevans/goerp/sdk/go/orm"`) {
-		t.Errorf("output should import sdk/go/orm for RelationRef:\n%s", src)
+		t.Errorf("output should import sdk/go/orm for Ref:\n%s", src)
+	}
+
+	if len(markers) != 1 || markers[0].goName != "ContactsContactRef" || markers[0].resourceName != "contacts.contact" {
+		t.Errorf("markers = %+v, want one {ContactsContactRef, contacts.contact}", markers)
+	}
+}
+
+// TestRenderModelFile_Many2OneSameModuleGeneratesRealTargetStruct pins
+// goerp#979's other half: a same-module Many2One target (its related_model
+// belongs to the declaring model's own module) resolves Ref[T] to that
+// target's own generated struct name, not a marker — and generates no
+// crossModuleMarker to collect.
+func TestRenderModelFile_Many2OneSameModuleGeneratesRealTargetStruct(t *testing.T) {
+	gadget := model.Define("widgets.gadget").
+		Field("name", model.Text())
+	probe := model.Define("widgets.kind_probe").
+		Field("created_by_gadget_id", model.Many2One("widgets.gadget"))
+
+	ctx := genContext{
+		moduleName:       "widgets",
+		modelsByResource: map[string]*model.ModelDeclaration{"gadget": gadget},
+	}
+
+	out, markers, err := renderModelFile(probe, nil, ctx)
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, `CreatedByGadget orm.Ref[Gadget] `+"`db:\"created_by_gadget\"`") {
+		t.Errorf("missing orm.Ref[Gadget] expansion field:\n%s", src)
+	}
+	if len(markers) != 0 {
+		t.Errorf("markers = %+v, want none for a same-module target", markers)
+	}
+}
+
+// TestRenderModelFile_Many2OneCrossModuleTargetNotInDependsOn_Errors pins
+// that a cross-module target must belong to a module the declaring
+// module's manifest actually lists (go-sdk-reference.md §22 "Many2One") —
+// generate fails fast rather than emitting a marker for an undeclared
+// dependency.
+func TestRenderModelFile_Many2OneCrossModuleTargetNotInDependsOn_Errors(t *testing.T) {
+	m := model.Define("widgets.gadget").
+		Field("owner_id", model.Many2One("nobody.person").Required())
+
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
+		t.Fatal("expected an error for a cross-module target whose module isn't in depends_on or soft_depends_on")
+	}
+}
+
+// TestRenderModelFile_Many2OneSameModuleTargetNotDeclared_Errors pins the
+// same-module counterpart: a related_model naming the declaring module's
+// own name but a resource that module doesn't actually declare.
+func TestRenderModelFile_Many2OneSameModuleTargetNotDeclared_Errors(t *testing.T) {
+	m := model.Define("widgets.kind_probe").
+		Field("created_by_gadget_id", model.Many2One("widgets.gadget").Required())
+
+	ctx := genContext{moduleName: "widgets", modelsByResource: map[string]*model.ModelDeclaration{}}
+
+	if _, _, err := renderModelFile(m, nil, ctx); err == nil {
+		t.Fatal("expected an error for a same-module target not declared in this module's own schema")
 	}
 }
 
@@ -189,7 +260,7 @@ func TestRenderModelFile_DynamicLinkGeneratesTwoPlainFields(t *testing.T) {
 		Field("reference_type", model.Selection("sales.order", "contacts.contact").Required()).
 		Field("reference_id", model.DynamicLink("reference_type").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -220,7 +291,7 @@ func TestRenderModelFile_DynamicLinkPrimaryKeyIsNonPointer(t *testing.T) {
 		Field("reference_type", model.Selection("sales.order", "contacts.contact").PrimaryKey()).
 		Field("reference_id", model.DynamicLink("reference_type").PrimaryKey())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -247,7 +318,7 @@ func TestRenderModelFile_TwoDynamicLinkFieldsSharingOneSibling_NoDuplicateField(
 		Field("source_id", model.DynamicLink("reference_type").Required()).
 		Field("target_id", model.DynamicLink("reference_type").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -267,14 +338,14 @@ func TestRenderModelFile_TwoDynamicLinkFieldsSharingOneSibling_NoDuplicateField(
 // TestRenderModelFile_Many2OneFieldNotEndingInID_Errors pins a real bug:
 // a Many2One field name not ending in "_id" made
 // strings.TrimSuffix(f.Name, "_id") a silent no-op, so the generated
-// *orm.RelationRef expansion field got the exact same Go name as the FK
+// orm.Ref[T] expansion field got the exact same Go name as the FK
 // field itself — a duplicate struct field, same failure mode as the
 // DynamicLink case above.
 func TestRenderModelFile_Many2OneFieldNotEndingInID_Errors(t *testing.T) {
 	m := model.Define("hr.employee").
 		Field("manager", model.Many2One("hr.employee").Required())
 
-	if _, err := renderModelFile(m, nil); err == nil {
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
 		t.Fatal("expected an error for a Many2One field not ending in \"_id\"")
 	}
 }
@@ -293,7 +364,7 @@ func TestRenderModelFile_Many2OneExpansionCollidesWithSiblingField_Errors(t *tes
 		Field("manager_id", model.Many2One("hr.employee")).
 		Field("manager", model.Text())
 
-	_, err := renderModelFile(m, nil)
+	_, _, err := renderModelFile(m, nil, testGenContext())
 	if err == nil {
 		t.Fatal("expected an error for manager_id's Many2One expansion colliding with the sibling manager field")
 	}
@@ -311,7 +382,7 @@ func TestRenderModelFile_FieldNamesCollidingOnPascalCase_Errors(t *testing.T) {
 		Field("display_name", model.Text()).
 		Field("display-name", model.Text())
 
-	if _, err := renderModelFile(m, nil); err == nil {
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
 		t.Fatal("expected an error for two field names that PascalCase to the same Go identifier")
 	}
 }
@@ -325,7 +396,7 @@ func TestRenderModelFile_SelectionValueWithNonIdentifierChars(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("state", model.Selection("in-progress", "needs review").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -348,7 +419,7 @@ func TestRenderModelFile_SelectionValueWithNonIdentifierChars(t *testing.T) {
 func TestRenderModelFile_EmptyResourceName_Errors(t *testing.T) {
 	m := model.Define("")
 
-	if _, err := renderModelFile(m, nil); err == nil {
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
 		t.Fatal("expected an error for a model with no usable resource name")
 	}
 }
@@ -357,7 +428,7 @@ func TestRenderModelFile_One2ManyIsSkipped(t *testing.T) {
 	m := model.Define("contacts.contact").
 		Field("address_ids", model.One2Many("contacts.address", "contact_id"))
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -378,7 +449,7 @@ func TestRenderModelFile_UnsupportedFieldKind_Errors(t *testing.T) {
 	// beyond the declared enum's range.
 	m.Fields[0].Def.Kind = model.FieldKind(9999)
 
-	if _, err := renderModelFile(m, nil); err == nil {
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
 		t.Fatal("expected an error for an unsupported field kind")
 	}
 }
@@ -389,7 +460,7 @@ func TestRenderModelFile_GeneratesResourceNameMethod(t *testing.T) {
 	m := model.Define("widgets.widget", model.Table("widgets")).
 		WithStandardFields()
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -415,7 +486,7 @@ func TestRenderModelFile_FieldDescriptorsPickWrapperPerKind(t *testing.T) {
 		Field("attachment", model.Bytea()).
 		Field("price", model.Decimal(10, 2).Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -465,7 +536,7 @@ func TestRenderModelFile_ScanRequiredField(t *testing.T) {
 	m := model.Define("widgets.widget").
 		Field("quantity", model.BigInt().Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -497,7 +568,7 @@ func TestRenderModelFile_ScanIntegerFieldNarrowsFromInt64(t *testing.T) {
 		Field("quantity", model.Integer().Required()).
 		Field("optional_quantity", model.Integer())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -527,7 +598,7 @@ func TestRenderModelFile_ScanOptionalField(t *testing.T) {
 	m := model.Define("widgets.widget").
 		Field("nickname", model.Text())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -551,7 +622,7 @@ func TestRenderModelFile_ScanNamedTypeField(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("state", model.Selection("draft", "done").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -568,13 +639,13 @@ func TestRenderModelFile_ScanNamedTypeField(t *testing.T) {
 // TestRenderModelFile_ScanRelationExpansion pins Scan's Many2One
 // expansion shape: always guarded on v != nil regardless of the FK's own
 // required-ness, decoding the nested {id, display_name} object into an
-// *orm.RelationRef — and that the expansion gets no field descriptor
-// (it's not Condition-bearing).
+// orm.Ref[T] — and that the expansion gets no field descriptor (it's not
+// Condition-bearing).
 func TestRenderModelFile_ScanRelationExpansion(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("customer_id", model.Many2One("contacts.contact").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -589,13 +660,13 @@ func TestRenderModelFile_ScanRelationExpansion(t *testing.T) {
 	if !strings.Contains(src, `ref.ID = id`) || !strings.Contains(src, "ref.DisplayName = dn") {
 		t.Errorf("missing RelationRef field extraction:\n%s", src)
 	}
-	if !strings.Contains(src, "x.Customer = &ref") {
+	if !strings.Contains(src, "x.Customer = orm.Ref[ContactsContactRef]{RelationRef: &ref}") {
 		t.Errorf("missing expansion field assignment:\n%s", src)
 	}
 	if strings.Contains(src, "GadgetFields.Customer,") {
 		t.Errorf("Many2One expansion should not get an AllFields entry:\n%s", src)
 	}
-	if strings.Contains(src, "Customer orm.") {
+	if strings.Contains(src, "Customer orm.Field[") {
 		t.Errorf("Many2One expansion should not get a field descriptor:\n%s", src)
 	}
 }
@@ -615,7 +686,7 @@ func TestRenderModelFile_ValuesBuilder_EmitsSetXPerWritableField(t *testing.T) {
 		Field("attachment", model.Bytea()).
 		Field("state", model.Selection("draft", "done").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -665,7 +736,7 @@ func TestRenderModelFile_ValuesBuilder_SkipsReadonlyAndComputedFields(t *testing
 		Field("locked_note", model.Text().Readonly()).
 		Field("total", model.Float().Computed("compute_total").Store(true))
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -683,14 +754,14 @@ func TestRenderModelFile_ValuesBuilder_SkipsReadonlyAndComputedFields(t *testing
 }
 
 // TestRenderModelFile_ValuesBuilder_Many2OneExpansionHasNoSetter pins
-// that only the FK ID field is writable — the *orm.RelationRef
+// that only the FK ID field is writable — the orm.Ref[T]
 // expansion isn't a real column and gets no field descriptor (already
 // pinned by TestRenderModelFile_ScanRelationExpansion) or SetX.
 func TestRenderModelFile_ValuesBuilder_Many2OneExpansionHasNoSetter(t *testing.T) {
 	m := model.Define("widgets.gadget").
 		Field("customer_id", model.Many2One("contacts.contact").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
@@ -715,7 +786,7 @@ func TestRenderModelFile_ValuesBuilder_DynamicLinkFieldsAreWritable(t *testing.T
 		Field("source_id", model.DynamicLink("reference_type").Required()).
 		Field("target_id", model.DynamicLink("reference_type").Required())
 
-	out, err := renderModelFile(m, nil)
+	out, _, err := renderModelFile(m, nil, testGenContext())
 	if err != nil {
 		t.Fatalf("renderModelFile: %v", err)
 	}
