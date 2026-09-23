@@ -57,6 +57,33 @@ func TestDomain_UnknownTypeFallsBackToQuotedString(t *testing.T) {
 	}
 }
 
+// TestDomain_NamedNumericTypeRendersAsNumber pins domainLiteral's
+// reflect-based fallback (added for orm v2's Ordered/Numeric constraints,
+// field.go, which deliberately allow a defined type over int32/int64/
+// float64) — such a value must still render as a plain number, not fall
+// through to the generic default's quoted-string handling.
+func TestDomain_NamedNumericTypeRendersAsNumber(t *testing.T) {
+	type sequenceID int32
+	got := Domain("record.seq = ?", sequenceID(5))
+	want := "record.seq = 5"
+	if got != want {
+		t.Errorf("Domain() = %q, want %q", got, want)
+	}
+}
+
+// TestDomain_NamedStringTypeRendersAsQuotedString pins the companion
+// case: a defined string type (the shape Selection/Enum's generated
+// types take) must still render as a quoted literal, exactly like a bare
+// string — only the numeric kinds need reflect-based unwrapping.
+func TestDomain_NamedStringTypeRendersAsQuotedString(t *testing.T) {
+	type productStatus string
+	got := Domain("record.status = ?", productStatus("draft"))
+	want := "record.status = 'draft'"
+	if got != want {
+		t.Errorf("Domain() = %q, want %q", got, want)
+	}
+}
+
 func TestDomain_ExtraPlaceholdersPassThroughUnreplaced(t *testing.T) {
 	got := Domain("record.a = ? AND record.b = ?", "x")
 	want := "record.a = 'x' AND record.b = ?"
