@@ -132,9 +132,11 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 		return nil, fmt.Errorf("build job registry: %w", err)
 	}
 
+	schemaHash := computeSchemaHash(modules, routeTable)
 	newSnap := &RegistrySnapshot{
 		modules:          modules,
-		schemaHash:       computeSchemaHash(modules, routeTable),
+		schemaHash:       schemaHash,
+		schemaResponse:   buildSchemaResponse(modules, routeTable, schemaHash),
 		routeTable:       routeTable,
 		eventRegistry:    buildEventRegistry(modules),
 		permRegistry:     buildPermissionRegistry(modules),
@@ -246,13 +248,13 @@ func buildDataAuditRegistry(modules map[string]*module.LoadedModule) *dataaudit.
 // iteration order directly.
 // schemaHashRoute/-Model/-Field mirror the subset of RouteManifest/
 // model.ModelDeclaration that participates in GET /_meta/schema's response
-// (internal/engine's metaSchemaRoute/metaSchemaModel/metaSchemaField) —
-// kept as this package's own local copy rather than importing engine's
-// types (which would need to import registry, an import cycle) or
-// exporting engine's types into registry (a bigger layering change than
-// this hash needs). Whenever a field is added to what /_meta/schema
-// reports for a module, add it here too, or a real content change stops
-// changing the hash.
+// (SchemaRoute/SchemaModel/SchemaField in schema_response.go) — kept as
+// their own narrower, hash-only copy rather than hashing SchemaResponse
+// itself, since fields like LoadOrder or Frontend don't affect the API
+// surface the hash is meant to signal changes to. Whenever a field is
+// added to what /_meta/schema reports for a module that does affect that
+// surface, add it here too, or a real content change stops changing the
+// hash.
 type schemaHashRoute struct {
 	Method         string
 	Path           string

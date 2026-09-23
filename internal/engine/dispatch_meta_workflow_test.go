@@ -59,7 +59,7 @@ func TestDispatchSchemaRoute_ExposesWorkflowTransitions(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	var resp metaSchemaResponse
+	var resp registry.SchemaResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestDispatchSchemaRoute_ExposesWorkflowTransitions(t *testing.T) {
 		t.Fatalf("models missing \"sales.order\", got %v", mod.Models)
 	}
 
-	var stateField *metaSchemaField
+	var stateField *registry.SchemaField
 	for i, f := range md.Fields {
 		if f.Name == "state" {
 			stateField = &md.Fields[i]
@@ -105,7 +105,7 @@ func TestDispatchSchemaRoute_ExposesWorkflowTransitions(t *testing.T) {
 		t.Errorf("cancel Condition = %q, want the declared expression", cancel.Condition)
 	}
 
-	var confirmRoute *metaSchemaRoute
+	var confirmRoute *registry.SchemaRoute
 	for i, r := range mod.Routes {
 		if r.Name == "confirm" {
 			confirmRoute = &mod.Routes[i]
@@ -122,14 +122,5 @@ func TestDispatchSchemaRoute_ExposesWorkflowTransitions(t *testing.T) {
 	}
 	if len(confirmRoute.Permissions) != 1 || confirmRoute.Permissions[0] != "sales:order:confirm" {
 		t.Errorf("confirm route permissions = %v, want [sales:order:confirm]", confirmRoute.Permissions)
-	}
-}
-
-func TestMetaSchemaWorkflowFrom_NoWorkflowIsNil(t *testing.T) {
-	if got := metaSchemaWorkflowFrom(model.Char()); got != nil {
-		t.Errorf("metaSchemaWorkflowFrom(Char()) = %+v, want nil", got)
-	}
-	if got := metaSchemaWorkflowFrom(model.Selection("a", "b")); got != nil {
-		t.Errorf("metaSchemaWorkflowFrom(no .Workflow()) = %+v, want nil", got)
 	}
 }
