@@ -42,10 +42,9 @@ export function resolveViewDeclaration(
   // Matched by name first, independent of validity — so a view that
   // exists but fails the common-fields check is reported, not silently
   // treated the same as one that was never there at all (a caller like
-  // resource-metadata-registry.ts's collectNavigatedResources would
-  // otherwise drop that view's entire resource from the registry with no
-  // error anywhere, the exact silent-failure mode this validation exists
-  // to prevent).
+  // view-registry.ts would otherwise drop that view's entire resource
+  // from the registry with no error anywhere, the exact silent-failure
+  // mode this validation exists to prevent).
   const candidate = moduleSchema.views.find((view) => hasMatchingName(view, viewName));
   if (candidate === undefined) return null;
 

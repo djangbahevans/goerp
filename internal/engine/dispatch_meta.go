@@ -667,6 +667,7 @@ type metaSchemaField struct {
 	Required     bool                `json:"required,omitzero"`
 	RelatedModel string              `json:"related_model,omitempty"`
 	InverseField string              `json:"inverse_field,omitempty"`
+	IsPrimary    bool                `json:"is_primary,omitzero"`
 	Workflow     *metaSchemaWorkflow `json:"workflow,omitempty"`
 }
 
@@ -719,6 +720,7 @@ func metaSchemaModelFrom(md sdkmodel.ModelDeclaration) metaSchemaModel {
 			Required:     f.Def.IsRequired,
 			RelatedModel: f.Def.RelatedModel,
 			InverseField: f.Def.InverseField,
+			IsPrimary:    f.Def.IsPrimary,
 			Workflow:     metaSchemaWorkflowFrom(f.Def),
 		})
 	}
