@@ -50,7 +50,7 @@ func createFixtureEmployeesSchema(t *testing.T, conn *sql.DB, slug string) {
 	})
 
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE `+schemaName+`.employee (
-		id UUID PRIMARY KEY,
+		id UUID PRIMARY KEY DEFAULT uuidv7(),
 		tenant_id UUID NOT NULL,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -179,18 +179,22 @@ func decodeResponseRecord(t *testing.T, w *httptest.ResponseRecorder) map[string
 
 func TestDispatchORMRoute_Create_MasksReadRestrictedFieldsInResponse(t *testing.T) {
 	f := newDispatchEmployeeFixture(t)
-	id := "11111111-1111-1111-1111-111111111111"
 
 	w := httptest.NewRecorder()
 	f.e.dispatchORMRoute(w, f.request(t, http.MethodPost, "/hr/employees", map[string]any{
-		"id": id, "tenant_id": f.tenantID, "name": "Ada", "bank_account": "1234567890",
+		"name": "Ada", "bank_account": "1234567890",
 	}, f.entryCreate, nil, false))
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body: %s", w.Code, w.Body.String())
 	}
-	if got := decodeResponseRecord(t, w)["bank_account"]; got != "****7890" {
-		t.Errorf("response bank_account = %v, want the masked \"****7890\"", got)
+	record := decodeResponseRecord(t, w)
+	if record["bank_account"] != "****7890" {
+		t.Errorf("response bank_account = %v, want the masked \"****7890\"", record["bank_account"])
+	}
+	id, _ := record["id"].(string)
+	if id == "" {
+		t.Fatal("created record has no id")
 	}
 	if got := f.storedBankAccount(t, id); got != "1234567890" {
 		t.Errorf("stored bank_account = %q, want the real value", got)

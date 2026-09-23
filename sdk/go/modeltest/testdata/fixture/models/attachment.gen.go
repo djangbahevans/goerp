@@ -140,41 +140,6 @@ func NewAttachmentValues() *AttachmentValues {
 	return &AttachmentValues{Values: *orm.NewValues[Attachment]()}
 }
 
-func (v *AttachmentValues) SetID(x string) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.ID, x)
-	return v
-}
-
-func (v *AttachmentValues) SetTenantID(x string) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.TenantID, x)
-	return v
-}
-
-func (v *AttachmentValues) SetCreatedAt(x time.Time) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.CreatedAt.Field, x)
-	return v
-}
-
-func (v *AttachmentValues) SetUpdatedAt(x time.Time) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.UpdatedAt.Field, x)
-	return v
-}
-
-func (v *AttachmentValues) SetDeletedAt(x time.Time) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.DeletedAt.Field, x)
-	return v
-}
-
-func (v *AttachmentValues) SetCreatedBy(x string) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.CreatedBy, x)
-	return v
-}
-
-func (v *AttachmentValues) SetEtag(x string) *AttachmentValues {
-	orm.Set(&v.Values, AttachmentFields.Etag.Field, x)
-	return v
-}
-
 func (v *AttachmentValues) SetReferenceType(x string) *AttachmentValues {
 	orm.Set(&v.Values, AttachmentFields.ReferenceType, x)
 	return v
