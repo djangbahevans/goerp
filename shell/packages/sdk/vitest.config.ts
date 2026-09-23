@@ -6,7 +6,14 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { name: "unit", environment: "node", include: ["src/**/*.test.ts"] },
+        test: {
+          name: "unit",
+          environment: "node",
+          include: ["src/**/*.test.ts"],
+          // cn.test.ts reads the app's tokens.css as ?raw; vitest otherwise
+          // replaces every CSS import with an empty string.
+          css: { include: [/tokens\.css/] },
+        },
       },
       {
         extends: true,
