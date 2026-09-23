@@ -4,88 +4,73 @@ import (
 	"fmt"
 
 	abi "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// Count returns the number of records matching domain via
-// host.orm.aggregate, under the same row-level security Search applies —
-// a record hidden by RLS is excluded the same way it would be from a
-// Search result.
-func Count(model, domain string) (int64, error) {
-	return count("", model, domain)
-}
-
-// CountTx is Count, scoped to tx's own open transaction.
-func CountTx(tx *db.Tx, model, domain string) (int64, error) {
-	return count(tx.TxID(), model, domain)
-}
-
-func count(txID, model, domain string) (int64, error) {
-	v, err := aggregateOne(txID, model, domain, abi.ORMAggregateValue{Aggregation: "count"})
+// Count returns the number of records matching cond via
+// host.orm.aggregate, under the same row-level security a Query
+// applies — a record hidden by RLS is excluded the same way it would be
+// from a Query result.
+func Count[T Model](cond Condition[T]) (int64, error) {
+	v, err := aggregateOne(cond, abi.ORMAggregateValue{Aggregation: "count"})
 	if err != nil {
 		return 0, err
 	}
 	return toInt64(v)
 }
 
-// Sum totals field over the records matching domain via
-// host.orm.aggregate, 0 when no record matches. field must be a numeric
-// field, or the call fails with orm.validation_failed (check via
-// IsValidationFailed).
-func Sum(model, field, domain string) (float64, error) {
-	return numericAggregate("", model, field, domain, "sum")
+// Sum totals f over the records matching cond via host.orm.aggregate, 0
+// when no record matches. f's TValue must additionally satisfy Numeric
+// (field.go) — an OrderedField over a Selection/Enum named string type,
+// or any non-OrderedField, fails to compile.
+func Sum[T Model, TValue Numeric](f OrderedField[T, TValue], cond Condition[T]) (float64, error) {
+	return numericAggregate(f.Name(), cond, "sum")
 }
 
-// SumTx is Sum, scoped to tx's own open transaction.
-func SumTx(tx *db.Tx, model, field, domain string) (float64, error) {
-	return numericAggregate(tx.TxID(), model, field, domain, "sum")
+// Avg returns the average value of f over the records matching cond via
+// host.orm.aggregate, 0 when no record matches.
+func Avg[T Model, TValue Numeric](f OrderedField[T, TValue], cond Condition[T]) (float64, error) {
+	return numericAggregate(f.Name(), cond, "avg")
 }
 
-// Min returns the smallest value of field over the records matching
-// domain via host.orm.aggregate, 0 when no record matches.
-func Min(model, field, domain string) (float64, error) {
-	return numericAggregate("", model, field, domain, "min")
+// Sortable is OrderedField+TimeField — anything Min/Max can meaningfully
+// range over, broader than Sum/Avg's Numeric requirement (Min over a
+// Char or TimestampTZ field is meaningful; summing/averaging either is
+// not). Implemented via an unexported marker method both OrderedField
+// and TimeField carry directly (field.go) — unlike Sum/Avg's Numeric
+// constraint, TValue Ordered's own type set can't distinguish "any
+// OrderedField" from "just the ones that should be Sortable" (it's meant
+// to include every OrderedField already), and TimeField isn't an
+// OrderedField at all, so a marker method is the only way to admit both
+// concrete types while excluding BytesField and a plain Field[T, bool].
+type Sortable[TModel Model] interface {
+	AnyField[TModel]
+	isSortable()
 }
 
-// MinTx is Min, scoped to tx's own open transaction.
-func MinTx(tx *db.Tx, model, field, domain string) (float64, error) {
-	return numericAggregate(tx.TxID(), model, field, domain, "min")
+// Min returns the smallest value of f over the records matching cond via
+// host.orm.aggregate, 0 when no record matches.
+func Min[T Model](f Sortable[T], cond Condition[T]) (float64, error) {
+	return numericAggregate(f.Name(), cond, "min")
 }
 
-// Max returns the largest value of field over the records matching
-// domain via host.orm.aggregate, 0 when no record matches.
-func Max(model, field, domain string) (float64, error) {
-	return numericAggregate("", model, field, domain, "max")
+// Max returns the largest value of f over the records matching cond via
+// host.orm.aggregate, 0 when no record matches.
+func Max[T Model](f Sortable[T], cond Condition[T]) (float64, error) {
+	return numericAggregate(f.Name(), cond, "max")
 }
 
-// MaxTx is Max, scoped to tx's own open transaction.
-func MaxTx(tx *db.Tx, model, field, domain string) (float64, error) {
-	return numericAggregate(tx.TxID(), model, field, domain, "max")
-}
-
-// Avg returns the average value of field over the records matching
-// domain via host.orm.aggregate, 0 when no record matches.
-func Avg(model, field, domain string) (float64, error) {
-	return numericAggregate("", model, field, domain, "avg")
-}
-
-// AvgTx is Avg, scoped to tx's own open transaction.
-func AvgTx(tx *db.Tx, model, field, domain string) (float64, error) {
-	return numericAggregate(tx.TxID(), model, field, domain, "avg")
-}
-
-func numericAggregate(txID, model, field, domain, aggregation string) (float64, error) {
-	v, err := aggregateOne(txID, model, domain, abi.ORMAggregateValue{Field: field, Aggregation: aggregation})
+func numericAggregate[T Model](field string, cond Condition[T], aggregation string) (float64, error) {
+	v, err := aggregateOne(cond, abi.ORMAggregateValue{Field: field, Aggregation: aggregation})
 	if err != nil {
 		return 0, err
 	}
 	return toFloat64(v)
 }
 
-func aggregateOne(txID, model, domain string, value abi.ORMAggregateValue) (any, error) {
+func aggregateOne[T Model](cond Condition[T], value abi.ORMAggregateValue) (any, error) {
 	var out abi.ORMAggregateOutput
-	in := abi.ORMAggregateInput{Model: model, Domain: domain, Values: []abi.ORMAggregateValue{value}, TxID: txID}
+	in := abi.ORMAggregateInput{Model: resourceName[T](), Domain: cond.expr, Values: []abi.ORMAggregateValue{value}}
 	if err := hostcall.Do(hostORMAggregate, in, &out); err != nil {
 		return nil, err
 	}

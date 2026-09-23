@@ -8,7 +8,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/djangbahevans/goerp/sdk/go/db"
@@ -65,7 +64,7 @@ func init() {
 			}}
 		}
 
-		read, err := orm.ReadOne[models.KindProbe]("widgets.kind_probe", created.ID, nil)
+		read, err := orm.Get[models.KindProbe](created.ID)
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.kind_probe_read_failed", "message": err.Error()},
@@ -91,7 +90,7 @@ func init() {
 	// /kind-probe-relation exercises the generated *orm.RelationRef
 	// expansion field (goerp#961 §3.4) end to end: a gadget created with
 	// a real display_name, a kind_probe row whose Many2One FK points at
-	// it, read back via orm.SearchRead (not just ReadOne, per goerp#961's
+	// it, read back via orm.Query's All (not just Get, per goerp#961's
 	// own AC) — and, in the same call, a second kind_probe row with the
 	// relation left unset, to confirm the expansion field decodes to nil
 	// rather than erroring when there's nothing to expand.
@@ -140,8 +139,9 @@ func init() {
 			}}
 		}
 
-		rows, _, err := orm.SearchRead[models.KindProbe]("widgets.kind_probe",
-			fmt.Sprintf("record.id = '%s' OR record.id = '%s'", withRelation.ID, withoutRelation.ID), nil)
+		rows, _, err := orm.From[models.KindProbe]().
+			Where(models.KindProbeFields.ID.In(withRelation.ID, withoutRelation.ID)).
+			All()
 		if err != nil {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.kind_probe_search_failed", "message": err.Error()},

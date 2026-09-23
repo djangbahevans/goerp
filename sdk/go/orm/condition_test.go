@@ -7,7 +7,7 @@ func TestCondition_And(t *testing.T) {
 	b := NewField[testModel, bool]("is_active").Eq(true)
 
 	got := a.And(b).expr
-	want := "(type = 'person') AND (is_active = true)"
+	want := "(record.type = 'person') AND (record.is_active = true)"
 	if got != want {
 		t.Errorf("And() = %q, want %q", got, want)
 	}
@@ -18,7 +18,7 @@ func TestCondition_Or(t *testing.T) {
 	b := NewField[testModel, string]("type").Eq("company")
 
 	got := a.Or(b).expr
-	want := "(type = 'person') OR (type = 'company')"
+	want := "(record.type = 'person') OR (record.type = 'company')"
 	if got != want {
 		t.Errorf("Or() = %q, want %q", got, want)
 	}
@@ -36,7 +36,7 @@ func TestCondition_OrThenAnd(t *testing.T) {
 	active := NewField[testModel, bool]("is_active").Eq(true)
 
 	got := person.Or(company).And(active).expr
-	want := "((type = 'person') OR (type = 'company')) AND (is_active = true)"
+	want := "((record.type = 'person') OR (record.type = 'company')) AND (record.is_active = true)"
 	if got != want {
 		t.Errorf("Or().And() = %q, want %q", got, want)
 	}
@@ -46,7 +46,7 @@ func TestNot(t *testing.T) {
 	a := NewField[testModel, string]("type").Eq("person")
 
 	got := Not(a).expr
-	want := "NOT (type = 'person')"
+	want := "NOT (record.type = 'person')"
 	if got != want {
 		t.Errorf("Not() = %q, want %q", got, want)
 	}
