@@ -34,7 +34,13 @@ const withTheme: Decorator = (Story, context) => {
     themeStore.setTheme(theme);
   }, [theme]);
   return (
-    <div style={{ background: "var(--color-bg)", color: "var(--color-text)", padding: "1rem" }}>
+    <div
+      style={{
+        background: "var(--color-bg)",
+        color: "var(--color-text)",
+        padding: context.parameters.layout === "fullscreen" ? 0 : "1rem",
+      }}
+    >
       <Story />
     </div>
   );
