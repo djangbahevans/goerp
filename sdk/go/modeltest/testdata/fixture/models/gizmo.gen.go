@@ -104,3 +104,50 @@ func (x *Gizmo) Scan(row map[string]any) error {
 	}
 	return nil
 }
+
+// GizmoValues is a typed builder for Gizmo's writable fields — one SetX
+// method per field goerp module generate found writable (not Readonly,
+// not Computed). The same builder serves both Create and Write: Create
+// sends every key present, Write sends only the keys present.
+type GizmoValues struct {
+	orm.Values[Gizmo]
+}
+
+func NewGizmoValues() *GizmoValues {
+	return &GizmoValues{Values: *orm.NewValues[Gizmo]()}
+}
+
+func (v *GizmoValues) SetID(x string) *GizmoValues {
+	orm.Set(&v.Values, GizmoFields.ID, x)
+	return v
+}
+
+func (v *GizmoValues) SetTenantID(x string) *GizmoValues {
+	orm.Set(&v.Values, GizmoFields.TenantID, x)
+	return v
+}
+
+func (v *GizmoValues) SetCreatedAt(x time.Time) *GizmoValues {
+	orm.Set(&v.Values, GizmoFields.CreatedAt.Field, x)
+	return v
+}
+
+func (v *GizmoValues) SetUpdatedAt(x time.Time) *GizmoValues {
+	orm.Set(&v.Values, GizmoFields.UpdatedAt.Field, x)
+	return v
+}
+
+func (v *GizmoValues) SetDeletedAt(x time.Time) *GizmoValues {
+	orm.Set(&v.Values, GizmoFields.DeletedAt.Field, x)
+	return v
+}
+
+func (v *GizmoValues) SetCreatedBy(x string) *GizmoValues {
+	orm.Set(&v.Values, GizmoFields.CreatedBy, x)
+	return v
+}
+
+func (v *GizmoValues) SetEtag(x string) *GizmoValues {
+	orm.Set(&v.Values, GizmoFields.Etag.Field, x)
+	return v
+}

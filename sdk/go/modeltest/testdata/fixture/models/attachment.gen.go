@@ -126,3 +126,60 @@ func (x *Attachment) Scan(row map[string]any) error {
 	}
 	return nil
 }
+
+// AttachmentValues is a typed builder for Attachment's writable fields — one SetX
+// method per field goerp module generate found writable (not Readonly,
+// not Computed). The same builder serves both Create and Write: Create
+// sends every key present, Write sends only the keys present.
+type AttachmentValues struct {
+	orm.Values[Attachment]
+}
+
+func NewAttachmentValues() *AttachmentValues {
+	return &AttachmentValues{Values: *orm.NewValues[Attachment]()}
+}
+
+func (v *AttachmentValues) SetID(x string) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.ID, x)
+	return v
+}
+
+func (v *AttachmentValues) SetTenantID(x string) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.TenantID, x)
+	return v
+}
+
+func (v *AttachmentValues) SetCreatedAt(x time.Time) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.CreatedAt.Field, x)
+	return v
+}
+
+func (v *AttachmentValues) SetUpdatedAt(x time.Time) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.UpdatedAt.Field, x)
+	return v
+}
+
+func (v *AttachmentValues) SetDeletedAt(x time.Time) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.DeletedAt.Field, x)
+	return v
+}
+
+func (v *AttachmentValues) SetCreatedBy(x string) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.CreatedBy, x)
+	return v
+}
+
+func (v *AttachmentValues) SetEtag(x string) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.Etag.Field, x)
+	return v
+}
+
+func (v *AttachmentValues) SetReferenceType(x string) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.ReferenceType, x)
+	return v
+}
+
+func (v *AttachmentValues) SetReferenceID(x string) *AttachmentValues {
+	orm.Set(&v.Values, AttachmentFields.ReferenceID, x)
+	return v
+}

@@ -241,6 +241,108 @@ func (x *KindProbe) Scan(row map[string]any) error {
 	return nil
 }
 
+// KindProbeValues is a typed builder for KindProbe's writable fields — one SetX
+// method per field goerp module generate found writable (not Readonly,
+// not Computed). The same builder serves both Create and Write: Create
+// sends every key present, Write sends only the keys present.
+type KindProbeValues struct {
+	orm.Values[KindProbe]
+}
+
+func NewKindProbeValues() *KindProbeValues {
+	return &KindProbeValues{Values: *orm.NewValues[KindProbe]()}
+}
+
+func (v *KindProbeValues) SetID(x string) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.ID, x)
+	return v
+}
+
+func (v *KindProbeValues) SetTenantID(x string) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.TenantID, x)
+	return v
+}
+
+func (v *KindProbeValues) SetCreatedAt(x time.Time) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.CreatedAt.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetUpdatedAt(x time.Time) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.UpdatedAt.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetDeletedAt(x time.Time) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.DeletedAt.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetCreatedBy(x string) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.CreatedBy, x)
+	return v
+}
+
+func (v *KindProbeValues) SetEtag(x string) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.Etag.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetDecimalField(x string) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.DecimalField.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetTimestampField(x time.Time) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.TimestampField.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetDateField(x time.Time) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.DateField.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetTimeField(x string) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.TimeField, x)
+	return v
+}
+
+func (v *KindProbeValues) SetJsonbField(x []byte) *KindProbeValues {
+	orm.SetBytes(&v.Values, KindProbeFields.JsonbField, x)
+	return v
+}
+
+func (v *KindProbeValues) SetByteaField(x []byte) *KindProbeValues {
+	orm.SetBytes(&v.Values, KindProbeFields.ByteaField, x)
+	return v
+}
+
+func (v *KindProbeValues) SetIntegerField(x int32) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.IntegerField.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetFloatField(x float64) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.FloatField.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetOptionalNote(x string) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.OptionalNote.Field, x)
+	return v
+}
+
+func (v *KindProbeValues) SetCreatedByGadgetID(x string) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.CreatedByGadgetID, x)
+	return v
+}
+
+func (v *KindProbeValues) SetPriority(x KindProbePriority) *KindProbeValues {
+	orm.Set(&v.Values, KindProbeFields.Priority, x)
+	return v
+}
+
 type KindProbePriority string
 
 const (
