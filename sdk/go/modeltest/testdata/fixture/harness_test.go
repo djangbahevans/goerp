@@ -2,6 +2,7 @@ package fixture
 
 import (
 	"encoding/json/v2"
+	"reflect"
 	"testing"
 
 	"github.com/djangbahevans/goerp/sdk/go/modeltest"
@@ -279,5 +280,32 @@ func TestKindProbe_RelationRoundTrip(t *testing.T) {
 	}
 	if got := resp.JSON("without_relation.gadget_display_name"); got != nil {
 		t.Errorf("without_relation.gadget_display_name = %v, want nil (*orm.RelationRef must decode to nil, not error, when there's nothing to expand)", got)
+	}
+}
+
+// TestGadget_QueryAndDelete pins goerp#980's own AC: Gadget{}.Query()
+// produces identical results to orm.From[models.Gadget](), and Delete()
+// actually soft-deletes the record via orm.Unlink — Gadget has a
+// deleted_at column (WithStandardFields), so Unlink sets it rather than
+// removing the row outright.
+func TestGadget_QueryAndDelete(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.POST("/widgets/gadget-query-delete", map[string]any{})
+	if resp.StatusCode != 201 {
+		t.Fatalf("status = %d, want 201; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+
+	queryMethodIDs, _ := resp.JSON("query_method_ids").([]any)
+	fromFuncIDs, _ := resp.JSON("from_func_ids").([]any)
+	if len(queryMethodIDs) != 1 {
+		t.Fatalf("query_method_ids = %v, want exactly one match", queryMethodIDs)
+	}
+	if !reflect.DeepEqual(queryMethodIDs, fromFuncIDs) {
+		t.Errorf("Gadget{}.Query() ids = %v, orm.From[models.Gadget]() ids = %v, want identical", queryMethodIDs, fromFuncIDs)
+	}
+
+	if got := resp.JSON("soft_deleted"); got != true {
+		t.Errorf("soft_deleted = %v, want true (Delete() should have set deleted_at)", got)
 	}
 }

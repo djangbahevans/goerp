@@ -5,6 +5,7 @@ package models
 import (
 	"time"
 
+	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -151,3 +152,12 @@ func (v *GizmoValues) SetEtag(x string) *GizmoValues {
 	orm.Set(&v.Values, GizmoFields.Etag.Field, x)
 	return v
 }
+
+// Query returns a fresh Gizmo query — sugar over orm.From[Gizmo]().
+func (Gizmo) Query() *orm.Query[Gizmo] { return orm.From[Gizmo]() }
+
+// Delete deletes x by its primary key — sugar over orm.Unlink[Gizmo].
+func (x Gizmo) Delete() (orm.ExecResult, error) { return orm.Unlink[Gizmo](x.ID) }
+
+// DeleteTx is Delete, scoped to tx's own open transaction.
+func (x Gizmo) DeleteTx(tx *db.Tx) (orm.ExecResult, error) { return orm.UnlinkTx[Gizmo](tx, x.ID) }

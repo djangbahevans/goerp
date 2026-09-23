@@ -841,3 +841,114 @@ func TestRenderModelFile_ValuesBuilder_DynamicLinkFieldsAreWritable(t *testing.T
 		t.Errorf("missing SetTargetID:\n%s", src)
 	}
 }
+
+// TestRenderModelFile_QueryAndDelete pins goerp#980's own scope example:
+// a thin Query() delegating to orm.From, and a Delete() delegating to
+// orm.Unlink against the model's own single string primary key field.
+func TestRenderModelFile_QueryAndDelete(t *testing.T) {
+	m := model.Define("widgets.gadget", model.Table("gadgets")).
+		WithStandardFields()
+
+	out, _, err := renderModelFile(m, nil, testGenContext())
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, "func (Gadget) Query() *orm.Query[Gadget] { return orm.From[Gadget]() }") {
+		t.Errorf("missing Query() method:\n%s", src)
+	}
+	if !strings.Contains(src, "func (x Gadget) Delete() (orm.ExecResult, error) { return orm.Unlink[Gadget](x.ID) }") {
+		t.Errorf("missing Delete() method:\n%s", src)
+	}
+	if !strings.Contains(src, "func (x Gadget) DeleteTx(tx *db.Tx) (orm.ExecResult, error) { return orm.UnlinkTx[Gadget](tx, x.ID) }") {
+		t.Errorf("missing DeleteTx() method:\n%s", src)
+	}
+	if !strings.Contains(src, `"github.com/djangbahevans/goerp/sdk/go/db"`) {
+		t.Errorf("output should import sdk/go/db for DeleteTx's *db.Tx parameter:\n%s", src)
+	}
+}
+
+// TestRenderModelFile_QueryFieldNameCollision_Errors and
+// TestRenderModelFile_DeleteFieldNameCollision_Errors pin that a schema
+// field literally named "query" or "delete" (pascalCase("query") ==
+// "Query", pascalCase("delete") == "Delete") is rejected rather than
+// silently producing a struct with both a field and a method of the same
+// name — a Go compile error go/format.Source doesn't catch, since it only
+// formats and never type-checks, the same class of bug
+// TestRenderModelFile_Many2OneExpansionCollidesWithSiblingField_Errors
+// pins for ordinary field-vs-field collisions.
+func TestRenderModelFile_QueryFieldNameCollision_Errors(t *testing.T) {
+	m := model.Define("widgets.saved_search").
+		Field("query", model.Text().Required())
+
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
+		t.Fatal("expected an error for a field named \"query\" colliding with the generated Query() method")
+	}
+}
+
+func TestRenderModelFile_DeleteFieldNameCollision_Errors(t *testing.T) {
+	m := model.Define("widgets.gadget", model.Table("gadgets")).
+		WithStandardFields().
+		Field("delete", model.Boolean().Required())
+
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
+		t.Fatal("expected an error for a field named \"delete\" colliding with the generated Delete() method")
+	}
+}
+
+// TestRenderModelFile_DeleteTxFieldNameCollision_Errors is the same
+// guard's third reserved name: pascalCase("delete_tx") == "DeleteTx",
+// the generated Delete()/DeleteTx pair's own transactional counterpart.
+func TestRenderModelFile_DeleteTxFieldNameCollision_Errors(t *testing.T) {
+	m := model.Define("widgets.gadget", model.Table("gadgets")).
+		WithStandardFields().
+		Field("delete_tx", model.Boolean().Required())
+
+	if _, _, err := renderModelFile(m, nil, testGenContext()); err == nil {
+		t.Fatal("expected an error for a field named \"delete_tx\" colliding with the generated DeleteTx() method")
+	}
+}
+
+// TestRenderModelFile_NoPrimaryKey_SkipsDelete pins that a model with no
+// IsPrimaryKey field (or a composite one, or a non-string one) gets no
+// Delete() — orm.Unlink takes a single string ID, so there's no sound
+// single-argument delegation to generate — but still gets Query(), which
+// doesn't depend on a primary key at all.
+func TestRenderModelFile_NoPrimaryKey_SkipsDelete(t *testing.T) {
+	m := model.Define("widgets.widget").
+		Field("name", model.Text().Required())
+
+	out, _, err := renderModelFile(m, nil, testGenContext())
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if !strings.Contains(src, "func (Widget) Query() *orm.Query[Widget] { return orm.From[Widget]() }") {
+		t.Errorf("missing Query() method:\n%s", src)
+	}
+	if strings.Contains(src, "Delete()") {
+		t.Errorf("model with no primary key should get no Delete():\n%s", src)
+	}
+}
+
+// TestRenderModelFile_CompositePrimaryKey_SkipsDelete pins the composite-
+// key half of the same guard: rls.go's own primaryKeyColumnName already
+// rejects a composite key for .Shareable() for the same underlying
+// reason — orm.Unlink has no concept of a multi-field ID.
+func TestRenderModelFile_CompositePrimaryKey_SkipsDelete(t *testing.T) {
+	m := model.Define("widgets.link").
+		Field("left_id", model.UUID().PrimaryKey()).
+		Field("right_id", model.UUID().PrimaryKey())
+
+	out, _, err := renderModelFile(m, nil, testGenContext())
+	if err != nil {
+		t.Fatalf("renderModelFile: %v", err)
+	}
+	src := normalizeSpaces(string(out))
+
+	if strings.Contains(src, "Delete()") {
+		t.Errorf("model with a composite primary key should get no Delete():\n%s", src)
+	}
+}
