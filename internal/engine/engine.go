@@ -783,7 +783,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
-	tenantContextHandler := tenantcontext.NewHandler(tenantResolver, cfg.RegistrationEnabled)
+	tenantContextHandler := tenantcontext.NewHandler(tenantResolver, cfg.RegistrationEnabled, cfg.TermsURL)
 	storageUploadHandler := storageupload.NewHandler(tenantResolver, authChecker, storageBackend, filesStore, storageupload.Limits{
 		MaxFileBytes: cfg.StorageMaxFileBytes,
 		AllowedTypes: cfg.StorageAllowedTypes,

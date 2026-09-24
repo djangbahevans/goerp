@@ -53,6 +53,22 @@ export interface EmailVerification {
 // membership), so the user signs in normally.
 export type EmailVerificationOutcome = "signed_in" | "login_required";
 
+export interface Registration {
+  name: string;
+  email: string;
+  password: string;
+  companyName: string;
+}
+
+// signed_in: the account is active and the response set a session.
+// login_required: the account and workspace exist but no session was
+// issued. verification_required: the account must verify its email first.
+// provisioning_pending: the workspace is still being set up.
+export type RegisterOutcome = {
+  kind: "signed_in" | "login_required" | "verification_required" | "provisioning_pending";
+  tenantSlug: string;
+};
+
 export interface VerificationEmailRequest {
   email: string;
   tenant: string;
@@ -86,6 +102,9 @@ export type InviteAcceptOutcome = "signed_in" | "login_required";
 export interface TenantContext {
   tenant: { slug: string; name: string } | null;
   registrationEnabled: boolean;
+  // The terms of service registration requires accepting; null when the
+  // platform configures none.
+  termsUrl: string | null;
 }
 
 export type MFAMethod = "totp" | "webauthn" | "recovery_code";

@@ -1,8 +1,10 @@
 export {
   acceptInvite,
+  checkSlug,
   confirmPasswordReset,
   fetchInviteInfo,
   fetchTenantContext,
+  register,
   requestPasswordReset,
   resendVerificationEmail,
   verifyEmail,
@@ -46,6 +48,8 @@ export type {
   PasswordResetConfirmation,
   PasswordResetOutcome,
   PasswordResetRequest,
+  RegisterOutcome,
+  Registration,
   TenantContext,
   VerificationEmailRequest,
 } from "./types.js";

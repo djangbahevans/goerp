@@ -1,0 +1,433 @@
+import {
+  checkSlug as checkSlugAvailability,
+  fetchTenantContext,
+  type RegisterOutcome,
+  type Registration,
+  register as registerAccount,
+} from "@goerp/sdk/auth";
+import { actionButtonClassName, Countdown, fieldInputClassName, Spinner } from "@goerp/sdk/components";
+import { isAppError } from "@goerp/sdk/error";
+import { useQuery } from "@tanstack/react-query";
+import { Check } from "lucide-react";
+import { type ReactNode, type RefObject, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { AuthLayout } from "./auth-layout.js";
+import { confirmBlurError, NewPasswordFields, validateNewPassword } from "./new-password-fields.js";
+import { policyMessageAsSentence } from "./password-messages.js";
+import { deriveSlug, isValidSlug } from "./slug.js";
+import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
+
+const SLUG_CHECK_DEBOUNCE_MS = 500;
+// Used when a 429 arrives without a parseable Retry-After header.
+const DEFAULT_LOCKOUT_SECONDS = 60;
+
+const linkClassName =
+  "rounded-control text-sm text-primary hover:underline focus-visible:outline-none focus-visible:shadow-focus";
+
+type Phase =
+  | { kind: "idle" }
+  | { kind: "submitting" }
+  | { kind: "locked"; seconds: number; key: number }
+  | { kind: "check_email"; email: string; tenantSlug: string }
+  | { kind: "provisioning_pending" };
+
+type SlugStatus = "unknown" | "checking" | "available" | "taken";
+
+interface FieldErrors {
+  name?: string | undefined;
+  email?: string | undefined;
+  next?: string | undefined;
+  confirm?: string | undefined;
+  company?: string | undefined;
+  terms?: string | undefined;
+}
+
+// A full page load either way, so the next page re-runs the mount-time
+// session check and picks up any session cookies registration just set.
+function replaceLocation(href: string): void {
+  window.location.replace(href);
+}
+
+export interface RegisterPageProps {
+  // Storybook and tests substitute these; the route never passes them.
+  register?: (input: Registration) => Promise<RegisterOutcome>;
+  checkSlug?: (slug: string, signal?: AbortSignal) => Promise<boolean>;
+  resend?: ResendVerification;
+  redirect?: (href: string) => void;
+}
+
+// shell-ux.md §2.2.
+export function RegisterPage({
+  register = registerAccount,
+  checkSlug = checkSlugAvailability,
+  resend,
+  redirect = replaceLocation,
+}: RegisterPageProps): ReactNode {
+  const tenantContext = useQuery({
+    queryKey: ["auth", "tenant-context"],
+    queryFn: fetchTenantContext,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
+  const registrationEnabled = tenantContext.data?.registrationEnabled === true;
+  const termsUrl = tenantContext.data?.termsUrl ?? null;
+
+  useEffect(() => {
+    if (tenantContext.isFetched && !registrationEnabled) redirect("/auth/login");
+  }, [tenantContext.isFetched, registrationEnabled, redirect]);
+
+  const nameId = useId();
+  const emailId = useId();
+  const companyId = useId();
+  const termsId = useId();
+  const cardHeadingRef = useRef<HTMLHeadingElement>(null);
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [strongEnough, setStrongEnough] = useState(false);
+  const [company, setCompany] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [slugStatus, setSlugStatus] = useState<SlugStatus>("unknown");
+
+  const slug = deriveSlug(company);
+
+  useEffect(() => {
+    // Clears the previous name's result until this one's check answers.
+    setSlugStatus("unknown");
+    if (!isValidSlug(slug)) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      setSlugStatus("checking");
+      checkSlug(slug, controller.signal).then(
+        (available) => {
+          if (!controller.signal.aborted) setSlugStatus(available ? "available" : "taken");
+        },
+        () => {
+          if (!controller.signal.aborted) setSlugStatus("unknown");
+        },
+      );
+    }, SLUG_CHECK_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [slug, checkSlug]);
+
+  // The form unmounts, taking its focused button with it.
+  useEffect(() => {
+    if (phase.kind === "check_email" || phase.kind === "provisioning_pending") cardHeadingRef.current?.focus();
+  }, [phase.kind]);
+
+  const submitting = phase.kind === "submitting";
+  const locked = phase.kind === "locked";
+  const inputsDisabled = submitting || locked;
+
+  const validate = (): FieldErrors => {
+    const found: FieldErrors = {};
+    if (!name.trim()) found.name = "Enter your name.";
+    if (!email.trim()) found.email = "Enter your email address.";
+    const password = validateNewPassword(next, confirm, strongEnough, "password");
+    if (password.next) found.next = password.next;
+    if (password.confirm) found.confirm = password.confirm;
+    if (!company.trim()) found.company = "Enter your company name.";
+    else if (!isValidSlug(slug)) found.company = "Use at least 3 letters or digits in your company name.";
+    if (termsUrl && !termsAccepted) found.terms = "Accept the terms of service to continue.";
+    return found;
+  };
+
+  const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (inputsDisabled) return;
+
+    const found = validate();
+    setErrors(found);
+    setFormError(null);
+    if (Object.values(found).some(Boolean)) return;
+
+    const submittedEmail = email.trim();
+    setPhase({ kind: "submitting" });
+    try {
+      const outcome = await register({
+        name: name.trim(),
+        email: submittedEmail,
+        password: next,
+        companyName: company.trim(),
+      });
+      switch (outcome.kind) {
+        case "signed_in":
+          redirect("/");
+          return;
+        case "login_required":
+          redirect("/auth/login");
+          return;
+        case "verification_required":
+          setPhase({ kind: "check_email", email: submittedEmail, tenantSlug: outcome.tenantSlug });
+          return;
+        case "provisioning_pending":
+          setPhase({ kind: "provisioning_pending" });
+          return;
+      }
+    } catch (err) {
+      if (isAppError(err) && err.isRateLimited()) {
+        const retryAfter = err.details?.retryAfter;
+        const seconds = typeof retryAfter === "number" && retryAfter > 0 ? retryAfter : DEFAULT_LOCKOUT_SECONDS;
+        setPhase({ kind: "locked", seconds, key: Date.now() });
+        return;
+      }
+      setPhase({ kind: "idle" });
+      if (!isAppError(err)) {
+        setFormError("Couldn't reach the server. Check your connection and try again.");
+      } else if (err.code === "auth.email_already_exists") {
+        setErrors({ email: "Email already in use" });
+      } else if (err.code === "tenant.slug_taken") {
+        setSlugStatus("taken");
+        setErrors({ company: "Company name taken, try another" });
+      } else if (err.code === "validation_failed") {
+        setErrors(fieldErrorsFrom(err.details));
+      } else if (err.code === "overloaded") {
+        setFormError("The server is busy. Try again in a moment.");
+      } else {
+        setFormError("Something went wrong. Try again.");
+      }
+    }
+  };
+
+  if (phase.kind === "check_email") {
+    return (
+      <CheckEmailCard email={phase.email} tenantSlug={phase.tenantSlug} resend={resend} headingRef={cardHeadingRef} />
+    );
+  }
+
+  if (phase.kind === "provisioning_pending") {
+    return (
+      <AuthLayout>
+        <div className="flex flex-col gap-4">
+          <h1 ref={cardHeadingRef} tabIndex={-1} className="font-semibold text-text text-xl focus:outline-none">
+            Your workspace is almost ready
+          </h1>
+          <p className="text-sm text-text-secondary">Sign in in a minute.</p>
+          <a href="/auth/login" className={`${actionButtonClassName("primary", "md")} w-full justify-center`}>
+            Sign in
+          </a>
+        </div>
+      </AuthLayout>
+    );
+  }
+
+  // Nothing renders until the platform confirms registration is on.
+  if (!registrationEnabled) return <AuthLayout>{null}</AuthLayout>;
+
+  return (
+    <AuthLayout>
+      <h1 className="mb-6 font-semibold text-text text-xl">Create your account</h1>
+
+      <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
+        <TextField
+          id={nameId}
+          label="Full name"
+          autoComplete="name"
+          value={name}
+          onChange={setName}
+          error={errors.name}
+          disabled={inputsDisabled}
+        />
+        <TextField
+          id={emailId}
+          label="Email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={setEmail}
+          error={errors.email}
+          disabled={inputsDisabled}
+        />
+        <NewPasswordFields
+          next={next}
+          confirm={confirm}
+          onNextChange={setNext}
+          onConfirmChange={setConfirm}
+          onConfirmBlur={() => setErrors((e) => ({ ...e, confirm: confirmBlurError(next, confirm) }))}
+          onStrengthChange={setStrongEnough}
+          errors={{ next: errors.next, confirm: errors.confirm }}
+          disabled={inputsDisabled}
+          nextLabel="Password"
+          confirmLabel="Confirm password"
+        />
+        <div className="flex flex-col gap-1">
+          <TextField
+            id={companyId}
+            label="Company name"
+            autoComplete="organization"
+            value={company}
+            onChange={setCompany}
+            error={errors.company}
+            disabled={inputsDisabled}
+          />
+          <div aria-live="polite" className="text-sm empty:hidden">
+            {!errors.company && slugStatus === "available" && (
+              <span className="flex items-center gap-1 text-success">
+                <Check size={16} aria-hidden="true" />
+                Available
+              </span>
+            )}
+            {!errors.company && slugStatus === "taken" && <span className="text-danger">Name taken</span>}
+          </div>
+        </div>
+
+        {termsUrl && (
+          <div className="flex flex-col gap-1">
+            <label htmlFor={termsId} className="flex items-center gap-2 text-sm text-text">
+              <input
+                id={termsId}
+                type="checkbox"
+                checked={termsAccepted}
+                disabled={inputsDisabled}
+                aria-invalid={errors.terms !== undefined}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                className="accent-primary"
+              />
+              <span>
+                I agree to the{" "}
+                <a href={termsUrl} target="_blank" rel="noopener noreferrer" className={linkClassName}>
+                  terms of service
+                </a>
+              </span>
+            </label>
+            {errors.terms && (
+              <span role="alert" className="text-danger text-sm">
+                {errors.terms}
+              </span>
+            )}
+          </div>
+        )}
+
+        <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
+          {formError}
+          {phase.kind === "locked" && (
+            <>
+              Too many attempts. Try again in{" "}
+              <Countdown key={phase.key} seconds={phase.seconds} onComplete={() => setPhase({ kind: "idle" })} />.
+            </>
+          )}
+        </div>
+
+        <button
+          type="submit"
+          disabled={inputsDisabled}
+          // Same convention as ActionButton: dimmed when inactive, but full
+          // contrast while busy submitting.
+          data-disabled={locked ? "true" : undefined}
+          aria-busy={submitting}
+          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
+        >
+          {submitting && <Spinner size={16} />}
+          Create account
+        </button>
+      </form>
+
+      <p className="mt-6 text-center text-sm text-text-secondary">
+        Already have an account?{" "}
+        <a href="/auth/login" className={linkClassName}>
+          Sign in
+        </a>
+      </p>
+    </AuthLayout>
+  );
+}
+
+// Maps a 422's details, keyed by the API's field names, onto the form.
+function fieldErrorsFrom(details: Record<string, unknown> | null): FieldErrors {
+  const text = (key: string) => (typeof details?.[key] === "string" ? (details[key] as string) : undefined);
+  const password = text("password");
+  return {
+    name: text("name"),
+    email: text("email"),
+    next: password && policyMessageAsSentence(password),
+    company: text("company_name"),
+  };
+}
+
+interface TextFieldProps {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  error: string | undefined;
+  disabled: boolean;
+  type?: "text" | "email";
+  autoComplete: string;
+}
+
+function TextField({ id, label, value, onChange, error, disabled, type = "text", autoComplete }: TextFieldProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-sm text-text">
+        {label}
+      </label>
+      <input
+        id={id}
+        type={type}
+        autoComplete={autoComplete}
+        {...(type === "email" ? { autoCorrect: "off", autoCapitalize: "none", spellCheck: false } : {})}
+        value={value}
+        disabled={disabled}
+        aria-invalid={error !== undefined}
+        onChange={(e) => onChange(e.target.value)}
+        className={fieldInputClassName(error !== undefined, "input", "sans")}
+      />
+      {error && (
+        <span role="alert" className="text-danger text-sm">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CheckEmailCard({
+  email,
+  tenantSlug,
+  resend,
+  headingRef,
+}: {
+  email: string;
+  tenantSlug: string;
+  resend: ResendVerification | undefined;
+  headingRef: RefObject<HTMLHeadingElement | null>;
+}): ReactNode {
+  const resendFlow = useVerificationResend(resend);
+  const disabled = resendFlow.sending || resendFlow.coolingDown;
+
+  return (
+    <AuthLayout>
+      <div className="flex flex-col gap-4">
+        <h1 ref={headingRef} tabIndex={-1} className="font-semibold text-text text-xl focus:outline-none">
+          Check your email
+        </h1>
+        <p className="text-sm text-text-secondary">
+          We sent a verification link to <strong className="font-semibold text-text">{email}</strong>. It expires in 24
+          hours.
+        </p>
+        <ResendStatus resend={resendFlow} sentMessage="Sent. Check your inbox and spam folder." />
+        <button
+          type="button"
+          disabled={disabled}
+          data-disabled={resendFlow.coolingDown ? "true" : undefined}
+          aria-busy={resendFlow.sending}
+          onClick={() => void resendFlow.send({ email, tenant: tenantSlug })}
+          className={`${actionButtonClassName("secondary", "md")} w-full justify-center`}
+        >
+          {resendFlow.sending && <Spinner size={16} />}
+          Resend email
+        </button>
+        <a href="/auth/login" className={`${linkClassName} self-center`}>
+          Back to sign in
+        </a>
+      </div>
+    </AuthLayout>
+  );
+}

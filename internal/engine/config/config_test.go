@@ -213,9 +213,15 @@ func TestLoadRegistrationSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if cfg.RegistrationEnabled || cfg.RequireEmailVerification != "tenant_choice" || len(cfg.ReservedSlugs) != 0 {
-		t.Errorf("defaults = %v, %q, %v, want false, tenant_choice, none", cfg.RegistrationEnabled, cfg.RequireEmailVerification, cfg.ReservedSlugs)
+	if cfg.RegistrationEnabled || cfg.RequireEmailVerification != "tenant_choice" || len(cfg.ReservedSlugs) != 0 || cfg.TermsURL != "" {
+		t.Errorf("defaults = %v, %q, %v, %q, want false, tenant_choice, none, empty", cfg.RegistrationEnabled, cfg.RequireEmailVerification, cfg.ReservedSlugs, cfg.TermsURL)
 	}
+
+	t.Setenv("GOERP_TERMS_URL", "not a url")
+	if _, err := Load(); err == nil {
+		t.Error("Load() accepted a GOERP_TERMS_URL that isn't an http(s) URL")
+	}
+	t.Setenv("GOERP_TERMS_URL", "https://example.com/terms")
 
 	t.Setenv("GOERP_RESERVED_SLUGS", "wiki,crm")
 	t.Setenv("GOERP_REQUIRE_EMAIL_VERIFICATION", "sometimes")

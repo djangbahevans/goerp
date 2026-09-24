@@ -12,11 +12,17 @@ export interface NewPasswordErrors {
 // shell-ux.md §2.4/§2.5's client-side rules: refuse under 12 characters or
 // below strength score 2 (strongEnough, from the meter), and require the
 // confirmation to match.
-export function validateNewPassword(next: string, confirm: string, strongEnough: boolean): NewPasswordErrors {
+// noun is "password" where there's no old one to replace (registration).
+export function validateNewPassword(
+  next: string,
+  confirm: string,
+  strongEnough: boolean,
+  noun = "new password",
+): NewPasswordErrors {
   const errors: NewPasswordErrors = {};
-  if (!next) errors.next = "Enter a new password.";
+  if (!next) errors.next = `Enter a ${noun}.`;
   else if (!strongEnough) errors.next = TOO_WEAK;
-  if (!confirm) errors.confirm = "Confirm your new password.";
+  if (!confirm) errors.confirm = `Confirm your ${noun}.`;
   else if (confirm !== next) errors.confirm = PASSWORD_MISMATCH;
   return errors;
 }
@@ -35,6 +41,8 @@ export interface NewPasswordFieldsProps {
   onStrengthChange: (strongEnough: boolean) => void;
   errors: NewPasswordErrors;
   disabled?: boolean | undefined;
+  nextLabel?: string | undefined;
+  confirmLabel?: string | undefined;
 }
 
 export function NewPasswordFields({
@@ -46,12 +54,14 @@ export function NewPasswordFields({
   onStrengthChange,
   errors,
   disabled,
+  nextLabel = "New password",
+  confirmLabel = "Confirm new password",
 }: NewPasswordFieldsProps): ReactNode {
   return (
     <>
       <div className="flex flex-col gap-2">
         <PasswordField
-          label="New password"
+          label={nextLabel}
           autoComplete="new-password"
           value={next}
           onChange={onNextChange}
@@ -61,7 +71,7 @@ export function NewPasswordFields({
         <PasswordStrengthMeter password={next} onValidityChange={onStrengthChange} />
       </div>
       <PasswordField
-        label="Confirm new password"
+        label={confirmLabel}
         autoComplete="new-password"
         value={confirm}
         onChange={onConfirmChange}
