@@ -120,10 +120,12 @@ func (h *Handlers) CheckSlug(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"available": available})
 }
 
-// slugAvailable reports whether slug is well-formed and held by no tenant
-// row in any status (the slug column is unique across all of them).
+// slugAvailable reports whether slug is well-formed, not reserved, and
+// held by no tenant row in any status (the slug column is unique across
+// all of them). A reserved slug reads as taken, so the register page's
+// "try another name" handling covers it.
 func (h *Handlers) slugAvailable(ctx context.Context, slug string) (bool, error) {
-	if !validSlug(slug) {
+	if !validSlug(slug) || h.tenants.IsReserved(slug) {
 		return false, nil
 	}
 	_, err := h.tenants.GetBySlug(ctx, slug)

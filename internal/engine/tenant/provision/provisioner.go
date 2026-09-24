@@ -100,7 +100,9 @@ func (p *Provisioner) ProvisionForRegistration(ctx context.Context, slug, name, 
 		if ctx.Err() != nil {
 			return ErrProvisioningPending
 		}
-		if hasApplicationErrorType(err, SlugTakenErrorType) {
+		// A reserved slug reads as taken to a registrant (auth-internals.md
+		// §3 "Self-service registration").
+		if hasApplicationErrorType(err, SlugTakenErrorType) || hasApplicationErrorType(err, SlugReservedErrorType) {
 			return ErrSlugTaken
 		}
 		return fmt.Errorf("provision tenant %s: %w", slug, err)

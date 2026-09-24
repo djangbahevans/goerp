@@ -896,3 +896,51 @@ func TestListRoute_ReportsUsersColumn(t *testing.T) {
 		t.Fatal("expected listusers1 in tenant list")
 	}
 }
+
+type recordingProvisioner struct{ calls int }
+
+func (p *recordingProvisioner) StartProvisioning(context.Context, CreateTenantRequest) (string, error) {
+	p.calls++
+	return "wf", nil
+}
+
+type recordingImporter struct{ calls int }
+
+func (i *recordingImporter) StartImport(context.Context, string, string, string) (string, error) {
+	i.calls++
+	return "job", nil
+}
+
+func TestCreateAndImportRoutes_RejectReservedSlugs(t *testing.T) {
+	store := tenant.NewStore(nil)
+	store.AddReservedSlugs("wiki")
+	provisioner := &recordingProvisioner{}
+	importer := &recordingImporter{}
+	mux := http.NewServeMux()
+	RegisterTenantRoutes(mux, TenantDeps{Store: store, Provisioner: provisioner, Importer: importer})
+
+	for _, c := range []struct{ path, body string }{
+		{"/admin/tenants", `{"slug":"app","admin_email":"a@b.com"}`},
+		{"/admin/tenants", `{"slug":"wiki","admin_email":"a@b.com"}`},
+		{"/admin/tenants/import", `{"slug":"storage","input":"x","decryption_key":"y"}`},
+	} {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, c.path, strings.NewReader(c.body)))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("POST %s %s status = %d, want 400", c.path, c.body, w.Code)
+			continue
+		}
+		if env := decodeEnvelope(t, w); env.Error == nil || env.Error.Code != "reserved_slug" {
+			t.Errorf("POST %s %s error = %+v, want reserved_slug", c.path, c.body, env.Error)
+		}
+	}
+	if provisioner.calls != 0 || importer.calls != 0 {
+		t.Errorf("provisioner calls = %d, importer calls = %d, want none for reserved slugs", provisioner.calls, importer.calls)
+	}
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/admin/tenants", strings.NewReader(`{"slug":"acme","admin_email":"a@b.com"}`)))
+	if w.Code != http.StatusAccepted || provisioner.calls != 1 {
+		t.Errorf("non-reserved slug status = %d, provisioner calls = %d, want 202 and 1", w.Code, provisioner.calls)
+	}
+}

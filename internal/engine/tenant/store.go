@@ -67,11 +67,12 @@ CREATE INDEX IF NOT EXISTS idx_tenant_domains_domain ON system.tenant_domains(do
 `
 
 type Store struct {
-	db *sql.DB
+	db       *sql.DB
+	reserved map[string]struct{}
 }
 
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db}
+	return &Store{db: db, reserved: newReservedSet()}
 }
 
 // Bootstrap creates system.tenants and system.tenant_domains (and their
@@ -108,6 +109,9 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 // ConstraintName themselves; this package doesn't hide that behind a
 // sentinel error, since which constraint fired is itself informative.
 func (s *Store) CreateTenant(ctx context.Context, slug, name string) (*Tenant, error) {
+	if s.IsReserved(slug) {
+		return nil, ErrSlugReserved
+	}
 	row := s.db.QueryRowContext(ctx, `
 		INSERT INTO system.tenants (slug, name)
 		VALUES ($1, $2)
@@ -130,6 +134,9 @@ var ErrSlugTaken = errors.New("tenant slug is already taken")
 // insert that committed but went unreported) returns the id again, while a
 // row with another id returns ErrSlugTaken.
 func (s *Store) ReserveSlug(ctx context.Context, id, slug, name string) (string, error) {
+	if s.IsReserved(slug) {
+		return "", ErrSlugReserved
+	}
 	var got string
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO system.tenants (id, slug, name)
