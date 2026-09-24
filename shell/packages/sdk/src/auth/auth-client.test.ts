@@ -10,8 +10,10 @@ import {
   login,
   logout,
   requestPasswordReset,
+  resendVerificationEmail,
   submitMFACode,
   updateProfile,
+  verifyEmail,
 } from "./auth-client.js";
 
 function jsonResponse(status: number, body: unknown, statusText = "", headers: Record<string, string> = {}): Response {
@@ -432,6 +434,69 @@ describe("confirmPasswordReset", () => {
       vi.fn(async () => jsonResponse(404, { error: { code: "invalid_token", message: "reset link is invalid" } })),
     );
     await expect(confirmPasswordReset(input)).rejects.toMatchObject({ code: "invalid_token", httpStatus: 404 });
+  });
+});
+
+describe("verifyEmail", () => {
+  const input = { token: "raw-token", tenant: "acme" };
+
+  it("posts token and tenant, resolving signed_in for a session response", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { expires_in: 900 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyEmail(input)).resolves.toBe("signed_in");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/verify-email",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ token: "raw-token", tenant: "acme" }),
+      }),
+    );
+  });
+
+  it("resolves login_required when no session was issued", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { login_required: true })),
+    );
+    await expect(verifyEmail(input)).resolves.toBe("login_required");
+  });
+
+  it("throws an AppError with the server's code on failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(404, { error: { code: "invalid_token", message: "link is invalid" } })),
+    );
+    await expect(verifyEmail(input)).rejects.toMatchObject({ code: "invalid_token", httpStatus: 404 });
+  });
+});
+
+describe("resendVerificationEmail", () => {
+  it("posts email and tenant", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await resendVerificationEmail({ email: "ada@example.com", tenant: "acme" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/verify-email/resend",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ email: "ada@example.com", tenant: "acme" }),
+      }),
+    );
+  });
+
+  it("throws an AppError on failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(400, { error: { code: "invalid_request", message: "malformed request body" } })),
+    );
+    await expect(resendVerificationEmail({ email: "a@b.co", tenant: "acme" })).rejects.toMatchObject({
+      code: "invalid_request",
+      httpStatus: 400,
+    });
   });
 });
 

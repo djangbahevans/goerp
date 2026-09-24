@@ -4,6 +4,8 @@ export {
   fetchInviteInfo,
   fetchTenantContext,
   requestPasswordReset,
+  resendVerificationEmail,
+  verifyEmail,
 } from "./auth-client.js";
 export { AuthMachine, authMachine, authTransition } from "./auth-machine.js";
 export { AuthContext, AuthProvider } from "./auth-provider.js";
@@ -33,6 +35,8 @@ export type {
   ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
+  EmailVerification,
+  EmailVerificationOutcome,
   InviteAcceptance,
   InviteAcceptOutcome,
   InviteInfo,
@@ -43,6 +47,7 @@ export type {
   PasswordResetOutcome,
   PasswordResetRequest,
   TenantContext,
+  VerificationEmailRequest,
 } from "./types.js";
 export { useAuth } from "./use-auth.js";
 export { useFieldPermission, useOptionalPermission, usePermission } from "./use-permission.js";

@@ -4,7 +4,7 @@ import { AppError } from "@goerp/sdk/error";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { LoginPage } from "./login-page.js";
 
 function authWith(login: AuthContextValue["login"]): AuthContextValue {
@@ -115,5 +115,33 @@ export const LockedOut: Story = {
   play: async ({ canvasElement }) => {
     const canvas = await fillAndSubmit(canvasElement);
     await expect(await canvas.findByText(/Too many attempts/)).toBeVisible();
+  },
+};
+
+export const EmailVerifiedNotice: Story = {
+  args: { notice: "email_verified" },
+  decorators: [
+    withProviders(
+      SUBDOMAIN,
+      authWith(async () => {}),
+    ),
+  ],
+};
+
+export const EmailVerificationRequired: Story = {
+  args: { resendVerification: fn(async () => {}) },
+  decorators: [
+    withProviders(
+      SUBDOMAIN,
+      authWith(async () => {
+        throw new AppError({ code: "email_verification_required", message: "", httpStatus: 403 });
+      }),
+    ),
+  ],
+  play: async ({ canvasElement, args }) => {
+    const canvas = await fillAndSubmit(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Resend verification email" }));
+    await expect(await canvas.findByText(/a new link is on its way/)).toBeVisible();
+    await expect(args.resendVerification).toHaveBeenCalledWith({ email: "ada@example.com", tenant: "acme" });
   },
 };
