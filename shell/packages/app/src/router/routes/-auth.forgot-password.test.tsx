@@ -82,7 +82,7 @@ describe("/auth/forgot-password", () => {
 
     const heading = await screen.findByRole("heading", { name: "Check your email" });
     expect(screen.getByText(SUCCESS_MESSAGE)).toBeTruthy();
-    expect(document.activeElement).toBe(heading);
+    await waitFor(() => expect(document.activeElement).toBe(heading));
     expect(screen.getByRole("link", { name: "Back to sign in" }).getAttribute("href")).toBe("/auth/login");
     expect(resetCalls(fetchMock)).toHaveLength(1);
     expect(JSON.parse(String(resetCalls(fetchMock)[0]?.[1]?.body))).toEqual({

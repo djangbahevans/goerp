@@ -41,6 +41,29 @@ export interface PasswordResetConfirmation {
 // of the tenant), so the user signs in normally.
 export type PasswordResetOutcome = "signed_in" | "login_required";
 
+export interface InviteLink {
+  token: string;
+  tenant: string;
+}
+
+export interface InviteInfo {
+  tenantName: string;
+  email: string;
+  name: string | null;
+  // False when the invitee already has an account on another tenant: they
+  // keep their existing password and just gain access.
+  passwordRequired: boolean;
+}
+
+export interface InviteAcceptance extends InviteLink {
+  // Only sent when InviteInfo.passwordRequired.
+  password?: string | undefined;
+}
+
+// "signed_in": the response set a session. "login_required": access was
+// granted but no session issued (an existing account), so the user signs in.
+export type InviteAcceptOutcome = "signed_in" | "login_required";
+
 // The pre-login tenant lookup (GET /auth/tenant-context). tenant is null on
 // a shared-domain deployment, where the Host alone doesn't identify one.
 export interface TenantContext {
