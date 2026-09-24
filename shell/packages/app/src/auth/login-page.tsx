@@ -1,17 +1,20 @@
-import { fetchTenantContext, useAuth } from "@goerp/sdk/auth";
+import { fetchTenantContext, useAuth, type VerificationEmailRequest } from "@goerp/sdk/auth";
 import { actionButtonClassName, Countdown, fieldInputClassName, PasswordField, Spinner } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
+import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
 
-// Why the user was sent back to sign in — set by the MFA challenge page
-// when a rejected attempt has spent its single-use mfa_token.
+// Why the user was sent here — set by the MFA challenge page when a
+// rejected attempt has spent its single-use mfa_token, or by the
+// verify-email page once the email is verified.
 const LOGIN_NOTICES = {
   mfa_failed: "Incorrect or expired code. Sign in again.",
   mfa_locked: "Too many failed verification attempts. Try again later.",
   session_failed: "Couldn't finish signing you in. Sign in again.",
+  email_verified: "Email verified. Sign in to continue.",
 } as const;
 
 export type LoginNotice = keyof typeof LOGIN_NOTICES;
@@ -24,6 +27,8 @@ export interface LoginPageProps {
   // Already passed through safeRedirect.
   redirectTo: string;
   notice?: LoginNotice | undefined;
+  // Storybook substitutes this; the route never passes it.
+  resendVerification?: ResendVerification | undefined;
 }
 
 type Phase = { kind: "idle" } | { kind: "submitting" } | { kind: "locked"; seconds: number; key: number };
@@ -44,7 +49,7 @@ function withRedirect(path: string, redirectTo: string): string {
   return `${path}?${new URLSearchParams({ redirect: redirectTo })}`;
 }
 
-export function LoginPage({ redirectTo, notice }: LoginPageProps): ReactNode {
+export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageProps): ReactNode {
   const { state, login } = useAuth();
   const navigate = useNavigate();
   const tenantContext = useQuery({
@@ -67,6 +72,10 @@ export function LoginPage({ redirectTo, notice }: LoginPageProps): ReactNode {
   const [formError, setFormError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [noticeDismissed, setNoticeDismissed] = useState(false);
+  // The email and tenant of the sign-in that needs verifying, which the
+  // resend action uses even if the fields have changed since.
+  const [unverified, setUnverified] = useState<VerificationEmailRequest | null>(null);
+  const resend = useVerificationResend(resendVerification);
   // Bumped to request email focus once the post-failure render has
   // re-enabled the input (a disabled input can't take focus).
   const [emailFocusRequest, setEmailFocusRequest] = useState(0);
@@ -117,6 +126,7 @@ export function LoginPage({ redirectTo, notice }: LoginPageProps): ReactNode {
     if (showCompanyField && !tenant) errors.company = "Enter your company.";
     setFieldErrors(errors);
     setFormError(null);
+    setUnverified(null);
     setNoticeDismissed(true);
     if (Object.keys(errors).length > 0) return;
 
@@ -143,6 +153,7 @@ export function LoginPage({ redirectTo, notice }: LoginPageProps): ReactNode {
         void navigate({ href: withRedirect("/auth/mfa-setup", redirectTo) });
       } else if (err.code === "email_verification_required") {
         setFormError("Verify your email address before signing in. Check your inbox for the verification link.");
+        setUnverified({ email: email.trim(), tenant });
       } else if (err.isUnauth()) {
         failCredentials("Invalid email or password");
       } else {
@@ -158,11 +169,17 @@ export function LoginPage({ redirectTo, notice }: LoginPageProps): ReactNode {
         {resolvedTenant && <p className="text-sm text-text-secondary">{resolvedTenant.name}</p>}
       </div>
 
-      {notice && !noticeDismissed && (
-        <p role="alert" className="mb-4 text-danger text-sm">
-          {LOGIN_NOTICES[notice]}
-        </p>
-      )}
+      {notice &&
+        !noticeDismissed &&
+        (notice === "email_verified" ? (
+          <p role="status" className="mb-4 text-sm text-success">
+            {LOGIN_NOTICES[notice]}
+          </p>
+        ) : (
+          <p role="alert" className="mb-4 text-danger text-sm">
+            {LOGIN_NOTICES[notice]}
+          </p>
+        ))}
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
         {showCompanyField && (
@@ -224,6 +241,23 @@ export function LoginPage({ redirectTo, notice }: LoginPageProps): ReactNode {
           disabled={inputsDisabled}
           error={fieldErrors.password ?? formError ?? undefined}
         />
+
+        {unverified && (
+          <div className="flex flex-col items-start gap-1">
+            {!resend.coolingDown && (
+              <button
+                type="button"
+                disabled={resend.sending}
+                aria-busy={resend.sending}
+                onClick={() => void resend.send(unverified)}
+                className={linkClassName}
+              >
+                Resend verification email
+              </button>
+            )}
+            <ResendStatus resend={resend} />
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <label htmlFor={rememberId} className="flex items-center gap-2 whitespace-nowrap text-sm text-text">

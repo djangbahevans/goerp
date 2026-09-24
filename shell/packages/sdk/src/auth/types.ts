@@ -41,6 +41,23 @@ export interface PasswordResetConfirmation {
 // of the tenant), so the user signs in normally.
 export type PasswordResetOutcome = "signed_in" | "login_required";
 
+export interface EmailVerification {
+  token: string;
+  // From the verification link; empty when the link has none, which still
+  // verifies but can't sign the user in.
+  tenant: string;
+}
+
+// "signed_in": the response set a session. "login_required": the email is
+// verified but no session was issued (MFA enrolled, or no resolvable tenant
+// membership), so the user signs in normally.
+export type EmailVerificationOutcome = "signed_in" | "login_required";
+
+export interface VerificationEmailRequest {
+  email: string;
+  tenant: string;
+}
+
 export interface InviteLink {
   token: string;
   tenant: string;

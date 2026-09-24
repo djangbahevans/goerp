@@ -3,6 +3,8 @@ import type {
   ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
+  EmailVerification,
+  EmailVerificationOutcome,
   InviteAcceptance,
   InviteAcceptOutcome,
   InviteInfo,
@@ -14,6 +16,7 @@ import type {
   PasswordResetRequest,
   TenantContext,
   UpdateProfileInput,
+  VerificationEmailRequest,
 } from "./types.js";
 
 interface MeResponseBody {
@@ -213,6 +216,34 @@ export async function confirmPasswordReset(input: PasswordResetConfirmation): Pr
   if (!response.ok) throw await readError(response);
   const body = (await response.json()) as { login_required?: boolean };
   return body.login_required ? "login_required" : "signed_in";
+}
+
+// verifyEmail backs POST /auth/verify-email (auth-internals.md §3 "Email
+// verification confirm"). A 404 means the token is invalid, expired, or
+// already used.
+export async function verifyEmail(input: EmailVerification): Promise<EmailVerificationOutcome> {
+  const response = await fetch("/auth/verify-email", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: input.token, tenant: input.tenant }),
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { login_required?: boolean };
+  return body.login_required ? "login_required" : "signed_in";
+}
+
+// resendVerificationEmail backs POST /auth/verify-email/resend
+// (auth-internals.md §3). The engine answers 200 for every well-formed
+// request, so success says nothing about whether a link was sent.
+export async function resendVerificationEmail(input: VerificationEmailRequest): Promise<void> {
+  const response = await fetch("/auth/verify-email/resend", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: input.email, tenant: input.tenant }),
+  });
+  if (!response.ok) throw await readError(response);
 }
 
 // fetchInviteInfo backs GET /auth/accept-invite/info (shell-ux.md §2.5).

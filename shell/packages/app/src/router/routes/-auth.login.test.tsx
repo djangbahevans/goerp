@@ -184,6 +184,16 @@ describe("/auth/login", () => {
     await waitFor(() => expect(screen.queryByText("Incorrect or expired code. Sign in again.")).toBeNull());
   });
 
+  it("shows the email_verified notice as a success status, not an alert", async () => {
+    stubTenantContext(SUBDOMAIN_TENANT);
+    await renderLogin({ url: "/auth/login?notice=email_verified" });
+
+    const notice = screen.getByText("Email verified. Sign in to continue.");
+    expect(notice.getAttribute("role")).toBe("status");
+    expect(notice.className).toContain("text-success");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("ignores an unknown notice value", async () => {
     stubTenantContext(SUBDOMAIN_TENANT);
     await renderLogin({ url: "/auth/login?notice=%3Cscript%3E" });
@@ -285,6 +295,63 @@ describe("/auth/login", () => {
     fireEvent.click(submit);
 
     expect(await screen.findByText(/Verify your email address before signing in/)).toBeTruthy();
+  });
+
+  it("resends the verification email for the failed sign-in's email and tenant, then cools down for 60 seconds", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/auth/tenant-context") return new Response(JSON.stringify(SUBDOMAIN_TENANT), { status: 200 });
+      if (url === "/auth/verify-email/resend") return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { submit } = await renderLogin({
+      loginImpl: async () => {
+        throw new AppError({ code: "email_verification_required", message: "", httpStatus: 403 });
+      },
+    });
+
+    fillCredentials();
+    fireEvent.click(submit);
+    const resend = await screen.findByRole("button", { name: "Resend verification email" });
+    // The resend targets the sign-in that failed, not whatever the field holds now.
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "" } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ["setInterval", "clearInterval", "Date"] });
+    await act(async () => {
+      fireEvent.click(resend);
+    });
+
+    const status = screen.getByText(/If your account still needs verifying/);
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.textContent).toBe(
+      "If your account still needs verifying, a new link is on its way. Resend again in 60 seconds.",
+    );
+    expect(screen.queryByRole("button", { name: "Resend verification email" })).toBeNull();
+    const resendCall = fetchMock.mock.calls.find(([url]) => url === "/auth/verify-email/resend") as
+      | [string, RequestInit]
+      | undefined;
+    expect(JSON.parse(String(resendCall?.[1].body))).toEqual({ email: "ada@example.com", tenant: "acme" });
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_200);
+    });
+    expect(status.textContent).toBe("If your account still needs verifying, a new link is on its way.");
+    expect(screen.getByRole("button", { name: "Resend verification email" })).toBeTruthy();
+  });
+
+  it("offers no resend for other login errors", async () => {
+    stubTenantContext(SUBDOMAIN_TENANT);
+    const { submit } = await renderLogin({
+      loginImpl: async () => {
+        throw new AppError({ code: "invalid_credentials", message: "", httpStatus: 401 });
+      },
+    });
+
+    fillCredentials();
+    fireEvent.click(submit);
+
+    expect(await screen.findByText("Invalid email or password")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Resend verification email" })).toBeNull();
   });
 
   it("redirects to MFA setup on mfa_setup_required", async () => {
