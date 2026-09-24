@@ -26,6 +26,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
@@ -122,7 +123,10 @@ type fixture struct {
 	issuer     *authtoken.Issuer
 	users      *user.Store
 	mfaStore   *mfa.Store
+	config     *tenantconfig.Store
+	tenants    *tenant.Store
 	conn       *sql.DB
+	tenantID   string
 	tenantSlug string
 	userID     string
 	email      string
@@ -216,6 +220,11 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE user_id = $1`, userID) })
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, userID) })
 
+	configStore := tenantconfig.NewStore(conn)
+	if err := configStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
+	}
+
 	issuer := authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore)
 	revoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 	mailer := newFakeMailer()
@@ -223,13 +232,16 @@ func newFixture(t *testing.T) *fixture {
 
 	return &fixture{
 		request:    NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, mailer, audit),
-		confirm:    NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, revoker, issuer, mailer, audit),
+		confirm:    NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, revoker, issuer, password.NewPolicyStore(configStore), mailer, audit),
 		mailer:     mailer,
 		audit:      audit,
 		issuer:     issuer,
 		users:      userStore,
 		mfaStore:   mfaStore,
+		config:     configStore,
+		tenants:    tenantStore,
 		conn:       conn,
+		tenantID:   tt.ID,
 		tenantSlug: slug,
 		userID:     userID,
 		email:      email,
@@ -279,9 +291,32 @@ func (f *fixture) doRequest(t *testing.T, email, tenantSlug string) *httptest.Re
 
 func (f *fixture) doConfirm(t *testing.T, token, newPw string) *httptest.ResponseRecorder {
 	t.Helper()
+	return f.doConfirmIn(t, f.tenantSlug, token, newPw)
+}
+
+func (f *fixture) doConfirmIn(t *testing.T, tenantSlug, token, newPw string) *httptest.ResponseRecorder {
+	t.Helper()
 	return do(t, f.confirm, "/auth/password-reset/confirm", map[string]any{
-		"token": token, "new_password": newPw, "tenant": f.tenantSlug,
+		"token": token, "new_password": newPw, "tenant": tenantSlug,
 	}, map[string]string{"X-Client-Type": "cli"})
+}
+
+func (f *fixture) storedPolicyTenantID(t *testing.T) *string {
+	t.Helper()
+	u, err := f.users.GetByID(t.Context(), f.userID)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	return u.PasswordSetAtPolicyTenantID
+}
+
+func (f *fixture) storedPolicyVersion(t *testing.T) int64 {
+	t.Helper()
+	u, err := f.users.GetByID(t.Context(), f.userID)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	return u.PasswordSetAtPolicyVersion
 }
 
 // issueToken runs a real request and returns the emailed raw token.
@@ -543,5 +578,52 @@ func TestConfirm_SuspendedUser_ResetsWithoutSigningInOrChangingStatus(t *testing
 	}
 	if n := f.activeSessionCount(t); n != 0 {
 		t.Errorf("active sessions = %d, want 0", n)
+	}
+}
+
+func TestConfirm_TenantPolicyEnforcedAndVersionRecorded(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyRequireDigit, "true"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	token := f.issueToken(t)
+
+	rec := f.doConfirm(t, token, newPassword)
+	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "auth.password_too_weak" {
+		t.Fatalf("status = %d, body = %s, want 422 for a password without a digit", rec.Code, rec.Body.String())
+	}
+
+	if rec := f.doConfirm(t, token, newPassword+" 7"); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if v := f.storedPolicyVersion(t); v != 1 {
+		t.Errorf("password_set_at_policy_version = %d, want 1", v)
+	}
+	if id := f.storedPolicyTenantID(t); id == nil || *id != f.tenantID {
+		t.Errorf("password_set_at_policy_tenant_id = %v, want %s", id, f.tenantID)
+	}
+}
+
+func TestConfirm_NonMemberTenant_GlobalPolicyAndVersionZero(t *testing.T) {
+	f := newFixture(t)
+	other, err := f.tenants.CreateTenant(t.Context(), fmt.Sprintf("pwresetother%d", time.Now().UnixNano()), "Other Co")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, other.ID) })
+	if err := f.config.Set(t.Context(), other.ID, password.KeyRequireDigit, "true"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	token := f.issueToken(t)
+
+	rec := f.doConfirmIn(t, other.Slug, token, newPassword)
+	if rec.Code != http.StatusOK || decodeBody(t, rec)["login_required"] != true {
+		t.Fatalf("status = %d, body = %s, want 200 login_required", rec.Code, rec.Body.String())
+	}
+	if v := f.storedPolicyVersion(t); v != 0 {
+		t.Errorf("password_set_at_policy_version = %d, want 0", v)
+	}
+	if id := f.storedPolicyTenantID(t); id != nil {
+		t.Errorf("password_set_at_policy_tenant_id = %s, want NULL (global policy only)", *id)
 	}
 }

@@ -27,6 +27,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
@@ -100,17 +101,99 @@ func (s *Store) Get(ctx context.Context, tenantID, key string) (value string, ok
 	return value, true, nil
 }
 
+// Password policy keys (auth-internals.md §3 "Password policy
+// versioning"): every PasswordPolicyPrefix field lives under it, and any
+// write that changes one bumps PasswordPolicyVersionKey in the same
+// transaction, so the version can't drift from the fields it versions.
+const (
+	PasswordPolicyPrefix     = "auth.password_policy."
+	PasswordPolicyVersionKey = "auth.password_policy_version"
+)
+
+// versionedPrefixes maps a key prefix to the counter a change under it
+// increments.
+var versionedPrefixes = map[string]string{
+	PasswordPolicyPrefix: PasswordPolicyVersionKey,
+}
+
+// ErrReadOnlyKey rejects a direct write to a version counter.
+var ErrReadOnlyKey = errors.New("config key is maintained by the engine and cannot be set directly")
+
+func versionCounterFor(key string) (string, bool) {
+	for prefix, counter := range versionedPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return counter, true
+		}
+	}
+	return "", false
+}
+
+func isVersionCounter(key string) bool {
+	for _, counter := range versionedPrefixes {
+		if key == counter {
+			return true
+		}
+	}
+	return false
+}
+
+// GetPrefix returns every key set for tenantID that starts with prefix.
+func (s *Store) GetPrefix(ctx context.Context, tenantID, prefix string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT key, value FROM system.tenant_config_overrides
+		WHERE tenant_id = $1 AND starts_with(key, $2)
+	`, tenantID, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("get tenant config prefix: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	values := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, fmt.Errorf("scan tenant config value: %w", err)
+		}
+		values[k] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get tenant config prefix: %w", err)
+	}
+	return values, nil
+}
+
 // Set upserts key's value for tenantID and broadcasts configChangedChannel
 // so every engine instance's Resolver cache drops its now-stale entry —
 // Postgres defers a transactional NOTIFY's delivery until COMMIT (and
 // drops it on rollback), so a failed upsert never broadcasts a change
-// that didn't actually happen.
+// that didn't actually happen. A key under a versioned prefix bumps its
+// counter only when the value actually changes.
 func (s *Store) Set(ctx context.Context, tenantID, key, value string) error {
+	if isVersionCounter(key) {
+		return ErrReadOnlyKey
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin set tenant config value: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	counter, versioned := versionCounterFor(key)
+	bump := false
+	if versioned {
+		// Serializes writers of this tenant's versioned keys, so the read
+		// below sees the committed value and every real change bumps.
+		lockKey := db.AdvisoryLockKey("tenantconfig.version:" + tenantID + ":" + counter)
+		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
+			return fmt.Errorf("lock tenant config version %s: %w", counter, err)
+		}
+		previous, ok, err := getTx(ctx, tx, tenantID, key)
+		if err != nil {
+			return err
+		}
+		bump = !ok || previous != value
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO system.tenant_config_overrides (tenant_id, key, value)
@@ -120,16 +203,45 @@ func (s *Store) Set(ctx context.Context, tenantID, key, value string) error {
 		return fmt.Errorf("set tenant config value: %w", err)
 	}
 
-	payload, err := json.Marshal(configChangedPayload{TenantID: tenantID, Key: key})
-	if err != nil {
-		return fmt.Errorf("encode config changed payload: %w", err)
+	changed := []string{key}
+	if bump {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO system.tenant_config_overrides (tenant_id, key, value)
+			VALUES ($1, $2, '1')
+			ON CONFLICT (tenant_id, key) DO UPDATE
+			SET value = (system.tenant_config_overrides.value::bigint + 1)::text, updated_at = NOW()
+		`, tenantID, counter); err != nil {
+			return fmt.Errorf("bump tenant config version %s: %w", counter, err)
+		}
+		changed = append(changed, counter)
 	}
-	if _, err := tx.ExecContext(ctx, "SELECT pg_notify($1, $2)", configChangedChannel, string(payload)); err != nil {
-		return fmt.Errorf("notify config changed: %w", err)
+
+	for _, k := range changed {
+		payload, err := json.Marshal(configChangedPayload{TenantID: tenantID, Key: k})
+		if err != nil {
+			return fmt.Errorf("encode config changed payload: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "SELECT pg_notify($1, $2)", configChangedChannel, string(payload)); err != nil {
+			return fmt.Errorf("notify config changed: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit set tenant config value: %w", err)
 	}
 	return nil
+}
+
+func getTx(ctx context.Context, tx *sql.Tx, tenantID, key string) (string, bool, error) {
+	var value string
+	err := tx.QueryRowContext(ctx, `
+		SELECT value FROM system.tenant_config_overrides WHERE tenant_id = $1 AND key = $2
+	`, tenantID, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("get tenant config value: %w", err)
+	}
+	return value, true, nil
 }

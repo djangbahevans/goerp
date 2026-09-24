@@ -223,7 +223,7 @@ func (f *fixture) enrollTOTP(t *testing.T) (code string) {
 
 func (f *fixture) issueMFAToken(t *testing.T, origin string) (token, txn string) {
 	t.Helper()
-	token, txn, err := f.mfaTokens.Issue(f.userID, f.tenantID, origin, false)
+	token, txn, err := f.mfaTokens.Issue(f.userID, f.tenantID, origin, mfatoken.IssueOptions{})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestServeHTTP_WebSessionPersistenceFollowsTokenRemember(t *testing.T) {
 		t.Run(fmt.Sprintf("remember=%v", remember), func(t *testing.T) {
 			f := newFixture(t)
 			code := f.enrollTOTP(t)
-			token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, testOrigin, remember)
+			token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, testOrigin, mfatoken.IssueOptions{Remember: remember})
 			if err != nil {
 				t.Fatalf("Issue() error: %v", err)
 			}
@@ -440,5 +440,32 @@ func TestServeHTTP_MalformedMFATokenRejected(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServeHTTP_TokenPasswordUpdateRecommendedReachesResponse(t *testing.T) {
+	for _, recommended := range []bool{true, false} {
+		t.Run(fmt.Sprintf("recommended=%v", recommended), func(t *testing.T) {
+			f := newFixture(t)
+			code := f.enrollTOTP(t)
+			token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, testOrigin, mfatoken.IssueOptions{PasswordUpdateRecommended: recommended})
+			if err != nil {
+				t.Fatalf("Issue() error: %v", err)
+			}
+
+			rec := f.doVerify(t, map[string]any{"mfa_token": token, "type": "totp", "code": code},
+				map[string]string{"Origin": testOrigin})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+			}
+
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if _, got := body["password_update_recommended"]; got != recommended {
+				t.Errorf("password_update_recommended present = %v, want %v; body = %s", got, recommended, rec.Body.String())
+			}
+		})
 	}
 }

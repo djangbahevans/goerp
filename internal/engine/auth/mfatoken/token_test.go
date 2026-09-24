@@ -14,7 +14,7 @@ func testKey() *Key {
 func TestIssueThenVerify_RoundTrips(t *testing.T) {
 	codec := NewCodec(testKey())
 
-	token, txn, err := codec.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", false)
+	token, txn, err := codec.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", IssueOptions{})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
@@ -46,11 +46,11 @@ func TestIssueThenVerify_RoundTrips(t *testing.T) {
 func TestIssue_DistinctTxnPerCall(t *testing.T) {
 	codec := NewCodec(testKey())
 
-	_, txn1, err := codec.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", false)
+	_, txn1, err := codec.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", IssueOptions{})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
-	_, txn2, err := codec.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", false)
+	_, txn2, err := codec.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", IssueOptions{})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestVerify_RejectsWrongKid(t *testing.T) {
 	issuer := NewCodec(issuingKey)
 	verifier := NewCodec(verifyingKey)
 
-	token, _, err := issuer.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", false)
+	token, _, err := issuer.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", IssueOptions{})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestVerify_RejectsWrongSecret(t *testing.T) {
 	issuer := NewCodec(testKey())
 	verifier := NewCodec(&Key{KeyID: "test-kid", Secret: []byte("different-secret-different-secr")})
 
-	token, _, err := issuer.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", false)
+	token, _, err := issuer.Issue("user-1", "tenant-1", "https://acmecorp.goerp.io", IssueOptions{})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}

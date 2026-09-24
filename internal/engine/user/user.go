@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS system.users (
     password_reset_token   TEXT,
     password_reset_expiry  TIMESTAMPTZ,
     password_hash          TEXT,
+    password_set_at_policy_version BIGINT NOT NULL DEFAULT 0,
+    password_set_at_policy_tenant_id UUID,
     status                 TEXT NOT NULL DEFAULT 'active'
                                CHECK (status IN ('active','invited','suspended','pending_verification','deleted')),
     contact_id             UUID,
@@ -129,6 +131,11 @@ type User struct {
 	UpdatedAt        time.Time
 	LockedUntil      *time.Time
 	FailedLoginCount int
+	// PasswordSetAtPolicyTenantID/Version identify the tenant policy the
+	// password was last validated against (auth-internals.md §3 "Password
+	// policy versioning"); a nil tenant means the global policy only.
+	PasswordSetAtPolicyTenantID *string
+	PasswordSetAtPolicyVersion  int64
 }
 
 type Store struct {
@@ -165,7 +172,7 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	})
 }
 
-const userColumns = `id, email, status, password_hash, contact_id::text, created_at, updated_at, locked_until, failed_login_count`
+const userColumns = `id, email, status, password_hash, contact_id::text, created_at, updated_at, locked_until, failed_login_count, password_set_at_policy_tenant_id::text, password_set_at_policy_version`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -173,7 +180,7 @@ type rowScanner interface {
 
 func scanUser(sc rowScanner) (*User, error) {
 	var u User
-	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.ContactID, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount); err != nil {
+	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.ContactID, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount, &u.PasswordSetAtPolicyTenantID, &u.PasswordSetAtPolicyVersion); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -335,14 +342,17 @@ func (s *Store) GetByPasswordResetToken(ctx context.Context, tokenHash string) (
 	return u, nil
 }
 
-// ConsumePasswordResetToken sets the new password hash, clears the token,
-// and lifts any login lockout in one conditional UPDATE, so of two
-// concurrent confirms with the same token exactly one succeeds. Never
-// touches status.
-func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwordHash string) (string, error) {
+// ConsumePasswordResetToken sets the new password hash and the tenant
+// policy it was validated against (policyTenantID "" for the global
+// policy), clears the token, and lifts any login lockout in one
+// conditional UPDATE, so of two concurrent confirms with the same token
+// exactly one succeeds. Never touches status.
+func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwordHash, policyTenantID string, policyVersion int64) (string, error) {
 	row := s.db.QueryRowContext(ctx, `
 		UPDATE system.users
 		SET password_hash = $2,
+		    password_set_at_policy_tenant_id = NULLIF($3, '')::uuid,
+		    password_set_at_policy_version = $4,
 		    password_reset_token = NULL,
 		    password_reset_expiry = NULL,
 		    failed_login_count = 0,
@@ -350,7 +360,7 @@ func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwo
 		    updated_at = NOW()
 		WHERE password_reset_token = $1 AND password_reset_expiry > NOW() AND deleted_at IS NULL
 		RETURNING id
-	`, tokenHash, passwordHash)
+	`, tokenHash, passwordHash, policyTenantID, policyVersion)
 
 	var id string
 	if err := row.Scan(&id); err != nil {

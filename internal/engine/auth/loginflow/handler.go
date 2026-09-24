@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/alexedwards/argon2id"
+	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
@@ -66,10 +67,11 @@ type Handler struct {
 	mfa       *mfa.Store
 	issuer    *authtoken.Issuer
 	mfaTokens *mfatoken.Codec
+	policies  *password.PolicyStore
 }
 
-func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec) *Handler {
-	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens}
+func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore) *Handler {
+	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies}
 }
 
 type loginRequest struct {
@@ -211,6 +213,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// auth-internals.md §3 "Password policy versioning": a nudge only,
+	// never a reason to refuse the login.
+	var updateRecommended bool
+	if _, policyVersion, err := h.policies.Effective(ctx, t.ID); err != nil {
+		log.Warn().Err(err).Str("tenant_id", t.ID).Msg("loginflow: password policy version lookup failed")
+	} else {
+		updateRecommended = password.UpdateRecommended(u.PasswordSetAtPolicyTenantID, u.PasswordSetAtPolicyVersion, t.ID, policyVersion)
+	}
+
 	// Step 10: MFA gating. Whether MFA is enrolled is the only signal
 	// available today — the per-tenant enforcement-mode policy
 	// (optional/required/required_for_roles, goerp#308) doesn't exist
@@ -221,7 +232,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(factors) > 0 {
-		mfaToken, _, err := h.mfaTokens.Issue(u.ID, t.ID, r.Header.Get("Origin"), req.Remember)
+		mfaToken, _, err := h.mfaTokens.Issue(u.ID, t.ID, r.Header.Get("Origin"), mfatoken.IssueOptions{
+			Remember:                  req.Remember,
+			PasswordUpdateRecommended: updateRecommended,
+		})
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 			return
@@ -257,7 +271,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser)
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, updateRecommended)
 }
 
 // runDummyCompare performs one Argon2id comparison against a fixed,

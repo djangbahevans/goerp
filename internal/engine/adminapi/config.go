@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 )
 
 type ConfigDeps struct {
@@ -65,6 +66,10 @@ func (h *configHandlers) set(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.deps.Config.Set(r.Context(), tenantID, req.Key, req.Value); err != nil {
+		if errors.Is(err, tenantconfig.ErrReadOnlyKey) {
+			writeError(w, http.StatusBadRequest, "read_only_key", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
