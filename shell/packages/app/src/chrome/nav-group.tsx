@@ -28,7 +28,7 @@ export function NavGroupSection({
         onClick={() => onToggle(group.key)}
         aria-expanded={expanded}
         aria-label={collapsed ? group.label : undefined}
-        className="flex w-full items-center gap-2 rounded-control px-3 py-2 text-sm text-text-secondary hover:bg-surface-hover"
+        className="flex w-full items-center gap-2 rounded-control px-3 py-2 font-medium text-sm text-text-secondary hover:bg-surface-hover"
       >
         <Icon name={group.icon} size={16} aria-hidden="true" />
         {!collapsed && (

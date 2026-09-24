@@ -1,6 +1,6 @@
 import { useLocale } from "@goerp/sdk/i18n";
-import { Outlet } from "@tanstack/react-router";
-import { type MouseEvent, type ReactNode, useRef } from "react";
+import { Outlet, useRouterState } from "@tanstack/react-router";
+import { type MouseEvent, type ReactNode, useEffect, useRef } from "react";
 import { ChromeBanners } from "./chrome-banners.js";
 import { ChromeHeader } from "./chrome-header.js";
 import { ChromeSidebar } from "./chrome-sidebar.js";
@@ -13,6 +13,17 @@ import { ChromeSidebar } from "./chrome-sidebar.js";
 export function ChromeLayout(): ReactNode {
   const { direction } = useLocale();
   const mainRef = useRef<HTMLElement>(null);
+  const pathname = useRouterState({ select: (s) => (s.resolvedLocation ?? s.location).pathname });
+  const previousPathname = useRef(pathname);
+
+  // Accessibility "Focus management": a route navigation moves focus to
+  // <main>. Only pathname changes count — filters, sort and form tabs live in
+  // search params and the hash, and must keep focus on their own control.
+  useEffect(() => {
+    if (previousPathname.current === pathname) return;
+    previousPathname.current = pathname;
+    mainRef.current?.focus({ preventScroll: true });
+  }, [pathname]);
 
   function skipToContent(event: MouseEvent<HTMLAnchorElement>): void {
     event.preventDefault();
