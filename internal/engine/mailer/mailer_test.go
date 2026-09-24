@@ -224,6 +224,37 @@ func TestSMTPMailer_SendInvite_ExistingUser(t *testing.T) {
 	}
 }
 
+func TestSMTPMailer_SendPasswordReset_ContainsResetLink(t *testing.T) {
+	srv := startFakeSMTP(t)
+	m := newTestMailer(t, srv, "", "")
+
+	if err := m.SendPasswordReset(context.Background(), "kwame@example.com", "acmecorp", "raw-token-123"); err != nil {
+		t.Fatalf("SendPasswordReset() error: %v", err)
+	}
+
+	msg := waitForMessage(t, srv)
+	if len(msg.to) != 1 || msg.to[0] != "<kwame@example.com>" {
+		t.Errorf("to = %v, want [<kwame@example.com>]", msg.to)
+	}
+	if !strings.Contains(msg.data, "http://localhost:8080/auth/reset-password?token=raw-token-123&tenant=acmecorp") {
+		t.Errorf("email should contain the reset link with token and tenant, got: %s", msg.data)
+	}
+}
+
+func TestSMTPMailer_SendPasswordResetConfirmed(t *testing.T) {
+	srv := startFakeSMTP(t)
+	m := newTestMailer(t, srv, "", "")
+
+	if err := m.SendPasswordResetConfirmed(context.Background(), "kwame@example.com"); err != nil {
+		t.Fatalf("SendPasswordResetConfirmed() error: %v", err)
+	}
+
+	msg := waitForMessage(t, srv)
+	if !strings.Contains(msg.data, "Subject: Your password has been changed") {
+		t.Errorf("unexpected confirmation email: %s", msg.data)
+	}
+}
+
 func TestSMTPMailer_SendInvite_WithAuth(t *testing.T) {
 	srv := startFakeSMTP(t)
 	srv.requireAuth = true

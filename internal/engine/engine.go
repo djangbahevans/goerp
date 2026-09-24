@@ -56,6 +56,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaverify"
+	"github.com/djangbahevans/goerp/internal/engine/auth/passwordreset"
 	"github.com/djangbahevans/goerp/internal/engine/auth/planchange"
 	"github.com/djangbahevans/goerp/internal/engine/auth/roleassign"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
@@ -750,6 +751,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	mfaLockout := lockout.NewCounter(cacheClient)
 	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil)
+	passwordResetRequestHandler := passwordreset.NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer, authAuditStore)
+	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, inviteMailer, authAuditStore)
 	// filesStore is constructed here (rather than down by
 	// offboardActivities, which also needs it) since authMeHandler
 	// (avatar URL resolution, goerp#819) and storageUploadHandler both
@@ -766,18 +769,20 @@ func New(cfg *config.Config) (*Engine, error) {
 		BlockedTypes: cfg.StorageBlockedTypes,
 	})
 	builtinRoutes := map[string]http.Handler{
-		"GET /_health":                     server.HealthHandler(),
-		"GET /_ready":                      server.ReadyHandler(),
-		"GET /auth/me":                     authMeHandler,
-		"PATCH /auth/me":                   authMeUpdateHandler,
-		"POST /auth/refresh":               authRefreshHandler,
-		"POST /auth/login":                 loginHandler,
-		"GET /auth/tenant-context":         tenantContextHandler,
-		"POST /auth/logout":                authLogoutHandler,
-		"POST /auth/mfa/verify":            mfaVerifyHandler,
-		"POST /auth/mfa/reverify":          mfaReverifyHandler,
-		"POST /admin/users/{id}/mfa/reset": mfaResetHandler,
-		"POST /storage/upload":             storageUploadHandler,
+		"GET /_health":                      server.HealthHandler(),
+		"GET /_ready":                       server.ReadyHandler(),
+		"GET /auth/me":                      authMeHandler,
+		"PATCH /auth/me":                    authMeUpdateHandler,
+		"POST /auth/refresh":                authRefreshHandler,
+		"POST /auth/login":                  loginHandler,
+		"POST /auth/password-reset/request": passwordResetRequestHandler,
+		"POST /auth/password-reset/confirm": passwordResetConfirmHandler,
+		"GET /auth/tenant-context":          tenantContextHandler,
+		"POST /auth/logout":                 authLogoutHandler,
+		"POST /auth/mfa/verify":             mfaVerifyHandler,
+		"POST /auth/mfa/reverify":           mfaReverifyHandler,
+		"POST /admin/users/{id}/mfa/reset":  mfaResetHandler,
+		"POST /storage/upload":              storageUploadHandler,
 	}
 	defaultRateLimit := route.RateLimitConfig{Requests: cfg.RateLimitMax, WindowSeconds: int(cfg.RateLimitWindow.Seconds()), Scope: "ip"}
 

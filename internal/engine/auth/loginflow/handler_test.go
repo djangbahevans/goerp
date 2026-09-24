@@ -15,6 +15,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -102,7 +103,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
 
-	hash, err := argon2id.CreateHash(testPassword, argonParams)
+	hash, err := argon2id.CreateHash(testPassword, password.ArgonParams)
 	if err != nil {
 		t.Fatalf("CreateHash() error: %v", err)
 	}
@@ -556,7 +557,7 @@ func TestServeHTTP_OutdatedParams_ReHashesStoredHash(t *testing.T) {
 	if err != nil || !match {
 		t.Fatalf("re-hashed hash doesn't verify: match=%v err=%v", match, err)
 	}
-	if !paramsMatch(params, argonParams) {
+	if !paramsMatch(params, password.ArgonParams) {
 		t.Errorf("re-hashed params = %+v, want current argonParams", params)
 	}
 }
