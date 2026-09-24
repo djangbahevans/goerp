@@ -4,7 +4,7 @@ import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
@@ -67,6 +67,23 @@ describe("/settings/profile", () => {
 
     expect((screen.getByLabelText("Full name") as HTMLInputElement).value).toBe("Ada Lovelace");
     expect(screen.getByText("ada@example.com")).toBeTruthy();
+  });
+
+  it("renders inside the Settings rail with Profile as the current page", async () => {
+    const user: CurrentUser = {
+      id: "u1",
+      email: "ada@example.com",
+      name: "Ada Lovelace",
+      contactId: null,
+      avatarUrl: null,
+      roles: [],
+      amr: [],
+      mfaVerifiedAt: null,
+    };
+    await renderProfilePage(fakeAuth(user));
+
+    const nav = screen.getByRole("navigation", { name: "Settings" });
+    expect(within(nav).getByRole("link", { name: "Profile" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("saves the edited name, trimmed, with no avatar change", async () => {
