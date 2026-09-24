@@ -5,6 +5,7 @@ package recoverycode
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -31,22 +32,52 @@ func NewService(store *mfa.Store) *Service {
 // — shown to the user exactly once; nothing in this package persists or
 // logs them again after this call returns.
 func (s *Service) Enroll(ctx context.Context, userID string) ([]string, error) {
-	codes, err := GenerateCodes()
+	set, err := Prepare()
 	if err != nil {
 		return nil, err
 	}
-
-	for _, code := range codes {
-		hash, err := bcrypt.GenerateFromPassword([]byte(code), bcryptCost)
-		if err != nil {
-			return nil, fmt.Errorf("hash recovery code: %w", err)
-		}
+	for _, hash := range set.Hashes {
 		if _, err := s.store.Insert(ctx, userID, mfa.CredentialRecoveryCode, hash, nil); err != nil {
 			return nil, fmt.Errorf("store recovery code: %w", err)
 		}
 	}
+	return set.Codes, nil
+}
 
-	return codes, nil
+// Set is a freshly generated batch of recovery codes and their bcrypt
+// hashes, index-aligned.
+type Set struct {
+	Codes  []string
+	Hashes [][]byte
+}
+
+// Prepare generates and hashes a new batch without storing it. Hashing ten
+// codes at bcryptCost takes seconds, so callers do it before opening a
+// transaction and store the result with InsertTx.
+func Prepare() (Set, error) {
+	codes, err := GenerateCodes()
+	if err != nil {
+		return Set{}, err
+	}
+	hashes := make([][]byte, len(codes))
+	for i, code := range codes {
+		hashes[i], err = bcrypt.GenerateFromPassword([]byte(code), bcryptCost)
+		if err != nil {
+			return Set{}, fmt.Errorf("hash recovery code: %w", err)
+		}
+	}
+	return Set{Codes: codes, Hashes: hashes}, nil
+}
+
+// InsertTx stores set's hashes as userID's recovery codes inside the
+// caller's transaction.
+func (s *Service) InsertTx(ctx context.Context, tx *sql.Tx, userID string, set Set) error {
+	for _, hash := range set.Hashes {
+		if _, err := s.store.InsertTx(ctx, tx, userID, mfa.CredentialRecoveryCode, hash, nil); err != nil {
+			return fmt.Errorf("store recovery code: %w", err)
+		}
+	}
+	return nil
 }
 
 // Verify checks code against userID's enrolled, non-revoked recovery

@@ -199,22 +199,18 @@ func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
 
 func (f *fixture) enrollTOTP(t *testing.T) (code string) {
 	t.Helper()
-	svc := totp.NewService(mfa.NewStore(f.conn), f.rowKeys, f.cache)
-	_, cred, err := svc.Enroll(context.Background(), f.userID, "user@example.com", nil)
+	key, err := pquernatotp.Generate(pquernatotp.GenerateOpts{Issuer: "GoERP", AccountName: "user@example.com"})
 	if err != nil {
-		t.Fatalf("Enroll() error: %v", err)
+		t.Fatalf("Generate() error: %v", err)
 	}
-	var ciphertext []byte
-	if err := f.conn.QueryRowContext(context.Background(),
-		"SELECT credential FROM system.user_mfa WHERE id = $1", cred.ID,
-	).Scan(&ciphertext); err != nil {
-		t.Fatalf("query stored credential: %v", err)
-	}
-	secret, err := f.rowKeys.Decrypt(ciphertext)
+	ciphertext, err := f.rowKeys.Encrypt([]byte(key.Secret()))
 	if err != nil {
-		t.Fatalf("decrypt stored credential: %v", err)
+		t.Fatalf("encrypt totp secret: %v", err)
 	}
-	code, err = pquernatotp.GenerateCode(string(secret), time.Now())
+	if _, err := mfa.NewStore(f.conn).Insert(context.Background(), f.userID, mfa.CredentialTOTP, ciphertext, nil); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	code, err = pquernatotp.GenerateCode(key.Secret(), time.Now())
 	if err != nil {
 		t.Fatalf("GenerateCode() error: %v", err)
 	}

@@ -430,6 +430,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 	}
 	for _, path := range []string{
 		"/auth/login", "/auth/mfa/verify", "/auth/mfa/reverify",
+		"/auth/mfa/enroll/totp", "/auth/mfa/enroll/totp/confirm",
 		"/admin/users/{id}/mfa/reset", "/admin/users/{id}/roles",
 		"/auth/refresh", "/auth/logout", "/admin/tenant/plan",
 		"/auth/password-reset/request", "/auth/password-reset/confirm",

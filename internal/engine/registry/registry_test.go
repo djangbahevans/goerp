@@ -622,6 +622,8 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	// production unless it also resolves here.
 	for _, c := range []struct{ method, path string }{
 		{"GET", "/auth/me"},
+		{"POST", "/auth/mfa/enroll/totp"},
+		{"POST", "/auth/mfa/enroll/totp/confirm"},
 		{"GET", "/auth/tenant-context"},
 		{"POST", "/auth/refresh"},
 		{"POST", "/auth/logout"},

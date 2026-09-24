@@ -99,6 +99,42 @@ func write(w http.ResponseWriter, status int, tokens *authtoken.Tokens, deviceID
 	writeJSON(w, body)
 }
 
+// WriteReissuedAccessToken writes an access token reissued for an existing
+// session (step-up reverify, MFA enrollment confirm): in the JSON body for a
+// non-browser client, or as a refreshed __Host-access_token cookie for a
+// browser. The refresh_token and device_id cookies are left alone, since
+// the session itself doesn't change. A non-persistent session gets a
+// browser-session cookie, matching SetTokenCookies. body carries any
+// endpoint-specific fields and may be nil.
+func WriteReissuedAccessToken(w http.ResponseWriter, r *http.Request, accessToken string, expiresIn int, persistent bool, body map[string]any) {
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["expires_in"] = expiresIn
+	w.Header().Set("Content-Type", "application/json")
+
+	if IsNonBrowser(r) {
+		body["access_token"] = accessToken
+		writeJSON(w, body)
+		return
+	}
+
+	cookieMaxAge := 0
+	if persistent {
+		cookieMaxAge = expiresIn
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "__Host-access_token",
+		Value:    accessToken,
+		Path:     "/",
+		MaxAge:   cookieMaxAge,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	writeJSON(w, body)
+}
+
 // SetTokenCookies sets the __Host-access_token/refresh_token cookies
 // every full-session response carries for a browser client — shared by
 // setCookies (a fresh login) and authrefresh's rotation response, so the

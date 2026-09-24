@@ -56,6 +56,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/emailverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfaenroll"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareset"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
@@ -768,6 +769,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
 	mfaLockout := lockout.NewCounter(cacheClient)
 	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
+	mfaEnrollHandlers := mfaenroll.NewHandlers(tenantResolver, authChecker, userStore, mfaStore, sessionStore, tokenIssuer, totpService, recoveryCodeService, authAuditStore)
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil, passwordHasher)
 	passwordResetRequestHandler := passwordreset.NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer, authAuditStore)
 	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, passwordPolicies, inviteMailer, authAuditStore, passwordHasher)
@@ -790,27 +792,29 @@ func New(cfg *config.Config) (*Engine, error) {
 		BlockedTypes: cfg.StorageBlockedTypes,
 	})
 	builtinRoutes := map[string]http.Handler{
-		"GET /_health":                      server.HealthHandler(),
-		"GET /_ready":                       server.ReadyHandler(),
-		"GET /auth/me":                      authMeHandler,
-		"POST /auth/me/change-password":     authMePasswordHandler,
-		"PATCH /auth/me":                    authMeUpdateHandler,
-		"POST /auth/refresh":                authRefreshHandler,
-		"POST /auth/register":               http.HandlerFunc(registerHandlers.Register),
-		"GET /auth/check-slug":              http.HandlerFunc(registerHandlers.CheckSlug),
-		"GET /auth/accept-invite/info":      http.HandlerFunc(acceptInviteHandlers.Info),
-		"POST /auth/accept-invite":          http.HandlerFunc(acceptInviteHandlers.Accept),
-		"POST /auth/login":                  loginHandler,
-		"POST /auth/password-reset/request": passwordResetRequestHandler,
-		"POST /auth/password-reset/confirm": passwordResetConfirmHandler,
-		"POST /auth/verify-email":           verifyEmailConfirmHandler,
-		"POST /auth/verify-email/resend":    verifyEmailResendHandler,
-		"GET /auth/tenant-context":          tenantContextHandler,
-		"POST /auth/logout":                 authLogoutHandler,
-		"POST /auth/mfa/verify":             mfaVerifyHandler,
-		"POST /auth/mfa/reverify":           mfaReverifyHandler,
-		"POST /admin/users/{id}/mfa/reset":  mfaResetHandler,
-		"POST /storage/upload":              storageUploadHandler,
+		"GET /_health":                       server.HealthHandler(),
+		"GET /_ready":                        server.ReadyHandler(),
+		"GET /auth/me":                       authMeHandler,
+		"POST /auth/me/change-password":      authMePasswordHandler,
+		"PATCH /auth/me":                     authMeUpdateHandler,
+		"POST /auth/refresh":                 authRefreshHandler,
+		"POST /auth/register":                http.HandlerFunc(registerHandlers.Register),
+		"GET /auth/check-slug":               http.HandlerFunc(registerHandlers.CheckSlug),
+		"GET /auth/accept-invite/info":       http.HandlerFunc(acceptInviteHandlers.Info),
+		"POST /auth/accept-invite":           http.HandlerFunc(acceptInviteHandlers.Accept),
+		"POST /auth/login":                   loginHandler,
+		"POST /auth/password-reset/request":  passwordResetRequestHandler,
+		"POST /auth/password-reset/confirm":  passwordResetConfirmHandler,
+		"POST /auth/verify-email":            verifyEmailConfirmHandler,
+		"POST /auth/verify-email/resend":     verifyEmailResendHandler,
+		"GET /auth/tenant-context":           tenantContextHandler,
+		"POST /auth/logout":                  authLogoutHandler,
+		"POST /auth/mfa/verify":              mfaVerifyHandler,
+		"POST /auth/mfa/reverify":            mfaReverifyHandler,
+		"POST /auth/mfa/enroll/totp":         http.HandlerFunc(mfaEnrollHandlers.Begin),
+		"POST /auth/mfa/enroll/totp/confirm": http.HandlerFunc(mfaEnrollHandlers.Confirm),
+		"POST /admin/users/{id}/mfa/reset":   mfaResetHandler,
+		"POST /storage/upload":               storageUploadHandler,
 	}
 	defaultRateLimit := route.RateLimitConfig{Requests: cfg.RateLimitMax, WindowSeconds: int(cfg.RateLimitWindow.Seconds()), Scope: "ip"}
 

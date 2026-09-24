@@ -323,6 +323,51 @@ func (c *Checker) EnforceMFA(ctx context.Context, path, tenantID string, authCtx
 	return enforce.Evaluate(policy, evalCtx, time.Now()), nil
 }
 
+// StepUpDecision evaluates an already-enrolled user's session as if the
+// tenant's MFA policy applied to them, whatever its mode: FactorRequired
+// when the session never completed MFA, ReverifyRequired once its assurance
+// is older than the policy's max age. Adding a factor to an enrolled
+// account needs this, so a stolen password-only or stale session can't
+// enroll its own authenticator (auth-internals.md §8 "MFA enrollment").
+func (c *Checker) StepUpDecision(ctx context.Context, tenantID string, authCtx *AuthContext) (enforce.Decision, error) {
+	policy := enforce.Policy{Mode: enforce.ModeRequired, MaxAssuranceAge: enforce.DefaultMaxAssuranceAge}
+	if c.mfaPolicies != nil {
+		tenantPolicy, err := c.mfaPolicies.LoadPolicy(ctx, tenantID)
+		if err != nil {
+			return "", fmt.Errorf("load mfa policy: %w", err)
+		}
+		policy.MaxAssuranceAge = tenantPolicy.MaxAssuranceAge
+	}
+	return enforce.Evaluate(policy, enforce.Context{
+		UserRoles:     authCtx.RolesLive,
+		Enrolled:      true,
+		AMRHasFactor:  hasMFAFactor(authCtx.AMR),
+		MFAVerifiedAt: authCtx.MFAVerifiedAt,
+	}, time.Now()), nil
+}
+
+// MFASetupRequired reports whether step 9 would return mfa_setup_required
+// for authCtx on a non-exempt route (auth-internals.md §8 "MFA
+// enrollment"), for GET /auth/me's mfa_setup_required flag.
+func (c *Checker) MFASetupRequired(ctx context.Context, tenantID string, authCtx *AuthContext) (bool, error) {
+	// A Checker built without MFA stores enforces no policy.
+	if c.mfaPolicies == nil || c.mfaCreds == nil {
+		return false, nil
+	}
+	policy, err := c.mfaPolicies.LoadPolicy(ctx, tenantID)
+	if err != nil {
+		return false, fmt.Errorf("load mfa policy: %w", err)
+	}
+	if !policy.Applies(authCtx.RolesLive) {
+		return false, nil
+	}
+	creds, err := c.mfaCreds.ListActiveByUser(ctx, authCtx.UserID)
+	if err != nil {
+		return false, fmt.Errorf("load mfa credentials: %w", err)
+	}
+	return len(creds) == 0, nil
+}
+
 // authenticateAPIKey validates an erp_-prefixed rawToken per
 // auth-internals.md §7's key authentication flow. If key.UserID is set,
 // the resulting PermissionSet is the user's normal RBAC set restricted

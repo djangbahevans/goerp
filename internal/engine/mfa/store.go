@@ -96,7 +96,16 @@ func scanCredential(sc rowScanner) (*Credential, error) {
 // be encrypted by the caller (goerp#297) — this store treats it as opaque
 // bytes.
 func (s *Store) Insert(ctx context.Context, userID string, credType CredentialType, credential []byte, label *string) (*Credential, error) {
-	row := s.db.QueryRowContext(ctx, `
+	return insert(ctx, s.db, userID, credType, credential, label)
+}
+
+// InsertTx is Insert inside the caller's transaction.
+func (s *Store) InsertTx(ctx context.Context, tx *sql.Tx, userID string, credType CredentialType, credential []byte, label *string) (*Credential, error) {
+	return insert(ctx, tx, userID, credType, credential, label)
+}
+
+func insert(ctx context.Context, q db.Execer, userID string, credType CredentialType, credential []byte, label *string) (*Credential, error) {
+	row := q.QueryRowContext(ctx, `
 		INSERT INTO system.user_mfa (user_id, type, credential, label)
 		VALUES ($1, $2, $3, $4)
 		RETURNING `+userMFAColumns,
@@ -107,6 +116,51 @@ func (s *Store) Insert(ctx context.Context, userID string, credType CredentialTy
 		return nil, fmt.Errorf("insert mfa credential: %w", err)
 	}
 	return c, nil
+}
+
+// WithTx runs fn in one transaction on the store's pool, committing only
+// if fn returns nil.
+func (s *Store) WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin mfa transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit mfa transaction: %w", err)
+	}
+	return nil
+}
+
+// LockUserTx row-locks userID's system.users row until tx ends, so two
+// concurrent enrollment confirms for one user serialize their "does the
+// user already hold recovery codes" check.
+func (s *Store) LockUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
+	var id string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM system.users WHERE id = $1 FOR UPDATE`, userID).Scan(&id)
+	if err != nil {
+		return fmt.Errorf("lock user for mfa change: %w", err)
+	}
+	return nil
+}
+
+// HasActiveOfTypeTx reports whether userID holds any non-revoked factor of
+// credType, read inside the caller's transaction.
+func (s *Store) HasActiveOfTypeTx(ctx context.Context, tx *sql.Tx, userID string, credType CredentialType) (bool, error) {
+	var exists bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM system.user_mfa
+			WHERE user_id = $1 AND type = $2 AND revoked_at IS NULL
+		)
+	`, userID, credType).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check active mfa credentials: %w", err)
+	}
+	return exists, nil
 }
 
 // ListActiveByUser returns userID's non-revoked MFA factors.

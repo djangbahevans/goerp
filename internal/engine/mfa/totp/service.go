@@ -8,8 +8,11 @@ package totp
 
 import (
 	"context"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"time"
+	"uuid"
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
@@ -31,6 +34,16 @@ const (
 	// replayTTL matches the 30s period × the ±1 skew window each side —
 	// auth-internals.md §8 states this directly as "90 seconds".
 	replayTTL = 90 * time.Second
+
+	// auth-internals.md §8 "MFA enrollment": a pending secret lives 10
+	// minutes, and the 5th wrong confirm code discards it.
+	enrollmentTTL      = 10 * time.Minute
+	maxConfirmAttempts = 5
+)
+
+var (
+	ErrEnrollmentNotFound = errors.New("totp enrollment not found")
+	ErrInvalidCode        = errors.New("invalid totp code")
 )
 
 var validateOpts = totp.ValidateOpts{
@@ -52,11 +65,25 @@ func NewService(store *mfa.Store, keys *rowcrypt.RowKeySet, cacheClient *cache.C
 	return &Service{store: store, keys: keys, cache: cacheClient}
 }
 
-// Enroll generates a new TOTP secret for userID, encrypts and persists it
-// as a user_mfa row, and renders a server-side SVG QR code for the user's
-// authenticator app — never a URL that logs the secret, per
-// auth-internals.md §8.
-func (s *Service) Enroll(ctx context.Context, userID, accountName string, label *string) (qrSVG []byte, cred *mfa.Credential, err error) {
+// PendingEnrollment is a TOTP secret waiting for its first valid code
+// (auth-internals.md §8 "MFA enrollment"). Secret is the base32 manual-entry
+// key; QRSVG renders the same secret for scanning.
+type PendingEnrollment struct {
+	ID     string
+	QRSVG  []byte
+	Secret string
+}
+
+type pendingRecord struct {
+	UserID string `json:"user_id"`
+	Secret []byte `json:"secret"`
+}
+
+// BeginEnrollment generates a TOTP secret for userID and holds it,
+// encrypted, in Redis for enrollmentTTL. Nothing is written to user_mfa
+// until ConfirmEnrollment succeeds, so an abandoned setup never counts as
+// an enrolled factor.
+func (s *Service) BeginEnrollment(ctx context.Context, userID, accountName string) (*PendingEnrollment, error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      issuer,
 		AccountName: accountName,
@@ -66,26 +93,135 @@ func (s *Service) Enroll(ctx context.Context, userID, accountName string, label 
 		Algorithm:   otp.AlgorithmSHA1,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("generate totp secret: %w", err)
+		return nil, fmt.Errorf("generate totp secret: %w", err)
 	}
 
 	ciphertext, err := s.keys.Encrypt([]byte(key.Secret()))
 	if err != nil {
-		return nil, nil, fmt.Errorf("encrypt totp secret: %w", err)
+		return nil, fmt.Errorf("encrypt totp secret: %w", err)
+	}
+	record, err := json.Marshal(pendingRecord{UserID: userID, Secret: ciphertext})
+	if err != nil {
+		return nil, fmt.Errorf("encode pending enrollment: %w", err)
 	}
 
-	cred, err = s.store.Insert(ctx, userID, mfa.CredentialTOTP, ciphertext, label)
-	if err != nil {
-		return nil, nil, fmt.Errorf("store totp credential: %w", err)
+	id := uuid.NewV7().String()
+	if err := s.cache.SetWithTTL(ctx, enrollmentKey(id), string(record), enrollmentTTL); err != nil {
+		return nil, fmt.Errorf("store pending enrollment: %w", err)
 	}
 
 	svg, err := qrCodeSVG(key.URL())
 	if err != nil {
-		return nil, nil, fmt.Errorf("render totp qr code: %w", err)
+		return nil, fmt.Errorf("render totp qr code: %w", err)
 	}
 
-	return svg, cred, nil
+	return &PendingEnrollment{ID: id, QRSVG: svg, Secret: key.Secret()}, nil
 }
+
+// VerifiedEnrollment is a pending enrollment whose confirm code checked
+// out. It still sits in Redis until ClaimEnrollment removes it.
+type VerifiedEnrollment struct {
+	id     string
+	raw    string
+	Secret []byte // rowcrypt-encrypted, ready to store as user_mfa.credential
+}
+
+// CheckEnrollmentCode checks code against userID's pending enrollment.
+// ErrEnrollmentNotFound covers a missing, expired, or other user's
+// enrollment; ErrInvalidCode a wrong or replayed code. The
+// maxConfirmAttempts-th wrong code discards the enrollment. A match leaves
+// the enrollment pending: the caller stores the factor and calls
+// ClaimEnrollment inside the same transaction, so a failed write can be
+// retried with the same enrollment.
+func (s *Service) CheckEnrollmentCode(ctx context.Context, userID, enrollmentID, code string) (*VerifiedEnrollment, error) {
+	raw, found, err := s.cache.Get(ctx, enrollmentKey(enrollmentID))
+	if err != nil {
+		return nil, fmt.Errorf("load pending enrollment: %w", err)
+	}
+	if !found {
+		return nil, ErrEnrollmentNotFound
+	}
+	var record pendingRecord
+	if err := json.Unmarshal([]byte(raw), &record); err != nil {
+		return nil, fmt.Errorf("decode pending enrollment: %w", err)
+	}
+	if record.UserID != userID {
+		return nil, ErrEnrollmentNotFound
+	}
+
+	secret, err := s.keys.Decrypt(record.Secret)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt pending totp secret: %w", err)
+	}
+	valid, err := validate(code, string(secret), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if !valid {
+		attempts, err := s.cache.IncrWithTTL(ctx, attemptsKey(enrollmentID), enrollmentTTL)
+		if err != nil {
+			return nil, fmt.Errorf("count enrollment attempts: %w", err)
+		}
+		if attempts >= maxConfirmAttempts {
+			if err := s.discardEnrollment(ctx, enrollmentID); err != nil {
+				return nil, err
+			}
+		}
+		return nil, ErrInvalidCode
+	}
+
+	claimed, err := s.cache.SetNXWithTTL(ctx, replayKey(userID, code), "1", replayTTL)
+	if err != nil {
+		return nil, fmt.Errorf("claim totp replay slot: %w", err)
+	}
+	if !claimed {
+		return nil, ErrInvalidCode
+	}
+	return &VerifiedEnrollment{id: enrollmentID, raw: raw, Secret: record.Secret}, nil
+}
+
+// ClaimEnrollment removes v's pending enrollment, returning
+// ErrEnrollmentNotFound if a concurrent confirm claimed it first.
+func (s *Service) ClaimEnrollment(ctx context.Context, v *VerifiedEnrollment) error {
+	won, err := s.cache.DeleteIfEqual(ctx, enrollmentKey(v.id), v.raw)
+	if err != nil {
+		return fmt.Errorf("claim pending enrollment: %w", err)
+	}
+	if !won {
+		return ErrEnrollmentNotFound
+	}
+	if err := s.cache.Delete(ctx, attemptsKey(v.id)); err != nil {
+		return fmt.Errorf("clear enrollment attempts: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) discardEnrollment(ctx context.Context, enrollmentID string) error {
+	if err := s.cache.Delete(ctx, enrollmentKey(enrollmentID)); err != nil {
+		return fmt.Errorf("discard pending enrollment: %w", err)
+	}
+	if err := s.cache.Delete(ctx, attemptsKey(enrollmentID)); err != nil {
+		return fmt.Errorf("discard enrollment attempts: %w", err)
+	}
+	return nil
+}
+
+// validate reports whether code is valid for secret at now. A code of the
+// wrong length is simply invalid; only a malformed stored secret is an error.
+func validate(code, secret string, now time.Time) (bool, error) {
+	valid, err := totp.ValidateCustom(code, secret, now, validateOpts)
+	if errors.Is(err, otp.ErrValidateInputInvalidLength) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("validate totp code: %w", err)
+	}
+	return valid, nil
+}
+
+func enrollmentKey(id string) string { return "mfa:enroll:totp:" + id }
+
+func attemptsKey(id string) string { return "mfa:enroll:totp:" + id + ":attempts" }
 
 // Verify reports whether code matches one of userID's enrolled TOTP
 // factors within the current ±1 window, and if so, the matched
@@ -123,9 +259,9 @@ func (s *Service) Verify(ctx context.Context, userID, code string) (valid bool, 
 			continue
 		}
 
-		validCode, err := totp.ValidateCustom(code, string(secret), now, validateOpts)
+		validCode, err := validate(code, string(secret), now)
 		if err != nil {
-			return false, "", fmt.Errorf("validate totp code: %w", err)
+			return false, "", err
 		}
 		if !validCode {
 			continue
