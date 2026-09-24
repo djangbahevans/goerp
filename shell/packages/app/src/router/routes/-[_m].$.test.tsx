@@ -3,9 +3,10 @@ import { AuthContext, createPermissionContextValue, PermissionContext, permissio
 import type { ResolvedView, ViewRegistry } from "@goerp/sdk/schema";
 import { buildEmptyViewRegistry, viewRegistryRef } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
 // Matches command-palette.test.tsx's own fakeAuth() shape — __root.tsx's
@@ -40,13 +41,17 @@ const FAKE_AUTH: AuthContextValue = {
 // comment for why the escape is load-bearing. The permission value here
 // mirrors permissionDataRef so both stay consistent within one test.
 async function renderAt(path: string) {
-  const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: [path] }) });
+  const router = createRouter({
+    routeTree,
+    context: { auth: FAKE_AUTH },
+    history: createMemoryHistory({ initialEntries: [path] }),
+  });
   await router.load();
   render(
     <QueryClientProvider client={new QueryClient()}>
       <AuthContext.Provider value={FAKE_AUTH}>
         <PermissionContext.Provider value={createPermissionContextValue(permissionDataRef.current)}>
-          <RouterProvider router={router} />
+          <AuthRouterProvider router={router} />
         </PermissionContext.Provider>
       </AuthContext.Provider>
     </QueryClientProvider>,

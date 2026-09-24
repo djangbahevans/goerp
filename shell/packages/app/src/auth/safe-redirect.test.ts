@@ -14,6 +14,7 @@ describe("safeRedirect", () => {
     ["backslash protocol-relative", "/\\evil.example"],
     ["relative path", "settings/profile"],
     ["auth route", "/auth/login"],
+    ["bare auth path with a query", "/auth?next=1"],
   ])("falls back to / for a %s target", (_label, raw) => {
     expect(safeRedirect(raw)).toBe("/");
   });

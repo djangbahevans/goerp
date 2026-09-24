@@ -2,11 +2,12 @@ import type { AuthContextValue, AuthState, MFAMethod } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext, permissionDataRef } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeRecoveryCode } from "../../auth/mfa-challenge-page.js";
+import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
 const FAKE_USER = {
@@ -76,13 +77,17 @@ async function renderMFA({
     "fetch",
     vi.fn(async () => new Response(JSON.stringify({ tenant: null, registration_enabled: false }), { status: 200 })),
   );
-  const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: [url] }) });
+  const router = createRouter({
+    routeTree,
+    context: { auth: undefined! },
+    history: createMemoryHistory({ initialEntries: [url] }),
+  });
   await router.load();
   render(
     <QueryClientProvider client={new QueryClient()}>
       <FakeAuthProvider initial={initial} submitImpl={submitImpl}>
         <PermissionContext.Provider value={createPermissionContextValue(permissionDataRef.current)}>
-          <RouterProvider router={router} />
+          <AuthRouterProvider router={router} />
         </PermissionContext.Provider>
       </FakeAuthProvider>
     </QueryClientProvider>,
