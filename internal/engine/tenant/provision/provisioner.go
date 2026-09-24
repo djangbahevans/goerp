@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
@@ -97,7 +98,7 @@ func (p *Provisioner) ProvisionForRegistration(ctx context.Context, slug, name, 
 		return fmt.Errorf("start provisioning workflow: %w", err)
 	}
 	if err := run.Get(ctx, nil); err != nil {
-		if ctx.Err() != nil {
+		if contextExpired(ctx) {
 			return ErrProvisioningPending
 		}
 		// A reserved slug reads as taken to a registrant (auth-internals.md
@@ -108,6 +109,17 @@ func (p *Provisioner) ProvisionForRegistration(ctx context.Context, slug, name, 
 		return fmt.Errorf("provision tenant %s: %w", slug, err)
 	}
 	return nil
+}
+
+// contextExpired reports whether ctx is done or past its deadline. The
+// Temporal client's gRPC call can fail on the deadline before ctx's own
+// timer marks it done, leaving ctx.Err() nil for that instant.
+func contextExpired(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	deadline, ok := ctx.Deadline()
+	return ok && !time.Now().Before(deadline)
 }
 
 // hasApplicationErrorType reports whether any ApplicationError in err's
