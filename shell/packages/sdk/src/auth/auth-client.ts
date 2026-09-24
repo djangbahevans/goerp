@@ -4,6 +4,7 @@ import type {
   CurrentUser,
   LoginCredentials,
   MFAMethod,
+  PasswordResetRequest,
   TenantContext,
   UpdateProfileInput,
 } from "./types.js";
@@ -157,6 +158,19 @@ export async function updateProfile(input: UpdateProfileInput): Promise<void> {
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: input.name, avatar_id: input.avatarId }),
+  });
+  if (!response.ok) throw await readError(response);
+}
+
+// requestPasswordReset backs POST /auth/password-reset/request
+// (auth-internals.md §3). The engine answers 200 for every well-formed
+// request, so success says nothing about whether the email is registered.
+export async function requestPasswordReset(input: PasswordResetRequest): Promise<void> {
+  const response = await fetch("/auth/password-reset/request", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: input.email, tenant: input.tenant }),
   });
   if (!response.ok) throw await readError(response);
 }
