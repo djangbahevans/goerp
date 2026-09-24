@@ -6,9 +6,24 @@ import { useNavigate } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
 
+// Why the user was sent back to sign in — set by the MFA challenge page
+// when a rejected attempt has spent its single-use mfa_token.
+const LOGIN_NOTICES = {
+  mfa_failed: "Incorrect or expired code. Sign in again.",
+  mfa_locked: "Too many failed verification attempts. Try again later.",
+  session_failed: "Couldn't finish signing you in. Sign in again.",
+} as const;
+
+export type LoginNotice = keyof typeof LOGIN_NOTICES;
+
+export function isLoginNotice(value: unknown): value is LoginNotice {
+  return typeof value === "string" && Object.hasOwn(LOGIN_NOTICES, value);
+}
+
 export interface LoginPageProps {
   // Already passed through safeRedirect.
   redirectTo: string;
+  notice?: LoginNotice | undefined;
 }
 
 type Phase = { kind: "idle" } | { kind: "submitting" } | { kind: "locked"; seconds: number; key: number };
@@ -29,7 +44,7 @@ function withRedirect(path: string, redirectTo: string): string {
   return `${path}?${new URLSearchParams({ redirect: redirectTo })}`;
 }
 
-export function LoginPage({ redirectTo }: LoginPageProps): ReactNode {
+export function LoginPage({ redirectTo, notice }: LoginPageProps): ReactNode {
   const { state, login } = useAuth();
   const navigate = useNavigate();
   const tenantContext = useQuery({
@@ -51,6 +66,7 @@ export function LoginPage({ redirectTo }: LoginPageProps): ReactNode {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
   // Bumped to request email focus once the post-failure render has
   // re-enabled the input (a disabled input can't take focus).
   const [emailFocusRequest, setEmailFocusRequest] = useState(0);
@@ -101,6 +117,7 @@ export function LoginPage({ redirectTo }: LoginPageProps): ReactNode {
     if (showCompanyField && !tenant) errors.company = "Enter your company.";
     setFieldErrors(errors);
     setFormError(null);
+    setNoticeDismissed(true);
     if (Object.keys(errors).length > 0) return;
 
     setPhase({ kind: "submitting" });
@@ -140,6 +157,12 @@ export function LoginPage({ redirectTo }: LoginPageProps): ReactNode {
         <h1 className="font-semibold text-text text-xl">Sign in</h1>
         {resolvedTenant && <p className="text-sm text-text-secondary">{resolvedTenant.name}</p>}
       </div>
+
+      {notice && !noticeDismissed && (
+        <p role="alert" className="mb-4 text-danger text-sm">
+          {LOGIN_NOTICES[notice]}
+        </p>
+      )}
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
         {showCompanyField && (

@@ -171,6 +171,24 @@ describe("/auth/login", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
   });
 
+  it("shows an MFA notice until the next submit", async () => {
+    stubTenantContext(SUBDOMAIN_TENANT);
+    const { submit } = await renderLogin({ url: "/auth/login?notice=mfa_failed" });
+
+    expect(screen.getByText("Incorrect or expired code. Sign in again.")).toBeTruthy();
+    fillCredentials();
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(screen.queryByText("Incorrect or expired code. Sign in again.")).toBeNull());
+  });
+
+  it("ignores an unknown notice value", async () => {
+    stubTenantContext(SUBDOMAIN_TENANT);
+    await renderLogin({ url: "/auth/login?notice=%3Cscript%3E" });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("shows the Company field on a shared domain and sends its slug", async () => {
     stubTenantContext({ tenant: null, registration_enabled: false });
     const loginImpl = vi.fn<LoginImpl>(async () => {});
