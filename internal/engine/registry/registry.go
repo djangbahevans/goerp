@@ -405,6 +405,7 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 // table, so /_health, /_ready, /auth/login, /auth/tenant-context,
 // /auth/me, /auth/refresh,
 // /auth/logout, /auth/mfa/verify, /auth/mfa/reverify,
+// /auth/password-reset/request, /auth/password-reset/confirm,
 // /admin/users/{id}/mfa/reset, /admin/users/{id}/roles[/{role}],
 // /admin/tenant/plan, /_meta/permissions, /_meta/shares,
 // /_meta/saved-filters, /_meta/schema, /storage/upload, and
@@ -441,6 +442,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		// goerp#822: previously present in engine.go's builtinRoutes
 		// dispatch map but missing here, so unreachable in production.
 		"/auth/refresh", "/auth/logout", "/admin/tenant/plan",
+		"/auth/password-reset/request", "/auth/password-reset/confirm",
 	} {
 		table.Register("POST", path, &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},

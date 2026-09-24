@@ -114,7 +114,10 @@ const (
 	StatusDeleted             Status = "deleted"
 )
 
-var ErrUserNotFound = errors.New("user not found")
+var (
+	ErrUserNotFound      = errors.New("user not found")
+	ErrResetTokenInvalid = errors.New("password reset token invalid or expired")
+)
 
 type User struct {
 	ID               string
@@ -298,4 +301,64 @@ func (s *Store) UpdatePasswordHash(ctx context.Context, id, hash string) error {
 		return fmt.Errorf("update password hash: %w", err)
 	}
 	return nil
+}
+
+// SetPasswordResetToken stores tokenHash as id's single pending reset
+// token, replacing any earlier one.
+func (s *Store) SetPasswordResetToken(ctx context.Context, id, tokenHash string, expiry time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.users
+		SET password_reset_token = $2, password_reset_expiry = $3, updated_at = NOW()
+		WHERE id = $1
+	`, id, tokenHash, expiry)
+	if err != nil {
+		return fmt.Errorf("set password reset token: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetByPasswordResetToken(ctx context.Context, tokenHash string) (*User, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT `+userColumns+`
+		FROM system.users
+		WHERE password_reset_token = $1 AND password_reset_expiry > NOW() AND deleted_at IS NULL
+	`, tokenHash)
+
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrResetTokenInvalid
+		}
+		return nil, fmt.Errorf("get user by password reset token: %w", err)
+	}
+
+	return u, nil
+}
+
+// ConsumePasswordResetToken sets the new password hash, clears the token,
+// and lifts any login lockout in one conditional UPDATE, so of two
+// concurrent confirms with the same token exactly one succeeds. Never
+// touches status.
+func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwordHash string) (string, error) {
+	row := s.db.QueryRowContext(ctx, `
+		UPDATE system.users
+		SET password_hash = $2,
+		    password_reset_token = NULL,
+		    password_reset_expiry = NULL,
+		    failed_login_count = 0,
+		    locked_until = NULL,
+		    updated_at = NOW()
+		WHERE password_reset_token = $1 AND password_reset_expiry > NOW() AND deleted_at IS NULL
+		RETURNING id
+	`, tokenHash, passwordHash)
+
+	var id string
+	if err := row.Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrResetTokenInvalid
+		}
+		return "", fmt.Errorf("consume password reset token: %w", err)
+	}
+
+	return id, nil
 }

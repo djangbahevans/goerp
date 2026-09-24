@@ -70,6 +70,34 @@ func (m *SMTPMailer) SendMFAReset(ctx context.Context, email string) error {
 	return m.send(ctx, email, subject, text, html)
 }
 
+// SendPasswordReset carries the reset link — auth-internals.md §3
+// "Password reset", template auth.password_reset.
+func (m *SMTPMailer) SendPasswordReset(ctx context.Context, email, tenantSlug, rawToken string) error {
+	link := fmt.Sprintf("%s/auth/reset-password?token=%s&tenant=%s",
+		m.cfg.BaseURL, url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
+
+	const subject = "Reset your password"
+	text := fmt.Sprintf("A password reset was requested for your account.\n\n"+
+		"Set a new password (this link expires in 1 hour):\n%s\n\n"+
+		"If you did not request this, you can ignore this email.\n", link)
+	html := fmt.Sprintf("<p>A password reset was requested for your account.</p>"+
+		`<p><a href="%s">Set a new password</a> (this link expires in 1 hour).</p>`+
+		"<p>If you did not request this, you can ignore this email.</p>", link)
+
+	return m.send(ctx, email, subject, text, html)
+}
+
+// SendPasswordResetConfirmed — template auth.password_reset_confirmed.
+func (m *SMTPMailer) SendPasswordResetConfirmed(ctx context.Context, email string) error {
+	const subject = "Your password has been changed"
+	text := "The password for your account was just reset, and you have been signed out everywhere.\n\n" +
+		"If you did not do this, contact your administrator immediately.\n"
+	html := "<p>The password for your account was just reset, and you have been signed out everywhere.</p>" +
+		"<p>If you did not do this, contact your administrator immediately.</p>"
+
+	return m.send(ctx, email, subject, text, html)
+}
+
 func (m *SMTPMailer) send(ctx context.Context, to, subject, text, html string) error {
 	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
 

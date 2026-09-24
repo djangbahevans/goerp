@@ -28,20 +28,12 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
-
-// argonParams matches auth-internals.md §3 "Hashing" exactly.
-var argonParams = &argon2id.Params{
-	Memory:      64 * 1024,
-	Iterations:  3,
-	Parallelism: 4,
-	SaltLength:  16,
-	KeyLength:   32,
-}
 
 // maxBodyBytes bounds the request body before JSON parsing — no shared
 // config field or middleware covers builtin routes yet (buildDispatchHandler
@@ -57,7 +49,7 @@ const minResponseTime = 300 * time.Millisecond
 var dummyHash string
 
 func init() {
-	h, err := argon2id.CreateHash("timing-normalisation-dummy-password", argonParams)
+	h, err := argon2id.CreateHash("timing-normalisation-dummy-password", password.ArgonParams)
 	if err != nil {
 		// argonParams is a fixed literal — CreateHash can only fail here
 		// from a coding mistake in that literal, never from runtime
@@ -208,8 +200,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeInvalidCredentials(w)
 		return
 	}
-	if !paramsMatch(params, argonParams) {
-		newHash, hashErr := argon2id.CreateHash(req.Password, argonParams)
+	if !paramsMatch(params, password.ArgonParams) {
+		newHash, hashErr := argon2id.CreateHash(req.Password, password.ArgonParams)
 		if hashErr == nil {
 			// A re-hash failure or update failure here doesn't fail the
 			// login — the password was already verified correct; the
