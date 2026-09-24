@@ -12,7 +12,7 @@ const LOGIN_NOTICES = {
   mfa_failed: "Incorrect or expired code. Sign in again.",
   mfa_locked: "Too many failed verification attempts. Try again later.",
   session_failed: "Couldn't finish signing you in. Sign in again.",
-} as const; 
+} as const;
 
 export type LoginNotice = keyof typeof LOGIN_NOTICES;
 
