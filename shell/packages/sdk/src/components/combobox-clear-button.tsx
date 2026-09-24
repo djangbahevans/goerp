@@ -1,12 +1,5 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { IconButton } from "./icon-button.js";
-
-const CLEAR_BUTTON_STYLE: CSSProperties = {
-  position: "absolute",
-  insetInlineEnd: "var(--space-1)",
-  top: "50%",
-  transform: "translateY(-50%)",
-};
 
 export interface ComboboxClearButtonProps {
   label: string;
@@ -14,12 +7,9 @@ export interface ComboboxClearButtonProps {
   onClear: () => void;
 }
 
-// Shared clear ("×") affordance behind every closed combobox trigger with a
-// value — CodeSelect (CountrySelect/LanguageSelect) and IconPicker.
+// Shared clear ("×") affordance in the `end` slot of every closed combobox
+// input with a value — CodeSelect (CountrySelect/LanguageSelect), IconPicker
+// and RelationPicker.
 export function ComboboxClearButton({ label, disabled = false, onClear }: ComboboxClearButtonProps): ReactNode {
-  return (
-    <span style={CLEAR_BUTTON_STYLE} className="flex">
-      <IconButton icon="x" label={`Clear ${label}`} size="sm" disabled={disabled} onClick={onClear} />
-    </span>
-  );
+  return <IconButton icon="x" label={`Clear ${label}`} size="sm" disabled={disabled} onClick={onClear} />;
 }

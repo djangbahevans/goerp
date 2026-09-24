@@ -1,6 +1,8 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { fieldInputClassName } from "./field-input-styles.js";
+import { FieldError, FieldLabel, useSelfLabelledFieldControl } from "./field-wrapper.js";
+import { requiredProps } from "./text-input.js";
 
 export interface TagValue {
   id: string;
@@ -61,6 +63,7 @@ export function TagsField({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [closed, setClosed] = useState(false);
   const listboxId = useId();
+  const { id: fieldId, errorId, controlProps } = useSelfLabelledFieldControl(id, error);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const selectedIds = new Set(value.map((t) => t.id));
   const normalizedQuery = query.trim().toLowerCase();
@@ -178,7 +181,7 @@ export function TagsField({
 
   return (
     <div ref={containerRef} className="flex flex-col gap-1">
-      {label !== undefined && <span className="text-sm text-text">{label}</span>}
+      {label !== undefined && <FieldLabel htmlFor={fieldId}>{label}</FieldLabel>}
       {value.length > 0 && (
         <span className="flex flex-wrap gap-1">
           {value.map((tag) => (
@@ -204,7 +207,8 @@ export function TagsField({
         </span>
       )}
       <input
-        id={id}
+        {...controlProps}
+        {...requiredProps("combobox", controlProps.required)}
         type="text"
         role="combobox"
         aria-expanded={isOpen}
@@ -214,10 +218,9 @@ export function TagsField({
         value={query}
         disabled={disabled}
         placeholder={placeholder ?? `Add ${label ?? "a tag"}…`}
-        aria-invalid={error !== undefined}
         onChange={(e) => handleInputChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        className={fieldInputClassName(error !== undefined)}
+        className={fieldInputClassName(controlProps["aria-invalid"] === true)}
       />
       {isOpen && (
         <span
@@ -229,11 +232,7 @@ export function TagsField({
           {showCreate && renderOption(matches.length, "create", `Create "${query.trim()}"`, create)}
         </span>
       )}
-      {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
-          {error}
-        </span>
-      )}
+      {error !== undefined && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   );
 }

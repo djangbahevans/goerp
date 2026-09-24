@@ -72,7 +72,7 @@ export function VerificationCodeInput({
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm text-text">
+      <label htmlFor={id} className="text-sm font-medium text-text">
         {label}
       </label>
       {description && (
@@ -95,7 +95,11 @@ export function VerificationCodeInput({
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy || undefined}
         onChange={handleChange}
-        className={cn(fieldInputClassName(Boolean(error), "input", "sans"), CODE_TYPE_CLASSES, error && SHAKE_CLASS)}
+        className={cn(
+          fieldInputClassName(Boolean(error), "input", "sans", "auto"),
+          CODE_TYPE_CLASSES,
+          error && SHAKE_CLASS,
+        )}
       />
       {error && (
         <span id={errorId} role="alert" className="text-danger text-sm">

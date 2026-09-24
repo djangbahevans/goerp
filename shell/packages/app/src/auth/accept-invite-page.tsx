@@ -6,10 +6,10 @@ import {
   type InviteInfo,
   type InviteLink,
 } from "@goerp/sdk/auth";
-import { Button, Countdown, fieldInputClassName, Spinner } from "@goerp/sdk/components";
+import { Button, Countdown, FieldWrapper, Spinner, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 import {
@@ -142,7 +142,6 @@ function NewAccountForm({
   accept: (input: InviteAcceptance) => Promise<InviteAcceptOutcome>;
   redirect: (href: string) => void;
 }): ReactNode {
-  const emailId = useId();
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [strongEnough, setStrongEnough] = useState(false);
@@ -197,20 +196,16 @@ function NewAccountForm({
       </div>
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <label htmlFor={emailId} className="text-sm text-text">
-            Email
-          </label>
-          <input
-            id={emailId}
+        <FieldWrapper label="Email">
+          <TextInput
             type="email"
             // Lets password managers file the new password under this account.
             autoComplete="username"
             value={info.email}
+            onChange={() => {}}
             readOnly
-            className={`${fieldInputClassName(false, "input", "sans")} bg-bg-subtle text-text-secondary`}
           />
-        </div>
+        </FieldWrapper>
 
         <NewPasswordFields
           next={next}

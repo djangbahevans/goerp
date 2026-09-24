@@ -1,9 +1,9 @@
 import { useFieldPermission } from "@goerp/sdk/auth";
-import { FieldWrapper } from "@goerp/sdk/components";
+import { FieldWrapper, useFieldControl } from "@goerp/sdk/components";
 import { useId } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import type { Row } from "../list/list-view-types.js";
-import { FieldInput, readFieldValue, writeFieldValue } from "./field-renderers.js";
+import { FieldInput, type FieldInputProps, readFieldValue, writeFieldValue } from "./field-renderers.js";
 import type { FormField } from "./form-view-types.js";
 
 // ContentEditable/canvas primary controls aren't natively labelable —
@@ -39,36 +39,6 @@ const UNASSOCIATED_FIELD_TYPES = new Set([
   "computed_display",
 ]);
 
-// Whether this field reaches RelationPicker at all, and as `multiple` —
-// mirrored from FieldInput's render switch (field-renderers.tsx): select/
-// multi_select only route through RelationPicker once field.resource is
-// set (otherwise it's the plain, safe-for-any-multiplicity Select), and
-// many2many always resolves to multiple regardless of field.multiple.
-function reachesRelationPickerAsMultiple(field: FormField): boolean {
-  const type = field.type;
-  if (type === "many2many") return true;
-  if (type === "relation" || type === "user_select") return field.multiple === true;
-  if ((type === "select" || type === "multi_select") && field.resource !== undefined) {
-    return field.multiple === true || type === "multi_select";
-  }
-  return false;
-}
-
-// FieldWrapper nests children inside its own <label> (implicit
-// association) — unsafe for TagsField and a `multiple` RelationPicker,
-// both of which render a "Remove" chip button ahead of their actual
-// <input> whenever selected values exist (relation-picker.tsx's own
-// `selected` array is only populated when `multiple`; a single relation's
-// value renders inside the input itself, so it's unaffected). Those keep
-// the explicit id/htmlFor path below instead — see form-fields.test.tsx's
-// "label association" tests, which verify this per field type/multiplicity
-// rather than assume it.
-function usesImplicitLabelWrap(field: FormField): boolean {
-  const type = field.type ?? "text";
-  if (ARIA_LABELLEDBY_FIELD_TYPES.has(type) || UNASSOCIATED_FIELD_TYPES.has(type) || type === "tags") return false;
-  return !reachesRelationPickerAsMultiple(field);
-}
-
 // A field lacking read access is absent from the DOM entirely; lacking
 // write access (or marked readonly/computed) renders read-only.
 export function FormFieldRow({ field, resource, record, onChange, formReadonly }: FormFieldRowProps) {
@@ -91,45 +61,34 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
     return <FieldInput field={field} value={value} record={record} resource={resource} onChange={() => {}} />;
   }
 
-  // Explicit id/htmlFor, not a wrapping <label>, for the field types where
-  // that's the only safe association — DOM order (e.g. TagsField's "Remove
-  // tag" buttons ahead of its input) can't hijack it.
   const type = field.type ?? "text";
-  const id = UNASSOCIATED_FIELD_TYPES.has(type) ? undefined : generatedId;
+  const inputProps = {
+    field,
+    value,
+    record,
+    resource,
+    disabled: readonly,
+    onChange: (next: unknown) => (readonly ? undefined : onChange(writeFieldValue(field, next))),
+  };
+  const gridStyle = field.span ? { gridColumn: `span ${field.span}` } : undefined;
 
-  const input = (
-    <FieldInput
-      field={field}
-      value={value}
-      record={record}
-      resource={resource}
-      disabled={readonly}
-      id={id}
-      onChange={(next) => (readonly ? undefined : onChange(writeFieldValue(field, next)))}
-    />
-  );
-  const helpText = field.help_text && <p className="text-xs text-text-secondary">{field.help_text}</p>;
-
-  if (usesImplicitLabelWrap(field)) {
+  if (!ARIA_LABELLEDBY_FIELD_TYPES.has(type) && !UNASSOCIATED_FIELD_TYPES.has(type)) {
     return (
-      <div className="flex flex-col gap-1" style={field.span ? { gridColumn: `span ${field.span}` } : undefined}>
-        {/* field-wrapper.md: required only marks the label visually —
-            required/aria-required on the control itself isn't wired
-            through FieldInput yet, a pre-existing gap this doesn't newly
-            introduce (the old inline "*" span had the same gap). */}
-        <FieldWrapper label={field.label ?? field.field} required={field.required ?? false}>
-          {input}
+      <div style={gridStyle}>
+        <FieldWrapper
+          label={field.label ?? field.field}
+          description={field.help_text || undefined}
+          required={field.required ?? false}
+        >
+          <WrappedFieldInput {...inputProps} />
         </FieldWrapper>
-        {helpText}
       </div>
     );
   }
 
-  // field-wrapper.md's own label typography/spacing, reproduced here (not
-  // FieldWrapper itself — that's the implicit-wrap component this path
-  // exists to avoid) so a field that can't safely use FieldWrapper still
-  // looks like every other one instead of falling back to an unstyled
-  // browser-default label.
+  // field-wrapper.md's label and description typography, for the field types
+  // FieldWrapper's <label htmlFor> can't name: a contentEditable/canvas control
+  // (aria-labelledby) or a compound one whose parts label themselves.
   const labelText = (
     <>
       {field.label ?? field.field}
@@ -141,21 +100,28 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
       )}
     </>
   );
-  const labelClassName = "text-sm font-medium text-text";
+  const id = UNASSOCIATED_FIELD_TYPES.has(type) ? undefined : generatedId;
 
   return (
-    <div className="flex flex-col gap-1" style={field.span ? { gridColumn: `span ${field.span}` } : undefined}>
-      {ARIA_LABELLEDBY_FIELD_TYPES.has(type) ? (
-        <span id={id} className={labelClassName}>
+    <div className="flex flex-col gap-1" style={gridStyle}>
+      {id === undefined ? (
+        <span className={LABEL_CLASS_NAME}>{labelText}</span>
+      ) : (
+        <span id={id} className={LABEL_CLASS_NAME}>
           {labelText}
         </span>
-      ) : (
-        <label htmlFor={id} className={labelClassName}>
-          {labelText}
-        </label>
       )}
-      {input}
-      {helpText}
+      <FieldInput {...inputProps} id={id} />
+      {field.help_text && <p className="text-sm text-text-secondary">{field.help_text}</p>}
     </div>
   );
+}
+
+const LABEL_CLASS_NAME = "text-sm font-medium text-text";
+
+// Hands FieldWrapper's generated id to the control, for the SDK controls that
+// take an `id` prop rather than reading FieldContext themselves.
+function WrappedFieldInput(props: Omit<FieldInputProps, "id">) {
+  const fieldControl = useFieldControl();
+  return <FieldInput {...props} id={fieldControl?.id} />;
 }

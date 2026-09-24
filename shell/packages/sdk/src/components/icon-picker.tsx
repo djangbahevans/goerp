@@ -4,9 +4,9 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
-import { fieldInputClassName } from "./field-input-styles.js";
 import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { Icon } from "./icon.js";
+import { TextInput } from "./text-input.js";
 
 export interface IconPickerProps {
   id?: string | undefined;
@@ -165,9 +165,8 @@ export function IconPicker({ id, value, onChange, placeholder, disabled = false 
 
   return (
     <div ref={containerRef} className="relative flex flex-col">
-      <input
+      <TextInput
         id={id}
-        type="text"
         role="combobox"
         aria-expanded={isOpen}
         aria-controls={panelId}
@@ -178,22 +177,19 @@ export function IconPicker({ id, value, onChange, placeholder, disabled = false 
         disabled={disabled}
         placeholder={placeholder}
         onFocus={open}
-        onChange={(event) => {
-          setQuery(event.target.value);
+        onChange={(next) => {
+          setQuery(next);
           if (!isOpen) open();
           else setActiveIndex(0);
         }}
         onKeyDown={handleKeyDown}
-        className={`w-full truncate ${fieldInputClassName(false, "input", "sans")} ${hasOverlayIcon ? "ps-8" : ""} ${
-          !isOpen && value ? "pe-8" : ""
-        }`}
+        start={hasOverlayIcon && value ? <Icon name={value} size={16} aria-hidden="true" /> : undefined}
+        end={
+          !isOpen && value ? (
+            <ComboboxClearButton label={value} disabled={disabled} onClear={() => onChange("")} />
+          ) : undefined
+        }
       />
-      {hasOverlayIcon && value && (
-        <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center pl-3">
-          <Icon name={value} size={16} />
-        </span>
-      )}
-      {!isOpen && value && <ComboboxClearButton label={value} disabled={disabled} onClear={() => onChange("")} />}
       {isOpen &&
         createPortal(
           <span

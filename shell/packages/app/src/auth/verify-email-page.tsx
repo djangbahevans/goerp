@@ -1,7 +1,7 @@
 import { type EmailVerification, type EmailVerificationOutcome, verifyEmail } from "@goerp/sdk/auth";
-import { Button, Countdown, fieldInputClassName } from "@goerp/sdk/components";
+import { Button, Countdown, FieldWrapper, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
-import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
@@ -124,7 +124,6 @@ export function VerifyEmailPage({
 }
 
 function ExpiredResendForm({ tenant, resend }: { tenant: string; resend: ResendVerification | undefined }): ReactNode {
-  const emailId = useId();
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
   const resendFlow = useVerificationResend(resend);
@@ -143,28 +142,17 @@ function ExpiredResendForm({ tenant, resend }: { tenant: string; resend: ResendV
   return (
     <>
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <label htmlFor={emailId} className="text-sm text-text">
-            Email
-          </label>
-          <input
-            id={emailId}
+        <FieldWrapper label="Email" error={emailError ?? undefined}>
+          <TextInput
             type="email"
             autoComplete="email"
             autoCorrect="off"
             autoCapitalize="none"
             spellCheck={false}
             value={email}
-            aria-invalid={emailError !== null}
-            onChange={(e) => setEmail(e.target.value)}
-            className={fieldInputClassName(emailError !== null, "input", "sans")}
+            onChange={setEmail}
           />
-          {emailError && (
-            <span role="alert" className="text-danger text-sm">
-              {emailError}
-            </span>
-          )}
-        </div>
+        </FieldWrapper>
 
         <ResendStatus resend={resendFlow} />
 

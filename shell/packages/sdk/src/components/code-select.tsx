@@ -2,13 +2,13 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
-import { fieldInputClassName } from "./field-input-styles.js";
 import {
   optionElementId,
   useFloatingPanelPosition,
   useOutsideClickClose,
   useScrollHighlightedOptionIntoView,
 } from "./floating-panel.js";
+import { TextInput } from "./text-input.js";
 
 // Shared combobox mechanics behind country-select.tsx, language-select.tsx,
 // timezone-select.tsx, and currency-select.tsx — same searchable-list-over-
@@ -68,17 +68,7 @@ export function CodeSelectFallbackInput({
   placeholder,
   disabled = false,
 }: CodeSelectFallbackProps): ReactNode {
-  return (
-    <input
-      id={id}
-      type="text"
-      className={fieldInputClassName(false, "input", "sans")}
-      value={value ?? ""}
-      disabled={disabled}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
+  return <TextInput id={id} value={value ?? ""} disabled={disabled} placeholder={placeholder} onChange={onChange} />;
 }
 
 export function CodeSelect({
@@ -215,9 +205,8 @@ export function CodeSelect({
 
   return (
     <div ref={containerRef} className="relative flex flex-col">
-      <input
+      <TextInput
         id={id}
-        type="text"
         role="combobox"
         aria-expanded={isOpen}
         aria-controls={listboxId}
@@ -228,24 +217,25 @@ export function CodeSelect({
         disabled={disabled}
         placeholder={placeholder}
         onFocus={open}
-        onChange={(event) => {
-          setQuery(event.target.value);
+        onChange={(next) => {
+          setQuery(next);
           if (!isOpen) open();
           else setHighlightedIndex(0);
         }}
         onKeyDown={handleKeyDown}
-        className={`w-full truncate ${fieldInputClassName(false, "input", "sans")} ${hasOverlayIcon ? "ps-8" : ""} ${
-          !isOpen && selected ? "pe-8" : ""
-        }`}
+        start={
+          hasOverlayIcon && selected && leadingIcon ? (
+            <span aria-hidden className="flex">
+              {leadingIcon(selected.code)}
+            </span>
+          ) : undefined
+        }
+        end={
+          !isOpen && selected ? (
+            <ComboboxClearButton label={selected.name} disabled={disabled} onClear={() => onChange("")} />
+          ) : undefined
+        }
       />
-      {hasOverlayIcon && selected && leadingIcon && (
-        <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center pl-3">
-          {leadingIcon(selected.code)}
-        </span>
-      )}
-      {!isOpen && selected && (
-        <ComboboxClearButton label={selected.name} disabled={disabled} onClear={() => onChange("")} />
-      )}
       {isOpen &&
         createPortal(
           <span

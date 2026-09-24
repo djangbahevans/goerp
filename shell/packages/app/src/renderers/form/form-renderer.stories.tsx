@@ -115,13 +115,9 @@ const view: FormViewDeclaration = {
         },
         { field: "is_vip", label: "VIP", type: "boolean" },
         { field: "founded", label: "Founded", type: "date" },
-        // relation.md's own single-value case — safely FieldWrapper-wrapped
-        // (form-fields.test.tsx's "relation (single, already holding a
-        // value)" test is what proves that, not this story).
+        // relation.md's own single-value case.
         { field: "account_manager_id", label: "Account Manager", type: "relation", resource: "contacts.user", span: 2 },
-        // Inherently multi-valued — kept on the explicit-label path
-        // (usesImplicitLabelWrap in form-fields.tsx), still fully styled by
-        // TagsField's own design, just without FieldWrapper's outer chrome.
+        // Inherently multi-valued: chips render ahead of the input.
         { field: "tag_ids", label: "Tags", type: "tags", resource: "contacts.tag" },
       ],
     },
@@ -456,9 +452,7 @@ export const Default: Story = {
     expect(canvas.getByLabelText("Email")).toBeInTheDocument();
 
     // "Preferences": a 3-column section mixing select/boolean/date/relation/
-    // tags — relation (single) goes through FieldWrapper same as any other
-    // safe type; tags keeps its own explicit-label styling (see
-    // usesImplicitLabelWrap in form-fields.tsx).
+    // tags, each labelled through FieldWrapper.
     expect(canvas.getByRole("heading", { name: "Preferences" })).toBeInTheDocument();
     expect(canvas.getByLabelText("VIP")).toBeChecked();
     expect(canvas.getByDisplayValue("Jordan Lee")).toBeInTheDocument();

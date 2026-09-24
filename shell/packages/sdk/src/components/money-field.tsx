@@ -1,7 +1,8 @@
-import type { ChangeEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useId } from "react";
 import { currencyMinorUnitDigits } from "./field.js";
-import { fieldInputClassName } from "./field-input-styles.js";
+import { FieldError, FieldLabel, joinIds } from "./field-wrapper.js";
+import { InputBox } from "./text-input.js";
 
 export interface MoneyFieldProps {
   label?: string | undefined;
@@ -46,38 +47,36 @@ export function MoneyField({
 }: MoneyFieldProps): ReactNode {
   const generatedId = useId();
   const id = idProp ?? generatedId;
+  const currencyId = `${generatedId}-currency`;
+  const errorId = `${generatedId}-error`;
   // ISO 4217 decimal places vary (XOF 0, USD 2, KWD 3); default to 2 when
   // no currency has been resolved yet so the input still has a sane step.
   const digits = currency ? currencyMinorUnitDigits(currency) : 2;
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => onChange(toMinorUnits(e.target.value, digits));
 
   return (
     <div className="flex flex-col gap-1">
-      {label !== undefined && (
-        <label htmlFor={id} className="text-sm text-text">
-          {label}
-        </label>
-      )}
-      <span className={`inline-flex items-center gap-2 ${fieldInputClassName(error !== undefined, "wrapper")}`}>
-        {currency !== undefined && <span className="font-sans text-sm text-text-secondary">{currency}</span>}
-        <input
-          id={id}
-          type="number"
-          step={1 / 10 ** digits}
-          min={toMajorUnits(min, digits)}
-          max={toMajorUnits(max, digits)}
-          value={toMajorUnits(value, digits)}
-          disabled={disabled}
-          aria-invalid={error !== undefined}
-          onChange={handleChange}
-          className="w-full border-0 bg-transparent p-0 font-mono text-sm focus:outline-none"
-        />
-      </span>
-      {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
-          {error}
-        </span>
-      )}
+      {label !== undefined && <FieldLabel htmlFor={id}>{label}</FieldLabel>}
+      <InputBox
+        id={id}
+        type="number"
+        font="mono"
+        step={1 / 10 ** digits}
+        min={toMajorUnits(min, digits)}
+        max={toMajorUnits(max, digits)}
+        value={String(toMajorUnits(value, digits))}
+        disabled={disabled}
+        invalid={error !== undefined || undefined}
+        aria-describedby={joinIds(currency !== undefined && currencyId, error !== undefined && errorId)}
+        onChange={(raw) => onChange(toMinorUnits(raw, digits))}
+        start={
+          currency === undefined ? undefined : (
+            <span id={currencyId} className="text-sm">
+              {currency}
+            </span>
+          )
+        }
+      />
+      {error !== undefined && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   );
 }

@@ -1,15 +1,16 @@
 import { useAuth, useUser } from "@goerp/sdk/auth";
 import {
   ActionButton,
+  FieldWrapper,
   FileField,
   type FileValue,
-  fieldInputClassName,
   PageHeader,
   PageLayout,
+  TextInput,
 } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import { createFileRoute } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { ChangePasswordSection } from "../../settings/change-password-section.js";
 
 // shell-ux.md §4.1 — name, avatar, and change password. Phone/title and
@@ -31,7 +32,6 @@ function currentAvatarValue(avatarUrl: string | null): FileValue | null {
 function ProfilePage() {
   const user = useUser();
   const { updateProfile } = useAuth();
-  const nameId = useId();
 
   const [name, setName] = useState(user.name ?? "");
   const [avatarValue, setAvatarValue] = useState<FileValue | null>(currentAvatarValue(user.avatarUrl));
@@ -81,18 +81,9 @@ function ProfilePage() {
           <span className="font-medium text-sm text-text">Avatar</span>
           <FileField variant="avatar" value={avatarValue} onChange={handleAvatarChange} />
         </div>
-        <div className="flex flex-col gap-2">
-          <label htmlFor={nameId} className="font-medium text-sm text-text">
-            Full name
-          </label>
-          <input
-            id={nameId}
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={fieldInputClassName(false, "input", "sans")}
-          />
-        </div>
+        <FieldWrapper label="Full name">
+          <TextInput autoComplete="name" value={name} onChange={setName} />
+        </FieldWrapper>
         <div className="flex flex-col gap-2">
           <span className="font-medium text-sm text-text">Email</span>
           <p className="text-sm text-text-secondary">{user.email}</p>

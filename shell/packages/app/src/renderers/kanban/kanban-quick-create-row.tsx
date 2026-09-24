@@ -1,3 +1,4 @@
+import { TextInput } from "@goerp/sdk/components";
 import type { KeyboardEvent, ReactNode, SubmitEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { KanbanQuickCreateField } from "./kanban-view-types.js";
@@ -59,7 +60,7 @@ export function KanbanQuickCreateRow({ groupId, fields, onSubmit }: KanbanQuickC
             <label htmlFor={inputId} className="sr-only">
               {field.label}
             </label>
-            <input
+            <TextInput
               id={inputId}
               ref={index === 0 ? firstInputRef : undefined}
               // Only the first field is required — view-system.md §6 leaves
@@ -67,9 +68,9 @@ export function KanbanQuickCreateRow({ groupId, fields, onSubmit }: KanbanQuickC
               // entirely-blank submission is worth blocking regardless.
               required={index === 0}
               value={values[field.name] ?? ""}
-              onChange={(event) => setValues((prev) => ({ ...prev, [field.name]: event.target.value }))}
+              onChange={(next) => setValues((prev) => ({ ...prev, [field.name]: next }))}
               placeholder={field.label}
-              className="w-full rounded-control border border-border bg-bg px-2 py-1 text-sm text-text focus-visible:outline-none focus-visible:shadow-focus"
+              size="sm"
             />
           </div>
         );

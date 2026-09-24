@@ -1,21 +1,21 @@
-import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { APIClient } from "../http/index.js";
 import { apiClient } from "../http/index.js";
 import type { ResourceMetadataRegistry } from "../schema/index.js";
 import { resourceListPath, resourceMetadataRegistry } from "../schema/index.js";
+import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { EmptyState } from "./empty-state.js";
-import { fieldInputClassName } from "./field-input-styles.js";
 import {
   optionElementId,
   useFloatingPanelPosition,
   useOutsideClickClose,
   useScrollHighlightedOptionIntoView,
 } from "./floating-panel.js";
-import { IconButton } from "./icon-button.js";
 import type { RelationValue } from "./relation-field.js";
 import { Skeleton } from "./skeleton.js";
+import { TextInput } from "./text-input.js";
 
 export type { RelationValue } from "./relation-field.js";
 
@@ -24,17 +24,6 @@ const PAGE_SIZE = 100;
 // specified anywhere — this is a standard short debounce, not a
 // documented value.
 const DEBOUNCE_MS = 300;
-
-// A single-select value has no pill/remove-button row the way multi-select
-// does — the native <select> this replaces always had a blank "—" option,
-// so this overlays a clear control on the trigger itself instead, the only
-// way to unset a single-select value back to null.
-const CLEAR_BUTTON_STYLE: CSSProperties = {
-  position: "absolute",
-  insetInlineEnd: "var(--space-1)",
-  top: "50%",
-  transform: "translateY(-50%)",
-};
 
 interface Row {
   id: string;
@@ -339,9 +328,8 @@ export function RelationPicker({
           ))}
         </span>
       )}
-      <input
+      <TextInput
         id={id}
-        type="text"
         role="combobox"
         aria-expanded={isOpen}
         aria-controls={listboxId}
@@ -352,22 +340,16 @@ export function RelationPicker({
         disabled={disabled}
         placeholder={placeholder}
         onFocus={handleFocus}
-        onChange={(event) => handleInputChange(event.target.value)}
+        onChange={handleInputChange}
         onKeyDown={handleKeyDown}
-        style={!multiple && singleValue ? { paddingInlineEnd: "var(--space-8)" } : undefined}
-        className={`truncate ${fieldInputClassName(false)}`}
+        // A single-select value has no pill row, so the clear button is the
+        // only way to unset it back to null.
+        end={
+          !multiple && singleValue && !isOpen ? (
+            <ComboboxClearButton label={singleValue.display} disabled={disabled} onClear={() => onChange(null)} />
+          ) : undefined
+        }
       />
-      {!multiple && singleValue && !isOpen && (
-        <span style={CLEAR_BUTTON_STYLE} className="flex">
-          <IconButton
-            icon="x"
-            label={`Clear ${singleValue.display}`}
-            size="sm"
-            disabled={disabled}
-            onClick={() => onChange(null)}
-          />
-        </span>
-      )}
       {isOpen &&
         createPortal(
           <span
