@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
-import { fetchCurrentSession, fetchTenantContext, login, logout, submitMFACode, updateProfile } from "./auth-client.js";
+import {
+  fetchCurrentSession,
+  fetchTenantContext,
+  login,
+  logout,
+  requestPasswordReset,
+  submitMFACode,
+  updateProfile,
+} from "./auth-client.js";
 
 function jsonResponse(status: number, body: unknown, statusText = "", headers: Record<string, string> = {}): Response {
   return {
@@ -303,6 +311,38 @@ describe("updateProfile", () => {
     );
 
     await expect(updateProfile({ name: "" })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+});
+
+describe("requestPasswordReset", () => {
+  it("posts the email and tenant", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestPasswordReset({ email: "ada@example.com", tenant: "acme" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/password-reset/request",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ email: "ada@example.com", tenant: "acme" }),
+      }),
+    );
+  });
+
+  it("throws an AppError carrying Retry-After on a 429", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(429, { error: { code: "rate_limited", message: "slow down" } }, "", { "Retry-After": "30" }),
+      ),
+    );
+
+    const err = await requestPasswordReset({ email: "ada@example.com", tenant: "acme" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).isRateLimited()).toBe(true);
+    expect((err as AppError).details).toEqual({ retryAfter: 30 });
   });
 });
 

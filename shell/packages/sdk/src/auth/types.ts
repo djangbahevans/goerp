@@ -25,6 +25,11 @@ export interface LoginCredentials {
   remember?: boolean | undefined;
 }
 
+export interface PasswordResetRequest {
+  email: string;
+  tenant: string;
+}
+
 // The pre-login tenant lookup (GET /auth/tenant-context). tenant is null on
 // a shared-domain deployment, where the Host alone doesn't identify one.
 export interface TenantContext {

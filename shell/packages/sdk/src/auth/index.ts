@@ -1,4 +1,4 @@
-export { fetchTenantContext } from "./auth-client.js";
+export { fetchTenantContext, requestPasswordReset } from "./auth-client.js";
 export { AuthMachine, authMachine, authTransition } from "./auth-machine.js";
 export { AuthContext, AuthProvider } from "./auth-provider.js";
 export { Can, type CanProps } from "./can.js";
@@ -22,6 +22,7 @@ export type {
   CurrentUser,
   LoginCredentials,
   MFAMethod,
+  PasswordResetRequest,
   TenantContext,
 } from "./types.js";
 export { useAuth } from "./use-auth.js";
