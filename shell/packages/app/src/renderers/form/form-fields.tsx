@@ -72,6 +72,15 @@ export function FormFieldRow({ field, resource, record, onChange, formReadonly }
   };
   const gridStyle = field.span ? { gridColumn: `span ${field.span}` } : undefined;
 
+  // checkbox.md: a Checkbox carries its own label, description and error.
+  if (type === "boolean") {
+    return (
+      <div style={gridStyle}>
+        <FieldInput {...inputProps} />
+      </div>
+    );
+  }
+
   if (!ARIA_LABELLEDBY_FIELD_TYPES.has(type) && !UNASSOCIATED_FIELD_TYPES.has(type)) {
     return (
       <div style={gridStyle}>

@@ -1,5 +1,5 @@
 import { PermissionContext } from "@goerp/sdk/auth";
-import { ActionButton, ActionMenu, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
+import { ActionButton, ActionMenu, Checkbox, EmptyState, Icon, Select, Skeleton } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import type { RelationBatchSpec } from "@goerp/sdk/react";
 import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
@@ -142,6 +142,29 @@ export function columnRendersOwnLink(column: ListColumn): boolean {
     column.type === "phone" ||
     column.type === "url" ||
     column.type === "file"
+  );
+}
+
+function SelectAllCheckbox({
+  label,
+  ids,
+  selectedIds,
+  onToggle,
+}: {
+  label: string;
+  ids: string[];
+  selectedIds: ReadonlySet<string>;
+  onToggle: () => void;
+}) {
+  const selectedCount = ids.filter((id) => selectedIds.has(id)).length;
+  return (
+    <Checkbox
+      label={label}
+      labelHidden
+      checked={ids.length > 0 && selectedCount === ids.length}
+      indeterminate={selectedCount > 0 && selectedCount < ids.length}
+      onChange={onToggle}
+    />
   );
 }
 
@@ -512,16 +535,13 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                         scope="col"
                         className={`p-3 text-left bg-surface ${stickyCheckboxClassName} ${scrolled ? "shadow-sm" : ""}`}
                       >
-                        <input
-                          type="checkbox"
-                          aria-label={
+                        <SelectAllCheckbox
+                          label={
                             listState.groupBy ? `Select all in ${group.key}` : `Select all ${view.label.toLowerCase()}`
                           }
-                          checked={
-                            selectableIds.length > 0 && selectableIds.every((id) => selection.selectedIds.has(id))
-                          }
-                          onChange={() => selection.toggleAll(selectableIds)}
-                          style={{ accentColor: "var(--color-primary)" }}
+                          ids={selectableIds}
+                          selectedIds={selection.selectedIds}
+                          onToggle={() => selection.toggleAll(selectableIds)}
                         />
                       </th>
                     )}
@@ -605,12 +625,11 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                               className={`p-3 ${stickyCheckboxClassName} ${selected ? "bg-primary-subtle" : "bg-surface"} ${scrolled ? "shadow-sm" : ""}`}
                             >
                               {typeof row.id === "string" && (
-                                <input
-                                  type="checkbox"
-                                  aria-label="Select row"
+                                <Checkbox
+                                  label="Select row"
+                                  labelHidden
                                   checked={selection.selectedIds.has(row.id)}
                                   onChange={() => selection.toggle(row.id as string)}
-                                  style={{ accentColor: "var(--color-primary)" }}
                                 />
                               )}
                             </td>

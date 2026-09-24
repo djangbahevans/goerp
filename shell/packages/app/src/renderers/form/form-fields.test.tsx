@@ -168,7 +168,7 @@ describe("FormFieldRow", () => {
       expect(screen.getByText("*").className).toContain("text-danger");
     });
 
-    it("boolean: clicking the visible label still toggles the checkbox via native htmlFor click-forwarding", () => {
+    it("boolean: renders one label, the checkbox's own, and clicking it toggles the checkbox", () => {
       const Wrapper = withFieldAccess({ active: { read: true, write: true } });
       const onChange = vi.fn();
       render(
@@ -182,6 +182,7 @@ describe("FormFieldRow", () => {
           />
         </Wrapper>,
       );
+      expect((screen.getByRole("checkbox", { name: "Active" }) as HTMLInputElement).labels).toHaveLength(1);
       fireEvent.click(screen.getByText("Active"));
       expect(onChange).toHaveBeenCalledWith({ active: true });
     });

@@ -1,5 +1,6 @@
 import { EmptyState, PageLayout } from "@goerp/sdk/components";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { RouterTextLink } from "../text-link.js";
 
 // First 403 page in the app — the /_m/$ catch-all route's beforeLoad
 // (goerp#671) redirects here when a resolved view's module isn't enabled
@@ -17,9 +18,9 @@ function ForbiddenPage() {
         title="You don't have permission to view this page"
         description="If you think this is a mistake, contact your workspace administrator."
         action={
-          <Link to="/" className="text-primary text-sm hover:underline">
-            Go home
-          </Link>
+          <span className="text-sm">
+            <RouterTextLink to="/">Go home</RouterTextLink>
+          </span>
         }
       />
     </PageLayout>

@@ -2,6 +2,7 @@ import { apiClient } from "@goerp/sdk";
 import type { BarcodeFormat, FileValue, RelationValue, TagValue } from "@goerp/sdk/components";
 import {
   BarcodeField,
+  Checkbox,
   CodeField,
   ColorPicker,
   CountrySelect,
@@ -662,17 +663,24 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
 
     case "boolean":
       return (
-        // self-start: FieldWrapper's layout is flex flex-col — a bare
-        // checkbox has no intrinsic width to resist the default cross-axis
-        // stretch, so without this it renders full column width with the
-        // native glyph centered inside that box, far from its own label.
-        <input
+        <Checkbox
           id={id}
-          type="checkbox"
-          className="self-start"
+          label={
+            <>
+              {field.label ?? field.field}
+              {field.required && (
+                <span aria-hidden="true" className="text-danger">
+                  {" "}
+                  *
+                </span>
+              )}
+            </>
+          }
+          description={field.help_text || undefined}
+          required={field.required || undefined}
           checked={value === true}
           disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
+          onChange={onChange}
         />
       );
 

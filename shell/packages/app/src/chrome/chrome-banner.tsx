@@ -1,7 +1,7 @@
 import { IconButton } from "@goerp/sdk/components";
-import { Link } from "@tanstack/react-router";
 import { Info, type LucideIcon, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
+import { RouterTextLink } from "../router/text-link.js";
 
 export type ChromeBannerTone = "warning" | "info";
 
@@ -51,13 +51,11 @@ export function ChromeBanner({
       <div className="flex min-w-0 flex-1 flex-col gap-1 @xl:flex-row @xl:items-baseline @xl:gap-3">
         <p className="min-w-0">{children}</p>
         {action && (
-          <Link
-            to={action.to}
-            {...(action.hash !== undefined && { hash: action.hash })}
-            className="shrink-0 rounded-control text-primary hover:underline focus-visible:shadow-focus focus-visible:outline-none"
-          >
-            {action.label}
-          </Link>
+          <span className="shrink-0">
+            <RouterTextLink to={action.to} {...(action.hash !== undefined && { hash: action.hash })}>
+              {action.label}
+            </RouterTextLink>
+          </span>
         )}
       </div>
       {onDismiss && <IconButton icon="x" label={dismissLabel} size="sm" onClick={onDismiss} />}

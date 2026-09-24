@@ -262,9 +262,16 @@ describe("FieldInput", () => {
     expect(onChange).toHaveBeenCalledWith(false);
   });
 
-  it("boolean: opts out of FieldWrapper's flex-col stretch, which would otherwise center its native glyph across the full field width", () => {
-    renderField({ field: "active", type: "boolean" }, true);
-    expect(screen.getByRole("checkbox").className).toContain("self-start");
+  it("boolean: labels the checkbox with the field's label and describes it with its help text", () => {
+    renderField({ field: "active", type: "boolean", label: "Active", help_text: "Shown in pickers" }, false);
+    const checkbox = screen.getByRole("checkbox", { name: "Active" });
+    expect(checkbox.getAttribute("aria-describedby")).toBe(screen.getByText("Shown in pickers").id);
+  });
+
+  it("boolean: marks a required field's label with the same asterisk as FieldWrapper", () => {
+    renderField({ field: "active", type: "boolean", label: "Active", required: true }, false);
+    expect(screen.getByText("*").className).toContain("text-danger");
+    expect(screen.getByRole("checkbox", { name: "Active" })).toBeTruthy();
   });
 
   it("toggle: renders as a switch role and reports the toggled value", () => {

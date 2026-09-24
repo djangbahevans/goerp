@@ -227,8 +227,10 @@ describe("RegisterPage", () => {
   it("shows the terms checkbox only when a terms URL is configured, and requires it", async () => {
     const { register } = await renderPage({}, { ...ENABLED, termsUrl: "https://example.com/terms" });
 
-    const link = await screen.findByRole("link", { name: "terms of service" });
+    const link = await screen.findByRole("link", { name: /^terms of service/ });
     expect(link.getAttribute("href")).toBe("https://example.com/terms");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.textContent).toContain("(opens in a new tab)");
     await fillForm();
     submit();
     expect(await screen.findByText("Accept the terms of service to continue.")).toBeTruthy();
