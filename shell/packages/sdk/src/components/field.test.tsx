@@ -170,8 +170,8 @@ describe("Field", () => {
 
   it("applies the same font-mono/truncate treatment to a linked json value", () => {
     render(<Field label="Metadata" value={{ a: 1 }} type="json" href="/records/1" />);
-    const link = screen.getByRole("link");
-    expect(link.className).toContain("font-mono");
-    expect(link.className).toContain("truncate");
+    const value = screen.getByRole("link").parentElement as HTMLElement;
+    expect(value.className).toContain("font-mono");
+    expect(value.className).toContain("truncate");
   });
 });

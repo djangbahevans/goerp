@@ -1,9 +1,9 @@
 import { fetchTenantContext, useAuth, type VerificationEmailRequest } from "@goerp/sdk/auth";
-import { Button, Countdown, FieldWrapper, PasswordField, TextInput } from "@goerp/sdk/components";
+import { Button, Checkbox, Countdown, FieldWrapper, PasswordField, TextInput, TextLink } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
 import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
 
@@ -42,9 +42,6 @@ interface FieldErrors {
 // Used when a 429 arrives without a parseable Retry-After header.
 const DEFAULT_LOCKOUT_SECONDS = 60;
 
-const linkClassName =
-  "rounded-control text-sm text-primary hover:underline focus-visible:outline-none focus-visible:shadow-focus";
-
 function withRedirect(path: string, redirectTo: string): string {
   return `${path}?${new URLSearchParams({ redirect: redirectTo })}`;
 }
@@ -59,7 +56,6 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
     retry: false,
   });
 
-  const rememberId = useId();
   const emailRef = useRef<HTMLInputElement>(null);
 
   const [email, setEmail] = useState("");
@@ -216,37 +212,19 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
         />
 
         {unverified && (
-          <div className="flex flex-col items-start gap-1">
+          <div className="flex flex-col items-start gap-1 text-sm">
             {!resend.coolingDown && (
-              <button
-                type="button"
-                disabled={resend.sending}
-                aria-busy={resend.sending}
-                onClick={() => void resend.send(unverified)}
-                className={linkClassName}
-              >
+              <Button variant="link" loading={resend.sending} onClick={() => void resend.send(unverified)}>
                 Resend verification email
-              </button>
+              </Button>
             )}
             <ResendStatus resend={resend} />
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <label htmlFor={rememberId} className="flex items-center gap-2 whitespace-nowrap text-sm text-text">
-            <input
-              id={rememberId}
-              type="checkbox"
-              checked={remember}
-              disabled={inputsDisabled}
-              onChange={(e) => setRemember(e.target.checked)}
-              className="accent-primary"
-            />
-            Remember this device
-          </label>
-          <a href="/auth/forgot-password" className={`${linkClassName} whitespace-nowrap`}>
-            Forgot password?
-          </a>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm">
+          <Checkbox label="Remember this device" checked={remember} disabled={inputsDisabled} onChange={setRemember} />
+          <TextLink href="/auth/forgot-password">Forgot password?</TextLink>
         </div>
 
         <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
@@ -271,10 +249,7 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
 
       {tenantContext.data?.registrationEnabled && (
         <p className="mt-6 text-center text-sm text-text-secondary">
-          Don't have an account?{" "}
-          <a href="/auth/register" className={linkClassName}>
-            Create an account
-          </a>
+          Don't have an account? <TextLink href="/auth/register">Create an account</TextLink>
         </p>
       )}
     </AuthLayout>

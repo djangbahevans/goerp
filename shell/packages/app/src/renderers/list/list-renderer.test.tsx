@@ -426,11 +426,18 @@ describe("ListRenderer", () => {
     expect(rowCheckboxes).toHaveLength(2);
     expect(screen.queryByText("1 selected")).toBeNull();
 
+    const selectAll = () => screen.getByRole("checkbox", { name: /Select all/ }) as HTMLInputElement;
+    expect(selectAll().indeterminate).toBe(false);
+
     fireEvent.click(rowCheckboxes[0] as HTMLInputElement);
     expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(selectAll().indeterminate).toBe(true);
+    expect(selectAll().getAttribute("aria-checked")).toBe("mixed");
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /Select all/ }));
+    fireEvent.click(selectAll());
     expect(screen.getByText("2 selected")).toBeTruthy();
+    expect(selectAll().checked).toBe(true);
+    expect(selectAll().indeterminate).toBe(false);
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Select all/ }));
     expect(screen.queryByText(/selected/)).toBeNull();

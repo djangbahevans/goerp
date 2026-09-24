@@ -5,11 +5,11 @@ import {
   type Registration,
   register as registerAccount,
 } from "@goerp/sdk/auth";
-import { Button, Countdown, FieldWrapper, TextInput } from "@goerp/sdk/components";
+import { Button, Checkbox, Countdown, FieldWrapper, TextInput, TextLink } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
-import { type ReactNode, type RefObject, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type RefObject, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 import { confirmBlurError, NewPasswordFields, validateNewPassword } from "./new-password-fields.js";
@@ -20,9 +20,6 @@ import { ResendStatus, type ResendVerification, useVerificationResend } from "./
 const SLUG_CHECK_DEBOUNCE_MS = 500;
 // Used when a 429 arrives without a parseable Retry-After header.
 const DEFAULT_LOCKOUT_SECONDS = 60;
-
-const linkClassName =
-  "rounded-control text-sm text-primary hover:underline focus-visible:outline-none focus-visible:shadow-focus";
 
 type Phase =
   | { kind: "idle" }
@@ -76,7 +73,6 @@ export function RegisterPage({
     if (tenantContext.isFetched && !registrationEnabled) redirect("/auth/login");
   }, [tenantContext.isFetched, registrationEnabled, redirect]);
 
-  const termsId = useId();
   const cardHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const [name, setName] = useState("");
@@ -274,30 +270,20 @@ export function RegisterPage({
         </div>
 
         {termsUrl && (
-          <div className="flex flex-col gap-1">
-            <label htmlFor={termsId} className="flex items-center gap-2 text-sm text-text">
-              <input
-                id={termsId}
-                type="checkbox"
-                checked={termsAccepted}
-                disabled={inputsDisabled}
-                aria-invalid={errors.terms !== undefined}
-                onChange={(e) => setTermsAccepted(e.target.checked)}
-                className="accent-primary"
-              />
-              <span>
+          <Checkbox
+            label={
+              <>
                 I agree to the{" "}
-                <a href={termsUrl} target="_blank" rel="noopener noreferrer" className={linkClassName}>
+                <TextLink href={termsUrl} inline external>
                   terms of service
-                </a>
-              </span>
-            </label>
-            {errors.terms && (
-              <span role="alert" className="text-danger text-sm">
-                {errors.terms}
-              </span>
-            )}
-          </div>
+                </TextLink>
+              </>
+            }
+            checked={termsAccepted}
+            disabled={inputsDisabled}
+            error={errors.terms}
+            onChange={setTermsAccepted}
+          />
         )}
 
         <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
@@ -316,10 +302,7 @@ export function RegisterPage({
       </form>
 
       <p className="mt-6 text-center text-sm text-text-secondary">
-        Already have an account?{" "}
-        <a href="/auth/login" className={linkClassName}>
-          Sign in
-        </a>
+        Already have an account? <TextLink href="/auth/login">Sign in</TextLink>
       </p>
     </AuthLayout>
   );
@@ -394,9 +377,9 @@ function CheckEmailCard({
         >
           Resend email
         </Button>
-        <a href="/auth/login" className={`${linkClassName} self-center`}>
-          Back to sign in
-        </a>
+        <p className="self-center text-sm">
+          <TextLink href="/auth/login">Back to sign in</TextLink>
+        </p>
       </div>
     </AuthLayout>
   );

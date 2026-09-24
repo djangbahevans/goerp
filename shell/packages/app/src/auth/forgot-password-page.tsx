@@ -1,5 +1,5 @@
 import { fetchTenantContext, type PasswordResetRequest, requestPasswordReset } from "@goerp/sdk/auth";
-import { Button, Countdown, FieldWrapper, TextInput } from "@goerp/sdk/components";
+import { Button, Countdown, FieldWrapper, TextInput, TextLink } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
@@ -19,9 +19,6 @@ interface FieldErrors {
 
 // Used when a 429 arrives without a parseable Retry-After header.
 const DEFAULT_LOCKOUT_SECONDS = 60;
-
-const linkClassName =
-  "rounded-control text-sm text-primary hover:underline focus-visible:outline-none focus-visible:shadow-focus";
 
 export interface ForgotPasswordPageProps {
   // Storybook substitutes canned responses; the route never passes it.
@@ -164,10 +161,8 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
         </Button>
       </form>
 
-      <p className="mt-6 text-center">
-        <a href="/auth/login" className={linkClassName}>
-          Back to sign in
-        </a>
+      <p className="mt-6 text-center text-sm">
+        <TextLink href="/auth/login">Back to sign in</TextLink>
       </p>
     </AuthLayout>
   );

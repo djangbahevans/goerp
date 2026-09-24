@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { TextLink } from "./text-link.js";
 
 export interface RelationValue {
   id: string;
@@ -19,9 +20,11 @@ export function RelationField({ label, value, href, emptyText = "—" }: Relatio
       {value === undefined ? (
         <span className="text-base text-text">{emptyText}</span>
       ) : href !== undefined ? (
-        <a href={href} className="text-base text-primary hover:underline">
-          {value.display}
-        </a>
+        <span className="text-base">
+          <TextLink href={href} inline>
+            {value.display}
+          </TextLink>
+        </span>
       ) : (
         <span className="text-base text-text">{value.display}</span>
       )}

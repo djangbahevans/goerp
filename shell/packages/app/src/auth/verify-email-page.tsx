@@ -1,5 +1,5 @@
 import { type EmailVerification, type EmailVerificationOutcome, verifyEmail } from "@goerp/sdk/auth";
-import { Button, Countdown, FieldWrapper, TextInput } from "@goerp/sdk/components";
+import { Button, Countdown, FieldWrapper, TextInput, TextLink } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { ButtonLink } from "../router/button-link.js";
@@ -166,12 +166,9 @@ function ExpiredResendForm({ tenant, resend }: { tenant: string; resend: ResendV
           Send a new link
         </Button>
       </form>
-      <a
-        href="/auth/login"
-        className="self-center rounded-control text-primary text-sm hover:underline focus-visible:shadow-focus focus-visible:outline-none"
-      >
-        Sign in
-      </a>
+      <p className="self-center text-sm">
+        <TextLink href="/auth/login">Sign in</TextLink>
+      </p>
     </>
   );
 }

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Badge, type BadgeColor } from "./badge.js";
 import { CountryFlag } from "./country-flag.js";
+import { TextLink } from "./text-link.js";
 import { UserAvatar } from "./user-avatar.js";
 
 // typescript-sdk-reference.md §13 "Form field components" — read-only
@@ -253,9 +254,11 @@ export function Field({
     <span className="flex flex-col gap-1">
       {label !== undefined && <span className="text-sm text-text-secondary">{label}</span>}
       {href !== undefined ? (
-        <a href={href} title={jsonTitle} className={`${valueClassName} text-primary hover:underline`}>
-          {content}
-        </a>
+        <span className={valueClassName}>
+          <TextLink href={href} title={jsonTitle} inline>
+            {content}
+          </TextLink>
+        </span>
       ) : (
         <span title={jsonTitle} className={`${valueClassName} text-text`}>
           {content}

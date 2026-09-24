@@ -1,9 +1,9 @@
 import { beginTOTPEnrollment, confirmTOTPEnrollment, type TOTPEnrollment, useAuth } from "@goerp/sdk/auth";
-import { Button, Spinner } from "@goerp/sdk/components";
+import { Button, Checkbox, Spinner } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, type SubmitEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useCallback, useEffect, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
 import { VerificationCodeInput } from "./verification-code-input.js";
 
@@ -76,7 +76,6 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
   const [saved, setSaved] = useState(false);
   const [finishError, setFinishError] = useState<string | undefined>(undefined);
   const codeRef = useRef<HTMLInputElement>(null);
-  const savedId = useId();
   const started = useRef(false);
 
   const start = useCallback(
@@ -259,17 +258,7 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
               Download
             </Button>
           </div>
-          <label htmlFor={savedId} className="flex items-center gap-2 text-sm text-text">
-            <input
-              id={savedId}
-              type="checkbox"
-              checked={saved}
-              disabled={busy}
-              onChange={(e) => setSaved(e.target.checked)}
-              className="accent-primary"
-            />
-            I've saved these codes
-          </label>
+          <Checkbox label="I've saved these codes" checked={saved} disabled={busy} onChange={setSaved} />
           {finishError && (
             <p role="alert" className="text-danger text-sm">
               {finishError}

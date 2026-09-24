@@ -1,5 +1,5 @@
 import { type MFAMethod, useAuth } from "@goerp/sdk/auth";
-import { Button, FieldWrapper, TextInput } from "@goerp/sdk/components";
+import { Button, FieldWrapper, TextInput, TextLink } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
@@ -32,9 +32,6 @@ function loginHref(redirectTo: string, notice?: LoginNotice): string {
   if (notice) params.set("notice", notice);
   return `/auth/login?${params}`;
 }
-
-const linkClassName =
-  "self-center rounded-control text-sm text-primary hover:underline focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50";
 
 export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNode {
   const { state, submitMFA } = useAuth();
@@ -131,9 +128,9 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
         <p className="mb-6 text-sm text-text-secondary">
           Your account's verification method can't be used on this page yet.
         </p>
-        <a href={loginHref(redirectTo)} className={linkClassName}>
-          Back to sign in
-        </a>
+        <p className="text-sm">
+          <TextLink href={loginHref(redirectTo)}>Back to sign in</TextLink>
+        </p>
       </AuthLayout>
     );
   }
