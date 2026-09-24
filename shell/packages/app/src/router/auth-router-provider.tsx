@@ -21,18 +21,20 @@ export function AuthRouterProvider({ router }: AuthRouterProviderProps): ReactNo
   router.update({ ...router.options, context: { ...router.options.context, auth } });
 
   // Re-runs the gate once when the session check first settles, then whenever
-  // a session starts or ends (logout, expiry) — not on every status change,
+  // a session starts or ends (logout, expiry) or the user's MFA-setup
+  // requirement flips (a 403 mfa_setup_required, or finishing setup) — not on every status change,
   // which would reload route data on each token refresh. The settle re-run is
   // unconditional: a load triggered while pending decided nothing, and
   // RouterProvider skips its own mount-time load when one already resolved or
   // is still in flight — which the public router API can't tell apart from a
   // cold start. On a cold start this runs the initial route checks twice.
-  const gatedAuthenticated = useRef<boolean | null>(null);
+  const gated = useRef<string | null>(null);
+  const gateKey = `${auth.isAuthenticated}:${auth.user?.mfaSetupRequired === true}`;
   useEffect(() => {
-    if (!sessionSettled || gatedAuthenticated.current === auth.isAuthenticated) return;
-    gatedAuthenticated.current = auth.isAuthenticated;
+    if (!sessionSettled || gated.current === gateKey) return;
+    gated.current = gateKey;
     void router.invalidate();
-  }, [sessionSettled, auth.isAuthenticated, router]);
+  }, [sessionSettled, gateKey, router]);
 
   if (!sessionSettled) return null;
   return <RouterProvider router={router} context={{ auth }} />;

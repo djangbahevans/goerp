@@ -203,6 +203,32 @@ describe("FetchAPIClient silent refresh on 401", () => {
     expect(calls.filter((c) => c === "/contacts/1")).toHaveLength(2);
   });
 
+  it("flags the signed-in user for MFA setup on a 403 mfa_setup_required", async () => {
+    const transitionSpy = vi.spyOn(authMachine, "transition");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(403, { error: { code: "mfa_setup_required", message: "mfa enforcement required" } }),
+      ),
+    );
+    const client = new FetchAPIClient();
+
+    await expect(client.get("/contacts/1")).rejects.toMatchObject({ httpStatus: 403, code: "mfa_setup_required" });
+    expect(transitionSpy).toHaveBeenCalledWith({ type: "mfa_setup_required" });
+  });
+
+  it("leaves other 403s to the caller", async () => {
+    const transitionSpy = vi.spyOn(authMachine, "transition");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { error: { code: "permission_denied" } })),
+    );
+    const client = new FetchAPIClient();
+
+    await expect(client.get("/contacts/1")).rejects.toMatchObject({ httpStatus: 403 });
+    expect(transitionSpy).not.toHaveBeenCalled();
+  });
+
   it("transitions to unauthenticated and does not loop when refresh itself fails", async () => {
     const transitionSpy = vi.spyOn(authMachine, "transition");
     const fetchMock = vi.fn(async (url: string) => {

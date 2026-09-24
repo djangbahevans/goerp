@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
 import {
   acceptInvite,
+  beginTOTPEnrollment,
   changePassword,
   checkSlug,
   confirmPasswordReset,
+  confirmTOTPEnrollment,
   fetchCurrentSession,
   fetchInviteInfo,
   fetchTenantContext,
@@ -63,6 +65,7 @@ describe("fetchCurrentSession", () => {
         roles: ["admin"],
         amr: ["pwd"],
         mfaVerifiedAt: null,
+        mfaSetupRequired: false,
       },
       tenant: { id: "t1", slug: "acme", name: "Acme", plan: "pro" },
     });
@@ -108,6 +111,64 @@ describe("fetchCurrentSession", () => {
       })) as unknown as typeof fetch,
     );
     expect(await fetchCurrentSession()).toBeNull();
+  });
+});
+
+describe("TOTP enrollment", () => {
+  it("maps /auth/me's mfa_setup_required onto the user", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          user: {
+            id: "u1",
+            email: "a@example.com",
+            contact_id: null,
+            name: null,
+            avatar_url: null,
+            roles: [],
+            amr: ["pwd"],
+            mfa_verified_at: null,
+            mfa_setup_required: true,
+          },
+          tenant: { id: "t1", slug: "acme", name: "Acme", plan: "pro" },
+        }),
+      ),
+    );
+    expect((await fetchCurrentSession())?.user.mfaSetupRequired).toBe(true);
+  });
+
+  it("beginTOTPEnrollment maps the pending enrollment", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, { enrollment_id: "e1", qr_svg: "<svg/>", secret: "JBSWY3DPEHPK3PXP" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await beginTOTPEnrollment()).toEqual({ enrollmentId: "e1", qrSvg: "<svg/>", secret: "JBSWY3DPEHPK3PXP" });
+    expect(fetchMock).toHaveBeenCalledWith("/auth/mfa/enroll/totp", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("confirmTOTPEnrollment returns the codes, or null when none were issued", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { recovery_codes: ["ABCDE-FGHIJ"], expires_in: 900 }))
+      .mockResolvedValueOnce(jsonResponse(200, { recovery_codes: null, expires_in: 900 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await confirmTOTPEnrollment({ enrollmentId: "e1", code: "123456" })).toEqual(["ABCDE-FGHIJ"]);
+    expect(await confirmTOTPEnrollment({ enrollmentId: "e2", code: "654321" })).toBeNull();
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({ enrollment_id: "e1", code: "123456" });
+  });
+
+  it("confirmTOTPEnrollment rejects with the server's error code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(400, { error: { code: "invalid_mfa_code", message: "invalid MFA code" } })),
+    );
+    await expect(confirmTOTPEnrollment({ enrollmentId: "e1", code: "000000" })).rejects.toMatchObject({
+      code: "invalid_mfa_code",
+      httpStatus: 400,
+    });
   });
 });
 

@@ -17,6 +17,8 @@ import type {
   RegisterOutcome,
   Registration,
   TenantContext,
+  TOTPEnrollment,
+  TOTPEnrollmentConfirmation,
   UpdateProfileInput,
   VerificationEmailRequest,
 } from "./types.js";
@@ -31,6 +33,7 @@ interface MeResponseBody {
     roles: string[];
     amr: string[];
     mfa_verified_at: string | null;
+    mfa_setup_required?: boolean;
   };
   tenant: {
     id: string;
@@ -50,6 +53,7 @@ function mapUser(user: MeResponseBody["user"]): CurrentUser {
     roles: user.roles,
     amr: user.amr,
     mfaVerifiedAt: user.mfa_verified_at,
+    mfaSetupRequired: user.mfa_setup_required === true,
   };
 }
 
@@ -241,6 +245,39 @@ export async function verifyEmail(input: EmailVerification): Promise<EmailVerifi
   if (!response.ok) throw await readError(response);
   const body = (await response.json()) as { login_required?: boolean };
   return body.login_required ? "login_required" : "signed_in";
+}
+
+// beginTOTPEnrollment backs POST /auth/mfa/enroll/totp (auth-internals.md
+// §8 "MFA enrollment"): a new secret held pending until confirmed.
+export async function beginTOTPEnrollment(): Promise<TOTPEnrollment> {
+  const response = await fetch("/auth/mfa/enroll/totp", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { enrollment_id: string; qr_svg: string; secret: string };
+  return { enrollmentId: body.enrollment_id, qrSvg: body.qr_svg, secret: body.secret };
+}
+
+// confirmTOTPEnrollment backs POST /auth/mfa/enroll/totp/confirm. Resolves
+// to the recovery codes issued with the user's first factor, or null when
+// they already hold some. Rejects with invalid_mfa_code (400),
+// mfa_enrollment_not_found (404), or mfa_required/mfa_reverify_required
+// (403) for an enrolled user whose session needs fresh MFA. The session's
+// access token is reissued by cookie; call reloadSession to pick up the
+// cleared mfaSetupRequired.
+export async function confirmTOTPEnrollment(input: TOTPEnrollmentConfirmation): Promise<string[] | null> {
+  const response = await fetch("/auth/mfa/enroll/totp/confirm", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enrollment_id: input.enrollmentId, code: input.code, label: input.label }),
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { recovery_codes: string[] | null };
+  return body.recovery_codes ?? null;
 }
 
 // resendVerificationEmail backs POST /auth/verify-email/resend

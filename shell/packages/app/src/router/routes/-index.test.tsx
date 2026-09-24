@@ -30,6 +30,7 @@ const FAKE_USER = {
   roles: [],
   amr: ["pwd"],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
 const FAKE_AUTH: AuthContextValue = {
@@ -42,6 +43,7 @@ const FAKE_AUTH: AuthContextValue = {
   submitMFA: async () => {},
   updateProfile: async () => {},
   changePassword: async () => {},
+  reloadSession: async () => {},
 };
 
 function group(module: string, children: NavigationGroup["children"], permission?: string): NavigationGroup {

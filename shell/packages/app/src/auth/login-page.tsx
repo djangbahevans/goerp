@@ -149,8 +149,6 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
       setPhase({ kind: "idle" });
       if (!isAppError(err)) {
         setFormError("Couldn't reach the server. Check your connection and try again.");
-      } else if (err.code === "mfa_setup_required") {
-        void navigate({ href: withRedirect("/auth/mfa-setup", redirectTo) });
       } else if (err.code === "email_verification_required") {
         setFormError("Verify your email address before signing in. Check your inbox for the verification link.");
         setUnverified({ email: email.trim(), tenant });

@@ -13,6 +13,7 @@ const user: CurrentUser = {
   roles: [],
   amr: ["pwd"],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 

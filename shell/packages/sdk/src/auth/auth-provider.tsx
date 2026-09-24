@@ -150,6 +150,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     passwordUpdateNotice.set(false);
   }, []);
 
+  const reloadSession = useCallback(async (): Promise<void> => {
+    const current = authMachine.getState();
+    if (current.status !== "authenticated" && current.status !== "refreshing") {
+      throw new Error("reloadSession called outside the authenticated state");
+    }
+    const session = await fetchCurrentSession();
+    if (!session) {
+      throw new Error("reloadSession's session check failed");
+    }
+    authMachine.transition({ type: "session_reloaded", user: session.user, tenant: session.tenant });
+  }, []);
+
   const logout = useCallback(async (): Promise<void> => {
     authMachine.transition({ type: "logout_started" });
     await logoutRequest();
@@ -168,8 +180,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       submitMFA,
       updateProfile,
       changePassword,
+      reloadSession,
     };
-  }, [state, login, logout, submitMFA, updateProfile, changePassword]);
+  }, [state, login, logout, submitMFA, updateProfile, changePassword, reloadSession]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

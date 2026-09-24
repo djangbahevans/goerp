@@ -19,6 +19,7 @@ const FAKE_USER = {
   roles: [],
   amr: ["pwd", "totp"],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
 
@@ -51,6 +52,7 @@ function FakeAuthProvider({
     submitMFA: (code, method = "totp") => submitImpl(code, method, setState),
     updateProfile: async () => {},
     changePassword: async () => {},
+    reloadSession: async () => {},
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

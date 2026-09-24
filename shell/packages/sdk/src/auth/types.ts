@@ -7,6 +7,9 @@ export interface CurrentUser {
   roles: string[];
   amr: string[];
   mfaVerifiedAt: string | null;
+  // auth-internals.md §8 "MFA enrollment": the tenant requires MFA and the
+  // user has no factor yet, so the shell holds them on /auth/mfa-setup.
+  mfaSetupRequired: boolean;
 }
 
 export interface CurrentTenant {
@@ -134,7 +137,9 @@ export type AuthEvent =
   | { type: "session_expired" }
   | { type: "logout_started" }
   | { type: "logout_complete" }
-  | { type: "profile_updated"; user: CurrentUser };
+  | { type: "profile_updated"; user: CurrentUser }
+  | { type: "mfa_setup_required" }
+  | { type: "session_reloaded"; user: CurrentUser; tenant: CurrentTenant };
 
 export interface ChangePasswordInput {
   currentPassword: string;
@@ -156,4 +161,20 @@ export interface AuthContextValue {
   submitMFA: (code: string, method?: MFAMethod) => Promise<void>;
   updateProfile: (input: UpdateProfileInput) => Promise<void>;
   changePassword: (input: ChangePasswordInput) => Promise<void>;
+  // Re-reads GET /auth/me into the signed-in state, e.g. once MFA setup finishes.
+  reloadSession: () => Promise<void>;
+}
+
+// POST /auth/mfa/enroll/totp (auth-internals.md §8 "MFA enrollment").
+export interface TOTPEnrollment {
+  enrollmentId: string;
+  qrSvg: string;
+  // Base32 manual-entry key for authenticator apps that can't scan.
+  secret: string;
+}
+
+export interface TOTPEnrollmentConfirmation {
+  enrollmentId: string;
+  code: string;
+  label?: string | undefined;
 }

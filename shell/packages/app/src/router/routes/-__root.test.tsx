@@ -3,8 +3,8 @@ import { AuthContext, createPermissionContextValue, PermissionContext } from "@g
 import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
@@ -17,6 +17,7 @@ const FAKE_USER = {
   roles: [],
   amr: ["pwd"],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
 const SIGNED_IN: AuthContextValue = {
@@ -29,6 +30,7 @@ const SIGNED_IN: AuthContextValue = {
   submitMFA: async () => {},
   updateProfile: async () => {},
   changePassword: async () => {},
+  reloadSession: async () => {},
 };
 const SIGNED_OUT: AuthContextValue = {
   ...SIGNED_IN,
@@ -57,9 +59,13 @@ function renderAt(path: string, auth: AuthContextValue) {
       </AuthContext.Provider>
     </QueryClientProvider>,
   );
+  return router;
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("root layout", () => {
   it("renders an app route inside the chrome", async () => {
@@ -70,6 +76,24 @@ describe("root layout", () => {
     expect(screen.getByRole("navigation", { name: "Main" })).toBeTruthy();
     expect(screen.getByRole("banner")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Skip to content" })).toBeTruthy();
+  });
+
+  it("holds a user who must enroll in MFA on the setup wizard", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ enrollment_id: "e1", qr_svg: "<svg/>", secret: "ABCD" }))),
+    );
+    const needsSetup = { ...FAKE_USER, mfaSetupRequired: true };
+    const router = renderAt("/settings/profile?tab=a", {
+      ...SIGNED_IN,
+      state: { status: "authenticated", user: needsSetup, tenant: FAKE_TENANT },
+      user: needsSetup,
+    });
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/auth/mfa-setup"));
+    expect(router.state.location.search).toEqual({ redirect: "/settings/profile?tab=a" });
+    expect(await screen.findByRole("heading", { name: /requires two-factor authentication/ })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
   });
 
   it("renders an /auth/* route with no sidebar or header", async () => {

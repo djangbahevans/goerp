@@ -198,7 +198,13 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
     }
 
     if (!response.ok) {
-      throw toAppError(response, await readErrorBody(response));
+      const body = await readErrorBody(response);
+      // auth-internals.md §8: step 9 rejects every module route for a user
+      // the tenant requires to enroll; the shell's route guard takes over.
+      if (response.status === 403 && body.code === "mfa_setup_required") {
+        authMachine.transition({ type: "mfa_setup_required" });
+      }
+      throw toAppError(response, body);
     }
     return response;
   }

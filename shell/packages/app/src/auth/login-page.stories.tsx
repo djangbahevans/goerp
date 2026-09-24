@@ -18,6 +18,7 @@ function authWith(login: AuthContextValue["login"]): AuthContextValue {
     submitMFA: async () => {},
     updateProfile: async () => {},
     changePassword: async () => {},
+    reloadSession: async () => {},
   };
 }
 

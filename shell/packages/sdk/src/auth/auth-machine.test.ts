@@ -11,10 +11,32 @@ const user: CurrentUser = {
   roles: ["admin"],
   amr: ["pwd"],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
 describe("authTransition", () => {
+  it("flags an authenticated user for MFA setup on mfa_setup_required", () => {
+    const next = authTransition({ status: "authenticated", user, tenant }, { type: "mfa_setup_required" });
+    expect(next).toEqual({ status: "authenticated", user: { ...user, mfaSetupRequired: true }, tenant });
+  });
+
+  it("ignores mfa_setup_required when already flagged or signed out", () => {
+    const flagged: AuthState = { status: "authenticated", user: { ...user, mfaSetupRequired: true }, tenant };
+    expect(authTransition(flagged, { type: "mfa_setup_required" })).toBe(flagged);
+    const signedOut: AuthState = { status: "unauthenticated" };
+    expect(authTransition(signedOut, { type: "mfa_setup_required" })).toBe(signedOut);
+  });
+
+  it("replaces user and tenant on session_reloaded, keeping the status", () => {
+    const reloaded = { ...user, mfaSetupRequired: false, amr: ["pwd", "totp"] };
+    const next = authTransition(
+      { status: "refreshing", user: { ...user, mfaSetupRequired: true }, tenant },
+      { type: "session_reloaded", user: reloaded, tenant },
+    );
+    expect(next).toEqual({ status: "refreshing", user: reloaded, tenant });
+  });
+
   it("idle → checking on check_session", () => {
     const next = authTransition({ status: "idle" }, { type: "check_session" });
     expect(next).toEqual({ status: "checking" });

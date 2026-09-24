@@ -18,6 +18,7 @@ const FAKE_USER = {
   roles: [],
   amr: ["pwd"],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
 
@@ -46,6 +47,7 @@ function FakeAuthProvider({
     submitMFA: async () => {},
     updateProfile: async () => {},
     changePassword: async () => {},
+    reloadSession: async () => {},
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -354,18 +356,19 @@ describe("/auth/login", () => {
     expect(screen.queryByRole("button", { name: "Resend verification email" })).toBeNull();
   });
 
-  it("redirects to MFA setup on mfa_setup_required", async () => {
+  it("sends a user who must enroll in MFA to the setup wizard, keeping ?redirect", async () => {
     stubTenantContext(SUBDOMAIN_TENANT);
     const { router, submit } = await renderLogin({
-      loginImpl: async () => {
-        throw new AppError({ code: "mfa_setup_required", message: "", httpStatus: 403 });
-      },
+      url: "/auth/login?redirect=%2Fsettings%2Fprofile",
+      loginImpl: async (_c, setState) =>
+        setState({ status: "authenticated", user: { ...FAKE_USER, mfaSetupRequired: true }, tenant: FAKE_TENANT }),
     });
 
     fillCredentials();
     fireEvent.click(submit);
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/auth/mfa-setup"));
+    expect(router.state.location.search).toEqual({ redirect: "/settings/profile" });
   });
 
   it("shows 'Create an account' only when registration is enabled", async () => {

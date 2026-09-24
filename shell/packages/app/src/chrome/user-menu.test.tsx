@@ -21,6 +21,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     roles: [],
     amr: [],
     mfaVerifiedAt: null,
+    mfaSetupRequired: false,
   };
   const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
   return {
@@ -33,6 +34,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),
     changePassword: vi.fn(),
+    reloadSession: vi.fn(),
     ...overrides,
   };
 }
@@ -117,6 +119,7 @@ describe("UserMenu", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     await renderUserMenu(fakeAuth({ user }));
     expect(screen.getByRole("button", { name: "@example.com's account menu" })).toBeTruthy();
@@ -132,6 +135,7 @@ describe("UserMenu", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     await renderUserMenu(fakeAuth({ user }));
     expect(screen.getByRole("button", { name: "Jane Doe's account menu" })).toBeTruthy();
@@ -147,6 +151,7 @@ describe("UserMenu", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     await renderUserMenu(fakeAuth({ user }));
     expect(screen.getByRole("button", { name: "Ada Lovelace's account menu" })).toBeTruthy();

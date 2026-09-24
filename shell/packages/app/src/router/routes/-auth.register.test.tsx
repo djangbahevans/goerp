@@ -33,6 +33,7 @@ const SIGNED_OUT: AuthContextValue = {
   submitMFA: async () => {},
   updateProfile: async () => {},
   changePassword: async () => {},
+  reloadSession: async () => {},
 };
 
 const STRONG = "Plinth-Quartz-Meadow-47";
