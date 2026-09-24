@@ -33,11 +33,11 @@ export function NavGroupSection({
         <Icon name={group.icon} size={16} aria-hidden="true" />
         {!collapsed && (
           <>
-            <span className="flex-1">{group.label}</span>
+            <span className="flex-1 text-start">{group.label}</span>
             <ChevronRight
               size={14}
               aria-hidden="true"
-              className={`transition-transform duration-(--duration-base) ${expanded ? "rotate-90" : ""}`}
+              className={`transition-transform duration-(--duration-base) ${expanded ? "rotate-90" : "rtl:-scale-x-100"}`}
             />
           </>
         )}
