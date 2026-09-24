@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { AppError } from "../error/app-error.js";
 import {
+  changePassword as changePasswordRequest,
   fetchCurrentSession,
   login as loginRequest,
   logout as logoutRequest,
@@ -8,7 +9,13 @@ import {
   updateProfile as updateProfileRequest,
 } from "./auth-client.js";
 import { authMachine } from "./auth-machine.js";
-import type { AuthContextValue, LoginCredentials, MFAMethod, UpdateProfileInput } from "./types.js";
+import type {
+  AuthContextValue,
+  ChangePasswordInput,
+  LoginCredentials,
+  MFAMethod,
+  UpdateProfileInput,
+} from "./types.js";
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -125,6 +132,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authMachine.transition({ type: "profile_updated", user: session.user });
   }, []);
 
+  const changePassword = useCallback(async (input: ChangePasswordInput): Promise<void> => {
+    const current = authMachine.getState();
+    if (current.status !== "authenticated" && current.status !== "refreshing") {
+      throw new Error("changePassword called outside the authenticated state");
+    }
+    await changePasswordRequest(input);
+  }, []);
+
   const logout = useCallback(async (): Promise<void> => {
     authMachine.transition({ type: "logout_started" });
     await logoutRequest();
@@ -142,8 +157,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       submitMFA,
       updateProfile,
+      changePassword,
     };
-  }, [state, login, logout, submitMFA, updateProfile]);
+  }, [state, login, logout, submitMFA, updateProfile, changePassword]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

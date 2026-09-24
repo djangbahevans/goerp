@@ -37,6 +37,13 @@ describe("PasswordField", () => {
     expect(onChange).toHaveBeenCalledWith("s3cret");
   });
 
+  it("calls onBlur when the input loses focus", () => {
+    const onBlur = vi.fn();
+    render(<PasswordField label="Password" value="" autoComplete="new-password" onChange={vi.fn()} onBlur={onBlur} />);
+    fireEvent.blur(screen.getByLabelText("Password"));
+    expect(onBlur).toHaveBeenCalledTimes(1);
+  });
+
   it("surfaces the error message with role=alert", () => {
     render(
       <PasswordField

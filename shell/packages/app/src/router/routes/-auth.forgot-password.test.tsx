@@ -21,6 +21,7 @@ const SIGNED_OUT: AuthContextValue = {
   logout: async () => {},
   submitMFA: async () => {},
   updateProfile: async () => {},
+  changePassword: async () => {},
 };
 
 const SUBDOMAIN_TENANT = { tenant: { slug: "acme", name: "Acme Corp" }, registration_enabled: false };

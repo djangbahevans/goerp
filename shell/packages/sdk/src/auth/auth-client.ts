@@ -1,5 +1,6 @@
 import { AppError } from "../error/app-error.js";
 import type {
+  ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
   LoginCredentials,
@@ -171,6 +172,19 @@ export async function requestPasswordReset(input: PasswordResetRequest): Promise
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: input.email, tenant: input.tenant }),
+  });
+  if (!response.ok) throw await readError(response);
+}
+
+// changePassword backs POST /auth/me/change-password (auth-internals.md §3
+// "Password change"). The caller's session survives, so there's no session
+// state to refresh afterwards.
+export async function changePassword(input: ChangePasswordInput): Promise<void> {
+  const response = await fetch("/auth/me/change-password", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: input.currentPassword, new_password: input.newPassword }),
   });
   if (!response.ok) throw await readError(response);
 }

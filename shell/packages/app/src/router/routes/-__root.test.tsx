@@ -28,6 +28,7 @@ const SIGNED_IN: AuthContextValue = {
   logout: async () => {},
   submitMFA: async () => {},
   updateProfile: async () => {},
+  changePassword: async () => {},
 };
 const SIGNED_OUT: AuthContextValue = {
   ...SIGNED_IN,
