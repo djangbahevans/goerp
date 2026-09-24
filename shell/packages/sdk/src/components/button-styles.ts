@@ -39,7 +39,7 @@ const ICON_SIZE_CLASSES: Record<ButtonSize, string> = { md: "size-9", sm: "size-
 const ICON_VARIANT_CLASSES: Record<IconButtonVariant, string> = {
   ghost: "bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text active:bg-surface-active",
   secondary: FILLED_VARIANT_CLASSES.secondary,
-  danger: FILLED_VARIANT_CLASSES.danger,
+  danger: "bg-transparent text-danger hover:bg-surface-hover active:bg-surface-active",
 };
 
 const PRESSED_CLASSES = "bg-primary-subtle text-primary";

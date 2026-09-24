@@ -1,4 +1,4 @@
-import { AlertDialog, Icon, Skeleton } from "@goerp/sdk/components";
+import { AlertDialog, Icon, IconButton, Skeleton } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import type { SavedFilter } from "@goerp/sdk/react";
 import { useSavedFilters } from "@goerp/sdk/react";
@@ -26,11 +26,6 @@ const TRIGGER_CLASSES = [
 const ROW_BUTTON_CLASSES =
   "flex min-w-0 flex-1 items-center gap-2 truncate rounded-control px-3 py-2 text-left text-sm text-text hover:bg-surface-hover focus-visible:outline-none focus-visible:shadow-focus";
 
-// --space-12 (48px) hit area for a 14px icon — WCAG 2.5.5, rounded up since
-// there's no 44px step in this scale.
-const ICON_BUTTON_CLASSES =
-  "flex h-(--space-12) w-(--space-12) flex-none items-center justify-center rounded-control text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:shadow-focus";
-
 function SavedFilterRow({
   filter,
   onApply,
@@ -52,23 +47,20 @@ function SavedFilterRow({
       </button>
       <span className="flex flex-none items-center gap-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
         {!filter.isDefault && (
-          <button
-            type="button"
-            aria-label={`Set '${filter.label}' as default`}
-            className={ICON_BUTTON_CLASSES}
+          <IconButton
+            icon="star"
+            label={`Set '${filter.label}' as default`}
+            size="sm"
             onClick={() => onSetDefault(filter)}
-          >
-            <Icon name="star" size={14} aria-hidden="true" />
-          </button>
+          />
         )}
-        <button
-          type="button"
-          aria-label={`Delete '${filter.label}'`}
-          className={`${ICON_BUTTON_CLASSES} text-danger`}
+        <IconButton
+          icon="trash-2"
+          label={`Delete '${filter.label}'`}
+          variant="danger"
+          size="sm"
           onClick={() => onRemove(filter)}
-        >
-          <Icon name="trash-2" size={14} aria-hidden="true" />
-        </button>
+        />
       </span>
     </div>
   );

@@ -42,6 +42,15 @@ describe("IconButton", () => {
     expect(screen.getByRole("button", { name: "Medium" }).className).toContain("size-9");
   });
 
+  it("renders danger as a ghost button with a red icon", () => {
+    render(<IconButton icon="trash-2" label="Delete" variant="danger" />);
+    const classes = screen.getByRole("button").className.split(" ");
+    expect(classes).toContain("text-danger");
+    expect(classes).toContain("bg-transparent");
+    expect(classes).toContain("hover:bg-surface-hover");
+    expect(classes).not.toContain("bg-danger");
+  });
+
   it("disables with the native attribute and the dimmed look", () => {
     const onClick = vi.fn();
     render(<IconButton icon="x" label="Dismiss" disabled onClick={onClick} />);
