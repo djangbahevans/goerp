@@ -85,7 +85,7 @@ type fakeMailer struct {
 	done chan struct{}
 }
 
-func (m *fakeMailer) SendVerifyEmail(_ context.Context, email, rawToken string) error {
+func (m *fakeMailer) SendVerifyEmail(_ context.Context, email, _, rawToken string) error {
 	m.mu.Lock()
 	m.sent[email] = rawToken
 	m.mu.Unlock()
@@ -305,6 +305,9 @@ func TestRegister_VerificationRequiredOrTenantChoiceReturns202(t *testing.T) {
 			company, _, email := f.registration(t)
 
 			rec := doRegister(t, h, body(company, email))
+			if resp := decode(t, rec); resp["tenant_slug"] != DeriveSlug(company) {
+				t.Errorf("tenant_slug = %v, want %q", resp["tenant_slug"], DeriveSlug(company))
+			}
 			if rec.Code != http.StatusAccepted || decode(t, rec)["requires_email_verification"] != true {
 				t.Fatalf("status = %d, body = %s, want 202 requires_email_verification", rec.Code, rec.Body.String())
 			}

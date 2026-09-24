@@ -99,9 +99,11 @@ func (m *SMTPMailer) SendPasswordResetConfirmed(ctx context.Context, email strin
 }
 
 // SendVerifyEmail carries the email-verification link for a self-registered
-// account — auth-internals.md §3, template auth.verify_email.
-func (m *SMTPMailer) SendVerifyEmail(ctx context.Context, email, rawToken string) error {
-	link := fmt.Sprintf("%s/auth/verify-email?token=%s", m.cfg.BaseURL, url.QueryEscape(rawToken))
+// account — auth-internals.md §3, template auth.verify_email. The link
+// carries the tenant so confirming can sign the user into it.
+func (m *SMTPMailer) SendVerifyEmail(ctx context.Context, email, tenantSlug, rawToken string) error {
+	link := fmt.Sprintf("%s/auth/verify-email?token=%s&tenant=%s",
+		m.cfg.BaseURL, url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
 
 	const subject = "Verify your email address"
 	text := fmt.Sprintf("Confirm your email address to finish setting up your account "+

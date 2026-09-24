@@ -276,12 +276,12 @@ func TestSMTPMailer_SendVerifyEmail_ContainsVerifyLink(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")
 
-	if err := m.SendVerifyEmail(context.Background(), "kwame@example.com", "raw-token-123"); err != nil {
+	if err := m.SendVerifyEmail(context.Background(), "kwame@example.com", "acmecorp", "raw-token-123"); err != nil {
 		t.Fatalf("SendVerifyEmail() error: %v", err)
 	}
 
 	msg := waitForMessage(t, srv)
-	if !strings.Contains(msg.data, "http://localhost:8080/auth/verify-email?token=raw-token-123") {
+	if !strings.Contains(msg.data, "http://localhost:8080/auth/verify-email?token=raw-token-123&tenant=acmecorp") {
 		t.Errorf("email should contain the verification link, got: %s", msg.data)
 	}
 }
