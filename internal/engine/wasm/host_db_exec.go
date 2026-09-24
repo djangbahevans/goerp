@@ -219,7 +219,7 @@ func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (prepar
 	if len(stmt.ReturningList) > 0 {
 		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: "host.db.exec statements must not include their own RETURNING clause — use opts.returning instead"}
 	}
-	if err := dbscope.ValidateTreeNoQualifiedTableRefs(tree); err != nil {
+	if err := dbscope.ValidateTreeTableRefs(tree); err != nil {
 		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeTableAccessDenied, Message: err.Error()}
 	}
 

@@ -541,7 +541,7 @@ func TestServeHTTP_AvatarNilWhenFilesStoreOrBackendMissing(t *testing.T) {
 }
 
 // erroringBackend implements storage.Backend, failing only SignedURL —
-// exercises resolveAvatarURL's own degrade-on-backend-error branch, which
+// exercises AvatarURL's own degrade-on-backend-error branch, which
 // the real LocalBackend's SignedURL never takes (it never fails).
 type erroringBackend struct{ storage.Backend }
 

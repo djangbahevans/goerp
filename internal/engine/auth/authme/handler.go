@@ -157,7 +157,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 		name = &profile.Name
 		if profile.AvatarFileID != nil {
-			avatarURL = h.resolveAvatarURL(ctx, tenantCtx.Slug, authCtx.UserID, *profile.AvatarFileID)
+			avatarURL = AvatarURL(ctx, h.files, h.backend, tenantCtx.Slug, authCtx.UserID, *profile.AvatarFileID)
 		}
 	case errors.Is(err, user.ErrProfileNotFound):
 		// Leave name/avatarURL nil.
@@ -194,20 +194,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resolveAvatarURL turns a stored file id into a signed URL, or nil on any
-// failure (missing files.Store/storage.Backend dependency, the file row
-// having since been deleted, or a backend error) — same "degrade rather
-// than fail the whole session check" reasoning ServeHTTP applies to a
-// profile lookup failure.
-func (h *Handler) resolveAvatarURL(ctx context.Context, tenantSlug, userID, fileID string) *string {
-	if h.files == nil || h.backend == nil {
+// AvatarURL turns a user's stored avatar file id into a signed URL, or nil
+// on any failure (missing files.Store/storage.Backend dependency, the file
+// row having since been deleted, or a backend error) — an avatar is
+// cosmetic, so callers degrade to no avatar rather than failing.
+func AvatarURL(ctx context.Context, filesStore *files.Store, backend storage.Backend, tenantSlug, userID, fileID string) *string {
+	if filesStore == nil || backend == nil {
 		return nil
 	}
 
-	f, err := h.files.GetByID(ctx, tenantSlug, fileID)
+	f, err := filesStore.GetByID(ctx, tenantSlug, fileID)
 	if err != nil {
 		if !errors.Is(err, files.ErrFileNotFound) {
-			log.Warn().Err(err).Str("user_id", userID).Str("file_id", fileID).Msg("authme: avatar file lookup failed")
+			log.Warn().Err(err).Str("user_id", userID).Str("file_id", fileID).Msg("avatar file lookup failed")
 		}
 		return nil
 	}
@@ -219,9 +218,9 @@ func (h *Handler) resolveAvatarURL(ctx context.Context, tenantSlug, userID, file
 		return nil
 	}
 
-	url, err := h.backend.SignedURL(ctx, f.StorageKey, avatarURLExpiry)
+	url, err := backend.SignedURL(ctx, f.StorageKey, avatarURLExpiry)
 	if err != nil {
-		log.Warn().Err(err).Str("user_id", userID).Str("file_id", fileID).Msg("authme: avatar signed URL generation failed")
+		log.Warn().Err(err).Str("user_id", userID).Str("file_id", fileID).Msg("avatar signed URL generation failed")
 		return nil
 	}
 

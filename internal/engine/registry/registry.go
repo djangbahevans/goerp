@@ -543,6 +543,25 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/saved-filters/{id}",
 	})
 
+	// /_meta/activity (record-activity.md §6) — same not-EngineBuiltin
+	// posture as /_meta/shares above, for the same reason.
+	table.Register("GET", "/_meta/activity", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/activity",
+	})
+	table.Register("POST", "/_meta/activity", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/activity",
+	})
+	table.Register("DELETE", "/_meta/activity/{id}", &route.RouteEntry{
+		Manifest: route.RouteManifest{
+			EngineNative: true,
+			Auth:         "required",
+			PathParams:   map[string]string{"id": "uuid"},
+		},
+		PathTemplate: "/_meta/activity/{id}",
+	})
+
 	// /storage/upload (goerp#818) — same EngineBuiltin posture as
 	// /auth/login above: storageupload.Handler resolves tenant/auth itself
 	// (same manual ResolveByHost/Authenticate pattern authme.Handler

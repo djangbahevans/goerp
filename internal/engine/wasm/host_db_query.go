@@ -74,7 +74,7 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 		if err := requireSelectOnly(tree); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeQueryError, Message: err.Error()})
 		}
-		if err := dbscope.ValidateTreeNoQualifiedTableRefs(tree); err != nil {
+		if err := dbscope.ValidateTreeTableRefs(tree); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeTableAccessDenied, Message: err.Error()})
 		}
 

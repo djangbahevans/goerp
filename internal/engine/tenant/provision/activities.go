@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -238,7 +239,8 @@ func registerTenantPartition(ctx context.Context, pool *sql.DB, slug, table, con
 // this uniformly regardless of which module owns the model),
 // saved_filters (savedfilters.Store.Bootstrap — goerp#635, the built-in
 // /_meta/saved-filters endpoint's own-rows-only backing table),
-// module_config (this ticket's own SeedTenantConfig step), sequences
+// record_activity (recordactivity.Store.Bootstrap — the per-record feed
+// behind /_meta/activity), module_config (this ticket's own SeedTenantConfig step), sequences
 // (backing store for Sequence-kind fields' per-tenant counters, keyed by
 // (model, field, period_key)), audit_log (goerp#363 — host.orm's write
 // path records one row here per INSERT/UPDATE/DELETE on a module's own
@@ -268,6 +270,10 @@ func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error 
 
 	if err := savedfilters.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
 		return fmt.Errorf("bootstrap saved_filters: %w", err)
+	}
+
+	if err := recordactivity.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
+		return fmt.Errorf("bootstrap record_activity: %w", err)
 	}
 
 	query := fmt.Sprintf(createModuleConfigTable, tenantschema.Name(slug))

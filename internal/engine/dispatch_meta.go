@@ -157,14 +157,14 @@ func shareToResponse(sh *recordshares.Share, recipientEmail string) shareRespons
 	}
 }
 
-// sharerCanReadRecord reports whether authCtx's caller can currently read
+// callerCanReadRecord reports whether authCtx's caller can currently read
 // recordID via host.orm.read — the same "current access" signal
 // go-sdk-reference.md §22 "Document sharing" uses to cap POST
 // /_meta/shares, reused by GET/DELETE so viewing or revoking a record's
 // shares requires the same access a fresh share request against that
-// record would. Fails closed (false) on an unresolvable model or any
-// host error.
-func (e *Engine) sharerCanReadRecord(ctx context.Context, authCtx *authcheck.AuthContext, tenantCtx *tenantresolve.TenantContext, modelName, recordID string) bool {
+// record would, and by every /_meta/activity route (record-activity.md
+// §7). Fails closed (false) on an unresolvable model or any host error.
+func (e *Engine) callerCanReadRecord(ctx context.Context, authCtx *authcheck.AuthContext, tenantCtx *tenantresolve.TenantContext, modelName, recordID string) bool {
 	snap := e.moduleRegistry.Snapshot()
 	if snap == nil {
 		return false
@@ -271,7 +271,7 @@ func (e *Engine) dispatchSharesCreateRoute(w http.ResponseWriter, r *http.Reques
 	// caller always gets the same permission_denied regardless of
 	// whether user_email is registered.
 	ctx := r.Context()
-	if !e.sharerCanReadRecord(ctx, authCtx, tenantCtx, body.Model, body.RecordID) {
+	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, body.Model, body.RecordID) {
 		writeRouteError(w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
 		return
 	}
@@ -318,7 +318,7 @@ func (e *Engine) dispatchSharesListRoute(w http.ResponseWriter, r *http.Request)
 	}
 
 	ctx := r.Context()
-	if !e.sharerCanReadRecord(ctx, authCtx, tenantCtx, modelName, recordID) {
+	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, modelName, recordID) {
 		writeRouteError(w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
 		return
 	}
@@ -389,7 +389,7 @@ func (e *Engine) dispatchSharesDeleteRoute(w http.ResponseWriter, r *http.Reques
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "revoke share failed")
 		return
 	}
-	if !e.sharerCanReadRecord(ctx, authCtx, tenantCtx, sh.Model, sh.RecordID) {
+	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, sh.Model, sh.RecordID) {
 		writeRouteError(w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
 		return
 	}
