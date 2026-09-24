@@ -205,3 +205,30 @@ func TestIsLoopback(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadRegistrationSettings(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.RegistrationEnabled || cfg.RequireEmailVerification != "tenant_choice" || len(cfg.ReservedSlugs) != 0 {
+		t.Errorf("defaults = %v, %q, %v, want false, tenant_choice, none", cfg.RegistrationEnabled, cfg.RequireEmailVerification, cfg.ReservedSlugs)
+	}
+
+	t.Setenv("GOERP_RESERVED_SLUGS", "wiki,crm")
+	t.Setenv("GOERP_REQUIRE_EMAIL_VERIFICATION", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Error("Load() accepted an unknown GOERP_REQUIRE_EMAIL_VERIFICATION")
+	}
+
+	t.Setenv("GOERP_REQUIRE_EMAIL_VERIFICATION", "off")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if len(cfg.ReservedSlugs) != 2 || cfg.ReservedSlugs[0] != "wiki" || cfg.ReservedSlugs[1] != "crm" {
+		t.Errorf("ReservedSlugs = %v, want [wiki crm]", cfg.ReservedSlugs)
+	}
+}

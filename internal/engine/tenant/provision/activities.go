@@ -95,9 +95,12 @@ func NewActivities(
 	}
 }
 
-// SlugTakenErrorType is the Temporal application-error type ReserveSlug
-// fails with when another tenant holds the slug.
-const SlugTakenErrorType = "SlugTaken"
+// Temporal application-error types ReserveSlug fails with when another
+// tenant holds the slug, or the slug is reserved.
+const (
+	SlugTakenErrorType    = "SlugTaken"
+	SlugReservedErrorType = "SlugReserved"
+)
 
 // ReserveSlug inserts the tenant row under the workflow-chosen tenantID
 // (system.tenants.status defaults to 'provisioning'), reserving the slug
@@ -108,6 +111,9 @@ func (a *Activities) ReserveSlug(ctx context.Context, slug, name, tenantID strin
 	id, err := a.tenantStore.ReserveSlug(ctx, tenantID, slug, name)
 	if errors.Is(err, tenant.ErrSlugTaken) {
 		return "", temporal.NewNonRetryableApplicationError("tenant slug is already taken", SlugTakenErrorType, err)
+	}
+	if errors.Is(err, tenant.ErrSlugReserved) {
+		return "", temporal.NewNonRetryableApplicationError("tenant slug is reserved", SlugReservedErrorType, err)
 	}
 	if err != nil {
 		return "", fmt.Errorf("reserve slug: %w", err)

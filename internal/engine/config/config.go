@@ -118,8 +118,11 @@ type Config struct {
 	// /auth/check-slug (404 when off). RequireEmailVerification is the
 	// platform email-verification policy (auth-internals.md §3 "Email
 	// verification policy").
-	RegistrationEnabled      bool   `env:"GOERP_REGISTRATION_ENABLED" envDefault:"false"`
-	RequireEmailVerification string `env:"GOERP_REQUIRE_EMAIL_VERIFICATION" envDefault:"tenant_choice" validate:"oneof=required tenant_choice off"`
+	RegistrationEnabled bool `env:"GOERP_REGISTRATION_ENABLED" envDefault:"false"`
+	// ReservedSlugs extends the built-in list of slugs no tenant may use
+	// (multitenancy-internals.md §1 "Reserved slugs").
+	ReservedSlugs            []string `env:"GOERP_RESERVED_SLUGS"`
+	RequireEmailVerification string   `env:"GOERP_REQUIRE_EMAIL_VERIFICATION" envDefault:"tenant_choice" validate:"oneof=required tenant_choice off"`
 
 	StorageBackend      string   `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
 	StorageBucket       string   `env:"GOERP_STORAGE_BUCKET" envDefault:"goerp-files"`

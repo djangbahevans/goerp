@@ -419,3 +419,24 @@ func TestRegister_ProvisioningTimeoutKeepsTheAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestReservedSlugs_ReadAsTaken(t *testing.T) {
+	f := newFixture(t)
+	f.tenants.AddReservedSlugs("wiki")
+	h := f.handlers(true, VerificationOff)
+
+	for _, slug := range []string{"app", "storage", "wiki"} {
+		if rec := doCheckSlug(t, h, slug); decode(t, rec)["available"] != false {
+			t.Errorf("check-slug(%q) = %s, want available=false", slug, rec.Body.String())
+		}
+	}
+
+	_, _, email := f.registration(t)
+	rec := doRegister(t, h, body("App", email))
+	if rec.Code != http.StatusConflict || errorCode(t, rec) != "tenant.slug_taken" {
+		t.Errorf("register as App = %d %s, want 409 tenant.slug_taken", rec.Code, rec.Body.String())
+	}
+	if len(f.provisioner.calls) != 0 {
+		t.Error("provisioning ran for a reserved slug")
+	}
+}

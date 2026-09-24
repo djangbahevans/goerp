@@ -226,6 +226,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	tenantStore := tenant.NewStore(primaryPool)
+	tenantStore.AddReservedSlugs(cfg.ReservedSlugs...)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
 		_ = primaryPool.Close()
 		_ = schemaPool.Close()

@@ -225,6 +225,9 @@ func (h *tenantHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "slug and admin_email are required")
 		return
 	}
+	if h.slugReserved(w, req.Slug) {
+		return
+	}
 
 	workflowID, err := h.deps.Provisioner.StartProvisioning(r.Context(), req)
 	if err != nil {
@@ -509,6 +512,17 @@ func (h *tenantHandlers) uploadImportArchive(w http.ResponseWriter, r *http.Requ
 	}{InputRef: key})
 }
 
+// slugReserved writes 400 reserved_slug when no tenant may be created
+// under slug (multitenancy-internals.md §1 "Reserved slugs"). There's no
+// operator override.
+func (h *tenantHandlers) slugReserved(w http.ResponseWriter, slug string) bool {
+	if h.deps.Store == nil || !h.deps.Store.IsReserved(slug) {
+		return false
+	}
+	writeError(w, http.StatusBadRequest, "reserved_slug", "slug "+slug+" is reserved and can't be used for a tenant")
+	return true
+}
+
 func (h *tenantHandlers) importTenant(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Importer == nil {
 		writeNotImplemented(w, "goerp#157")
@@ -522,6 +536,9 @@ func (h *tenantHandlers) importTenant(w http.ResponseWriter, r *http.Request) {
 	}](r)
 	if err != nil || req.Slug == "" || req.Input == "" || req.DecryptionKey == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "slug, input, and decryption_key are required")
+		return
+	}
+	if h.slugReserved(w, req.Slug) {
 		return
 	}
 

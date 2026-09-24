@@ -363,3 +363,13 @@ func TestReserveSlug_RetryWithTheSameIDSucceedsAnotherIDFailsNonRetryably(t *tes
 		t.Errorf("ReserveSlug() for another id error = %v, want a non-retryable %s", err, SlugTakenErrorType)
 	}
 }
+
+func TestReserveSlug_ReservedSlugFailsNonRetryably(t *testing.T) {
+	env := newTestEnv(t, nil)
+
+	_, err := env.activities.ReserveSlug(t.Context(), "app", "App", uuid.NewV7().String())
+	appErr, ok := errors.AsType[*sdktemporal.ApplicationError](err)
+	if !ok || appErr.Type() != SlugReservedErrorType || !appErr.NonRetryable() {
+		t.Errorf("ReserveSlug(app) error = %v, want a non-retryable %s", err, SlugReservedErrorType)
+	}
+}
