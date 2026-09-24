@@ -126,7 +126,3 @@ func (p Policy) Validate(plain, email string) error {
 func isSymbol(r rune) bool {
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsSpace(r)
 }
-
-func Hash(plain string) (string, error) {
-	return argon2id.CreateHash(plain, ArgonParams)
-}
