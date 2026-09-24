@@ -46,9 +46,12 @@ export { buildViewExtensionRegistry, ViewExtensionRegistry } from "./view-extens
 export type { NavigationGroup, NavigationItem, ResolvedView, ViewRegistry } from "./view-registry.js";
 export { buildEmptyViewRegistry, buildViewRegistry, filterViewByCapability } from "./view-registry.js";
 export {
+  type LoadStatus,
+  useViewRegistryStatus,
   ViewRegistryContext,
   ViewRegistryProvider,
   ViewRegistryProviderForTenant,
+  ViewRegistryStatusContext,
   viewRegistryRef,
 } from "./view-registry-provider.js";
 
