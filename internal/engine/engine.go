@@ -54,6 +54,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authrefresh"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authregister"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/emailverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareset"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareverify"
@@ -770,6 +771,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil, passwordHasher)
 	passwordResetRequestHandler := passwordreset.NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer, authAuditStore)
 	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, passwordPolicies, inviteMailer, authAuditStore, passwordHasher)
+	verifyEmailConfirmHandler := emailverify.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer)
+	verifyEmailResendHandler := emailverify.NewResendHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer)
 	// filesStore is constructed here (rather than down by
 	// offboardActivities, which also needs it) since authMeHandler
 	// (avatar URL resolution, goerp#819) and storageUploadHandler both
@@ -800,6 +803,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/login":                  loginHandler,
 		"POST /auth/password-reset/request": passwordResetRequestHandler,
 		"POST /auth/password-reset/confirm": passwordResetConfirmHandler,
+		"POST /auth/verify-email":           verifyEmailConfirmHandler,
+		"POST /auth/verify-email/resend":    verifyEmailResendHandler,
 		"GET /auth/tenant-context":          tenantContextHandler,
 		"POST /auth/logout":                 authLogoutHandler,
 		"POST /auth/mfa/verify":             mfaVerifyHandler,

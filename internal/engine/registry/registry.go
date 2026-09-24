@@ -433,6 +433,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		"/admin/users/{id}/mfa/reset", "/admin/users/{id}/roles",
 		"/auth/refresh", "/auth/logout", "/admin/tenant/plan",
 		"/auth/password-reset/request", "/auth/password-reset/confirm",
+		"/auth/verify-email", "/auth/verify-email/resend",
 		"/auth/me/change-password", "/auth/accept-invite", "/auth/register",
 	} {
 		table.Register("POST", path, &route.RouteEntry{

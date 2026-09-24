@@ -9,10 +9,6 @@ package authregister
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -25,6 +21,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/emailverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -33,9 +30,7 @@ import (
 )
 
 const (
-	maxBodyBytes   = 64 * 1024
-	verifyTokenTTL = 24 * time.Hour
-	mailTimeout    = 30 * time.Second
+	maxBodyBytes = 64 * 1024
 )
 
 // Verification policies — the values of GOERP_REQUIRE_EMAIL_VERIFICATION.
@@ -48,10 +43,6 @@ const (
 // Provisioner is satisfied by tenantprovision.Provisioner.
 type Provisioner interface {
 	ProvisionForRegistration(ctx context.Context, slug, name, userID string) error
-}
-
-type Mailer interface {
-	SendVerifyEmail(ctx context.Context, email, tenantSlug, rawToken string) error
 }
 
 type Config struct {
@@ -70,10 +61,10 @@ type Handlers struct {
 	provisioner Provisioner
 	hasher      *password.Hasher
 	issuer      *authtoken.Issuer
-	mailer      Mailer
+	mailer      emailverify.Mailer
 }
 
-func NewHandlers(cfg Config, users *user.Store, tenants *tenant.Store, provisioner Provisioner, hasher *password.Hasher, issuer *authtoken.Issuer, mailer Mailer) *Handlers {
+func NewHandlers(cfg Config, users *user.Store, tenants *tenant.Store, provisioner Provisioner, hasher *password.Hasher, issuer *authtoken.Issuer, mailer emailverify.Mailer) *Handlers {
 	return &Handlers{cfg: cfg, users: users, tenants: tenants, provisioner: provisioner, hasher: hasher, issuer: issuer, mailer: mailer}
 }
 
@@ -309,26 +300,10 @@ func (h *Handlers) abandon(ctx context.Context, userID string) {
 // sendVerification stores the hashed verification token and emails the
 // link off the request goroutine.
 func (h *Handlers) sendVerification(ctx context.Context, userID, email, tenantSlug string) error {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	raw, err := emailverify.IssueToken(ctx, h.users, userID)
+	if err != nil {
 		return err
 	}
-	raw := base64.RawURLEncoding.EncodeToString(buf)
-	sum := sha256.Sum256([]byte(raw))
-	if err := h.users.SetEmailVerifyToken(ctx, userID, hex.EncodeToString(sum[:]), time.Now().Add(verifyTokenTTL)); err != nil {
-		return err
-	}
-	if h.mailer == nil {
-		log.Warn().Str("user_id", userID).Msg("authregister: no mailer wired, verification email not sent")
-		return nil
-	}
-	sendCtx := context.WithoutCancel(ctx)
-	go func() {
-		sendCtx, cancel := context.WithTimeout(sendCtx, mailTimeout)
-		defer cancel()
-		if err := h.mailer.SendVerifyEmail(sendCtx, email, tenantSlug, raw); err != nil {
-			log.Warn().Err(err).Str("user_id", userID).Msg("authregister: verification email failed")
-		}
-	}()
+	emailverify.SendDetached(ctx, h.mailer, email, tenantSlug, raw)
 	return nil
 }
