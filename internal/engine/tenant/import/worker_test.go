@@ -112,7 +112,7 @@ func newImportTestFixture(t *testing.T) *importTestFixture {
 		t.Fatalf("registry Update() error: %v", err)
 	}
 
-	provisionActivities := tenantprovision.NewActivities(tenantStore, nil, conn, pool, diffEngine, reg, "goerp.test")
+	provisionActivities := tenantprovision.NewActivities(tenantStore, nil, nil, conn, pool, diffEngine, reg, "goerp.test")
 
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
 	backend, err := storage.New("local")

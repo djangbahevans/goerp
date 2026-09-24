@@ -1,33 +1,37 @@
 // Package tenantprovision implements ProvisionTenantWorkflow
 // (multitenancy-internals.md §6) for the operator-triggered POST
-// /admin/tenants path: reserve a slug, create the tenant's schema and
-// engine-owned tables, sync every loaded module's schema against it,
-// seed config and default roles, invite the founding admin, register its
-// default subdomain, then activate it. Runs on systemworker.Worker
-// (goerp#273) — the engine's own in-process Temporal worker, not
-// internal/engine/workflowworker's per-module child-process mechanism,
-// since this workflow belongs to the engine itself, not any module.
+// /admin/tenants path and self-service POST /auth/register: reserve a
+// slug, create the tenant's schema and engine-owned tables, sync every
+// loaded module's schema against it, seed config and default roles,
+// invite the founding admin (or grant a registered user the admin role),
+// register its default subdomain, then activate it. Runs on
+// systemworker.Worker (goerp#273) — the engine's own in-process Temporal
+// worker, not internal/engine/workflowworker's per-module child-process
+// mechanism, since this workflow belongs to the engine itself, not any
+// module.
 package tenantprovision
 
 import (
 	"fmt"
 	"time"
+	"uuid"
 
 	"go.temporal.io/sdk/workflow"
 )
 
-// Input is ProvisionTenantWorkflow's argument — the operator-triggered
-// path's own fields (multitenancy-internals.md §6's ProvisionInput has
-// further fields — ExistingUserID, plan/subscription — that belong to
-// the self-service and billing-webhook trigger paths this ticket
-// explicitly excludes; see goerp#149's own scope).
+// Input is ProvisionTenantWorkflow's argument (multitenancy-internals.md
+// §6's ProvisionInput, minus the plan/subscription fields the
+// billing-webhook trigger path owns). ExistingUserID is set by self-service
+// registration: that user already has a password, so step 7 grants them
+// the admin role instead of inviting AdminEmail.
 type Input struct {
-	Slug       string
-	Name       string
-	AdminEmail string
-	AdminName  string
-	Region     string
-	Country    string
+	Slug           string
+	Name           string
+	AdminEmail     string
+	AdminName      string
+	Region         string
+	Country        string
+	ExistingUserID string
 }
 
 // activityTimeout bounds every activity below — generous relative to
@@ -47,8 +51,13 @@ func Workflow(ctx workflow.Context, input Input) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: activityTimeout})
 	logger := workflow.GetLogger(ctx)
 
+	// Chosen once and recorded in history, so a retried ReserveSlug
+	// recognises its own row.
 	var tenantID string
-	if err := workflow.ExecuteActivity(ctx, "ReserveSlug", input.Slug, input.Name).Get(ctx, &tenantID); err != nil {
+	if err := workflow.SideEffect(ctx, func(workflow.Context) any { return uuid.NewV7().String() }).Get(&tenantID); err != nil {
+		return fmt.Errorf("choose tenant id: %w", err)
+	}
+	if err := workflow.ExecuteActivity(ctx, "ReserveSlug", input.Slug, input.Name, tenantID).Get(ctx, &tenantID); err != nil {
 		return fmt.Errorf("reserve slug: %w", err)
 	}
 
@@ -90,7 +99,11 @@ func Workflow(ctx workflow.Context, input Input) error {
 		return fmt.Errorf("seed system data: %w", err)
 	}
 
-	if err := workflow.ExecuteActivity(ctx, "CreateAdminUser", input.Slug, input.AdminEmail, input.AdminName).Get(ctx, nil); err != nil {
+	if input.ExistingUserID != "" {
+		if err := workflow.ExecuteActivity(ctx, "AssignAdminRole", input.Slug, input.ExistingUserID).Get(ctx, nil); err != nil {
+			return fmt.Errorf("assign admin role: %w", err)
+		}
+	} else if err := workflow.ExecuteActivity(ctx, "CreateAdminUser", input.Slug, input.AdminEmail, input.AdminName).Get(ctx, nil); err != nil {
 		return fmt.Errorf("create admin user: %w", err)
 	}
 

@@ -98,6 +98,22 @@ func (m *SMTPMailer) SendPasswordResetConfirmed(ctx context.Context, email strin
 	return m.send(ctx, email, subject, text, html)
 }
 
+// SendVerifyEmail carries the email-verification link for a self-registered
+// account — auth-internals.md §3, template auth.verify_email.
+func (m *SMTPMailer) SendVerifyEmail(ctx context.Context, email, rawToken string) error {
+	link := fmt.Sprintf("%s/auth/verify-email?token=%s", m.cfg.BaseURL, url.QueryEscape(rawToken))
+
+	const subject = "Verify your email address"
+	text := fmt.Sprintf("Confirm your email address to finish setting up your account "+
+		"(this link expires in 24 hours):\n%s\n\n"+
+		"If you didn't create an account, you can ignore this email.\n", link)
+	html := fmt.Sprintf(`<p><a href="%s">Confirm your email address</a> to finish setting up your account `+
+		"(this link expires in 24 hours).</p>"+
+		"<p>If you didn't create an account, you can ignore this email.</p>", link)
+
+	return m.send(ctx, email, subject, text, html)
+}
+
 // SendPasswordChanged — template auth.password_changed.
 func (m *SMTPMailer) SendPasswordChanged(ctx context.Context, email string) error {
 	const subject = "Your password has been changed"

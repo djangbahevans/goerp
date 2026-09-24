@@ -16,11 +16,12 @@ import (
 )
 
 type Handler struct {
-	tenants *tenantresolve.Resolver
+	tenants             *tenantresolve.Resolver
+	registrationEnabled bool
 }
 
-func NewHandler(tenants *tenantresolve.Resolver) *Handler {
-	return &Handler{tenants: tenants}
+func NewHandler(tenants *tenantresolve.Resolver, registrationEnabled bool) *Handler {
+	return &Handler{tenants: tenants, registrationEnabled: registrationEnabled}
 }
 
 type tenantSummary struct {
@@ -28,9 +29,8 @@ type tenantSummary struct {
 	Name string `json:"name"`
 }
 
-// RegistrationEnabled is always false: self-service registration
-// (POST /auth/register) is not implemented, so no platform setting backs
-// it yet.
+// RegistrationEnabled is the platform's GOERP_REGISTRATION_ENABLED: the
+// login page's "Create an account" link.
 type response struct {
 	Tenant              *tenantSummary `json:"tenant"`
 	RegistrationEnabled bool           `json:"registration_enabled"`
@@ -55,9 +55,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tenantCtx, err := h.tenants.ResolveByHost(r.Context(), r.Host)
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, response{Tenant: &tenantSummary{Slug: tenantCtx.Slug, Name: tenantCtx.Name}})
+		writeJSON(w, http.StatusOK, response{Tenant: &tenantSummary{Slug: tenantCtx.Slug, Name: tenantCtx.Name}, RegistrationEnabled: h.registrationEnabled})
 	case errors.Is(err, tenantresolve.ErrTenantNotFound):
-		writeJSON(w, http.StatusOK, response{})
+		writeJSON(w, http.StatusOK, response{RegistrationEnabled: h.registrationEnabled})
 	case errors.Is(err, tenantresolve.ErrTenantSuspended):
 		writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 	case errors.Is(err, tenantresolve.ErrTenantOffboarding):

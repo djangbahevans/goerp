@@ -114,7 +114,13 @@ type Config struct {
 	Argon2MemoryBudgetMB int           `env:"GOERP_ARGON2_MEMORY_BUDGET_MB" envDefault:"1024" validate:"min=64"`
 	Argon2AcquireTimeout time.Duration `env:"GOERP_ARGON2_ACQUIRE_TIMEOUT" envDefault:"500ms"`
 
-	// Registration
+	// RegistrationEnabled gates POST /auth/register and GET
+	// /auth/check-slug (404 when off). RequireEmailVerification is the
+	// platform email-verification policy (auth-internals.md §3 "Email
+	// verification policy").
+	RegistrationEnabled      bool   `env:"GOERP_REGISTRATION_ENABLED" envDefault:"false"`
+	RequireEmailVerification string `env:"GOERP_REQUIRE_EMAIL_VERIFICATION" envDefault:"tenant_choice" validate:"oneof=required tenant_choice off"`
+
 	StorageBackend      string   `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
 	StorageBucket       string   `env:"GOERP_STORAGE_BUCKET" envDefault:"goerp-files"`
 	StorageMaxFileBytes int64    `env:"GOERP_STORAGE_MAX_FILE_BYTES" envDefault:"104857600"`

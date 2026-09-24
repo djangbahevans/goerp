@@ -73,8 +73,21 @@ func writeJSON(w http.ResponseWriter, v any) {
 // body for a browser client. passwordUpdateRecommended adds
 // auth-internals.md §3's "password_update_recommended" nudge.
 func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh, nonBrowser, passwordUpdateRecommended bool) {
-	w.Header().Set("Content-Type", "application/json")
-	body := map[string]any{"expires_in": tokens.ExpiresIn}
+	body := map[string]any{}
+	if passwordUpdateRecommended {
+		body["password_update_recommended"] = true
+	}
+	write(w, http.StatusOK, tokens, deviceID, deviceIDIsFresh, nonBrowser, body)
+}
+
+// WriteRegisteredResponse is WriteResponse for a self-registration that
+// signs its user straight in: 201 Created, with the new tenant's slug.
+func WriteRegisteredResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh, nonBrowser bool, tenantSlug string) {
+	write(w, http.StatusCreated, tokens, deviceID, deviceIDIsFresh, nonBrowser, map[string]any{"tenant_slug": tenantSlug})
+}
+
+func write(w http.ResponseWriter, status int, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh, nonBrowser bool, body map[string]any) {
+	body["expires_in"] = tokens.ExpiresIn
 	if nonBrowser {
 		body["access_token"] = tokens.AccessToken
 		body["refresh_token"] = tokens.RefreshToken
@@ -82,9 +95,8 @@ func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID str
 	} else {
 		setCookies(w, tokens, deviceID, deviceIDIsFresh)
 	}
-	if passwordUpdateRecommended {
-		body["password_update_recommended"] = true
-	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	writeJSON(w, body)
 }
 

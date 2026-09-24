@@ -24,6 +24,7 @@ type fixture struct {
 	cache       *cache.Client
 	slug        string
 	domain      string
+	resolver    *tenantresolve.Resolver
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -67,7 +68,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = cacheClient.Delete(context.Background(), tenantresolve.DomainCacheKey(domain)) })
 
 	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
-	return &fixture{handler: NewHandler(resolver), tenantStore: tenantStore, cache: cacheClient, slug: slug, domain: domain}
+	return &fixture{handler: NewHandler(resolver, false), resolver: resolver, tenantStore: tenantStore, cache: cacheClient, slug: slug, domain: domain}
 }
 
 func (f *fixture) get(t *testing.T, host string) (*httptest.ResponseRecorder, map[string]any) {
@@ -127,5 +128,17 @@ func TestServeHTTP_SuspendedTenantReturns403(t *testing.T) {
 	errBody, _ := body["error"].(map[string]any)
 	if errBody["code"] != "tenant_suspended" {
 		t.Errorf("error.code = %v, want tenant_suspended", errBody["code"])
+	}
+}
+
+func TestServeHTTP_ReportsPlatformRegistrationSetting(t *testing.T) {
+	f := newFixture(t)
+	f.handler = NewHandler(f.resolver, true)
+
+	_, resolved := f.get(t, f.domain)
+	_, shared := f.get(t, "shared-"+f.slug+".goerp.test")
+
+	if resolved["registration_enabled"] != true || shared["registration_enabled"] != true {
+		t.Errorf("registration_enabled = %v (resolved), %v (shared), want true for both", resolved["registration_enabled"], shared["registration_enabled"])
 	}
 }

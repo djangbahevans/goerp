@@ -433,7 +433,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		"/admin/users/{id}/mfa/reset", "/admin/users/{id}/roles",
 		"/auth/refresh", "/auth/logout", "/admin/tenant/plan",
 		"/auth/password-reset/request", "/auth/password-reset/confirm",
-		"/auth/me/change-password", "/auth/accept-invite",
+		"/auth/me/change-password", "/auth/accept-invite", "/auth/register",
 	} {
 		table.Register("POST", path, &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
@@ -444,6 +444,11 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 	table.Register("GET", "/auth/me", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/auth/me",
+	})
+	// Anonymous slug-availability check for the register page.
+	table.Register("GET", "/auth/check-slug", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		PathTemplate: "/auth/check-slug",
 	})
 	// Anonymous accept-invite prefill (Class B: tenant from ?tenant=).
 	table.Register("GET", "/auth/accept-invite/info", &route.RouteEntry{

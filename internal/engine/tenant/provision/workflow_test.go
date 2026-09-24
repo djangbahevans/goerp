@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
@@ -23,6 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"go.temporal.io/sdk/client"
+	sdktemporal "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 )
 
@@ -92,7 +94,7 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 		t.Fatalf("registry Update() error: %v", err)
 	}
 
-	activities := NewActivities(tenantStore, inviteStore, conn, syncPool, diffEngine, reg, "goerp.test")
+	activities := NewActivities(tenantStore, inviteStore, role.NewStore(conn), conn, syncPool, diffEngine, reg, "goerp.test")
 
 	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:7233")
 	t.Setenv("GOERP_TEMPORAL_NAMESPACE", "default")
@@ -318,7 +320,7 @@ func TestProvisionTenantWorkflow_SchemaCreationFailureReleasesSlug(t *testing.T)
 	slug := uniqueSlug(t)
 	env := newTestEnv(t, nil)
 
-	tenantID, err := env.activities.ReserveSlug(context.Background(), slug, "Compensation Test")
+	tenantID, err := env.activities.ReserveSlug(context.Background(), slug, "Compensation Test", uuid.NewV7().String())
 	if err != nil {
 		t.Fatalf("ReserveSlug() error: %v", err)
 	}
@@ -338,4 +340,26 @@ func TestProvisionTenantWorkflow_SchemaCreationFailureReleasesSlug(t *testing.T)
 		t.Fatalf("CreateTenant() after release: expected success, got error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = env.conn.Exec("DELETE FROM system.tenants WHERE id = $1", tt.ID) })
+}
+
+func TestReserveSlug_RetryWithTheSameIDSucceedsAnotherIDFailsNonRetryably(t *testing.T) {
+	slug := uniqueSlug(t)
+	env := newTestEnv(t, nil)
+	id := uuid.NewV7().String()
+	t.Cleanup(func() { _, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug) })
+
+	first, err := env.activities.ReserveSlug(t.Context(), slug, "Retry Co", id)
+	if err != nil || first != id {
+		t.Fatalf("ReserveSlug() = %q, %v, want %q", first, err, id)
+	}
+	again, err := env.activities.ReserveSlug(t.Context(), slug, "Retry Co", id)
+	if err != nil || again != id {
+		t.Errorf("retried ReserveSlug() = %q, %v, want the same id", again, err)
+	}
+
+	_, err = env.activities.ReserveSlug(t.Context(), slug, "Other Co", uuid.NewV7().String())
+	appErr, ok := errors.AsType[*sdktemporal.ApplicationError](err)
+	if !ok || appErr.Type() != SlugTakenErrorType || !appErr.NonRetryable() {
+		t.Errorf("ReserveSlug() for another id error = %v, want a non-retryable %s", err, SlugTakenErrorType)
+	}
 }
