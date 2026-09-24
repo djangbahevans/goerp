@@ -23,9 +23,6 @@ export interface TextInputProps extends NativeInputProps {
   end?: ReactNode;
 }
 
-// Fixed heights matching Button's, so an input and a button line up in a row.
-const SIZE_CLASSES: Record<TextInputSize, string> = { md: "h-9 text-base", sm: "h-7 text-sm" };
-
 // The <input> carries the horizontal padding, so a click anywhere in the box
 // outside a slot lands on it. Beside a slot it keeps the --space-2 gap.
 const INPUT_PADDING: Record<TextInputSize, { edge: string; start: string; end: string }> = {
@@ -87,11 +84,7 @@ export function InputBox({
     // biome-ignore lint/a11y/noStaticElementInteractions: forwards a click on the box's padding or a decorative slot to the <input>, which stays the only focus target.
     <span
       onMouseDown={focusInputFromBox}
-      className={cn(
-        fieldInputClassName(isInvalid, "wrapper", font),
-        "flex w-full items-center p-0",
-        SIZE_CLASSES[size],
-      )}
+      className={cn(fieldInputClassName(isInvalid, "wrapper", font, size), "flex w-full items-center p-0")}
     >
       {start !== undefined && (
         <span className={cn("flex shrink-0 items-center font-sans text-text-secondary", padding.edge)}>{start}</span>
@@ -167,7 +160,11 @@ export function TextArea({
       aria-describedby={joinIds(field?.describedBy, ariaDescribedBy)}
       aria-invalid={isInvalid || undefined}
       onChange={(event) => onChange(event.target.value)}
-      className={cn(fieldInputClassName(isInvalid), "block w-full", resize === "vertical" ? "resize-y" : "resize-none")}
+      className={cn(
+        fieldInputClassName(isInvalid, "input", "sans", "auto"),
+        "block w-full",
+        resize === "vertical" ? "resize-y" : "resize-none",
+      )}
     />
   );
 }

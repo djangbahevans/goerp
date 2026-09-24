@@ -37,6 +37,7 @@ export type { ErrorBoundaryProps } from "./error-boundary.js";
 export { ErrorBoundary } from "./error-boundary.js";
 export type { FieldProps, FieldType } from "./field.js";
 export { currencyMinorUnitDigits, Field, formatFieldValue, formatRelativeTime } from "./field.js";
+export type { FieldInputHeight } from "./field-input-styles.js";
 export { fieldInputClassName } from "./field-input-styles.js";
 export type { FieldControlProps, FieldWrapperProps } from "./field-wrapper.js";
 export { FieldWrapper, useFieldControl } from "./field-wrapper.js";

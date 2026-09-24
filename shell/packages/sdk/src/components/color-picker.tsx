@@ -37,7 +37,7 @@ export function ColorPicker({
         disabled={disabled}
         aria-invalid={error !== undefined}
         onChange={(e) => onChange(e.target.value)}
-        className={`h-8 w-10 rounded-control border transition-colors duration-(--duration-fast) ease-out focus:border-primary focus:shadow-focus disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`h-9 w-10 rounded-control border transition-colors duration-(--duration-fast) ease-out focus:border-primary focus:shadow-focus disabled:cursor-not-allowed disabled:opacity-50 ${
           error !== undefined ? "border-danger" : "border-border"
         }`}
       />
