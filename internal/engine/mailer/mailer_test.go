@@ -255,6 +255,23 @@ func TestSMTPMailer_SendPasswordResetConfirmed(t *testing.T) {
 	}
 }
 
+func TestSMTPMailer_SendPasswordChanged(t *testing.T) {
+	srv := startFakeSMTP(t)
+	m := newTestMailer(t, srv, "", "")
+
+	if err := m.SendPasswordChanged(context.Background(), "kwame@example.com"); err != nil {
+		t.Fatalf("SendPasswordChanged() error: %v", err)
+	}
+
+	msg := waitForMessage(t, srv)
+	if len(msg.to) != 1 || msg.to[0] != "<kwame@example.com>" {
+		t.Errorf("to = %v, want [<kwame@example.com>]", msg.to)
+	}
+	if !strings.Contains(msg.data, "other sessions were signed out") {
+		t.Errorf("unexpected password changed email: %s", msg.data)
+	}
+}
+
 func TestSMTPMailer_SendInvite_WithAuth(t *testing.T) {
 	srv := startFakeSMTP(t)
 	srv.requireAuth = true

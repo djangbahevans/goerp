@@ -402,19 +402,11 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 }
 
 // registerBuiltinRoutes registers the engine's own built-in routes into
-// table, so /_health, /_ready, /auth/login, /auth/tenant-context,
-// /auth/me, /auth/refresh,
-// /auth/logout, /auth/mfa/verify, /auth/mfa/reverify,
-// /auth/password-reset/request, /auth/password-reset/confirm,
-// /admin/users/{id}/mfa/reset, /admin/users/{id}/roles[/{role}],
-// /admin/tenant/plan, /_meta/permissions, /_meta/shares,
-// /_meta/saved-filters, /_meta/schema, /storage/upload, and
-// /modules/{module}/frontend/{file} resolve through the exact same
-// RouteTable.Lookup module routes do — no second router. Safe against
-// collision by construction: RegisterModuleRoutes already rejects any
-// module route whose top path segment starts with "_", or is exactly
-// "auth", "admin", "storage", or "modules", as a reserved engine
-// namespace.
+// table, so they resolve through the same RouteTable.Lookup module routes
+// do — no second router. Safe against collision by construction:
+// RegisterModuleRoutes already rejects any module route whose top path
+// segment starts with "_", or is exactly "auth", "admin", "storage", or
+// "modules", as a reserved engine namespace.
 //
 // /admin/users/{id}/mfa/reset and /admin/users/{id}/roles[/{role}] are
 // tenant-facing routes despite their "/admin/" prefix — see
@@ -443,6 +435,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		// dispatch map but missing here, so unreachable in production.
 		"/auth/refresh", "/auth/logout", "/admin/tenant/plan",
 		"/auth/password-reset/request", "/auth/password-reset/confirm",
+		"/auth/me/change-password",
 	} {
 		table.Register("POST", path, &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},

@@ -48,6 +48,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authlogout"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authmepassword"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authmeupdate"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authrefresh"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
@@ -762,6 +763,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	filesStore := files.NewStore(primaryPool)
 	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, filesStore, storageBackend)
 	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore)
+	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
 	tenantContextHandler := tenantcontext.NewHandler(tenantResolver)
@@ -774,6 +776,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"GET /_health":                      server.HealthHandler(),
 		"GET /_ready":                       server.ReadyHandler(),
 		"GET /auth/me":                      authMeHandler,
+		"POST /auth/me/change-password":     authMePasswordHandler,
 		"PATCH /auth/me":                    authMeUpdateHandler,
 		"POST /auth/refresh":                authRefreshHandler,
 		"POST /auth/login":                  loginHandler,

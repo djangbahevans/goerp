@@ -50,6 +50,7 @@ function FakeAuthProvider({
     logout: async () => {},
     submitMFA: (code, method = "totp") => submitImpl(code, method, setState),
     updateProfile: async () => {},
+    changePassword: async () => {},
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

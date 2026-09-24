@@ -45,6 +45,7 @@ function FakeAuthProvider({
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
+    changePassword: async () => {},
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

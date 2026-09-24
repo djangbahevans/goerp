@@ -1,5 +1,6 @@
 import type { AuthContextValue, CurrentUser } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext, permissionDataRef } from "@goerp/sdk/auth";
+import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
@@ -12,7 +13,11 @@ const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
 // Same __root.tsx-renders-CommandPalette-regardless reasoning
 // -[_m].$.test.tsx's own FAKE_AUTH comment documents.
-function fakeAuth(user: CurrentUser, updateProfile = vi.fn(async () => {})): AuthContextValue {
+function fakeAuth(
+  user: CurrentUser,
+  updateProfile = vi.fn(async () => {}),
+  changePassword: AuthContextValue["changePassword"] = vi.fn(async () => {}),
+): AuthContextValue {
   return {
     state: { status: "authenticated", user, tenant: FAKE_TENANT },
     isAuthenticated: true,
@@ -22,14 +27,15 @@ function fakeAuth(user: CurrentUser, updateProfile = vi.fn(async () => {})): Aut
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile,
+    changePassword,
   };
 }
 
-async function renderProfilePage(auth: AuthContextValue) {
+async function renderProfilePage(auth: AuthContextValue, entry = "/settings/profile") {
   const router = createRouter({
     routeTree,
     context: { auth },
-    history: createMemoryHistory({ initialEntries: ["/settings/profile"] }),
+    history: createMemoryHistory({ initialEntries: [entry] }),
   });
   await router.load();
   render(
@@ -200,5 +206,100 @@ describe("/settings/profile", () => {
       expect(toastSuccess).toHaveBeenCalledWith("Profile updated.");
     });
     toastSuccess.mockRestore();
+  });
+});
+
+const ADA: CurrentUser = {
+  id: "u1",
+  email: "ada@example.com",
+  name: "Ada Lovelace",
+  contactId: null,
+  avatarUrl: null,
+  roles: [],
+  amr: [],
+  mfaVerifiedAt: null,
+};
+
+function fillPasswords(current: string, next: string, confirm: string) {
+  fireEvent.change(screen.getByLabelText("Current password"), { target: { value: current } });
+  fireEvent.change(screen.getByLabelText("New password"), { target: { value: next } });
+  fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: confirm } });
+}
+
+describe("/settings/profile change password", () => {
+  it("submits, clears the fields and toasts on success", async () => {
+    const changePassword = vi.fn(async () => {});
+    const toastSuccess = vi.spyOn(toast, "success").mockImplementation(() => {});
+    await renderProfilePage(fakeAuth(ADA, undefined, changePassword));
+
+    fillPasswords("old passphrase here", "a brand new passphrase", "a brand new passphrase");
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    await waitFor(() => {
+      expect(changePassword).toHaveBeenCalledWith({
+        currentPassword: "old passphrase here",
+        newPassword: "a brand new passphrase",
+      });
+    });
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith("Password updated. Other sessions were signed out.");
+    });
+    expect((screen.getByLabelText("Current password") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("New password") as HTMLInputElement).value).toBe("");
+    toastSuccess.mockRestore();
+  });
+
+  it("validates empty and mismatched fields without calling the API", async () => {
+    const changePassword = vi.fn(async () => {});
+    await renderProfilePage(fakeAuth(ADA, undefined, changePassword));
+
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByText("Enter your current password.")).toBeTruthy();
+
+    fillPasswords("old passphrase here", "a brand new passphrase", "something else");
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByText("Passwords don't match.")).toBeTruthy();
+    expect(changePassword).not.toHaveBeenCalled();
+  });
+
+  it("flags a mismatched confirmation on blur", async () => {
+    await renderProfilePage(fakeAuth(ADA));
+
+    fillPasswords("", "a brand new passphrase", "something else");
+    fireEvent.blur(screen.getByLabelText("Confirm new password"));
+
+    expect(await screen.findByText("Passwords don't match.")).toBeTruthy();
+  });
+
+  it("shows a wrong current password inline", async () => {
+    const changePassword = vi.fn(async () => {
+      throw new AppError({ code: "invalid_password", message: "current password is incorrect", httpStatus: 401 });
+    });
+    await renderProfilePage(fakeAuth(ADA, undefined, changePassword));
+
+    fillPasswords("wrong", "a brand new passphrase", "a brand new passphrase");
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    expect(await screen.findByText("Current password is incorrect.")).toBeTruthy();
+  });
+
+  it("shows the server's policy message under the new password", async () => {
+    const changePassword = vi.fn(async () => {
+      throw new AppError({ code: "auth.password_too_weak", message: "password is too common", httpStatus: 422 });
+    });
+    await renderProfilePage(fakeAuth(ADA, undefined, changePassword));
+
+    fillPasswords("old passphrase here", "schmetterling", "schmetterling");
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    expect(await screen.findByText("Password is too common.")).toBeTruthy();
+  });
+
+  it("focuses the current password field when opened at #change-password", async () => {
+    await renderProfilePage(fakeAuth(ADA), "/settings/profile#change-password");
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByLabelText("Current password"));
+    });
   });
 });

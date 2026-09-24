@@ -372,3 +372,25 @@ func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwo
 
 	return id, nil
 }
+
+// SetPassword stores a new password hash with the tenant policy it was
+// validated against (policyTenantID "" for the global policy) —
+// auth-internals.md §3 "Password change". Never touches status or the
+// login lockout.
+func (s *Store) SetPassword(ctx context.Context, id, passwordHash, policyTenantID string, policyVersion int64) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE system.users
+		SET password_hash = $2,
+		    password_set_at_policy_tenant_id = NULLIF($3, '')::uuid,
+		    password_set_at_policy_version = $4,
+		    updated_at = NOW()
+		WHERE id = $1
+	`, id, passwordHash, policyTenantID, policyVersion)
+	if err != nil {
+		return fmt.Errorf("set password: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}

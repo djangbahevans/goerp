@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
 import {
+  changePassword,
   fetchCurrentSession,
   fetchTenantContext,
   login,
@@ -343,6 +344,38 @@ describe("requestPasswordReset", () => {
     expect(err).toBeInstanceOf(AppError);
     expect((err as AppError).isRateLimited()).toBe(true);
     expect((err as AppError).details).toEqual({ retryAfter: 30 });
+  });
+});
+
+describe("changePassword", () => {
+  it("POSTs current_password and new_password", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await changePassword({ currentPassword: "old passphrase", newPassword: "new passphrase" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/me/change-password",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ current_password: "old passphrase", new_password: "new passphrase" }),
+      }),
+    );
+  });
+
+  it("throws an AppError carrying the server's code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(422, { error: { code: "auth.password_too_weak", message: "password is too common" } }),
+      ),
+    );
+
+    await expect(changePassword({ currentPassword: "a", newPassword: "b" })).rejects.toMatchObject({
+      code: "auth.password_too_weak",
+      message: "password is too common",
+    });
   });
 });
 

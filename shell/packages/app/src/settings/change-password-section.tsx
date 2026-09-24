@@ -1,0 +1,142 @@
+import { useAuth } from "@goerp/sdk/auth";
+import {
+  actionButtonClassName,
+  PasswordField,
+  PasswordStrengthMeter,
+  SectionCard,
+  Spinner,
+} from "@goerp/sdk/components";
+import { isAppError } from "@goerp/sdk/error";
+import { toast } from "@goerp/sdk/notifications";
+import { useLocation } from "@tanstack/react-router";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+
+// The #change-password anchor the password update banner links to
+// (shell-ux.md §2.1, §4.1).
+export const CHANGE_PASSWORD_ANCHOR = "change-password";
+
+interface FieldErrors {
+  current?: string | undefined;
+  next?: string | undefined;
+  confirm?: string | undefined;
+}
+
+const MISMATCH = "Passwords don't match.";
+
+// The server's policy messages are lowercase fragments ("password is too
+// common"); shown inline they read as sentences.
+function asSentence(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed) return trimmed;
+  const capitalized = trimmed[0]?.toUpperCase() + trimmed.slice(1);
+  return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
+}
+
+// shell-ux.md §4.1 "Change password section". Independent of the profile
+// form's "Save changes": it's a separate request that signs out every other
+// session.
+export function ChangePasswordSection(): ReactNode {
+  const { changePassword } = useAuth();
+  const hash = useLocation({ select: (location) => location.hash });
+  const sectionRef = useRef<HTMLDivElement>(null);
+
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (hash !== CHANGE_PASSWORD_ANCHOR) return;
+    const section = sectionRef.current;
+    if (!section) return;
+    section.scrollIntoView?.({ block: "start" });
+    section.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')?.focus();
+  }, [hash]);
+
+  const handleConfirmBlur = () => {
+    setErrors((e) => ({ ...e, confirm: confirm && confirm !== next ? MISMATCH : undefined }));
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitting) return;
+
+    const found: FieldErrors = {};
+    if (!current) found.current = "Enter your current password.";
+    if (!next) found.next = "Enter a new password.";
+    if (!confirm) found.confirm = "Confirm your new password.";
+    else if (confirm !== next) found.confirm = MISMATCH;
+    setErrors(found);
+    if (Object.keys(found).length > 0) return;
+
+    setSubmitting(true);
+    try {
+      await changePassword({ currentPassword: current, newPassword: next });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      toast.success("Password updated. Other sessions were signed out.");
+    } catch (err) {
+      if (isAppError(err) && err.code === "invalid_password") {
+        setCurrent("");
+        setErrors({ current: "Current password is incorrect." });
+      } else if (isAppError(err) && err.code === "auth.password_too_weak") {
+        setErrors({ next: asSentence(err.message) });
+      } else {
+        toast.error("Couldn't change your password. Try again.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div id={CHANGE_PASSWORD_ANCHOR} ref={sectionRef} className="scroll-mt-(--space-4)">
+      <SectionCard title="Change password">
+        <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
+          <PasswordField
+            label="Current password"
+            autoComplete="current-password"
+            value={current}
+            onChange={setCurrent}
+            error={errors.current}
+            disabled={submitting}
+          />
+          <div className="flex flex-col gap-2">
+            <PasswordField
+              label="New password"
+              autoComplete="new-password"
+              value={next}
+              onChange={setNext}
+              error={errors.next}
+              disabled={submitting}
+            />
+            {/* Guidance only: the server's tenant policy decides. */}
+            <PasswordStrengthMeter password={next} />
+          </div>
+          <PasswordField
+            label="Confirm new password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={setConfirm}
+            onBlur={handleConfirmBlur}
+            error={errors.confirm}
+            disabled={submitting}
+          />
+          <div>
+            <button
+              type="submit"
+              disabled={submitting}
+              aria-busy={submitting}
+              className={actionButtonClassName("secondary", "md")}
+            >
+              {submitting && <Spinner size={16} />}
+              Change password
+            </button>
+          </div>
+        </form>
+      </SectionCard>
+    </div>
+  );
+}

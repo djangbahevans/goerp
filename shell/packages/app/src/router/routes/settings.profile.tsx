@@ -10,10 +10,10 @@ import {
 import { toast } from "@goerp/sdk/notifications";
 import { createFileRoute } from "@tanstack/react-router";
 import { useId, useState } from "react";
+import { ChangePasswordSection } from "../../settings/change-password-section.js";
 
-// shell-ux.md §4.1 — covers the name/avatar half of the page only
-// (phone/title/change-password/change-email have no backing columns or
-// endpoints yet; goerp#819's own Scope explicitly defers them).
+// shell-ux.md §4.1 — name, avatar, and change password. Phone/title and
+// change-email have no backing columns or endpoints yet.
 export const Route = createFileRoute("/settings/profile")({
   component: ProfilePage,
 });
@@ -75,7 +75,7 @@ function ProfilePage() {
 
   return (
     <PageLayout>
-      <PageHeader title="Profile" subtitle="Manage your name and avatar." />
+      <PageHeader title="Profile" subtitle="Manage your name, avatar, and password." />
       <div className="flex max-w-md flex-col gap-6">
         <div className="flex flex-col gap-2">
           <span className="font-medium text-sm text-text">Avatar</span>
@@ -102,6 +102,9 @@ function ProfilePage() {
             Save changes
           </ActionButton>
         </div>
+      </div>
+      <div className="mt-8 max-w-md">
+        <ChangePasswordSection />
       </div>
     </PageLayout>
   );

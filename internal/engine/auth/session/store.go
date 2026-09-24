@@ -228,6 +228,35 @@ func (s *Store) RevokeAllForUser(ctx context.Context, userID, reason string) err
 	return nil
 }
 
+// RevokeOthersForUser revokes every non-revoked session row for userID
+// outside keepSessionID's family (so the caller's own rotation chain
+// survives) and returns the revoked ids.
+func (s *Store) RevokeOthersForUser(ctx context.Context, userID, keepSessionID, reason string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $3
+		WHERE user_id = $1 AND revoked_at IS NULL
+		  AND family_id IS DISTINCT FROM (SELECT family_id FROM system.sessions WHERE id = $2)
+		RETURNING id
+	`, userID, keepSessionID, reason)
+	if err != nil {
+		return nil, fmt.Errorf("revoke other sessions for user: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan revoked session id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate revoked session ids: %w", err)
+	}
+	return ids, nil
+}
+
 // NonRevokedIDsForUserInTenant returns the ids of every session row for
 // userID within tenantID that isn't already revoked — the
 // (user, tenant)-scoped counterpart to NonRevokedIDsForUser, needed the

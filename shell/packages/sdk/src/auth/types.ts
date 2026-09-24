@@ -66,6 +66,11 @@ export type AuthEvent =
   | { type: "logout_complete" }
   | { type: "profile_updated"; user: CurrentUser };
 
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export interface UpdateProfileInput {
   name: string;
   avatarId?: string | undefined;
@@ -80,4 +85,5 @@ export interface AuthContextValue {
   logout: () => Promise<void>;
   submitMFA: (code: string, method?: MFAMethod) => Promise<void>;
   updateProfile: (input: UpdateProfileInput) => Promise<void>;
+  changePassword: (input: ChangePasswordInput) => Promise<void>;
 }

@@ -12,6 +12,7 @@ export interface PasswordFieldProps {
   autoComplete: "current-password" | "new-password";
   error?: string | undefined;
   disabled?: boolean | undefined;
+  onBlur?: (() => void) | undefined;
 }
 
 export function PasswordField({
@@ -21,6 +22,7 @@ export function PasswordField({
   autoComplete,
   error,
   disabled = false,
+  onBlur,
 }: PasswordFieldProps): ReactNode {
   const id = useId();
   const [revealed, setRevealed] = useState(false);
@@ -39,6 +41,7 @@ export function PasswordField({
           disabled={disabled}
           aria-invalid={error !== undefined}
           onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+          onBlur={onBlur}
           className="w-full border-0 bg-transparent p-0 text-sm focus:outline-none"
         />
         <button

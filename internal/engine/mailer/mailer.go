@@ -98,6 +98,17 @@ func (m *SMTPMailer) SendPasswordResetConfirmed(ctx context.Context, email strin
 	return m.send(ctx, email, subject, text, html)
 }
 
+// SendPasswordChanged — template auth.password_changed.
+func (m *SMTPMailer) SendPasswordChanged(ctx context.Context, email string) error {
+	const subject = "Your password has been changed"
+	text := "The password for your account was just changed, and your other sessions were signed out.\n\n" +
+		"If you did not do this, reset your password and contact your administrator immediately.\n"
+	html := "<p>The password for your account was just changed, and your other sessions were signed out.</p>" +
+		"<p>If you did not do this, reset your password and contact your administrator immediately.</p>"
+
+	return m.send(ctx, email, subject, text, html)
+}
+
 func (m *SMTPMailer) send(ctx context.Context, to, subject, text, html string) error {
 	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
 

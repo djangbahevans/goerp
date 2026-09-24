@@ -41,6 +41,7 @@ const FAKE_AUTH: AuthContextValue = {
   logout: async () => {},
   submitMFA: async () => {},
   updateProfile: async () => {},
+  changePassword: async () => {},
 };
 
 function group(module: string, children: NavigationGroup["children"], permission?: string): NavigationGroup {

@@ -18,6 +18,7 @@ export type {
   AuthContextValue,
   AuthEvent,
   AuthState,
+  ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
   LoginCredentials,

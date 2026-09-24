@@ -78,6 +78,22 @@ func (r *Revoker) RevokeAllForUser(ctx context.Context, userID, reason string) e
 	return nil
 }
 
+// RevokeOthersForUser revokes and blocklists every session for userID
+// except keepSessionID's family — a password change signing out every
+// other device while the caller stays signed in.
+func (r *Revoker) RevokeOthersForUser(ctx context.Context, userID, keepSessionID, reason string) error {
+	ids, err := r.sessions.RevokeOthersForUser(ctx, userID, keepSessionID, reason)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := r.cache.SetWithTTL(ctx, blocklistKey(id), "1", blocklistTTL); err != nil {
+			return fmt.Errorf("blocklist session %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
 // RevokeAllForUserInTenant revokes every non-revoked session for userID
 // within tenantID and blocklists each one — goerp#306's admin MFA reset,
 // which must only revoke a target's sessions in the admin's own tenant,
