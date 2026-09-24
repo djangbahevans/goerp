@@ -26,8 +26,12 @@ function withProviders(tenantContext: TenantContext): Decorator {
   };
 }
 
-const SUBDOMAIN: TenantContext = { tenant: { slug: "acme", name: "Acme Corp" }, registrationEnabled: false };
-const SHARED_DOMAIN: TenantContext = { tenant: null, registrationEnabled: false };
+const SUBDOMAIN: TenantContext = {
+  tenant: { slug: "acme", name: "Acme Corp" },
+  registrationEnabled: false,
+  termsUrl: null,
+};
+const SHARED_DOMAIN: TenantContext = { tenant: null, registrationEnabled: false, termsUrl: null };
 
 const meta = {
   title: "Shell/Auth/ForgotPasswordPage",

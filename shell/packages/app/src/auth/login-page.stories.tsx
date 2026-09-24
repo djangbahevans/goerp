@@ -43,8 +43,12 @@ function withProviders(tenantContext: TenantContext, auth: AuthContextValue): De
   };
 }
 
-const SUBDOMAIN: TenantContext = { tenant: { slug: "acme", name: "Acme Corp" }, registrationEnabled: false };
-const SHARED_DOMAIN: TenantContext = { tenant: null, registrationEnabled: true };
+const SUBDOMAIN: TenantContext = {
+  tenant: { slug: "acme", name: "Acme Corp" },
+  registrationEnabled: false,
+  termsUrl: null,
+};
+const SHARED_DOMAIN: TenantContext = { tenant: null, registrationEnabled: true, termsUrl: null };
 
 const meta = {
   title: "Shell/Auth/LoginPage",

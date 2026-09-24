@@ -123,6 +123,9 @@ type Config struct {
 	// (multitenancy-internals.md §1 "Reserved slugs").
 	ReservedSlugs            []string `env:"GOERP_RESERVED_SLUGS"`
 	RequireEmailVerification string   `env:"GOERP_REQUIRE_EMAIL_VERIFICATION" envDefault:"tenant_choice" validate:"oneof=required tenant_choice off"`
+	// TermsURL is the terms of service the register page links to and
+	// requires accepting; unset, the page shows no terms checkbox.
+	TermsURL string `env:"GOERP_TERMS_URL" validate:"omitempty,http_url"`
 
 	StorageBackend      string   `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
 	StorageBucket       string   `env:"GOERP_STORAGE_BUCKET" envDefault:"goerp-files"`

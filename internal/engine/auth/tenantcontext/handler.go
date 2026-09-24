@@ -18,10 +18,16 @@ import (
 type Handler struct {
 	tenants             *tenantresolve.Resolver
 	registrationEnabled bool
+	termsURL            *string
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, registrationEnabled bool) *Handler {
-	return &Handler{tenants: tenants, registrationEnabled: registrationEnabled}
+// NewHandler takes termsURL "" when no terms of service are configured.
+func NewHandler(tenants *tenantresolve.Resolver, registrationEnabled bool, termsURL string) *Handler {
+	h := &Handler{tenants: tenants, registrationEnabled: registrationEnabled}
+	if termsURL != "" {
+		h.termsURL = &termsURL
+	}
+	return h
 }
 
 type tenantSummary struct {
@@ -34,6 +40,7 @@ type tenantSummary struct {
 type response struct {
 	Tenant              *tenantSummary `json:"tenant"`
 	RegistrationEnabled bool           `json:"registration_enabled"`
+	TermsURL            *string        `json:"terms_url"`
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -55,9 +62,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tenantCtx, err := h.tenants.ResolveByHost(r.Context(), r.Host)
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, response{Tenant: &tenantSummary{Slug: tenantCtx.Slug, Name: tenantCtx.Name}, RegistrationEnabled: h.registrationEnabled})
+		writeJSON(w, http.StatusOK, response{Tenant: &tenantSummary{Slug: tenantCtx.Slug, Name: tenantCtx.Name}, RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL})
 	case errors.Is(err, tenantresolve.ErrTenantNotFound):
-		writeJSON(w, http.StatusOK, response{RegistrationEnabled: h.registrationEnabled})
+		writeJSON(w, http.StatusOK, response{RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL})
 	case errors.Is(err, tenantresolve.ErrTenantSuspended):
 		writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 	case errors.Is(err, tenantresolve.ErrTenantOffboarding):

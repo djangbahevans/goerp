@@ -67,7 +67,13 @@ export function useVerificationResend(resend: ResendVerification = resendVerific
 // One live region for the confirmation and the cooldown, so a screen reader
 // announces the send without focus moving. The confirmation never says
 // whether an account exists: the endpoint answers 200 either way.
-export function ResendStatus({ resend }: { resend: VerificationResend }): ReactNode {
+export function ResendStatus({
+  resend,
+  sentMessage = "If your account still needs verifying, a new link is on its way.",
+}: {
+  resend: VerificationResend;
+  sentMessage?: string | undefined;
+}): ReactNode {
   const { state, endCooldown } = resend;
   return (
     <div
@@ -84,7 +90,7 @@ export function ResendStatus({ resend }: { resend: VerificationResend }): ReactN
       )}
       {state.kind === "sent" && (
         <>
-          If your account still needs verifying, a new link is on its way.
+          {sentMessage}
           {state.coolingDown && (
             <>
               {" "}

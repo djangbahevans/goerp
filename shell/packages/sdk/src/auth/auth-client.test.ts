@@ -3,12 +3,14 @@ import { AppError } from "../error/app-error.js";
 import {
   acceptInvite,
   changePassword,
+  checkSlug,
   confirmPasswordReset,
   fetchCurrentSession,
   fetchInviteInfo,
   fetchTenantContext,
   login,
   logout,
+  register,
   requestPasswordReset,
   resendVerificationEmail,
   submitMFACode,
@@ -214,12 +216,19 @@ describe("fetchTenantContext", () => {
   it("maps a resolved tenant", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => jsonResponse(200, { tenant: { slug: "acme", name: "Acme Corp" }, registration_enabled: true })),
+      vi.fn(async () =>
+        jsonResponse(200, {
+          tenant: { slug: "acme", name: "Acme Corp" },
+          registration_enabled: true,
+          terms_url: "https://example.com/terms",
+        }),
+      ),
     );
 
     expect(await fetchTenantContext()).toEqual({
       tenant: { slug: "acme", name: "Acme Corp" },
       registrationEnabled: true,
+      termsUrl: "https://example.com/terms",
     });
   });
 
@@ -229,7 +238,7 @@ describe("fetchTenantContext", () => {
       vi.fn(async () => jsonResponse(200, { tenant: null, registration_enabled: false })),
     );
 
-    expect(await fetchTenantContext()).toEqual({ tenant: null, registrationEnabled: false });
+    expect(await fetchTenantContext()).toEqual({ tenant: null, registrationEnabled: false, termsUrl: null });
   });
 
   it("resolves to null on a non-200 or network failure", async () => {
@@ -497,6 +506,94 @@ describe("resendVerificationEmail", () => {
       code: "invalid_request",
       httpStatus: 400,
     });
+  });
+});
+
+describe("register", () => {
+  const input = { name: "Kwame Mensah", email: "kwame@acme.test", password: "pw", companyName: "Acme Corp" };
+
+  it("posts the form in the API's field names and resolves signed_in on a 201", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(201, { tenant_slug: "acme-corp", expires_in: 900 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(register(input)).resolves.toEqual({ kind: "signed_in", tenantSlug: "acme-corp" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/register",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({
+          name: "Kwame Mensah",
+          email: "kwame@acme.test",
+          password: "pw",
+          company_name: "Acme Corp",
+        }),
+      }),
+    );
+  });
+
+  it("resolves login_required on a 201 that issued no session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(201, { tenant_slug: "acme-corp", login_required: true })),
+    );
+    await expect(register(input)).resolves.toEqual({ kind: "login_required", tenantSlug: "acme-corp" });
+  });
+
+  it("resolves verification_required on a 202 that requires verification, pending or not", async () => {
+    for (const body of [
+      { requires_email_verification: true, tenant_slug: "acme-corp" },
+      { requires_email_verification: true, provisioning_pending: true, tenant_slug: "acme-corp" },
+    ]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(202, body)),
+      );
+      await expect(register(input)).resolves.toEqual({ kind: "verification_required", tenantSlug: "acme-corp" });
+    }
+  });
+
+  it("resolves provisioning_pending on a 202 without verification", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(202, { requires_email_verification: false, provisioning_pending: true, tenant_slug: "acme-corp" }),
+      ),
+    );
+    await expect(register(input)).resolves.toEqual({ kind: "provisioning_pending", tenantSlug: "acme-corp" });
+  });
+
+  it("carries a 422's per-field messages in details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(422, {
+          error: {
+            code: "validation_failed",
+            message: "some fields are invalid",
+            details: { email: "Enter a valid email." },
+          },
+        }),
+      ),
+    );
+    await expect(register(input)).rejects.toMatchObject({
+      code: "validation_failed",
+      httpStatus: 422,
+      details: { email: "Enter a valid email." },
+    });
+  });
+});
+
+describe("checkSlug", () => {
+  it("GETs the slug check and resolves its availability", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { available: false }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(checkSlug("acme-corp")).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/check-slug?slug=acme-corp",
+      expect.objectContaining({ credentials: "include" }),
+    );
   });
 });
 

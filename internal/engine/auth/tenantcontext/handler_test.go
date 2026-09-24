@@ -68,7 +68,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = cacheClient.Delete(context.Background(), tenantresolve.DomainCacheKey(domain)) })
 
 	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
-	return &fixture{handler: NewHandler(resolver, false), resolver: resolver, tenantStore: tenantStore, cache: cacheClient, slug: slug, domain: domain}
+	return &fixture{handler: NewHandler(resolver, false, ""), resolver: resolver, tenantStore: tenantStore, cache: cacheClient, slug: slug, domain: domain}
 }
 
 func (f *fixture) get(t *testing.T, host string) (*httptest.ResponseRecorder, map[string]any) {
@@ -98,6 +98,9 @@ func TestServeHTTP_ResolvedHostReturnsTenant(t *testing.T) {
 	}
 	if body["registration_enabled"] != false {
 		t.Errorf("registration_enabled = %v, want false", body["registration_enabled"])
+	}
+	if v, ok := body["terms_url"]; !ok || v != nil {
+		t.Errorf("terms_url = %v (present=%v), want explicit null when unconfigured", v, ok)
 	}
 }
 
@@ -133,12 +136,25 @@ func TestServeHTTP_SuspendedTenantReturns403(t *testing.T) {
 
 func TestServeHTTP_ReportsPlatformRegistrationSetting(t *testing.T) {
 	f := newFixture(t)
-	f.handler = NewHandler(f.resolver, true)
+	f.handler = NewHandler(f.resolver, true, "")
 
 	_, resolved := f.get(t, f.domain)
 	_, shared := f.get(t, "shared-"+f.slug+".goerp.test")
 
 	if resolved["registration_enabled"] != true || shared["registration_enabled"] != true {
 		t.Errorf("registration_enabled = %v (resolved), %v (shared), want true for both", resolved["registration_enabled"], shared["registration_enabled"])
+	}
+}
+
+func TestServeHTTP_ReportsConfiguredTermsURL(t *testing.T) {
+	f := newFixture(t)
+	const termsURL = "https://example.com/terms"
+	f.handler = NewHandler(f.resolver, true, termsURL)
+
+	_, resolved := f.get(t, f.domain)
+	_, shared := f.get(t, "shared-"+f.slug+".goerp.test")
+
+	if resolved["terms_url"] != termsURL || shared["terms_url"] != termsURL {
+		t.Errorf("terms_url = %v (resolved), %v (shared), want %q for both", resolved["terms_url"], shared["terms_url"], termsURL)
 	}
 }

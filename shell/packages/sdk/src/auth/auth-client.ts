@@ -14,6 +14,8 @@ import type {
   PasswordResetConfirmation,
   PasswordResetOutcome,
   PasswordResetRequest,
+  RegisterOutcome,
+  Registration,
   TenantContext,
   UpdateProfileInput,
   VerificationEmailRequest,
@@ -60,15 +62,21 @@ function mapTenant(tenant: MeResponseBody["tenant"]): CurrentTenant {
 async function readError(response: Response): Promise<AppError> {
   let code = "unknown_error";
   let message = response.statusText || "request failed";
+  let bodyDetails: Record<string, unknown> | null = null;
   try {
-    const body = (await response.json()) as { error?: { code?: string; message?: string } };
+    const body = (await response.json()) as { error?: { code?: string; message?: string; details?: unknown } };
     if (body.error?.code) code = body.error.code;
     if (body.error?.message) message = body.error.message;
+    const d = body.error?.details;
+    if (d !== null && typeof d === "object" && !Array.isArray(d)) bodyDetails = d as Record<string, unknown>;
   } catch {
     // Non-JSON or empty body — fall back to the status text above.
   }
   const retryAfter = Number.parseInt(response.headers.get("Retry-After") ?? "", 10);
-  const details = Number.isFinite(retryAfter) ? { retryAfter } : null;
+  const details =
+    bodyDetails || Number.isFinite(retryAfter)
+      ? { ...bodyDetails, ...(Number.isFinite(retryAfter) ? { retryAfter } : {}) }
+      : null;
   return new AppError({ code, message, httpStatus: response.status, details });
 }
 
@@ -102,10 +110,12 @@ export async function fetchTenantContext(): Promise<TenantContext | null> {
     const body = (await response.json()) as {
       tenant: { slug: string; name: string } | null;
       registration_enabled: boolean;
+      terms_url?: string | null;
     };
     return {
       tenant: body.tenant ? { slug: body.tenant.slug, name: body.tenant.name } : null,
       registrationEnabled: body.registration_enabled === true,
+      termsUrl: typeof body.terms_url === "string" && body.terms_url !== "" ? body.terms_url : null,
     };
   } catch {
     return null;
@@ -244,6 +254,48 @@ export async function resendVerificationEmail(input: VerificationEmailRequest): 
     body: JSON.stringify({ email: input.email, tenant: input.tenant }),
   });
   if (!response.ok) throw await readError(response);
+}
+
+// register backs POST /auth/register (shell-ux.md §2.2). A 409 carries
+// auth.email_already_exists or tenant.slug_taken; a 422 (validation_failed)
+// carries per-field messages in details.
+export async function register(input: Registration): Promise<RegisterOutcome> {
+  const response = await fetch("/auth/register", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      email: input.email,
+      password: input.password,
+      company_name: input.companyName,
+    }),
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json().catch(() => ({}))) as {
+    tenant_slug?: string;
+    login_required?: boolean;
+    requires_email_verification?: boolean;
+    provisioning_pending?: boolean;
+  };
+  const tenantSlug = body.tenant_slug ?? "";
+  if (response.status === 202) {
+    if (body.requires_email_verification) return { kind: "verification_required", tenantSlug };
+    return { kind: "provisioning_pending", tenantSlug };
+  }
+  return body.login_required ? { kind: "login_required", tenantSlug } : { kind: "signed_in", tenantSlug };
+}
+
+// checkSlug backs GET /auth/check-slug. false covers a malformed or reserved
+// slug as well as a taken one.
+export async function checkSlug(slug: string, signal?: AbortSignal): Promise<boolean> {
+  const response = await fetch(`/auth/check-slug?${new URLSearchParams({ slug })}`, {
+    credentials: "include",
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { available?: boolean };
+  return body.available === true;
 }
 
 // fetchInviteInfo backs GET /auth/accept-invite/info (shell-ux.md §2.5).
