@@ -21,6 +21,7 @@ const fakeUser = {
   roles: [],
   amr: [],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const fakeTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 const fakeAuth = {
@@ -33,6 +34,7 @@ const fakeAuth = {
   submitMFA: async () => {},
   updateProfile: async () => {},
   changePassword: async () => {},
+  reloadSession: async () => {},
 };
 
 const permissionValue = createPermissionContextValue({

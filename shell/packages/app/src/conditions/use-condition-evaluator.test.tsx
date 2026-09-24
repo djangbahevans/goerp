@@ -14,6 +14,7 @@ const user: CurrentUser = {
   roles: ["sales_manager"],
   amr: [],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 

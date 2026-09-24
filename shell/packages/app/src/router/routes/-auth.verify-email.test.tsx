@@ -29,6 +29,7 @@ const SIGNED_OUT: AuthContextValue = {
   submitMFA: async () => {},
   updateProfile: async () => {},
   changePassword: async () => {},
+  reloadSession: async () => {},
 };
 
 const SENT_TEXT = "If your account still needs verifying, a new link is on its way.";

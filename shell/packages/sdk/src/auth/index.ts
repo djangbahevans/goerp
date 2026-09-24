@@ -1,7 +1,9 @@
 export {
   acceptInvite,
+  beginTOTPEnrollment,
   checkSlug,
   confirmPasswordReset,
+  confirmTOTPEnrollment,
   fetchInviteInfo,
   fetchTenantContext,
   register,
@@ -51,6 +53,8 @@ export type {
   RegisterOutcome,
   Registration,
   TenantContext,
+  TOTPEnrollment,
+  TOTPEnrollmentConfirmation,
   VerificationEmailRequest,
 } from "./types.js";
 export { useAuth } from "./use-auth.js";

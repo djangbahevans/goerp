@@ -14,6 +14,7 @@ const USER: CurrentUser = {
   roles: [],
   amr: [],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const TENANT: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
@@ -28,6 +29,7 @@ function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue 
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),
     changePassword: vi.fn(),
+    reloadSession: vi.fn(),
     ...overrides,
   };
 }

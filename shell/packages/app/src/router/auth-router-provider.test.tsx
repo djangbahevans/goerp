@@ -17,6 +17,7 @@ const FAKE_USER = {
   roles: [],
   amr: ["pwd"],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
 const AUTHENTICATED: AuthState = { status: "authenticated", user: FAKE_USER, tenant: FAKE_TENANT };
@@ -47,6 +48,7 @@ function FakeAuthProvider({
     submitMFA: async () => {},
     updateProfile: async () => {},
     changePassword: async () => {},
+    reloadSession: async () => {},
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -156,6 +158,21 @@ describe("auth gate", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/auth/login"));
     expect(router.state.location.search).toEqual({ redirect: "/settings/profile" });
+  });
+
+  it("moves to MFA setup when a request flags the user mid-session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ enrollment_id: "e1", qr_svg: "<svg/>", secret: "ABCD" }))),
+    );
+    const { router, setAuthState } = renderAt("/settings/profile", AUTHENTICATED);
+    await screen.findByRole("heading", { name: "Profile" });
+
+    setAuthState({ status: "authenticated", user: { ...FAKE_USER, mfaSetupRequired: true }, tenant: FAKE_TENANT });
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/auth/mfa-setup"));
+    expect(router.state.location.search).toEqual({ redirect: "/settings/profile" });
+    vi.unstubAllGlobals();
   });
 
   it("re-runs the gate exactly once when the session check settles", async () => {

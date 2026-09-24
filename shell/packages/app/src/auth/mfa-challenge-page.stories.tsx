@@ -16,6 +16,7 @@ function authWith(methods: MFAMethod[], submitMFA: AuthContextValue["submitMFA"]
     submitMFA,
     updateProfile: async () => {},
     changePassword: async () => {},
+    reloadSession: async () => {},
   };
 }
 

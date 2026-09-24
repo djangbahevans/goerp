@@ -15,6 +15,7 @@ const fakeUser = {
   roles: [],
   amr: [],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const fakeTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
@@ -29,6 +30,7 @@ function authWith(changePassword: AuthContextValue["changePassword"]): AuthConte
     submitMFA: async () => {},
     updateProfile: async () => {},
     changePassword,
+    reloadSession: async () => {},
   };
 }
 

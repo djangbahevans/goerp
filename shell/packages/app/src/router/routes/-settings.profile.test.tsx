@@ -28,6 +28,7 @@ function fakeAuth(
     submitMFA: async () => {},
     updateProfile,
     changePassword,
+    reloadSession: async () => {},
   };
 }
 
@@ -62,6 +63,7 @@ describe("/settings/profile", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     await renderProfilePage(fakeAuth(user));
 
@@ -79,6 +81,7 @@ describe("/settings/profile", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     await renderProfilePage(fakeAuth(user));
 
@@ -96,6 +99,7 @@ describe("/settings/profile", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     const updateProfile = vi.fn(async () => {});
     await renderProfilePage(fakeAuth(user, updateProfile));
@@ -118,6 +122,7 @@ describe("/settings/profile", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     const updateProfile = vi.fn(async () => {});
     const toastError = vi.spyOn(toast, "error").mockImplementation(() => {});
@@ -141,6 +146,7 @@ describe("/settings/profile", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     const updateProfile = vi.fn(async () => {
       throw new Error("network down");
@@ -166,6 +172,7 @@ describe("/settings/profile", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     const updateProfile = vi.fn(async () => {});
     await renderProfilePage(fakeAuth(user, updateProfile));
@@ -192,6 +199,7 @@ describe("/settings/profile", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     const updateProfile = vi.fn(async () => {});
     await renderProfilePage(fakeAuth(user, updateProfile));
@@ -213,6 +221,7 @@ describe("/settings/profile", () => {
       roles: [],
       amr: [],
       mfaVerifiedAt: null,
+      mfaSetupRequired: false,
     };
     const toastSuccess = vi.spyOn(toast, "success").mockImplementation(() => {});
     await renderProfilePage(fakeAuth(user));
@@ -235,6 +244,7 @@ const ADA: CurrentUser = {
   roles: [],
   amr: [],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 
 function fillPasswords(current: string, next: string, confirm: string) {

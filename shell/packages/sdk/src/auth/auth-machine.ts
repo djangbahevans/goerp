@@ -66,6 +66,18 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
     case "logout_complete":
       return state.status === "logging_out" ? { status: "unauthenticated" } : state;
 
+    case "mfa_setup_required":
+      // A 403 mfa_setup_required from any request: the tenant's policy now
+      // applies to a user with no factor.
+      return (state.status === "authenticated" || state.status === "refreshing") && !state.user.mfaSetupRequired
+        ? { status: state.status, user: { ...state.user, mfaSetupRequired: true }, tenant: state.tenant }
+        : state;
+
+    case "session_reloaded":
+      return state.status === "authenticated" || state.status === "refreshing"
+        ? { status: state.status, user: event.user, tenant: event.tenant }
+        : state;
+
     case "profile_updated":
       return state.status === "authenticated" || state.status === "refreshing"
         ? { status: state.status, user: event.user, tenant: state.tenant }

@@ -22,6 +22,7 @@ const FAKE_USER = {
   roles: [],
   amr: [],
   mfaVerifiedAt: null,
+  mfaSetupRequired: false,
 };
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 const FAKE_AUTH: AuthContextValue = {
@@ -34,6 +35,7 @@ const FAKE_AUTH: AuthContextValue = {
   submitMFA: async () => {},
   updateProfile: async () => {},
   changePassword: async () => {},
+  reloadSession: async () => {},
 };
 
 // Exercises the real generated route tree (not a hand-built stand-in) so

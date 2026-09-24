@@ -26,6 +26,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     roles: [],
     amr: [],
     mfaVerifiedAt: null,
+    mfaSetupRequired: false,
   };
   const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
   return {
@@ -38,6 +39,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),
     changePassword: vi.fn(),
+    reloadSession: vi.fn(),
     ...overrides,
   };
 }
