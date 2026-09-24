@@ -5,7 +5,7 @@ import { SearchTrigger } from "./search-trigger.js";
 import { UserMenu } from "./user-menu.js";
 
 // shell-architecture.md §15/§17: the shell's persistent global header,
-// mounted once by ChromeLayout (unbuilt, a later ticket). No explicit
+// mounted once by ChromeLayout. No explicit
 // role="banner" — a top-level <header> carries that landmark implicitly.
 export function ChromeHeader(): ReactNode {
   return (

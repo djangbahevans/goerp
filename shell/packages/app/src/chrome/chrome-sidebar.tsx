@@ -6,14 +6,12 @@ import { useSidebar } from "./sidebar-store.js";
 import { useNavigationTree } from "./use-navigation-tree.js";
 
 // shell-architecture.md §15/§16: the shell's persistent left-edge
-// navigation rail, mounted once by ChromeLayout (unbuilt, a later ticket,
-// same posture as chrome-header.tsx). Its own tree data source
-// (viewRegistry.navigationTree) is also unbuilt — see use-navigation-tree.ts
-// — so this renders an empty-but-correct <nav> until that lands.
+// navigation rail, mounted once by ChromeLayout. Its tree comes from
+// viewRegistry.navigationTree via use-navigation-tree.ts.
 //
 // `tree`/`store` exist only for Storybook/tests to substitute fixture data
-// and a deterministic sidebar-state store in place of the real (currently
-// empty) tree source and the real localStorage-backed singleton — the same
+// and a deterministic sidebar-state store in place of the real view-registry
+// tree and the real localStorage-backed singleton — the same
 // injectable-default shape as useTheme(store)/useSidebar(store). ChromeLayout,
 // the only production caller, never passes either — matching the doc's own
 // "API/Props: None" contract for every real usage.
