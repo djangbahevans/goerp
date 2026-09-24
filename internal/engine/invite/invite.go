@@ -1,10 +1,8 @@
 // Package invite is the tenant_invitations table from auth-internals.md
 // §3 "Invite flow" — one physical copy per tenant, alongside roles/
 // role_permissions/user_roles (internal/engine/role) in the same
-// tenant_{slug} schema. Scoped to the operator-invite send/resend/revoke
-// path goerp#31's `tenant create`/`tenant resend-invite` CLI commands
-// need; the self-service accept-invite endpoint is separate, unfiled
-// scope.
+// tenant_{slug} schema: the operator-invite send/resend/revoke path and
+// the acceptance that grants membership.
 package invite
 
 import (
@@ -12,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -282,6 +281,97 @@ func (s *Store) GetLiveByEmail(ctx context.Context, tenantSlug, email string) (*
 	}
 
 	return inv, nil
+}
+
+// hashToken returns the stored token_hash for a raw (hex) token, matching
+// generateToken's SHA-256 of the raw bytes. A token that isn't valid hex
+// can't match any invitation.
+func hashToken(rawToken string) (string, bool) {
+	raw, err := hex.DecodeString(rawToken)
+	if err != nil || len(raw) == 0 {
+		return "", false
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), true
+}
+
+// GetLiveByToken returns the pending, unrevoked, unexpired invitation for
+// rawToken, or ErrInvitationNotLive.
+func (s *Store) GetLiveByToken(ctx context.Context, tenantSlug, rawToken string) (*Invitation, error) {
+	tokenHash, ok := hashToken(rawToken)
+	if !ok {
+		return nil, ErrInvitationNotLive
+	}
+	schema := tenantschema.Name(tenantSlug)
+	row := s.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM %s.tenant_invitations
+		WHERE token_hash = $1 AND expires_at > NOW() AND accepted_at IS NULL AND revoked_at IS NULL
+	`, invitationColumns, schema), tokenHash)
+
+	inv, err := scanInvitation(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrInvitationNotLive
+		}
+		return nil, fmt.Errorf("get invitation by token: %w", err)
+	}
+	return inv, nil
+}
+
+// Accept is auth-internals.md §3 "Invite acceptance" steps 4-6 in one
+// transaction: activate (when non-nil, e.g. setting a new user's first
+// password), the single membership-creation point, and accepted_at. The
+// invitation row is locked and re-checked live first, so of two concurrent
+// accepts exactly one succeeds.
+func (s *Store) Accept(ctx context.Context, tenantSlug, invitationID, userID string, activate func(*sql.Tx) error) error {
+	schema := tenantschema.Name(tenantSlug)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin accept invitation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var roleID string
+	var invitedBy sql.NullString
+	err = tx.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT role_id, invited_by FROM %s.tenant_invitations
+		WHERE id = $1 AND expires_at > NOW() AND accepted_at IS NULL AND revoked_at IS NULL
+		FOR UPDATE
+	`, schema), invitationID).Scan(&roleID, &invitedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrInvitationNotLive
+	}
+	if err != nil {
+		return fmt.Errorf("lock invitation: %w", err)
+	}
+
+	if activate != nil {
+		if err := activate(tx); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
+		INSERT INTO %s.user_roles (user_id, role_id, granted_by)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, role_id) DO UPDATE SET granted_by = EXCLUDED.granted_by, granted_at = NOW(), expires_at = NULL
+	`, schema), userID, roleID, invitedBy); err != nil {
+		return fmt.Errorf("grant invited role: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE %s.tenant_invitations SET accepted_at = NOW() WHERE id = $1
+	`, schema), invitationID); err != nil {
+		return fmt.Errorf("mark invitation accepted: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit accept invitation: %w", err)
+	}
+
+	s.emit(ctx, tenantSlug, "user.invite_accepted", map[string]any{
+		"invitation_id": invitationID,
+		"user_id":       userID,
+	})
+	return nil
 }
 
 // ListExpired returns every still-live invitation (accepted_at IS NULL AND

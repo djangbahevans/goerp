@@ -45,6 +45,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
+	"github.com/djangbahevans/goerp/internal/engine/auth/acceptinvite"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authlogout"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
@@ -748,6 +749,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	passwordPolicies := password.NewPolicyStore(tenantConfigStore)
 	passwordHasher := password.NewHasher(cfg.Argon2MemoryBudgetMB, cfg.Argon2AcquireTimeout)
+	acceptInviteHandlers := acceptinvite.NewHandlers(tenantStore, inviteStore, userStore, passwordPolicies, passwordHasher, tokenIssuer)
 	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
@@ -780,6 +782,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/me/change-password":     authMePasswordHandler,
 		"PATCH /auth/me":                    authMeUpdateHandler,
 		"POST /auth/refresh":                authRefreshHandler,
+		"GET /auth/accept-invite/info":      http.HandlerFunc(acceptInviteHandlers.Info),
+		"POST /auth/accept-invite":          http.HandlerFunc(acceptInviteHandlers.Accept),
 		"POST /auth/login":                  loginHandler,
 		"POST /auth/password-reset/request": passwordResetRequestHandler,
 		"POST /auth/password-reset/confirm": passwordResetConfirmHandler,

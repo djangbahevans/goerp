@@ -394,3 +394,30 @@ func (s *Store) SetPassword(ctx context.Context, id, passwordHash, policyTenantI
 	}
 	return nil
 }
+
+// ErrNotActivatable reports that ActivateWithPasswordTx found the user no
+// longer an invited account without a password.
+var ErrNotActivatable = errors.New("user is no longer an invited account without a password")
+
+// ActivateWithPasswordTx sets a first password and activates the account
+// inside tx — auth-internals.md §3 "Invite acceptance" step 4. Only an
+// invited user with no password yet is touched, so this can never
+// reactivate a suspended account.
+func (s *Store) ActivateWithPasswordTx(ctx context.Context, tx *sql.Tx, id, passwordHash, policyTenantID string, policyVersion int64) error {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE system.users
+		SET password_hash = $2,
+		    status = 'active',
+		    password_set_at_policy_tenant_id = NULLIF($3, '')::uuid,
+		    password_set_at_policy_version = $4,
+		    updated_at = NOW()
+		WHERE id = $1 AND password_hash IS NULL AND status = 'invited'
+	`, id, passwordHash, policyTenantID, policyVersion)
+	if err != nil {
+		return fmt.Errorf("activate user with password: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNotActivatable
+	}
+	return nil
+}
