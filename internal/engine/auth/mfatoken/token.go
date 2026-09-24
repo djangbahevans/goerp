@@ -28,9 +28,9 @@ var ErrInvalidToken = errors.New("invalid or expired mfa_token")
 
 // Claims is the mfa_token's JSON shape, auth-internals.md §8's
 // {sub, tid, txn, purpose, origin, rmb, iat, exp} claim set — sub/iat/exp
-// come from jwt.RegisteredClaims. Remember carries the password step's
-// "remember this device" choice through to the session /auth/mfa/verify
-// issues.
+// come from jwt.RegisteredClaims. Remember and PasswordUpdateRecommended
+// carry the password step's "remember this device" choice and §3's
+// password-policy nudge through to the session /auth/mfa/verify issues.
 type Claims struct {
 	jwt.RegisteredClaims
 	TenantID string `json:"tid"`
@@ -38,6 +38,14 @@ type Claims struct {
 	Purpose  string `json:"purpose"`
 	Origin   string `json:"origin"`
 	Remember bool   `json:"rmb,omitzero"`
+	// PasswordUpdateRecommended is carried under "puc".
+	PasswordUpdateRecommended bool `json:"puc,omitzero"`
+}
+
+// IssueOptions carries the password step's outcome into the token.
+type IssueOptions struct {
+	Remember                  bool
+	PasswordUpdateRecommended bool
 }
 
 // Codec issues and verifies mfa_tokens against a single HMAC-SHA256 key.
@@ -57,7 +65,7 @@ func NewCodec(key *Key) *Codec {
 // The returned txn is the same random per-attempt identifier embedded in
 // the token's txn claim — the atomic single-use consumption key the
 // /auth/mfa/verify handler claims via Redis SETNX.
-func (c *Codec) Issue(userID, tenantID, origin string, remember bool) (token, txn string, err error) {
+func (c *Codec) Issue(userID, tenantID, origin string, opts IssueOptions) (token, txn string, err error) {
 	now := time.Now()
 	txn = uuid.NewString()
 
@@ -69,7 +77,9 @@ func (c *Codec) Issue(userID, tenantID, origin string, remember bool) (token, tx
 		Txn:       txn,
 		Purpose:   PurposeMFALogin,
 		Origin:    origin,
-		Remember:  remember,
+		Remember:  opts.Remember,
+
+		PasswordUpdateRecommended: opts.PasswordUpdateRecommended,
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

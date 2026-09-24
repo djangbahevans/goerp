@@ -18,7 +18,7 @@ func TestWriteResponse_NonBrowser_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	req.Header.Set("X-Client-Type", "cli")
 
 	tokens := &authtoken.Tokens{AccessToken: "<script>&</script>", RefreshToken: "r", ExpiresIn: 900}
-	WriteResponse(w, tokens, "device-1", true, IsNonBrowser(req))
+	WriteResponse(w, tokens, "device-1", true, IsNonBrowser(req), false)
 
 	body := w.Body.String()
 	wantEscaped := "\\u003cscript\\u003e\\u0026\\u003c/script\\u003e"

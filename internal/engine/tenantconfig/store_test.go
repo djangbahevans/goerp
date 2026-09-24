@@ -3,6 +3,7 @@ package tenantconfig
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -183,5 +184,106 @@ func TestSet_UnknownTenantFails(t *testing.T) {
 	err := env.store.Set(context.Background(), "00000000-0000-0000-0000-000000000000", "engine.mfa_mode", "required")
 	if err == nil {
 		t.Fatal("expected a foreign key violation for an unknown tenant")
+	}
+}
+
+func (e *testEnv) version(t *testing.T, tenantID string) string {
+	t.Helper()
+	v, _, err := e.store.Get(t.Context(), tenantID, PasswordPolicyVersionKey)
+	if err != nil {
+		t.Fatalf("Get(version) error: %v", err)
+	}
+	return v
+}
+
+func TestSet_PasswordPolicyChangeBumpsVersionOnlyOnRealChange(t *testing.T) {
+	env := openTestEnv(t)
+	tt := env.createTenant(t)
+	ctx := t.Context()
+	key := PasswordPolicyPrefix + "min_length"
+
+	if v := env.version(t, tt.ID); v != "" {
+		t.Fatalf("version before any change = %q, want unset", v)
+	}
+	if err := env.store.Set(ctx, tt.ID, key, "14"); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+	if v := env.version(t, tt.ID); v != "1" {
+		t.Errorf("version after first change = %q, want 1", v)
+	}
+	if err := env.store.Set(ctx, tt.ID, key, "14"); err != nil {
+		t.Fatalf("Set() same value error: %v", err)
+	}
+	if v := env.version(t, tt.ID); v != "1" {
+		t.Errorf("version after rewriting the same value = %q, want 1", v)
+	}
+	if err := env.store.Set(ctx, tt.ID, PasswordPolicyPrefix+"require_digit", "true"); err != nil {
+		t.Fatalf("Set() second field error: %v", err)
+	}
+	if v := env.version(t, tt.ID); v != "2" {
+		t.Errorf("version after a second field change = %q, want 2", v)
+	}
+	if err := env.store.Set(ctx, tt.ID, "engine.mfa_mode", "required"); err != nil {
+		t.Fatalf("Set() unrelated key error: %v", err)
+	}
+	if v := env.version(t, tt.ID); v != "2" {
+		t.Errorf("version after an unrelated key = %q, want 2", v)
+	}
+}
+
+func TestSet_ConcurrentPolicyChangesEachBump(t *testing.T) {
+	env := openTestEnv(t)
+	tt := env.createTenant(t)
+
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Go(func() {
+			errs <- env.store.Set(t.Context(), tt.ID, fmt.Sprintf("%sfield_%d", PasswordPolicyPrefix, i), "true")
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Set() error: %v", err)
+		}
+	}
+	if v := env.version(t, tt.ID); v != fmt.Sprint(n) {
+		t.Errorf("version = %q, want %d", v, n)
+	}
+}
+
+func TestSet_VersionCounterIsReadOnly(t *testing.T) {
+	env := openTestEnv(t)
+	tt := env.createTenant(t)
+
+	if err := env.store.Set(t.Context(), tt.ID, PasswordPolicyVersionKey, "99"); !errors.Is(err, ErrReadOnlyKey) {
+		t.Errorf("Set(version) error = %v, want ErrReadOnlyKey", err)
+	}
+}
+
+func TestGetPrefix_ReturnsOnlyMatchingKeys(t *testing.T) {
+	env := openTestEnv(t)
+	tt := env.createTenant(t)
+	ctx := t.Context()
+
+	for k, v := range map[string]string{
+		PasswordPolicyPrefix + "min_length": "14",
+		"engine.mfa_mode":                   "required",
+	} {
+		if err := env.store.Set(ctx, tt.ID, k, v); err != nil {
+			t.Fatalf("Set(%q) error: %v", k, err)
+		}
+	}
+
+	got, err := env.store.GetPrefix(ctx, tt.ID, "auth.password_policy")
+	if err != nil {
+		t.Fatalf("GetPrefix() error: %v", err)
+	}
+	want := map[string]string{PasswordPolicyPrefix + "min_length": "14", PasswordPolicyVersionKey: "1"}
+	if len(got) != len(want) || got[PasswordPolicyPrefix+"min_length"] != "14" || got[PasswordPolicyVersionKey] != "1" {
+		t.Errorf("GetPrefix() = %v, want %v", got, want)
 	}
 }

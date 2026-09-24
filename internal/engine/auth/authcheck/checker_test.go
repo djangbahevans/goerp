@@ -858,7 +858,7 @@ func TestAuthenticate_APIKeyUpdatesLastUsedEvenWhenPermissionDenied(t *testing.T
 
 func TestAuthenticateMFAToken_ValidTokenReturnsMFAPending(t *testing.T) {
 	f := newFixture(t)
-	token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, "https://example.com", false)
+	token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, "https://example.com", mfatoken.IssueOptions{})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
@@ -908,7 +908,7 @@ func TestAuthenticateMFAToken_MalformedTokenIsRejected(t *testing.T) {
 
 func TestAuthenticateMFAToken_TenantMismatchIsRejected(t *testing.T) {
 	f := newFixture(t)
-	token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, "https://example.com", false)
+	token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, "https://example.com", mfatoken.IssueOptions{})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}

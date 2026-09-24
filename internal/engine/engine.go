@@ -56,6 +56,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaverify"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/passwordreset"
 	"github.com/djangbahevans/goerp/internal/engine/auth/planchange"
 	"github.com/djangbahevans/goerp/internal/engine/auth/roleassign"
@@ -744,7 +745,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		return report, failed
 	})
 
-	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec)
+	passwordPolicies := password.NewPolicyStore(tenantConfigStore)
+	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
 	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
@@ -752,7 +754,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil)
 	passwordResetRequestHandler := passwordreset.NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer, authAuditStore)
-	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, inviteMailer, authAuditStore)
+	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, passwordPolicies, inviteMailer, authAuditStore)
 	// filesStore is constructed here (rather than down by
 	// offboardActivities, which also needs it) since authMeHandler
 	// (avatar URL resolution, goerp#819) and storageUploadHandler both

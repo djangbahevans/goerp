@@ -23,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
@@ -40,6 +41,9 @@ type fixture struct {
 	userID     string
 	users      *user.Store
 	mfaStore   *mfa.Store
+	config     *tenantconfig.Store
+	mfaTokens  *mfatoken.Codec
+	tenantID   string
 	conn       *sql.DB
 }
 
@@ -136,7 +140,11 @@ func newFixture(t *testing.T) *fixture {
 
 	issuer := authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore)
 	mfaTokens := mfatoken.NewCodec(&mfaTokenKeySet.Active)
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens)
+	configStore := tenantconfig.NewStore(conn)
+	if err := configStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
+	}
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore))
 
 	return &fixture{
 		handler:    handler,
@@ -144,6 +152,9 @@ func newFixture(t *testing.T) *fixture {
 		userID:     userID,
 		users:      userStore,
 		mfaStore:   mfaStore,
+		config:     configStore,
+		mfaTokens:  mfaTokens,
+		tenantID:   tt.ID,
 		conn:       conn,
 	}
 }
@@ -586,4 +597,89 @@ func TestServeHTTP_SuccessResetsFailedLoginCounter(t *testing.T) {
 
 func fixtureEmail(f *fixture) string {
 	return f.tenantSlug + "@example.com"
+}
+
+func TestServeHTTP_PolicyVersionBehind_RecommendsUpdateWithoutBlocking(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "16"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+
+	rec := f.doLogin(t, map[string]any{
+		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug,
+	}, map[string]string{"X-Client-Type": "cli"})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	body := decodeBody(t, rec)
+	if body["password_update_recommended"] != true {
+		t.Errorf("password_update_recommended = %v, want true", body["password_update_recommended"])
+	}
+	if body["access_token"] == nil {
+		t.Error("access_token missing — the nudge must not block login")
+	}
+}
+
+func TestServeHTTP_PolicyVersionCurrent_NoRecommendation(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "16"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	if _, err := f.conn.Exec(`UPDATE system.users SET password_set_at_policy_tenant_id = $2, password_set_at_policy_version = 1 WHERE id = $1`, f.userID, f.tenantID); err != nil {
+		t.Fatalf("set user policy version: %v", err)
+	}
+
+	rec := f.doLogin(t, map[string]any{
+		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug,
+	}, nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if _, ok := decodeBody(t, rec)["password_update_recommended"]; ok {
+		t.Error("password_update_recommended present, want it omitted when the user is current")
+	}
+}
+
+func TestServeHTTP_MFAEnrolledPolicyVersionBehind_TokenCarriesRecommendation(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "16"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	if _, err := f.mfaStore.Insert(t.Context(), f.userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
+		t.Fatalf("Insert() mfa credential error: %v", err)
+	}
+
+	rec := f.doLogin(t, map[string]any{
+		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug,
+	}, nil)
+
+	token, _ := decodeBody(t, rec)["mfa_token"].(string)
+	claims, err := f.mfaTokens.Verify(token)
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+	if !claims.PasswordUpdateRecommended {
+		t.Error("mfa_token PasswordUpdateRecommended = false, want true")
+	}
+}
+
+func TestServeHTTP_PasswordValidatedInAnotherTenant_RecommendsUpdate(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyRequireSymbol, "true"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	// A higher version recorded against a different tenant must not count.
+	if _, err := f.conn.Exec(`UPDATE system.users SET password_set_at_policy_tenant_id = gen_random_uuid(), password_set_at_policy_version = 5 WHERE id = $1`, f.userID); err != nil {
+		t.Fatalf("set user policy version: %v", err)
+	}
+
+	rec := f.doLogin(t, map[string]any{
+		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug,
+	}, nil)
+
+	if rec.Code != http.StatusOK || decodeBody(t, rec)["password_update_recommended"] != true {
+		t.Errorf("status = %d, body = %s, want 200 with password_update_recommended", rec.Code, rec.Body.String())
+	}
 }

@@ -135,3 +135,17 @@ func TestSetConfigRoute_UpdatesExistingValue(t *testing.T) {
 		t.Errorf("stored value = %q, want %q (the second Set should overwrite the first)", stored, "required")
 	}
 }
+
+func TestSetConfigRoute_VersionCounterReturnsBadRequest(t *testing.T) {
+	env := newTestConfigMux(t)
+	tt := env.createTenant(t)
+
+	body := `{"key":"` + tenantconfig.PasswordPolicyVersionKey + `","value":"99"}`
+	req := httptest.NewRequest(http.MethodPatch, "/admin/tenants/"+tt.Slug+"/config", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	env.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "read_only_key") {
+		t.Errorf("status = %d, body = %s, want 400 read_only_key", w.Code, w.Body.String())
+	}
+}

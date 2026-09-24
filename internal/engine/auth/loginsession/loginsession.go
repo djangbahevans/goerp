@@ -70,21 +70,22 @@ func writeJSON(w http.ResponseWriter, v any) {
 // WriteResponse writes the final success response for a completed login:
 // a JSON body carrying the tokens directly for a non-browser client, or
 // __Host-access_token/refresh_token/device_id cookies plus a minimal JSON
-// body for a browser client.
-func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh, nonBrowser bool) {
+// body for a browser client. passwordUpdateRecommended adds
+// auth-internals.md §3's "password_update_recommended" nudge.
+func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh, nonBrowser, passwordUpdateRecommended bool) {
 	w.Header().Set("Content-Type", "application/json")
+	body := map[string]any{"expires_in": tokens.ExpiresIn}
 	if nonBrowser {
-		writeJSON(w, map[string]any{
-			"access_token":  tokens.AccessToken,
-			"refresh_token": tokens.RefreshToken,
-			"device_id":     deviceID,
-			"expires_in":    tokens.ExpiresIn,
-		})
-		return
+		body["access_token"] = tokens.AccessToken
+		body["refresh_token"] = tokens.RefreshToken
+		body["device_id"] = deviceID
+	} else {
+		setCookies(w, tokens, deviceID, deviceIDIsFresh)
 	}
-
-	setCookies(w, tokens, deviceID, deviceIDIsFresh)
-	writeJSON(w, map[string]any{"expires_in": tokens.ExpiresIn})
+	if passwordUpdateRecommended {
+		body["password_update_recommended"] = true
+	}
+	writeJSON(w, body)
 }
 
 // SetTokenCookies sets the __Host-access_token/refresh_token cookies

@@ -202,7 +202,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser)
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, claims.PasswordUpdateRecommended)
 }
 
 // VerifyCode dispatches to whichever Service matches mfaType. totp and

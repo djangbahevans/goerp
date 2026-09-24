@@ -30,12 +30,13 @@ type ConfirmHandler struct {
 	mfa      *mfa.Store
 	sessions *sessionrevoke.Revoker
 	issuer   *authtoken.Issuer
+	policies *password.PolicyStore
 	mailer   Mailer
 	audit    AuditRecorder
 }
 
-func NewConfirmHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, sessions *sessionrevoke.Revoker, issuer *authtoken.Issuer, mailer Mailer, audit AuditRecorder) *ConfirmHandler {
-	return &ConfirmHandler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, sessions: sessions, issuer: issuer, mailer: mailer, audit: audit}
+func NewConfirmHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, sessions *sessionrevoke.Revoker, issuer *authtoken.Issuer, policies *password.PolicyStore, mailer Mailer, audit AuditRecorder) *ConfirmHandler {
+	return &ConfirmHandler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, sessions: sessions, issuer: issuer, policies: policies, mailer: mailer, audit: audit}
 }
 
 type confirmRequest struct {
@@ -66,7 +67,23 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := password.Validate(req.NewPassword, u.Email); err != nil {
+	t, member, err := h.resolveTenant(ctx, u, req.Tenant)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "password reset failed")
+		return
+	}
+	// Only a tenant the user belongs to can apply its policy. Any other
+	// confirm records the global policy, so a stricter tenant still nudges.
+	policy, policyTenantID, policyVersion := password.Global, "", int64(0)
+	if member {
+		policyTenantID = t.ID
+		if policy, policyVersion, err = h.policies.Effective(ctx, t.ID); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "password reset failed")
+			return
+		}
+	}
+
+	if err := policy.Validate(req.NewPassword, u.Email); err != nil {
 		writeJSONError(w, http.StatusUnprocessableEntity, "auth.password_too_weak", err.Error())
 		return
 	}
@@ -84,7 +101,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// The token can be consumed by a concurrent confirm between the
 	// lookup above and here; the conditional update is the real check.
-	if _, err := h.users.ConsumePasswordResetToken(ctx, tokenHash, hash); err != nil {
+	if _, err := h.users.ConsumePasswordResetToken(ctx, tokenHash, hash, policyTenantID, policyVersion); err != nil {
 		if errors.Is(err, user.ErrResetTokenInvalid) {
 			writeInvalidToken(w)
 			return
@@ -97,13 +114,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Error().Err(err).Str("user_id", u.ID).Msg("passwordreset: post-reset session revocation failed")
 	}
 
-	// The password is already changed, so a lookup failure here degrades
-	// to login_required rather than failing the request.
-	t, sessionAllowed, err := h.sessionTenant(ctx, u, req.Tenant)
-	if err != nil {
-		log.Error().Err(err).Str("user_id", u.ID).Msg("passwordreset: session eligibility check failed")
-		sessionAllowed = false
-	}
+	sessionAllowed := member && h.canSignIn(ctx, u)
 
 	auditRow := authaudit.Row{
 		EventType: "password.reset_completed",
@@ -148,15 +159,13 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser)
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, false)
 }
 
-// sessionTenant reports whether confirm may sign the user straight in:
-// only an active member of the tenant with no MFA enrolled. A reset link
-// proves control of the mailbox, not of a second factor, and a reset
-// never changes status (auth-internals.md §2), so everyone else is sent
-// to the normal login flow. The tenant is returned whenever it resolves.
-func (h *ConfirmHandler) sessionTenant(ctx context.Context, u *user.User, tenantSlug string) (*tenant.Tenant, bool, error) {
+// resolveTenant returns the named tenant (nil if it doesn't exist) and
+// whether u is a member of it. GetBySlug runs first because IsMember
+// interpolates the slug into a schema name, safe only for a real row's.
+func (h *ConfirmHandler) resolveTenant(ctx context.Context, u *user.User, tenantSlug string) (*tenant.Tenant, bool, error) {
 	if tenantSlug == "" {
 		return nil, false, nil
 	}
@@ -167,18 +176,29 @@ func (h *ConfirmHandler) sessionTenant(ctx context.Context, u *user.User, tenant
 		}
 		return nil, false, err
 	}
-	if u.Status != user.StatusActive {
-		return t, false, nil
-	}
 	isMember, err := h.roles.IsMember(ctx, t.Slug, u.ID)
-	if err != nil || !isMember {
-		return t, false, err
+	if err != nil {
+		return nil, false, err
+	}
+	return t, isMember, nil
+}
+
+// canSignIn reports whether confirm may sign a tenant member straight in:
+// only an active user with no MFA enrolled. A reset link proves control
+// of the mailbox, not of a second factor, and a reset never changes
+// status (auth-internals.md §2), so everyone else goes through login. The
+// password is already changed by now, so a lookup failure degrades to
+// login_required rather than failing the request.
+func (h *ConfirmHandler) canSignIn(ctx context.Context, u *user.User) bool {
+	if u.Status != user.StatusActive {
+		return false
 	}
 	factors, err := h.mfa.ListActiveByUser(ctx, u.ID)
 	if err != nil {
-		return t, false, err
+		log.Error().Err(err).Str("user_id", u.ID).Msg("passwordreset: mfa enrollment check failed")
+		return false
 	}
-	return t, len(factors) == 0, nil
+	return len(factors) == 0
 }
 
 func writeInvalidToken(w http.ResponseWriter) {
