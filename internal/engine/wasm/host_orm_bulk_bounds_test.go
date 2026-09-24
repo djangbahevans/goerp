@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -48,7 +48,7 @@ func TestORMCreateBatch_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 
 	records := make([]map[string]any, 4)
 	for i := range records {
-		records[i] = map[string]any{"id": uuid.NewString(), "name": fmt.Sprintf("Item %d", i)}
+		records[i] = map[string]any{"id": uuid.New().String(), "name": fmt.Sprintf("Item %d", i)}
 	}
 
 	_, hostErr := ORMCreateBatch(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMCreateBatchInput{
@@ -80,7 +80,7 @@ func TestORMCreateBatch_AtBulkMaxRows_Succeeds(t *testing.T) {
 
 	records := make([]map[string]any, 3)
 	for i := range records {
-		records[i] = map[string]any{"id": uuid.NewString(), "name": fmt.Sprintf("Item %d", i)}
+		records[i] = map[string]any{"id": uuid.New().String(), "name": fmt.Sprintf("Item %d", i)}
 	}
 
 	out, hostErr := ORMCreateBatch(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMCreateBatchInput{
@@ -106,7 +106,7 @@ func TestORMWriteMany_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 
 	ids := make([]string, 4)
 	for i := range ids {
-		ids[i] = uuid.NewString()
+		ids[i] = uuid.New().String()
 		if _, err := primaryDB.ExecContext(ctx, "INSERT INTO tenant_"+slug+".hard_item (id, name) VALUES ($1, $2)", ids[i], "Original"); err != nil {
 			t.Fatalf("seed row: %v", err)
 		}
@@ -142,7 +142,7 @@ func TestORMWriteWhere_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 	createFixtureHardItemsTable(t, primaryDB, slug)
 
 	for range 4 {
-		if _, err := primaryDB.ExecContext(ctx, "INSERT INTO tenant_"+slug+".hard_item (id, name) VALUES ($1, 'Original')", uuid.NewString()); err != nil {
+		if _, err := primaryDB.ExecContext(ctx, "INSERT INTO tenant_"+slug+".hard_item (id, name) VALUES ($1, 'Original')", uuid.New().String()); err != nil {
 			t.Fatalf("seed row: %v", err)
 		}
 	}
@@ -177,7 +177,7 @@ func TestORMWriteWhere_AtBulkMaxRows_Succeeds(t *testing.T) {
 	createFixtureHardItemsTable(t, primaryDB, slug)
 
 	for range 3 {
-		if _, err := primaryDB.ExecContext(ctx, "INSERT INTO tenant_"+slug+".hard_item (id, name) VALUES ($1, 'Original')", uuid.NewString()); err != nil {
+		if _, err := primaryDB.ExecContext(ctx, "INSERT INTO tenant_"+slug+".hard_item (id, name) VALUES ($1, 'Original')", uuid.New().String()); err != nil {
 			t.Fatalf("seed row: %v", err)
 		}
 	}
@@ -205,7 +205,7 @@ func TestORMUnlink_OverBulkMaxRows_BatchTooLargeAndNoDelete(t *testing.T) {
 
 	ids := make([]string, 4)
 	for i := range ids {
-		ids[i] = uuid.NewString()
+		ids[i] = uuid.New().String()
 		if _, err := primaryDB.ExecContext(ctx, "INSERT INTO tenant_"+slug+".hard_item (id, name) VALUES ($1, 'Original')", ids[i]); err != nil {
 			t.Fatalf("seed row: %v", err)
 		}
@@ -241,7 +241,7 @@ func TestORMStatementTimeout_LockContention_ReturnsOrmTimeoutAndRollsBack(t *tes
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
 
-	id := uuid.NewString()
+	id := uuid.New().String()
 	if _, err := primaryDB.ExecContext(ctx, "INSERT INTO tenant_"+slug+".hard_item (id, name) VALUES ($1, 'Original')", id); err != nil {
 		t.Fatalf("seed row: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestORMStatementTimeout_DoesNotFireWithinTheTimeout(t *testing.T) {
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureHardItemsTable(t, primaryDB, slug)
 
-	id := uuid.NewString()
+	id := uuid.New().String()
 	if _, err := primaryDB.ExecContext(ctx, "INSERT INTO tenant_"+slug+".hard_item (id, name) VALUES ($1, 'Original')", id); err != nil {
 		t.Fatalf("seed row: %v", err)
 	}

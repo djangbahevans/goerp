@@ -14,13 +14,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 const (
@@ -131,7 +131,7 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 
 	deviceID := p.DeviceID
 	if deviceID == "" {
-		deviceID = uuid.NewString()
+		deviceID = uuid.New().String()
 	}
 
 	refreshToken, refreshHash, err := newRefreshToken()
@@ -140,7 +140,7 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 	}
 
 	now := time.Now()
-	sessionID := uuid.NewString()
+	sessionID := uuid.New().String()
 
 	if err := i.sessions.Insert(ctx, session.Row{
 		ID:              sessionID,
@@ -210,7 +210,7 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 		Subject:       userID,
 		IssuedAt:      jwt.NewNumericDate(now),
 		ExpiresAt:     jwt.NewNumericDate(now.Add(accessTokenTTL)),
-		ID:            uuid.NewString(),
+		ID:            uuid.New().String(),
 		SessionID:     sessionID,
 		TenantID:      tenantID,
 		Roles:         roleNames,
@@ -282,7 +282,7 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 	if err != nil {
 		return nil, 0, fmt.Errorf("generate refresh token: %w", err)
 	}
-	newSessionID := uuid.NewString()
+	newSessionID := uuid.New().String()
 
 	result, err := i.sessions.Rotate(ctx, presentedHash, newSessionID, newHash, p.DeviceID, refreshExpiry, p.UserAgent, p.IPAddress, p.CountryCode)
 	if err != nil {

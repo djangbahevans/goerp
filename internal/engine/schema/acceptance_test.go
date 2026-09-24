@@ -4,14 +4,13 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 func TestAcceptedHashes_ScopedToModuleVersion(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 	ctx := context.Background()
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 
 	if _, err := pool.RecordAcceptance(ctx, tenantID, "sales", "1.0.0", "hash-a", "reviewed", "operator-1"); err != nil {
 		t.Fatalf("RecordAcceptance() error: %v", err)
@@ -42,7 +41,7 @@ func TestAcceptedHashes_ScopedToModuleVersion(t *testing.T) {
 func TestRecordAcceptance_ConcurrentDuplicateCallsConvergeOnOneRow(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
 	ctx := context.Background()
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 
 	const n = 5
 	ids := make(chan string, n)

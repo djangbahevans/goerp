@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
@@ -15,7 +16,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -237,7 +237,7 @@ func TestEnqueueApplicableDataMigration_EnqueuesOnlyFirstApplicable(t *testing.T
 	riverClient := newTestRiverClient(t)
 	jobsConn := openJobsConn(t)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
@@ -271,7 +271,7 @@ func TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler(t 
 	riverClient := newTestRiverClient(t)
 	jobsConn := openJobsConn(t)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
 	mod := newDataMigrationModule(t, []model.DataMigration{
 		{FromVersion: "< 1.4.0", ToVersion: ">= 1.4.0", Handler: "backfill_a"},
@@ -329,7 +329,7 @@ func TestEnqueueApplicableDataMigration_TenantNotYetSyncedIsNoop(t *testing.T) {
 	riverClient := newTestRiverClient(t)
 	jobsConn := openJobsConn(t)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
@@ -354,7 +354,7 @@ func TestEnqueueApplicableDataMigration_NoneApplicableIsNoop(t *testing.T) {
 	riverClient := newTestRiverClient(t)
 	jobsConn := openJobsConn(t)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)

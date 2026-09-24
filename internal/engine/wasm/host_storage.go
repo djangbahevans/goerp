@@ -7,12 +7,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path"
+	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
-	"github.com/google/uuid"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
@@ -103,11 +103,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			})
 		}
 
-		fileID, err := uuid.NewV7()
-		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
-		}
-
+		fileID := uuid.NewV7()
 		key := storage.BuildKey(purpose, modCtx.TenantID, fileID.String(), path.Ext(input.Filename))
 
 		checksum := sha256.Sum256(input.Data)

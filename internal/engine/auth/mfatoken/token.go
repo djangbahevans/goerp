@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"uuid"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 // TTL is the mfa_token's lifetime — auth-internals.md §8 "MFA token
@@ -67,7 +67,7 @@ func NewCodec(key *Key) *Codec {
 // /auth/mfa/verify handler claims via Redis SETNX.
 func (c *Codec) Issue(userID, tenantID, origin string, opts IssueOptions) (token, txn string, err error) {
 	now := time.Now()
-	txn = uuid.NewString()
+	txn = uuid.New().String()
 
 	claims := Claims{
 		Subject:   userID,

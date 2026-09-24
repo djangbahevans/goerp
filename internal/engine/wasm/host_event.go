@@ -2,22 +2,23 @@ package wasm
 
 import (
 	"context"
+	"crypto/sha1"
 	"database/sql"
 	"fmt"
 	"time"
+	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
-	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// idempotencyKeyNamespace is a fixed RFC 4122 namespace UUID for deriving
+// idempotencyKeyNamespace is a fixed RFC 9562 namespace UUID for deriving
 // deterministic event IDs from a caller-supplied idempotency key
 // (engine-internals.md §9) — any fixed value works, it only needs to
 // never change once chosen, since changing it would silently break dedup
@@ -146,9 +147,22 @@ func deriveEventID(reg *event.EventRegistry, moduleName, tenantID, name string, 
 		}
 	}
 	if idempotencyKey == "" {
-		return uuid.Must(uuid.NewV7())
+		return uuid.NewV7()
 	}
-	return uuid.NewSHA1(idempotencyKeyNamespace, []byte(tenantID+"|"+name+"|"+idempotencyKey))
+	return newSHA1UUID(idempotencyKeyNamespace, []byte(tenantID+"|"+name+"|"+idempotencyKey))
+}
+
+// newSHA1UUID returns the name-based version 5 UUID for name in namespace
+// (RFC 9562 §5.5), which the standard library uuid package does not provide.
+func newSHA1UUID(namespace uuid.UUID, name []byte) uuid.UUID {
+	h := sha1.New()
+	h.Write(namespace[:])
+	h.Write(name)
+	var u uuid.UUID
+	copy(u[:], h.Sum(nil))
+	u[6] = u[6]&0x0f | 0x50
+	u[8] = u[8]&0x3f | 0x80
+	return u
 }
 
 type eventEmitOutput = abiv1.EventEmitOutput

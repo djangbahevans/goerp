@@ -5,10 +5,10 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
@@ -100,15 +100,7 @@ func requestIDFromContext(ctx context.Context) string {
 func requestIDMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			id, err := uuid.NewV7()
-			if err != nil {
-				// crypto/rand exhaustion is effectively unreachable in
-				// practice; falling back to v4 keeps the request moving
-				// with a still-unique, just non-time-ordered id rather
-				// than failing the request over a logging concern.
-				id = uuid.New()
-			}
-			idStr := id.String()
+			idStr := uuid.NewV7().String()
 			w.Header().Set(requestIDHeader, idStr)
 			ctx := context.WithValue(r.Context(), requestIDContextKey{}, idStr)
 			next.ServeHTTP(w, r.WithContext(ctx))

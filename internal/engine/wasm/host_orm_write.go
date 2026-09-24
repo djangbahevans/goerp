@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
@@ -19,7 +20,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero/api"
@@ -572,7 +572,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 
 	record := make(map[string]any, len(input.Record)+1)
 	maps.Copy(record, input.Record)
-	newEtag := uuid.Must(uuid.NewV7()).String()
+	newEtag := uuid.NewV7().String()
 	if hasField(md, "etag") {
 		record["etag"] = newEtag
 	}
@@ -692,7 +692,7 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 	record := make(map[string]any, len(input.Record)+1)
 	maps.Copy(record, input.Record)
 	if hasField(md, "etag") {
-		record["etag"] = uuid.Must(uuid.NewV7()).String()
+		record["etag"] = uuid.NewV7().String()
 	}
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
@@ -779,7 +779,7 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 	record := make(map[string]any, len(input.Record)+1)
 	maps.Copy(record, input.Record)
 	if hasField(md, "etag") {
-		record["etag"] = uuid.Must(uuid.NewV7()).String()
+		record["etag"] = uuid.NewV7().String()
 	}
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
@@ -1891,7 +1891,7 @@ func emitRecordEventPayload(ctx context.Context, insertClient *river.Client[*sql
 	if err != nil {
 		return err
 	}
-	eventID := uuid.Must(uuid.NewV7())
+	eventID := uuid.NewV7()
 	return insertEventDeliveryTx(ctx, insertClient, tx, eventID, eventName, 1,
 		modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, payload, 0, nil)
 }

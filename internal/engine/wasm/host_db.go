@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -129,7 +129,7 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 			})
 		}
 
-		txID := uuid.NewString()
+		txID := uuid.New().String()
 		modCtx.RegisterTransaction(txID, conn, tx)
 
 		return abi.WriteToModule(ctx, m, allocate, dbBeginOutput{

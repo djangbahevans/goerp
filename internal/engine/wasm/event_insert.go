@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
-	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 )
 

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -35,7 +36,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
-	"github.com/google/uuid"
 )
 
 // connectTenantConn dials a real WebSocket connection registered with hub
@@ -274,7 +274,7 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) tenant.Tenant {
 // budget.
 func uniqueSlug(t *testing.T) string {
 	t.Helper()
-	return "s" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	return "s" + strings.ReplaceAll(uuid.New().String(), "-", "")[:12]
 }
 
 func tableExists(t *testing.T, conn *sql.DB, schemaName, table string) bool {

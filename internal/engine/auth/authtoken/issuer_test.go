@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
@@ -19,7 +20,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 // localPostgresDSN points directly at the compose.dev.yml Postgres
@@ -171,7 +171,7 @@ func TestIssue_AccessTokenClaimsMatchDocumentedShape(t *testing.T) {
 	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
-		DeviceID:   uuid.NewString(),
+		DeviceID:   uuid.New().String(),
 	})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
@@ -229,12 +229,12 @@ func TestIssue_AccessTokenClaimsMatchDocumentedShape(t *testing.T) {
 func TestIssue_MFAParamsPopulateSessionRowAndClaims(t *testing.T) {
 	f := newFixture(t)
 	verifiedAt := time.Now().Add(-2 * time.Minute)
-	credID := uuid.NewString()
+	credID := uuid.New().String()
 
 	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
 		UserID:          f.userID,
 		TenantSlug:      f.tenantSlug,
-		DeviceID:        uuid.NewString(),
+		DeviceID:        uuid.New().String(),
 		MFAMethod:       "totp",
 		MFAVerifiedAt:   &verifiedAt,
 		MFACredentialID: credID,
@@ -288,7 +288,7 @@ func TestReissueAccessToken_CarriesUpdatedAMRAndMFAVerifiedAt(t *testing.T) {
 	initial, err := f.issuer.Issue(context.Background(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
-		DeviceID:   uuid.NewString(),
+		DeviceID:   uuid.New().String(),
 	})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
@@ -345,7 +345,7 @@ func TestIssue_NoMFAParamsLeavesSessionRowAndClaimsAtDefaults(t *testing.T) {
 	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
-		DeviceID:   uuid.NewString(),
+		DeviceID:   uuid.New().String(),
 	})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
@@ -386,7 +386,7 @@ func TestIssue_RefreshTokenStoredOnlyAsHash(t *testing.T) {
 	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
-		DeviceID:   uuid.NewString(),
+		DeviceID:   uuid.New().String(),
 	})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
@@ -426,7 +426,7 @@ func TestIssue_SessionRowIsItsOwnFamily(t *testing.T) {
 	tokens, err := f.issuer.Issue(context.Background(), LoginParams{
 		UserID:     f.userID,
 		TenantSlug: f.tenantSlug,
-		DeviceID:   uuid.NewString(),
+		DeviceID:   uuid.New().String(),
 	})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
@@ -15,7 +16,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/user"
-	"github.com/google/uuid"
 )
 
 const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
@@ -78,9 +78,9 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
 
-	sessionID := uuid.NewString()
+	sessionID := uuid.New().String()
 	if err := sessionStore.Insert(ctx, session.Row{
-		ID: sessionID, UserID: userID, TenantID: tt.ID, DeviceID: uuid.NewString(),
+		ID: sessionID, UserID: userID, TenantID: tt.ID, DeviceID: uuid.New().String(),
 		RefreshHash: "fixture-hash", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
 	}); err != nil {
 		t.Fatalf("Insert() error: %v", err)

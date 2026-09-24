@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	pg_query "github.com/pganalyze/pg_query_go/v6"

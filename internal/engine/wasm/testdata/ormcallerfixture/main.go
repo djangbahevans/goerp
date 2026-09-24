@@ -11,11 +11,11 @@ package main
 
 import (
 	"strconv"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
-	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -140,7 +140,7 @@ func runOrmFlow() uint64 {
 		return err == nil
 	}
 
-	id1 := uuid.NewString()
+	id1 := uuid.New().String()
 	createVals := NewWidgetValues().SetID(id1).SetName("Widget A").SetPrice(100)
 	created, err := orm.Create[Widget](&createVals.Values)
 	if !record("create", created.Name, err) {
@@ -160,14 +160,14 @@ func runOrmFlow() uint64 {
 	searchReadOut, _, err := orm.From[Widget]().Where(WidgetFields.Price.Eq(200)).Select(WidgetAllFields...).All()
 	record("search_read", strconv.Itoa(len(searchReadOut)), err)
 
-	id2, id3 := uuid.NewString(), uuid.NewString()
+	id2, id3 := uuid.New().String(), uuid.New().String()
 	batchVals2 := NewWidgetValues().SetID(id2).SetName("Widget B").SetPrice(50)
 	batchVals3 := NewWidgetValues().SetID(id3).SetName("Widget C").SetPrice(50)
 	batchOut, err := orm.CreateBatch[Widget]([]*orm.Values[Widget]{&batchVals2.Values, &batchVals3.Values})
 	record("create_batch", strconv.Itoa(len(batchOut)), err)
 
 	focUnique := NewWidgetValues().SetName("Widget A")
-	focCreate := NewWidgetValues().SetID(uuid.NewString()).SetPrice(999)
+	focCreate := NewWidgetValues().SetID(uuid.New().String()).SetPrice(999)
 	focRecord, focCreated, err := orm.FirstOrCreate[Widget](&focUnique.Values, &focCreate.Values)
 	_ = focRecord
 	record("first_or_create", strconv.FormatBool(focCreated), err)
@@ -237,7 +237,7 @@ func runOrmTxFlow() uint64 {
 		return err == nil
 	}
 
-	id1, id2 := uuid.NewString(), uuid.NewString()
+	id1, id2 := uuid.New().String(), uuid.New().String()
 	var countInTx int64
 	err := db.WithTx(func(tx *db.Tx) error {
 		createVals := NewWidgetValues().SetID(id1).SetName("Tx Widget A").SetPrice(700)
@@ -300,7 +300,7 @@ func runOrmTxFlow() uint64 {
 
 		// Matches "name", which CreateTx already inserted on this same tx.
 		focUnique := NewWidgetValues().SetName("Tx Widget A")
-		focCreate := NewWidgetValues().SetID(uuid.NewString()).SetPrice(999)
+		focCreate := NewWidgetValues().SetID(uuid.New().String()).SetPrice(999)
 		_, focCreated, err := orm.FirstOrCreateTx[Widget](tx, &focUnique.Values, &focCreate.Values)
 		if err != nil {
 			return err

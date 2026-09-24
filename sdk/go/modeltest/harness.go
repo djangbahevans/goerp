@@ -22,6 +22,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine"
 	"github.com/djangbahevans/goerp/internal/engine/config"
@@ -35,7 +36,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	internalmodule "github.com/djangbahevans/goerp/internal/module"
-	"github.com/google/uuid"
 )
 
 // riverMigrateOnce ensures River's own tables (river_job, etc. — h.Events
@@ -151,7 +151,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	})
 	moduleName := mod.Manifest.Name
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	tenantSlug := randomTenantSlug()
 	createTenantSchema(t, primaryDB, tenantSlug)
 
@@ -174,7 +174,7 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 
 	userID := cfg.userID
 	if userID == "" {
-		userID = uuid.NewString()
+		userID = uuid.New().String()
 	}
 	userPerms := allPerms
 	if cfg.userID != "" {

@@ -19,13 +19,13 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
-	"github.com/google/uuid"
 )
 
 // defaultPurpose matches host.storage.upload's own default
@@ -173,12 +173,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileID, err := uuid.NewV7()
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "upload failed")
-		return
-	}
-
+	fileID := uuid.NewV7()
 	key := storage.BuildKey(purpose, tenantCtx.TenantID, fileID.String(), path.Ext(fileHeader.Filename))
 
 	f, err := fileHeader.Open()

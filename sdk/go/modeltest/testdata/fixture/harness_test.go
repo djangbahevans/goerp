@@ -4,9 +4,9 @@ import (
 	"encoding/json/v2"
 	"reflect"
 	"testing"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/sdk/go/modeltest"
-	"github.com/google/uuid"
 )
 
 func TestPing(t *testing.T) {
@@ -82,7 +82,7 @@ func TestCreateWidget_InsertsRowAndEmitsEvent(t *testing.T) {
 func TestSeed_ThenAssertExists(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
-	h.DB.Seed("widgets", map[string]any{"id": uuid.NewString(), "name": "Seeded Widget"})
+	h.DB.Seed("widgets", map[string]any{"id": uuid.New().String(), "name": "Seeded Widget"})
 	h.DB.AssertExists("widgets", map[string]any{"name": "Seeded Widget"})
 	h.DB.AssertNotExists("widgets", map[string]any{"name": "Nonexistent Widget"})
 	h.DB.AssertCount("widgets", 1, "")
@@ -117,7 +117,7 @@ func TestActionOverridesEnableOpsRouteOfModelWithLabelPlural(t *testing.T) {
 func TestCustomActionIsExposedAtDerivedPathAndReachesItsHandler(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
-	id := uuid.NewString()
+	id := uuid.New().String()
 	resp := h.POST("/widgets/gizmo-boxes/"+id+"/ship", nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
@@ -134,7 +134,7 @@ func TestActionRouteRequiresAuthenticationByDefault(t *testing.T) {
 	if resp := h.Anonymous().GET("/widgets/gizmo-boxes"); resp.StatusCode != 401 {
 		t.Fatalf("anonymous list action status = %d, want 401", resp.StatusCode)
 	}
-	if resp := h.Anonymous().POST("/widgets/gizmo-boxes/"+uuid.NewString()+"/ship", nil); resp.StatusCode != 401 {
+	if resp := h.Anonymous().POST("/widgets/gizmo-boxes/"+uuid.New().String()+"/ship", nil); resp.StatusCode != 401 {
 		t.Fatalf("anonymous custom action status = %d, want 401", resp.StatusCode)
 	}
 }
@@ -162,7 +162,7 @@ func TestRecordActionRejectsANonUUIDID(t *testing.T) {
 func TestEnableOpsRoutesAreServedByTheEngine(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
-	h.DB.Seed("widgets_gadget", map[string]any{"id": uuid.NewString(), "name": "Sprocket"})
+	h.DB.Seed("widgets_gadget", map[string]any{"id": uuid.New().String(), "name": "Sprocket"})
 
 	list := h.GET("/widgets/gadgets")
 	if list.StatusCode != 200 {
@@ -188,7 +188,7 @@ func TestEnableOpsRoutesAreServedByTheEngine(t *testing.T) {
 func TestWorkflowTransitionRouteIsServedByTheEngine(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
-	id := uuid.NewString()
+	id := uuid.New().String()
 	h.DB.Seed("widgets_gadget", map[string]any{"id": id, "name": "Sprocket", "state": "draft"})
 
 	resp := h.POST("/widgets/gadgets/"+id+"/finish", nil)

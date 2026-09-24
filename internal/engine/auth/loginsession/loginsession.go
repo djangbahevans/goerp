@@ -13,8 +13,7 @@ import (
 	"encoding/json/v2"
 	"net"
 	"net/http"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 )
@@ -37,7 +36,7 @@ func ResolveDeviceID(r *http.Request, bodyDeviceID string, nonBrowser bool) (id 
 			return candidate, false
 		}
 	}
-	return uuid.NewString(), true
+	return uuid.New().String(), true
 }
 
 // ClientIP extracts the request's remote address, stripping the port.

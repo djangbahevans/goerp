@@ -9,11 +9,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/user"
-	"github.com/google/uuid"
 )
 
 // localPostgresDSN points directly at the compose.dev.yml Postgres
@@ -170,12 +170,12 @@ func sessionFixture(t *testing.T, store *Store, conn *sql.DB) (sessionID, userID
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
 
-	sessionID = uuid.NewString()
+	sessionID = uuid.New().String()
 	row := Row{
 		ID:          sessionID,
 		UserID:      userID,
 		TenantID:    tt.ID,
-		DeviceID:    uuid.NewString(),
+		DeviceID:    uuid.New().String(),
 		RefreshHash: "fixture-hash",
 		ExpiresAt:   time.Now().Add(30 * 24 * time.Hour),
 	}
@@ -217,14 +217,14 @@ func TestInsert_MFAFieldsRoundTripWhenSet(t *testing.T) {
 		t.Fatalf("query fixture tenant_id: %v", err)
 	}
 
-	credID := uuid.NewString()
+	credID := uuid.New().String()
 	verifiedAt := time.Now().Add(-time.Minute)
-	mfaSessionID := uuid.NewString()
+	mfaSessionID := uuid.New().String()
 	if err := store.Insert(context.Background(), Row{
 		ID:              mfaSessionID,
 		UserID:          userID,
 		TenantID:        tenantID,
-		DeviceID:        uuid.NewString(),
+		DeviceID:        uuid.New().String(),
 		RefreshHash:     "mfa-fixture-hash",
 		ExpiresAt:       time.Now().Add(30 * 24 * time.Hour),
 		MFAMethod:       "totp",
@@ -275,7 +275,7 @@ func TestUpdateMFAAssurance_SetsColumnsOnExistingRow(t *testing.T) {
 	store, conn := openTestStore(t)
 	sessionID, _ := sessionFixture(t, store, conn)
 
-	credID := uuid.NewString()
+	credID := uuid.New().String()
 	verifiedAt := time.Now().Add(-30 * time.Second)
 	if _, err := store.UpdateMFAAssurance(context.Background(), sessionID, "totp", verifiedAt, credID); err != nil {
 		t.Fatalf("UpdateMFAAssurance() error: %v", err)
@@ -305,12 +305,12 @@ func TestUpdateMFAAssurance_OverwritesPreviousValue(t *testing.T) {
 	sessionID, _ := sessionFixture(t, store, conn)
 	ctx := context.Background()
 
-	first := uuid.NewString()
+	first := uuid.New().String()
 	if _, err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now().Add(-time.Hour), first); err != nil {
 		t.Fatalf("first UpdateMFAAssurance() error: %v", err)
 	}
 
-	second := uuid.NewString()
+	second := uuid.New().String()
 	verifiedAt := time.Now()
 	if _, err := store.UpdateMFAAssurance(ctx, sessionID, "webauthn", verifiedAt, second); err != nil {
 		t.Fatalf("second UpdateMFAAssurance() error: %v", err)
@@ -338,7 +338,7 @@ func TestUpdateMFAAssurance_OverwritesPreviousValue(t *testing.T) {
 func TestUpdateMFAAssurance_UnknownIDReturnsErrSessionNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.UpdateMFAAssurance(context.Background(), uuid.NewString(), "totp", time.Now(), uuid.NewString())
+	_, err := store.UpdateMFAAssurance(context.Background(), uuid.New().String(), "totp", time.Now(), uuid.New().String())
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("UpdateMFAAssurance() error = %v, want ErrSessionNotFound", err)
 	}
@@ -353,7 +353,7 @@ func TestUpdateMFAAssurance_RevokedSessionReturnsErrSessionNotFound(t *testing.T
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
-	_, err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now(), uuid.NewString())
+	_, err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now(), uuid.New().String())
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("UpdateMFAAssurance() on a revoked session error = %v, want ErrSessionNotFound", err)
 	}
@@ -386,7 +386,7 @@ func TestRevoke_SetsRevokedAtAndReason(t *testing.T) {
 func TestRevoke_UnknownIDReturnsErrSessionNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	err := store.Revoke(context.Background(), uuid.NewString(), "logout")
+	err := store.Revoke(context.Background(), uuid.New().String(), "logout")
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("Revoke() error = %v, want ErrSessionNotFound", err)
 	}
@@ -422,13 +422,13 @@ func TestRevokeAllForUser_RevokesEveryNonRevokedSession(t *testing.T) {
 	// A second session for the same user, same fixture tenant/user rows
 	// reused by inserting directly rather than calling sessionFixture
 	// again (which would create a second, unrelated tenant/user pair).
-	id2 := uuid.NewString()
+	id2 := uuid.New().String()
 	var tenantID string
 	if err := conn.QueryRowContext(context.Background(), `SELECT tenant_id FROM system.sessions WHERE id = $1`, id1).Scan(&tenantID); err != nil {
 		t.Fatalf("query tenant_id: %v", err)
 	}
 	if err := store.Insert(context.Background(), Row{
-		ID: id2, UserID: userID, TenantID: tenantID, DeviceID: uuid.NewString(),
+		ID: id2, UserID: userID, TenantID: tenantID, DeviceID: uuid.New().String(),
 		RefreshHash: "fixture-hash-2", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
 	}); err != nil {
 		t.Fatalf("Insert() second session: %v", err)
@@ -487,9 +487,9 @@ func TestRevokeAllForTenant_RevokesEveryNonRevokedSession(t *testing.T) {
 
 	// A second user's session in the same tenant — a tenant-scoped revoke
 	// must reach across users, unlike RevokeAllForUser.
-	id2 := uuid.NewString()
+	id2 := uuid.New().String()
 	if err := store.Insert(context.Background(), Row{
-		ID: id2, UserID: userID, TenantID: tenantID, DeviceID: uuid.NewString(),
+		ID: id2, UserID: userID, TenantID: tenantID, DeviceID: uuid.New().String(),
 		RefreshHash: "fixture-hash-2", ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
 	}); err != nil {
 		t.Fatalf("Insert() second session: %v", err)
@@ -560,11 +560,11 @@ func secondTenantForUser(t *testing.T, conn *sql.DB, userID string) (tenantID, s
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
 
-	sessionID = uuid.NewString()
+	sessionID = uuid.New().String()
 	if _, err := conn.ExecContext(ctx, `
 		INSERT INTO system.sessions (id, user_id, tenant_id, family_id, device_id, refresh_hash, expires_at)
 		VALUES ($1, $2, $3, $1, $4, $5, $6)
-	`, sessionID, userID, tt.ID, uuid.NewString(), "fixture-hash-other-tenant", time.Now().Add(30*24*time.Hour)); err != nil {
+	`, sessionID, userID, tt.ID, uuid.New().String(), "fixture-hash-other-tenant", time.Now().Add(30*24*time.Hour)); err != nil {
 		t.Fatalf("insert session in second tenant: %v", err)
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE id = $1`, sessionID) })
