@@ -1,8 +1,7 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
-import { Toast } from "@goerp/sdk/components";
-import { createRootRouteWithContext, Outlet, redirect } from "@tanstack/react-router";
+import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { isAuthPath } from "../../auth/safe-redirect.js";
-import { CommandPalette } from "../../chrome/index.js";
+import { RootLayout } from "../root-layout.js";
 
 export interface RouterContext {
   auth: AuthContextValue;
@@ -19,11 +18,5 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     if (status === "idle" || status === "checking" || context.auth.isAuthenticated) return;
     throw redirect({ to: "/auth/login", search: { redirect: location.href } });
   },
-  component: () => (
-    <>
-      <Outlet />
-      <Toast />
-      <CommandPalette />
-    </>
-  ),
+  component: RootLayout,
 });
