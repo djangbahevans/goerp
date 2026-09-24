@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SectionNav, type SectionNavGroup, type SectionNavLayout } from "./section-nav.js";
+import { mostSpecificItem, SectionNav, type SectionNavGroup, type SectionNavLayout } from "./section-nav.js";
 
 afterEach(() => {
   cleanup();
@@ -27,10 +27,19 @@ const GROUPS: SectionNavGroup[] = [
   { heading: "Platform", items: [{ to: "/admin/modules", label: "Modules" }] },
 ];
 
-async function renderNav(path: string, layout?: SectionNavLayout) {
+const NESTED_GROUPS: SectionNavGroup[] = [
+  {
+    items: [
+      { to: "/admin/settings", label: "Tenant settings" },
+      { to: "/admin/settings/notifications", label: "Notification templates" },
+    ],
+  },
+];
+
+async function renderNav(path: string, layout?: SectionNavLayout, groups: SectionNavGroup[] = GROUPS) {
   const rootRoute = createRootRoute({
     component: () => (
-      <SectionNav label="Administration" groups={GROUPS} layout={layout}>
+      <SectionNav label="Administration" groups={groups} layout={layout}>
         <Outlet />
       </SectionNav>
     ),
@@ -43,6 +52,8 @@ async function renderNav(path: string, layout?: SectionNavLayout) {
       page("/admin/users/$id"),
       page("/admin/roles"),
       page("/admin/modules"),
+      page("/admin/settings"),
+      page("/admin/settings/notifications"),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
   });
@@ -73,6 +84,20 @@ describe("SectionNav", () => {
   it("keeps an item active on its nested pages", async () => {
     const nav = await renderNav("/admin/users/01j", "wide");
     expect(within(nav).getByRole("link", { name: "Users" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("marks only the most specific item when one item's path is a parent of another's", async () => {
+    const nav = await renderNav("/admin/settings/notifications", "wide", NESTED_GROUPS);
+    const current = within(nav)
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("aria-current") === "page");
+    expect(current.map((link) => link.textContent)).toEqual(["Notification templates"]);
+  });
+
+  it("keeps the parent item active on its own page", async () => {
+    const nav = await renderNav("/admin/settings", "wide", NESTED_GROUPS);
+    expect(within(nav).getByRole("link", { name: "Tenant settings" }).getAttribute("aria-current")).toBe("page");
+    expect(within(nav).getByRole("link", { name: "Notification templates" }).getAttribute("aria-current")).toBeNull();
   });
 
   it("labels each headed group's list and drops empty groups with their heading", async () => {
@@ -112,5 +137,13 @@ describe("SectionNav", () => {
     stubMatchMedia(true);
     const wide = await renderNav("/admin/users");
     expect(within(wide).getAllByRole("list")).toHaveLength(2);
+  });
+});
+
+describe("mostSpecificItem", () => {
+  it("picks the longest item path that equals or contains the pathname", () => {
+    expect(mostSpecificItem("/admin/settings/notifications", NESTED_GROUPS)).toBe("/admin/settings/notifications");
+    expect(mostSpecificItem("/admin/settings/", NESTED_GROUPS)).toBe("/admin/settings");
+    expect(mostSpecificItem("/admin/settings-archive", NESTED_GROUPS)).toBeNull();
   });
 });
