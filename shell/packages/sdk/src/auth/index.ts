@@ -7,7 +7,10 @@ export {
   createPermissionContextValue,
   PermissionContext,
   PermissionProvider,
+  type PermissionsStatus,
+  PermissionsStatusContext,
   permissionDataRef,
+  usePermissionsStatus,
 } from "./permission-provider.js";
 export type { FieldAccess, FieldAccessMap, PermissionContextValue, PermissionData } from "./permission-types.js";
 export { TokenRefreshScheduler, tokenRefreshScheduler, wireAutoRefresh } from "./token-refresh-scheduler.js";

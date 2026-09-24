@@ -1,10 +1,22 @@
-import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { tenantChannel, useChannelRefresh, userChannel } from "../realtime/index.js";
 import { fetchPermissions } from "./permission-client.js";
 import type { PermissionContextValue, PermissionData } from "./permission-types.js";
 import { useAuth } from "./use-auth.js";
 
 export const PermissionContext = createContext<PermissionContextValue | null>(null);
+
+// Whether the current session's first /_meta/permissions fetch is still in
+// flight, succeeded, or failed. Before it settles — and after a failure —
+// PermissionContext holds the same empty, deny-everything data a user with no
+// grants gets. "ready" outside a provider, where there's nothing to wait for.
+export type PermissionsStatus = "loading" | "ready" | "error";
+
+export const PermissionsStatusContext = createContext<PermissionsStatus>("ready");
+
+export function usePermissionsStatus(): PermissionsStatus {
+  return useContext(PermissionsStatusContext);
+}
 
 const EMPTY_DATA: PermissionData = { permissions: new Set(), fieldAccess: {}, modulesEnabled: new Set() };
 
@@ -46,6 +58,7 @@ export function PermissionProviderForUser({
   children: ReactNode;
 }) {
   const [loadedData, setLoadedData] = useState<PermissionData>(EMPTY_DATA);
+  const [status, setStatus] = useState<PermissionsStatus>("loading");
 
   // Shared by both effects below so a fetch triggered by one can never be
   // clobbered by a slower, already-superseded fetch from the other landing
@@ -56,11 +69,15 @@ export function PermissionProviderForUser({
     const requestId = ++latestRequestId.current;
     void fetchPermissions()
       .then((result) => {
-        if (!isCancelled() && latestRequestId.current === requestId) setLoadedData(result);
+        if (isCancelled() || latestRequestId.current !== requestId) return;
+        setLoadedData(result);
+        setStatus("ready");
       })
       .catch(() => {
-        if (!isCancelled() && fallbackToEmptyOnError && latestRequestId.current === requestId)
+        if (!isCancelled() && fallbackToEmptyOnError && latestRequestId.current === requestId) {
           setLoadedData(EMPTY_DATA);
+          setStatus("error");
+        }
       });
   }, []);
 
@@ -89,7 +106,13 @@ export function PermissionProviderForUser({
     permissionDataRef.current = data;
   }, [data]);
   const value = useMemo(() => createPermissionContextValue(data), [data]);
-  return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
+  return (
+    <PermissionContext.Provider value={value}>
+      <PermissionsStatusContext.Provider value={isAuthenticated ? status : "loading"}>
+        {children}
+      </PermissionsStatusContext.Provider>
+    </PermissionContext.Provider>
+  );
 }
 
 // Keyed by user id so switching accounts on the same tab remounts with a fresh EMPTY_DATA instead of

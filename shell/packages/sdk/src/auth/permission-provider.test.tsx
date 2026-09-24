@@ -5,7 +5,7 @@ import type { MessageHandler, RealtimeEnvelope } from "../realtime/ws-manager.js
 // vi.mock calls are hoisted above every import in this file (including this
 // one) by vitest's transform, so the module under test always sees the
 // mocked ./permission-client.js and ../realtime/index.js below.
-import { PermissionContext, PermissionProviderForUser } from "./permission-provider.js";
+import { PermissionContext, PermissionProviderForUser, usePermissionsStatus } from "./permission-provider.js";
 import type { PermissionData } from "./permission-types.js";
 
 // vi.mock's factory runs at hoist time, before any other top-level statement
@@ -355,5 +355,63 @@ describe("PermissionProviderForUser with both tenant and user channels active", 
     // module.installed + plan.changed on the tenant channel, plus
     // role.changed on the user channel.
     expect(unsubscribeMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+function LoadedProbe() {
+  return <div data-testid="loaded">{usePermissionsStatus()}</div>;
+}
+
+describe("usePermissionsStatus", () => {
+  it("is loading until the first fetch settles, then ready", async () => {
+    const pending = deferred<PermissionData>();
+    fetchPermissionsMock.mockReturnValue(pending.promise);
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
+        <LoadedProbe />
+      </PermissionProviderForUser>,
+    );
+
+    expect(getByTestId("loaded").textContent).toBe("loading");
+    await act(async () => pending.resolve(dataOf([])));
+    expect(getByTestId("loaded").textContent).toBe("ready");
+  });
+
+  it("is error after a failed fetch, so empty data isn't mistaken for no access", async () => {
+    fetchPermissionsMock.mockRejectedValue(new Error("network"));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
+        <LoadedProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("loaded").textContent).toBe("error"));
+  });
+
+  it("stays ready while a live refresh is in flight", async () => {
+    fetchPermissionsMock.mockResolvedValueOnce(dataOf(["sales"]));
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
+        <LoadedProbe />
+      </PermissionProviderForUser>,
+    );
+    await waitFor(() => expect(getByTestId("loaded").textContent).toBe("ready"));
+
+    fetchPermissionsMock.mockReturnValueOnce(deferred<PermissionData>().promise);
+    fireChannelMessage("tenant:t1", { channel: "tenant:t1", type: "module.installed" });
+    expect(getByTestId("loaded").textContent).toBe("ready");
+  });
+
+  it("is loading while unauthenticated", () => {
+    const { getByTestId } = render(
+      <PermissionProviderForUser isAuthenticated={false} tenantId={null} userId={null}>
+        <LoadedProbe />
+      </PermissionProviderForUser>,
+    );
+    expect(getByTestId("loaded").textContent).toBe("loading");
+  });
+
+  it("defaults to ready outside a provider", () => {
+    const { getByTestId } = render(<LoadedProbe />);
+    expect(getByTestId("loaded").textContent).toBe("ready");
   });
 });
