@@ -1012,7 +1012,7 @@ describe("ListRenderer", () => {
     expect(router.state.location.search).toEqual({});
   });
 
-  it("Load more: disabled with ActionButton's own loading treatment while isFetchingNextPage", async () => {
+  it("Load more: shows ActionButton's loading treatment while isFetchingNextPage", async () => {
     useInfiniteListMock.mockReturnValue({
       data: { pages: [{ data: [], meta: { cursor: "p2", hasMore: true } }] },
       isLoading: false,
@@ -1026,7 +1026,7 @@ describe("ListRenderer", () => {
 
     await renderListRenderer({}, fullAccess);
 
-    expect(screen.getByRole("button", { name: "Load more" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Load more" }).getAttribute("aria-busy")).toBe("true");
   });
 
   it("Load more: calls fetchNextPage on click once no longer fetching", async () => {

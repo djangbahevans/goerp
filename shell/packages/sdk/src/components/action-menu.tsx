@@ -3,8 +3,8 @@ import type { KeyboardEvent, ReactNode, Ref } from "react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOptionalPermission } from "../auth/use-permission.js";
-import { actionButtonClassName } from "./action-button-styles.js";
 import { AlertDialog, type AlertDialogInput } from "./alert-dialog.js";
+import { Button } from "./button.js";
 import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { Icon, type IconNameLike } from "./icon.js";
 
@@ -282,19 +282,16 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
           },
         })
       ) : (
-        <button
+        <Button
           ref={triggerRef}
-          type="button"
           aria-haspopup="menu"
           aria-expanded={open}
-          data-disabled={disabled ? "true" : undefined}
           disabled={disabled}
-          className={actionButtonClassName("secondary", "md")}
           onClick={() => (open ? setOpen(false) : openMenu(1))}
           onKeyDown={handleTriggerKeyDown}
         >
           {label}
-        </button>
+        </Button>
       )}
       {open &&
         createPortal(

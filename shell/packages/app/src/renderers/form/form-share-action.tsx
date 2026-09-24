@@ -1,4 +1,4 @@
-import { actionButtonClassName } from "@goerp/sdk/components";
+import { Button } from "@goerp/sdk/components";
 import { modelRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
@@ -45,17 +45,16 @@ export function ShareHeaderAction({ resource, recordId }: { resource: string; re
 
   return (
     <div ref={containerRef} className="relative inline-block">
-      <button
+      <Button
         ref={triggerRef}
-        type="button"
-        className={actionButtonClassName("ghost", "md")}
+        variant="ghost"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}
       >
         Share
-      </button>
+      </Button>
       {open && (
         <div
           id={panelId}

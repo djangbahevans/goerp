@@ -1,8 +1,7 @@
-import { EmptyState, formatRelativeTime, Skeleton } from "@goerp/sdk/components";
+import { EmptyState, formatRelativeTime, IconButton, Skeleton } from "@goerp/sdk/components";
 import type { Notification } from "@goerp/sdk/notifications";
 import { useMarkRead, useNotifications } from "@goerp/sdk/notifications";
 import { useNavigate } from "@tanstack/react-router";
-import { X } from "lucide-react";
 import type { CSSProperties, ReactNode, UIEvent } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -168,14 +167,7 @@ export function NotificationSheet({ open, onClose }: NotificationSheetProps): Re
           >
             Notifications
           </h2>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="rounded-control p-1 text-text-secondary hover:bg-surface-hover"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
+          <IconButton icon="x" label="Close" size="sm" onClick={onClose} />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>

@@ -1,5 +1,5 @@
 import { fetchTenantContext, useAuth, type VerificationEmailRequest } from "@goerp/sdk/auth";
-import { actionButtonClassName, Countdown, fieldInputClassName, PasswordField, Spinner } from "@goerp/sdk/components";
+import { Button, Countdown, fieldInputClassName, PasswordField } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -283,18 +283,15 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
           )}
         </div>
 
-        <button
+        <Button
           type="submit"
-          disabled={inputsDisabled || sessionCheckPending || !tenantContext.isFetched}
-          // Same convention as ActionButton: dimmed when inactive, but full
-          // contrast while busy submitting.
-          data-disabled={locked || sessionCheckPending || !tenantContext.isFetched ? "true" : undefined}
-          aria-busy={submitting}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
+          variant="primary"
+          fullWidth
+          disabled={locked || sessionCheckPending || !tenantContext.isFetched}
+          loading={submitting}
         >
-          {submitting && <Spinner size={16} />}
           Sign in
-        </button>
+        </Button>
       </form>
 
       {tenantContext.data?.registrationEnabled && (

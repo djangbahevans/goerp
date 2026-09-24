@@ -1,6 +1,6 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import { useRef } from "react";
-import { actionButtonClassName } from "./action-button-styles.js";
+import { Button } from "./button.js";
 
 export interface SignaturePadProps {
   value: string | null;
@@ -74,15 +74,9 @@ export function SignaturePad({ value, onChange, disabled = false, ariaLabel }: S
           onPointerLeave={end}
         />
       )}
-      <button
-        type="button"
-        disabled={disabled}
-        data-disabled={disabled ? "true" : undefined}
-        onClick={clear}
-        className={actionButtonClassName("ghost", "sm")}
-      >
+      <Button variant="ghost" size="sm" disabled={disabled} onClick={clear}>
         Clear
-      </button>
+      </Button>
     </span>
   );
 }

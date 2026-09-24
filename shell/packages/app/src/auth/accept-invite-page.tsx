@@ -6,10 +6,11 @@ import {
   type InviteInfo,
   type InviteLink,
 } from "@goerp/sdk/auth";
-import { actionButtonClassName, Countdown, fieldInputClassName, Spinner } from "@goerp/sdk/components";
+import { Button, Countdown, fieldInputClassName, Spinner } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 import {
   confirmBlurError,
@@ -74,13 +75,9 @@ export function AcceptInvitePage({
         <div className="flex flex-col gap-4">
           <h1 className="font-semibold text-text text-xl">Couldn't load your invite</h1>
           <p className="text-sm text-text-secondary">Check your connection and try again.</p>
-          <button
-            type="button"
-            onClick={() => void info.refetch()}
-            className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-          >
+          <Button variant="primary" fullWidth onClick={() => void info.refetch()}>
             Try again
-          </button>
+          </Button>
         </div>
       </AuthLayout>
     );
@@ -120,9 +117,9 @@ function DeadLinkCard({ replacesForm = false }: { replacesForm?: boolean }): Rea
         <p className="text-sm text-text-secondary">
           This invite link has expired or has already been used. Ask your administrator to send a new one.
         </p>
-        <a href="/auth/login" className={`${actionButtonClassName("primary", "md")} w-full justify-center`}>
+        <ButtonLink to="/auth/login" variant="primary" fullWidth>
           Go to sign in
-        </a>
+        </ButtonLink>
       </div>
     </AuthLayout>
   );
@@ -236,18 +233,9 @@ function NewAccountForm({
           )}
         </div>
 
-        <button
-          type="submit"
-          disabled={inputsDisabled}
-          // Same convention as ActionButton: dimmed when inactive, but full
-          // contrast while busy submitting.
-          data-disabled={locked ? "true" : undefined}
-          aria-busy={submitting}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-        >
-          {submitting && <Spinner size={16} />}
+        <Button type="submit" variant="primary" fullWidth disabled={locked} loading={submitting}>
           Set password and sign in
-        </button>
+        </Button>
       </form>
     </AuthLayout>
   );
@@ -297,16 +285,9 @@ function ExistingAccountAccess({
         <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
           {phase.kind === "failed" && phase.message}
         </div>
-        <button
-          type="button"
-          onClick={() => void handleAccept()}
-          disabled={accepting}
-          aria-busy={accepting}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-        >
-          {accepting && <Spinner size={16} />}
+        <Button variant="primary" fullWidth loading={accepting} onClick={() => void handleAccept()}>
           Accept and sign in
-        </button>
+        </Button>
       </div>
     </AuthLayout>
   );

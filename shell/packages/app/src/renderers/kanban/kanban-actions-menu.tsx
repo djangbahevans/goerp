@@ -1,6 +1,5 @@
 import { useOptionalPermission } from "@goerp/sdk/auth";
-import { ActionMenu, type ActionMenuItem } from "@goerp/sdk/components";
-import { MoreVertical } from "lucide-react";
+import { ActionMenu, type ActionMenuItem, IconButton } from "@goerp/sdk/components";
 import type { ReactNode } from "react";
 
 export interface KanbanActionsMenuProps {
@@ -42,18 +41,16 @@ export function KanbanActionsMenu({ actions, label }: KanbanActionsMenuProps): R
       label={label}
       items={actions}
       trigger={({ ref, open, onClick, onKeyDown }) => (
-        <button
+        <IconButton
           ref={ref}
-          type="button"
+          icon="ellipsis-vertical"
+          label={label}
+          size="sm"
           aria-haspopup="menu"
           aria-expanded={open}
-          aria-label={label}
           onClick={onClick}
           onKeyDown={onKeyDown}
-          className="rounded-control p-1 text-text-secondary hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
-        >
-          <MoreVertical size={14} aria-hidden="true" />
-        </button>
+        />
       )}
     />
   );

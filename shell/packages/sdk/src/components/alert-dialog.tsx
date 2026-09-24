@@ -3,7 +3,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import * as v from "valibot";
 import { optionalNullable } from "../schema/optional-nullable.js";
-import { actionButtonClassName } from "./action-button-styles.js";
+import { Button } from "./button.js";
 import { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
 
 // manifest-spec.md's SelectOption, as used by ConfirmInput — a schema, not
@@ -145,20 +145,15 @@ export function AlertDialog({
             </div>
             <div className="flex justify-end gap-2 px-6 pb-6 pt-2">
               <AlertDialogPrimitive.Cancel asChild>
-                <button type="button" className={actionButtonClassName("ghost", "md")}>
-                  {cancelLabel}
-                </button>
+                <Button variant="ghost">{cancelLabel}</Button>
               </AlertDialogPrimitive.Cancel>
-              <button
-                type="button"
-                data-variant={confirmVariant}
-                data-disabled={confirmDisabled ? "true" : undefined}
+              <Button
+                variant={confirmVariant}
                 disabled={confirmDisabled}
-                className={actionButtonClassName(confirmVariant, "md")}
                 onClick={() => onConfirm(input ? inputValue : undefined)}
               >
                 {confirmLabel}
-              </button>
+              </Button>
             </div>
           </div>
         </AlertDialogPrimitive.Content>

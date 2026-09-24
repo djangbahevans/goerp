@@ -5,11 +5,12 @@ import {
   type Registration,
   register as registerAccount,
 } from "@goerp/sdk/auth";
-import { actionButtonClassName, Countdown, fieldInputClassName, Spinner } from "@goerp/sdk/components";
+import { Button, Countdown, fieldInputClassName } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { type ReactNode, type RefObject, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 import { confirmBlurError, NewPasswordFields, validateNewPassword } from "./new-password-fields.js";
 import { policyMessageAsSentence } from "./password-messages.js";
@@ -210,9 +211,9 @@ export function RegisterPage({
             Your workspace is almost ready
           </h1>
           <p className="text-sm text-text-secondary">Sign in in a minute.</p>
-          <a href="/auth/login" className={`${actionButtonClassName("primary", "md")} w-full justify-center`}>
+          <ButtonLink to="/auth/login" variant="primary" fullWidth>
             Sign in
-          </a>
+          </ButtonLink>
         </div>
       </AuthLayout>
     );
@@ -315,18 +316,9 @@ export function RegisterPage({
           )}
         </div>
 
-        <button
-          type="submit"
-          disabled={inputsDisabled}
-          // Same convention as ActionButton: dimmed when inactive, but full
-          // contrast while busy submitting.
-          data-disabled={locked ? "true" : undefined}
-          aria-busy={submitting}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-        >
-          {submitting && <Spinner size={16} />}
+        <Button type="submit" variant="primary" fullWidth disabled={locked} loading={submitting}>
           Create account
-        </button>
+        </Button>
       </form>
 
       <p className="mt-6 text-center text-sm text-text-secondary">
@@ -400,7 +392,6 @@ function CheckEmailCard({
   headingRef: RefObject<HTMLHeadingElement | null>;
 }): ReactNode {
   const resendFlow = useVerificationResend(resend);
-  const disabled = resendFlow.sending || resendFlow.coolingDown;
 
   return (
     <AuthLayout>
@@ -413,17 +404,14 @@ function CheckEmailCard({
           hours.
         </p>
         <ResendStatus resend={resendFlow} sentMessage="Sent. Check your inbox and spam folder." />
-        <button
-          type="button"
-          disabled={disabled}
-          data-disabled={resendFlow.coolingDown ? "true" : undefined}
-          aria-busy={resendFlow.sending}
+        <Button
+          fullWidth
+          disabled={resendFlow.coolingDown}
+          loading={resendFlow.sending}
           onClick={() => void resendFlow.send({ email, tenant: tenantSlug })}
-          className={`${actionButtonClassName("secondary", "md")} w-full justify-center`}
         >
-          {resendFlow.sending && <Spinner size={16} />}
           Resend email
-        </button>
+        </Button>
         <a href="/auth/login" className={`${linkClassName} self-center`}>
           Back to sign in
         </a>

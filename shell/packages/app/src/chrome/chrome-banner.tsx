@@ -1,5 +1,6 @@
+import { IconButton } from "@goerp/sdk/components";
 import { Link } from "@tanstack/react-router";
-import { Info, type LucideIcon, TriangleAlert, X } from "lucide-react";
+import { Info, type LucideIcon, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type ChromeBannerTone = "warning" | "info";
@@ -59,16 +60,7 @@ export function ChromeBanner({
           </Link>
         )}
       </div>
-      {onDismiss && (
-        <button
-          type="button"
-          onClick={onDismiss}
-          aria-label={dismissLabel}
-          className="shrink-0 rounded-control p-1 text-text-secondary hover:text-text focus-visible:shadow-focus focus-visible:outline-none"
-        >
-          <X size={16} aria-hidden="true" />
-        </button>
-      )}
+      {onDismiss && <IconButton icon="x" label={dismissLabel} size="sm" onClick={onDismiss} />}
     </div>
   );
 }

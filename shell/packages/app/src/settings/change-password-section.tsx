@@ -1,11 +1,5 @@
 import { useAuth } from "@goerp/sdk/auth";
-import {
-  actionButtonClassName,
-  PasswordField,
-  PasswordStrengthMeter,
-  SectionCard,
-  Spinner,
-} from "@goerp/sdk/components";
+import { Button, PasswordField, PasswordStrengthMeter, SectionCard } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { useLocation } from "@tanstack/react-router";
@@ -115,15 +109,9 @@ export function ChangePasswordSection(): ReactNode {
             disabled={submitting}
           />
           <div>
-            <button
-              type="submit"
-              disabled={submitting}
-              aria-busy={submitting}
-              className={actionButtonClassName("secondary", "md")}
-            >
-              {submitting && <Spinner size={16} />}
+            <Button type="submit" loading={submitting}>
               Change password
-            </button>
+            </Button>
           </div>
         </form>
       </SectionCard>

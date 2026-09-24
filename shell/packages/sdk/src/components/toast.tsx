@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { ToastMessage, ToastVariant } from "../notifications/toast.js";
 import { type ToastBus, toastBus } from "../notifications/toast.js";
-import { actionButtonClassName } from "./action-button-styles.js";
+import { Button } from "./button.js";
+import { IconButton } from "./icon-button.js";
 import { Spinner } from "./spinner.js";
 
 // Matches --duration-fast — ToastBus removes a dismissed/auto-dismissed
@@ -32,9 +33,6 @@ const VARIANT_BORDER_CLASSES: Record<ToastVariant, string> = {
   info: "border-l-info",
   loading: "border-l-primary",
 };
-
-const DISMISS_CLASSES =
-  "rounded-control p-1 text-text-secondary transition-colors duration-(--duration-fast) ease-out hover:text-text focus-visible:outline-none focus-visible:shadow-focus motion-reduce:transition-none";
 
 // shell-ux.md §7.1: renders the ToastBus queue — the data/event layer
 // module code calls directly (`toast.success(...)`), never mounting this
@@ -102,9 +100,9 @@ export function Toast({ bus = toastBus }: ToastProps): ReactNode {
           )}
           <span className="flex-1 text-text">{t.message}</span>
           {t.options?.action && (
-            <button type="button" className={actionButtonClassName("ghost", "sm")} onClick={t.options.action.onClick}>
+            <Button variant="ghost" size="sm" onClick={t.options.action.onClick}>
               {t.options.action.label}
-            </button>
+            </Button>
           )}
           {t.variant !== "loading" && (
             // A loading toast is resolved by the caller (success/error
@@ -112,14 +110,7 @@ export function Toast({ bus = toastBus }: ToastProps): ReactNode {
             // manually dismissed would make that later resolve() call
             // resurrect it as a brand-new toast (id no longer found in
             // ToastBus.toasts, so upsert() appends instead of replacing).
-            <button
-              type="button"
-              className={DISMISS_CLASSES}
-              onClick={() => bus.dismiss(t.id)}
-              aria-label={`Dismiss: ${t.message}`}
-            >
-              ×
-            </button>
+            <IconButton icon="x" label={`Dismiss: ${t.message}`} size="sm" onClick={() => bus.dismiss(t.id)} />
           )}
         </div>
       ))}

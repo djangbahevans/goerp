@@ -1,5 +1,5 @@
 import { beginTOTPEnrollment, confirmTOTPEnrollment, type TOTPEnrollment, useAuth } from "@goerp/sdk/auth";
-import { actionButtonClassName, Spinner } from "@goerp/sdk/components";
+import { Button, Spinner } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { useNavigate } from "@tanstack/react-router";
@@ -34,9 +34,6 @@ type Step =
   | { kind: "codes"; codes: string[] }
   // Enrolled, with no new recovery codes to show; finishing may need a retry.
   | { kind: "done" };
-
-const linkButtonClassName =
-  "self-center rounded-control text-sm text-primary hover:underline focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50";
 
 // Groups the base32 key in fours so it can be read off and typed by hand.
 export function formatManualKey(secret: string): string {
@@ -177,13 +174,9 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
           <p role="alert" className="text-danger text-sm">
             Couldn't start two-factor setup. Check your connection and try again.
           </p>
-          <button
-            type="button"
-            onClick={() => void start()}
-            className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-          >
+          <Button variant="primary" fullWidth onClick={() => void start()}>
             Try again
-          </button>
+          </Button>
         </div>
       )}
 
@@ -210,14 +203,13 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
               <code className="flex-1 select-all break-all rounded-control bg-bg-subtle px-2 py-1 font-mono text-sm text-text">
                 {formatManualKey(step.enrollment.secret)}
               </code>
-              <button
-                type="button"
-                onClick={() => void copyText(step.enrollment.secret, "Key")}
+              <Button
+                size="sm"
                 aria-label="Copy setup key"
-                className={actionButtonClassName("secondary", "sm")}
+                onClick={() => void copyText(step.enrollment.secret, "Key")}
               >
                 Copy
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -240,16 +232,9 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
             {busy ? "Verifying…" : null}
           </div>
 
-          <button
-            type="submit"
-            disabled={busy}
-            data-disabled={busy}
-            aria-busy={busy}
-            className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-          >
-            {busy && <Spinner size={16} />}
+          <Button type="submit" variant="primary" fullWidth loading={busy}>
             Verify
-          </button>
+          </Button>
         </form>
       )}
 
@@ -267,20 +252,12 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
             ))}
           </ol>
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => void copyText(step.codes.join("\n"), "Recovery codes")}
-              className={`${actionButtonClassName("secondary", "sm")} flex-1 justify-center`}
-            >
+            <Button size="sm" fullWidth onClick={() => void copyText(step.codes.join("\n"), "Recovery codes")}>
               Copy all
-            </button>
-            <button
-              type="button"
-              onClick={() => downloadCodes(step.codes)}
-              className={`${actionButtonClassName("secondary", "sm")} flex-1 justify-center`}
-            >
+            </Button>
+            <Button size="sm" fullWidth onClick={() => downloadCodes(step.codes)}>
               Download
-            </button>
+            </Button>
           </div>
           <label htmlFor={savedId} className="flex items-center gap-2 text-sm text-text">
             <input
@@ -298,17 +275,9 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
               {finishError}
             </p>
           )}
-          <button
-            type="button"
-            disabled={!saved || busy}
-            data-disabled={!saved || busy}
-            aria-busy={busy}
-            onClick={() => void finish()}
-            className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-          >
-            {busy && <Spinner size={16} />}
+          <Button variant="primary" fullWidth disabled={!saved} loading={busy} onClick={() => void finish()}>
             Finish
-          </button>
+          </Button>
         </div>
       )}
 
@@ -320,15 +289,9 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
               <p role="alert" className="text-danger text-sm">
                 {finishError}
               </p>
-              <button
-                type="button"
-                disabled={busy}
-                data-disabled={busy}
-                onClick={() => void finish()}
-                className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-              >
+              <Button variant="primary" fullWidth loading={busy} onClick={() => void finish()}>
                 Try again
-              </button>
+              </Button>
             </>
           ) : (
             <div role="status" className="flex items-center gap-2 text-sm text-text-secondary">
@@ -339,9 +302,11 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
         </div>
       )}
 
-      <button type="button" onClick={() => void signOut()} className={`${linkButtonClassName} mt-6 block`}>
-        Sign out
-      </button>
+      <div className="mt-6 flex justify-center text-sm">
+        <Button variant="link" onClick={() => void signOut()}>
+          Sign out
+        </Button>
+      </div>
     </AuthLayout>
   );
 }

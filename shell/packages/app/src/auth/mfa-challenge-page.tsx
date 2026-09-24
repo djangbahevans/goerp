@@ -1,5 +1,5 @@
 import { type MFAMethod, useAuth } from "@goerp/sdk/auth";
-import { actionButtonClassName, fieldInputClassName, Spinner } from "@goerp/sdk/components";
+import { Button, fieldInputClassName } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
@@ -33,7 +33,7 @@ function loginHref(redirectTo: string, notice?: LoginNotice): string {
   return `/auth/login?${params}`;
 }
 
-const linkButtonClassName =
+const linkClassName =
   "self-center rounded-control text-sm text-primary hover:underline focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50";
 
 export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNode {
@@ -132,7 +132,7 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
         <p className="mb-6 text-sm text-text-secondary">
           Your account's verification method can't be used on this page yet.
         </p>
-        <a href={loginHref(redirectTo)} className={linkButtonClassName}>
+        <a href={loginHref(redirectTo)} className={linkClassName}>
           Back to sign in
         </a>
       </AuthLayout>
@@ -199,25 +199,20 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
           {verifying ? "Verifying…" : null}
         </div>
 
-        <button
-          type="submit"
-          disabled={verifying}
-          aria-busy={verifying}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-        >
-          {verifying && <Spinner size={16} />}
+        <Button type="submit" variant="primary" fullWidth loading={verifying}>
           Verify
-        </button>
+        </Button>
 
         {canTOTP && canRecovery && (
-          <button
-            type="button"
-            disabled={verifying}
-            onClick={() => switchMode(mode === "totp" ? "recovery_code" : "totp")}
-            className={linkButtonClassName}
-          >
-            {mode === "totp" ? "Use a recovery code instead" : "Use your authenticator app instead"}
-          </button>
+          <div className="flex justify-center text-sm">
+            <Button
+              variant="link"
+              disabled={verifying}
+              onClick={() => switchMode(mode === "totp" ? "recovery_code" : "totp")}
+            >
+              {mode === "totp" ? "Use a recovery code instead" : "Use your authenticator app instead"}
+            </Button>
+          </div>
         )}
       </form>
     </AuthLayout>

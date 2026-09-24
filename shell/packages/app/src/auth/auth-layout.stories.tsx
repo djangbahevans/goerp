@@ -1,4 +1,4 @@
-import { actionButtonClassName, PasswordField, PasswordStrengthMeter } from "@goerp/sdk/components";
+import { Button, PasswordField, PasswordStrengthMeter } from "@goerp/sdk/components";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { type ReactNode, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
@@ -21,9 +21,9 @@ const signInContent = (
     <h1 className="text-xl font-semibold">Sign in</h1>
     <Field label="Email" type="email" />
     <Field label="Password" type="password" />
-    <button type="submit" className={`${actionButtonClassName("primary", "md")} w-full justify-center`}>
+    <Button type="submit" variant="primary" fullWidth>
       Sign in
-    </button>
+    </Button>
   </form>
 );
 
@@ -44,9 +44,9 @@ function AcceptInviteContent(): ReactNode {
       <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="new-password" />
       <PasswordStrengthMeter password={password} />
       <PasswordField label="Confirm password" value={confirm} onChange={setConfirm} autoComplete="new-password" />
-      <button type="submit" className={`${actionButtonClassName("primary", "md")} w-full justify-center`}>
+      <Button type="submit" variant="primary" fullWidth>
         Accept invitation
-      </button>
+      </Button>
     </form>
   );
 }

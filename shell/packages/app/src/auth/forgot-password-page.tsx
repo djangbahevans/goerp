@@ -1,8 +1,9 @@
 import { fetchTenantContext, type PasswordResetRequest, requestPasswordReset } from "@goerp/sdk/auth";
-import { actionButtonClassName, Countdown, fieldInputClassName, Spinner } from "@goerp/sdk/components";
+import { Button, Countdown, fieldInputClassName } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 
 type Phase =
@@ -101,9 +102,9 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
           <p className="text-sm text-text-secondary">
             If that email is registered, you'll receive a reset link shortly.
           </p>
-          <a href="/auth/login" className={`${actionButtonClassName("primary", "md")} w-full justify-center`}>
+          <ButtonLink to="/auth/login" variant="primary" fullWidth>
             Back to sign in
-          </a>
+          </ButtonLink>
         </div>
       </AuthLayout>
     );
@@ -177,18 +178,15 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
           )}
         </div>
 
-        <button
+        <Button
           type="submit"
-          disabled={inputsDisabled || !tenantContext.isFetched}
-          // Same convention as ActionButton: dimmed when inactive, but full
-          // contrast while busy submitting.
-          data-disabled={locked || !tenantContext.isFetched ? "true" : undefined}
-          aria-busy={submitting}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
+          variant="primary"
+          fullWidth
+          disabled={locked || !tenantContext.isFetched}
+          loading={submitting}
         >
-          {submitting && <Spinner size={16} />}
           Send reset link
-        </button>
+        </Button>
       </form>
 
       <p className="mt-6 text-center">

@@ -12,6 +12,7 @@ import {
   useScrollHighlightedOptionIntoView,
 } from "./floating-panel.js";
 import { Icon, type IconNameLike } from "./icon.js";
+import { IconButton } from "./icon-button.js";
 
 // manifest-spec.md's FieldOption object (§10), redefined locally since
 // packages/sdk must not depend on packages/app.
@@ -73,7 +74,7 @@ const TRIGGER_PADDING_WITH_VALUE: CSSProperties = { paddingInlineEnd: "var(--spa
 // it lands between the value and the pinned chevron, not on top of either.
 const CLEAR_BUTTON_STYLE: CSSProperties = {
   position: "absolute",
-  insetInlineEnd: "var(--space-10)",
+  insetInlineEnd: "calc(var(--space-10) - var(--space-1))",
   top: "50%",
   transform: "translateY(-50%)",
 };
@@ -144,15 +145,9 @@ function SelectSingle({
         </SelectPrimitive.Portal>
       </SelectPrimitive.Root>
       {selected !== undefined && clearable && !disabled && (
-        <button
-          type="button"
-          onClick={() => onChange(emptyValue)}
-          aria-label={`Clear ${selected.label}`}
-          style={CLEAR_BUTTON_STYLE}
-          className="rounded-control p-1 text-text-secondary hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus"
-        >
-          ×
-        </button>
+        <span style={CLEAR_BUTTON_STYLE} className="flex">
+          <IconButton icon="x" label={`Clear ${selected.label}`} size="sm" onClick={() => onChange(emptyValue)} />
+        </span>
       )}
     </div>
   );

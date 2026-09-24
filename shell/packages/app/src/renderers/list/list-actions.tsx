@@ -1,13 +1,6 @@
 import { apiClient, downloadBlob } from "@goerp/sdk";
 import { useOptionalPermission } from "@goerp/sdk/auth";
-import {
-  ActionButton,
-  ActionMenu,
-  type ActionMenuItem,
-  AlertDialog,
-  actionButtonClassName,
-  Icon,
-} from "@goerp/sdk/components";
+import { ActionButton, ActionMenu, type ActionMenuItem, AlertDialog, Button } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import { toast } from "@goerp/sdk/notifications";
 import { actionRegistry, dispatch, splitPathAndBody, useAction, useExport } from "@goerp/sdk/react";
@@ -260,19 +253,18 @@ function MenuActionButton({
       label={action.label ?? ""}
       items={trimSeparators(menuItems)}
       trigger={({ ref, open, disabled, onClick, onKeyDown }) => (
-        <button
+        <Button
           ref={ref}
-          type="button"
+          variant={action.style ?? "secondary"}
+          icon={action.icon}
           aria-haspopup="menu"
           aria-expanded={open}
           disabled={disabled}
           onClick={onClick}
           onKeyDown={onKeyDown}
-          className={actionButtonClassName(action.style === "danger" ? "danger" : (action.style ?? "secondary"), "md")}
         >
-          {action.icon && <Icon name={action.icon} size={16} aria-hidden="true" />}
           {action.label}
-        </button>
+        </Button>
       )}
     />
   );

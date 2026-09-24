@@ -1,7 +1,8 @@
 import { type EmailVerification, type EmailVerificationOutcome, verifyEmail } from "@goerp/sdk/auth";
-import { actionButtonClassName, Countdown, fieldInputClassName, Spinner } from "@goerp/sdk/components";
+import { Button, Countdown, fieldInputClassName } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
 
@@ -85,9 +86,9 @@ export function VerifyEmailPage({
           {tenant ? (
             <ExpiredResendForm tenant={tenant} resend={resend} />
           ) : (
-            <a href="/auth/login" className={`${actionButtonClassName("primary", "md")} w-full justify-center`}>
+            <ButtonLink to="/auth/login" variant="primary" fullWidth>
               Sign in
-            </a>
+            </ButtonLink>
           )}
         </div>
       </AuthLayout>
@@ -100,19 +101,9 @@ export function VerifyEmailPage({
         <h1 className="font-semibold text-text text-xl">Verify your email</h1>
         <p className="text-sm text-text-secondary">Confirm your email address to finish setting up your account.</p>
 
-        <button
-          type="button"
-          onClick={() => void handleVerify()}
-          disabled={verifying || locked}
-          // Same convention as ActionButton: dimmed when inactive, but full
-          // contrast while busy verifying.
-          data-disabled={locked ? "true" : undefined}
-          aria-busy={verifying}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-        >
-          {verifying && <Spinner size={16} />}
+        <Button variant="primary" fullWidth disabled={locked} loading={verifying} onClick={() => void handleVerify()}>
           Verify email
-        </button>
+        </Button>
 
         {phase.kind === "error" && (
           <p role="alert" className="text-danger text-sm">
@@ -149,8 +140,6 @@ function ExpiredResendForm({ tenant, resend }: { tenant: string; resend: ResendV
     await resendFlow.send({ email: email.trim(), tenant });
   };
 
-  const disabled = resendFlow.sending || resendFlow.coolingDown;
-
   return (
     <>
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
@@ -179,16 +168,15 @@ function ExpiredResendForm({ tenant, resend }: { tenant: string; resend: ResendV
 
         <ResendStatus resend={resendFlow} />
 
-        <button
+        <Button
           type="submit"
-          disabled={disabled}
-          data-disabled={resendFlow.coolingDown ? "true" : undefined}
-          aria-busy={resendFlow.sending}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
+          variant="primary"
+          fullWidth
+          disabled={resendFlow.coolingDown}
+          loading={resendFlow.sending}
         >
-          {resendFlow.sending && <Spinner size={16} />}
           Send a new link
-        </button>
+        </Button>
       </form>
       <a
         href="/auth/login"

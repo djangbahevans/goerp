@@ -1,7 +1,8 @@
 import { confirmPasswordReset, type PasswordResetConfirmation, type PasswordResetOutcome } from "@goerp/sdk/auth";
-import { actionButtonClassName, Countdown, Spinner } from "@goerp/sdk/components";
+import { Button, Countdown } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
+import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 import {
   confirmBlurError,
@@ -112,9 +113,9 @@ export function ResetPasswordPage({
           <p className="text-sm text-text-secondary">
             This reset link has expired or has already been used. Request a new one.
           </p>
-          <a href="/auth/forgot-password" className={`${actionButtonClassName("primary", "md")} w-full justify-center`}>
+          <ButtonLink to="/auth/forgot-password" variant="primary" fullWidth>
             Request a new link
-          </a>
+          </ButtonLink>
         </div>
       </AuthLayout>
     );
@@ -146,18 +147,9 @@ export function ResetPasswordPage({
           )}
         </div>
 
-        <button
-          type="submit"
-          disabled={inputsDisabled}
-          // Same convention as ActionButton: dimmed when inactive, but full
-          // contrast while busy submitting.
-          data-disabled={locked ? "true" : undefined}
-          aria-busy={submitting}
-          className={`${actionButtonClassName("primary", "md")} w-full justify-center`}
-        >
-          {submitting && <Spinner size={16} />}
+        <Button type="submit" variant="primary" fullWidth disabled={locked} loading={submitting}>
           Set new password
-        </button>
+        </Button>
       </form>
     </AuthLayout>
   );
