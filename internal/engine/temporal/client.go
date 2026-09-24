@@ -109,3 +109,9 @@ func (c *Client) NewWorker(taskQueue string, options worker.Options) worker.Work
 func (c *Client) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow any, args ...any) (client.WorkflowRun, error) {
 	return c.sdk.ExecuteWorkflow(ctx, options, workflow, args...)
 }
+
+// TerminateWorkflow force-stops a workflow run; runID "" targets the
+// latest run for workflowID.
+func (c *Client) TerminateWorkflow(ctx context.Context, workflowID, runID, reason string) error {
+	return c.sdk.TerminateWorkflow(ctx, workflowID, runID, reason)
+}

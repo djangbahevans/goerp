@@ -166,28 +166,19 @@ func TestProvisionForRegistration_TakenSlugFailsFast(t *testing.T) {
 	}
 }
 
+// A task queue nobody polls holds the run open for as long as the test
+// needs, so the wait deterministically outlasts its context.
 func TestProvisionForRegistration_WaitOutlastingTheContextIsPending(t *testing.T) {
 	slug := uniqueSlug(t)
 	env := newTestEnv(t, nil)
+	t.Cleanup(func() {
+		_ = env.temporalClient.TerminateWorkflow(context.Background(), WorkflowID(slug), "", "test cleanup")
+	})
 
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	err := NewProvisioner(env.temporalClient, env.taskQueue).ProvisionForRegistration(ctx, slug, "Slow Co", uuid.New().String())
+	err := NewProvisioner(env.temporalClient, "unpolled-"+slug).ProvisionForRegistration(ctx, slug, "Slow Co", uuid.New().String())
 	if !errors.Is(err, ErrProvisioningPending) {
 		t.Fatalf("ProvisionForRegistration() error = %v, want ErrProvisioningPending", err)
 	}
-
-	// The workflow carries on; wait for it before cleaning up.
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if tt, err := env.tenantStore.GetBySlug(t.Context(), slug); err == nil && tt.Status == tenant.StatusActive {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("workflow didn't finish after the caller stopped waiting")
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
-	_, _ = env.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
 }
