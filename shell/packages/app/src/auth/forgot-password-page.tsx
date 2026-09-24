@@ -2,7 +2,7 @@ import { fetchTenantContext, type PasswordResetRequest, requestPasswordReset } f
 import { actionButtonClassName, Countdown, fieldInputClassName, Spinner } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
 
 type Phase =
@@ -59,7 +59,7 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
   const locked = phase.kind === "locked";
   const inputsDisabled = submitting || locked;
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (inputsDisabled || !tenantContext.isFetched) return;
 

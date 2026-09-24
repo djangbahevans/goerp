@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
 import {
   changePassword,
+  confirmPasswordReset,
   fetchCurrentSession,
   fetchTenantContext,
   login,
@@ -376,6 +377,41 @@ describe("changePassword", () => {
       code: "auth.password_too_weak",
       message: "password is too common",
     });
+  });
+});
+
+describe("confirmPasswordReset", () => {
+  const input = { token: "raw-token", newPassword: "correct horse battery", tenant: "acme" };
+
+  it("posts token, new_password, and tenant, resolving signed_in for a session response", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { expires_in: 900 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(confirmPasswordReset(input)).resolves.toBe("signed_in");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/password-reset/confirm",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ token: "raw-token", new_password: "correct horse battery", tenant: "acme" }),
+      }),
+    );
+  });
+
+  it("resolves login_required when no session was issued", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { login_required: true })),
+    );
+    await expect(confirmPasswordReset(input)).resolves.toBe("login_required");
+  });
+
+  it("throws an AppError with the server's code on failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(404, { error: { code: "invalid_token", message: "reset link is invalid" } })),
+    );
+    await expect(confirmPasswordReset(input)).rejects.toMatchObject({ code: "invalid_token", httpStatus: 404 });
   });
 });
 

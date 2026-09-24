@@ -2,7 +2,7 @@ import { type MFAMethod, useAuth } from "@goerp/sdk/auth";
 import { actionButtonClassName, fieldInputClassName, Spinner } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useNavigate } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
 import type { LoginNotice } from "./login-page.js";
 import { VerificationCodeInput } from "./verification-code-input.js";
@@ -99,7 +99,7 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
     }
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (mode === "totp") {
       if (code.length !== TOTP_LENGTH) {

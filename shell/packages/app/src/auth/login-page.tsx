@@ -3,7 +3,7 @@ import { actionButtonClassName, Countdown, fieldInputClassName, PasswordField, S
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
 
 // Why the user was sent back to sign in — set by the MFA challenge page
@@ -106,7 +106,7 @@ export function LoginPage({ redirectTo, notice }: LoginPageProps): ReactNode {
     setEmailFocusRequest((n) => n + 1);
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (inputsDisabled || sessionCheckPending || !tenantContext.isFetched) return;
 
