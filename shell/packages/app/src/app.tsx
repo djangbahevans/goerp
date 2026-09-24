@@ -1,8 +1,8 @@
 import { AuthProvider, PermissionProvider } from "@goerp/sdk/auth";
 import { ViewRegistryProvider } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
+import { AuthRouterProvider } from "./router/auth-router-provider.js";
 
 const queryClient = new QueryClient();
 
@@ -17,7 +17,7 @@ export function App() {
               manual refresh — shell-architecture.md §9 "Registry updates on
               hot reload" step 5. */}
           <ViewRegistryProvider onUpdate={() => router.invalidate()}>
-            <RouterProvider router={router} />
+            <AuthRouterProvider router={router} />
           </ViewRegistryProvider>
         </PermissionProvider>
       </AuthProvider>

@@ -2,10 +2,11 @@ import type { AuthContextValue, AuthState, LoginCredentials } from "@goerp/sdk/a
 import { AuthContext, createPermissionContextValue, PermissionContext, permissionDataRef } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
 const FAKE_USER = {
@@ -70,13 +71,13 @@ async function renderLogin({
   loginImpl?: LoginImpl;
 } = {}) {
   const history = createMemoryHistory({ initialEntries: [url] });
-  const router = createRouter({ routeTree, history });
+  const router = createRouter({ routeTree, context: { auth: undefined! }, history });
   await router.load();
   render(
     <QueryClientProvider client={new QueryClient()}>
       <FakeAuthProvider initial={initial} loginImpl={loginImpl}>
         <PermissionContext.Provider value={createPermissionContextValue(permissionDataRef.current)}>
-          <RouterProvider router={router} />
+          <AuthRouterProvider router={router} />
         </PermissionContext.Provider>
       </FakeAuthProvider>
     </QueryClientProvider>,
@@ -313,7 +314,7 @@ describe("/auth/login", () => {
   it("redirects an already-authenticated visitor straight through", async () => {
     stubTenantContext(SUBDOMAIN_TENANT);
     const history = createMemoryHistory({ initialEntries: ["/auth/login?redirect=%2Fsettings%2Fprofile"] });
-    const router = createRouter({ routeTree, history });
+    const router = createRouter({ routeTree, context: { auth: undefined! }, history });
     await router.load();
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -322,7 +323,7 @@ describe("/auth/login", () => {
           loginImpl={async () => {}}
         >
           <PermissionContext.Provider value={createPermissionContextValue(permissionDataRef.current)}>
-            <RouterProvider router={router} />
+            <AuthRouterProvider router={router} />
           </PermissionContext.Provider>
         </FakeAuthProvider>
       </QueryClientProvider>,
@@ -331,16 +332,16 @@ describe("/auth/login", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings/profile"));
   });
 
-  it("keeps submit disabled while the mount-time session check is in flight", async () => {
+  it("keeps submit disabled while a logout is still in flight", async () => {
     stubTenantContext(SUBDOMAIN_TENANT);
     const history = createMemoryHistory({ initialEntries: ["/auth/login"] });
-    const router = createRouter({ routeTree, history });
+    const router = createRouter({ routeTree, context: { auth: undefined! }, history });
     await router.load();
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <FakeAuthProvider initial={{ status: "checking" }} loginImpl={async () => {}}>
+        <FakeAuthProvider initial={{ status: "logging_out" }} loginImpl={async () => {}}>
           <PermissionContext.Provider value={createPermissionContextValue(permissionDataRef.current)}>
-            <RouterProvider router={router} />
+            <AuthRouterProvider router={router} />
           </PermissionContext.Provider>
         </FakeAuthProvider>
       </QueryClientProvider>,

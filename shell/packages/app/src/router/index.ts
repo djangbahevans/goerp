@@ -1,7 +1,10 @@
+import type { AuthContextValue } from "@goerp/sdk/auth";
 import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 
-export const router = createRouter({ routeTree });
+// The real auth value arrives through AuthRouterProvider's context prop,
+// before any route loads.
+export const router = createRouter({ routeTree, context: { auth: undefined as unknown as AuthContextValue } });
 
 declare module "@tanstack/react-router" {
   interface Register {

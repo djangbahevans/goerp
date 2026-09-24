@@ -2,9 +2,10 @@ import type { AuthContextValue, CurrentUser } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext, permissionDataRef } from "@goerp/sdk/auth";
 import { toast } from "@goerp/sdk/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
@@ -27,6 +28,7 @@ function fakeAuth(user: CurrentUser, updateProfile = vi.fn(async () => {})): Aut
 async function renderProfilePage(auth: AuthContextValue) {
   const router = createRouter({
     routeTree,
+    context: { auth },
     history: createMemoryHistory({ initialEntries: ["/settings/profile"] }),
   });
   await router.load();
@@ -34,7 +36,7 @@ async function renderProfilePage(auth: AuthContextValue) {
     <QueryClientProvider client={new QueryClient()}>
       <AuthContext.Provider value={auth}>
         <PermissionContext.Provider value={createPermissionContextValue(permissionDataRef.current)}>
-          <RouterProvider router={router} />
+          <AuthRouterProvider router={router} />
         </PermissionContext.Provider>
       </AuthContext.Provider>
     </QueryClientProvider>,
