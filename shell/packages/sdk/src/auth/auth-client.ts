@@ -5,6 +5,8 @@ import type {
   CurrentUser,
   LoginCredentials,
   MFAMethod,
+  PasswordResetConfirmation,
+  PasswordResetOutcome,
   PasswordResetRequest,
   TenantContext,
   UpdateProfileInput,
@@ -187,6 +189,22 @@ export async function changePassword(input: ChangePasswordInput): Promise<void> 
     body: JSON.stringify({ current_password: input.currentPassword, new_password: input.newPassword }),
   });
   if (!response.ok) throw await readError(response);
+}
+
+// confirmPasswordReset backs POST /auth/password-reset/confirm
+// (auth-internals.md §3). A 404 means the token is invalid, expired, or
+// already used; a 422 (auth.password_too_weak) means the tenant's policy
+// rejected the password.
+export async function confirmPasswordReset(input: PasswordResetConfirmation): Promise<PasswordResetOutcome> {
+  const response = await fetch("/auth/password-reset/confirm", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: input.token, new_password: input.newPassword, tenant: input.tenant }),
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { login_required?: boolean };
+  return body.login_required ? "login_required" : "signed_in";
 }
 
 // logout backs POST /auth/logout (auth-internals.md §4). Deliberately

@@ -30,6 +30,17 @@ export interface PasswordResetRequest {
   tenant: string;
 }
 
+export interface PasswordResetConfirmation {
+  token: string;
+  newPassword: string;
+  tenant: string;
+}
+
+// "signed_in": the response set a session. "login_required": the password
+// changed but no session was issued (MFA enrolled, or not an active member
+// of the tenant), so the user signs in normally.
+export type PasswordResetOutcome = "signed_in" | "login_required";
+
 // The pre-login tenant lookup (GET /auth/tenant-context). tenant is null on
 // a shared-domain deployment, where the Host alone doesn't identify one.
 export interface TenantContext {

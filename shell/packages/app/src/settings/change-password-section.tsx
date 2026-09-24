@@ -9,7 +9,8 @@ import {
 import { isAppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { useLocation } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
+import { PASSWORD_MISMATCH, policyMessageAsSentence } from "../auth/password-messages.js";
 
 // The #change-password anchor the password update banner links to
 // (shell-ux.md §2.1, §4.1).
@@ -19,17 +20,6 @@ interface FieldErrors {
   current?: string | undefined;
   next?: string | undefined;
   confirm?: string | undefined;
-}
-
-const MISMATCH = "Passwords don't match.";
-
-// The server's policy messages are lowercase fragments ("password is too
-// common"); shown inline they read as sentences.
-function asSentence(message: string): string {
-  const trimmed = message.trim();
-  if (!trimmed) return trimmed;
-  const capitalized = trimmed[0]?.toUpperCase() + trimmed.slice(1);
-  return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
 }
 
 // shell-ux.md §4.1 "Change password section". Independent of the profile
@@ -55,10 +45,10 @@ export function ChangePasswordSection(): ReactNode {
   }, [hash]);
 
   const handleConfirmBlur = () => {
-    setErrors((e) => ({ ...e, confirm: confirm && confirm !== next ? MISMATCH : undefined }));
+    setErrors((e) => ({ ...e, confirm: confirm && confirm !== next ? PASSWORD_MISMATCH : undefined }));
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submitting) return;
 
@@ -66,7 +56,7 @@ export function ChangePasswordSection(): ReactNode {
     if (!current) found.current = "Enter your current password.";
     if (!next) found.next = "Enter a new password.";
     if (!confirm) found.confirm = "Confirm your new password.";
-    else if (confirm !== next) found.confirm = MISMATCH;
+    else if (confirm !== next) found.confirm = PASSWORD_MISMATCH;
     setErrors(found);
     if (Object.keys(found).length > 0) return;
 
@@ -82,7 +72,7 @@ export function ChangePasswordSection(): ReactNode {
         setCurrent("");
         setErrors({ current: "Current password is incorrect." });
       } else if (isAppError(err) && err.code === "auth.password_too_weak") {
-        setErrors({ next: asSentence(err.message) });
+        setErrors({ next: policyMessageAsSentence(err.message) });
       } else {
         toast.error("Couldn't change your password. Try again.");
       }

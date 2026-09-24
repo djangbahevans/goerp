@@ -1,4 +1,4 @@
-import type { FormEvent, KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, SubmitEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { KanbanQuickCreateField } from "./kanban-view-types.js";
 
@@ -24,7 +24,7 @@ export function KanbanQuickCreateRow({ groupId, fields, onSubmit }: KanbanQuickC
     setValues({});
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+  function handleSubmit(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     onSubmit(values);
     close();
