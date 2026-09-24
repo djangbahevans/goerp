@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { useFieldControl } from "./field-wrapper.js";
 
 export interface ToggleFieldProps {
   id?: string | undefined;
@@ -17,14 +18,18 @@ const THUMB_STYLE: CSSProperties = { width: "var(--space-4)" };
 const THUMB_TRAVEL_CLASS = "group-data-[checked=true]:translate-x-3.5";
 
 export function ToggleField({ id, value, onChange, disabled = false }: ToggleFieldProps): ReactNode {
+  const field = useFieldControl();
   return (
     <label
       data-checked={value}
       style={TRACK_STYLE}
-      className="group inline-flex h-5 shrink-0 cursor-pointer items-center rounded-full border px-0.5 py-0.5 transition-colors duration-(--duration-fast) ease-out has-focus-visible:shadow-focus has-disabled:cursor-not-allowed has-disabled:opacity-50 data-[checked=false]:border-border data-[checked=false]:bg-bg-subtle data-[checked=false]:hover:border-border-strong data-[checked=true]:border-transparent data-[checked=true]:bg-primary data-[checked=true]:hover:bg-primary-hover"
+      className="group inline-flex h-5 shrink-0 cursor-pointer items-center rounded-full border px-0.5 py-0.5 transition-colors duration-(--duration-fast) ease-out has-focus-visible:shadow-focus has-disabled:cursor-not-allowed has-disabled:opacity-50 data-[checked=false]:border-border-control data-[checked=false]:bg-bg-subtle data-[checked=false]:hover:border-text-secondary data-[checked=true]:border-transparent data-[checked=true]:bg-primary data-[checked=true]:hover:bg-primary-hover"
     >
       <input
-        id={id}
+        id={field?.id ?? id}
+        aria-describedby={field?.describedBy}
+        aria-invalid={field?.invalid || undefined}
+        required={field?.required || undefined}
         type="checkbox"
         role="switch"
         aria-checked={value}

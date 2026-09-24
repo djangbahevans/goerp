@@ -1,6 +1,6 @@
 import type { ChangeEvent, ReactNode } from "react";
-import { useId } from "react";
 import { fieldInputClassName } from "./field-input-styles.js";
+import { FieldError, FieldLabel, useSelfLabelledFieldControl } from "./field-wrapper.js";
 
 // Native <input type="date"|"datetime-local"|"time"> value formats.
 // Distinct components per form-view-types.ts's FieldType, matching the
@@ -63,32 +63,22 @@ export function DateField({
   error,
   disabled = false,
 }: DateFieldProps): ReactNode {
-  const generatedId = useId();
-  const id = idProp ?? generatedId;
+  const { id, errorId, controlProps } = useSelfLabelledFieldControl(idProp, error);
   return (
     <div className="flex flex-col gap-1">
-      {label !== undefined && (
-        <label htmlFor={id} className="text-sm text-text">
-          {label}
-        </label>
-      )}
+      {label !== undefined && <FieldLabel htmlFor={id}>{label}</FieldLabel>}
       <input
-        id={id}
+        {...controlProps}
         type="date"
         aria-label={ariaLabel}
         value={toDateInputValue(value)}
         min={toDateInputValue(min) || undefined}
         max={toDateInputValue(max) || undefined}
         disabled={disabled}
-        aria-invalid={error !== undefined}
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(parseDate(e.target.value))}
-        className={fieldInputClassName(error !== undefined)}
+        className={fieldInputClassName(controlProps["aria-invalid"] === true)}
       />
-      {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
-          {error}
-        </span>
-      )}
+      {error !== undefined && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   );
 }
@@ -115,31 +105,21 @@ export function DateTimeField({
   error,
   disabled = false,
 }: DateTimeFieldProps): ReactNode {
-  const generatedId = useId();
-  const id = idProp ?? generatedId;
+  const { id, errorId, controlProps } = useSelfLabelledFieldControl(idProp, error);
   return (
     <div className="flex flex-col gap-1">
-      {label !== undefined && (
-        <label htmlFor={id} className="text-sm text-text">
-          {label}
-        </label>
-      )}
+      {label !== undefined && <FieldLabel htmlFor={id}>{label}</FieldLabel>}
       <input
-        id={id}
+        {...controlProps}
         type="datetime-local"
         value={toDateTimeInputValue(value)}
         min={toDateTimeInputValue(min) || undefined}
         max={toDateTimeInputValue(max) || undefined}
         disabled={disabled}
-        aria-invalid={error !== undefined}
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(parseDate(e.target.value))}
-        className={fieldInputClassName(error !== undefined)}
+        className={fieldInputClassName(controlProps["aria-invalid"] === true)}
       />
-      {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
-          {error}
-        </span>
-      )}
+      {error !== undefined && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   );
 }
@@ -166,31 +146,21 @@ export function TimeField({
   error,
   disabled = false,
 }: TimeFieldProps): ReactNode {
-  const generatedId = useId();
-  const id = idProp ?? generatedId;
+  const { id, errorId, controlProps } = useSelfLabelledFieldControl(idProp, error);
   return (
     <div className="flex flex-col gap-1">
-      {label !== undefined && (
-        <label htmlFor={id} className="text-sm text-text">
-          {label}
-        </label>
-      )}
+      {label !== undefined && <FieldLabel htmlFor={id}>{label}</FieldLabel>}
       <input
-        id={id}
+        {...controlProps}
         type="time"
         value={value ?? ""}
         min={min}
         max={max}
         disabled={disabled}
-        aria-invalid={error !== undefined}
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-        className={fieldInputClassName(error !== undefined)}
+        className={fieldInputClassName(controlProps["aria-invalid"] === true)}
       />
-      {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
-          {error}
-        </span>
-      )}
+      {error !== undefined && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   );
 }

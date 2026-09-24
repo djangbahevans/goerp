@@ -1,8 +1,8 @@
 import { fetchTenantContext, type PasswordResetRequest, requestPasswordReset } from "@goerp/sdk/auth";
-import { Button, Countdown, fieldInputClassName } from "@goerp/sdk/components";
+import { Button, Countdown, FieldWrapper, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
 
@@ -39,8 +39,6 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
     retry: false,
   });
 
-  const emailId = useId();
-  const companyId = useId();
   const sentHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const [email, setEmail] = useState("");
@@ -119,37 +117,21 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
         {showCompanyField && (
-          <div className="flex flex-col gap-1">
-            <label htmlFor={companyId} className="text-sm text-text">
-              Company
-            </label>
-            <input
-              id={companyId}
-              type="text"
+          <FieldWrapper label="Company" error={fieldErrors.company}>
+            <TextInput
               autoComplete="organization"
               autoCorrect="off"
               autoCapitalize="none"
               spellCheck={false}
               value={company}
               disabled={inputsDisabled}
-              aria-invalid={fieldErrors.company !== undefined}
-              onChange={(e) => setCompany(e.target.value)}
-              className={fieldInputClassName(fieldErrors.company !== undefined, "input", "sans")}
+              onChange={setCompany}
             />
-            {fieldErrors.company && (
-              <span role="alert" className="text-danger text-sm">
-                {fieldErrors.company}
-              </span>
-            )}
-          </div>
+          </FieldWrapper>
         )}
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor={emailId} className="text-sm text-text">
-            Email
-          </label>
-          <input
-            id={emailId}
+        <FieldWrapper label="Email" error={fieldErrors.email}>
+          <TextInput
             type="email"
             autoComplete="email"
             autoCorrect="off"
@@ -157,16 +139,9 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
             spellCheck={false}
             value={email}
             disabled={inputsDisabled}
-            aria-invalid={fieldErrors.email !== undefined}
-            onChange={(e) => setEmail(e.target.value)}
-            className={fieldInputClassName(fieldErrors.email !== undefined, "input", "sans")}
+            onChange={setEmail}
           />
-          {fieldErrors.email && (
-            <span role="alert" className="text-danger text-sm">
-              {fieldErrors.email}
-            </span>
-          )}
-        </div>
+        </FieldWrapper>
 
         <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
           {formError}

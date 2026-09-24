@@ -213,7 +213,7 @@ export function CodeField({
         // descendant (has-[:disabled]) — CodeMirror's contentEditable host
         // is never one, unlike RichTextField's real disabled toolbar
         // buttons, so disabled dimming is applied directly here instead.
-        className={`${fieldInputClassName(error !== undefined, "wrapper")} ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+        className={`${fieldInputClassName(error !== undefined, "wrapper", "mono")} ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
       >
         <div ref={hostRef} style={{ minHeight: `${rows * 1.5}em` }} />
       </div>

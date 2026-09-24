@@ -3,10 +3,10 @@ import {
   Badge,
   DateField,
   FieldWrapper,
-  fieldInputClassName,
   Icon,
   SegmentedField,
   Skeleton,
+  TextInput,
   UserAvatar,
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
@@ -87,7 +87,6 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
     resource,
     recordId,
   );
-  const emailId = useId();
   const accessId = useId();
   const emailRef = useRef<HTMLInputElement | null>(null);
   const [email, setEmail] = useState("");
@@ -165,15 +164,13 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
           }}
         >
           <FieldWrapper label="Email" error={emailError}>
-            <input
-              id={emailId}
+            <TextInput
               ref={emailRef}
               type="email"
               autoComplete="off"
               value={email}
               disabled={isGranting}
-              className={fieldInputClassName(emailError !== undefined)}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={setEmail}
               onKeyDown={(event) => {
                 if (event.key !== "Enter") return;
                 event.preventDefault();

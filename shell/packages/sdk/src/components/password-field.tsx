@@ -1,6 +1,8 @@
-import type { ChangeEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useId, useState } from "react";
-import { fieldInputClassName } from "./field-input-styles.js";
+import { FieldError, FieldLabel } from "./field-wrapper.js";
+import { IconButton } from "./icon-button.js";
+import { InputBox } from "./text-input.js";
 
 export interface PasswordFieldProps {
   label: string;
@@ -25,44 +27,36 @@ export function PasswordField({
   onBlur,
 }: PasswordFieldProps): ReactNode {
   const id = useId();
+  const errorId = `${id}-error`;
   const [revealed, setRevealed] = useState(false);
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm text-text">
-        {label}
-      </label>
-      <span className={`inline-flex items-center gap-2 ${fieldInputClassName(error !== undefined, "wrapper", "sans")}`}>
-        <input
-          id={id}
-          type={revealed ? "text" : "password"}
-          autoComplete={autoComplete}
-          value={value}
-          disabled={disabled}
-          aria-invalid={error !== undefined}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-          onBlur={onBlur}
-          className="w-full border-0 bg-transparent p-0 text-sm focus:outline-none"
-        />
-        <button
-          type="button"
-          // Native mousedown-focuses-button behavior would otherwise move
-          // focus off the input on click, violating "toggling never moves
-          // focus away from the input" (password-field.md States table).
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setRevealed((v) => !v)}
-          disabled={disabled}
-          aria-label={revealed ? "Hide password" : "Show password"}
-          className="rounded-control p-1 text-text-secondary transition-colors duration-(--duration-fast) ease-out hover:text-text focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
-        >
-          {revealed ? "Hide" : "Show"}
-        </button>
-      </span>
-      {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
-          {error}
-        </span>
-      )}
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <InputBox
+        id={id}
+        type={revealed ? "text" : "password"}
+        autoComplete={autoComplete}
+        value={value}
+        disabled={disabled}
+        invalid={error !== undefined || undefined}
+        aria-describedby={error !== undefined ? errorId : undefined}
+        onChange={onChange}
+        onBlur={onBlur}
+        end={
+          <IconButton
+            icon={revealed ? "eye-off" : "eye"}
+            label={revealed ? "Hide password" : "Show password"}
+            size="sm"
+            // Native mousedown-focuses-button behavior would otherwise move
+            // focus off the input on click (password-field.md States table).
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setRevealed((v) => !v)}
+            disabled={disabled}
+          />
+        }
+      />
+      {error !== undefined && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   );
 }

@@ -9,7 +9,6 @@ import {
   DateField,
   DateTimeField,
   FileField,
-  fieldInputClassName,
   IconPicker,
   LanguageSelect,
   LocationField,
@@ -21,6 +20,8 @@ import {
   SignaturePad,
   SliderField,
   TagsField,
+  TextArea,
+  TextInput,
   TimeField,
   TimezoneSelect,
   ToggleField,
@@ -34,12 +35,6 @@ import type { Row } from "../list/list-view-types.js";
 import type { FieldType, FormField } from "./form-view-types.js";
 
 export type { TagValue } from "@goerp/sdk/components";
-
-// Shared by every plain native fallback below (goerp#743) — no per-field
-// error state reaches FieldInput yet (FormFieldRow never passes one
-// through to FieldWrapper either), so `hasError` stays `false` until that
-// exists.
-const PLAIN_INPUT_CLASS_NAME = fieldInputClassName(false, "input", "sans");
 
 // "tags" writes `{field}` (an `_ids` key) as a UUID array but reads the
 // plural key with `_ids` stripped ("tags"), holding full {id,name,color}.
@@ -481,27 +476,25 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
     case "phone":
     case "url":
       return (
-        <input
+        <TextInput
           id={id}
-          type={type === "text" ? "text" : type === "phone" ? "tel" : type}
+          type={type === "phone" ? "tel" : type}
           value={stringValue}
           placeholder={field.placeholder}
           disabled={disabled}
-          className={PLAIN_INPUT_CLASS_NAME}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
         />
       );
 
     case "textarea":
       return (
-        <textarea
+        <TextArea
           id={id}
           value={stringValue}
           rows={field.rows ?? 3}
           placeholder={field.placeholder}
           disabled={disabled}
-          className={PLAIN_INPUT_CLASS_NAME}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
         />
       );
 
@@ -543,7 +536,7 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
     case "number":
     case "integer":
       return (
-        <input
+        <TextInput
           id={id}
           type="number"
           value={stringValue}
@@ -551,8 +544,7 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
           max={field.max}
           step={type === "integer" ? 1 : field.step}
           disabled={disabled}
-          className={PLAIN_INPUT_CLASS_NAME}
-          onChange={(e) => onChange(toNumber(e.target.value))}
+          onChange={(next) => onChange(toNumber(next))}
         />
       );
 
@@ -576,16 +568,15 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
       // whole percent points (0-100), converting on the way in/out.
       const percentValue = typeof value === "number" ? value * 100 : "";
       return (
-        <input
+        <TextInput
           id={id}
           type="number"
           min={field.min ?? 0}
           max={field.max ?? 100}
-          value={percentValue}
+          value={String(percentValue)}
           disabled={disabled}
-          className={PLAIN_INPUT_CLASS_NAME}
-          onChange={(e) => {
-            const n = toNumber(e.target.value);
+          onChange={(next) => {
+            const n = toNumber(next);
             onChange(n === undefined ? undefined : n / 100);
           }}
         />
@@ -648,24 +639,22 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
       const minutes = totalMinutes % 60;
       return (
         <span className="flex items-center gap-2">
-          <input
+          <TextInput
             type="number"
             min={0}
             aria-label={`${field.label ?? field.field} hours`}
-            value={hours}
+            value={String(hours)}
             disabled={disabled}
-            className={PLAIN_INPUT_CLASS_NAME}
-            onChange={(e) => onChange((toNumber(e.target.value) ?? 0) * 60 + minutes)}
+            onChange={(next) => onChange((toNumber(next) ?? 0) * 60 + minutes)}
           />
-          <input
+          <TextInput
             type="number"
             min={0}
             max={59}
             aria-label={`${field.label ?? field.field} minutes`}
-            value={minutes}
+            value={String(minutes)}
             disabled={disabled}
-            className={PLAIN_INPUT_CLASS_NAME}
-            onChange={(e) => onChange(hours * 60 + (toNumber(e.target.value) ?? 0))}
+            onChange={(next) => onChange(hours * 60 + (toNumber(next) ?? 0))}
           />
         </span>
       );
@@ -673,7 +662,7 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
 
     case "boolean":
       return (
-        // self-start: FieldWrapper's own <label> is flex flex-col — a bare
+        // self-start: FieldWrapper's layout is flex flex-col — a bare
         // checkbox has no intrinsic width to resist the default cross-axis
         // stretch, so without this it renders full column width with the
         // native glyph centered inside that box, far from its own label.
@@ -910,16 +899,15 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
       return (
         <span className="flex flex-wrap items-center gap-2">
           {Object.entries(mapping).map(([part, addrField]) => (
-            <input
-              key={part}
-              type="text"
-              aria-label={part}
-              placeholder={part}
-              disabled={disabled}
-              value={typeof record[addrField] === "string" ? (record[addrField] as string) : ""}
-              className={PLAIN_INPUT_CLASS_NAME}
-              onChange={(e) => onChange({ [addrField]: e.target.value })}
-            />
+            <span key={part} className="min-w-40 flex-1">
+              <TextInput
+                aria-label={part}
+                placeholder={part}
+                disabled={disabled}
+                value={typeof record[addrField] === "string" ? (record[addrField] as string) : ""}
+                onChange={(next) => onChange({ [addrField]: next })}
+              />
+            </span>
           ))}
         </span>
       );
@@ -976,15 +964,6 @@ export function FieldInput({ field, value, onChange, record, resource, disabled 
     }
 
     default:
-      return (
-        <input
-          id={id}
-          type="text"
-          value={stringValue}
-          disabled={disabled}
-          className={PLAIN_INPUT_CLASS_NAME}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
+      return <TextInput id={id} value={stringValue} disabled={disabled} onChange={onChange} />;
   }
 }

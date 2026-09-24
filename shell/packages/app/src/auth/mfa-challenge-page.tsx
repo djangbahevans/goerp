@@ -1,8 +1,8 @@
 import { type MFAMethod, useAuth } from "@goerp/sdk/auth";
-import { Button, fieldInputClassName } from "@goerp/sdk/components";
+import { Button, FieldWrapper, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
 import type { LoginNotice } from "./login-page.js";
 import { VerificationCodeInput } from "./verification-code-input.js";
@@ -39,7 +39,6 @@ const linkClassName =
 export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNode {
   const { state, submitMFA } = useAuth();
   const navigate = useNavigate();
-  const recoveryId = useId();
   const codeRef = useRef<HTMLInputElement>(null);
   const recoveryRef = useRef<HTMLInputElement>(null);
 
@@ -160,39 +159,26 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
             autoFocus
           />
         ) : (
-          <div className="flex flex-col gap-1">
-            <label htmlFor={recoveryId} className="text-sm text-text">
-              Recovery code
-            </label>
-            <span id={`${recoveryId}-description`} className="text-sm text-text-secondary">
-              Enter one of the recovery codes you saved when you set up two-factor authentication.
-            </span>
-            <input
+          <FieldWrapper
+            label="Recovery code"
+            description="Enter one of the recovery codes you saved when you set up two-factor authentication."
+            error={error || undefined}
+          >
+            <TextInput
               ref={recoveryRef}
-              id={recoveryId}
-              // biome-ignore lint/a11y/noAutofocus: the code field is this page's single task, same as VerificationCodeInput's autoFocus.
               autoFocus
-              type="text"
               autoComplete="one-time-code"
               autoCorrect="off"
               autoCapitalize="characters"
               spellCheck={false}
               value={recoveryCode}
               disabled={verifying}
-              aria-invalid={error ? true : undefined}
-              aria-describedby={`${recoveryId}-description${error ? ` ${recoveryId}-error` : ""}`}
-              onChange={(e) => {
-                setRecoveryCode(e.target.value);
+              onChange={(next) => {
+                setRecoveryCode(next);
                 setError(undefined);
               }}
-              className={fieldInputClassName(Boolean(error), "input", "sans")}
             />
-            {error && (
-              <span id={`${recoveryId}-error`} role="alert" className="text-danger text-sm">
-                {error}
-              </span>
-            )}
-          </div>
+          </FieldWrapper>
         )}
 
         <div role="status" aria-live="polite" className="text-sm text-text-secondary empty:hidden">

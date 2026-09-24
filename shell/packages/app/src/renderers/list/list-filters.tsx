@@ -1,7 +1,7 @@
 import type { FilterRange } from "@goerp/sdk";
 import { apiClient, isFilterLike, isFilterRange } from "@goerp/sdk";
 import type { RelationValue } from "@goerp/sdk/components";
-import { CountrySelect, DateField, fieldInputClassName, RelationPicker, Select } from "@goerp/sdk/components";
+import { CountrySelect, DateField, RelationPicker, Select, TextInput } from "@goerp/sdk/components";
 import { createRelationLabelsQueryOptions } from "@goerp/sdk/react";
 import { resourceMetadataRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
@@ -108,12 +108,10 @@ function TextFilterInput({ filter, value, onChange }: FilterInputProps) {
   const id = useId();
   return (
     <FilterFieldLabel id={id} label={filter.label}>
-      <input
+      <TextInput
         id={id}
-        type="text"
         value={asLike(value)}
-        onChange={(event) => onChange(event.target.value === "" ? undefined : { like: event.target.value })}
-        className={fieldInputClassName(false, "input", "sans")}
+        onChange={(next) => onChange(next === "" ? undefined : { like: next })}
       />
     </FilterFieldLabel>
   );
@@ -223,12 +221,11 @@ function NumberFilterInput({ filter, value, onChange }: FilterInputProps) {
   const id = useId();
   return (
     <FilterFieldLabel id={id} label={filter.label}>
-      <input
+      <TextInput
         id={id}
         type="number"
-        value={typeof value === "number" ? value : ""}
-        onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))}
-        className={fieldInputClassName(false)}
+        value={typeof value === "number" ? String(value) : ""}
+        onChange={(next) => onChange(next === "" ? undefined : Number(next))}
       />
     </FilterFieldLabel>
   );
@@ -240,19 +237,17 @@ function NumberRangeFilterInput({ filter, value, onChange }: FilterInputProps) {
     <fieldset className={FIELDSET_CLASSES}>
       <legend className={LEGEND_CLASSES}>{filter.label}</legend>
       <div className="flex items-center gap-2">
-        <input
+        <TextInput
           type="number"
           aria-label={`${filter.label} min`}
-          value={range.gte ?? ""}
-          onChange={(event) => commitRangeBound(range, "gte", event.target.value, onChange)}
-          className={fieldInputClassName(false)}
+          value={String(range.gte ?? "")}
+          onChange={(next) => commitRangeBound(range, "gte", next, onChange)}
         />
-        <input
+        <TextInput
           type="number"
           aria-label={`${filter.label} max`}
-          value={range.lte ?? ""}
-          onChange={(event) => commitRangeBound(range, "lte", event.target.value, onChange)}
-          className={fieldInputClassName(false)}
+          value={String(range.lte ?? "")}
+          onChange={(next) => commitRangeBound(range, "lte", next, onChange)}
         />
       </div>
     </fieldset>

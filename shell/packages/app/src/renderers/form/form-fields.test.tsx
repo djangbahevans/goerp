@@ -152,7 +152,7 @@ describe("FormFieldRow", () => {
       expect(screen.getByLabelText("Email")).toBe(screen.getByDisplayValue("a@b.com"));
     });
 
-    it("email: implicit-label-safe types go through FieldWrapper, whose required asterisk is danger-colored", () => {
+    it("email: goes through FieldWrapper, whose required asterisk is danger-colored", () => {
       const Wrapper = withFieldAccess({ email: { read: true, write: true } });
       render(
         <Wrapper>
@@ -297,7 +297,7 @@ describe("FormFieldRow", () => {
       expect(screen.getByLabelText("Skills")).not.toBe(screen.getByLabelText("Remove tag: VIP"));
     });
 
-    it("tags: the explicit-label path still gets FieldWrapper's own label typography, not an unstyled default", async () => {
+    it("tags: gets FieldWrapper's label typography", async () => {
       const Wrapper = withFieldAccess({ tag_ids: { read: true, write: true } });
       renderWithQueryClient(
         <Wrapper>
@@ -315,7 +315,7 @@ describe("FormFieldRow", () => {
       expect(label?.className).toContain("font-medium");
     });
 
-    it("relation (single, already holding a value): safely goes through FieldWrapper — the value renders inside the input itself, no chip ahead of it", () => {
+    it("relation (single, already holding a value): labels the combobox input, which holds the value", () => {
       const Wrapper = withFieldAccess({ customer_id: { read: true, write: true } });
       renderWithQueryClient(
         <Wrapper>
@@ -328,10 +328,8 @@ describe("FormFieldRow", () => {
           />
         </Wrapper>,
       );
-      // relation-picker.tsx: `selected` (the chip array) is only populated
-      // when `multiple` — a single value renders as the input's own value
-      // instead, so implicit wrapping is safe here (unlike the multiple
-      // case right below).
+      // relation-picker.tsx: a single value renders as the input's own value,
+      // not as a chip ahead of it.
       expect(screen.getByLabelText("Customer")).toBe(screen.getByRole("combobox"));
       expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("Acme Corp");
     });
@@ -426,7 +424,31 @@ describe("FormFieldRow", () => {
           />
         </Wrapper>,
       );
-      expect(screen.getByText("Priority").closest("label")?.querySelector("label")).toBeNull();
+      expect(screen.getByText("Priority").closest("label")).toBeNull();
+    });
+
+    it("marks a required field's control required and describes it with the help text", () => {
+      const Wrapper = withFieldAccess({ name: { read: true, write: true } });
+      render(
+        <Wrapper>
+          <FormFieldRow
+            field={{
+              field: "name",
+              type: "text",
+              label: "Name",
+              required: true,
+              help_text: "As it appears on invoices",
+            }}
+            resource="contacts.contact"
+            record={{ name: "" }}
+            onChange={vi.fn()}
+            formReadonly={false}
+          />
+        </Wrapper>,
+      );
+      const input = screen.getByRole("textbox", { name: /Name/ }) as HTMLInputElement;
+      expect(input.required).toBe(true);
+      expect(input.getAttribute("aria-describedby")).toBe(screen.getByText("As it appears on invoices").id);
     });
   });
 });

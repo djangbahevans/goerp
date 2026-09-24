@@ -5,7 +5,7 @@ import {
   type Registration,
   register as registerAccount,
 } from "@goerp/sdk/auth";
-import { Button, Countdown, fieldInputClassName } from "@goerp/sdk/components";
+import { Button, Countdown, FieldWrapper, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
@@ -76,9 +76,6 @@ export function RegisterPage({
     if (tenantContext.isFetched && !registrationEnabled) redirect("/auth/login");
   }, [tenantContext.isFetched, registrationEnabled, redirect]);
 
-  const nameId = useId();
-  const emailId = useId();
-  const companyId = useId();
   const termsId = useId();
   const cardHeadingRef = useRef<HTMLHeadingElement>(null);
 
@@ -228,7 +225,6 @@ export function RegisterPage({
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
         <TextField
-          id={nameId}
           label="Full name"
           autoComplete="name"
           value={name}
@@ -237,7 +233,6 @@ export function RegisterPage({
           disabled={inputsDisabled}
         />
         <TextField
-          id={emailId}
           label="Email"
           type="email"
           autoComplete="email"
@@ -260,7 +255,6 @@ export function RegisterPage({
         />
         <div className="flex flex-col gap-1">
           <TextField
-            id={companyId}
             label="Company name"
             autoComplete="organization"
             value={company}
@@ -344,7 +338,6 @@ function fieldErrorsFrom(details: Record<string, unknown> | null): FieldErrors {
 }
 
 interface TextFieldProps {
-  id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -354,29 +347,18 @@ interface TextFieldProps {
   autoComplete: string;
 }
 
-function TextField({ id, label, value, onChange, error, disabled, type = "text", autoComplete }: TextFieldProps) {
+function TextField({ label, value, onChange, error, disabled, type = "text", autoComplete }: TextFieldProps) {
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm text-text">
-        {label}
-      </label>
-      <input
-        id={id}
+    <FieldWrapper label={label} error={error}>
+      <TextInput
         type={type}
         autoComplete={autoComplete}
         {...(type === "email" ? { autoCorrect: "off", autoCapitalize: "none", spellCheck: false } : {})}
         value={value}
         disabled={disabled}
-        aria-invalid={error !== undefined}
-        onChange={(e) => onChange(e.target.value)}
-        className={fieldInputClassName(error !== undefined, "input", "sans")}
+        onChange={onChange}
       />
-      {error && (
-        <span role="alert" className="text-danger text-sm">
-          {error}
-        </span>
-      )}
-    </div>
+    </FieldWrapper>
   );
 }
 

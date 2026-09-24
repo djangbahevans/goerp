@@ -28,6 +28,7 @@
 
   --color-border: var(--goerp-color-border);
   --color-border-strong: var(--goerp-color-border-strong);
+  --color-border-control: var(--goerp-color-border-control);
 
   --color-text: var(--goerp-color-text);
   --color-text-secondary: var(--goerp-color-text-secondary);

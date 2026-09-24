@@ -1,5 +1,5 @@
 import { fetchTenantContext, useAuth, type VerificationEmailRequest } from "@goerp/sdk/auth";
-import { Button, Countdown, fieldInputClassName, PasswordField } from "@goerp/sdk/components";
+import { Button, Countdown, FieldWrapper, PasswordField, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -59,8 +59,6 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
     retry: false,
   });
 
-  const emailId = useId();
-  const companyId = useId();
   const rememberId = useId();
   const emailRef = useRef<HTMLInputElement>(null);
 
@@ -181,38 +179,22 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
         {showCompanyField && (
-          <div className="flex flex-col gap-1">
-            <label htmlFor={companyId} className="text-sm text-text">
-              Company
-            </label>
-            <input
-              id={companyId}
-              type="text"
+          <FieldWrapper label="Company" error={fieldErrors.company}>
+            <TextInput
               autoComplete="organization"
               autoCorrect="off"
               autoCapitalize="none"
               spellCheck={false}
               value={company}
               disabled={inputsDisabled}
-              aria-invalid={fieldErrors.company !== undefined}
-              onChange={(e) => setCompany(e.target.value)}
-              className={fieldInputClassName(fieldErrors.company !== undefined, "input", "sans")}
+              onChange={setCompany}
             />
-            {fieldErrors.company && (
-              <span role="alert" className="text-danger text-sm">
-                {fieldErrors.company}
-              </span>
-            )}
-          </div>
+          </FieldWrapper>
         )}
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor={emailId} className="text-sm text-text">
-            Email
-          </label>
-          <input
+        <FieldWrapper label="Email" error={fieldErrors.email}>
+          <TextInput
             ref={emailRef}
-            id={emailId}
             type="email"
             autoComplete="email"
             autoCorrect="off"
@@ -220,16 +202,9 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
             spellCheck={false}
             value={email}
             disabled={inputsDisabled}
-            aria-invalid={fieldErrors.email !== undefined}
-            onChange={(e) => setEmail(e.target.value)}
-            className={fieldInputClassName(fieldErrors.email !== undefined, "input", "sans")}
+            onChange={setEmail}
           />
-          {fieldErrors.email && (
-            <span role="alert" className="text-danger text-sm">
-              {fieldErrors.email}
-            </span>
-          )}
-        </div>
+        </FieldWrapper>
 
         <PasswordField
           label="Password"
