@@ -618,8 +618,8 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 		t.Error("Lookup(POST, /storage/upload).Manifest.EngineBuiltin = false, want true")
 	}
 
-	// goerp#822: these four were previously missing here despite being
-	// dispatched from engine.go's builtinRoutes map.
+	// A route engine.go's builtinRoutes dispatches is unreachable in
+	// production unless it also resolves here.
 	for _, c := range []struct{ method, path string }{
 		{"GET", "/auth/me"},
 		{"GET", "/auth/tenant-context"},
@@ -629,6 +629,8 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 		{"POST", "/auth/password-reset/request"},
 		{"POST", "/auth/password-reset/confirm"},
 		{"POST", "/auth/me/change-password"},
+		{"POST", "/auth/accept-invite"},
+		{"GET", "/auth/accept-invite/info"},
 	} {
 		entry, _, result, _ := table.Lookup(c.method, c.path)
 		if result != route.RouteFound {

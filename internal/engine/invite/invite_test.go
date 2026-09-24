@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -474,5 +475,65 @@ func TestListExpired_NoExpiredInvitationsReturnsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("ListExpired() = %v, want empty", got)
+	}
+}
+
+// acceptFixture invites email and returns the live invitation. user_roles
+// takes a UUID, so the acceptor is a fresh one rather than the fake
+// resolver's id.
+func acceptFixture(t *testing.T) (*Store, string, *Invitation, string) {
+	t.Helper()
+	store, _, slug := openTestStore(t)
+	email := uniqueEmail(t)
+	if _, err := store.Invite(t.Context(), slug, email, "admin", "", nil); err != nil {
+		t.Fatalf("Invite() error: %v", err)
+	}
+	inv, err := store.GetLiveByEmail(t.Context(), slug, email)
+	if err != nil {
+		t.Fatalf("GetLiveByEmail() error: %v", err)
+	}
+	return store, slug, inv, uuid.New().String()
+}
+
+func TestAccept_ConcurrentAcceptsSucceedExactlyOnce(t *testing.T) {
+	store, slug, inv, userID := acceptFixture(t)
+
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range n {
+		wg.Go(func() { errs <- store.Accept(t.Context(), slug, inv.ID, userID, nil) })
+	}
+	wg.Wait()
+	close(errs)
+
+	var ok, notLive int
+	for err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, ErrInvitationNotLive):
+			notLive++
+		default:
+			t.Fatalf("Accept() error: %v", err)
+		}
+	}
+	if ok != 1 || notLive != n-1 {
+		t.Errorf("ok = %d, not live = %d, want 1 and %d", ok, notLive, n-1)
+	}
+}
+
+func TestAccept_ActivateFailureRollsBackMembershipAndAcceptance(t *testing.T) {
+	store, slug, inv, userID := acceptFixture(t)
+	boom := errors.New("activate failed")
+
+	if err := store.Accept(t.Context(), slug, inv.ID, userID, func(*sql.Tx) error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("Accept() error = %v, want the activate error", err)
+	}
+	if _, err := store.GetLiveByEmail(t.Context(), slug, inv.Email); err != nil {
+		t.Errorf("invitation no longer live after a failed accept: %v", err)
+	}
+	if err := store.Accept(t.Context(), slug, inv.ID, userID, nil); err != nil {
+		t.Errorf("retry Accept() error: %v", err)
 	}
 }
