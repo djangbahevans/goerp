@@ -1,5 +1,5 @@
 import { Icon } from "@goerp/sdk/components";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useEffect, useId, useRef } from "react";
 import { useMediaQuery } from "./use-media-query.js";
 
@@ -48,10 +48,36 @@ const BOTTOM_BAR_STYLE: CSSProperties = {
   backgroundColor: "var(--color-primary)",
 };
 
-function SectionNavLink({ item, layout }: { item: SectionNavItem; layout: SectionNavLayout }): ReactNode {
+function trimTrailingSlash(path: string): string {
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
+// The one item that owns `pathname`: the longest `to` equal to it or a parent
+// of it, so /admin/settings/notifications picks its own item over /admin/settings.
+export function mostSpecificItem(pathname: string, groups: SectionNavGroup[]): string | null {
+  const path = trimTrailingSlash(pathname);
+  let match: string | null = null;
+  for (const item of groups.flatMap((group) => group.items)) {
+    const to = trimTrailingSlash(item.to);
+    if ((path === to || path.startsWith(`${to}/`)) && (match === null || to.length > match.length)) match = to;
+  }
+  return match;
+}
+
+interface SectionNavLinkProps {
+  item: SectionNavItem;
+  layout: SectionNavLayout;
+  activeTo: string | null;
+}
+
+function SectionNavLink({ item, layout, activeTo }: SectionNavLinkProps): ReactNode {
+  // Link applies aria-current after activeProps, so a less specific item is
+  // kept from matching at all (exact) rather than switched off afterwards.
+  const ownsPath = trimTrailingSlash(item.to) === activeTo;
   return (
     <Link
       to={item.to}
+      activeOptions={{ exact: !ownsPath }}
       className={ITEM_CLASSES}
       inactiveProps={{ className: "text-text-secondary hover:bg-surface-hover" }}
       activeProps={{ className: "bg-primary-subtle font-medium text-primary" }}
@@ -73,7 +99,7 @@ function SectionNavLink({ item, layout }: { item: SectionNavItem; layout: Sectio
   );
 }
 
-function WideRail({ groups }: { groups: SectionNavGroup[] }): ReactNode {
+function WideRail({ groups, activeTo }: { groups: SectionNavGroup[]; activeTo: string | null }): ReactNode {
   const idPrefix = useId();
   return (
     <div className="sticky top-0 flex flex-col gap-4 px-2 py-4">
@@ -89,7 +115,7 @@ function WideRail({ groups }: { groups: SectionNavGroup[] }): ReactNode {
             <ul aria-labelledby={group.heading ? headingId : undefined}>
               {group.items.map((item) => (
                 <li key={item.to}>
-                  <SectionNavLink item={item} layout="wide" />
+                  <SectionNavLink item={item} layout="wide" activeTo={activeTo} />
                 </li>
               ))}
             </ul>
@@ -100,7 +126,7 @@ function WideRail({ groups }: { groups: SectionNavGroup[] }): ReactNode {
   );
 }
 
-function NarrowRow({ groups }: { groups: SectionNavGroup[] }): ReactNode {
+function NarrowRow({ groups, activeTo }: { groups: SectionNavGroup[]; activeTo: string | null }): ReactNode {
   const listRef = useRef<HTMLUListElement>(null);
 
   // The active link can start off-screen in a long row; bring it into view once.
@@ -114,7 +140,7 @@ function NarrowRow({ groups }: { groups: SectionNavGroup[] }): ReactNode {
       {groups.flatMap((group) =>
         group.items.map((item) => (
           <li key={item.to} className="shrink-0">
-            <SectionNavLink item={item} layout="narrow" />
+            <SectionNavLink item={item} layout="narrow" activeTo={activeTo} />
           </li>
         )),
       )}
@@ -128,12 +154,14 @@ export function SectionNav({ label, groups, children, layout }: SectionNavProps)
   const wideViewport = useMediaQuery(WIDE_QUERY, true);
   const resolved: SectionNavLayout = layout ?? (wideViewport ? "wide" : "narrow");
   const visibleGroups = groups.filter((group) => group.items.length > 0);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const activeTo = mostSpecificItem(pathname, visibleGroups);
 
   if (resolved === "narrow") {
     return (
       <div className="flex min-h-full flex-col">
         <nav aria-label={label} className="border-border border-b bg-surface">
-          <NarrowRow groups={visibleGroups} />
+          <NarrowRow groups={visibleGroups} activeTo={activeTo} />
         </nav>
         <div className="min-w-0 flex-1">{children}</div>
       </div>
@@ -142,8 +170,8 @@ export function SectionNav({ label, groups, children, layout }: SectionNavProps)
 
   return (
     <div className="flex min-h-full">
-      <nav aria-label={label} className="w-[224px] shrink-0 border-border border-e bg-surface">
-        <WideRail groups={visibleGroups} />
+      <nav aria-label={label} className="w-56 shrink-0 border-border border-e bg-surface">
+        <WideRail groups={visibleGroups} activeTo={activeTo} />
       </nav>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
