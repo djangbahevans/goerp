@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPermissionContextValue, PermissionContext } from "../auth/permission-provider.js";
 import { ActionButton } from "./action-button.js";
+import { Button } from "./button.js";
 
 afterEach(cleanup);
 
@@ -47,16 +48,37 @@ describe("ActionButton", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("disables the button while loading", () => {
+  it("blocks clicks while loading without setting the native disabled attribute", () => {
+    const onClick = vi.fn();
     render(
       withPermissions(
         [],
-        <ActionButton onClick={vi.fn()} loading>
+        <ActionButton onClick={onClick} loading>
           Confirm Order
         </ActionButton>,
       ),
     );
-    expect(screen.getByRole("button").hasAttribute("disabled")).toBe(true);
+    const button = screen.getByRole("button");
+    fireEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(button.hasAttribute("disabled")).toBe(false);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("renders the same classes as a Button with the same variant", () => {
+    render(
+      withPermissions(
+        [],
+        <>
+          <ActionButton onClick={vi.fn()} variant="danger">
+            Archive
+          </ActionButton>
+          <Button variant="danger">Archive</Button>
+        </>,
+      ),
+    );
+    const [action, plain] = screen.getAllByRole("button", { name: "Archive" });
+    expect(action?.className).toBe(plain?.className);
   });
 
   it("defaults to the md size", () => {

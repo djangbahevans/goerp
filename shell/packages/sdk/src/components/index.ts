@@ -1,12 +1,5 @@
 export type { ActionButtonProps, ActionButtonSize, ActionButtonVariant } from "./action-button.js";
 export { ActionButton } from "./action-button.js";
-// A trigger needing ActionButton's exact visual treatment but with DOM
-// attributes ActionButtonProps doesn't pass through (e.g. aria-haspopup/
-// aria-expanded on a disclosure trigger) — action-button-styles.ts's own
-// comment: "as a className builder rather than mounting <ActionButton>
-// itself." AlertDialog already relies on this internally; exported here so
-// call sites outside the sdk package (form-share-action.tsx) can too.
-export { actionButtonClassName } from "./action-button-styles.js";
 export type { ActionMenuItem, ActionMenuItemConfirm, ActionMenuProps } from "./action-menu.js";
 export { ActionMenu } from "./action-menu.js";
 export type { AlertDialogInput, AlertDialogProps, AlertDialogSelectOption } from "./alert-dialog.js";
@@ -19,6 +12,8 @@ export type { BreadcrumbItem, BreadcrumbProps } from "./breadcrumb.js";
 export { Breadcrumb } from "./breadcrumb.js";
 export type { BulkActionPanelProps } from "./bulk-action-panel.js";
 export { BulkActionPanel } from "./bulk-action-panel.js";
+export type { ButtonAsButtonProps, ButtonAsLinkProps, ButtonProps, ButtonSize, ButtonVariant } from "./button.js";
+export { Button } from "./button.js";
 export { cn } from "./cn.js";
 export type { CodeFieldProps } from "./code-field.js";
 export { CodeField } from "./code-field.js";
@@ -49,6 +44,8 @@ export type { FileFieldProps, FileValue } from "./file-field.js";
 export { FileField } from "./file-field.js";
 export type { IconName, IconNameLike, IconProps } from "./icon.js";
 export { Icon, isKnownIconName } from "./icon.js";
+export type { IconButtonProps, IconButtonVariant } from "./icon-button.js";
+export { IconButton } from "./icon-button.js";
 export type { IconPickerProps } from "./icon-picker.js";
 export { IconPicker } from "./icon-picker.js";
 export type { LanguageSelectProps } from "./language-select.js";

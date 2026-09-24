@@ -1,6 +1,6 @@
 import type { KeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { actionButtonClassName } from "./action-button-styles.js";
+import { Button } from "./button.js";
 
 export interface AvatarCropProps {
   file: File;
@@ -201,24 +201,12 @@ export function AvatarCrop({ file, onApply, onCancel, disabled = false }: Avatar
         style={{ width: VIEWPORT_SIZE }}
       />
       <span className="flex gap-2">
-        <button
-          type="button"
-          disabled={disabled}
-          data-disabled={disabled ? "true" : undefined}
-          onClick={onCancel}
-          className={actionButtonClassName("secondary", "sm")}
-        >
+        <Button size="sm" disabled={disabled} onClick={onCancel}>
           Cancel
-        </button>
-        <button
-          type="button"
-          disabled={disabled || !ready}
-          data-disabled={disabled || !ready ? "true" : undefined}
-          onClick={apply}
-          className={actionButtonClassName("primary", "sm")}
-        >
+        </Button>
+        <Button variant="primary" size="sm" disabled={disabled || !ready} onClick={apply}>
           Apply
-        </button>
+        </Button>
       </span>
     </div>
   );

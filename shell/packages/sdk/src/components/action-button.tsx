@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { useOptionalPermission } from "../auth/use-permission.js";
-import { type ActionButtonSize, type ActionButtonVariant, actionButtonClassName } from "./action-button-styles.js";
-import { Icon, type IconNameLike } from "./icon.js";
-import { Spinner } from "./spinner.js";
+import { Button } from "./button.js";
+import type { ButtonSize } from "./button-styles.js";
+import type { IconNameLike } from "./icon.js";
 
-export type { ActionButtonSize, ActionButtonVariant };
+export type ActionButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+export type ActionButtonSize = ButtonSize;
 
 export interface ActionButtonProps {
   permission?: string | undefined;
@@ -19,17 +20,13 @@ export interface ActionButtonProps {
   children: ReactNode;
 }
 
-// Shared by the spinner and the icon, so `loading` swaps one for the
-// other at the same size instead of visibly resizing the button.
-const ICON_DIMENSION: Record<ActionButtonSize, number> = { sm: 14, md: 16 };
-
 export function ActionButton({
   permission,
   onClick,
-  loading = false,
-  disabled = false,
-  variant = "secondary",
-  size = "md",
+  loading,
+  disabled,
+  variant,
+  size,
   icon,
   children,
 }: ActionButtonProps): ReactNode {
@@ -37,26 +34,8 @@ export function ActionButton({
   if (!allowed) return null;
 
   return (
-    <button
-      type="button"
-      data-variant={variant}
-      data-size={size}
-      // Keys the opacity-dimmed disabled look off the `disabled` prop
-      // specifically, not off the rendered native `disabled` attribute
-      // below (also set while `loading`) — a loading button is busy, not
-      // inactive, and must stay at full contrast while aria-busy is true.
-      data-disabled={disabled ? "true" : undefined}
-      disabled={disabled || loading}
-      aria-busy={loading}
-      onClick={onClick}
-      className={actionButtonClassName(variant, size)}
-    >
-      {loading ? (
-        <Spinner size={ICON_DIMENSION[size]} />
-      ) : (
-        icon && <Icon name={icon} size={ICON_DIMENSION[size]} className="shrink-0" aria-hidden="true" />
-      )}
+    <Button variant={variant} size={size} icon={icon} loading={loading} disabled={disabled} onClick={() => onClick()}>
       {children}
-    </button>
+    </Button>
   );
 }

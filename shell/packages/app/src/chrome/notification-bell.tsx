@@ -1,5 +1,5 @@
+import { IconButton } from "@goerp/sdk/components";
 import { useUnreadCount } from "@goerp/sdk/notifications";
-import { Bell } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { NotificationSheet } from "./notification-sheet.js";
@@ -13,23 +13,22 @@ export function NotificationBell(): ReactNode {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        aria-label={count > 0 ? `Notifications (${count} unread)` : "Notifications"}
-        className="relative rounded-control p-1.5 hover:bg-surface-hover aria-expanded:bg-surface-hover"
-        aria-expanded={open}
-      >
-        <Bell size={18} aria-hidden="true" />
+      <span className="relative inline-flex">
+        <IconButton
+          icon="bell"
+          label={count > 0 ? `Notifications (${count} unread)` : "Notifications"}
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+        />
         {count > 0 && (
           <span
             aria-hidden="true"
-            className="-top-0.5 -right-0.5 absolute flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-text-inverse"
+            className="pointer-events-none -top-0.5 -right-0.5 absolute flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-text-inverse"
           >
             {capped}
           </span>
         )}
-      </button>
+      </span>
 
       <NotificationSheet open={open} onClose={() => setOpen(false)} />
     </>

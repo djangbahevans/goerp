@@ -172,12 +172,12 @@ describe("ListActions", () => {
     expect(screen.queryByText("Docs")).toBeNull();
   });
 
-  it("route: disables the button while the mutation is pending", async () => {
+  it("route: marks the button busy while the mutation is pending", async () => {
     useActionMock.mockReturnValue({ mutate: vi.fn(), isPending: true, isError: false, error: null });
     const actions: ListAction[] = [{ label: "Confirm", type: "route", route: "contacts.confirm" }];
     await renderActions(actions, fullAccess);
 
-    expect(screen.getByRole("button", { name: "Confirm" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Confirm" }).getAttribute("aria-busy")).toBe("true");
   });
 
   it("create: resolves the view name to a path and navigates to its /_m browser link", async () => {

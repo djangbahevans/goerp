@@ -1,25 +1,11 @@
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import {
-  Bold,
-  ExternalLink,
-  Heading1,
-  Heading2,
-  Heading3,
-  Italic,
-  Link as LinkIcon,
-  List,
-  Quote,
-  Redo2,
-  Trash2,
-  Underline,
-  Undo2,
-} from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
-import { actionButtonClassName } from "./action-button-styles.js";
+import { Button } from "./button.js";
 import { fieldInputClassName } from "./field-input-styles.js";
+import { IconButton } from "./icon-button.js";
 
 export interface RichTextFieldProps {
   label?: string | undefined;
@@ -45,37 +31,19 @@ export interface RichTextFieldProps {
 // own Link button needs a plain click on link text to place the cursor.
 const EXTENSIONS = [StarterKit.configure({ link: { openOnClick: false } })];
 
-const TOOLBAR_ICON_SIZE = 16;
-const TOOLBAR_BUTTON_CLASSES = actionButtonClassName("ghost", "sm");
-
 const HEADING_LEVELS = [1, 2, 3] as const;
-const HEADING_ICONS = { 1: Heading1, 2: Heading2, 3: Heading3 } as const;
-
-function toolbarButtonClassName(active: boolean): string {
-  return `${TOOLBAR_BUTTON_CLASSES} ${active ? "bg-surface-active text-primary" : ""}`;
-}
+const HEADING_ICONS = { 1: "heading-1", 2: "heading-2", 3: "heading-3" } as const;
 
 interface ToolbarButtonProps {
+  icon: string;
   label: string;
   active: boolean;
   disabled: boolean;
   onClick: () => void;
-  children: ReactNode;
 }
 
-function ToolbarButton({ label, active, disabled, onClick, children }: ToolbarButtonProps): ReactNode {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={toolbarButtonClassName(active)}
-    >
-      {children}
-    </button>
-  );
+function ToolbarButton({ icon, label, active, disabled, onClick }: ToolbarButtonProps): ReactNode {
+  return <IconButton icon={icon} label={label} size="sm" pressed={active} disabled={disabled} onClick={onClick} />;
 }
 
 function ToolbarDivider(): ReactNode {
@@ -83,21 +51,17 @@ function ToolbarDivider(): ReactNode {
 }
 
 interface MomentaryToolbarButtonProps {
+  icon: string;
   label: string;
   disabled: boolean;
   onClick: () => void;
-  children: ReactNode;
 }
 
 // Undo/Redo, unlike ToolbarButton's other callers, are momentary actions
 // with no persistent "on" state — no aria-pressed, since their disabled
 // state is the whole affordance (matching a native app's undo/redo).
-function MomentaryToolbarButton({ label, disabled, onClick, children }: MomentaryToolbarButtonProps): ReactNode {
-  return (
-    <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className={TOOLBAR_BUTTON_CLASSES}>
-      {children}
-    </button>
-  );
+function MomentaryToolbarButton({ icon, label, disabled, onClick }: MomentaryToolbarButtonProps): ReactNode {
+  return <IconButton icon={icon} label={label} size="sm" disabled={disabled} onClick={onClick} />;
 }
 
 export function RichTextField({
@@ -233,89 +197,76 @@ export function RichTextField({
           className="flex flex-wrap items-center gap-1 border-border border-b pb-2"
         >
           <MomentaryToolbarButton
+            icon="undo-2"
             label="Undo"
             disabled={disabled || !activeMarks.canUndo}
             onClick={() => editor.chain().focus().undo().run()}
-          >
-            <Undo2 size={TOOLBAR_ICON_SIZE} />
-          </MomentaryToolbarButton>
+          />
           <MomentaryToolbarButton
+            icon="redo-2"
             label="Redo"
             disabled={disabled || !activeMarks.canRedo}
             onClick={() => editor.chain().focus().redo().run()}
-          >
-            <Redo2 size={TOOLBAR_ICON_SIZE} />
-          </MomentaryToolbarButton>
+          />
           <ToolbarDivider />
-          {HEADING_LEVELS.map((level) => {
-            const HeadingIcon = HEADING_ICONS[level];
-            return (
-              <ToolbarButton
-                key={level}
-                label={`Heading ${level}`}
-                active={headingActive[level]}
-                disabled={disabled}
-                onClick={() => editor.chain().focus().toggleHeading({ level }).run()}
-              >
-                <HeadingIcon size={TOOLBAR_ICON_SIZE} />
-              </ToolbarButton>
-            );
-          })}
+          {HEADING_LEVELS.map((level) => (
+            <ToolbarButton
+              key={level}
+              icon={HEADING_ICONS[level]}
+              label={`Heading ${level}`}
+              active={headingActive[level]}
+              disabled={disabled}
+              onClick={() => editor.chain().focus().toggleHeading({ level }).run()}
+            />
+          ))}
           <ToolbarDivider />
           <ToolbarButton
+            icon="bold"
             label="Bold"
             active={activeMarks.bold}
             disabled={disabled}
             onClick={() => editor.chain().focus().toggleBold().run()}
-          >
-            <Bold size={TOOLBAR_ICON_SIZE} />
-          </ToolbarButton>
+          />
           <ToolbarButton
+            icon="italic"
             label="Italic"
             active={activeMarks.italic}
             disabled={disabled}
             onClick={() => editor.chain().focus().toggleItalic().run()}
-          >
-            <Italic size={TOOLBAR_ICON_SIZE} />
-          </ToolbarButton>
+          />
           <ToolbarButton
+            icon="underline"
             label="Underline"
             active={activeMarks.underline}
             disabled={disabled}
             onClick={() => editor.chain().focus().toggleUnderline().run()}
-          >
-            <Underline size={TOOLBAR_ICON_SIZE} />
-          </ToolbarButton>
+          />
           <ToolbarDivider />
           <ToolbarButton
+            icon="list"
             label="Bulleted list"
             active={activeMarks.bulletList}
             disabled={disabled}
             onClick={() => editor.chain().focus().toggleBulletList().run()}
-          >
-            <List size={TOOLBAR_ICON_SIZE} />
-          </ToolbarButton>
+          />
           <ToolbarButton
+            icon="quote"
             label="Blockquote"
             active={activeMarks.blockquote}
             disabled={disabled}
             onClick={() => editor.chain().focus().toggleBlockquote().run()}
-          >
-            <Quote size={TOOLBAR_ICON_SIZE} />
-          </ToolbarButton>
+          />
           <ToolbarDivider />
           <PopoverPrimitive.Root open={linkPopoverOpen && !disabled} onOpenChange={setLinkPopoverOpen}>
             <PopoverPrimitive.Trigger asChild>
-              <button
-                type="button"
-                aria-label="Link"
-                aria-pressed={activeMarks.link}
+              <IconButton
+                icon="link"
+                label="Link"
+                size="sm"
+                pressed={activeMarks.link}
                 disabled={linkButtonDisabled}
                 onClick={openLinkPopover}
-                className={toolbarButtonClassName(activeMarks.link)}
-              >
-                <LinkIcon size={TOOLBAR_ICON_SIZE} />
-              </button>
+              />
             </PopoverPrimitive.Trigger>
             <PopoverPrimitive.Portal>
               <PopoverPrimitive.Content
@@ -345,26 +296,19 @@ export function RichTextField({
                     className={`w-56 rounded-control border px-2 py-1 text-sm text-text focus-visible:outline-none focus-visible:shadow-focus ${linkUrlInvalid ? "border-danger" : "border-border"}`}
                   />
                   {activeMarks.link && (
-                    <a
+                    <Button
                       href={activeMarks.linkHref}
                       target="_blank"
                       rel="noopener noreferrer"
                       aria-label="Open link in new tab"
-                      className={actionButtonClassName("ghost", "sm")}
+                      variant="ghost"
+                      size="sm"
+                      icon="external-link"
                     >
-                      <ExternalLink size={TOOLBAR_ICON_SIZE} />
-                    </a>
+                      Open
+                    </Button>
                   )}
-                  {activeMarks.link && (
-                    <button
-                      type="button"
-                      aria-label="Remove link"
-                      onClick={removeLink}
-                      className={actionButtonClassName("ghost", "sm")}
-                    >
-                      <Trash2 size={TOOLBAR_ICON_SIZE} />
-                    </button>
-                  )}
+                  {activeMarks.link && <IconButton icon="trash-2" label="Remove link" size="sm" onClick={removeLink} />}
                 </div>
                 {linkUrlInvalid && (
                   <span role="alert" className="text-danger text-xs">

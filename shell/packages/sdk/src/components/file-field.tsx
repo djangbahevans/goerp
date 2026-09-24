@@ -1,10 +1,11 @@
 import { File as FileIcon, FileSpreadsheet, FileText, Image as ImageIcon } from "lucide-react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
-import { actionButtonClassName } from "./action-button-styles.js";
 import { AvatarCrop } from "./avatar-crop.js";
+import { Button } from "./button.js";
 import type { UploadHandle } from "./file-field-upload.js";
 import { formatFileSize, UploadError, uploadFile, validateFile } from "./file-field-upload.js";
+import { IconButton } from "./icon-button.js";
 import { ProgressBar } from "./progress-bar.js";
 
 export interface FileValue {
@@ -287,15 +288,9 @@ export function FileField({
           } ${disabled ? "opacity-50" : ""}`}
         >
           <span className="text-sm text-text-secondary">Drag and drop a file here, or</span>
-          <button
-            type="button"
-            disabled={disabled}
-            data-disabled={disabled ? "true" : undefined}
-            onClick={browse}
-            className={actionButtonClassName("secondary", "sm")}
-          >
+          <Button size="sm" disabled={disabled} onClick={browse}>
             Browse files
-          </button>
+          </Button>
         </div>
       )}
 
@@ -311,15 +306,13 @@ export function FileField({
             <span className="truncate text-sm text-text" title={item.filename}>
               {item.filename}
             </span>
-            <button
-              type="button"
+            <IconButton
+              icon="x"
+              label={`Remove ${item.filename}`}
+              size="sm"
               disabled={disabled}
               onClick={() => removeInFlight(item.key)}
-              aria-label={`Remove ${item.filename}`}
-              className="shrink-0 rounded-control p-1 text-text-secondary hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ×
-            </button>
+            />
           </div>
           <ProgressBar
             value={item.percent}
@@ -331,15 +324,11 @@ export function FileField({
               <span role="alert" className="text-xs text-danger">
                 {item.error}
               </span>
-              <button
-                type="button"
-                disabled={disabled}
-                data-disabled={disabled ? "true" : undefined}
-                onClick={() => retry(item)}
-                className={`self-start ${actionButtonClassName("secondary", "sm")}`}
-              >
-                Try again
-              </button>
+              <span className="flex self-start">
+                <Button size="sm" disabled={disabled} onClick={() => retry(item)}>
+                  Try again
+                </Button>
+              </span>
             </>
           )}
         </div>
@@ -355,15 +344,16 @@ export function FileField({
                   {previewUrl && (
                     <img src={previewUrl} alt={fileValue.name} className="h-24 w-24 rounded-full object-cover" />
                   )}
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => removeCompleted(fileValue.fileId)}
-                    aria-label={`Remove ${fileValue.name}`}
-                    className="absolute top-1 inset-e-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-surface text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    ×
-                  </button>
+                  <span className="absolute top-1 inset-e-1 flex">
+                    <IconButton
+                      icon="x"
+                      label={`Remove ${fileValue.name}`}
+                      variant="secondary"
+                      size="sm"
+                      disabled={disabled}
+                      onClick={() => removeCompleted(fileValue.fileId)}
+                    />
+                  </span>
                 </span>
               );
             }
@@ -373,15 +363,16 @@ export function FileField({
                   {previewUrl && (
                     <img src={previewUrl} alt={fileValue.name} className="h-32 w-32 rounded-control object-cover" />
                   )}
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => removeCompleted(fileValue.fileId)}
-                    aria-label={`Remove ${fileValue.name}`}
-                    className="absolute top-1 inset-e-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-surface text-text-secondary shadow-sm hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    ×
-                  </button>
+                  <span className="absolute top-1 inset-e-1 flex">
+                    <IconButton
+                      icon="x"
+                      label={`Remove ${fileValue.name}`}
+                      variant="secondary"
+                      size="sm"
+                      disabled={disabled}
+                      onClick={() => removeCompleted(fileValue.fileId)}
+                    />
+                  </span>
                 </span>
               );
             }
@@ -397,15 +388,13 @@ export function FileField({
                   </span>
                   <span className="text-xs text-text-secondary">{formatFileSize(fileValue.sizeBytes)}</span>
                 </span>
-                <button
-                  type="button"
+                <IconButton
+                  icon="x"
+                  label={`Remove ${fileValue.name}`}
+                  size="sm"
                   disabled={disabled}
                   onClick={() => removeCompleted(fileValue.fileId)}
-                  aria-label={`Remove ${fileValue.name}`}
-                  className="shrink-0 rounded-control p-1 text-text-secondary hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  ×
-                </button>
+                />
               </span>
             );
           })}

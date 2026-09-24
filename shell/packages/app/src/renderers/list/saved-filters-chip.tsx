@@ -14,7 +14,7 @@ export interface SavedFiltersChipProps {
   listState: ListStateHandle;
 }
 
-// Mirrors action-button-styles.ts's "secondary"/"sm" pieces, with
+// Mirrors button-styles.ts's "secondary"/"sm" pieces, with
 // --radius-full swapped in for --radius-control.
 const TRIGGER_CLASSES = [
   "inline-flex h-7 items-center gap-2 rounded-full border border-border bg-surface px-2 font-medium text-sm text-text",

@@ -13,6 +13,7 @@ import {
   useOutsideClickClose,
   useScrollHighlightedOptionIntoView,
 } from "./floating-panel.js";
+import { IconButton } from "./icon-button.js";
 import type { RelationValue } from "./relation-field.js";
 import { Skeleton } from "./skeleton.js";
 
@@ -30,7 +31,7 @@ const DEBOUNCE_MS = 300;
 // way to unset a single-select value back to null.
 const CLEAR_BUTTON_STYLE: CSSProperties = {
   position: "absolute",
-  insetInlineEnd: "var(--space-2)",
+  insetInlineEnd: "var(--space-1)",
   top: "50%",
   transform: "translateY(-50%)",
 };
@@ -357,16 +358,15 @@ export function RelationPicker({
         className={`truncate ${fieldInputClassName(false)}`}
       />
       {!multiple && singleValue && !isOpen && (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(null)}
-          aria-label={`Clear ${singleValue.display}`}
-          style={CLEAR_BUTTON_STYLE}
-          className="rounded-control p-1 text-text-secondary hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          ×
-        </button>
+        <span style={CLEAR_BUTTON_STYLE} className="flex">
+          <IconButton
+            icon="x"
+            label={`Clear ${singleValue.display}`}
+            size="sm"
+            disabled={disabled}
+            onClick={() => onChange(null)}
+          />
+        </span>
       )}
       {isOpen &&
         createPortal(
