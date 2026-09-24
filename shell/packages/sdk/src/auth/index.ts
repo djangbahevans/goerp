@@ -1,4 +1,10 @@
-export { confirmPasswordReset, fetchTenantContext, requestPasswordReset } from "./auth-client.js";
+export {
+  acceptInvite,
+  confirmPasswordReset,
+  fetchInviteInfo,
+  fetchTenantContext,
+  requestPasswordReset,
+} from "./auth-client.js";
 export { AuthMachine, authMachine, authTransition } from "./auth-machine.js";
 export { AuthContext, AuthProvider } from "./auth-provider.js";
 export { Can, type CanProps } from "./can.js";
@@ -27,6 +33,10 @@ export type {
   ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
+  InviteAcceptance,
+  InviteAcceptOutcome,
+  InviteInfo,
+  InviteLink,
   LoginCredentials,
   MFAMethod,
   PasswordResetConfirmation,

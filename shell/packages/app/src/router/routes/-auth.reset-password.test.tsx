@@ -137,7 +137,7 @@ describe("/auth/reset-password", () => {
     submit();
 
     const heading = await screen.findByRole("heading", { name: "Link expired" });
-    expect(document.activeElement).toBe(heading);
+    await waitFor(() => expect(document.activeElement).toBe(heading));
     expect(screen.queryByLabelText("New password")).toBeNull();
     expect(JSON.parse(String(confirmCalls(fetchMock)[0]?.[1]?.body))).toEqual({
       token: "t0k",

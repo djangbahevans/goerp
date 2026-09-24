@@ -3,6 +3,10 @@ import type {
   ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
+  InviteAcceptance,
+  InviteAcceptOutcome,
+  InviteInfo,
+  InviteLink,
   LoginCredentials,
   MFAMethod,
   PasswordResetConfirmation,
@@ -205,6 +209,40 @@ export async function confirmPasswordReset(input: PasswordResetConfirmation): Pr
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token: input.token, new_password: input.newPassword, tenant: input.tenant }),
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { login_required?: boolean };
+  return body.login_required ? "login_required" : "signed_in";
+}
+
+// fetchInviteInfo backs GET /auth/accept-invite/info (shell-ux.md §2.5).
+// A 404 (invalid_invite) covers every dead link: unknown, expired,
+// revoked, or already accepted.
+export async function fetchInviteInfo(link: InviteLink): Promise<InviteInfo> {
+  const query = new URLSearchParams({ token: link.token, tenant: link.tenant });
+  const response = await fetch(`/auth/accept-invite/info?${query}`, { credentials: "include" });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as {
+    tenant_name: string;
+    email: string;
+    name: string | null;
+    password_required: boolean;
+  };
+  return {
+    tenantName: body.tenant_name,
+    email: body.email,
+    name: body.name,
+    passwordRequired: body.password_required,
+  };
+}
+
+// acceptInvite backs POST /auth/accept-invite (shell-ux.md §2.5).
+export async function acceptInvite(input: InviteAcceptance): Promise<InviteAcceptOutcome> {
+  const response = await fetch("/auth/accept-invite", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: input.token, tenant: input.tenant, password: input.password }),
   });
   if (!response.ok) throw await readError(response);
   const body = (await response.json()) as { login_required?: boolean };

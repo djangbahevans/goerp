@@ -1,9 +1,15 @@
 import { confirmPasswordReset, type PasswordResetConfirmation, type PasswordResetOutcome } from "@goerp/sdk/auth";
-import { actionButtonClassName, Countdown, PasswordField, PasswordStrengthMeter, Spinner } from "@goerp/sdk/components";
+import { actionButtonClassName, Countdown, Spinner } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
-import { PASSWORD_MISMATCH, policyMessageAsSentence } from "./password-messages.js";
+import {
+  confirmBlurError,
+  type NewPasswordErrors,
+  NewPasswordFields,
+  validateNewPassword,
+} from "./new-password-fields.js";
+import { policyMessageAsSentence } from "./password-messages.js";
 
 type Phase =
   | { kind: "idle" }
@@ -11,15 +17,8 @@ type Phase =
   | { kind: "expired" }
   | { kind: "locked"; seconds: number; key: number };
 
-interface FieldErrors {
-  next?: string | undefined;
-  confirm?: string | undefined;
-}
-
 // Used when a 429 arrives without a parseable Retry-After header.
 const DEFAULT_LOCKOUT_SECONDS = 60;
-
-const TOO_WEAK = "Choose a stronger password: at least 12 characters, rated Fair or better.";
 
 // A full page load either way: a confirm revokes every existing session
 // (possibly this browser's), so the next page must re-run the mount-time
@@ -49,7 +48,7 @@ export function ResetPasswordPage({
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [strongEnough, setStrongEnough] = useState(false);
-  const [errors, setErrors] = useState<FieldErrors>({});
+  const [errors, setErrors] = useState<NewPasswordErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>(token ? { kind: "idle" } : { kind: "expired" });
 
@@ -63,18 +62,14 @@ export function ResetPasswordPage({
   const inputsDisabled = submitting || locked;
 
   const handleConfirmBlur = () => {
-    setErrors((e) => ({ ...e, confirm: confirm && confirm !== next ? PASSWORD_MISMATCH : undefined }));
+    setErrors((e) => ({ ...e, confirm: confirmBlurError(next, confirm) }));
   };
 
   const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (inputsDisabled || !token) return;
 
-    const found: FieldErrors = {};
-    if (!next) found.next = "Enter a new password.";
-    else if (!strongEnough) found.next = TOO_WEAK;
-    if (!confirm) found.confirm = "Confirm your new password.";
-    else if (confirm !== next) found.confirm = PASSWORD_MISMATCH;
+    const found = validateNewPassword(next, confirm, strongEnough);
     setErrors(found);
     setFormError(null);
     if (Object.keys(found).length > 0) return;
@@ -130,24 +125,14 @@ export function ResetPasswordPage({
       <h1 className="mb-6 font-semibold text-text text-xl">Set a new password</h1>
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <PasswordField
-            label="New password"
-            autoComplete="new-password"
-            value={next}
-            onChange={setNext}
-            error={errors.next}
-            disabled={inputsDisabled}
-          />
-          <PasswordStrengthMeter password={next} onValidityChange={setStrongEnough} />
-        </div>
-        <PasswordField
-          label="Confirm new password"
-          autoComplete="new-password"
-          value={confirm}
-          onChange={setConfirm}
-          onBlur={handleConfirmBlur}
-          error={errors.confirm}
+        <NewPasswordFields
+          next={next}
+          confirm={confirm}
+          onNextChange={setNext}
+          onConfirmChange={setConfirm}
+          onConfirmBlur={handleConfirmBlur}
+          onStrengthChange={setStrongEnough}
+          errors={errors}
           disabled={inputsDisabled}
         />
 

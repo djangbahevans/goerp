@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../error/app-error.js";
 import {
+  acceptInvite,
   changePassword,
   confirmPasswordReset,
   fetchCurrentSession,
+  fetchInviteInfo,
   fetchTenantContext,
   login,
   logout,
@@ -430,6 +432,65 @@ describe("confirmPasswordReset", () => {
       vi.fn(async () => jsonResponse(404, { error: { code: "invalid_token", message: "reset link is invalid" } })),
     );
     await expect(confirmPasswordReset(input)).rejects.toMatchObject({ code: "invalid_token", httpStatus: 404 });
+  });
+});
+
+describe("fetchInviteInfo", () => {
+  it("GETs the info endpoint with token and tenant and maps the response", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, { tenant_name: "Acme Corp", email: "kwame@acme.com", name: null, password_required: true }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchInviteInfo({ token: "a+b", tenant: "acme" })).resolves.toEqual({
+      tenantName: "Acme Corp",
+      email: "kwame@acme.com",
+      name: null,
+      passwordRequired: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/accept-invite/info?token=a%2Bb&tenant=acme",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("throws an AppError on a dead link", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(404, { error: { code: "invalid_invite", message: "invite link is invalid" } })),
+    );
+    await expect(fetchInviteInfo({ token: "t", tenant: "acme" })).rejects.toMatchObject({
+      code: "invalid_invite",
+      httpStatus: 404,
+    });
+  });
+});
+
+describe("acceptInvite", () => {
+  it("posts token, tenant, and password, resolving signed_in for a session response", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { expires_in: 900 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(acceptInvite({ token: "t", tenant: "acme", password: "pw" })).resolves.toBe("signed_in");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/accept-invite",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ token: "t", tenant: "acme", password: "pw" }),
+      }),
+    );
+  });
+
+  it("omits the password for an existing account and resolves login_required", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { login_required: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(acceptInvite({ token: "t", tenant: "acme" })).resolves.toBe("login_required");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/accept-invite",
+      expect.objectContaining({ body: JSON.stringify({ token: "t", tenant: "acme" }) }),
+    );
   });
 });
 
