@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
@@ -15,7 +16,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -49,7 +49,7 @@ func uniqueSlug(t *testing.T) string {
 // making a later run's own dedup assertion see a stale duplicate.
 func uniqueEventID(t *testing.T, conn *sql.DB) string {
 	t.Helper()
-	id := uuid.Must(uuid.NewV7()).String()
+	id := uuid.NewV7().String()
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, id)
 	})

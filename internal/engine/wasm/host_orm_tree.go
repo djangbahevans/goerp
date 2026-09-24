@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 )
 
 // This file holds .Tree() companion-path maintenance for host.orm's write
@@ -65,7 +65,7 @@ func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDecla
 	}
 	ownPK, ok := record[pkCol]
 	if !ok {
-		genPK = uuid.Must(uuid.NewV7()).String()
+		genPK = uuid.NewV7().String()
 		record[pkCol] = genPK
 		ownPK = genPK
 	}

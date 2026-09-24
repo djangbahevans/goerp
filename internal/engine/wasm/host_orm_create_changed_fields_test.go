@@ -6,10 +6,10 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 )
 
 // newORMCreateChangedFieldsModuleContext is newORMWriteTestModuleContext
@@ -24,7 +24,7 @@ import (
 // for isolation (updatedEventPayloads/countEventDeliveryJobsByName) uses
 // the returned UUID, not the slug.
 func newORMCreateChangedFieldsModuleContext(slug string, decls []model.ModelDeclaration) (mc *ModuleContext, tenantID string) {
-	tenantID = uuid.NewString()
+	tenantID = uuid.New().String()
 	return NewModuleContext("req-1", "testmodule", "00000000-0000-0000-0000-0000000000aa", "contact-1", []string{"admin"}, nil,
 		tenantID, slug, "trace-1", abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls}), tenantID
 }

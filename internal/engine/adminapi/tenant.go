@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -27,7 +28,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
-	"github.com/google/uuid"
 )
 
 type TenantDeps struct {
@@ -501,7 +501,7 @@ func (h *tenantHandlers) uploadImportArchive(w http.ResponseWriter, r *http.Requ
 	}
 	defer func() { _ = file.Close() }()
 
-	key := "imports/" + uuid.NewString() + "/archive.zip.enc"
+	key := "imports/" + uuid.New().String() + "/archive.zip.enc"
 	if _, err := h.deps.Storage.Upload(r.Context(), key, file, storage.UploadOptions{ContentType: "application/octet-stream"}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return

@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -65,7 +65,7 @@ func transientTTL(md model.ModelDeclaration) time.Duration {
 func transientCreate(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any) (ORMCreateOutput, *abi.HostError) {
 	id, _ := record["id"].(string)
 	if id == "" {
-		id = uuid.Must(uuid.NewV7()).String()
+		id = uuid.NewV7().String()
 		record["id"] = id
 	}
 	etag, _ := record["etag"].(string)

@@ -21,8 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
@@ -190,7 +189,7 @@ func generateAndStore(ctx context.Context, tx *sql.Tx, secretsBackend secrets.Ba
 		CreatedAt: now,
 	}
 
-	keyID := uuid.NewString()
+	keyID := uuid.New().String()
 	material := base64.StdEncoding.EncodeToString(raw)
 	if setErr := secretsBackend.Set(ctx, secretName(keyID), material); setErr != nil {
 		if errors.Is(setErr, secrets.ErrSetNotSupported) {

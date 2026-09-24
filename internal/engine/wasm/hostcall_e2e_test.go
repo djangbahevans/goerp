@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
-	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -126,7 +126,7 @@ func TestHostcallFixture_EmitTxCommitFlow_ReachesEventDeliveryQueue(t *testing.T
 	ctx := context.Background()
 	wasmBytes := compileHostcallFixture(t)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "hostcalltest", "trace-1", abi.CapDBWrite|abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 
@@ -155,7 +155,7 @@ func TestHostcallFixture_EmitSync_SubscriberFailureSurfacedAsError(t *testing.T)
 	ctx := context.Background()
 	wasmBytes := compileHostcallFixture(t)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterAndSubscriberRegistry("testmodule", "sales.order.shipped",
 		manifest.EventSubscription{Name: "sales.order.shipped", Handler: "handle_a", Async: false},
 	)
@@ -192,7 +192,7 @@ func TestHostcallFixture_LockFlow_TryLockAndLockBothSucceed(t *testing.T) {
 	ctx := context.Background()
 	wasmBytes := compileHostcallFixture(t)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "hostcalllocktest", "trace-1", abi.CapDBWrite, nil, ModuleSnapshot{})
 
 	r := newHostcallTestRuntime(t, primaryDB, 10)

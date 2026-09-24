@@ -4,14 +4,13 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 func TestDataMigrationVersion_NoRowReturnsZero(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	got, err := pool.DataMigrationVersion(context.Background(), tenantID, "nonexistent_module")
 	if err != nil {
 		t.Fatalf("DataMigrationVersion() error: %v", err)
@@ -24,7 +23,7 @@ func TestDataMigrationVersion_NoRowReturnsZero(t *testing.T) {
 func TestDataMigrationVersion_NullColumnReturnsZero(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	moduleName := "datamigtest_nullcol"
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, moduleName)
@@ -57,7 +56,7 @@ func TestDataMigrationVersion_NullColumnReturnsZero(t *testing.T) {
 func TestAdvanceDataMigrationVersion_UpdatesWatermark(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	moduleName := "datamigtest_advance"
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, moduleName)
@@ -98,7 +97,7 @@ func TestAdvanceDataMigrationVersion_UpdatesWatermark(t *testing.T) {
 func TestDataMigrationWatermark_NoRowIsNotEligible(t *testing.T) {
 	_, pool := openTestPool(t, 5*time.Second)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	watermark, eligible, err := pool.DataMigrationWatermark(context.Background(), tenantID, "nonexistent_module", "1.0.0")
 	if err != nil {
 		t.Fatalf("DataMigrationWatermark() error: %v", err)
@@ -114,7 +113,7 @@ func TestDataMigrationWatermark_NoRowIsNotEligible(t *testing.T) {
 func TestDataMigrationWatermark_StaleCurrentVersionIsNotEligible(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	moduleName := "datamigtest_stale"
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, moduleName)
@@ -145,7 +144,7 @@ func TestDataMigrationWatermark_StaleCurrentVersionIsNotEligible(t *testing.T) {
 func TestDataMigrationWatermark_FailedSyncIsNotEligible(t *testing.T) {
 	conn, pool := openTestPool(t, 5*time.Second)
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	moduleName := "datamigtest_failed"
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, moduleName)

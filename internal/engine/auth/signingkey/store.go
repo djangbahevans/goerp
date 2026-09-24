@@ -17,10 +17,10 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
-	"github.com/google/uuid"
 )
 
 const createJWTSigningKeysTable = `
@@ -189,7 +189,7 @@ func generateAndStore(ctx context.Context, tx *sql.Tx, secretsBackend secrets.Ba
 		return nil, fmt.Errorf("encode public key: %w", err)
 	}
 
-	ephemeralKID := uuid.NewString()
+	ephemeralKID := uuid.New().String()
 	if setErr := secretsBackend.Set(ctx, secretName(ephemeralKID), privatePEM); setErr != nil {
 		if errors.Is(setErr, secrets.ErrSetNotSupported) {
 			key.KID = ephemeralKID

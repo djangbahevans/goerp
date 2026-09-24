@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
-	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -81,10 +81,7 @@ func TestStorageCallerFixture_Upload_RoundTripsThroughRealModule(t *testing.T) {
 	ctx := context.Background()
 	wasmBytes := compileStorageCallerFixture(t)
 
-	tenantID, err := uuid.NewV7()
-	if err != nil {
-		t.Fatalf("uuid.NewV7: %v", err)
-	}
+	tenantID := uuid.NewV7()
 	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, tenantID.String(), slug, "trace-1", abi.CapStorageWrite, nil, ModuleSnapshot{})
 	r := newStorageHostcallTestRuntime(t, primaryDB, backend)
 

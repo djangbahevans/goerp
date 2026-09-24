@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
-	"github.com/google/uuid"
 )
 
 // localPostgresDSN points directly at the compose.dev.yml Postgres
@@ -61,14 +61,8 @@ func TestInsert_RoundTripsRow(t *testing.T) {
 	store, conn, slug := openTestStore(t)
 	ctx := context.Background()
 
-	fileID, err := uuid.NewV7()
-	if err != nil {
-		t.Fatalf("uuid.NewV7: %v", err)
-	}
-	tenantID, err := uuid.NewV7()
-	if err != nil {
-		t.Fatalf("uuid.NewV7: %v", err)
-	}
+	fileID := uuid.NewV7()
+	tenantID := uuid.NewV7()
 
 	row := InsertRow{
 		ID:             fileID.String(),
@@ -121,8 +115,8 @@ func TestInsert_DuplicateStorageKeyFails(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	ctx := context.Background()
 
-	fileID, _ := uuid.NewV7()
-	tenantID, _ := uuid.NewV7()
+	fileID := uuid.NewV7()
+	tenantID := uuid.NewV7()
 	row := InsertRow{
 		ID:           fileID.String(),
 		TenantID:     tenantID.String(),
@@ -136,7 +130,7 @@ func TestInsert_DuplicateStorageKeyFails(t *testing.T) {
 		t.Fatalf("first Insert() error: %v", err)
 	}
 
-	secondID, _ := uuid.NewV7()
+	secondID := uuid.NewV7()
 	row.ID = secondID.String()
 	if err := store.Insert(ctx, slug, row); err == nil {
 		t.Fatal("expected a duplicate storage_key to fail (UNIQUE constraint)")
@@ -147,10 +141,10 @@ func TestStorageKeysForTenant_ReturnsEveryInsertedKey(t *testing.T) {
 	store, _, slug := openTestStore(t)
 	ctx := context.Background()
 
-	tenantID, _ := uuid.NewV7()
+	tenantID := uuid.NewV7()
 	want := make(map[string]bool)
 	for i := range 3 {
-		fileID, _ := uuid.NewV7()
+		fileID := uuid.NewV7()
 		key := fmt.Sprintf("attachments/%s/2026/08/%s-%d.txt", tenantID.String(), fileID.String(), i)
 		if err := store.Insert(ctx, slug, InsertRow{
 			ID: fileID.String(), TenantID: tenantID.String(), StorageKey: key,
@@ -177,14 +171,8 @@ func TestStorageKeysForTenant_ReturnsEveryInsertedKey(t *testing.T) {
 
 func insertFixtureFile(t *testing.T, store *Store, slug, purpose string) InsertRow {
 	t.Helper()
-	fileID, err := uuid.NewV7()
-	if err != nil {
-		t.Fatalf("uuid.NewV7: %v", err)
-	}
-	tenantID, err := uuid.NewV7()
-	if err != nil {
-		t.Fatalf("uuid.NewV7: %v", err)
-	}
+	fileID := uuid.NewV7()
+	tenantID := uuid.NewV7()
 	row := InsertRow{
 		ID:           fileID.String(),
 		TenantID:     tenantID.String(),

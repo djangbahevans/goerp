@@ -8,12 +8,12 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/riverqueue/river"
 	"github.com/tetratelabs/wazero/api"
@@ -103,7 +103,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		sets = append(sets, fmt.Sprintf("%s = COALESCE(%s, 0) + $%d", col, col, len(args)))
 	}
 	if hasField(md, "etag") {
-		args = append(args, uuid.Must(uuid.NewV7()).String())
+		args = append(args, uuid.NewV7().String())
 		sets = append(sets, fmt.Sprintf("%s = $%d", quoteIdentORM("etag"), len(args)))
 	}
 	args = append(args, input.ID)

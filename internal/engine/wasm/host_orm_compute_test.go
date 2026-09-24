@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 )
 
 // orderModelDecl declares a same-record computed field: amount_total
@@ -154,7 +154,7 @@ func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -205,7 +205,7 @@ func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 	idx.Register("testmodule", decls)
 
 	target := newComputeTarget(t, ctx, r, decls)
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputedIndex:  idx,
@@ -270,7 +270,7 @@ func TestORMWrite_ComputedField_RejectedAsFieldNotWritable(t *testing.T) {
 
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{orderModelDecl()}
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 
 	insertClient := r.EventInsertClient()

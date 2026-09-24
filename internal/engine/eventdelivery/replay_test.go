@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
-	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -34,10 +34,10 @@ func TestMatchingEventLogRows_FiltersByEventNameModuleAndTimeRange(t *testing.T)
 	newTestTenant(t, tenantStore, conn, slug)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	inRange := uuid.Must(uuid.NewV7()).String()
-	wrongEvent := uuid.Must(uuid.NewV7()).String()
-	wrongModule := uuid.Must(uuid.NewV7()).String()
-	outOfRange := uuid.Must(uuid.NewV7()).String()
+	inRange := uuid.NewV7().String()
+	wrongEvent := uuid.NewV7().String()
+	wrongModule := uuid.NewV7().String()
+	outOfRange := uuid.NewV7().String()
 
 	insertFixtureEventLogRow(t, conn, slug, inRange, "sales.order.confirmed", "sales", now)
 	insertFixtureEventLogRow(t, conn, slug, wrongEvent, "sales.order.cancelled", "sales", now)
@@ -88,8 +88,8 @@ func TestCountReplayMatches_SingleTenant(t *testing.T) {
 	newTestTenant(t, tenantStore, conn, slug)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	insertFixtureEventLogRow(t, conn, slug, uuid.Must(uuid.NewV7()).String(), eventName, "sales", now)
-	insertFixtureEventLogRow(t, conn, slug, uuid.Must(uuid.NewV7()).String(), eventName, "sales", now)
+	insertFixtureEventLogRow(t, conn, slug, uuid.NewV7().String(), eventName, "sales", now)
+	insertFixtureEventLogRow(t, conn, slug, uuid.NewV7().String(), eventName, "sales", now)
 
 	filter := jobqueue.EventsReplayArgs{
 		Tenant:     slug,
@@ -119,7 +119,7 @@ func TestEventsReplayWorker_Work_EnqueuesFanOutJobsForMatchedEvents(t *testing.T
 	tt := newTestTenant(t, tenantStore, conn, slug)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	eventID := uuid.Must(uuid.NewV7()).String()
+	eventID := uuid.NewV7().String()
 	insertFixtureEventLogRow(t, conn, slug, eventID, eventName, "sales", now)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
@@ -159,7 +159,7 @@ func TestEventsReplayWorker_Work_DoesNotDoubleEnqueueOnRetry(t *testing.T) {
 	newTestTenant(t, tenantStore, conn, slug)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	eventID := uuid.Must(uuid.NewV7()).String()
+	eventID := uuid.NewV7().String()
 	insertFixtureEventLogRow(t, conn, slug, eventID, eventName, "sales", now)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
@@ -202,7 +202,7 @@ func TestEventsReplayWorker_Work_TenantAll(t *testing.T) {
 	newTestTenant(t, tenantStore, conn, slug)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	eventID := uuid.Must(uuid.NewV7()).String()
+	eventID := uuid.NewV7().String()
 	insertFixtureEventLogRow(t, conn, slug, eventID, eventName, "sales", now)
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)

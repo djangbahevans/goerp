@@ -22,10 +22,10 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"uuid"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	wan "github.com/go-webauthn/webauthn/webauthn"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
@@ -113,7 +113,7 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, accountName str
 		return nil, "", fmt.Errorf("begin webauthn registration: %w", err)
 	}
 
-	ceremonyID = uuid.NewString()
+	ceremonyID = uuid.New().String()
 	if err := s.storeSession(ctx, regKey(ceremonyID), userID, *sessionData); err != nil {
 		return nil, "", err
 	}
@@ -188,7 +188,7 @@ func (s *Service) BeginLogin(ctx context.Context, userID, accountName string) (o
 		return nil, "", fmt.Errorf("begin webauthn login: %w", err)
 	}
 
-	ceremonyID = uuid.NewString()
+	ceremonyID = uuid.New().String()
 	if err := s.storeSession(ctx, authKey(ceremonyID), userID, *sessionData); err != nil {
 		return nil, "", err
 	}

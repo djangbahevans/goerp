@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
@@ -27,7 +28,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -78,7 +78,7 @@ func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
 	if _, err := rand.Read(key); err != nil {
 		t.Fatalf("generate row encryption key: %v", err)
 	}
-	return &rowcrypt.RowKeySet{Active: rowcrypt.RowKey{KeyID: uuid.NewString(), Key: key}}
+	return &rowcrypt.RowKeySet{Active: rowcrypt.RowKey{KeyID: uuid.New().String(), Key: key}}
 }
 
 func newImportTestFixture(t *testing.T) *importTestFixture {

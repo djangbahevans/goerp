@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
-	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -177,10 +177,7 @@ func TestStorageUpload_SuccessRoundTripsFileRow(t *testing.T) {
 	primaryDB, _, slug := newHostStorageFixture(t)
 	rt := newHostStorageTestRuntime(t, primaryDB, backend)
 
-	tenantID, err := uuid.NewV7()
-	if err != nil {
-		t.Fatalf("uuid.NewV7: %v", err)
-	}
+	tenantID := uuid.NewV7()
 	mc := NewModuleContext("req-1", "testmodule", "", "", nil, nil, tenantID.String(), slug, "trace-1", abi.CapStorageWrite, rt.TxLimiter(), ModuleSnapshot{})
 	ctx := context.Background()
 	inst := newHostStorageCaller(t, ctx, rt, mc)

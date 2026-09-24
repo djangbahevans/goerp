@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 )
 
 // newConstraintTestModuleContext wires ComputedIndex/ComputeTargets the
@@ -19,7 +19,7 @@ import (
 // so a create omitting it gets it auto-filled straight from
 // ModuleContext.TenantID — the non-UUID slug can't go into that column).
 func newConstraintTestModuleContext(slug string, decls []model.ModelDeclaration, target ComputeTarget) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"testmodule": target},
@@ -160,7 +160,7 @@ func TestORMWrite_ConstraintHook_NoLivePool_Allowed(t *testing.T) {
 	decls := []model.ModelDeclaration{itemModelDecl()}
 	// No ComputeTargets entry at all for "testmodule" — the equivalent of
 	// a module with no live pool.
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 	insertClient := r.EventInsertClient()
 

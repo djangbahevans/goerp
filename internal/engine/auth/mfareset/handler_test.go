@@ -12,9 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/alexedwards/argon2id"
-	"github.com/google/uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
@@ -273,7 +273,7 @@ func (f *fixture) issueAccessToken(t *testing.T, userID string) string {
 	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
 		UserID:     userID,
 		TenantSlug: f.tenantSlug,
-		DeviceID:   uuid.NewString(),
+		DeviceID:   uuid.New().String(),
 	})
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
@@ -310,7 +310,7 @@ func TestServeHTTP_Success_RevokesFactorsAndTenantSessionsNotifiesAndAudits(t *t
 		t.Fatalf("Insert() mfa credential error: %v", err)
 	}
 	targetSessionTokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
-		UserID: targetID, TenantSlug: f.tenantSlug, DeviceID: uuid.NewString(),
+		UserID: targetID, TenantSlug: f.tenantSlug, DeviceID: uuid.New().String(),
 	})
 	if err != nil {
 		t.Fatalf("Issue() target session error: %v", err)

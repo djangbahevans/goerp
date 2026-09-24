@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
-	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -67,7 +67,7 @@ func beginAndRegisterTx(t *testing.T, ctx context.Context, primaryDB *sql.DB, mc
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	txID = uuid.NewString()
+	txID = uuid.New().String()
 	mc.RegisterTransaction(txID, conn, tx)
 	return txID, tx
 }
@@ -84,11 +84,27 @@ func countEventDeliveryJobs(t *testing.T, conn *sql.DB, tenantID string) int {
 	return count
 }
 
+func TestDeriveEventID_IdempotencyKeyIsStableVersion5(t *testing.T) {
+	tests := []struct {
+		tenantID, name, key string
+		want                string
+	}{
+		{"tenant-1", "sales.order.confirmed", "order-42", "0d9b48ed-8149-56fe-9fc3-ee982303d1f9"},
+		{"0b9e2c64-7d1c-4a57-9b3c-8f0e7a6d5c4b", "crm.lead.created", "lead-ünïcødé", "180cbfe4-2595-53d9-8243-10572b80bcf9"},
+	}
+	for _, tt := range tests {
+		got := deriveEventID(nil, "testmodule", tt.tenantID, tt.name, nil, tt.key)
+		if got.String() != tt.want {
+			t.Errorf("deriveEventID(%q, %q, %q) = %s, want %s", tt.tenantID, tt.name, tt.key, got, tt.want)
+		}
+	}
+}
+
 func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventcommittest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 
@@ -186,7 +202,7 @@ func TestHostEvent_EmitTx_ExplicitIdempotencyKey_DedupesAcrossCalls(t *testing.T
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventdeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
@@ -226,7 +242,7 @@ func TestHostEvent_EmitTx_ManifestIdempotencyKeyField_DedupesFromPayload(t *test
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "order_id")
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventmanifestdeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
@@ -257,7 +273,7 @@ func TestHostEvent_EmitTx_NoIdempotencyKey_NoDedup(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventnodeduptest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
@@ -313,7 +329,7 @@ func TestHostEvent_Emit_InsertsJobWithoutTransaction(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterEventRegistry("testmodule", "sales.order.confirmed", "")
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, "eventemittest", "trace-1", abi.CapEventEmit, nil, ModuleSnapshot{EventRegistry: reg})
 	r := newHostDBTestRuntime(t, primaryDB, 10)
@@ -403,7 +419,7 @@ func TestHostEvent_Emit_Sync_AllSubscribersSucceed(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterAndSubscriberRegistry("testmodule", "sales.order.shipped",
 		manifest.EventSubscription{Name: "sales.order.shipped", Handler: "handle_a", Async: false},
 	)
@@ -429,7 +445,7 @@ func TestHostEvent_Emit_Sync_SubscriberFailureAggregatedAndReturned(t *testing.T
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	reg := newEmitterAndSubscriberRegistry("testmodule", "sales.order.shipped",
 		manifest.EventSubscription{Name: "sales.order.shipped", Handler: "handle_a", Async: false},
 		manifest.EventSubscription{Name: "sales.order.shipped", Handler: "handle_b", Async: false},

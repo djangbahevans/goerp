@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 )
 
 // hostORMWriteCallerModule exports call_create/call_create_batch/
@@ -52,7 +52,7 @@ func newHostORMWriteCaller(t *testing.T, ctx context.Context, r *Runtime, mc *Mo
 // is also what a caller should pass to countEventDeliveryJobsByName for
 // river_job isolation, in place of the slug that filled that role before.
 func newORMWriteTestModuleContext(tenantSlug string, modelDecls []model.ModelDeclaration) (*ModuleContext, string) {
-	tenantID := uuid.NewString()
+	tenantID := uuid.New().String()
 	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, tenantID, tenantSlug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: modelDecls}), tenantID
 }

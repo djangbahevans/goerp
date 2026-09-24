@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
-	"github.com/google/uuid"
 )
 
 func categoryModelDecl() model.ModelDeclaration {
@@ -44,7 +44,7 @@ func createFixtureCategoryTable(t *testing.T, conn *sql.DB, slug string) {
 // so a create omitting it gets it auto-filled straight from
 // ModuleContext.TenantID — the non-UUID slug can't go into that column).
 func newTreeTestModuleContext(slug string, decls []model.ModelDeclaration) *ModuleContext {
-	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
+	return NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 }
 
@@ -292,7 +292,7 @@ func TestORMCreate_DynamicLink_NonexistentTarget_Rejected(t *testing.T) {
 
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{commentModelDecl()}
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"salesmod": {ModelDecls: []model.ModelDeclaration{orderTargetModelDecl()}}},
@@ -326,7 +326,7 @@ func TestORMCreate_DynamicLink_ValidCrossModuleTarget_Succeeds(t *testing.T) {
 
 	r := newComputeTestRuntime(t, primaryDB)
 	decls := []model.ModelDeclaration{commentModelDecl()}
-	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.NewString(), slug, "trace-1",
+	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, uuid.New().String(), slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{
 			ModelDecls:     decls,
 			ComputeTargets: map[string]ComputeTarget{"salesmod": {ModelDecls: []model.ModelDeclaration{orderTargetModelDecl()}}},
