@@ -2,11 +2,14 @@ package tenantprovision
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
+	sdktemporal "go.temporal.io/sdk/temporal"
 )
 
 // Provisioner satisfies adminapi.Provisioner — the POST /admin/tenants
@@ -63,4 +66,56 @@ func (p *Provisioner) StartProvisioning(ctx context.Context, req adminapi.Create
 	}
 
 	return workflowID, nil
+}
+
+// ErrSlugTaken reports that another provisioning run already holds the
+// slug.
+var ErrSlugTaken = errors.New("tenant slug is already taken")
+
+// ErrProvisioningPending reports that the workflow started but ctx ended
+// before it finished; it keeps running and will complete on its own.
+var ErrProvisioningPending = errors.New("tenant provisioning is still running")
+
+// ProvisionForRegistration runs ProvisionTenantWorkflow for self-service
+// registration and waits for it to finish, granting userID the admin role.
+// Unlike StartProvisioning it never attaches to an existing run for the
+// slug: that run would be another registrant's tenant.
+func (p *Provisioner) ProvisionForRegistration(ctx context.Context, slug, name, userID string) error {
+	if p.temporal == nil {
+		return fmt.Errorf("temporal client unavailable")
+	}
+
+	run, err := p.temporal.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:                                       WorkflowID(slug),
+		TaskQueue:                                p.taskQueue,
+		WorkflowExecutionErrorWhenAlreadyStarted: true,
+	}, Workflow, Input{Slug: slug, Name: name, ExistingUserID: userID})
+	if err != nil {
+		if _, ok := errors.AsType[*serviceerror.WorkflowExecutionAlreadyStarted](err); ok {
+			return ErrSlugTaken
+		}
+		return fmt.Errorf("start provisioning workflow: %w", err)
+	}
+	if err := run.Get(ctx, nil); err != nil {
+		if ctx.Err() != nil {
+			return ErrProvisioningPending
+		}
+		if hasApplicationErrorType(err, SlugTakenErrorType) {
+			return ErrSlugTaken
+		}
+		return fmt.Errorf("provision tenant %s: %w", slug, err)
+	}
+	return nil
+}
+
+// hasApplicationErrorType reports whether any ApplicationError in err's
+// chain has errType. The workflow wraps an activity's failure in its own
+// ApplicationError, so the first one found isn't the activity's.
+func hasApplicationErrorType(err error, errType string) bool {
+	for ; err != nil; err = errors.Unwrap(err) {
+		if appErr, ok := err.(*sdktemporal.ApplicationError); ok && appErr.Type() == errType {
+			return true
+		}
+	}
+	return false
 }

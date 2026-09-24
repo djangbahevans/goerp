@@ -122,6 +122,36 @@ func (s *Store) CreateTenant(ctx context.Context, slug, name string) (*Tenant, e
 	return &t, nil
 }
 
+// ErrSlugTaken reports that a different tenant row holds the slug.
+var ErrSlugTaken = errors.New("tenant slug is already taken")
+
+// ReserveSlug inserts a provisioning tenant row with a caller-chosen id.
+// It's idempotent for that id: finding its own row (a retry after an
+// insert that committed but went unreported) returns the id again, while a
+// row with another id returns ErrSlugTaken.
+func (s *Store) ReserveSlug(ctx context.Context, id, slug, name string) (string, error) {
+	var got string
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO system.tenants (id, slug, name)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (slug) DO NOTHING
+		RETURNING id
+	`, id, slug, name).Scan(&got)
+	if err == nil {
+		return got, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("reserve slug: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM system.tenants WHERE slug = $1`, slug).Scan(&got); err != nil {
+		return "", fmt.Errorf("read slug holder: %w", err)
+	}
+	if got != id {
+		return "", ErrSlugTaken
+	}
+	return got, nil
+}
+
 // ActiveTenants returns every tenant with status = 'active' — "active
 // tenants" per multitenancy-internals.md §16's schema-sync definition,
 // the set Stage 4 schema sync runs against. Provisioning/suspended/

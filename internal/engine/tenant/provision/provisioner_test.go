@@ -5,8 +5,10 @@ import (
 	"errors"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
@@ -102,4 +104,90 @@ func TestStartProvisioning_RetryReplaysSameWorkflowID(t *testing.T) {
 	if first != second {
 		t.Errorf("workflow_id changed on retry: first = %q, second = %q", first, second)
 	}
+}
+
+func TestProvisionForRegistration_NilTemporalClientDoesNotPanic(t *testing.T) {
+	p := NewProvisioner(nil, "goerp-system")
+	if err := p.ProvisionForRegistration(t.Context(), "x", "X", "u"); err == nil {
+		t.Error("ProvisionForRegistration() with a nil temporal client: expected an error, got nil")
+	}
+}
+
+func TestProvisionForRegistration_GrantsTheExistingUserAdminWithoutAnInvite(t *testing.T) {
+	slug := uniqueSlug(t)
+	env := newTestEnv(t, nil)
+	t.Cleanup(func() {
+		_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
+		_, _ = env.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
+	})
+	userID := uuid.New().String()
+
+	p := NewProvisioner(env.temporalClient, env.taskQueue)
+	if err := p.ProvisionForRegistration(t.Context(), slug, "Acme Corp", userID); err != nil {
+		t.Fatalf("ProvisionForRegistration() error: %v", err)
+	}
+
+	tt, err := env.tenantStore.GetBySlug(t.Context(), slug)
+	if err != nil {
+		t.Fatalf("GetBySlug() error: %v", err)
+	}
+	if tt.Status != tenant.StatusActive {
+		t.Errorf("Status = %q, want active", tt.Status)
+	}
+	roles, err := role.NewStore(env.conn).RoleNamesForUser(t.Context(), slug, userID)
+	if err != nil {
+		t.Fatalf("RoleNamesForUser() error: %v", err)
+	}
+	if len(roles) != 1 || roles[0] != "admin" {
+		t.Errorf("roles = %v, want [admin]", roles)
+	}
+	var invites int
+	if err := env.conn.QueryRow("SELECT count(*) FROM " + tenantschema.Name(slug) + ".tenant_invitations").Scan(&invites); err != nil {
+		t.Fatalf("count invitations: %v", err)
+	}
+	if invites != 0 {
+		t.Errorf("invitations = %d, want 0", invites)
+	}
+}
+
+func TestProvisionForRegistration_TakenSlugFailsFast(t *testing.T) {
+	slug := uniqueSlug(t)
+	env := newTestEnv(t, nil)
+	if _, err := env.tenantStore.CreateTenant(t.Context(), slug, "Existing Co"); err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug) })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	err := NewProvisioner(env.temporalClient, env.taskQueue).ProvisionForRegistration(ctx, slug, "Acme Corp", uuid.New().String())
+	if !errors.Is(err, ErrSlugTaken) {
+		t.Fatalf("ProvisionForRegistration() error = %v, want ErrSlugTaken without retrying", err)
+	}
+}
+
+func TestProvisionForRegistration_WaitOutlastingTheContextIsPending(t *testing.T) {
+	slug := uniqueSlug(t)
+	env := newTestEnv(t, nil)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	err := NewProvisioner(env.temporalClient, env.taskQueue).ProvisionForRegistration(ctx, slug, "Slow Co", uuid.New().String())
+	if !errors.Is(err, ErrProvisioningPending) {
+		t.Fatalf("ProvisionForRegistration() error = %v, want ErrProvisioningPending", err)
+	}
+
+	// The workflow carries on; wait for it before cleaning up.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if tt, err := env.tenantStore.GetBySlug(t.Context(), slug); err == nil && tt.Status == tenant.StatusActive {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("workflow didn't finish after the caller stopped waiting")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
+	_, _ = env.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
 }

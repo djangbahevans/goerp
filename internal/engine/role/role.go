@@ -240,14 +240,13 @@ func (s *Store) RoleNamesForUser(ctx context.Context, tenantSlug, userID string)
 // RoleNamesForUser both filter on expires_at, so the row would still read
 // as not-a-member even though AssignRole reported success. grantedBy is
 // the admin performing the grant, recorded for audit purposes
-// (user_roles.granted_by is nullable, but the admin API's own caller
-// identity is always known, unlike the provisioning-time grants that
-// legitimately leave it null).
+// (user_roles.granted_by is nullable: "" stores NULL, for a grant with
+// no granting admin, such as a self-registered tenant's founding admin).
 func (s *Store) AssignRole(ctx context.Context, tenantSlug, userID, roleID, grantedBy string) error {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
 		INSERT INTO %s.user_roles (user_id, role_id, granted_by)
-		VALUES ($1, $2, $3)
+		VALUES ($1, $2, NULLIF($3, '')::uuid)
 		ON CONFLICT (user_id, role_id) DO UPDATE SET
 			granted_by = EXCLUDED.granted_by,
 			granted_at = NOW(),

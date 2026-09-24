@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
+	"go.temporal.io/sdk/temporal"
 )
 
 // Activities implements every activity Workflow calls, registered as a
@@ -29,6 +30,7 @@ import (
 // becomes an activity named after itself (e.g. "ReserveSlug").
 type Activities struct {
 	// tenantStore and inviteStore are the engine's own, already-constructed
+	roleStore *role.Store
 	// instances (matching engine.go's existing Stage 1 wiring) — normal
 	// DML operations, no elevated privilege needed.
 	tenantStore *tenant.Store
@@ -74,6 +76,7 @@ type Activities struct {
 func NewActivities(
 	tenantStore *tenant.Store,
 	inviteStore *invite.Store,
+	roleStore *role.Store,
 	schemaSyncPool *sql.DB,
 	syncPool *schema.SchemaSyncPool,
 	diffEngine *schema.SchemaDiffEngine,
@@ -83,6 +86,7 @@ func NewActivities(
 	return &Activities{
 		tenantStore:    tenantStore,
 		inviteStore:    inviteStore,
+		roleStore:      roleStore,
 		schemaSyncPool: schemaSyncPool,
 		syncPool:       syncPool,
 		diffEngine:     diffEngine,
@@ -91,15 +95,24 @@ func NewActivities(
 	}
 }
 
-// ReserveSlug inserts the tenant row (system.tenants.status defaults to
-// 'provisioning' — CreateTenant's own default), reserving the slug via
-// its UNIQUE constraint. Returns the new tenant's id.
-func (a *Activities) ReserveSlug(ctx context.Context, slug, name string) (string, error) {
-	t, err := a.tenantStore.CreateTenant(ctx, slug, name)
+// SlugTakenErrorType is the Temporal application-error type ReserveSlug
+// fails with when another tenant holds the slug.
+const SlugTakenErrorType = "SlugTaken"
+
+// ReserveSlug inserts the tenant row under the workflow-chosen tenantID
+// (system.tenants.status defaults to 'provisioning'), reserving the slug
+// via its UNIQUE constraint. Idempotent for tenantID, so a retry after an
+// unreported success returns the same id. A slug another tenant holds
+// fails non-retryably: retrying can't free it.
+func (a *Activities) ReserveSlug(ctx context.Context, slug, name, tenantID string) (string, error) {
+	id, err := a.tenantStore.ReserveSlug(ctx, tenantID, slug, name)
+	if errors.Is(err, tenant.ErrSlugTaken) {
+		return "", temporal.NewNonRetryableApplicationError("tenant slug is already taken", SlugTakenErrorType, err)
+	}
 	if err != nil {
 		return "", fmt.Errorf("reserve slug: %w", err)
 	}
-	return t.ID, nil
+	return id, nil
 }
 
 // ReleaseSlugReservation is the compensating action a failed provisioning
@@ -462,6 +475,20 @@ func (a *Activities) SeedSystemData(ctx context.Context, slug string) error {
 func (a *Activities) CreateAdminUser(ctx context.Context, slug, adminEmail, adminName string) error {
 	if _, err := a.inviteStore.Invite(ctx, slug, adminEmail, "admin", adminName, nil); err != nil {
 		return fmt.Errorf("invite admin user: %w", err)
+	}
+	return nil
+}
+
+// AssignAdminRole grants the admin role to an already-registered user —
+// the self-service path's step 7 (multitenancy-internals.md §6), in place
+// of CreateAdminUser's invite. Idempotent, so a retried activity is safe.
+func (a *Activities) AssignAdminRole(ctx context.Context, slug, userID string) error {
+	roleID, err := a.roleStore.GetRoleByName(ctx, slug, "admin")
+	if err != nil {
+		return fmt.Errorf("look up admin role: %w", err)
+	}
+	if err := a.roleStore.AssignRole(ctx, slug, userID, roleID, ""); err != nil {
+		return fmt.Errorf("assign admin role: %w", err)
 	}
 	return nil
 }

@@ -52,6 +52,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authmepassword"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authmeupdate"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authrefresh"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authregister"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareset"
@@ -749,6 +750,15 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	passwordPolicies := password.NewPolicyStore(tenantConfigStore)
 	passwordHasher := password.NewHasher(cfg.Argon2MemoryBudgetMB, cfg.Argon2AcquireTimeout)
+	registerHandlers := authregister.NewHandlers(
+		authregister.Config{
+			Enabled:            cfg.RegistrationEnabled,
+			VerificationPolicy: cfg.RequireEmailVerification,
+			ProvisionTimeout:   max(cfg.ServerWriteTimeout-10*time.Second, 5*time.Second),
+		},
+		userStore, tenantStore, tenantprovision.NewProvisioner(temporalClient, systemworker.TaskQueue),
+		passwordHasher, tokenIssuer, inviteMailer,
+	)
 	acceptInviteHandlers := acceptinvite.NewHandlers(tenantStore, inviteStore, userStore, passwordPolicies, passwordHasher, tokenIssuer)
 	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
@@ -769,7 +779,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
-	tenantContextHandler := tenantcontext.NewHandler(tenantResolver)
+	tenantContextHandler := tenantcontext.NewHandler(tenantResolver, cfg.RegistrationEnabled)
 	storageUploadHandler := storageupload.NewHandler(tenantResolver, authChecker, storageBackend, filesStore, storageupload.Limits{
 		MaxFileBytes: cfg.StorageMaxFileBytes,
 		AllowedTypes: cfg.StorageAllowedTypes,
@@ -782,6 +792,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/me/change-password":     authMePasswordHandler,
 		"PATCH /auth/me":                    authMeUpdateHandler,
 		"POST /auth/refresh":                authRefreshHandler,
+		"POST /auth/register":               http.HandlerFunc(registerHandlers.Register),
+		"GET /auth/check-slug":              http.HandlerFunc(registerHandlers.CheckSlug),
 		"GET /auth/accept-invite/info":      http.HandlerFunc(acceptInviteHandlers.Info),
 		"POST /auth/accept-invite":          http.HandlerFunc(acceptInviteHandlers.Accept),
 		"POST /auth/login":                  loginHandler,
@@ -809,7 +821,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	// ProvisionTenantWorkflow's activities need moduleRegistry/diffEngine,
 	// which don't exist until here — registered on systemWorker (built
 	// earlier, alongside temporalClient) now, started later in Start.
-	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain)
+	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, roleStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain)
 	systemWorker.RegisterWorkflow(tenantprovision.Workflow)
 	systemWorker.RegisterActivity(provisionActivities)
 

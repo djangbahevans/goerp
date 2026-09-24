@@ -421,3 +421,51 @@ func (s *Store) ActivateWithPasswordTx(ctx context.Context, tx *sql.Tx, id, pass
 	}
 	return nil
 }
+
+// ErrEmailTaken reports that an active account already uses the email.
+var ErrEmailTaken = errors.New("email already registered")
+
+// CreateRegistered creates a self-registered account with its password
+// already set (auth-internals.md §3 "Self-service registration"), in
+// status active or pending_verification — never invited. Its password was
+// validated against the global policy only, since the tenant it founds
+// doesn't exist yet.
+func (s *Store) CreateRegistered(ctx context.Context, email, passwordHash string, status Status) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO system.users (email, password_hash, status)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (email) WHERE deleted_at IS NULL DO NOTHING
+		RETURNING id
+	`, strings.ToLower(email), passwordHash, status).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrEmailTaken
+	}
+	if err != nil {
+		return "", fmt.Errorf("create registered user: %w", err)
+	}
+	return id, nil
+}
+
+// DeleteRegistered removes an account CreateRegistered just made, when
+// the registration that created it fails before the tenant exists.
+func (s *Store) DeleteRegistered(ctx context.Context, id string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM system.users WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("delete registered user: %w", err)
+	}
+	return nil
+}
+
+// SetEmailVerifyToken stores tokenHash as id's pending email-verification
+// token — a column pair separate from the password reset token's.
+func (s *Store) SetEmailVerifyToken(ctx context.Context, id, tokenHash string, expiry time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE system.users
+		SET email_verify_token = $2, email_verify_expiry = $3, updated_at = NOW()
+		WHERE id = $1
+	`, id, tokenHash, expiry)
+	if err != nil {
+		return fmt.Errorf("set email verify token: %w", err)
+	}
+	return nil
+}
