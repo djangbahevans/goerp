@@ -9,6 +9,7 @@ import {
   updateProfile as updateProfileRequest,
 } from "./auth-client.js";
 import { authMachine } from "./auth-machine.js";
+import { passwordUpdateNotice } from "./password-update-notice.js";
 import type {
   AuthContextValue,
   ChangePasswordInput,
@@ -41,6 +42,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Logout, an expired session and a failed MFA challenge all end here.
+  useEffect(() => {
+    if (state.status === "unauthenticated") passwordUpdateNotice.set(false);
+  }, [state.status]);
+
   const login = useCallback(async (credentials: LoginCredentials): Promise<void> => {
     // login_started only applies from "unauthenticated" (or an abandoned
     // "mfa_required" challenge) — rejects outright
@@ -64,6 +70,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Every sign-in writes the flag, set or cleared, so a later user in this
+    // tab never inherits it.
+    passwordUpdateNotice.set(result.passwordUpdateRecommended);
     const session = await fetchCurrentSession();
     if (!session) {
       authMachine.transition({ type: "login_failed" });
@@ -92,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mfaInFlight.current = true;
     try {
       try {
-        await submitMFACode(challengeToken, code, method);
+        passwordUpdateNotice.set(await submitMFACode(challengeToken, code, method));
       } catch (err) {
         // The mfa_token is only consumed once the server actually
         // receives and processes the request (auth-internals.md §8 step
@@ -138,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("changePassword called outside the authenticated state");
     }
     await changePasswordRequest(input);
+    passwordUpdateNotice.set(false);
   }, []);
 
   const logout = useCallback(async (): Promise<void> => {

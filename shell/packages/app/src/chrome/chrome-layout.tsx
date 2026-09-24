@@ -1,6 +1,7 @@
 import { useLocale } from "@goerp/sdk/i18n";
 import { Outlet } from "@tanstack/react-router";
 import { type MouseEvent, type ReactNode, useRef } from "react";
+import { ChromeBanners } from "./chrome-banners.js";
 import { ChromeHeader } from "./chrome-header.js";
 import { ChromeSidebar } from "./chrome-sidebar.js";
 
@@ -31,6 +32,7 @@ export function ChromeLayout(): ReactNode {
       <ChromeSidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <ChromeHeader />
+        <ChromeBanners mainRef={mainRef} />
         <main ref={mainRef} id="main-content" tabIndex={-1} className="flex-1 overflow-auto focus:outline-none">
           <Outlet />
         </main>

@@ -114,11 +114,20 @@ describe("login", () => {
 
     const result = await login(credentials);
 
-    expect(result).toEqual({ kind: "authenticated" });
+    expect(result).toEqual({ kind: "authenticated", passwordUpdateRecommended: false });
     expect(fetchMock).toHaveBeenCalledWith(
       "/auth/login",
       expect.objectContaining({ method: "POST", credentials: "include" }),
     );
+  });
+
+  it("carries password_update_recommended on a full-session response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { expires_in: 900, password_update_recommended: true })),
+    );
+
+    expect(await login(credentials)).toEqual({ kind: "authenticated", passwordUpdateRecommended: true });
   });
 
   it("returns mfa_required with the challenge token and methods", async () => {
@@ -241,7 +250,7 @@ describe("submitMFACode", () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { expires_in: 900 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await submitMFACode("mfa-tok", "123456", "totp");
+    expect(await submitMFACode("mfa-tok", "123456", "totp")).toBe(false);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/auth/mfa/verify",
@@ -251,6 +260,15 @@ describe("submitMFACode", () => {
         body: JSON.stringify({ mfa_token: "mfa-tok", type: "totp", code: "123456" }),
       }),
     );
+  });
+
+  it("resolves to password_update_recommended", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { expires_in: 900, password_update_recommended: true })),
+    );
+
+    expect(await submitMFACode("mfa-tok", "123456", "totp")).toBe(true);
   });
 
   it("throws an AppError on an invalid code", async () => {

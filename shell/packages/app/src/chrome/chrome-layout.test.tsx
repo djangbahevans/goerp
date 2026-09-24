@@ -1,3 +1,4 @@
+import { passwordUpdateNotice } from "@goerp/sdk/auth";
 import { localeStore } from "@goerp/sdk/i18n";
 import {
   createMemoryHistory,
@@ -28,6 +29,7 @@ vi.mock("./chrome-sidebar.js", () => ({
 afterEach(() => {
   cleanup();
   localeStore.setLocale("en");
+  passwordUpdateNotice.set(false);
 });
 
 const FOCUSABLE = "a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex='-1'])";
@@ -81,5 +83,33 @@ describe("ChromeLayout", () => {
 
     expect(document.activeElement).toBe(screen.getByRole("main"));
     expect(router.state.location.hash).toBe("");
+  });
+
+  it("places session banners between the header and <main>", async () => {
+    passwordUpdateNotice.set(true);
+    await renderLayout();
+
+    const header = screen.getByRole("banner");
+    const status = screen.getByRole("status");
+    const main = screen.getByRole("main");
+    expect(header.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(status.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(status.textContent).toContain("updated its password requirements");
+  });
+
+  it("moves focus to <main> when a banner is dismissed", async () => {
+    passwordUpdateNotice.set(true);
+    await renderLayout();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss password notice" }));
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(passwordUpdateNotice.get()).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+
+  it("renders no banner when nothing is active", async () => {
+    await renderLayout();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

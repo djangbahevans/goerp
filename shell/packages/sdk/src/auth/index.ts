@@ -2,6 +2,12 @@ export { confirmPasswordReset, fetchTenantContext, requestPasswordReset } from "
 export { AuthMachine, authMachine, authTransition } from "./auth-machine.js";
 export { AuthContext, AuthProvider } from "./auth-provider.js";
 export { Can, type CanProps } from "./can.js";
+export {
+  type PasswordUpdateNotice,
+  PasswordUpdateNoticeStore,
+  passwordUpdateNotice,
+  usePasswordUpdateNotice,
+} from "./password-update-notice.js";
 export { fetchPermissions } from "./permission-client.js";
 export {
   createPermissionContextValue,
