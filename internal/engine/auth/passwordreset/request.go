@@ -79,7 +79,7 @@ var errSkipped = errors.New("skipped")
 
 func (h *RequestHandler) issue(r *http.Request, req resetRequest) error {
 	ctx := r.Context()
-	email := strings.ToLower(req.Email)
+	email := strings.ToLower(strings.TrimSpace(req.Email))
 	if email == "" {
 		return nil
 	}

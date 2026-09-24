@@ -628,6 +628,8 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 		{"POST", "/admin/tenant/plan"},
 		{"POST", "/auth/password-reset/request"},
 		{"POST", "/auth/password-reset/confirm"},
+		{"POST", "/auth/verify-email"},
+		{"POST", "/auth/verify-email/resend"},
 		{"POST", "/auth/me/change-password"},
 		{"POST", "/auth/accept-invite"},
 		{"GET", "/auth/accept-invite/info"},

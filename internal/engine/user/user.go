@@ -117,8 +117,9 @@ const (
 )
 
 var (
-	ErrUserNotFound      = errors.New("user not found")
-	ErrResetTokenInvalid = errors.New("password reset token invalid or expired")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrResetTokenInvalid  = errors.New("password reset token invalid or expired")
+	ErrVerifyTokenInvalid = errors.New("email verify token invalid or expired")
 )
 
 type User struct {
@@ -468,4 +469,31 @@ func (s *Store) SetEmailVerifyToken(ctx context.Context, id, tokenHash string, e
 		return fmt.Errorf("set email verify token: %w", err)
 	}
 	return nil
+}
+
+// ConsumeEmailVerifyToken marks the email verified, clears the token, and
+// activates a pending_verification account in one conditional UPDATE, so
+// of two concurrent confirms with the same token exactly one succeeds.
+// Never reads the password reset token.
+func (s *Store) ConsumeEmailVerifyToken(ctx context.Context, tokenHash string) (*User, error) {
+	row := s.db.QueryRowContext(ctx, `
+		UPDATE system.users
+		SET email_verified = TRUE,
+		    email_verify_token = NULL,
+		    email_verify_expiry = NULL,
+		    status = CASE WHEN status = 'pending_verification' THEN 'active' ELSE status END,
+		    updated_at = NOW()
+		WHERE email_verify_token = $1 AND email_verify_expiry > NOW() AND deleted_at IS NULL
+		RETURNING `+userColumns+`
+	`, tokenHash)
+
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrVerifyTokenInvalid
+		}
+		return nil, fmt.Errorf("consume email verify token: %w", err)
+	}
+
+	return u, nil
 }
