@@ -106,7 +106,7 @@ export async function fetchTenantContext(): Promise<TenantContext | null> {
 }
 
 export type LoginResult =
-  | { kind: "authenticated" }
+  | { kind: "authenticated"; passwordUpdateRecommended: boolean }
   | { kind: "mfa_required"; challengeToken: string; methods: MFAMethod[] };
 
 // login backs POST /auth/login (auth-internals.md §3). A successful full
@@ -131,16 +131,18 @@ export async function login(credentials: LoginCredentials): Promise<LoginResult>
     mfa_required?: boolean;
     mfa_token?: string;
     mfa_methods?: MFAMethod[];
+    password_update_recommended?: boolean;
   };
   if (body.mfa_required && body.mfa_token) {
     return { kind: "mfa_required", challengeToken: body.mfa_token, methods: body.mfa_methods ?? [] };
   }
-  return { kind: "authenticated" };
+  return { kind: "authenticated", passwordUpdateRecommended: body.password_update_recommended === true };
 }
 
 // submitMFACode backs POST /auth/mfa/verify (auth-internals.md §8). Same
-// as login, a successful verify carries no user/tenant data of its own.
-export async function submitMFACode(challengeToken: string, code: string, method: MFAMethod): Promise<void> {
+// as login, a successful verify carries no user/tenant data of its own;
+// it resolves to the password_update_recommended flag.
+export async function submitMFACode(challengeToken: string, code: string, method: MFAMethod): Promise<boolean> {
   const response = await fetch("/auth/mfa/verify", {
     method: "POST",
     credentials: "include",
@@ -148,6 +150,8 @@ export async function submitMFACode(challengeToken: string, code: string, method
     body: JSON.stringify({ mfa_token: challengeToken, type: method, code }),
   });
   if (!response.ok) throw await readError(response);
+  const body = (await response.json().catch(() => ({}))) as { password_update_recommended?: boolean };
+  return body.password_update_recommended === true;
 }
 
 // updateProfile backs PATCH /auth/me (shell-ux.md §4.1). Its own response
