@@ -41,8 +41,13 @@ async function renderLayout() {
     path: "/",
     component: () => <p>page content</p>,
   });
+  const other = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/other",
+    component: () => <p>other page</p>,
+  });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([index]),
+    routeTree: rootRoute.addChildren([index, other]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
@@ -106,6 +111,32 @@ describe("ChromeLayout", () => {
     expect(screen.queryByRole("status")).toBeNull();
     expect(passwordUpdateNotice.get()).toBe(false);
     expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+
+  it("leaves focus alone on the initial render", async () => {
+    await renderLayout();
+    expect(document.activeElement).not.toBe(screen.getByRole("main"));
+  });
+
+  it("moves focus to <main> when the pathname changes", async () => {
+    const { router } = await renderLayout();
+    screen.getByRole("button", { name: "search" }).focus();
+
+    await act(() => router.navigate({ href: "/other" }));
+
+    expect(screen.getByRole("main").textContent).toContain("other page");
+    expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+
+  it("keeps focus in place when only the search params or hash change", async () => {
+    const { router } = await renderLayout();
+    const search = screen.getByRole("button", { name: "search" });
+    search.focus();
+
+    await act(() => router.navigate({ href: "/?sort=name" }));
+    await act(() => router.navigate({ href: "/?sort=name#lines" }));
+
+    expect(document.activeElement).toBe(search);
   });
 
   it("renders no banner when nothing is active", async () => {
