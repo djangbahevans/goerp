@@ -51,7 +51,7 @@ type Provisioner interface {
 }
 
 type Mailer interface {
-	SendVerifyEmail(ctx context.Context, email, rawToken string) error
+	SendVerifyEmail(ctx context.Context, email, tenantSlug, rawToken string) error
 }
 
 type Config struct {
@@ -250,11 +250,11 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 		// finishes, so the account stays.
 		log.Warn().Str("slug", slug).Msg("authregister: provisioning outlasted the request")
 		if verify {
-			if err := h.sendVerification(ctx, userID, req.Email); err != nil {
+			if err := h.sendVerification(ctx, userID, req.Email, slug); err != nil {
 				log.Error().Err(err).Str("user_id", userID).Msg("authregister: storing verification token failed")
 			}
 		}
-		writeJSON(w, http.StatusAccepted, map[string]any{"requires_email_verification": verify, "provisioning_pending": true})
+		writeJSON(w, http.StatusAccepted, map[string]any{"requires_email_verification": verify, "provisioning_pending": true, "tenant_slug": slug})
 		return
 	}
 	if err != nil {
@@ -269,10 +269,12 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if verify {
-		if err := h.sendVerification(ctx, userID, req.Email); err != nil {
+		if err := h.sendVerification(ctx, userID, req.Email, slug); err != nil {
 			log.Error().Err(err).Str("user_id", userID).Msg("authregister: storing verification token failed")
 		}
-		writeJSON(w, http.StatusAccepted, map[string]any{"requires_email_verification": true})
+		// tenant_slug lets the page offer "Resend email" (auth-internals.md
+		// §3 "Resend email verification").
+		writeJSON(w, http.StatusAccepted, map[string]any{"requires_email_verification": true, "tenant_slug": slug})
 		return
 	}
 
@@ -306,7 +308,7 @@ func (h *Handlers) abandon(ctx context.Context, userID string) {
 
 // sendVerification stores the hashed verification token and emails the
 // link off the request goroutine.
-func (h *Handlers) sendVerification(ctx context.Context, userID, email string) error {
+func (h *Handlers) sendVerification(ctx context.Context, userID, email, tenantSlug string) error {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return err
@@ -324,7 +326,7 @@ func (h *Handlers) sendVerification(ctx context.Context, userID, email string) e
 	go func() {
 		sendCtx, cancel := context.WithTimeout(sendCtx, mailTimeout)
 		defer cancel()
-		if err := h.mailer.SendVerifyEmail(sendCtx, email, raw); err != nil {
+		if err := h.mailer.SendVerifyEmail(sendCtx, email, tenantSlug, raw); err != nil {
 			log.Warn().Err(err).Str("user_id", userID).Msg("authregister: verification email failed")
 		}
 	}()
