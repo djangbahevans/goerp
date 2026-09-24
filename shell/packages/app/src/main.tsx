@@ -7,6 +7,8 @@ import "./design/tokens.css";
 // CSS itself; the app entry point is where every other global style import
 // already lives (tokens.css, above).
 import "maplibre-gl/dist/maplibre-gl.css";
+// Constructing localeStore sets <html lang/dir> before the first render.
+import "@goerp/sdk/i18n";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
