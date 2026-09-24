@@ -20,12 +20,15 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
@@ -33,13 +36,15 @@ import (
 const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
 
 // fixture mirrors mfareverify's own fixture shape, trimmed to what a
-// plain "is there a valid session" check needs — no MFA/rowcrypt.
+// plain "is there a valid session" check needs, plus the MFA stores the
+// mfa_setup_required flag reads — no rowcrypt.
 type fixture struct {
 	handler     *Handler
 	issuer      *authtoken.Issuer
 	revoker     *sessionrevoke.Revoker
 	tenantStore *tenant.Store
 	filesStore  *files.Store
+	config      *tenantconfig.Store
 	domain      string
 	tenantID    string
 	tenantSlug  string
@@ -101,7 +106,15 @@ func newFixture(t *testing.T) *fixture {
 	roleCache := permcache.NewRoleCache(cacheClient)
 	roleMap := permcache.NewRolePermissionMap()
 	revoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
-	authChecker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, roleCache, roleMap, apiKeys, false, nil, nil, nil)
+	mfaStore := mfa.NewStore(conn)
+	if err := mfaStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("mfa Bootstrap() error: %v", err)
+	}
+	configStore := tenantconfig.NewStore(conn)
+	if err := configStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
+	}
+	authChecker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, roleCache, roleMap, apiKeys, false, nil, mfaStore, enforce.NewStore(configStore))
 
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
 	backend, err := storage.New("local")
@@ -166,6 +179,7 @@ func newFixture(t *testing.T) *fixture {
 		revoker:     revoker,
 		tenantStore: tenantStore,
 		filesStore:  filesStore,
+		config:      configStore,
 		domain:      domain,
 		tenantID:    tt.ID,
 		tenantSlug:  slug,
@@ -283,6 +297,42 @@ func TestServeHTTP_ValidTokenReturnsUserAndTenant(t *testing.T) {
 	}
 	if resp.Tenant.Slug != f.tenantSlug {
 		t.Errorf("tenant.slug = %q, want %q", resp.Tenant.Slug, f.tenantSlug)
+	}
+}
+
+func TestServeHTTP_MFASetupRequiredFollowsPolicyAndEnrollment(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, f.userID) })
+	accessToken := f.issueAccessToken(t)
+
+	setupRequired := func() bool {
+		t.Helper()
+		rec := f.doMe(t, f.domain, accessToken)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+		}
+		var resp meResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		return resp.User.MFASetupRequired
+	}
+
+	if setupRequired() {
+		t.Error("mfa_setup_required = true under the default optional policy, want false")
+	}
+	if err := f.config.Set(ctx, f.tenantID, "mfa.enforcement_mode", string(enforce.ModeRequired)); err != nil {
+		t.Fatalf("set mfa policy: %v", err)
+	}
+	if !setupRequired() {
+		t.Error("mfa_setup_required = false under a required policy with no factor, want true")
+	}
+	if _, err := mfa.NewStore(f.conn).Insert(ctx, f.userID, mfa.CredentialTOTP, []byte("ciphertext"), nil); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	if setupRequired() {
+		t.Error("mfa_setup_required = true after enrolling a factor, want false")
 	}
 }
 

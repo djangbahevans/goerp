@@ -92,6 +92,9 @@ type meUser struct {
 	Roles         []string   `json:"roles"`
 	AMR           []string   `json:"amr"`
 	MFAVerifiedAt *time.Time `json:"mfa_verified_at"`
+	// MFASetupRequired drives the shell's forced-enrollment redirect
+	// (auth-internals.md §8 "MFA enrollment").
+	MFASetupRequired bool `json:"mfa_setup_required"`
 }
 
 // meTenant deliberately omits logoUrl/locale/timezone/currency
@@ -162,17 +165,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: profile lookup failed, omitting name/avatar")
 	}
 
+	// Degrades to false: step 9 still rejects module routes with
+	// mfa_setup_required, which the shell also routes to the wizard.
+	setupRequired, err := h.auth.MFASetupRequired(ctx, tenantCtx.TenantID, authCtx)
+	if err != nil {
+		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: mfa setup check failed, reporting false")
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, meResponse{
 		User: meUser{
-			ID:            authCtx.UserID,
-			Email:         u.Email,
-			ContactID:     u.ContactID,
-			Name:          name,
-			AvatarURL:     avatarURL,
-			Roles:         authCtx.RolesLive,
-			AMR:           authCtx.AMR,
-			MFAVerifiedAt: authCtx.MFAVerifiedAt,
+			ID:               authCtx.UserID,
+			Email:            u.Email,
+			ContactID:        u.ContactID,
+			Name:             name,
+			AvatarURL:        avatarURL,
+			Roles:            authCtx.RolesLive,
+			AMR:              authCtx.AMR,
+			MFAVerifiedAt:    authCtx.MFAVerifiedAt,
+			MFASetupRequired: setupRequired,
 		},
 		Tenant: meTenant{
 			ID:   tenantCtx.TenantID,

@@ -3,7 +3,9 @@ package totp
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -134,31 +136,161 @@ func (e *testEnv) createUser(t *testing.T) string {
 	return userID
 }
 
-func TestEnroll_StoresEncryptedCredentialAndReturnsSVG(t *testing.T) {
+// seedFactor stores an active TOTP factor for userID directly, returning
+// its row id and plaintext secret.
+func seedFactor(t *testing.T, env *testEnv, userID string) (credID, secret string) {
+	t.Helper()
+	key, err := pquernatotp.Generate(pquernatotp.GenerateOpts{Issuer: issuer, AccountName: "user@example.com"})
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	ciphertext, err := env.service.keys.Encrypt([]byte(key.Secret()))
+	if err != nil {
+		t.Fatalf("Encrypt() error: %v", err)
+	}
+	cred, err := env.service.store.Insert(context.Background(), userID, mfa.CredentialTOTP, ciphertext, nil)
+	if err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	return cred.ID, key.Secret()
+}
+
+func activeFactorCount(t *testing.T, env *testEnv, userID string) int {
+	t.Helper()
+	creds, err := env.service.store.ListActiveByUser(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("ListActiveByUser() error: %v", err)
+	}
+	return len(creds)
+}
+
+func TestBeginEnrollment_ReturnsSecretAndSVGWithoutStoringAFactor(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	svg, cred, err := env.service.Enroll(context.Background(), userID, "user@example.com", nil)
+	pending, err := env.service.BeginEnrollment(context.Background(), userID, "user@example.com")
 	if err != nil {
-		t.Fatalf("Enroll() error: %v", err)
+		t.Fatalf("BeginEnrollment() error: %v", err)
 	}
-	if len(svg) == 0 {
-		t.Error("Enroll() returned empty SVG")
+	if pending.ID == "" || pending.Secret == "" || !strings.HasPrefix(string(pending.QRSVG), "<svg") {
+		t.Errorf("BeginEnrollment() = %+v, want an id, a secret, and an SVG", pending)
 	}
-	if cred.Type != mfa.CredentialTOTP {
-		t.Errorf("cred.Type = %q, want %q", cred.Type, mfa.CredentialTOTP)
+	if n := activeFactorCount(t, env, userID); n != 0 {
+		t.Errorf("active factors after BeginEnrollment = %d, want 0", n)
+	}
+}
+
+func TestCheckEnrollmentCode_ReturnsSecretAndLeavesEnrollmentUntilClaimed(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+	ctx := context.Background()
+
+	pending, err := env.service.BeginEnrollment(ctx, userID, "user@example.com")
+	if err != nil {
+		t.Fatalf("BeginEnrollment() error: %v", err)
+	}
+	code, err := pquernatotp.GenerateCode(pending.Secret, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error: %v", err)
 	}
 
-	var storedCredential []byte
-	if err := env.conn.QueryRowContext(context.Background(),
-		"SELECT credential FROM system.user_mfa WHERE id = $1", cred.ID,
-	).Scan(&storedCredential); err != nil {
-		t.Fatalf("query stored credential: %v", err)
+	verified, err := env.service.CheckEnrollmentCode(ctx, userID, pending.ID, code)
+	if err != nil {
+		t.Fatalf("CheckEnrollmentCode() error: %v", err)
 	}
-	// The stored value is rowcrypt's {key_id}:{nonce}:{ciphertext} format
-	// — it must not contain a readable base32 TOTP secret.
-	if len(storedCredential) == 0 {
-		t.Error("stored credential is empty")
+	plain, err := env.service.keys.Decrypt(verified.Secret)
+	if err != nil {
+		t.Fatalf("Decrypt() error: %v", err)
+	}
+	if string(plain) != pending.Secret {
+		t.Error("CheckEnrollmentCode() secret doesn't decrypt to the pending secret")
+	}
+	if _, found, err := env.service.cache.Get(ctx, enrollmentKey(pending.ID)); err != nil || !found {
+		t.Errorf("pending enrollment after a successful check: found %v, %v; want still pending", found, err)
+	}
+
+	if err := env.service.ClaimEnrollment(ctx, verified); err != nil {
+		t.Fatalf("ClaimEnrollment() error: %v", err)
+	}
+	if err := env.service.ClaimEnrollment(ctx, verified); !errors.Is(err, ErrEnrollmentNotFound) {
+		t.Errorf("second ClaimEnrollment() error = %v, want ErrEnrollmentNotFound", err)
+	}
+	next, err := pquernatotp.GenerateCode(pending.Secret, time.Now().Add(-period*time.Second))
+	if err != nil {
+		t.Fatalf("GenerateCode() error: %v", err)
+	}
+	if _, err := env.service.CheckEnrollmentCode(ctx, userID, pending.ID, next); !errors.Is(err, ErrEnrollmentNotFound) {
+		t.Errorf("CheckEnrollmentCode() after claim error = %v, want ErrEnrollmentNotFound", err)
+	}
+}
+
+func TestCheckEnrollmentCode_WrongLengthCodeIsInvalidNotAnError(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+	ctx := context.Background()
+
+	pending, err := env.service.BeginEnrollment(ctx, userID, "user@example.com")
+	if err != nil {
+		t.Fatalf("BeginEnrollment() error: %v", err)
+	}
+	if _, err := env.service.CheckEnrollmentCode(ctx, userID, pending.ID, "12345"); !errors.Is(err, ErrInvalidCode) {
+		t.Errorf("CheckEnrollmentCode() with a 5-digit code error = %v, want ErrInvalidCode", err)
+	}
+
+	seedFactor(t, env, userID)
+	if ok, _, err := env.service.Verify(ctx, userID, "1234567"); err != nil || ok {
+		t.Errorf("Verify() with a 7-digit code = %v, %v; want false, nil", ok, err)
+	}
+}
+
+func TestCheckEnrollmentCode_RejectsAnotherUsersEnrollment(t *testing.T) {
+	env := openTestEnv(t)
+	owner := env.createUser(t)
+	other := env.createUser(t)
+	ctx := context.Background()
+
+	pending, err := env.service.BeginEnrollment(ctx, owner, "owner@example.com")
+	if err != nil {
+		t.Fatalf("BeginEnrollment() error: %v", err)
+	}
+	code, err := pquernatotp.GenerateCode(pending.Secret, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error: %v", err)
+	}
+
+	if _, err := env.service.CheckEnrollmentCode(ctx, other, pending.ID, code); !errors.Is(err, ErrEnrollmentNotFound) {
+		t.Errorf("CheckEnrollmentCode() by another user error = %v, want ErrEnrollmentNotFound", err)
+	}
+	if _, err := env.service.CheckEnrollmentCode(ctx, owner, pending.ID, code); err != nil {
+		t.Errorf("CheckEnrollmentCode() by the owner afterwards error = %v, want nil", err)
+	}
+}
+
+func TestCheckEnrollmentCode_FifthWrongCodeDiscardsEnrollment(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+	ctx := context.Background()
+
+	pending, err := env.service.BeginEnrollment(ctx, userID, "user@example.com")
+	if err != nil {
+		t.Fatalf("BeginEnrollment() error: %v", err)
+	}
+	valid, err := pquernatotp.GenerateCode(pending.Secret, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error: %v", err)
+	}
+	wrong := "000000"
+	if wrong == valid {
+		wrong = "111111"
+	}
+
+	for i := range maxConfirmAttempts {
+		if _, err := env.service.CheckEnrollmentCode(ctx, userID, pending.ID, wrong); !errors.Is(err, ErrInvalidCode) {
+			t.Fatalf("wrong attempt %d error = %v, want ErrInvalidCode", i+1, err)
+		}
+	}
+	if _, err := env.service.CheckEnrollmentCode(ctx, userID, pending.ID, valid); !errors.Is(err, ErrEnrollmentNotFound) {
+		t.Errorf("CheckEnrollmentCode() after %d wrong codes error = %v, want ErrEnrollmentNotFound", maxConfirmAttempts, err)
 	}
 }
 
@@ -166,12 +298,7 @@ func TestVerify_AcceptsCurrentValidCode(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	_, cred, err := env.service.Enroll(context.Background(), userID, "user@example.com", nil)
-	if err != nil {
-		t.Fatalf("Enroll() error: %v", err)
-	}
-
-	secret := decryptStoredSecret(t, env, cred.ID)
+	_, secret := seedFactor(t, env, userID)
 	code, err := pquernatotp.GenerateCode(secret, time.Now())
 	if err != nil {
 		t.Fatalf("GenerateCode() error: %v", err)
@@ -190,9 +317,7 @@ func TestVerify_RejectsWrongCode(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	if _, _, err := env.service.Enroll(context.Background(), userID, "user@example.com", nil); err != nil {
-		t.Fatalf("Enroll() error: %v", err)
-	}
+	seedFactor(t, env, userID)
 
 	ok, _, err := env.service.Verify(context.Background(), userID, "000000")
 	if err != nil {
@@ -207,11 +332,7 @@ func TestVerify_AcceptsPreviousWindowWithinSkew(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	_, cred, err := env.service.Enroll(context.Background(), userID, "user@example.com", nil)
-	if err != nil {
-		t.Fatalf("Enroll() error: %v", err)
-	}
-	secret := decryptStoredSecret(t, env, cred.ID)
+	_, secret := seedFactor(t, env, userID)
 
 	previousWindow := time.Now().Add(-period * time.Second)
 	code, err := pquernatotp.GenerateCode(secret, previousWindow)
@@ -232,11 +353,7 @@ func TestVerify_RejectsTwoWindowsAgo(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	_, cred, err := env.service.Enroll(context.Background(), userID, "user@example.com", nil)
-	if err != nil {
-		t.Fatalf("Enroll() error: %v", err)
-	}
-	secret := decryptStoredSecret(t, env, cred.ID)
+	_, secret := seedFactor(t, env, userID)
 
 	tooOld := time.Now().Add(-2 * period * time.Second)
 	code, err := pquernatotp.GenerateCode(secret, tooOld)
@@ -257,11 +374,7 @@ func TestVerify_RejectsReplayedCode(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	_, cred, err := env.service.Enroll(context.Background(), userID, "user@example.com", nil)
-	if err != nil {
-		t.Fatalf("Enroll() error: %v", err)
-	}
-	secret := decryptStoredSecret(t, env, cred.ID)
+	_, secret := seedFactor(t, env, userID)
 	code, err := pquernatotp.GenerateCode(secret, time.Now())
 	if err != nil {
 		t.Fatalf("GenerateCode() error: %v", err)
@@ -299,11 +412,7 @@ func TestVerify_UndecryptableFactorDoesNotBlockAnotherValidFactor(t *testing.T) 
 		t.Fatalf("Insert() of the undecryptable row error: %v", err)
 	}
 
-	_, cred, err := env.service.Enroll(context.Background(), userID, "user@example.com", nil)
-	if err != nil {
-		t.Fatalf("Enroll() error: %v", err)
-	}
-	secret := decryptStoredSecret(t, env, cred.ID)
+	_, secret := seedFactor(t, env, userID)
 	code, err := pquernatotp.GenerateCode(secret, time.Now())
 	if err != nil {
 		t.Fatalf("GenerateCode() error: %v", err)
@@ -343,24 +452,4 @@ func TestVerify_NoEnrolledFactorsReturnsFalse(t *testing.T) {
 	if ok {
 		t.Error("Verify() = true for a user with no enrolled factors, want false")
 	}
-}
-
-// decryptStoredSecret reads back and decrypts cred's stored TOTP secret
-// via the same key set the test's Service uses, so tests can generate
-// real codes to feed into Verify without depending on Enroll to expose
-// the secret itself (which it deliberately doesn't — the SVG is the only
-// output).
-func decryptStoredSecret(t *testing.T, env *testEnv, credID string) string {
-	t.Helper()
-	var ciphertext []byte
-	if err := env.conn.QueryRowContext(context.Background(),
-		"SELECT credential FROM system.user_mfa WHERE id = $1", credID,
-	).Scan(&ciphertext); err != nil {
-		t.Fatalf("query stored credential: %v", err)
-	}
-	secret, err := env.service.keys.Decrypt(ciphertext)
-	if err != nil {
-		t.Fatalf("decrypt stored credential: %v", err)
-	}
-	return string(secret)
 }

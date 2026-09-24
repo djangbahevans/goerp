@@ -172,7 +172,17 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 // needs to scope the reissued access-token cookie. Returns
 // ErrSessionNotFound if id doesn't match any non-revoked row.
 func (s *Store) UpdateMFAAssurance(ctx context.Context, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, err error) {
-	err = s.db.QueryRowContext(ctx, `
+	return updateMFAAssurance(ctx, s.db, id, mfaMethod, mfaVerifiedAt, mfaCredentialID)
+}
+
+// UpdateMFAAssuranceTx is UpdateMFAAssurance inside the caller's
+// transaction.
+func (s *Store) UpdateMFAAssuranceTx(ctx context.Context, tx *sql.Tx, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, err error) {
+	return updateMFAAssurance(ctx, tx, id, mfaMethod, mfaVerifiedAt, mfaCredentialID)
+}
+
+func updateMFAAssurance(ctx context.Context, q db.Execer, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, err error) {
+	err = q.QueryRowContext(ctx, `
 		UPDATE system.sessions
 		SET mfa_verified_at = $2, mfa_method = $3, mfa_credential_id = NULLIF($4, '')::uuid
 		WHERE id = $1 AND revoked_at IS NULL

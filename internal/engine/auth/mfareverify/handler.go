@@ -173,38 +173,5 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeAccessToken(w, r, accessToken, expiresIn, persistent)
-}
-
-// writeAccessToken writes the reverified access token: a JSON body for a
-// non-browser client, or a refreshed __Host-access_token cookie for a
-// browser client. Unlike loginsession.WriteResponse, this never touches
-// the refresh_token or device_id cookies — reverify never changes
-// either, only the access token itself. A non-persistent session gets a
-// browser-session cookie, matching loginsession.SetTokenCookies.
-func writeAccessToken(w http.ResponseWriter, r *http.Request, accessToken string, expiresIn int, persistent bool) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if loginsession.IsNonBrowser(r) {
-		writeJSON(w, map[string]any{
-			"access_token": accessToken,
-			"expires_in":   expiresIn,
-		})
-		return
-	}
-
-	cookieMaxAge := 0
-	if persistent {
-		cookieMaxAge = expiresIn
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "__Host-access_token",
-		Value:    accessToken,
-		Path:     "/",
-		MaxAge:   cookieMaxAge,
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-	})
-	writeJSON(w, map[string]any{"expires_in": expiresIn})
+	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, persistent, nil)
 }
