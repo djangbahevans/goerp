@@ -190,7 +190,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
 
-	hash, err := password.Hash(oldPassword)
+	hash, err := argon2id.CreateHash(oldPassword, password.ArgonParams)
 	if err != nil {
 		t.Fatalf("Hash() error: %v", err)
 	}
@@ -232,7 +232,7 @@ func newFixture(t *testing.T) *fixture {
 
 	return &fixture{
 		request:    NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, mailer, audit),
-		confirm:    NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, revoker, issuer, password.NewPolicyStore(configStore), mailer, audit),
+		confirm:    NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, revoker, issuer, password.NewPolicyStore(configStore), mailer, audit, password.NewHasher(1024, time.Second)),
 		mailer:     mailer,
 		audit:      audit,
 		issuer:     issuer,
@@ -625,5 +625,45 @@ func TestConfirm_NonMemberTenant_GlobalPolicyAndVersionZero(t *testing.T) {
 	}
 	if id := f.storedPolicyTenantID(t); id != nil {
 		t.Errorf("password_set_at_policy_tenant_id = %s, want NULL (global policy only)", *id)
+	}
+}
+
+// saturatedHasher has its only slot held for the test's lifetime, so every
+// Acquire times out.
+func saturatedHasher(t *testing.T) *password.Hasher {
+	t.Helper()
+	h := password.NewHasher(64, 10*time.Millisecond)
+	slot, err := h.Acquire(t.Context())
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+	t.Cleanup(slot.Release)
+	return h
+}
+
+func assertOverloaded(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != "overloaded" {
+		t.Fatalf("status = %d, body = %s, want 503 overloaded", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want \"1\"", got)
+	}
+}
+
+func TestConfirm_Overloaded_Returns503AndKeepsToken(t *testing.T) {
+	f := newFixture(t)
+	token := f.issueToken(t)
+	hasher := f.confirm.hasher
+	f.confirm.hasher = saturatedHasher(t)
+
+	assertOverloaded(t, f.doConfirm(t, token, newPassword))
+	if !f.passwordMatches(t, oldPassword) {
+		t.Error("password changed despite an overloaded hasher")
+	}
+
+	f.confirm.hasher = hasher
+	if retry := f.doConfirm(t, token, newPassword); retry.Code != http.StatusOK {
+		t.Errorf("retry status = %d, want 200 — an overloaded confirm must not consume the token", retry.Code)
 	}
 }

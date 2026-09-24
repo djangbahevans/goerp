@@ -11,8 +11,8 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
+	"strconv"
 
-	"github.com/alexedwards/argon2id"
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
@@ -47,10 +47,11 @@ type Handler struct {
 	sessions *sessionrevoke.Revoker
 	mailer   Mailer
 	audit    AuditRecorder
+	hasher   *password.Hasher
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, policies *password.PolicyStore, sessions *sessionrevoke.Revoker, mailer Mailer, audit AuditRecorder) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, policies: policies, sessions: sessions, mailer: mailer, audit: audit}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, policies *password.PolicyStore, sessions *sessionrevoke.Revoker, mailer Mailer, audit AuditRecorder, hasher *password.Hasher) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, policies: policies, sessions: sessions, mailer: mailer, audit: audit, hasher: hasher}
 }
 
 type changeRequest struct {
@@ -72,6 +73,11 @@ func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 
 func writeInternal(w http.ResponseWriter) {
 	writeJSONError(w, http.StatusInternalServerError, "internal_error", "password change failed")
+}
+
+func writeOverloaded(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
+	writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many password changes in progress, retry shortly")
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +129,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeInvalidPassword(w)
 		return
 	}
-	match, err := argon2id.ComparePasswordAndHash(req.CurrentPassword, *u.PasswordHash)
+	// Looked up before taking a slot, so the slot covers only hashing.
+	policy, policyVersion, err := h.policies.Effective(ctx, tenantCtx.TenantID)
+	if err != nil {
+		writeInternal(w)
+		return
+	}
+	slot, err := h.hasher.Acquire(ctx)
+	if err != nil {
+		writeOverloaded(w)
+		return
+	}
+	defer slot.Release()
+	match, _, err := slot.Verify(req.CurrentPassword, *u.PasswordHash)
 	if err != nil {
 		writeInternal(w)
 		return
@@ -133,17 +151,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policy, policyVersion, err := h.policies.Effective(ctx, tenantCtx.TenantID)
-	if err != nil {
-		writeInternal(w)
-		return
-	}
 	if err := policy.Validate(req.NewPassword, u.Email); err != nil {
 		writeJSONError(w, http.StatusUnprocessableEntity, "auth.password_too_weak", err.Error())
 		return
 	}
 
-	hash, err := password.Hash(req.NewPassword)
+	hash, err := slot.Hash(req.NewPassword)
+	slot.Release()
 	if err != nil {
 		writeInternal(w)
 		return

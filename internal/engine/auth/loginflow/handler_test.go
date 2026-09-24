@@ -144,7 +144,7 @@ func newFixture(t *testing.T) *fixture {
 	if err := configStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
 	}
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore))
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second))
 
 	return &fixture{
 		handler:    handler,
@@ -568,7 +568,7 @@ func TestServeHTTP_OutdatedParams_ReHashesStoredHash(t *testing.T) {
 	if err != nil || !match {
 		t.Fatalf("re-hashed hash doesn't verify: match=%v err=%v", match, err)
 	}
-	if !paramsMatch(params, password.ArgonParams) {
+	if *params != *password.ArgonParams {
 		t.Errorf("re-hashed params = %+v, want current argonParams", params)
 	}
 }
@@ -681,5 +681,55 @@ func TestServeHTTP_PasswordValidatedInAnotherTenant_RecommendsUpdate(t *testing.
 
 	if rec.Code != http.StatusOK || decodeBody(t, rec)["password_update_recommended"] != true {
 		t.Errorf("status = %d, body = %s, want 200 with password_update_recommended", rec.Code, rec.Body.String())
+	}
+}
+
+// saturatedHasher has its only slot held for the test's lifetime, so every
+// Acquire times out.
+func saturatedHasher(t *testing.T) *password.Hasher {
+	t.Helper()
+	h := password.NewHasher(64, 10*time.Millisecond)
+	slot, err := h.Acquire(t.Context())
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+	t.Cleanup(slot.Release)
+	return h
+}
+
+func assertOverloaded(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != "overloaded" {
+		t.Fatalf("status = %d, body = %s, want 503 overloaded", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want \"1\"", got)
+	}
+}
+
+func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	errObj, _ := decodeBody(t, rec)["error"].(map[string]any)
+	code, _ := errObj["code"].(string)
+	return code
+}
+
+func TestServeHTTP_Overloaded_Returns503BeforeLookingUpTheUser(t *testing.T) {
+	f := newFixture(t)
+	f.handler.hasher = saturatedHasher(t)
+
+	for _, email := range []string{fixtureEmail(f), "no-such-user@example.com"} {
+		rec := f.doLogin(t, map[string]any{
+			"email": email, "password": "wrong-password", "tenant": f.tenantSlug,
+		}, nil)
+		assertOverloaded(t, rec)
+	}
+
+	got, err := f.users.GetByID(t.Context(), f.userID)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if got.FailedLoginCount != 0 {
+		t.Errorf("FailedLoginCount = %d, want 0 — an overloaded login never checked the password", got.FailedLoginCount)
 	}
 }

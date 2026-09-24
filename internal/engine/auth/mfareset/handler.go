@@ -26,12 +26,13 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 
-	"github.com/alexedwards/argon2id"
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -79,9 +80,10 @@ type Handler struct {
 	sessions *sessionrevoke.Revoker
 	mailer   Mailer
 	audit    AuditEmitter
+	hasher   *password.Hasher
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, roles *role.Store, mfaStore *mfa.Store, sessions *sessionrevoke.Revoker, mailer Mailer, audit AuditEmitter) *Handler {
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, roles *role.Store, mfaStore *mfa.Store, sessions *sessionrevoke.Revoker, mailer Mailer, audit AuditEmitter, hasher *password.Hasher) *Handler {
 	return &Handler{
 		tenants:  tenants,
 		auth:     auth,
@@ -91,6 +93,7 @@ func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users 
 		sessions: sessions,
 		mailer:   mailer,
 		audit:    audit,
+		hasher:   hasher,
 	}
 }
 
@@ -161,7 +164,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.confirmCallerPassword(ctx, authCtx.UserID, req.Password) {
+	confirmed, err := h.confirmCallerPassword(ctx, authCtx.UserID, req.Password)
+	if err != nil {
+		w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
+		writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many password checks in progress, retry shortly")
+		return
+	}
+	if !confirmed {
 		writeJSONError(w, http.StatusUnauthorized, "invalid_password", "current password confirmation failed")
 		return
 	}
@@ -219,13 +228,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // never the target's. A nil PasswordHash (shouldn't happen for a caller
 // who just authenticated via a real access token, since password login
 // requires one) is treated as a failed confirmation, not a system error.
-func (h *Handler) confirmCallerPassword(ctx context.Context, callerID, password string) bool {
+// The only error it returns is from acquiring an Argon2id slot.
+func (h *Handler) confirmCallerPassword(ctx context.Context, callerID, plain string) (bool, error) {
 	caller, err := h.users.GetByID(ctx, callerID)
 	if err != nil || caller.PasswordHash == nil {
-		return false
+		return false, nil
 	}
-	match, err := argon2id.ComparePasswordAndHash(password, *caller.PasswordHash)
-	return err == nil && match
+	slot, err := h.hasher.Acquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer slot.Release()
+	match, _, err := slot.Verify(plain, *caller.PasswordHash)
+	return err == nil && match, nil
 }
 
 func (h *Handler) emitAudit(ctx context.Context, tenantSlug, performedBy, targetUserID string) {

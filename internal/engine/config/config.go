@@ -107,6 +107,12 @@ type Config struct {
 	// Security
 	SecretsBackend string `env:"GOERP_SECRETS_BACKEND" envDefault:"env" validate:"oneof=env vault aws_secretsmanager"`
 	EnableAPIKeys  bool   `env:"GOERP_ENABLE_API_KEYS" envDefault:"false"`
+	// Argon2MemoryBudgetMB caps memory spent on concurrent Argon2id
+	// operations: budget / 64 MB (per hash) slots, auth-internals.md §15
+	// "Global Argon2 verification limit". Argon2AcquireTimeout is how long
+	// a request waits for a slot before a 503.
+	Argon2MemoryBudgetMB int           `env:"GOERP_ARGON2_MEMORY_BUDGET_MB" envDefault:"1024" validate:"min=64"`
+	Argon2AcquireTimeout time.Duration `env:"GOERP_ARGON2_ACQUIRE_TIMEOUT" envDefault:"500ms"`
 
 	// Registration
 	StorageBackend      string   `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`

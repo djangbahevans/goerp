@@ -747,15 +747,16 @@ func New(cfg *config.Config) (*Engine, error) {
 	})
 
 	passwordPolicies := password.NewPolicyStore(tenantConfigStore)
-	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies)
+	passwordHasher := password.NewHasher(cfg.Argon2MemoryBudgetMB, cfg.Argon2AcquireTimeout)
+	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
 	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
 	mfaLockout := lockout.NewCounter(cacheClient)
 	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
-	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil)
+	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil, passwordHasher)
 	passwordResetRequestHandler := passwordreset.NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer, authAuditStore)
-	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, passwordPolicies, inviteMailer, authAuditStore)
+	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, passwordPolicies, inviteMailer, authAuditStore, passwordHasher)
 	// filesStore is constructed here (rather than down by
 	// offboardActivities, which also needs it) since authMeHandler
 	// (avatar URL resolution, goerp#819) and storageUploadHandler both
@@ -763,7 +764,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	filesStore := files.NewStore(primaryPool)
 	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, filesStore, storageBackend)
 	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore)
-	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore)
+	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
 	tenantContextHandler := tenantcontext.NewHandler(tenantResolver)

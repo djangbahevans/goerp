@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/rs/zerolog/log"
 
@@ -33,10 +34,11 @@ type ConfirmHandler struct {
 	policies *password.PolicyStore
 	mailer   Mailer
 	audit    AuditRecorder
+	hasher   *password.Hasher
 }
 
-func NewConfirmHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, sessions *sessionrevoke.Revoker, issuer *authtoken.Issuer, policies *password.PolicyStore, mailer Mailer, audit AuditRecorder) *ConfirmHandler {
-	return &ConfirmHandler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, sessions: sessions, issuer: issuer, policies: policies, mailer: mailer, audit: audit}
+func NewConfirmHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, sessions *sessionrevoke.Revoker, issuer *authtoken.Issuer, policies *password.PolicyStore, mailer Mailer, audit AuditRecorder, hasher *password.Hasher) *ConfirmHandler {
+	return &ConfirmHandler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, sessions: sessions, issuer: issuer, policies: policies, mailer: mailer, audit: audit, hasher: hasher}
 }
 
 type confirmRequest struct {
@@ -88,7 +90,16 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := password.Hash(req.NewPassword)
+	// Hashing on reset costs the same memory as verification, so it takes
+	// a slot too.
+	slot, err := h.hasher.Acquire(ctx)
+	if err != nil {
+		w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
+		writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many password resets in progress, retry shortly")
+		return
+	}
+	hash, err := slot.Hash(req.NewPassword)
+	slot.Release()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "password reset failed")
 		return

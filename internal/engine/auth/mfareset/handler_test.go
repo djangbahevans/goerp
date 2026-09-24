@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
@@ -154,7 +155,7 @@ func newFixture(t *testing.T) *fixture {
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 	mailer := &spyMailer{}
 	audit := &spyAudit{}
-	handler := NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, mailer, audit)
+	handler := NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, mailer, audit, password.NewHasher(1024, time.Second))
 
 	slug := fmt.Sprintf("mfaresettest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "MFA Reset Test Co")
@@ -433,4 +434,50 @@ func TestServeHTTP_UnresolvableHostRejected(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404; body = %s", rec.Code, rec.Body.String())
 	}
+}
+
+// saturatedHasher has its only slot held for the test's lifetime, so every
+// Acquire times out.
+func saturatedHasher(t *testing.T) *password.Hasher {
+	t.Helper()
+	h := password.NewHasher(64, 10*time.Millisecond)
+	slot, err := h.Acquire(t.Context())
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+	t.Cleanup(slot.Release)
+	return h
+}
+
+func assertOverloaded(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != "overloaded" {
+		t.Fatalf("status = %d, body = %s, want 503 overloaded", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want \"1\"", got)
+	}
+}
+
+func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return body.Error.Code
+}
+
+func TestServeHTTP_OverloadedPasswordCheckReturns503(t *testing.T) {
+	f := newFixture(t)
+	f.handler.hasher = saturatedHasher(t)
+	callerID := f.createCallerWithPassword(t)
+	callerToken := f.issueAccessToken(t, callerID)
+	targetID, _ := f.createUserWithRole(t, "user")
+
+	assertOverloaded(t, f.doReset(t, callerToken, targetID, map[string]any{"password": testCallerPassword}))
 }

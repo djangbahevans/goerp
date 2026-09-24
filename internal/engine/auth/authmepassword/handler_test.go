@@ -140,7 +140,7 @@ func newFixture(t *testing.T) *fixture {
 	authChecker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, permcache.NewRoleCache(cacheClient), permcache.NewRolePermissionMap(), apiKeys, false, nil, nil, nil)
 	mailer := &fakeMailer{}
 	audit := &fakeAudit{}
-	handler := NewHandler(tenantResolver, authChecker, userStore, password.NewPolicyStore(configStore), revoker, mailer, audit)
+	handler := NewHandler(tenantResolver, authChecker, userStore, password.NewPolicyStore(configStore), revoker, mailer, audit, password.NewHasher(1024, time.Second))
 
 	slug := fmt.Sprintf("authmepwtest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Password Test Co")
@@ -162,7 +162,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
-	hash, err := password.Hash(oldPassword)
+	hash, err := argon2id.CreateHash(oldPassword, password.ArgonParams)
 	if err != nil {
 		t.Fatalf("Hash() error: %v", err)
 	}
@@ -426,5 +426,39 @@ func TestServeHTTP_NoTokenRejected(t *testing.T) {
 	rec := f.doChange(t, "", oldPassword, newPassword)
 	if rec.Code != http.StatusUnauthorized || errorCode(t, rec) != "unauthenticated" {
 		t.Fatalf("status = %d, body = %s, want 401 unauthenticated", rec.Code, rec.Body.String())
+	}
+}
+
+// saturatedHasher has its only slot held for the test's lifetime, so every
+// Acquire times out.
+func saturatedHasher(t *testing.T) *password.Hasher {
+	t.Helper()
+	h := password.NewHasher(64, 10*time.Millisecond)
+	slot, err := h.Acquire(t.Context())
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+	t.Cleanup(slot.Release)
+	return h
+}
+
+func assertOverloaded(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != "overloaded" {
+		t.Fatalf("status = %d, body = %s, want 503 overloaded", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want \"1\"", got)
+	}
+}
+
+func TestServeHTTP_OverloadedReturns503AndChangesNothing(t *testing.T) {
+	f := newFixture(t)
+	tokens := f.signIn(t)
+	f.handler.hasher = saturatedHasher(t)
+
+	assertOverloaded(t, f.doChange(t, tokens.AccessToken, oldPassword, newPassword))
+	if !f.passwordMatches(t, oldPassword) {
+		t.Error("password changed despite an overloaded hasher")
 	}
 }

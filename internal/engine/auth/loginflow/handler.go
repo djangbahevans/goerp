@@ -4,9 +4,8 @@
 // Argon2id verification, MFA gating, and token issuance for both browser
 // (cookie) and non-browser (JSON body) clients.
 //
-// Out of scope, left to the tickets that own them: the global Argon2
-// concurrency semaphore (backlog #286), the three partitioned Redis rate
-// limiters and credential-stuffing detection (backlog #287), and the
+// Out of scope, left to the tickets that own them: the three partitioned
+// Redis rate limiters and credential-stuffing detection (backlog #287), and the
 // full escalating account-lockout policy — doubling duration, security
 // notification email, audit log entry, admin manual-unlock (backlog
 // #291). This handler implements only the single-tier lockout
@@ -18,12 +17,11 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/alexedwards/argon2id"
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
@@ -47,19 +45,6 @@ const maxBodyBytes = 64 * 1024
 // "no such user" from "wrong password" by response latency.
 const minResponseTime = 300 * time.Millisecond
 
-var dummyHash string
-
-func init() {
-	h, err := argon2id.CreateHash("timing-normalisation-dummy-password", password.ArgonParams)
-	if err != nil {
-		// argonParams is a fixed literal — CreateHash can only fail here
-		// from a coding mistake in that literal, never from runtime
-		// conditions, so failing loudly at startup is correct.
-		panic(fmt.Sprintf("loginflow: create dummy hash: %v", err))
-	}
-	dummyHash = h
-}
-
 type Handler struct {
 	users     *user.Store
 	tenants   *tenant.Store
@@ -68,10 +53,11 @@ type Handler struct {
 	issuer    *authtoken.Issuer
 	mfaTokens *mfatoken.Codec
 	policies  *password.PolicyStore
+	hasher    *password.Hasher
 }
 
-func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore) *Handler {
-	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies}
+func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher) *Handler {
+	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher}
 }
 
 type loginRequest struct {
@@ -103,6 +89,11 @@ func writeInvalidCredentials(w http.ResponseWriter) {
 	writeJSONError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 }
 
+func writeOverloaded(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
+	writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many sign-in attempts in progress, retry shortly")
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	defer func() {
@@ -121,13 +112,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	email := strings.ToLower(req.Email)
 
+	// Taken before the user lookup, so an overloaded 503 looks the same
+	// whether or not the email exists (auth-internals.md §15).
+	slot, err := h.hasher.Acquire(ctx)
+	if err != nil {
+		writeOverloaded(w)
+		return
+	}
+	defer slot.Release()
+
 	// Step 2/3: look up user, check status. "invited" (no password ever
 	// set) and "not found" are deliberately the same code path — see
 	// auth-internals.md §15 "Timing attack prevention".
 	u, err := h.users.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, user.ErrUserNotFound) {
-			runDummyCompare(req.Password)
+			slot.VerifyDummy(req.Password)
 			writeInvalidCredentials(w)
 			return
 		}
@@ -135,7 +135,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if u.PasswordHash == nil {
-		runDummyCompare(req.Password)
+		slot.VerifyDummy(req.Password)
 		writeInvalidCredentials(w)
 		return
 	}
@@ -189,7 +189,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Steps 6-9: Argon2id verify, transparent re-hash if params outdated.
-	match, params, err := argon2id.CheckHash(req.Password, *u.PasswordHash)
+	match, needsRehash, err := slot.Verify(req.Password, *u.PasswordHash)
+	var newHash string
+	var rehashErr error
+	if err == nil && needsRehash {
+		newHash, rehashErr = slot.Hash(req.Password)
+	}
+	// Nothing below hashes; the slot guards memory, not database latency.
+	slot.Release()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
@@ -202,15 +209,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeInvalidCredentials(w)
 		return
 	}
-	if !paramsMatch(params, password.ArgonParams) {
-		newHash, hashErr := argon2id.CreateHash(req.Password, password.ArgonParams)
-		if hashErr == nil {
-			// A re-hash failure or update failure here doesn't fail the
-			// login — the password was already verified correct; the
-			// stored hash simply stays on its old (still valid) params
-			// until the next successful login retries the upgrade.
-			_ = h.users.UpdatePasswordHash(ctx, u.ID, newHash)
-		}
+	if needsRehash && rehashErr == nil {
+		// A re-hash failure or update failure here doesn't fail the
+		// login — the password was already verified correct; the
+		// stored hash simply stays on its old (still valid) params
+		// until the next successful login retries the upgrade.
+		_ = h.users.UpdatePasswordHash(ctx, u.ID, newHash)
 	}
 
 	// auth-internals.md §3 "Password policy versioning": a nudge only,
@@ -272,23 +276,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, updateRecommended)
-}
-
-// runDummyCompare performs one Argon2id comparison against a fixed,
-// precomputed hash — the same cost as a real verification — so a
-// not-found or never-had-a-password account can't be distinguished from
-// a wrong-password rejection by response latency alone (minResponseTime
-// is a coarser floor on top of this; both apply).
-func runDummyCompare(password string) {
-	_, _ = argon2id.ComparePasswordAndHash(password, dummyHash)
-}
-
-func paramsMatch(got, want *argon2id.Params) bool {
-	return got.Memory == want.Memory &&
-		got.Iterations == want.Iterations &&
-		got.Parallelism == want.Parallelism &&
-		got.SaltLength == want.SaltLength &&
-		got.KeyLength == want.KeyLength
 }
 
 // enrolledMethods returns the distinct set of credential types among

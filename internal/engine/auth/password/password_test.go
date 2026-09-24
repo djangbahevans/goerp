@@ -4,8 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/alexedwards/argon2id"
 )
 
 func TestPolicyValidate(t *testing.T) {
@@ -68,20 +66,6 @@ func TestCommonPasswords_OnlyHoldsEntriesLongEnoughToMatter(t *testing.T) {
 		if p != strings.ToLower(p) {
 			t.Errorf("entry %q isn't lowercased", p)
 		}
-	}
-}
-
-func TestHash_UsesDocumentedParams(t *testing.T) {
-	h, err := Hash("correct horse battery staple")
-	if err != nil {
-		t.Fatalf("Hash() error: %v", err)
-	}
-	match, params, err := argon2id.CheckHash("correct horse battery staple", h)
-	if err != nil || !match {
-		t.Fatalf("CheckHash() = %v, %v, want match", match, err)
-	}
-	if *params != *ArgonParams {
-		t.Errorf("params = %+v, want %+v", *params, *ArgonParams)
 	}
 }
 
