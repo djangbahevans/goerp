@@ -1,16 +1,15 @@
-import { PermissionContext, useAuth } from "@goerp/sdk/auth";
+import { PermissionContext } from "@goerp/sdk/auth";
 import { MODAL_OVERLAY_CLASSES } from "@goerp/sdk/components";
-import { toast } from "@goerp/sdk/notifications";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { formatShortcutText } from "../shortcuts/shortcut.js";
 import { useBuiltInCommands } from "./built-in-commands.js";
 import { onCommandPaletteOpenRequest } from "./command-palette-control.js";
 import { commandRegistry } from "./command-registry.js";
 import { searchCommands } from "./command-search.js";
-import type { Command, CommandContext } from "./command-types.js";
+import type { Command } from "./command-types.js";
+import { useCommandRunner } from "./use-command-runner.js";
 import { useRecentCommands } from "./use-recent-commands.js";
 
 // Same full-viewport-boundary/inner-panel split as AlertDialog's CONTENT_CLASSES.
@@ -57,9 +56,7 @@ export function CommandPalette(): ReactNode {
   const highlightedRef = useRef<HTMLDivElement | null>(null);
   const listboxId = useId();
 
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const auth = useAuth();
+  const runCommand = useCommandRunner();
   const permissions = useContext(PermissionContext);
   if (!permissions) {
     throw new Error("CommandPalette must be used within a PermissionProvider");
@@ -84,17 +81,6 @@ export function CommandPalette(): ReactNode {
   useEffect(() => onCommandPaletteOpenRequest(() => setOpen(true)), []);
 
   useEffect(() => {
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setOpen(true);
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  useEffect(() => {
     if (open) {
       triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       // biome-ignore lint/nursery/useReactCompiler: resetting to the initial input state on reopen — same reset-on-reopen shape as AlertDialog's own (already-shipped) triggerRef/setState effect.
@@ -108,34 +94,8 @@ export function CommandPalette(): ReactNode {
     // biome-ignore lint/nursery/useReactCompiler: scrollIntoView is a DOM side effect keyed on activeIndex, not a state update.
   }, [activeIndex]);
 
-  // CommandPalette mounts at the app root (__root.tsx) regardless of auth
-  // state, so user/tenant can genuinely be null here (e.g. on the login
-  // screen) — a command that needs them just can't run yet, rather than
-  // this component crashing the whole shell over a normal, temporary state.
-  const context: CommandContext | null =
-    auth.user && auth.tenant
-      ? {
-          navigate: (path) => void navigate({ to: path }),
-          user: auth.user,
-          tenant: auth.tenant,
-          toast,
-          queryClient,
-        }
-      : null;
-
   const execute = (command: Command) => {
-    if (!context) {
-      toast.error("Not ready yet — try again in a moment.");
-      return;
-    }
-    setOpen(false);
-    // A module-registered command's action may be async (CommandDefinition
-    // permits void | Promise<void>) — awaited here only to surface a
-    // rejection as a toast instead of an unhandled promise rejection the
-    // palette itself (already closed by the time it settles) can't show.
-    void Promise.resolve(command.action(context)).catch((err: unknown) => {
-      toast.error(err instanceof Error ? err.message : String(err));
-    });
+    if (runCommand(command)) setOpen(false);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -221,7 +181,7 @@ export function CommandPalette(): ReactNode {
                       </span>
                       {command.shortcut && (
                         <kbd className="rounded-control border border-border px-1.5 py-0.5 text-text-secondary text-xs">
-                          {command.shortcut}
+                          {formatShortcutText(command.shortcut)}
                         </kbd>
                       )}
                     </div>

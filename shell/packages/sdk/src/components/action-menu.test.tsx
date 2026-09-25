@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPermissionContextValue, PermissionContext } from "../auth/permission-provider.js";
 import { ActionMenu } from "./action-menu.js";
+import { EscapeLayer } from "./escape-layer.js";
 
 afterEach(cleanup);
 
@@ -288,17 +289,30 @@ describe("ActionMenu", () => {
       expect(document.activeElement).toBe(trigger);
     });
 
-    it("Escape doesn't propagate to close an ancestor's own Escape handler", () => {
+    it("Escape doesn't propagate to an ancestor's own Escape handler", () => {
       const ancestorEscape = vi.fn();
       render(
-        // role="dialog": stands in for a real ancestor dialog's own
-        // Escape-to-close listener.
         <div role="dialog" onKeyDown={ancestorEscape}>
           {withPermissions([], <ActionMenu label="Actions" items={[{ label: "Edit", onClick: vi.fn() }]} />)}
         </div>,
       );
       fireEvent.click(screen.getByRole("button", { name: "Actions" }));
       fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      expect(ancestorEscape).not.toHaveBeenCalled();
+    });
+
+    it("Escape closes only the menu, not an ancestor overlay it's nested in", () => {
+      const ancestorEscape = vi.fn();
+      render(
+        <EscapeLayer onEscape={ancestorEscape}>
+          <div role="dialog">
+            {withPermissions([], <ActionMenu label="Actions" items={[{ label: "Edit", onClick: vi.fn() }]} />)}
+          </div>
+        </EscapeLayer>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      expect(screen.queryByRole("menu")).toBeNull();
       expect(ancestorEscape).not.toHaveBeenCalled();
     });
 

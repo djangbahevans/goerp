@@ -1,5 +1,6 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
+import { EscapeLayer } from "./escape-layer.js";
 import { fieldInputClassName } from "./field-input-styles.js";
 import { FieldError, FieldLabel, useSelfLabelledFieldControl } from "./field-wrapper.js";
 import { requiredProps } from "./text-input.js";
@@ -151,10 +152,6 @@ export function TagsField({
           create();
         }
         break;
-      case "Escape":
-        event.preventDefault();
-        setClosed(true);
-        break;
       default:
         break;
     }
@@ -223,14 +220,16 @@ export function TagsField({
         className={fieldInputClassName(controlProps["aria-invalid"] === true)}
       />
       {isOpen && (
-        <span
-          id={listboxId}
-          role="listbox"
-          className="flex flex-col gap-1 rounded-structural border border-border bg-surface p-2 shadow-md"
-        >
-          {matches.map((option, index) => renderOption(index, option.id, option.name, () => add(option)))}
-          {showCreate && renderOption(matches.length, "create", `Create "${query.trim()}"`, create)}
-        </span>
+        <EscapeLayer onEscape={() => setClosed(true)}>
+          <span
+            id={listboxId}
+            role="listbox"
+            className="flex flex-col gap-1 rounded-structural border border-border bg-surface p-2 shadow-md"
+          >
+            {matches.map((option, index) => renderOption(index, option.id, option.name, () => add(option)))}
+            {showCreate && renderOption(matches.length, "create", `Create "${query.trim()}"`, create)}
+          </span>
+        </EscapeLayer>
       )}
       {error !== undefined && <FieldError id={errorId}>{error}</FieldError>}
     </div>

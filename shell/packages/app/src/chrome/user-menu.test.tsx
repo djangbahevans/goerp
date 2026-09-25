@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { onKeyboardShortcutsOpenRequest } from "../shortcuts/keyboard-shortcuts-control.js";
 import { UserMenu } from "./user-menu.js";
 
 function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
@@ -85,6 +86,17 @@ describe("UserMenu", () => {
     expect(screen.getByRole("menuitemcheckbox", { name: "Dark mode" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
+  });
+
+  it("Keyboard shortcuts opens the shortcuts reference", async () => {
+    const onOpen = vi.fn();
+    const unsubscribe = onKeyboardShortcutsOpenRequest(onOpen);
+    await renderUserMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Keyboard shortcuts" }));
+    unsubscribe();
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
   it("toggling Dark mode flips its checked state without closing the menu", async () => {

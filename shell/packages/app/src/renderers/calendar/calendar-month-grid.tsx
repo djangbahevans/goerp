@@ -1,3 +1,4 @@
+import { EscapeLayer } from "@goerp/sdk/components";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -285,36 +286,37 @@ export function CalendarMonthGrid({
                     />
                   )}
                   {overflowDay && isSameDay(overflowDay, day) && (
-                    <div
-                      role="dialog"
-                      aria-label={`All events on ${LONG_DATE_FORMAT.format(day)}`}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Escape") return;
-                        event.preventDefault();
-                        event.stopPropagation();
+                    <EscapeLayer
+                      onEscape={() => {
                         setOverflowDay(null);
                         cellRefs.current.get(key)?.focus();
                       }}
-                      className={`${FLOATING_PANEL_CLASSES} min-w-48 p-2`}
+                      onPointerDownOutside={() => setOverflowDay(null)}
                     >
-                      <div className="flex flex-col gap-1">
-                        {dayEvents.map((event) => (
-                          <EventChip key={event.id} event={event} onClick={onEventClick} />
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        // Focuses on mount, matching QuickCreatePopover's
-                        // own convention of moving focus into the popover
-                        // when it opens rather than leaving it on the
-                        // now-covered trigger button.
-                        ref={(el) => el?.focus()}
-                        onClick={() => setOverflowDay(null)}
-                        className="mt-2 text-text-secondary text-xs hover:text-text"
+                      <div
+                        role="dialog"
+                        aria-label={`All events on ${LONG_DATE_FORMAT.format(day)}`}
+                        className={`${FLOATING_PANEL_CLASSES} min-w-48 p-2`}
                       >
-                        Close
-                      </button>
-                    </div>
+                        <div className="flex flex-col gap-1">
+                          {dayEvents.map((event) => (
+                            <EventChip key={event.id} event={event} onClick={onEventClick} />
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          // Focuses on mount, matching QuickCreatePopover's
+                          // own convention of moving focus into the popover
+                          // when it opens rather than leaving it on the
+                          // now-covered trigger button.
+                          ref={(el) => el?.focus()}
+                          onClick={() => setOverflowDay(null)}
+                          className="mt-2 text-text-secondary text-xs hover:text-text"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </EscapeLayer>
                   )}
                 </td>
               );

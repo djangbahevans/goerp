@@ -2,6 +2,7 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
+import { EscapeLayer } from "./escape-layer.js";
 import {
   optionElementId,
   useFloatingPanelPosition,
@@ -190,11 +191,6 @@ export function CodeSelect({
         if (entry) selectEntry(entry);
         break;
       }
-      case "Escape":
-        event.preventDefault();
-        setIsOpen(false);
-        setQuery("");
-        break;
       default:
         break;
     }
@@ -238,43 +234,50 @@ export function CodeSelect({
       />
       {isOpen &&
         createPortal(
-          <span
-            ref={panelRef}
-            id={listboxId}
-            role="listbox"
-            style={
-              position
-                ? { position: "fixed", top: position.top, left: position.left, width: position.width }
-                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
-            }
-            className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
+          <EscapeLayer
+            onEscape={() => {
+              setIsOpen(false);
+              setQuery("");
+            }}
           >
-            {matches.length === 0 ? (
-              <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
-                No results for &quot;{query}&quot;
-              </span>
-            ) : (
-              matches.map((entry, index) => (
-                // aria-label overrides name-from-content, since CountryFlag's own icon already carries one.
-                // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG combobox-with-listbox — options are never independently focusable, only virtually "focused" via aria-activedescendant.
-                // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
-                <div
-                  key={entry.code}
-                  id={optionElementId(listboxId, index)}
-                  role="option"
-                  aria-label={entry.name}
-                  aria-selected={index === activeIndex}
-                  onMouseEnter={() => setHighlightedIndex(index)}
-                  onClick={() => selectEntry(entry)}
-                  className={`flex cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-left text-sm text-text ${
-                    index === activeIndex ? "bg-surface-hover" : ""
-                  }`}
-                >
-                  {renderRow(entry.code, entry.name)}
-                </div>
-              ))
-            )}
-          </span>,
+            <span
+              ref={panelRef}
+              id={listboxId}
+              role="listbox"
+              style={
+                position
+                  ? { position: "fixed", top: position.top, left: position.left, width: position.width }
+                  : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
+              }
+              className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
+            >
+              {matches.length === 0 ? (
+                <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
+                  No results for &quot;{query}&quot;
+                </span>
+              ) : (
+                matches.map((entry, index) => (
+                  // aria-label overrides name-from-content, since CountryFlag's own icon already carries one.
+                  // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG combobox-with-listbox — options are never independently focusable, only virtually "focused" via aria-activedescendant.
+                  // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
+                  <div
+                    key={entry.code}
+                    id={optionElementId(listboxId, index)}
+                    role="option"
+                    aria-label={entry.name}
+                    aria-selected={index === activeIndex}
+                    onMouseEnter={() => setHighlightedIndex(index)}
+                    onClick={() => selectEntry(entry)}
+                    className={`flex cursor-pointer items-center gap-2 rounded-control px-2 py-1 text-left text-sm text-text ${
+                      index === activeIndex ? "bg-surface-hover" : ""
+                    }`}
+                  >
+                    {renderRow(entry.code, entry.name)}
+                  </div>
+                ))
+              )}
+            </span>
+          </EscapeLayer>,
           document.body,
         )}
     </div>

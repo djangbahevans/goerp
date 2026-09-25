@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { expect, fireEvent, waitFor, within } from "storybook/test";
 import { CommandPalette } from "./command-palette.js";
+import { openCommandPalette } from "./command-palette-control.js";
 import { commandRegistry } from "./command-registry.js";
 import type { Command } from "./command-types.js";
 
@@ -84,7 +85,7 @@ type Story = StoryObj<typeof CommandPalette>;
 // to exercise search and keyboard nav against the example commands instead.
 export const Opened: Story = {
   play: async ({ canvasElement }) => {
-    fireEvent.keyDown(document, { key: "k", metaKey: true });
+    openCommandPalette();
     const body = within(canvasElement.ownerDocument.body);
     const dialog = await waitFor(() => body.getByRole("dialog", { name: "Command palette" }));
 
