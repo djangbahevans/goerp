@@ -22,6 +22,11 @@ vi.mock("./use-form-record.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./use-form-record.js")>();
   return { ...actual, useFormRecord: useFormRecordMock };
 });
+vi.mock("./form-chatter.js", () => ({
+  FormChatter: ({ recordId }: { recordId: string | undefined }) => (
+    <section data-testid="form-chatter">{recordId ?? "unsaved"}</section>
+  ),
+}));
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
   return { ...actual, modelRegistry: { resolve: resolveModelMock } };
@@ -230,5 +235,37 @@ describe("FormRenderer conditions", () => {
     renderConditional(actionView, record);
     expect(screen.getByText("Archive")).toBeTruthy();
     expect(screen.queryByText("Reopen")).toBeNull();
+  });
+});
+
+describe("FormRenderer chatter", () => {
+  it("renders FormChatter for the record by default", () => {
+    useFormRecordMock.mockReturnValue(handle());
+    renderForm();
+    expect(screen.getByTestId("form-chatter").textContent).toBe("01j");
+  });
+
+  it('omits the chatter when the view sets "chatter": false', () => {
+    useFormRecordMock.mockReturnValue(handle());
+    renderForm({ ...view, chatter: false });
+    expect(screen.queryByTestId("form-chatter")).toBeNull();
+  });
+
+  it("invalidates the record's activity feed when a save succeeds", () => {
+    useFormRecordMock.mockReturnValue(handle());
+    const client = new QueryClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    render(
+      <QueryClientProvider client={client}>
+        <PermissionContext.Provider value={permissionValue}>
+          <FormRenderer view={view} module="contacts" recordId="01j" />
+        </PermissionContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const options = useFormRecordMock.mock.calls[0]?.[2] as { onSaved?: (record: Record<string, unknown>) => void };
+    options.onSaved?.({ id: "01j" });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["record-activity", "contacts.contact", "01j"] });
   });
 });

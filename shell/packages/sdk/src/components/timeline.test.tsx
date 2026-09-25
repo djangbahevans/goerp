@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Timeline, TimelineItem } from "./timeline.js";
 
@@ -54,5 +55,33 @@ describe("Timeline", () => {
       </Timeline>,
     );
     expect(screen.getByText("📦")).toBeTruthy();
+  });
+
+  it("renders children below the title and actions beside it", () => {
+    render(
+      <Timeline>
+        <TimelineItem
+          title="Changed Status"
+          timestamp="2026-01-15T10:30:00.000Z"
+          actions={<button type="button">Delete</button>}
+        >
+          <p>Draft → Confirmed</p>
+        </TimelineItem>
+      </Timeline>,
+    );
+    expect(screen.getByText("Draft → Confirmed")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("passes ref and tabIndex through to the list item so a caller can focus it", () => {
+    const ref = createRef<HTMLLIElement>();
+    render(
+      <Timeline>
+        <TimelineItem ref={ref} tabIndex={-1} title="Comment deleted" timestamp="2026-01-15T10:30:00.000Z" />
+      </Timeline>,
+    );
+    expect(ref.current?.tagName).toBe("LI");
+    ref.current?.focus();
+    expect(document.activeElement).toBe(ref.current);
   });
 });
