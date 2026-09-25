@@ -170,17 +170,18 @@ func registerTenantScopedTestTx(t *testing.T, ctx context.Context, db *sql.DB, m
 	return tx
 }
 
+// createFixtureTenantSchema creates the tenant's schema and role the way
+// provisioning does (tenantschema.Create), without the engine-owned tables.
 func createFixtureTenantSchema(t *testing.T, conn *sql.DB, slug string) {
 	t.Helper()
-	ctx := context.Background()
-	schema := tenantschema.Name(slug)
-
-	if _, err := conn.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
+	t.Cleanup(func() {
+		if err := tenantschema.Drop(context.Background(), conn, slug); err != nil {
+			t.Logf("drop fixture schema: %v", err)
+		}
+	})
+	if err := tenantschema.Create(t.Context(), conn, slug); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-	})
 }
 
 func TestHostDB_BeginCommit_SetsSearchPathAndCommits(t *testing.T) {

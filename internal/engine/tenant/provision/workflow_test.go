@@ -158,7 +158,7 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 	env := newTestEnv(t, map[string]*module.LoadedModule{"widgets": mod})
 	t.Cleanup(func() {
 		_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
-		_, _ = env.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
+		_ = tenantschema.Drop(context.Background(), env.conn, slug)
 	})
 
 	err := env.runWorkflow(t, Input{

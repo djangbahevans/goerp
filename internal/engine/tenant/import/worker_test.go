@@ -27,6 +27,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
+	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -253,7 +254,7 @@ func TestWorkerRun_ImportsArchiveIntoNewTenant(t *testing.T) {
 	jobID := time.Now().UnixNano()
 	t.Cleanup(func() {
 		_, _ = f.conn.Exec("DELETE FROM system.job_checkpoints WHERE job_id = $1", fmt.Sprintf("%d", jobID))
-		_, _ = f.conn.Exec(`DROP SCHEMA IF EXISTS "tenant_` + slug + `" CASCADE`)
+		_ = tenantschema.Drop(context.Background(), f.conn, slug)
 		_, _ = f.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
 	})
 
@@ -351,7 +352,7 @@ func TestWorkerRun_FinalAttemptFailureReleasesSlugReservation(t *testing.T) {
 	jobID := time.Now().UnixNano()
 	t.Cleanup(func() {
 		_, _ = f.conn.Exec("DELETE FROM system.job_checkpoints WHERE job_id = $1", fmt.Sprintf("%d", jobID))
-		_, _ = f.conn.Exec(`DROP SCHEMA IF EXISTS "tenant_` + slug + `" CASCADE`)
+		_ = tenantschema.Drop(context.Background(), f.conn, slug)
 		_, _ = f.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
 	})
 

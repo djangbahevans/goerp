@@ -15,7 +15,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
-	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"os"
@@ -286,12 +285,11 @@ func compileModuleUnderTest(t *testing.T, ctx context.Context, moduleDir string)
 
 func createTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	t.Helper()
-	if _, err := primaryDB.Exec(fmt.Sprintf(`CREATE SCHEMA %s`, tenantschema.Name(slug))); err != nil {
-		t.Fatalf("modeltest: create tenant schema: %v", err)
-	}
-	// Registered before anything else is created in the schema, so a later
-	// setup failure still drops it.
+	// Registered first, so a later setup failure still drops the schema.
 	t.Cleanup(func() { dropTenantSchema(t, primaryDB, slug) })
+	if err := tenantschema.Create(t.Context(), primaryDB, slug); err != nil {
+		t.Fatalf("modeltest: create tenant schema (the database needs docker/postgres-initdb's roles and functions; recreate the dev stack with docker compose down -v): %v", err)
+	}
 	// The engine-owned tables tenant provisioning creates (sequences and
 	// the rest), which ORM writes and host functions read.
 	if err := enginetables.CreateAll(t.Context(), primaryDB, slug); err != nil {
@@ -299,15 +297,9 @@ func createTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	}
 }
 
-// dropTenantSchema also removes the pg_partman registrations
-// enginetables.CreateAll adds for the tenant's partitioned tables, which
-// DROP SCHEMA leaves behind.
 func dropTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	t.Helper()
-	if _, err := primaryDB.Exec(`DELETE FROM partman.part_config WHERE parent_table LIKE $1`, "tenant_"+slug+".%"); err != nil {
-		t.Logf("modeltest: remove pg_partman config for %s: %v", slug, err)
-	}
-	if _, err := primaryDB.Exec(fmt.Sprintf(`DROP SCHEMA %s CASCADE`, tenantschema.Name(slug))); err != nil {
+	if err := tenantschema.Drop(context.Background(), primaryDB, slug); err != nil {
 		t.Logf("modeltest: drop tenant schema %s: %v", slug, err)
 	}
 }
@@ -357,6 +349,9 @@ func syncModuleSchema(t *testing.T, ctx context.Context, tenantID, tenantSlug st
 		if err := diffEngine.SyncEtagTriggers(ctx, sess, mod.ModelDecls, mod.Manifest.AuditedTables); err != nil {
 			t.Fatalf("modeltest: sync etag triggers: %v", err)
 		}
+	}
+	if err := diffEngine.SyncTenantRoleGrants(ctx, sess, mod.ModelDecls); err != nil {
+		t.Fatalf("modeltest: sync tenant role grants: %v", err)
 	}
 	if err := sess.RecordSyncSuccess(ctx); err != nil {
 		t.Fatalf("modeltest: record sync success: %v", err)
