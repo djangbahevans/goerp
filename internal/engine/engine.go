@@ -46,6 +46,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/auth/acceptinvite"
+	"github.com/djangbahevans/goerp/internal/engine/auth/adminroles"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminusers"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authlogout"
@@ -184,6 +185,7 @@ type Engine struct {
 	hotReload  *hotreload.Coordinator
 
 	tenantConfigListener *tenantconfig.Listener
+	rolesListener        *permcache.Listener
 }
 
 func New(cfg *config.Config) (*Engine, error) {
@@ -717,6 +719,16 @@ func New(cfg *config.Config) (*Engine, error) {
 	tenantConfigResolver := tenantconfig.NewResolver(tenantConfigStore, tenantStore, moduleRegistry)
 	tenantConfigListener := tenantconfig.NewListener(primaryPool, tenantConfigResolver)
 
+	// Rebuilds a tenant's rolePermissionMap entries on this replica when a
+	// tenant admin changes roles on any replica (auth/adminroles).
+	currentPermissionRegistry := func() *permission.PermissionRegistry {
+		if snap := moduleRegistry.Snapshot(); snap != nil && snap.PermissionRegistry() != nil {
+			return snap.PermissionRegistry()
+		}
+		return permission.NewPermissionRegistry()
+	}
+	rolesListener := permcache.NewListener(primaryPool, tenantStore, roleStore, currentPermissionRegistry, rolePermissionMap)
+
 	// authChecker isn't consumed yet — wiring it into an actual HTTP
 	// middleware chain is goerp#91, which also owns resolving the current
 	// registry.RegistrySnapshot's PermissionRegistry to pass into
@@ -942,6 +954,13 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["POST /users/invite"] = http.HandlerFunc(adminUsersHandler.ServeInvite)
 	builtinRoutes["POST /users/invitations/{id}/resend"] = http.HandlerFunc(adminUsersHandler.ServeResendInvitation)
 	builtinRoutes["POST /users/invitations/{id}/revoke"] = http.HandlerFunc(adminUsersHandler.ServeRevokeInvitation)
+	adminRolesHandler := adminroles.NewHandler(tenantResolver, authChecker, roleStore, moduleRegistry, rolePermissionMap, sessionRevoker, wsHub, authAuditStore)
+	builtinRoutes["GET /admin/roles"] = http.HandlerFunc(adminRolesHandler.ServeList)
+	builtinRoutes["POST /admin/roles"] = http.HandlerFunc(adminRolesHandler.ServeCreate)
+	builtinRoutes["GET /admin/roles/permissions"] = http.HandlerFunc(adminRolesHandler.ServePermissions)
+	builtinRoutes["GET /admin/roles/{id}"] = http.HandlerFunc(adminRolesHandler.ServeGet)
+	builtinRoutes["PATCH /admin/roles/{id}"] = http.HandlerFunc(adminRolesHandler.ServeUpdate)
+	builtinRoutes["DELETE /admin/roles/{id}"] = http.HandlerFunc(adminRolesHandler.ServeDelete)
 	planChangeHandler := planchange.NewHandler(tenantResolver, authChecker, billingStore, tenantStore, cacheClient, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/tenant/plan"] = http.HandlerFunc(planChangeHandler.ServeHTTP)
 	moduleInstallWorker := &moduleinstall.Worker{
@@ -1128,6 +1147,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		hotReload:           hotReloadCoordinator,
 
 		tenantConfigListener: tenantConfigListener,
+		rolesListener:        rolesListener,
 	}
 
 	// GET /_meta/permissions (goerp#417) is added here rather than to the
@@ -1241,6 +1261,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 
 	e.tenantConfigListener.Start(ctx, nil)
+	e.rolesListener.Start(ctx, nil)
 
 	e.readiness.Store(true)
 
@@ -1261,6 +1282,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	}
 
 	e.tenantConfigListener.Stop()
+	e.rolesListener.Stop()
 
 	if err := e.adminServer.Shutdown(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not shut down admin server")
