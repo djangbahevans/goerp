@@ -27,6 +27,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -194,8 +195,6 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	h.DB = newTestDB(t, primaryDB, tenantID, tenantSlug)
 	h.Events = newTestEvents(t, primaryDB, tenantID)
 
-	t.Cleanup(func() { dropTenantSchema(t, primaryDB, tenantSlug) })
-
 	for _, path := range cfg.fixturePaths {
 		h.DB.SeedFromFixture(path)
 	}
@@ -287,10 +286,24 @@ func createTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	if _, err := primaryDB.Exec(fmt.Sprintf(`CREATE SCHEMA %s`, tenantschema.Name(slug))); err != nil {
 		t.Fatalf("modeltest: create tenant schema: %v", err)
 	}
+	// Registered before anything else is created in the schema, so a later
+	// setup failure still drops it.
+	t.Cleanup(func() { dropTenantSchema(t, primaryDB, slug) })
+	// The engine-owned tables tenant provisioning creates (sequences and
+	// the rest), which ORM writes and host functions read.
+	if err := enginetables.CreateAll(t.Context(), primaryDB, slug); err != nil {
+		t.Fatalf("modeltest: create engine-owned tenant tables: %v", err)
+	}
 }
 
+// dropTenantSchema also removes the pg_partman registrations
+// enginetables.CreateAll adds for the tenant's partitioned tables, which
+// DROP SCHEMA leaves behind.
 func dropTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	t.Helper()
+	if _, err := primaryDB.Exec(`DELETE FROM partman.part_config WHERE parent_table LIKE $1`, "tenant_"+slug+".%"); err != nil {
+		t.Logf("modeltest: remove pg_partman config for %s: %v", slug, err)
+	}
 	if _, err := primaryDB.Exec(fmt.Sprintf(`DROP SCHEMA %s CASCADE`, tenantschema.Name(slug))); err != nil {
 		t.Logf("modeltest: drop tenant schema %s: %v", slug, err)
 	}
