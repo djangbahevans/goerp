@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { onKeyboardShortcutsOpenRequest } from "../shortcuts/keyboard-shortcuts-control.js";
 import { UserMenu } from "./user-menu.js";
@@ -63,6 +63,7 @@ async function renderUserMenu(auth: AuthContextValue = fakeAuth()) {
   });
   await router.load();
   render(<RouterProvider router={router} />);
+  return router;
 }
 
 beforeEach(() => {
@@ -86,6 +87,21 @@ describe("UserMenu", () => {
     expect(screen.getByRole("menuitemcheckbox", { name: "Dark mode" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
+  });
+
+  it("shows Admin only to a tenant admin, and it navigates to /admin", async () => {
+    await renderUserMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+    expect(screen.queryByRole("menuitem", { name: "Admin" })).toBeNull();
+    cleanup();
+
+    const base = fakeAuth();
+    const admin = { ...base.user!, roles: ["admin"] };
+    const router = await renderUserMenu(fakeAuth({ user: admin }));
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Admin" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin"));
   });
 
   it("Keyboard shortcuts opens the shortcuts reference", async () => {

@@ -4,6 +4,7 @@ import { useTheme } from "@goerp/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
+import { isTenantAdmin } from "../admin/is-tenant-admin.js";
 import { openKeyboardShortcuts } from "../shortcuts/keyboard-shortcuts-control.js";
 import { titleCaseWords } from "./title-case-words.js";
 
@@ -33,6 +34,7 @@ export function UserMenu(): ReactNode {
       items={[
         { label: "Profile", onClick: () => void navigate({ to: "/settings/profile" }) },
         { label: "Settings", onClick: () => void navigate({ to: "/settings" }) },
+        ...(isTenantAdmin(user) ? [{ label: "Admin", onClick: () => void navigate({ to: "/admin" }) }] : []),
         { label: "Dark mode", checked: theme === "dark", onClick: toggleTheme },
         { label: "Keyboard shortcuts", onClick: openKeyboardShortcuts },
         { type: "separator" },

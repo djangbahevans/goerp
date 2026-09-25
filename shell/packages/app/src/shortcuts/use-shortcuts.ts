@@ -1,6 +1,7 @@
 import { PermissionContext, useAuth } from "@goerp/sdk/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { useContext, useMemo, useSyncExternalStore } from "react";
+import { isTenantAdmin } from "../admin/is-tenant-admin.js";
 import { openCommandPalette } from "../chrome/command-palette-control.js";
 import { commandRegistry } from "../chrome/command-registry.js";
 import { useCommandRunner } from "../chrome/use-command-runner.js";
@@ -46,7 +47,7 @@ export function useShortcuts(): ShortcutEntry[] {
       ),
     [commands, permissions],
   );
-  const isAdmin = user?.roles.includes("admin") ?? false;
+  const isAdmin = isTenantAdmin(user);
 
   return useMemo(() => {
     const go = (path: string) => () => void navigate({ to: path });
