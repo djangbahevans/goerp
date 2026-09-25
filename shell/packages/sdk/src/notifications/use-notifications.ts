@@ -9,6 +9,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { apiClient } from "../http/index.js";
+import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
 
 // typescript-sdk-reference.md §8's canonical Notification interface.
@@ -38,6 +39,33 @@ export interface UseNotificationsResult {
   isFetchingNextPage: boolean;
 }
 
+// notification-system.md §9 "Feed response shape".
+interface NotificationWire {
+  id: string;
+  type: string;
+  module: string;
+  title: string;
+  body: string | null;
+  action_url: string | null;
+  icon: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+function toNotification(wire: NotificationWire): Notification {
+  return {
+    id: wire.id,
+    type: wire.type,
+    module: wire.module,
+    title: wire.title,
+    body: wire.body,
+    actionUrl: wire.action_url,
+    icon: wire.icon,
+    readAt: wire.read_at,
+    createdAt: wire.created_at,
+  };
+}
+
 const NOTIFICATIONS_QUERY_KEY: QueryKey = ["notifications"];
 const UNREAD_COUNT_QUERY_KEY: QueryKey = ["notifications", "unread-count"];
 
@@ -52,13 +80,15 @@ export function createNotificationsInfiniteQueryOptions(
 ) {
   return {
     queryKey: [...NOTIFICATIONS_QUERY_KEY, options.limit ?? null] as QueryKey,
-    queryFn: async ({ pageParam }: { pageParam: string | undefined }): Promise<PagedResponse<Notification>> =>
-      client.get<PagedResponse<Notification>>("/_notif/feed", {
+    queryFn: async ({ pageParam }: { pageParam: string | undefined }): Promise<PagedResponse<Notification>> => {
+      const wire = await client.get<PagedResponseWire<NotificationWire>>("/_notif/feed", {
         params: {
           ...(options.limit !== undefined ? { limit: options.limit } : {}),
           ...(pageParam !== undefined ? { cursor: pageParam } : {}),
         },
-      }),
+      });
+      return toPagedResponse(wire, toNotification);
+    },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage: PagedResponse<Notification>) =>
       lastPage.meta.hasMore ? (lastPage.meta.cursor ?? undefined) : undefined,

@@ -10,20 +10,25 @@ import {
   createUnreadCountQueryOptions,
 } from "./use-notifications.js";
 
-function fakeNotification(overrides: Partial<Notification> = {}): Notification {
-  return {
-    id: "n1",
-    type: "sales.order_confirmed",
-    module: "sales",
-    title: "Order confirmed",
-    body: null,
-    actionUrl: null,
-    icon: null,
-    readAt: null,
-    createdAt: "2026-01-01T00:00:00Z",
-    ...overrides,
-  };
-}
+// notification-system.md §9 "Feed response shape".
+const feedResponseExample = {
+  data: [
+    {
+      id: "01j-notif",
+      type: "sales.order_confirmed",
+      module: "sales",
+      title: "Order ORD-0042 confirmed",
+      body: "Order for Acme Corp confirmed. Total: GH₵1,234.56",
+      action_url: "/_m/sales/orders/01j-order",
+      icon: "shopping-cart",
+      read_at: null,
+      created_at: "2026-05-16T10:22:31Z",
+    },
+  ],
+  meta: { cursor: "01j-cursor", has_more: true, unread: 12 },
+};
+
+const emptyFeedResponse = { data: [], meta: { cursor: null, has_more: false, unread: 0 } };
 
 function fakeGetClient(response: unknown): Pick<APIClient, "get"> {
   const get = vi.fn(async () => response);
@@ -51,11 +56,7 @@ async function callQueryFn<T>(
 
 describe("createNotificationsInfiniteQueryOptions", () => {
   it("fetches /_notif/feed with limit and no cursor on the first page", async () => {
-    const response: PagedResponse<Notification> = {
-      data: [fakeNotification()],
-      meta: { cursor: null, hasMore: false },
-    };
-    const client = fakeGetClient(response);
+    const client = fakeGetClient(emptyFeedResponse);
     const options = createNotificationsInfiniteQueryOptions({ limit: 20 }, client);
 
     await callQueryFn(options, undefined);
@@ -64,8 +65,7 @@ describe("createNotificationsInfiniteQueryOptions", () => {
   });
 
   it("sends the page param as a cursor on subsequent pages", async () => {
-    const response: PagedResponse<Notification> = { data: [], meta: { cursor: null, hasMore: false } };
-    const client = fakeGetClient(response);
+    const client = fakeGetClient(emptyFeedResponse);
     const options = createNotificationsInfiniteQueryOptions({}, client);
 
     await callQueryFn(options, "page-2");
@@ -73,8 +73,43 @@ describe("createNotificationsInfiniteQueryOptions", () => {
     expect(client.get).toHaveBeenCalledWith("/_notif/feed", { params: { cursor: "page-2" } });
   });
 
+  it("maps the snake_case feed response to camelCase notifications and meta", async () => {
+    const options = createNotificationsInfiniteQueryOptions({}, fakeGetClient(feedResponseExample));
+
+    const page = await callQueryFn<PagedResponse<Notification>>(options, undefined);
+
+    expect(page).toEqual({
+      data: [
+        {
+          id: "01j-notif",
+          type: "sales.order_confirmed",
+          module: "sales",
+          title: "Order ORD-0042 confirmed",
+          body: "Order for Acme Corp confirmed. Total: GH₵1,234.56",
+          actionUrl: "/_m/sales/orders/01j-order",
+          icon: "shopping-cart",
+          readAt: null,
+          createdAt: "2026-05-16T10:22:31Z",
+        },
+      ],
+      meta: { cursor: "01j-cursor", hasMore: true },
+    });
+  });
+
+  it("requests the next page with the previous response's meta.cursor", async () => {
+    const client = fakeGetClient(feedResponseExample);
+    const options = createNotificationsInfiniteQueryOptions({}, client);
+
+    const first = await callQueryFn<PagedResponse<Notification>>(options, undefined);
+    const next = options.getNextPageParam(first);
+    await callQueryFn(options, next);
+
+    expect(next).toBe("01j-cursor");
+    expect(client.get).toHaveBeenLastCalledWith("/_notif/feed", { params: { cursor: "01j-cursor" } });
+  });
+
   it("advances to the next cursor only while hasMore is true", () => {
-    const client = fakeGetClient({ data: [], meta: { cursor: null, hasMore: false } });
+    const client = fakeGetClient(emptyFeedResponse);
     const options = createNotificationsInfiniteQueryOptions({}, client);
 
     expect(options.getNextPageParam({ data: [], meta: { cursor: "next", hasMore: true } })).toBe("next");
