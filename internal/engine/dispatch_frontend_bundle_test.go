@@ -42,7 +42,10 @@ func (b *fakeBundleBackend) Download(_ context.Context, key string) (io.ReadClos
 	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
 }
 
-func (b *fakeBundleBackend) Delete(context.Context, string) error         { return nil }
+func (b *fakeBundleBackend) Delete(_ context.Context, key string) error {
+	delete(b.files, key)
+	return nil
+}
 func (b *fakeBundleBackend) DeleteByPrefix(context.Context, string) error { return nil }
 func (b *fakeBundleBackend) SignedURL(context.Context, string, time.Duration) (string, error) {
 	return "", nil

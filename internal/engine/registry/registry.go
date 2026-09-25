@@ -608,6 +608,13 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/modules/{module}/frontend/{file}",
 	})
+
+	// /modules/{module}/translations/{locale}.json (goerp#1121) — the same
+	// posture: a module's frontend translations are module code too.
+	table.Register("GET", "/modules/{module}/translations/{file}", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		PathTemplate: "/modules/{module}/translations/{file}",
+	})
 }
 
 func buildEventRegistry(modules map[string]*module.LoadedModule) *event.EventRegistry {

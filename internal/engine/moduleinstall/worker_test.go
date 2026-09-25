@@ -9,12 +9,14 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +34,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
+	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/internal/engine/workflowworker"
@@ -119,6 +122,13 @@ func compileFixtureVariant(t *testing.T, variant string) []byte {
 // the same wire shape moduleboot.ParsePackage reads.
 func buildPackage(t *testing.T, name string, wasmBytes []byte, extra map[string]any) []byte {
 	t.Helper()
+	return buildPackageWithMembers(t, name, wasmBytes, extra, nil)
+}
+
+// buildPackageWithMembers is buildPackage plus extra archive members, by
+// path.
+func buildPackageWithMembers(t *testing.T, name string, wasmBytes []byte, extra map[string]any, members map[string][]byte) []byte {
+	t.Helper()
 
 	sum := sha256.Sum256(wasmBytes)
 	fields := map[string]any{
@@ -156,6 +166,9 @@ func buildPackage(t *testing.T, name string, wasmBytes []byte, extra map[string]
 	}
 	writeEntry("manifest.json", manifestBytes)
 	writeEntry("module.wasm", wasmBytes)
+	for _, path := range slices.Sorted(maps.Keys(members)) {
+		writeEntry(path, members[path])
+	}
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close zip: %v", err)
 	}
@@ -423,6 +436,47 @@ func TestWorker_Run_FreshInstallSucceeds(t *testing.T) {
 	}
 	if m.Status != module.StatusReady {
 		t.Errorf("Status = %v, want StatusReady", m.Status)
+	}
+}
+
+func TestWorker_Run_PublishesFrontendTranslationsForTheInstalledVersion(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	env.activeTenant(t, slug)
+
+	name := "widgets_" + slug
+	en := []byte(`{"actions.create":"New widget"}`)
+	fr := []byte(`{"actions.create":"Nouveau widget"}`)
+	pkg := buildPackageWithMembers(t, name, compileFixture(t), nil, map[string][]byte{
+		"frontend/translations/en.json": en,
+		"frontend/translations/fr.json": fr,
+	})
+
+	t.Setenv("GOERP_STORAGE_LOCAL_DIR", filepath.Join(t.TempDir(), "objectstore"))
+	backend, err := storage.New("local")
+	if err != nil {
+		t.Fatalf("storage.New(local): %v", err)
+	}
+	w, _ := newWorker(t, env, nil)
+	w.Storage = backend
+	if _, err := w.run(t.Context(), Args{PackagePath: writeTempPackage(t, pkg)}); err != nil {
+		t.Fatalf("run() error: %v", err)
+	}
+
+	for locale, want := range map[string][]byte{"en": en, "fr": fr} {
+		key, err := module.LiveFrontendTranslationKey(t.Context(), backend, name, "1.0.0", locale)
+		if err != nil || key == "" {
+			t.Fatalf("live %s translations key = %q, error %v", locale, key, err)
+		}
+		rc, _, err := backend.Download(t.Context(), key)
+		if err != nil {
+			t.Fatalf("download %s translations: %v", locale, err)
+		}
+		got, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s translations = %s, want %s", locale, got, want)
+		}
 	}
 }
 

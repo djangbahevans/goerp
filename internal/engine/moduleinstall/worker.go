@@ -180,6 +180,13 @@ func (w *Worker) run(ctx context.Context, a Args) (result Result, err error) {
 			log.Warn().Err(err).Str("module", m.Manifest.Name).Msg("module install: publish frontend bundle to object storage failed")
 		}
 	}
+	if err := module.PublishFrontendTranslations(ctx, w.Storage, m.Manifest.Name, m.Manifest.Version, src.FrontendTranslations); err != nil {
+		if errors.Is(err, module.ErrNoStorageBackend) {
+			log.Warn().Str("module", m.Manifest.Name).Msg("module install: frontend translations present but no object storage backend is configured; they will not be servable")
+		} else {
+			log.Warn().Err(err).Str("module", m.Manifest.Name).Msg("module install: publish frontend translations to object storage failed")
+		}
+	}
 
 	// From here on, m owns a live pool and compiled module (LoadModule's
 	// own internal defer only closes those for a failure inside

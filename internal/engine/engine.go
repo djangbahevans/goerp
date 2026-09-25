@@ -1186,6 +1186,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	// /_meta/schema above: dispatchFrontendBundleRoute is an *Engine
 	// method (it reads e.storageBackend).
 	builtinRoutes["GET /modules/{module}/frontend/{file}"] = http.HandlerFunc(e.dispatchFrontendBundleRoute)
+	// GET /modules/{module}/translations/{file} (goerp#1121), serving
+	// {locale}.json — same reason: it reads e.moduleRegistry and
+	// e.storageBackend.
+	builtinRoutes["GET /modules/{module}/translations/{file}"] = http.HandlerFunc(e.dispatchFrontendTranslationsRoute)
 
 	// GET /_ws (goerp#616) — same reason as /_meta/permissions above:
 	// dispatchWSRoute is an *Engine method.
