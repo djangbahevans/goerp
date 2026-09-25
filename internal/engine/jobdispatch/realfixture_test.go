@@ -119,7 +119,7 @@ func loadWASMJobArgs(t *testing.T, jobsConn *sql.DB, moduleName, handler, tenant
 	t.Helper()
 	var argsJSON []byte
 	if err := jobsConn.QueryRow(
-		`SELECT args FROM river_job WHERE kind = 'wasm_job' AND args->>'module_name' = $1 AND args->>'job_type' = $2 AND args->>'tenant_id' = $3`,
+		`SELECT args FROM system.river_job WHERE kind = 'wasm_job' AND args->>'module_name' = $1 AND args->>'job_type' = $2 AND args->>'tenant_id' = $3`,
 		moduleName, handler, tenantID,
 	).Scan(&argsJSON); err != nil {
 		t.Fatalf("query enqueued job args: %v", err)

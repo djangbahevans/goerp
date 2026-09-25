@@ -74,6 +74,7 @@ func newTestJobClient(t *testing.T) *river.Client[pgx.Tx] {
 	river.AddWorker(workers, &AcceptResyncWorker{})
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Schema:  jobqueue.Schema,
 		Queues:  map[string]river.QueueConfig{jobqueue.QueueAdmin: {MaxWorkers: 1}},
 		Workers: workers,
 	})
@@ -225,6 +226,7 @@ func newTestJobClientWithoutAcceptWorker(t *testing.T) *river.Client[pgx.Tx] {
 	river.AddWorker(workers, &SyncWorker{})
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Schema:  jobqueue.Schema,
 		Queues:  map[string]river.QueueConfig{jobqueue.QueueAdmin: {MaxWorkers: 1}},
 		Workers: workers,
 	})

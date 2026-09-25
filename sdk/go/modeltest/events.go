@@ -42,7 +42,7 @@ func newTestEvents(t *testing.T, db *sql.DB, tenantID string) *TestEvents {
 func (e *TestEvents) all() []Event {
 	e.t.Helper()
 	rows, err := e.db.Query(
-		`SELECT args FROM river_job WHERE kind = 'event_delivery' AND args->>'tenant_id' = $1 ORDER BY id`,
+		`SELECT args FROM system.river_job WHERE kind = 'event_delivery' AND args->>'tenant_id' = $1 ORDER BY id`,
 		e.tenantID,
 	)
 	if err != nil {

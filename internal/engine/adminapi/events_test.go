@@ -49,7 +49,7 @@ func newInsertOnlyEventsJobClient(t *testing.T) *river.Client[pgx.Tx] {
 		t.Fatalf("jobqueue.Migrate: %v", err)
 	}
 
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Schema: jobqueue.Schema})
 	if err != nil {
 		t.Fatalf("river.NewClient: %v", err)
 	}

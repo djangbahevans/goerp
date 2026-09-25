@@ -18,7 +18,6 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Store struct {
@@ -50,17 +49,6 @@ type Share struct {
 // false; otherwise a row is inserted and created is true. The unique index
 // on (model, record_id, shared_with_user_id) makes this race-safe.
 func (s *Store) Grant(ctx context.Context, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy string, expiresAt *time.Time) (sh *Share, created bool, err error) {
-	sh, created, err = s.upsert(ctx, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt)
-	if !isMissingConflictTarget(err) {
-		return sh, created, err
-	}
-
-	// A tenant provisioned before the unique index existed only gains it when
-	// Bootstrap or a .Shareable() module's schema sync next runs for it, which
-	// may be never; adding it here keeps sharing working on such a tenant.
-	if err := s.Bootstrap(ctx, tenantSlug); err != nil {
-		return nil, false, fmt.Errorf("add record_shares unique index: %w", err)
-	}
 	return s.upsert(ctx, tenantSlug, model, recordID, sharedWithUserID, permission, sharedBy, expiresAt)
 }
 
@@ -82,13 +70,6 @@ func (s *Store) upsert(ctx context.Context, tenantSlug, model, recordID, sharedW
 		return nil, false, fmt.Errorf("grant record share: %w", err)
 	}
 	return &out, created, nil
-}
-
-// isMissingConflictTarget reports Postgres's invalid_column_reference error
-// (42P10) for an ON CONFLICT target no unique index backs.
-func isMissingConflictTarget(err error) bool {
-	pgErr, ok := errors.AsType[*pgconn.PgError](err)
-	return ok && pgErr.Code == "42P10"
 }
 
 // ListForRecord returns every non-expired grant on (model, recordID),

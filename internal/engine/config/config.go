@@ -77,7 +77,7 @@ type Config struct {
 	// Database
 	DBPrimaryDSN                string `env:"GOERP_DB_PRIMARY_DSN,required"`
 	DBReplicaDSN                string `env:"GOERP_DB_REPLICA_DSN"`
-	DBSchemaSyncDSN             string `env:"GOERP_DB_SCHEMA_SYNC_DSN"`
+	DBSchemaSyncDSN             string `env:"GOERP_DB_SCHEMA_SYNC_DSN,required,notEmpty"`
 	DBMaxConcurrentTransactions int    `env:"GOERP_DB_MAX_CONCURRENT_TRANSACTIONS" envDefault:"100" validate:"min=1"`
 
 	// host.orm bulk operation bounds (create_batch/write_many/write_where/unlink)

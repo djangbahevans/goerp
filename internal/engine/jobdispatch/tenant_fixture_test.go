@@ -68,9 +68,9 @@ func newTestWasmRuntime(t *testing.T) *wasm.Runtime {
 // newTestWasmRuntimeWithPrimaryDB is newTestWasmRuntime for the one
 // fixture that does need a real host.db.migration_ddl call to go all the
 // way through to Postgres (TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds,
-// goerp#500) — primary is registerHostDB's own connection pool, so pass
-// the same *sql.DB the fixture tenant's schema/tables were created
-// against.
+// goerp#500) — primary serves as both registerHostDB's pool and the
+// schema-sync pool migration_ddl runs on, so pass the same *sql.DB the
+// fixture tenant's schema/tables were created against.
 func newTestWasmRuntimeWithPrimaryDB(t *testing.T, primary *sql.DB) *wasm.Runtime {
 	t.Helper()
 	rt, err := wasm.New(&config.Config{
@@ -81,6 +81,7 @@ func newTestWasmRuntimeWithPrimaryDB(t *testing.T, primary *sql.DB) *wasm.Runtim
 	if err != nil {
 		t.Fatalf("wasm.New: %v", err)
 	}
+	rt.SetSchemaSyncDB(primary)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	return rt
 }

@@ -369,7 +369,23 @@ func TestHostDBMigrationDDL_WiredThroughWASMBoundary(t *testing.T) {
 		}
 	})
 
+	t.Run("with no schema-sync pool configured", func(t *testing.T) {
+		mc := newMigrationDDLTestModuleContext(slug, true)
+		inst := newCaller(t, mc, "nopool")
+
+		env := callHost(t, ctx, inst, "call_migration_ddl", abiv1.DBMigrationDDLInput{
+			Op: abiv1.DBMigrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
+		})
+		if env.OK {
+			t.Fatal("expected abi.unavailable, got success")
+		}
+		if env.Error.Code != abiv1.ErrCodeUnavailable {
+			t.Errorf("Code = %q, want %q", env.Error.Code, abiv1.ErrCodeUnavailable)
+		}
+	})
+
 	t.Run("with capability inside a data migration job", func(t *testing.T) {
+		r.SetSchemaSyncDB(primaryDB)
 		mc := newMigrationDDLTestModuleContext(slug, true)
 		inst := newCaller(t, mc, "migration")
 

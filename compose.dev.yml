@@ -19,7 +19,10 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:v1.25.2-p0
     environment:
-      DATABASE_URL: postgres://goerp:dev@postgres:5432/goerp
+      # engine_user on goerp_dev is the running engine's primary pool
+      # (docker/postgres-initdb); goerp on goerp is the test suite's. Schema
+      # sync connects to Postgres directly.
+      DATABASE_URLS: postgres://engine_user:dev@postgres:5432/goerp_dev,postgres://goerp:dev@postgres:5432/goerp
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 1000
       SERVER_RESET_QUERY: "" # must be empty in transaction mode
@@ -30,7 +33,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -h localhost -p 5432 -U goerp" ]
+      test: [ "CMD-SHELL", "pg_isready -h localhost -p 5432 -U engine_user -d goerp_dev" ]
       interval: 5s
       timeout: 5s
       retries: 5

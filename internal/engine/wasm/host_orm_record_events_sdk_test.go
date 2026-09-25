@@ -19,7 +19,7 @@ func rawEventPayload(t *testing.T, primaryDB *sql.DB, eventName, tenantID string
 	t.Helper()
 	var b64 string
 	if err := primaryDB.QueryRow(
-		`SELECT args->>'payload' FROM river_job
+		`SELECT args->>'payload' FROM system.river_job
 		 WHERE kind = 'event_delivery' AND args->>'event_name' = $1 AND args->>'tenant_id' = $2
 		 ORDER BY id DESC LIMIT 1`, eventName, tenantID,
 	).Scan(&b64); err != nil {

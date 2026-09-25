@@ -72,7 +72,7 @@ func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 		t.Fatalf("jobqueue.Migrate: %v", err)
 	}
 
-	client, err := river.NewClient(riverpgxv5.New(pgxPool), &river.Config{})
+	client, err := river.NewClient(riverpgxv5.New(pgxPool), &river.Config{Schema: jobqueue.Schema})
 	if err != nil {
 		t.Fatalf("river.NewClient: %v", err)
 	}
@@ -173,7 +173,7 @@ func openJobsConn(t *testing.T) *sql.DB {
 func cleanupRiverJobsForTenant(t *testing.T, conn *sql.DB, tenantID string) {
 	t.Helper()
 	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'wasm_job' AND args->>'tenant_id' = $1`, tenantID)
+		_, _ = conn.Exec(`DELETE FROM system.river_job WHERE kind = 'wasm_job' AND args->>'tenant_id' = $1`, tenantID)
 	})
 }
 
@@ -181,7 +181,7 @@ func countRiverJobsForHandler(t *testing.T, conn *sql.DB, moduleName, handler, t
 	t.Helper()
 	var count int
 	if err := conn.QueryRow(
-		`SELECT count(*) FROM river_job WHERE kind = 'wasm_job' AND args->>'module_name' = $1 AND args->>'job_type' = $2 AND args->>'tenant_id' = $3`,
+		`SELECT count(*) FROM system.river_job WHERE kind = 'wasm_job' AND args->>'module_name' = $1 AND args->>'job_type' = $2 AND args->>'tenant_id' = $3`,
 		moduleName, handler, tenantID,
 	).Scan(&count); err != nil {
 		t.Fatalf("query river_job: %v", err)
@@ -284,7 +284,7 @@ func TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler(t 
 
 	var argsJSON []byte
 	if err := jobsConn.QueryRow(
-		`SELECT args FROM river_job WHERE kind = 'wasm_job' AND args->>'module_name' = $1 AND args->>'job_type' = $2 AND args->>'tenant_id' = $3`,
+		`SELECT args FROM system.river_job WHERE kind = 'wasm_job' AND args->>'module_name' = $1 AND args->>'job_type' = $2 AND args->>'tenant_id' = $3`,
 		migrationTestModuleName, "backfill_a", tenantID,
 	).Scan(&argsJSON); err != nil {
 		t.Fatalf("query enqueued job args: %v", err)

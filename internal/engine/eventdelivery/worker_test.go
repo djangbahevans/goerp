@@ -51,7 +51,7 @@ func uniqueEventID(t *testing.T, conn *sql.DB) string {
 	t.Helper()
 	id := uuid.NewV7().String()
 	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, id)
+		_, _ = conn.Exec(`DELETE FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, id)
 	})
 	return id
 }
@@ -98,7 +98,7 @@ func newTestTenant(t *testing.T, tenantStore *tenant.Store, conn *sql.DB, slug s
 
 // newTestRiverClient builds a real, insert-only river.Client[pgx.Tx]
 // against the real dev Postgres — mirroring runtime.go's own
-// river.NewClient(driver, &river.Config{}) insert-only construction
+// river.NewClient(driver, &river.Config{Schema: jobqueue.Schema}) insert-only construction
 // (host_event.go's insertClient uses the equivalent database/sql-driver
 // shape). Never Start()'d: this test drives Worker.Work directly via
 // rivertest.WorkContext rather than through a real queue poller, so
@@ -122,7 +122,7 @@ func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 		t.Fatalf("jobqueue.Migrate: %v", err)
 	}
 
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Schema: jobqueue.Schema})
 	if err != nil {
 		t.Fatalf("river.NewClient: %v", err)
 	}
@@ -184,7 +184,7 @@ func fanOutJobExists(t *testing.T, conn *sql.DB, eventID string) bool {
 	t.Helper()
 	var count int
 	if err := conn.QueryRow(
-		`SELECT count(*) FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`,
+		`SELECT count(*) FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`,
 		eventID,
 	).Scan(&count); err != nil {
 		t.Fatalf("query river_job: %v", err)
@@ -314,7 +314,7 @@ func TestWork_MaxAttemptsSetFromSubscriberRetryPolicy(t *testing.T) {
 	}
 
 	var maxAttempts int
-	if err := conn.QueryRow(`SELECT max_attempts FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&maxAttempts); err != nil {
+	if err := conn.QueryRow(`SELECT max_attempts FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&maxAttempts); err != nil {
 		t.Fatalf("query river_job: %v", err)
 	}
 	if maxAttempts != 7 {
@@ -377,7 +377,7 @@ func TestWork_RetryIsIdempotent(t *testing.T) {
 		t.Fatalf("expected exactly 1 event_log row after 2 Work() calls, got %d", len(rows))
 	}
 	var fanOutCount int
-	if err := conn.QueryRow(`SELECT count(*) FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&fanOutCount); err != nil {
+	if err := conn.QueryRow(`SELECT count(*) FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&fanOutCount); err != nil {
 		t.Fatalf("query river_job: %v", err)
 	}
 	if fanOutCount != 1 {
@@ -413,7 +413,7 @@ func TestWork_RetryAfterSubscriberJobTerminalDoesNotReExecute(t *testing.T) {
 	// Simulate the subscriber_delivery job having already been fully
 	// processed (River's real terminal state after SubscriberDeliveryWorker
 	// succeeds) before the emitter's own retry arrives.
-	if _, err := conn.Exec(`UPDATE river_job SET state = 'completed', finalized_at = now() WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID); err != nil {
+	if _, err := conn.Exec(`UPDATE system.river_job SET state = 'completed', finalized_at = now() WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID); err != nil {
 		t.Fatalf("mark subscriber_delivery job completed: %v", err)
 	}
 
@@ -422,7 +422,7 @@ func TestWork_RetryAfterSubscriberJobTerminalDoesNotReExecute(t *testing.T) {
 	}
 
 	var count int
-	if err := conn.QueryRow(`SELECT count(*) FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count); err != nil {
+	if err := conn.QueryRow(`SELECT count(*) FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count); err != nil {
 		t.Fatalf("query river_job: %v", err)
 	}
 	if count != 1 {

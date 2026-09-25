@@ -271,7 +271,7 @@ func TestEnqueuePendingValidations_SecondSweepIsNoOp(t *testing.T) {
 	countJobs := func() int {
 		var n int
 		if err := conn.QueryRow(
-			`SELECT count(*) FROM river_job WHERE kind = 'schema.validate_constraint' AND args->>'tenant_id' = $1`,
+			`SELECT count(*) FROM system.river_job WHERE kind = 'schema.validate_constraint' AND args->>'tenant_id' = $1`,
 			widgetSyncTenantID,
 		).Scan(&n); err != nil {
 			t.Fatalf("count river_job rows: %v", err)

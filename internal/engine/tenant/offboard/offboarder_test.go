@@ -106,6 +106,7 @@ func newTestJobClient(t *testing.T, queueName string, activities *Activities, te
 	river.AddWorker(workers, &ImmediateWorker{Activities: activities, TenantStore: tenantStore})
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Schema:  jobqueue.Schema,
 		Queues:  map[string]river.QueueConfig{queueName: {MaxWorkers: 2}},
 		Workers: workers,
 	})

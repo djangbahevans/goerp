@@ -8,11 +8,12 @@ import (
 )
 
 // setRequiredEnv sets the env vars Load() requires to succeed at all
-// (GOERP_DB_PRIMARY_DSN), so individual tests can focus on the one value
-// they're actually exercising.
+// (GOERP_DB_PRIMARY_DSN, GOERP_DB_SCHEMA_SYNC_DSN), so individual tests
+// can focus on the one value they're actually exercising.
 func setRequiredEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("GOERP_DB_PRIMARY_DSN", "postgres://primary")
+	t.Setenv("GOERP_DB_SCHEMA_SYNC_DSN", "postgres://schema-sync")
 }
 
 func TestLoadDefaults(t *testing.T) {
@@ -133,6 +134,14 @@ func TestLoadMissingRequired(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected an error when required DSNs are unset, got nil")
+	}
+}
+
+func TestLoadMissingSchemaSyncDSN(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("GOERP_DB_SCHEMA_SYNC_DSN", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected an error when GOERP_DB_SCHEMA_SYNC_DSN is unset, got nil")
 	}
 }
 

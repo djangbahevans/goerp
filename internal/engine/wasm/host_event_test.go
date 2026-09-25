@@ -77,7 +77,7 @@ func countEventDeliveryJobs(t *testing.T, conn *sql.DB, tenantID string) int {
 	t.Helper()
 	var count int
 	if err := conn.QueryRow(
-		`SELECT count(*) FROM river_job WHERE kind = 'event_delivery' AND args->>'tenant_id' = $1`,
+		`SELECT count(*) FROM system.river_job WHERE kind = 'event_delivery' AND args->>'tenant_id' = $1`,
 		tenantID,
 	).Scan(&count); err != nil {
 		t.Fatalf("count river_job rows: %v", err)

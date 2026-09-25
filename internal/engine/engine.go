@@ -222,137 +222,64 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("connect to schema sync database: %w", err)
 	}
 
-	syncPool := schema.NewPool(schemaPool, 30*time.Second)
-	if err := syncPool.Bootstrap(ctx); err != nil {
+	closeDBs := func() {
 		_ = primaryPool.Close()
 		_ = schemaPool.Close()
 		if replicaPool != nil {
 			_ = replicaPool.Close()
 		}
-		return nil, fmt.Errorf("bootstrap schema sync tracking table: %w", err)
+	}
+
+	syncPool := schema.NewPool(schemaPool, 30*time.Second)
+	if err := bootstrapSystemSchema(ctx, schemaPool, syncPool); err != nil {
+		closeDBs()
+		return nil, err
 	}
 
 	tenantStore := tenant.NewStore(primaryPool)
 	tenantStore.AddReservedSlugs(cfg.ReservedSlugs...)
-	if err := tenantStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap tenant registry: %w", err)
-	}
 
 	// billingStore isn't stored as an Engine field or passed to any
 	// adminapi.Register* call — tenantResolver below is its only consumer.
-	// Bootstrapped here, after tenantStore, since tenant_subscriptions/
-	// tenant_entitlement_overrides both FK-reference system.tenants.
 	billingStore := billing.NewStore(primaryPool)
-	if err := billingStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap billing schema: %w", err)
-	}
 
 	// checkpointStore backs goerp tenant export/import's per-module
-	// resumability (goerp#265, goerp#156) — not tenant-scoped data, so no
-	// FK-ordering constraint against tenantStore the way billingStore has.
+	// resumability (goerp#265, goerp#156).
 	checkpointStore := checkpoint.NewStore(primaryPool)
-	if err := checkpointStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap checkpoint schema: %w", err)
-	}
 
 	userStore := user.NewStore(primaryPool)
 	recordSharesStore := recordshares.NewStore(primaryPool)
 	savedFiltersStore := savedfilters.NewStore(primaryPool)
 	recordActivityStore := recordactivity.NewStore(primaryPool)
-	if err := userStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap user identity store: %w", err)
-	}
 
 	// apiKeyStore isn't stored as an Engine field — authChecker below is
-	// its only consumer. Bootstrapped here, after both tenantStore and
-	// userStore, since api_keys FK-references system.tenants and
-	// system.users.
+	// its only consumer.
 	apiKeyStore := apikey.NewStore(primaryPool)
-	if err := apiKeyStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap api key store: %w", err)
-	}
 
 	// mfaStore isn't stored as an Engine field — loginHandler,
 	// totpService, recoveryCodeService, mfaResetHandler, and authChecker
-	// below are its consumers. Bootstrapped here, after userStore, since
-	// user_mfa FK-references system.users.
+	// below are its consumers.
 	mfaStore := mfa.NewStore(primaryPool)
-	if err := mfaStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap mfa credential store: %w", err)
-	}
 
 	// rowCryptStore isn't stored as an Engine field — goerp#304's
 	// mfaverify.Handler (via totp.Service) is its first real caller.
 	rowCryptStore := rowcrypt.NewStore(primaryPool, secretsBackend)
-	if err := rowCryptStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap row encryption keys table: %w", err)
-	}
 	// Loaded (or generated, on first boot) here at startup, same reasoning
 	// as signingKeySet/mfaTokenKeySet below — totp.Service needs a key
 	// ready before it can decrypt any enrolled TOTP secret.
 	rowKeySet, err := rowCryptStore.LoadOrGenerate(ctx)
 	if err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
+		closeDBs()
 		return nil, fmt.Errorf("load row encryption key: %w", err)
 	}
 
 	// tenantConfigStore isn't stored as an Engine field — adminapi's config
 	// route below and MFA enforcement (goerp#308) are its only consumers.
-	// Bootstrapped here, after tenantStore, since tenant_config_overrides
-	// FK-references system.tenants.
 	tenantConfigStore := tenantconfig.NewStore(primaryPool)
-	if err := tenantConfigStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap tenant config overrides table: %w", err)
-	}
 
-	// roleStore's Bootstrap is per-tenant (roles/role_permissions/
-	// user_roles live in each tenant's own schema, not system) — invoked
-	// once a tenant schema actually exists, by provisioning (goerp#149),
-	// not here at engine startup.
+	// roleStore's tables are per-tenant (roles/role_permissions/user_roles
+	// live in each tenant's own schema, not system), created by
+	// provisioning (goerp#149), not here at engine startup.
 	roleStore := role.NewStore(primaryPool)
 	inviteMailer := mailer.New(mailer.Config{
 		Host:    cfg.SMTPHost,
@@ -362,92 +289,32 @@ func New(cfg *config.Config) (*Engine, error) {
 		From:    cfg.SMTPFrom,
 		BaseURL: cfg.AppBaseURL,
 	})
-	// authAuditStore satisfies invite.AuditEmitter directly (goerp#400) —
-	// bootstrapped here, after tenantStore, since auth_audit_log.tenant_id
-	// FK-references system.tenants.
+	// authAuditStore satisfies invite.AuditEmitter directly (goerp#400).
 	authAuditStore := authaudit.NewStore(primaryPool, tenantStore)
-	if err := authAuditStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap auth audit log: %w", err)
-	}
 	inviteStore := invite.NewStore(primaryPool, userStore, roleStore, authAuditStore, inviteMailer)
 
 	auditStore := auditlog.NewStore(primaryPool)
-	if err := auditStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap admin audit log: %w", err)
-	}
-
 	operatorCertStore := operatorcert.NewStore(primaryPool)
-	if err := operatorCertStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap operator certificate ledger: %w", err)
-	}
-
 	sessionStore := session.NewStore(primaryPool)
-	if err := sessionStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap sessions table: %w", err)
-	}
 
 	signingKeyStore := signingkey.NewStore(primaryPool, secretsBackend)
-	if err := signingKeyStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap jwt signing keys table: %w", err)
-	}
 	// Loaded (or generated, on first boot) here at startup rather than
 	// lazily on first login, so tokenIssuer below always has a key ready.
 	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
+		closeDBs()
 		return nil, fmt.Errorf("load jwt signing key: %w", err)
 	}
 
 	tokenIssuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
 
 	mfaTokenKeyStore := mfatoken.NewStore(primaryPool, secretsBackend)
-	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
-		return nil, fmt.Errorf("bootstrap mfa token signing keys table: %w", err)
-	}
 	// Loaded (or generated, on first boot) here at startup, same reasoning
 	// as signingKeySet above — loginHandler and mfaVerifyHandler both need
 	// a key ready, and both must agree on the same one.
 	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
+		closeDBs()
 		return nil, fmt.Errorf("load mfa token signing key: %w", err)
 	}
 	mfaTokenCodec := mfatoken.NewCodec(&mfaTokenKeySet.Active)
@@ -473,11 +340,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		AuditStore:    auditStore,
 	})
 	if err != nil {
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
+		closeDBs()
 		return nil, fmt.Errorf("create admin server: %w", err)
 	}
 
@@ -494,6 +357,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		MaxRetries:    cfg.RedisMaxRetries,
 	})
 	if err != nil {
+		closeDBs()
 		return nil, fmt.Errorf("connect to redis: %w", err)
 	}
 
@@ -617,11 +481,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	runtime, err := wasm.New(cfg, primaryPool, storageBackend, cacheClient)
 	if err != nil {
 		_ = cacheClient.Close()
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
+		closeDBs()
 
 		return nil, fmt.Errorf("create wasm runtime: %w", err)
 	}
@@ -630,6 +490,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	// nil-guard turns a replica-requiring call into db.replica_unavailable
 	// rather than a nil-pointer panic.
 	runtime.SetReplicaDB(replicaPool)
+	runtime.SetSchemaSyncDB(schemaPool)
 
 	// Telemetry setup happens here, immediately before closeOnFailure is
 	// first defined, rather than at the top of New() — SetupTracing opens
@@ -657,11 +518,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		}
 		_ = runtime.Close(ctx)
 		_ = cacheClient.Close()
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
+		closeDBs()
 	}
 
 	sources, err := moduleboot.Discover(cfg.ModuleDir)
@@ -883,23 +740,21 @@ func New(cfg *config.Config) (*Engine, error) {
 		jobQueuePool.Close()
 		_ = runtime.Close(ctx)
 		_ = cacheClient.Close()
-		_ = primaryPool.Close()
-		_ = schemaPool.Close()
-		if replicaPool != nil {
-			_ = replicaPool.Close()
-		}
+		closeDBs()
 	}
 
-	if err := jobqueue.Migrate(ctx, jobQueuePool); err != nil {
+	// River's migrations are DDL, so they run as the schema-sync role, which
+	// owns River's tables; jobQueuePool's role only has DML on them.
+	if err := migrateJobQueue(ctx, cfg.DBSchemaSyncDSN); err != nil {
 		closeOnFailure()
-		return nil, fmt.Errorf("migrate job queue schema: %w", err)
+		return nil, err
 	}
 
 	// Baseline liveness-check job type; real ones (email_send, ...) add
 	// their own river.AddWorker call here as they land.
 	jobWorkers := river.NewWorkers()
 	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
-	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: primaryPool})
+	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &tenantoffboard.ImmediateWorker{Activities: offboardActivities, TenantStore: tenantStore})
 	river.AddWorker(jobWorkers, &tenantexport.Worker{
 		TenantStore:    tenantStore,
@@ -979,7 +834,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry})
-	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: primaryPool})
+	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool})
+	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
 	river.AddWorker(jobWorkers, &jobdispatch.Worker{ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool, Runtime: runtime, TenantStore: tenantStore})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)

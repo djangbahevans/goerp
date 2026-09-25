@@ -12,6 +12,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/riverqueue/river"
@@ -33,6 +34,7 @@ type Runtime struct {
 	syncEventDispatcher   SyncEventDispatcher
 	syncSubscriberTimeout time.Duration
 	replicaDB             atomic.Pointer[sql.DB]
+	schemaSyncDB          atomic.Pointer[sql.DB]
 	ormBulkMaxRows        int
 	ormStatementTimeout   time.Duration
 }
@@ -57,6 +59,12 @@ func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
 // than panicking.
 func (r *Runtime) SetReplicaDB(db *sql.DB) {
 	r.replicaDB.Store(db)
+}
+
+// SetSchemaSyncDB wires the pool host.db.migration_ddl runs DDL on; unset,
+// migration_ddl returns abi.unavailable.
+func (r *Runtime) SetSchemaSyncDB(db *sql.DB) {
+	r.schemaSyncDB.Store(db)
 }
 
 // New builds the shared wazero runtime and registers the host ABI against
@@ -136,7 +144,7 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	// registerHostORM (not just registerHostEvent) since host.orm's write
 	// half (goerp#343) also emits orm.record.* events transactionally
 	// through this same client.
-	eventInsertClient, err := river.NewClient(riverdatabasesql.New(db), &river.Config{})
+	eventInsertClient, err := river.NewClient(riverdatabasesql.New(db), &river.Config{Schema: jobqueue.Schema})
 	if err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("create event insert client: %w", err)
