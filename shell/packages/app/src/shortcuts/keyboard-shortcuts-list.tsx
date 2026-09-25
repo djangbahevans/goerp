@@ -27,9 +27,14 @@ function spokenKeys(shortcuts: Shortcut[]): string {
   return shortcuts.map((shortcut) => describeShortcut(shortcut, IS_MAC)).join(" or ");
 }
 
+export interface KeyboardShortcutsListProps {
+  headingLevel?: 3 | 4 | undefined;
+}
+
 // keyboard-shortcuts-dialog.md: the reference content, shared by
 // KeyboardShortcutsDialog and the help panel.
-export function KeyboardShortcutsList(): ReactNode {
+export function KeyboardShortcutsList({ headingLevel = 3 }: KeyboardShortcutsListProps): ReactNode {
+  const GroupHeading = headingLevel === 4 ? "h4" : "h3";
   const entries = useShortcuts();
   const groups = GROUP_ORDER.map((group) => ({
     group,
@@ -40,7 +45,7 @@ export function KeyboardShortcutsList(): ReactNode {
     <div className="flex flex-col gap-4">
       {groups.map(({ group, entries: groupEntries }) => (
         <section key={group}>
-          <h3 className="text-text-secondary text-xs">{group}</h3>
+          <GroupHeading className="text-text-secondary text-xs">{group}</GroupHeading>
           <dl>
             {groupEntries.map((entry) => (
               <div key={entry.id} className="flex items-center justify-between gap-4 py-2">
