@@ -44,6 +44,7 @@ type invitation struct {
 type listFilter struct {
 	Search string
 	Status string
+	Role   string
 	After  string
 	Limit  int
 }
@@ -111,12 +112,16 @@ func escapeLike(s string) string {
 
 // list returns one page of the directory ordered by email, which is unique
 // among non-deleted users and so serves as the keyset, plus the number of
-// entries matching the search and status filters across all pages.
+// entries matching the filters across all pages. Role keeps the members
+// holding a live grant of that role name.
 func (s *Store) list(ctx context.Context, tenantSlug string, f listFilter) ([]entry, int, error) {
 	schema := tenantschema.Name(tenantSlug)
-	where := `
+	where := fmt.Sprintf(`
 		WHERE ($1 = '' OR e.email ILIKE $1 OR p.name ILIKE $1)
-		  AND ($2 = '' OR e.status = $2)`
+		  AND ($2 = '' OR e.status = $2)
+		  AND ($3 = '' OR EXISTS (
+			SELECT 1 FROM %[1]s.user_roles ur JOIN %[1]s.roles r ON r.id = ur.role_id
+			WHERE ur.user_id = e.id AND r.name = $3 AND (ur.expires_at IS NULL OR ur.expires_at > NOW())))`, schema)
 	search := ""
 	if f.Search != "" {
 		search = "%" + escapeLike(f.Search) + "%"
@@ -124,16 +129,16 @@ func (s *Store) list(ctx context.Context, tenantSlug string, f listFilter) ([]en
 
 	var total int
 	countQuery := directoryCTE(schema) + ` SELECT COUNT(*) FROM entries e LEFT JOIN system.user_profiles p ON p.user_id = e.id` + where
-	if err := s.db.QueryRowContext(ctx, countQuery, search, f.Status).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, countQuery, search, f.Status, f.Role).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count directory entries: %w", err)
 	}
 
 	pageQuery := directoryCTE(schema) + ` SELECT ` + entryColumns(schema) + `
 		FROM entries e LEFT JOIN system.user_profiles p ON p.user_id = e.id` + where + `
-		  AND ($3 = '' OR e.email > $3)
+		  AND ($4 = '' OR e.email > $4)
 		ORDER BY e.email
-		LIMIT $4`
-	rows, err := s.db.QueryContext(ctx, pageQuery, search, f.Status, f.After, f.Limit)
+		LIMIT $5`
+	rows, err := s.db.QueryContext(ctx, pageQuery, search, f.Status, f.Role, f.After, f.Limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query directory entries: %w", err)
 	}

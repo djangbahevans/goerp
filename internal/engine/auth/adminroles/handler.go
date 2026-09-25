@@ -88,11 +88,12 @@ func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, roles 
 }
 
 type roleJSON struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	IsImmutable bool    `json:"is_immutable"`
-	UserCount   int     `json:"user_count"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Description     *string `json:"description"`
+	IsImmutable     bool    `json:"is_immutable"`
+	UserCount       int     `json:"user_count"`
+	InvitationCount int     `json:"invitation_count"`
 }
 
 type roleDetailJSON struct {
@@ -120,7 +121,7 @@ type updateRequest struct {
 }
 
 func toJSON(s role.Summary) roleJSON {
-	return roleJSON{ID: s.ID, Name: s.Name, Description: s.Description, IsImmutable: s.IsImmutable, UserCount: s.UserCount}
+	return roleJSON{ID: s.ID, Name: s.Name, Description: s.Description, IsImmutable: s.IsImmutable, UserCount: s.UserCount, InvitationCount: s.InvitationCount}
 }
 
 func toDetailJSON(d role.Detail) roleDetailJSON {

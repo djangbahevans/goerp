@@ -92,3 +92,24 @@ export const LoadError: Story = {
     expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   },
 };
+
+export const RoleFilter: Story = {
+  name: "filtered by role",
+  render: () => (
+    <AdminUsersPage
+      search=""
+      status="all"
+      roleFilter="user"
+      onSearchChange={() => {}}
+      onStatusChange={() => {}}
+      onClearRole={() => {}}
+      onOpenUser={() => {}}
+    />
+  ),
+  beforeEach: fakeBackend(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByText("Showing 3 of 3")).toBeInTheDocument());
+    expect(canvas.getByRole("button", { name: "Show all roles" })).toBeInTheDocument();
+  },
+};

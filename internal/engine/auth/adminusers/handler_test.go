@@ -248,6 +248,9 @@ func (e *env) familyIDs(t *testing.T, userID string) []string {
 		}
 		ids = append(ids, id)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate families: %v", err)
+	}
 	return ids
 }
 
@@ -454,12 +457,16 @@ func TestServeList_MembersInviteesFiltersAndPagination(t *testing.T) {
 	}
 
 	for query, want := range map[string][]string{
-		"?status=invited":   {invitee.ID},
-		"?status=suspended": {suspended},
-		"?status=active":    {admin, active},
-		"?q=bola":           {active},
-		"?q=C-SUSPENDED":    {suspended},
-		"?q=%25":            {},
+		"?status=invited":          {invitee.ID},
+		"?status=suspended":        {suspended},
+		"?status=active":           {admin, active},
+		"?q=bola":                  {active},
+		"?q=C-SUSPENDED":           {suspended},
+		"?q=%25":                   {},
+		"?role=portal":             {active},
+		"?role=user":               {active, suspended},
+		"?role=user&status=active": {active},
+		"?role=nosuch":             {},
 	} {
 		got := e.list(t, ft, token, query)
 		if !slices.Equal(ids(got.Data), want) || got.Meta.Total != len(want) {

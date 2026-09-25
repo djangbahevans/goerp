@@ -131,14 +131,15 @@ const adminUsersKey = ["admin-users"] as const;
 
 export const adminUserKeys = {
   all: adminUsersKey,
-  list: (search: string, status: AdminUserStatusFilter) => [...adminUsersKey, "list", { search, status }] as const,
+  list: (search: string, status: AdminUserStatusFilter, role: string) =>
+    [...adminUsersKey, "list", { search, status, role }] as const,
   detail: (id: string) => [...adminUsersKey, "detail", id] as const,
   sessions: (id: string) => [...adminUsersKey, "sessions", id] as const,
 };
 
-export function useAdminUsers(search: string, status: AdminUserStatusFilter) {
+export function useAdminUsers(search: string, status: AdminUserStatusFilter, role: string) {
   return useInfiniteQuery<AdminUsersPage, Error, InfiniteData<AdminUsersPage>, readonly unknown[], string | null>({
-    queryKey: adminUserKeys.list(search, status),
+    queryKey: adminUserKeys.list(search, status, role),
     initialPageParam: null,
     queryFn: async ({ pageParam, signal }) => {
       const { data, meta } = await apiClient.get<{ data: UserWire[]; meta: { total: number; cursor: string | null } }>(
@@ -148,6 +149,7 @@ export function useAdminUsers(search: string, status: AdminUserStatusFilter) {
             limit: ADMIN_USERS_PAGE_SIZE,
             ...(search ? { q: search } : {}),
             ...(status !== "all" ? { status } : {}),
+            ...(role ? { role } : {}),
             ...(pageParam ? { cursor: pageParam } : {}),
           },
           signal,

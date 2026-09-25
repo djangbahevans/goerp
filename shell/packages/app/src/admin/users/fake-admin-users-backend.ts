@@ -96,10 +96,12 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
     if (path === "/admin/users") {
       const q = String(params.q ?? "").toLowerCase();
       const status = params.status as string | undefined;
+      const role = params.role as string | undefined;
       const limit = Number(params.limit ?? 50);
       const matching = users
         .filter((user) => !q || user.email.includes(q) || (user.name ?? "").toLowerCase().includes(q))
         .filter((user) => !status || user.status === status)
+        .filter((user) => !role || (user.status !== "invited" && user.roles.includes(role)))
         .sort((a, b) => a.email.localeCompare(b.email));
       const after = params.cursor ? atob(String(params.cursor)) : "";
       const page = matching.filter((user) => user.email > after).slice(0, limit);

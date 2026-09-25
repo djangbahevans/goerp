@@ -562,6 +562,30 @@ func TestServeDelete_AnExpiredGrantDoesNotBlock(t *testing.T) {
 	}
 }
 
+func TestDeletedAccounts_NeitherCountNorBlockDeletion(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	token := e.issue(t, ft, e.member(t, ft, "admin"))
+	orphaned := decode[roleDetailJSON](t, e.create(t, ft, token, map[string]any{"name": "orphaned"}))
+	holder := e.member(t, ft, "orphaned")
+	email := fmt.Sprintf("invitee%d@example.com", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = e.conn.Exec(`DELETE FROM system.users WHERE email = $1`, email) })
+	if _, err := e.invites.Invite(t.Context(), ft.slug, email, "orphaned", "", nil); err != nil {
+		t.Fatalf("Invite() error: %v", err)
+	}
+	if _, err := e.conn.Exec(`UPDATE system.users SET status = 'deleted', deleted_at = NOW() WHERE id = $1 OR email = $2`, holder, email); err != nil {
+		t.Fatalf("delete accounts: %v", err)
+	}
+
+	rec := do(t, ft, token, request{serve: e.handler.ServeGet, method: http.MethodGet, path: "/admin/roles/" + orphaned.ID, id: orphaned.ID})
+	if got := decode[roleDetailJSON](t, rec); got.UserCount != 0 || got.InvitationCount != 0 {
+		t.Errorf("counts with only deleted accounts = %d users, %d invitations, want 0 and 0", got.UserCount, got.InvitationCount)
+	}
+	if rec := e.remove(t, ft, token, orphaned.ID); rec.Code != http.StatusNoContent {
+		t.Errorf("delete with only deleted accounts = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
 func TestServeDelete_APendingInvitationBlocks(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
@@ -574,11 +598,21 @@ func TestServeDelete_APendingInvitationBlocks(t *testing.T) {
 		t.Fatalf("Invite() error: %v", err)
 	}
 
+	invitationCount := func() int {
+		rec := do(t, ft, token, request{serve: e.handler.ServeGet, method: http.MethodGet, path: "/admin/roles/" + offered.ID, id: offered.ID})
+		return decode[roleDetailJSON](t, rec).InvitationCount
+	}
+	if got := invitationCount(); got != 1 {
+		t.Errorf("invitation_count with a pending invitation = %d, want 1", got)
+	}
 	if rec := e.remove(t, ft, token, offered.ID); rec.Code != http.StatusConflict || errorCode(t, rec) != "role_in_use" {
 		t.Errorf("delete with a pending invitation = %d %s, want 409 role_in_use", rec.Code, rec.Body)
 	}
 	if err := e.invites.Revoke(t.Context(), ft.slug, inv.ID, nil); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
+	}
+	if got := invitationCount(); got != 0 {
+		t.Errorf("invitation_count after revoking = %d, want 0", got)
 	}
 	if rec := e.remove(t, ft, token, offered.ID); rec.Code != http.StatusNoContent {
 		t.Errorf("delete after revoking the invitation = %d %s, want 204", rec.Code, rec.Body)
