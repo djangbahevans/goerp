@@ -1,14 +1,18 @@
 package wasm
 
-import "testing"
+import (
+	"testing"
+
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+)
 
 func TestEvaluateFieldCheck_NoRuleDeclaredAllowsBoth(t *testing.T) {
 	mc := newFieldSecModuleContext("authztest-norule")
 
-	if !evaluateFieldCheck(mc, "testmodule.widget", "name", authzFieldCheckRead) {
+	if !evaluateFieldCheck(mc, "testmodule.widget", "name", abiv1.AuthzFieldCheckRead) {
 		t.Error("expected an unrestricted field to allow read")
 	}
-	if !evaluateFieldCheck(mc, "testmodule.widget", "name", authzFieldCheckWrite) {
+	if !evaluateFieldCheck(mc, "testmodule.widget", "name", abiv1.AuthzFieldCheckWrite) {
 		t.Error("expected an unrestricted field to allow write")
 	}
 }
@@ -17,17 +21,17 @@ func TestEvaluateFieldCheck_GrantedVsDenied(t *testing.T) {
 	granted := newFieldSecModuleContext("authztest-granted", "contacts:contact:financials_read")
 	denied := newFieldSecModuleContext("authztest-denied")
 
-	if !evaluateFieldCheck(granted, "testmodule.widget", "credit_limit", authzFieldCheckRead) {
+	if !evaluateFieldCheck(granted, "testmodule.widget", "credit_limit", abiv1.AuthzFieldCheckRead) {
 		t.Error("expected the granted caller to be allowed to read credit_limit")
 	}
-	if evaluateFieldCheck(denied, "testmodule.widget", "credit_limit", authzFieldCheckRead) {
+	if evaluateFieldCheck(denied, "testmodule.widget", "credit_limit", abiv1.AuthzFieldCheckRead) {
 		t.Error("expected the caller without the permission to be denied read of credit_limit")
 	}
 }
 
 func TestEvaluateFieldCheck_NilFieldSecRegistryAllows(t *testing.T) {
 	mc := &ModuleContext{}
-	if !evaluateFieldCheck(mc, "testmodule.widget", "credit_limit", authzFieldCheckRead) {
+	if !evaluateFieldCheck(mc, "testmodule.widget", "credit_limit", abiv1.AuthzFieldCheckRead) {
 		t.Error("expected a nil FieldSecurityRegistry to allow rather than deny")
 	}
 }

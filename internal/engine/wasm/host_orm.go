@@ -31,27 +31,27 @@ const pgStatementTimeoutSQLState = "57014"
 
 // ormTimeoutHostError is host.orm's response to a cancelled statement —
 // retryable, since the same call with more time may well succeed.
-func ormTimeoutHostError() *abi.HostError {
-	return &abi.HostError{Code: abi.ErrCodeORMTimeout, Message: "statement exceeded host.orm's statement timeout", Retry: true}
+func ormTimeoutHostError() *abiv1.HostError {
+	return &abiv1.HostError{Code: abiv1.ErrCodeORMTimeout, Message: "statement exceeded host.orm's statement timeout", Retry: true}
 }
 
 // ormSQLError maps a query/exec failure on an ORM-owned transaction to
 // orm.timeout or the generic abi.unavailable — the read-side counterpart
 // to translateWriteError's own pgStatementTimeoutSQLState case.
-func ormSQLError(err error) *abi.HostError {
+func ormSQLError(err error) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == pgStatementTimeoutSQLState {
 		return ormTimeoutHostError()
 	}
-	return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 }
 
 // ormSQLErrorRetryable is ormSQLError for a call site that already
 // always sets Retry: true on the generic case.
-func ormSQLErrorRetryable(err error) *abi.HostError {
+func ormSQLErrorRetryable(err error) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == pgStatementTimeoutSQLState {
 		return ormTimeoutHostError()
 	}
-	return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 }
 
 // registerHostORM attaches host.orm's read half (search/search_read/read,
@@ -86,18 +86,6 @@ func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql
 	return err
 }
 
-type ORMSearchInput = abiv1.ORMSearchInput
-
-type ORMSearchOutput = abiv1.ORMSearchOutput
-
-type ORMSearchReadInput = abiv1.ORMSearchReadInput
-
-type ORMSearchReadOutput = abiv1.ORMSearchReadOutput
-
-type ORMReadInput = abiv1.ORMReadInput
-
-type ORMReadOutput = abiv1.ORMReadOutput
-
 func makeORMSearch(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -108,7 +96,7 @@ func makeORMSearch(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Modul
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMSearchInput
+		var input abiv1.ORMSearchInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -127,32 +115,32 @@ func makeORMSearch(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Modul
 // routes). Enforces db.read the same way regardless of caller, since
 // modCtx.Capabilities() reflects the calling module's own declared
 // capabilities, not the transport that reached it.
-func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMSearchInput) (ORMSearchOutput, *abi.HostError) {
+func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.ORMSearchInput) (abiv1.ORMSearchOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
-		return ORMSearchOutput{}, abi.CapabilityDenied("db.read")
+		return abiv1.ORMSearchOutput{}, abi.CapabilityDenied("db.read")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMSearchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
+		return abiv1.ORMSearchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
 	}
 
 	whereFrag, args, hostErr := compileDomain(input.Domain)
 	if hostErr != nil {
-		return ORMSearchOutput{}, hostErr
+		return abiv1.ORMSearchOutput{}, hostErr
 	}
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ORMSearchOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return abiv1.ORMSearchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMSearchOutput{}, hostErr
+		return abiv1.ORMSearchOutput{}, hostErr
 	}
 	defer finish()
 
@@ -162,13 +150,13 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORM
 	var count int64
 	countSQL := fmt.Sprintf("SELECT count(*) FROM %s WHERE %s", table, whereFrag)
 	if err := tx.QueryRowContext(ctx, countSQL, args...).Scan(&count); err != nil {
-		return ORMSearchOutput{}, ormSQLError(err)
+		return abiv1.ORMSearchOutput{}, ormSQLError(err)
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s%s", pkColQuoted, table, whereFrag, orderLimitOffsetClause(input.Order, input.Limit, input.Offset))
 	rows, err := tx.QueryContext(ctx, listSQL, args...)
 	if err != nil {
-		return ORMSearchOutput{}, ormSQLError(err)
+		return abiv1.ORMSearchOutput{}, ormSQLError(err)
 	}
 	defer rows.Close()
 
@@ -176,15 +164,15 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORM
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return ORMSearchOutput{}, ormSQLError(err)
+			return abiv1.ORMSearchOutput{}, ormSQLError(err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return ORMSearchOutput{}, ormSQLError(err)
+		return abiv1.ORMSearchOutput{}, ormSQLError(err)
 	}
 
-	return ORMSearchOutput{IDs: ids, Count: count}, nil
+	return abiv1.ORMSearchOutput{IDs: ids, Count: count}, nil
 }
 
 func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -197,7 +185,7 @@ func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.M
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMSearchReadInput
+		var input abiv1.ORMSearchReadInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -212,32 +200,32 @@ func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.M
 
 // ORMSearchRead is host.orm search_read's plain-Go core — see ORMSearch's
 // doc comment for the shared-entry-point rationale.
-func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMSearchReadInput) (ORMSearchReadOutput, *abi.HostError) {
+func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.ORMSearchReadInput) (abiv1.ORMSearchReadOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
-		return ORMSearchReadOutput{}, abi.CapabilityDenied("db.read")
+		return abiv1.ORMSearchReadOutput{}, abi.CapabilityDenied("db.read")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMSearchReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
+		return abiv1.ORMSearchReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to search"}
 	}
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ORMSearchReadOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return abiv1.ORMSearchReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	columns, hostErr := readableColumns(input.Model, md, input.Fields)
 	if hostErr != nil {
-		return ORMSearchReadOutput{}, hostErr
+		return abiv1.ORMSearchReadOutput{}, hostErr
 	}
 
 	whereFrag, args, hostErr := compileDomain(input.Domain)
 	if hostErr != nil {
-		return ORMSearchReadOutput{}, hostErr
+		return abiv1.ORMSearchReadOutput{}, hostErr
 	}
 
 	if input.Cursor != "" {
@@ -247,7 +235,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMSearchReadOutput{}, hostErr
+		return abiv1.ORMSearchReadOutput{}, hostErr
 	}
 	defer finish()
 
@@ -281,19 +269,19 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		strings.Join(selectCols, ", "), table, whereFrag, orderLimitOffsetClause(order, limit, input.Offset))
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return ORMSearchReadOutput{}, ormSQLError(err)
+		return abiv1.ORMSearchReadOutput{}, ormSQLError(err)
 	}
 	defer rows.Close()
 
 	records, err := scanRowsToMaps(rows)
 	if err != nil {
-		return ORMSearchReadOutput{}, ormSQLError(err)
+		return abiv1.ORMSearchReadOutput{}, ormSQLError(err)
 	}
 
 	applyFieldMasking(modCtx, input.Model, records)
 
 	if err := expandRelations(ctx, tx, modCtx, md, columns, records, true); err != nil {
-		return ORMSearchReadOutput{}, ormSQLError(err)
+		return abiv1.ORMSearchReadOutput{}, ormSQLError(err)
 	}
 
 	// A page has a next one only if it came back full — whether or not
@@ -315,7 +303,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		}
 	}
 
-	return ORMSearchReadOutput{Records: records, NextCursor: nextCursor}, nil
+	return abiv1.ORMSearchReadOutput{Records: records, NextCursor: nextCursor}, nil
 }
 
 // aggregateSQLFuncs maps a PivotValue/ORMAggregateValue aggregation name
@@ -366,24 +354,24 @@ type ORMPivotOutput struct {
 // finest-grain groups plus every coarser rollup (including the grand
 // total) in a single pass, and GROUPING() on each dimension column
 // disambiguates "rolled up" from "genuinely NULL in the data".
-func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMPivotInput) (ORMPivotOutput, *abi.HostError) {
+func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMPivotInput) (ORMPivotOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
 		return ORMPivotOutput{}, abi.CapabilityDenied("db.read")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to aggregate"}
+		return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to aggregate"}
 	}
 
 	if len(input.Rows) == 0 && len(input.Columns) == 0 {
-		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "pivot requires at least one rows or columns field"}
+		return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "pivot requires at least one rows or columns field"}
 	}
 	if len(input.Values) == 0 {
-		return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "pivot requires at least one values entry"}
+		return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "pivot requires at least one values entry"}
 	}
 
 	declared := make(map[string]model.FieldDef, len(md.Fields))
@@ -393,19 +381,19 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 	fieldSecReg := modCtx.FieldSecRegistry()
 	permReg := modCtx.PermissionRegistry()
 
-	checkField := func(name string) *abi.HostError {
+	checkField := func(name string) *abiv1.HostError {
 		def, ok := declared[name]
 		if !ok {
-			return &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + name + " is not declared on " + input.Model, Details: map[string]any{"field": name}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + name + " is not declared on " + input.Model, Details: map[string]any{"field": name}}
 		}
 		if def.Kind == model.KindOne2Many {
-			return &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + name + " is a One2Many relation and cannot be aggregated", Details: map[string]any{"field": name}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + name + " is a One2Many relation and cannot be aggregated", Details: map[string]any{"field": name}}
 		}
 		if fieldSecReg == nil {
 			return nil
 		}
 		if rule, ok := fieldSecReg.Rule(input.Model, name); ok && rule.ReadPermission != "" && !callerHasPermission(modCtx, permReg, rule.ReadPermission) {
-			return &abi.HostError{Code: abi.ErrCodeFieldReadDenied, Message: "field " + name + " requires permission " + rule.ReadPermission, Details: map[string]any{"field": name}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeFieldReadDenied, Message: "field " + name + " requires permission " + rule.ReadPermission, Details: map[string]any{"field": name}}
 		}
 		return nil
 	}
@@ -424,11 +412,11 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 		}
 		if v.Aggregation != "count_distinct" {
 			if _, ok := aggregateSQLFuncs[v.Aggregation]; !ok {
-				return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unknown aggregation " + v.Aggregation, Details: map[string]any{"aggregation": v.Aggregation}}
+				return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "unknown aggregation " + v.Aggregation, Details: map[string]any{"aggregation": v.Aggregation}}
 			}
 		}
 		if (v.Aggregation == "sum" || v.Aggregation == "avg" || v.Aggregation == "min" || v.Aggregation == "max") && !isNumericKind(declared[v.Field].Kind) {
-			return ORMPivotOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + v.Field + " is not numeric", Details: map[string]any{"field": v.Field}}
+			return ORMPivotOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + v.Field + " is not numeric", Details: map[string]any{"field": v.Field}}
 		}
 	}
 
@@ -539,7 +527,7 @@ func makeORMRead(r *Runtime, db *sql.DB, cacheClient *cache.Client) func(ctx con
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMReadInput
+		var input abiv1.ORMReadInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -553,7 +541,7 @@ func makeORMRead(r *Runtime, db *sql.DB, cacheClient *cache.Client) func(ctx con
 }
 
 // ORMReadOption configures an engine-internal ORMRead call. It's a plain
-// Go-side functional option, never part of ORMReadInput's msgpack-decoded
+// Go-side functional option, never part of abiv1.ORMReadInput's msgpack-decoded
 // wire shape — the wasm host-call boundary (makeORMRead below) always
 // calls ORMRead with zero options, so a module has no way to set one of
 // these itself over the ABI.
@@ -578,19 +566,19 @@ func SkipFieldSecurity() ORMReadOption {
 // for the shared-entry-point rationale. Branches to transientRead
 // (host_orm_transient.go) for Transient-backed models internally, so
 // callers never need to know a model's backend before calling in.
-func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx *ModuleContext, input ORMReadInput, opts ...ORMReadOption) (ORMReadOutput, *abi.HostError) {
+func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMReadInput, opts ...ORMReadOption) (abiv1.ORMReadOutput, *abiv1.HostError) {
 	var o ormReadOptions
 	for _, opt := range opts {
 		opt(&o)
 	}
 
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
-		return ORMReadOutput{}, abi.CapabilityDenied("db.read")
+		return abiv1.ORMReadOutput{}, abi.CapabilityDenied("db.read")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 
 	if md.Backend == model.BackendTransient {
@@ -603,21 +591,21 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	columns, hostErr := readableColumns(input.Model, md, input.Fields)
 	if hostErr != nil {
-		return ORMReadOutput{}, hostErr
+		return abiv1.ORMReadOutput{}, hostErr
 	}
 
 	if len(input.IDs) == 0 {
-		return ORMReadOutput{Records: []map[string]any{}}, nil
+		return abiv1.ORMReadOutput{Records: []map[string]any{}}, nil
 	}
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMReadOutput{}, hostErr
+		return abiv1.ORMReadOutput{}, hostErr
 	}
 	defer finish()
 
@@ -638,13 +626,13 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		strings.Join(selectCols, ", "), table, quoteIdentORM(pkCol), strings.Join(placeholders, ", "))
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return ORMReadOutput{}, ormSQLError(err)
+		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
 	defer rows.Close()
 
 	records, err := scanRowsToMaps(rows)
 	if err != nil {
-		return ORMReadOutput{}, ormSQLError(err)
+		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
 
 	if !o.skipFieldSecurity {
@@ -652,10 +640,10 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 	}
 
 	if err := expandRelations(ctx, tx, modCtx, md, columns, records, !o.skipFieldSecurity); err != nil {
-		return ORMReadOutput{}, ormSQLError(err)
+		return abiv1.ORMReadOutput{}, ormSQLError(err)
 	}
 
-	return ORMReadOutput{Records: records}, nil
+	return abiv1.ORMReadOutput{Records: records}, nil
 }
 
 // resolveModel resolves an ABI-level "{module}.{resource}" model name
@@ -683,17 +671,17 @@ func primaryKeyColumn(md model.ModelDeclaration) (string, bool) {
 // parameterized SQL WHERE fragment, mapping a parse/compile failure to
 // orm.domain_invalid (host-abi-reference.md §5a) rather than surfacing
 // the raw parser error.
-func compileDomain(src string) (string, []any, *abi.HostError) {
+func compileDomain(src string) (string, []any, *abiv1.HostError) {
 	if src == "" {
 		return "true", nil, nil
 	}
 	expr, err := domain.Parse(src)
 	if err != nil {
-		return "", nil, &abi.HostError{Code: abi.ErrCodeDomainInvalid, Message: err.Error()}
+		return "", nil, &abiv1.HostError{Code: abiv1.ErrCodeDomainInvalid, Message: err.Error()}
 	}
 	frag, args, err := domain.CompileToSQL(expr)
 	if err != nil {
-		return "", nil, &abi.HostError{Code: abi.ErrCodeDomainInvalid, Message: err.Error()}
+		return "", nil, &abiv1.HostError{Code: abiv1.ErrCodeDomainInvalid, Message: err.Error()}
 	}
 	return frag, args, nil
 }
@@ -705,7 +693,7 @@ func compileDomain(src string) (string, []any, *abi.HostError) {
 // on the child model's own Many2One column, served via a separate
 // sub-resource route), so it's excluded from the default list and
 // rejected if explicitly requested.
-func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested []string) ([]string, *abi.HostError) {
+func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested []string) ([]string, *abiv1.HostError) {
 	declared := make(map[string]model.FieldDef, len(md.Fields))
 	all := make([]string, 0, len(md.Fields))
 	for _, f := range md.Fields {
@@ -722,10 +710,10 @@ func readableColumns(qualifiedModel string, md model.ModelDeclaration, requested
 	for _, f := range requested {
 		def, ok := declared[f]
 		if !ok {
-			return nil, &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + f + " is not declared on " + qualifiedModel}
+			return nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + f + " is not declared on " + qualifiedModel}
 		}
 		if def.Kind == model.KindOne2Many {
-			return nil, &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + f + " is a One2Many relation and cannot be selected directly"}
+			return nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + f + " is a One2Many relation and cannot be selected directly"}
 		}
 	}
 	return requested, nil
@@ -823,17 +811,17 @@ func applyMaskPattern(pattern string, value any) string {
 // responsibility, never host.orm's — and rolls back an owned one
 // (read-only, so there's never anything to commit), matching every
 // existing host.orm read function's own defer-rollback-only pattern.
-func resolveORMReadTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, finish func(), hostErr *abi.HostError) {
+func resolveORMReadTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, finish func(), hostErr *abiv1.HostError) {
 	if txID != "" {
 		tx, ok := modCtx.Transaction(txID)
 		if !ok {
-			return nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
+			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
 		}
 		return tx, func() {}, nil
 	}
 	tx, err := beginTenantScopedRead(ctx, db, modCtx)
 	if err != nil {
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	return tx, func() { _ = tx.Rollback() }, nil
 }

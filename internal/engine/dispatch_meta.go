@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -185,7 +186,7 @@ func (e *Engine) callerCanReadRecord(ctx context.Context, authCtx *authcheck.Aut
 	}, mod)
 	defer modCtx.RollbackAll()
 
-	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, wasm.ORMReadInput{
+	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, abiv1.ORMReadInput{
 		Model: modelName,
 		IDs:   []string{recordID},
 	})

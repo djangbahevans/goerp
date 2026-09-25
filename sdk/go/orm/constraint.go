@@ -67,12 +67,6 @@ func RegisterConstraint(modelName string, phase ConstraintPhase, fn ConstraintFu
 	constraintRegistry[constraintKey{model: modelName, phase: phase}] = fn
 }
 
-type constraintRequest = abi.ConstraintRequest
-
-type constraintResponse = abi.ConstraintResponse
-
-type constraintError = abi.ConstraintError
-
 // DispatchConstraint decodes a constraintRequest from module memory at
 // (ptr, length), routes it to the ConstraintFunc registered for
 // (req.Model, req.Phase), and writes back a msgpack-encoded
@@ -87,26 +81,26 @@ type constraintError = abi.ConstraintError
 func DispatchConstraint(ptr, length uint32) uint64 {
 	buf := engine.ReadMem(ptr, length)
 
-	var req constraintRequest
+	var req abi.ConstraintRequest
 	if err := msgpack.Unmarshal(buf, &req); err != nil {
-		return writeConstraintResponse(&constraintResponse{Error: &constraintError{Code: "orm.invalid_request", Message: err.Error()}})
+		return writeConstraintResponse(&abi.ConstraintResponse{Error: &abi.ConstraintError{Code: "orm.invalid_request", Message: err.Error()}})
 	}
 
 	fn, ok := constraintRegistry[constraintKey{model: req.Model, phase: ConstraintPhase(req.Phase)}]
 	if !ok {
-		return writeConstraintResponse(&constraintResponse{Allowed: true})
+		return writeConstraintResponse(&abi.ConstraintResponse{Allowed: true})
 	}
 
 	ctx := ConstraintContext{TenantID: req.TenantID, UserID: req.UserID, TraceID: req.TraceID}
 	result := fn(ctx, req.Record)
-	return writeConstraintResponse(&constraintResponse{Allowed: result.allowed, Field: result.field, Message: result.message})
+	return writeConstraintResponse(&abi.ConstraintResponse{Allowed: result.allowed, Field: result.field, Message: result.message})
 }
 
-func writeConstraintResponse(resp *constraintResponse) uint64 {
+func writeConstraintResponse(resp *abi.ConstraintResponse) uint64 {
 	data, err := msgpack.Marshal(resp)
 	if err != nil {
-		data, _ = msgpack.Marshal(&constraintResponse{
-			Error: &constraintError{Code: "orm.marshal_failed", Message: err.Error()},
+		data, _ = msgpack.Marshal(&abi.ConstraintResponse{
+			Error: &abi.ConstraintError{Code: "orm.marshal_failed", Message: err.Error()},
 		})
 	}
 	ptr := engine.Allocate(uint32(len(data)))

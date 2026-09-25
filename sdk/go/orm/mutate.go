@@ -6,10 +6,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-type ormMutateInput = abi.ORMMutateInput
-
-type ormMutateOutput = abi.ORMMutateOutput
-
 // Number is the delta type of Increment and Decrement.
 type Number interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~float64
@@ -61,8 +57,8 @@ func mutate[T Model, PT ptrScanner[T]](txID, id string, opts ...MutateOption[T])
 	for _, opt := range opts {
 		opt(&spec)
 	}
-	var out ormMutateOutput
-	in := ormMutateInput{Model: resourceName[T](), ID: id, Ops: spec.ops, Guard: spec.guard, TxID: txID}
+	var out abi.ORMMutateOutput
+	in := abi.ORMMutateInput{Model: resourceName[T](), ID: id, Ops: spec.ops, Guard: spec.guard, TxID: txID}
 	if err := hostcall.Do(hostORMMutate, in, &out); err != nil {
 		return zero, err
 	}

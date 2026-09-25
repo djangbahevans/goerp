@@ -21,10 +21,6 @@ var ErrLockTimeout = errors.New("db: lock not acquired within timeout")
 // IsLockTimeout reports whether err is (or wraps) ErrLockTimeout.
 func IsLockTimeout(err error) bool { return errors.Is(err, ErrLockTimeout) }
 
-type dbLockInput = abi.DBLockInput
-
-type dbLockOutput = abi.DBLockOutput
-
 // Lock acquires a Postgres advisory lock scoped to tx via host.db.lock,
 // blocking up to defaultLockTimeoutMs. Released automatically when tx
 // commits or rolls back — no explicit unlock call.
@@ -46,8 +42,8 @@ func (tx *Tx) TryLock(key string) (bool, error) {
 }
 
 func (tx *Tx) lock(key string, timeoutMs int64) (bool, error) {
-	var out dbLockOutput
-	in := dbLockInput{Key: key, TxID: tx.id, TimeoutMs: timeoutMs}
+	var out abi.DBLockOutput
+	in := abi.DBLockInput{Key: key, TxID: tx.id, TimeoutMs: timeoutMs}
 	if err := hostcall.Do(hostDBLock, in, &out); err != nil {
 		return false, err
 	}

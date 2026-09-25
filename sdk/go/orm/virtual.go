@@ -53,12 +53,6 @@ func RegisterVirtualBackend(modelName string, backend VirtualBackend) {
 	registry[modelName] = backend
 }
 
-type virtualOpRequest = abi.VirtualOpRequest
-
-type virtualOpResponse = abi.VirtualOpResponse
-
-type virtualOpError = abi.VirtualOpError
-
 // DispatchVirtualOp decodes a virtualOpRequest from module memory at
 // (ptr, length), routes it to the registered VirtualBackend's matching
 // function, and writes back a msgpack-encoded virtualOpResponse — the
@@ -71,7 +65,7 @@ type virtualOpError = abi.VirtualOpError
 func DispatchVirtualOp(ptr, length uint32) uint64 {
 	buf := engine.ReadMem(ptr, length)
 
-	var req virtualOpRequest
+	var req abi.VirtualOpRequest
 	if err := msgpack.Unmarshal(buf, &req); err != nil {
 		return writeVirtualOpError("orm.invalid_request", err.Error())
 	}
@@ -92,7 +86,7 @@ func DispatchVirtualOp(ptr, length uint32) uint64 {
 		if err != nil {
 			return writeVirtualOpError("orm.backend_error", err.Error())
 		}
-		return writeVirtualOpResponse(&virtualOpResponse{Record: record})
+		return writeVirtualOpResponse(&abi.VirtualOpResponse{Record: record})
 	case "list":
 		if backend.List == nil {
 			return writeVirtualOpNotImplemented(req)
@@ -101,7 +95,7 @@ func DispatchVirtualOp(ptr, length uint32) uint64 {
 		if err != nil {
 			return writeVirtualOpError("orm.backend_error", err.Error())
 		}
-		return writeVirtualOpResponse(&virtualOpResponse{Records: records})
+		return writeVirtualOpResponse(&abi.VirtualOpResponse{Records: records})
 	case "create":
 		if backend.Create == nil {
 			return writeVirtualOpNotImplemented(req)
@@ -110,7 +104,7 @@ func DispatchVirtualOp(ptr, length uint32) uint64 {
 		if err != nil {
 			return writeVirtualOpError("orm.backend_error", err.Error())
 		}
-		return writeVirtualOpResponse(&virtualOpResponse{Record: record})
+		return writeVirtualOpResponse(&abi.VirtualOpResponse{Record: record})
 	case "update":
 		if backend.Update == nil {
 			return writeVirtualOpNotImplemented(req)
@@ -119,7 +113,7 @@ func DispatchVirtualOp(ptr, length uint32) uint64 {
 		if err != nil {
 			return writeVirtualOpError("orm.backend_error", err.Error())
 		}
-		return writeVirtualOpResponse(&virtualOpResponse{Record: record})
+		return writeVirtualOpResponse(&abi.VirtualOpResponse{Record: record})
 	case "delete":
 		if backend.Delete == nil {
 			return writeVirtualOpNotImplemented(req)
@@ -127,25 +121,25 @@ func DispatchVirtualOp(ptr, length uint32) uint64 {
 		if err := backend.Delete(ctx, req.ID, req.ExpectedEtag); err != nil {
 			return writeVirtualOpError("orm.backend_error", err.Error())
 		}
-		return writeVirtualOpResponse(&virtualOpResponse{})
+		return writeVirtualOpResponse(&abi.VirtualOpResponse{})
 	default:
 		return writeVirtualOpError("orm.invalid_request", "unknown op "+req.Op)
 	}
 }
 
-func writeVirtualOpNotImplemented(req virtualOpRequest) uint64 {
+func writeVirtualOpNotImplemented(req abi.VirtualOpRequest) uint64 {
 	return writeVirtualOpError("orm.virtual_op_not_implemented", "no "+req.Op+" backend function registered for model "+req.Model)
 }
 
 func writeVirtualOpError(code, message string) uint64 {
-	return writeVirtualOpResponse(&virtualOpResponse{Error: &virtualOpError{Code: code, Message: message}})
+	return writeVirtualOpResponse(&abi.VirtualOpResponse{Error: &abi.VirtualOpError{Code: code, Message: message}})
 }
 
-func writeVirtualOpResponse(resp *virtualOpResponse) uint64 {
+func writeVirtualOpResponse(resp *abi.VirtualOpResponse) uint64 {
 	data, err := msgpack.Marshal(resp)
 	if err != nil {
-		data, _ = msgpack.Marshal(&virtualOpResponse{
-			Error: &virtualOpError{Code: "orm.marshal_failed", Message: err.Error()},
+		data, _ = msgpack.Marshal(&abi.VirtualOpResponse{
+			Error: &abi.VirtualOpError{Code: "orm.marshal_failed", Message: err.Error()},
 		})
 	}
 	ptr := engine.Allocate(uint32(len(data)))

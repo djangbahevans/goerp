@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
@@ -63,7 +63,7 @@ func needsRowBeforeWrite(modCtx *ModuleContext, qualifiedModel string, md model.
 
 // writeCreatedActivity writes row's `created` entry when md has tracked
 // fields; a no-op otherwise.
-func writeCreatedActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, row map[string]any) *abi.HostError {
+func writeCreatedActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, row map[string]any) *abiv1.HostError {
 	if !hasTrackedFields(md) {
 		return nil
 	}
@@ -80,7 +80,7 @@ func writeCreatedActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext
 // writeChangeActivity writes one `change` entry listing every tracked field
 // whose value differs between oldRow and newRow. A write that changes no
 // tracked field, or a missing oldRow, writes nothing.
-func writeChangeActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, oldRow, newRow map[string]any) *abi.HostError {
+func writeChangeActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, oldRow, newRow map[string]any) *abiv1.HostError {
 	if oldRow == nil || newRow == nil || !hasTrackedFields(md) {
 		return nil
 	}
@@ -100,7 +100,7 @@ func writeChangeActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext,
 	}
 	changes, err := trackedChanges(md, oldRow, newRow)
 	if err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 	if len(changes) == 0 {
 		return nil
@@ -230,7 +230,7 @@ func writeExecChangeActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 // OnConflictUpdate create would overwrite, so its change entry has old
 // values to compare against. nil when md has no tracked fields, the create
 // isn't an OnConflictUpdate, or no row matches the conflict target yet.
-func lockConflictRowBeforeUpsert(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption) (map[string]any, *abi.HostError) {
+func lockConflictRowBeforeUpsert(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *abiv1.ORMOnConflict) (map[string]any, *abiv1.HostError) {
 	if onConflict == nil || onConflict.Policy != "update" || !hasTrackedFields(md) {
 		return nil, nil
 	}
@@ -266,7 +266,7 @@ func lockConflictRowBeforeUpsert(ctx context.Context, tx *sql.Tx, md model.Model
 // writeCreateActivity writes the feed entry for one create_one result: a
 // `created` entry for an inserted row, or a change entry for a row an
 // OnConflictUpdate overwrote.
-func writeCreateActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, inserted bool, conflictRow, row map[string]any) *abi.HostError {
+func writeCreateActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, inserted bool, conflictRow, row map[string]any) *abiv1.HostError {
 	if inserted {
 		return writeCreatedActivity(ctx, tx, modCtx, qualifiedModel, md, row)
 	}
@@ -276,7 +276,7 @@ func writeCreateActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext,
 // writeRecomputedActivity writes the change entry for a stored computed
 // field recomputed on another record (a Many2One or One2Many hop), when that
 // field is tracked. oldRow is the dependent row as read before the recompute.
-func writeRecomputedActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, dep computed.Dependent, oldRow map[string]any) *abi.HostError {
+func writeRecomputedActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, dep computed.Dependent, oldRow map[string]any) *abiv1.HostError {
 	if !isTrackedField(dep.ModelDecl, dep.Field) {
 		return nil
 	}

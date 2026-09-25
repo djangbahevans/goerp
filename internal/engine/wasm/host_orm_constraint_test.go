@@ -7,6 +7,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -42,7 +43,7 @@ func TestORMCreate_ConstraintHook_UnregisteredPhase_Allowed(t *testing.T) {
 
 	// The fixture only registers a constraint hook for
 	// ("testmodule.order", OnDelete) — create should proceed unaffected.
-	out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.order",
 		Record: map[string]any{"state": "confirmed"},
 	})
@@ -68,7 +69,7 @@ func TestORMUnlink_ConstraintHook_Rejects_NoRowDeleted(t *testing.T) {
 	mc := newConstraintTestModuleContext(slug, decls, target)
 	insertClient := r.EventInsertClient()
 
-	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.order",
 		Record: map[string]any{"state": "confirmed"},
 	})
@@ -77,15 +78,15 @@ func TestORMUnlink_ConstraintHook_Rejects_NoRowDeleted(t *testing.T) {
 	}
 	orderID, _ := createOut.Record["id"].(string)
 
-	_, hostErr = ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
+	_, hostErr = ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMUnlinkInput{
 		Model: "testmodule.order",
 		IDs:   []string{orderID},
 	})
 	if hostErr == nil {
 		t.Fatal("ORMUnlink: expected a rejection, got nil error")
 	}
-	if hostErr.Code != abi.ErrCodeValidationFailed {
-		t.Errorf("hostErr.Code = %q, want %q", hostErr.Code, abi.ErrCodeValidationFailed)
+	if hostErr.Code != abiv1.ErrCodeValidationFailed {
+		t.Errorf("hostErr.Code = %q, want %q", hostErr.Code, abiv1.ErrCodeValidationFailed)
 	}
 	if hostErr.Details["field"] != "state" {
 		t.Errorf("hostErr.Details[field] = %v, want state", hostErr.Details["field"])
@@ -114,7 +115,7 @@ func TestORMUnlink_ConstraintHook_Allows_RowDeleted(t *testing.T) {
 	mc := newConstraintTestModuleContext(slug, decls, target)
 	insertClient := r.EventInsertClient()
 
-	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.order",
 		Record: map[string]any{"state": "draft"},
 	})
@@ -123,7 +124,7 @@ func TestORMUnlink_ConstraintHook_Allows_RowDeleted(t *testing.T) {
 	}
 	orderID, _ := createOut.Record["id"].(string)
 
-	out, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
+	out, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMUnlinkInput{
 		Model: "testmodule.order",
 		IDs:   []string{orderID},
 	})
@@ -164,7 +165,7 @@ func TestORMWrite_ConstraintHook_NoLivePool_Allowed(t *testing.T) {
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 	insertClient := r.EventInsertClient()
 
-	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.item",
 		Record: map[string]any{"name": "Widget"},
 	})
@@ -173,7 +174,7 @@ func TestORMWrite_ConstraintHook_NoLivePool_Allowed(t *testing.T) {
 	}
 	itemID, _ := createOut.Record["id"].(string)
 
-	out, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+	out, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.item",
 		ID:     itemID,
 		Record: map[string]any{"name": "Renamed Widget"},

@@ -15,7 +15,7 @@ import (
 // "expect_rows"), since Go field access doesn't go through the tag at
 // all.
 func TestDbExecInput_MsgpackWireShape(t *testing.T) {
-	in := dbExecInput{SQL: "UPDATE widget SET name = $1", Params: []any{"x"}, TxID: "tx-1", Opts: dbExecOpts{Returning: "id,name", ExpectRows: true}}
+	in := abi.DBExecInput{SQL: "UPDATE widget SET name = $1", Params: []any{"x"}, TxID: "tx-1", Opts: abi.DBExecOpts{Returning: "id,name", ExpectRows: true}}
 	data, err := msgpack.Marshal(in)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

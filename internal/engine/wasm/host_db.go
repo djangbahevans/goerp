@@ -43,14 +43,6 @@ func registerHostDB(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.
 	return err
 }
 
-type dbBeginInput = abiv1.DBBeginInput
-
-type dbBeginOutput = abiv1.DBBeginOutput
-
-type dbTxIDInput = abiv1.DBTxIDInput
-
-type dbDurationOutput = abiv1.DBDurationOutput
-
 func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -62,8 +54,8 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		}
 
 		if modCtx.HasOpenTransaction() {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeTransactionAlreadyOpen,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeTransactionAlreadyOpen,
 				Message: "a transaction is already open in this request context",
 			})
 		}
@@ -72,7 +64,7 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input dbBeginInput
+		var input abiv1.DBBeginInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -83,8 +75,8 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		}
 
 		if !r.txLimiter.TryAcquire() {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeTransactionLimitExceeded,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeTransactionLimitExceeded,
 				Message: "maximum concurrent transactions reached",
 			})
 		}
@@ -96,8 +88,8 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		conn, err := db.Conn(ctx)
 		if err != nil {
 			r.txLimiter.Release()
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeUnavailable,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeUnavailable,
 				Message: err.Error(),
 				Retry:   true,
 			})
@@ -107,8 +99,8 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		if err != nil {
 			_ = conn.Close()
 			r.txLimiter.Release()
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeUnavailable,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeUnavailable,
 				Message: err.Error(),
 				Retry:   true,
 			})
@@ -122,8 +114,8 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 			_ = tx.Rollback()
 			_ = conn.Close()
 			r.txLimiter.Release()
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeUnavailable,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeUnavailable,
 				Message: err.Error(),
 				Retry:   true,
 			})
@@ -132,7 +124,7 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 		txID := uuid.New().String()
 		modCtx.RegisterTransaction(txID, conn, tx)
 
-		return abi.WriteToModule(ctx, m, allocate, dbBeginOutput{
+		return abi.WriteToModule(ctx, m, allocate, abiv1.DBBeginOutput{
 			TxID:      txID,
 			ExpiresAt: time.Now().Add(transactionExpiry).Unix(),
 		})
@@ -153,15 +145,15 @@ func makeDBCommit(r *Runtime) func(ctx context.Context, m api.Module, ptr, lengt
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input dbTxIDInput
+		var input abiv1.DBTxIDInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
 		tx, ok := modCtx.Transaction(input.TxID)
 		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeTransactionNotFound,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeTransactionNotFound,
 				Message: "transaction ID does not exist or has expired",
 			})
 		}
@@ -171,7 +163,7 @@ func makeDBCommit(r *Runtime) func(ctx context.Context, m api.Module, ptr, lengt
 		modCtx.RemoveTransaction(input.TxID)
 		r.txLimiter.Release()
 		if err != nil {
-			hostErr := &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+			hostErr := &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 			// Retry is only meaningful for a serialization failure — the
 			// module should retry the whole transaction from begin
 			// (host-abi-reference.md §5 "host.db.commit"). Other commit
@@ -184,7 +176,7 @@ func makeDBCommit(r *Runtime) func(ctx context.Context, m api.Module, ptr, lengt
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
 
-		return abi.WriteToModule(ctx, m, allocate, dbDurationOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000})
+		return abi.WriteToModule(ctx, m, allocate, abiv1.DBDurationOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000})
 	}
 }
 
@@ -202,7 +194,7 @@ func makeDBRollback(r *Runtime) func(ctx context.Context, m api.Module, ptr, len
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input dbTxIDInput
+		var input abiv1.DBTxIDInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -212,7 +204,7 @@ func makeDBRollback(r *Runtime) func(ctx context.Context, m api.Module, ptr, len
 			// Rollback is safe to call even after a successful commit — a
 			// no-op success, not an error (host-abi-reference.md §5
 			// "host.db.rollback").
-			return abi.WriteToModule(ctx, m, allocate, dbDurationOutput{})
+			return abi.WriteToModule(ctx, m, allocate, abiv1.DBDurationOutput{})
 		}
 
 		start := time.Now()
@@ -220,7 +212,7 @@ func makeDBRollback(r *Runtime) func(ctx context.Context, m api.Module, ptr, len
 		modCtx.RemoveTransaction(input.TxID)
 		r.txLimiter.Release()
 
-		return abi.WriteToModule(ctx, m, allocate, dbDurationOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000})
+		return abi.WriteToModule(ctx, m, allocate, abiv1.DBDurationOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000})
 	}
 }
 

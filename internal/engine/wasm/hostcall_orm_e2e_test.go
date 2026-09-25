@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/vmihailenco/msgpack/v5"
@@ -238,7 +239,7 @@ func TestOrmCallerFixture_TxVariants_RoundTripThroughRealModule(t *testing.T) {
 	// transaction) must see exactly the rows that survived the fixture's
 	// writes/unlink — proving every intermediate orm.*Tx call itself
 	// committed nothing.
-	out, hostErr := ORMSearch(ctx, primaryDB, mc, ORMSearchInput{Model: "testmodule.widget"})
+	out, hostErr := ORMSearch(ctx, primaryDB, mc, abiv1.ORMSearchInput{Model: "testmodule.widget"})
 	if hostErr != nil {
 		t.Fatalf("post-commit search failed: %+v", hostErr)
 	}

@@ -4,11 +4,12 @@ import (
 	"errors"
 	"testing"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-func dispatchAndDecode(t *testing.T, req virtualOpRequest) virtualOpResponse {
+func dispatchAndDecode(t *testing.T, req abi.VirtualOpRequest) abi.VirtualOpResponse {
 	t.Helper()
 	data, err := msgpack.Marshal(req)
 	if err != nil {
@@ -20,7 +21,7 @@ func dispatchAndDecode(t *testing.T, req virtualOpRequest) virtualOpResponse {
 	packed := DispatchVirtualOp(ptr, uint32(len(data)))
 	respPtr, respLen := uint32(packed>>32), uint32(packed)
 
-	var resp virtualOpResponse
+	var resp abi.VirtualOpResponse
 	if err := msgpack.Unmarshal(engine.ReadMem(respPtr, respLen), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestDispatchVirtualOp_RegisteredRead(t *testing.T) {
 		},
 	})
 
-	resp := dispatchAndDecode(t, virtualOpRequest{Model: "test.read_model", Op: "read", ID: "42", TenantID: "acme"})
+	resp := dispatchAndDecode(t, abi.VirtualOpRequest{Model: "test.read_model", Op: "read", ID: "42", TenantID: "acme"})
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
@@ -50,14 +51,14 @@ func TestDispatchVirtualOp_UnregisteredOpOnRegisteredModel(t *testing.T) {
 		},
 	})
 
-	resp := dispatchAndDecode(t, virtualOpRequest{Model: "test.read_only_model", Op: "create"})
+	resp := dispatchAndDecode(t, abi.VirtualOpRequest{Model: "test.read_only_model", Op: "create"})
 	if resp.Error == nil || resp.Error.Code != "orm.virtual_op_not_implemented" {
 		t.Errorf("Error = %+v, want code orm.virtual_op_not_implemented", resp.Error)
 	}
 }
 
 func TestDispatchVirtualOp_UnregisteredModel(t *testing.T) {
-	resp := dispatchAndDecode(t, virtualOpRequest{Model: "test.never_registered", Op: "read", ID: "1"})
+	resp := dispatchAndDecode(t, abi.VirtualOpRequest{Model: "test.never_registered", Op: "read", ID: "1"})
 	if resp.Error == nil || resp.Error.Code != "orm.virtual_op_not_implemented" {
 		t.Errorf("Error = %+v, want code orm.virtual_op_not_implemented", resp.Error)
 	}
@@ -70,7 +71,7 @@ func TestDispatchVirtualOp_BackendErrorSurfaces(t *testing.T) {
 		},
 	})
 
-	resp := dispatchAndDecode(t, virtualOpRequest{Model: "test.erroring_model", Op: "read", ID: "1"})
+	resp := dispatchAndDecode(t, abi.VirtualOpRequest{Model: "test.erroring_model", Op: "read", ID: "1"})
 	if resp.Error == nil || resp.Error.Code != "orm.backend_error" || resp.Error.Message != "upstream unavailable" {
 		t.Errorf("Error = %+v, want backend_error/upstream unavailable", resp.Error)
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -157,7 +158,7 @@ func TestORMRead_FieldSecurity_DeniedFieldsMaskedPerBehaviour(t *testing.T) {
 	// No permissions granted — every restricted field should be denied.
 	modCtx := newFieldSecModuleContext(slug)
 
-	out, hostErr := ORMRead(ctx, primaryDB, nil, modCtx, ORMReadInput{Model: "testmodule.widget", IDs: []string{id}})
+	out, hostErr := ORMRead(ctx, primaryDB, nil, modCtx, abiv1.ORMReadInput{Model: "testmodule.widget", IDs: []string{id}})
 	if hostErr != nil {
 		t.Fatalf("ORMRead: %+v", hostErr)
 	}
@@ -195,7 +196,7 @@ func TestORMRead_FieldSecurity_GrantedPermissionSeesRealValue(t *testing.T) {
 	// through unmasked, bank_account/notes still denied.
 	modCtx := newFieldSecModuleContext(slug, "contacts:contact:financials_read")
 
-	out, hostErr := ORMRead(ctx, primaryDB, nil, modCtx, ORMReadInput{Model: "testmodule.widget", IDs: []string{id}})
+	out, hostErr := ORMRead(ctx, primaryDB, nil, modCtx, abiv1.ORMReadInput{Model: "testmodule.widget", IDs: []string{id}})
 	if hostErr != nil {
 		t.Fatalf("ORMRead: %+v", hostErr)
 	}
@@ -220,7 +221,7 @@ func TestORMSearchRead_FieldSecurity_DeniedFieldsMasked(t *testing.T) {
 
 	modCtx := newFieldSecModuleContext(slug)
 
-	out, hostErr := ORMSearchRead(ctx, primaryDB, modCtx, ORMSearchReadInput{Model: "testmodule.widget", Domain: ""})
+	out, hostErr := ORMSearchRead(ctx, primaryDB, modCtx, abiv1.ORMSearchReadInput{Model: "testmodule.widget", Domain: ""})
 	if hostErr != nil {
 		t.Fatalf("ORMSearchRead: %+v", hostErr)
 	}

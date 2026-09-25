@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -113,7 +114,7 @@ func TestDBExec_Insert_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-000000000001"
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		Params: []any{id, "Widget A"},
 	})
@@ -133,10 +134,10 @@ func TestDBExec_Insert_WithReturning(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-000000000002"
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		Params: []any{id, "Widget B"},
-		Opts:   dbExecOpts{Returning: "id, name"},
+		Opts:   abiv1.DBExecOpts{Returning: "id, name"},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExec: %+v", hostErr)
@@ -154,16 +155,16 @@ func TestDBExec_Insert_WithReturning_UnknownColumn_ReturnsError(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES (gen_random_uuid(), gen_random_uuid(), $1)",
 		Params: []any{"Widget"},
-		Opts:   dbExecOpts{Returning: "nmae"}, // typo for "name"
+		Opts:   abiv1.DBExecOpts{Returning: "nmae"}, // typo for "name"
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for a nonexistent opts.returning column")
 	}
-	if hostErr.Code != abi.ErrCodeExecError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeExecError)
+	if hostErr.Code != abiv1.ErrCodeExecError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeExecError)
 	}
 }
 
@@ -172,13 +173,13 @@ func TestDBExec_Update_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-000000000003"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "Original"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"Renamed", id},
 	})
 	if hostErr != nil {
@@ -194,13 +195,13 @@ func TestDBExec_Delete_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-000000000004"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "ToDelete"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "DELETE FROM widget WHERE id = $1", Params: []any{id},
 	})
 	if hostErr != nil {
@@ -215,14 +216,14 @@ func TestDBExec_RejectsOwnReturningClause(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2) RETURNING id", Params: []any{"10000000-0000-0000-0000-000000000005", "X"},
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for a statement with its own RETURNING clause")
 	}
-	if hostErr.Code != abi.ErrCodeExecError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeExecError)
+	if hostErr.Code != abiv1.ErrCodeExecError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeExecError)
 	}
 }
 
@@ -230,12 +231,12 @@ func TestDBExec_RejectsDDL(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{SQL: "ALTER TABLE widget ADD COLUMN evil TEXT"})
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "ALTER TABLE widget ADD COLUMN evil TEXT"})
 	if hostErr == nil {
 		t.Fatal("expected an error for DDL")
 	}
-	if hostErr.Code != abi.ErrCodeExecError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeExecError)
+	if hostErr.Code != abiv1.ErrCodeExecError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeExecError)
 	}
 }
 
@@ -243,7 +244,7 @@ func TestDBExec_RejectsSelect(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{SQL: "SELECT * FROM widget"})
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "SELECT * FROM widget"})
 	if hostErr == nil {
 		t.Fatal("expected an error for a SELECT")
 	}
@@ -253,7 +254,7 @@ func TestDBExec_RejectsMultipleStatements(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{SQL: "DELETE FROM widget; DELETE FROM gadget;"})
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "DELETE FROM widget; DELETE FROM gadget;"})
 	if hostErr == nil {
 		t.Fatal("expected an error for multiple statements")
 	}
@@ -263,12 +264,12 @@ func TestDBExec_RejectsQualifiedTableReference(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{SQL: "DELETE FROM tenant_" + slug + ".widget"})
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "DELETE FROM tenant_" + slug + ".widget"})
 	if hostErr == nil {
 		t.Fatal("expected an error for a schema-qualified table reference")
 	}
-	if hostErr.Code != abi.ErrCodeTableAccessDenied {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeTableAccessDenied)
+	if hostErr.Code != abiv1.ErrCodeTableAccessDenied {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeTableAccessDenied)
 	}
 }
 
@@ -281,22 +282,22 @@ func TestDBExec_RejectsEngineOwnedTableReference(t *testing.T) {
 		"UPDATE record_activity SET body = 'rewritten'",
 		"DELETE FROM widget WHERE id IN (SELECT record_id FROM record_activity)",
 	} {
-		_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{SQL: sql})
+		_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: sql})
 		if hostErr == nil {
 			t.Errorf("%q: expected an error for an engine-owned table reference", sql)
 			continue
 		}
-		if hostErr.Code != abi.ErrCodeTableAccessDenied {
-			t.Errorf("%q: Code = %q, want %q", sql, hostErr.Code, abi.ErrCodeTableAccessDenied)
+		if hostErr.Code != abiv1.ErrCodeTableAccessDenied {
+			t.Errorf("%q: Code = %q, want %q", sql, hostErr.Code, abiv1.ErrCodeTableAccessDenied)
 		}
 	}
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO record_activity (model, record_id, kind, body) VALUES ($1, $2, 'comment', $3)",
 		ParamSets: [][]any{{"x.y", "11111111-1111-1111-1111-111111111111", "forged"}},
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeTableAccessDenied {
-		t.Errorf("DBExecBatch error = %v, want %q", hostErr, abi.ErrCodeTableAccessDenied)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeTableAccessDenied {
+		t.Errorf("DBExecBatch error = %v, want %q", hostErr, abiv1.ErrCodeTableAccessDenied)
 	}
 }
 
@@ -304,9 +305,9 @@ func TestDBExec_RejectsReturningStar(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:  "INSERT INTO widget (id, tenant_id) VALUES (gen_random_uuid(), gen_random_uuid())",
-		Opts: dbExecOpts{Returning: "*"},
+		Opts: abiv1.DBExecOpts{Returning: "*"},
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for opts.returning = \"*\"")
@@ -317,22 +318,22 @@ func TestDBExec_UniqueViolation(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		Params: []any{"10000000-0000-0000-0000-000000000006", "Dup"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		Params: []any{"10000000-0000-0000-0000-000000000007", "Dup"},
 	})
 	if hostErr == nil {
 		t.Fatal("expected a unique violation")
 	}
-	if hostErr.Code != abi.ErrCodeDBUniqueViolation {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeDBUniqueViolation)
+	if hostErr.Code != abiv1.ErrCodeDBUniqueViolation {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeDBUniqueViolation)
 	}
 }
 
@@ -340,15 +341,15 @@ func TestDBExec_ForeignKeyViolation(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, parent_id) VALUES (gen_random_uuid(), gen_random_uuid(), $1)",
 		Params: []any{"20000000-0000-0000-0000-000000000001"},
 	})
 	if hostErr == nil {
 		t.Fatal("expected a foreign key violation")
 	}
-	if hostErr.Code != abi.ErrCodeDBForeignKeyViolation {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeDBForeignKeyViolation)
+	if hostErr.Code != abiv1.ErrCodeDBForeignKeyViolation {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeDBForeignKeyViolation)
 	}
 	if hostErr.Details["table"] != "widget" || hostErr.Details["column"] != "parent_id" {
 		t.Errorf("Details = %+v, want table=widget column=parent_id", hostErr.Details)
@@ -362,14 +363,14 @@ func TestDBExec_UniqueViolation_IncludesSQLState(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		Params: []any{"30000000-0000-0000-0000-000000000001", "SQLStateDup"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		Params: []any{"30000000-0000-0000-0000-000000000002", "SQLStateDup"},
 	})
@@ -392,7 +393,7 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 	id1 := "30000000-0000-0000-0000-000000000003"
 	id2 := "30000000-0000-0000-0000-000000000004"
 	for _, id := range []string{id1, id2} {
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "Row " + id},
 		}); hostErr != nil {
 			t.Fatalf("seed insert %s: %+v", id, hostErr)
@@ -415,11 +416,11 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 	firstLockDone.Add(2)
 
 	var wg sync.WaitGroup
-	errs := make([]*abi.HostError, 2)
+	errs := make([]*abiv1.HostError, 2)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"A1", id1}, TxID: "deadlock-tx1",
 		}); hostErr != nil {
 			errs[0] = hostErr
@@ -428,14 +429,14 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 		}
 		firstLockDone.Done()
 		firstLockDone.Wait()
-		_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"A2", id2}, TxID: "deadlock-tx1",
 		})
 		errs[0] = hostErr
 	}()
 	go func() {
 		defer wg.Done()
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"B1", id2}, TxID: "deadlock-tx2",
 		}); hostErr != nil {
 			errs[1] = hostErr
@@ -444,7 +445,7 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 		}
 		firstLockDone.Done()
 		firstLockDone.Wait()
-		_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"B2", id1}, TxID: "deadlock-tx2",
 		})
 		errs[1] = hostErr
@@ -454,7 +455,7 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 	_ = tx1.Rollback()
 	_ = tx2.Rollback()
 
-	var deadlockErr *abi.HostError
+	var deadlockErr *abiv1.HostError
 	survivorIdx := -1
 	for i, e := range errs {
 		if e != nil && e.Details["sqlstate"] == "40P01" {
@@ -465,8 +466,8 @@ func TestDBExec_Deadlock_SurfacesSQLState(t *testing.T) {
 	if deadlockErr == nil {
 		t.Fatalf("expected one side to report a deadlock (sqlstate 40P01); got errs = %+v, %+v", errs[0], errs[1])
 	}
-	if deadlockErr.Code != abi.ErrCodeExecError {
-		t.Errorf("Code = %q, want %q", deadlockErr.Code, abi.ErrCodeExecError)
+	if deadlockErr.Code != abiv1.ErrCodeExecError {
+		t.Errorf("Code = %q, want %q", deadlockErr.Code, abiv1.ErrCodeExecError)
 	}
 	if errs[survivorIdx] != nil {
 		t.Errorf("the non-deadlocked side should have succeeded, got: %+v", errs[survivorIdx])
@@ -478,21 +479,21 @@ func TestDBExec_EtagMismatch(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-000000000008"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "Etagged"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "UPDATE widget SET name = $1 WHERE id = $2 AND etag = $3",
 		Params: []any{"Renamed", id, "stale-etag-value"},
 	})
 	if hostErr == nil {
 		t.Fatal("expected an etag mismatch")
 	}
-	if hostErr.Code != abi.ErrCodeDBEtagMismatch {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeDBEtagMismatch)
+	if hostErr.Code != abiv1.ErrCodeDBEtagMismatch {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeDBEtagMismatch)
 	}
 }
 
@@ -501,13 +502,13 @@ func TestDBExec_EtagCheck_MatchingEtagSucceeds(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-000000000009"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "Etagged"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "UPDATE widget SET name = $1 WHERE id = $2 AND etag = $3",
 		Params: []any{"Renamed", id, ""}, // etag column defaults to '' and is never rotated without the #455 trigger installed in this fixture
 	})
@@ -524,16 +525,16 @@ func TestDBExec_SkipEtag_BypassesMismatch(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-00000000000a"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "Etagged"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "UPDATE widget SET name = $1 WHERE id = $2 AND etag = $3",
 		Params: []any{"Renamed", id, "stale-etag-value"},
-		Opts:   dbExecOpts{SkipEtag: true},
+		Opts:   abiv1.DBExecOpts{SkipEtag: true},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExec: %+v", hostErr)
@@ -547,16 +548,16 @@ func TestDBExec_ExpectRows_ZeroRowsReturnsError(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "UPDATE gadget SET name = $1 WHERE id = $2",
 		Params: []any{"x", "10000000-0000-0000-0000-00000000000b"},
-		Opts:   dbExecOpts{ExpectRows: true},
+		Opts:   abiv1.DBExecOpts{ExpectRows: true},
 	})
 	if hostErr == nil {
 		t.Fatal("expected db.no_rows_affected")
 	}
-	if hostErr.Code != abi.ErrCodeNoRowsAffected {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeNoRowsAffected)
+	if hostErr.Code != abiv1.ErrCodeNoRowsAffected {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeNoRowsAffected)
 	}
 }
 
@@ -564,7 +565,7 @@ func TestDBExec_NoExpectRows_ZeroRowsIsNotAnError(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "UPDATE gadget SET name = $1 WHERE id = $2",
 		Params: []any{"x", "10000000-0000-0000-0000-00000000000c"},
 	})
@@ -581,7 +582,7 @@ func TestDBExec_Audit_InsertWritesAuditLogRow(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-00000000000d"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name, secret) VALUES ($1, gen_random_uuid(), $2, $3)",
 		Params: []any{id, "Audited Insert", "shh"},
 	}); hostErr != nil {
@@ -605,12 +606,12 @@ func TestDBExec_Audit_UpdateWritesOldAndNewData(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-00000000000e"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "Before"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "UPDATE widget SET name = $1 WHERE id = $2", Params: []any{"After", id},
 	}); hostErr != nil {
 		t.Fatalf("DBExec update: %+v", hostErr)
@@ -630,12 +631,12 @@ func TestDBExec_Audit_DeleteWritesOldDataOnly(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-00000000000f"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "ToDelete"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "DELETE FROM widget WHERE id = $1", Params: []any{id},
 	}); hostErr != nil {
 		t.Fatalf("DBExec delete: %+v", hostErr)
@@ -660,15 +661,15 @@ func TestDBExec_Audit_DeleteWithOptsReturning_NewDataStaysNull(t *testing.T) {
 	ctx := context.Background()
 
 	id := "10000000-0000-0000-0000-000000000012"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "ToDeleteWithReturning"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "DELETE FROM widget WHERE id = $1", Params: []any{id},
-		Opts: dbExecOpts{Returning: "id, name"},
+		Opts: abiv1.DBExecOpts{Returning: "id, name"},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExec delete: %+v", hostErr)
@@ -690,10 +691,10 @@ func TestDBExec_SkipAudit_NoAuditLogRow(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES (gen_random_uuid(), gen_random_uuid(), $1)",
 		Params: []any{"Unaudited"},
-		Opts:   dbExecOpts{SkipAudit: true},
+		Opts:   abiv1.DBExecOpts{SkipAudit: true},
 	}); hostErr != nil {
 		t.Fatalf("DBExec: %+v", hostErr)
 	}
@@ -707,7 +708,7 @@ func TestDBExec_UnauditedTable_NoAuditLogRow(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO gadget (id, name) VALUES (gen_random_uuid(), $1)",
 		Params: []any{"Gadget A"},
 	}); hostErr != nil {
@@ -727,7 +728,7 @@ func TestDBExec_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
 
 	id := "10000000-0000-0000-0000-000000000010"
-	out, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	out, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "InTx"},
 		TxID: txID,
 	})
@@ -762,15 +763,15 @@ func TestDBExec_UnknownTransactionID(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "DELETE FROM widget WHERE id = $1", Params: []any{"10000000-0000-0000-0000-000000000011"},
 		TxID: "does-not-exist",
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for an unknown tx_id")
 	}
-	if hostErr.Code != abi.ErrCodeTransactionNotFound {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeTransactionNotFound)
+	if hostErr.Code != abiv1.ErrCodeTransactionNotFound {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeTransactionNotFound)
 	}
 }
 
@@ -800,12 +801,12 @@ func TestHostDBExec_WiredThroughWASMBoundary(t *testing.T) {
 		r.RegisterInstance(inst)
 		t.Cleanup(func() { r.UnregisterInstance(inst) })
 
-		env := callHost(t, ctx, inst, "call_exec", dbExecInput{SQL: "DELETE FROM widget WHERE id = $1", Params: []any{"x"}})
+		env := callHost(t, ctx, inst, "call_exec", abiv1.DBExecInput{SQL: "DELETE FROM widget WHERE id = $1", Params: []any{"x"}})
 		if env.OK {
 			t.Fatal("expected capability_denied, got success")
 		}
-		if env.Error.Code != abi.ErrCodeCapabilityDenied {
-			t.Errorf("Code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+		if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+			t.Errorf("Code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 		}
 	})
 
@@ -825,13 +826,13 @@ func TestHostDBExec_WiredThroughWASMBoundary(t *testing.T) {
 		r.RegisterInstance(inst)
 		t.Cleanup(func() { r.UnregisterInstance(inst) })
 
-		env := callHost(t, ctx, inst, "call_exec", dbExecInput{
+		env := callHost(t, ctx, inst, "call_exec", abiv1.DBExecInput{
 			SQL: "INSERT INTO widget (id, tenant_id, name) VALUES (gen_random_uuid(), gen_random_uuid(), $1)", Params: []any{"WASM Widget"},
 		})
 		if !env.OK {
 			t.Fatalf("exec failed: %+v", env.Error)
 		}
-		var out dbExecOutput
+		var out abiv1.DBExecOutput
 		if err := msgpack.Unmarshal(env.Data, &out); err != nil {
 			t.Fatalf("unmarshal output: %v", err)
 		}

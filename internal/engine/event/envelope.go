@@ -1,7 +1,7 @@
 package event
 
 import (
-	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -12,7 +12,7 @@ import (
 // dispatch) marshals one of these instead of passing the bare event
 // payload, so the module's own handle_event export has the event name it
 // needs to route to the handler registered via engine.OnEvent.
-type Envelope abi.EventEnvelope
+type Envelope abiv1.EventEnvelope
 
 // Marshal encodes e as the msgpack bytes InvokeHandleEvent's payload
 // argument expects.

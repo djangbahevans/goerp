@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -107,9 +108,9 @@ func TestORMAggregate_Count_EmptyDomainCountsEveryRLSVisibleRecord(t *testing.T)
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggcount", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
-	out, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	out, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model:  "testmodule.sale",
-		Values: []ORMAggregateValue{{Aggregation: "count"}},
+		Values: []abiv1.ORMAggregateValue{{Aggregation: "count"}},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMAggregate: %+v", hostErr)
@@ -125,10 +126,10 @@ func TestORMAggregate_Sum_ZeroMatchesReturnsZeroNotError(t *testing.T) {
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggsumzero", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
-	out, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	out, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model:  "testmodule.sale",
 		Domain: `record.region = 'nowhere'`,
-		Values: []ORMAggregateValue{{Field: "amount", Aggregation: "sum"}},
+		Values: []abiv1.ORMAggregateValue{{Field: "amount", Aggregation: "sum"}},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMAggregate: %+v", hostErr)
@@ -144,10 +145,10 @@ func TestORMAggregate_Sum_DomainNarrowsTheTotal(t *testing.T) {
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggsumdomain", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
-	out, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	out, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model:  "testmodule.sale",
 		Domain: `record.region = 'east'`,
-		Values: []ORMAggregateValue{{Field: "amount", Aggregation: "sum"}},
+		Values: []abiv1.ORMAggregateValue{{Field: "amount", Aggregation: "sum"}},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMAggregate: %+v", hostErr)
@@ -163,9 +164,9 @@ func TestORMAggregate_MultipleValuesInOneCall(t *testing.T) {
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggmulti", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
-	out, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	out, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model: "testmodule.sale",
-		Values: []ORMAggregateValue{
+		Values: []abiv1.ORMAggregateValue{
 			{Aggregation: "count"},
 			{Field: "amount", Aggregation: "sum"},
 			{Field: "amount", Aggregation: "min"},
@@ -189,10 +190,10 @@ func TestORMAggregate_Avg(t *testing.T) {
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggavg", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
-	out, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	out, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model:  "testmodule.sale",
 		Domain: `record.region = 'east'`,
-		Values: []ORMAggregateValue{{Field: "amount", Aggregation: "avg"}},
+		Values: []abiv1.ORMAggregateValue{{Field: "amount", Aggregation: "avg"}},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMAggregate: %+v", hostErr)
@@ -209,15 +210,15 @@ func TestORMAggregate_ReadDeniedFieldReturnsFieldReadDenied(t *testing.T) {
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggdenied", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug) // no cost_read permission granted
 
-	_, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	_, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model:  "testmodule.sale",
-		Values: []ORMAggregateValue{{Field: "cost", Aggregation: "sum"}},
+		Values: []abiv1.ORMAggregateValue{{Field: "cost", Aggregation: "sum"}},
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for a denied field")
 	}
-	if hostErr.Code != abi.ErrCodeFieldReadDenied {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeFieldReadDenied)
+	if hostErr.Code != abiv1.ErrCodeFieldReadDenied {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeFieldReadDenied)
 	}
 }
 
@@ -227,15 +228,15 @@ func TestORMAggregate_SumOnNonNumericFieldFailsValidation(t *testing.T) {
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggnonnumeric", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
-	_, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	_, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model:  "testmodule.sale",
-		Values: []ORMAggregateValue{{Field: "region", Aggregation: "sum"}},
+		Values: []abiv1.ORMAggregateValue{{Field: "region", Aggregation: "sum"}},
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for summing a non-numeric field")
 	}
-	if hostErr.Code != abi.ErrCodeValidationFailed {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeValidationFailed)
+	if hostErr.Code != abiv1.ErrCodeValidationFailed {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeValidationFailed)
 	}
 }
 
@@ -245,15 +246,15 @@ func TestORMAggregate_UnknownAggregationFailsValidation(t *testing.T) {
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggunknown", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
-	_, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	_, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model:  "testmodule.sale",
-		Values: []ORMAggregateValue{{Field: "amount", Aggregation: "median"}},
+		Values: []abiv1.ORMAggregateValue{{Field: "amount", Aggregation: "median"}},
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for an unknown aggregation")
 	}
-	if hostErr.Code != abi.ErrCodeValidationFailed {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeValidationFailed)
+	if hostErr.Code != abiv1.ErrCodeValidationFailed {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeValidationFailed)
 	}
 }
 
@@ -263,12 +264,12 @@ func TestORMAggregate_NoValuesFailsValidation(t *testing.T) {
 	slug := setupAggregateSaleTenant(t, primaryDB, "aggnovalues", aggregateSaleRows)
 	mc := newAggregateModuleContext(slug, "testmodule:sale:cost_read")
 
-	_, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{Model: "testmodule.sale"})
+	_, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{Model: "testmodule.sale"})
 	if hostErr == nil {
 		t.Fatal("expected an error for no values entries")
 	}
-	if hostErr.Code != abi.ErrCodeValidationFailed {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeValidationFailed)
+	if hostErr.Code != abiv1.ErrCodeValidationFailed {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeValidationFailed)
 	}
 }
 
@@ -292,10 +293,10 @@ func TestORMAggregate_TxID_SeesUncommittedWriteInSameTransaction(t *testing.T) {
 		t.Fatalf("insert within tx: %v", err)
 	}
 
-	out, hostErr := ORMAggregate(ctx, primaryDB, mc, ORMAggregateInput{
+	out, hostErr := ORMAggregate(ctx, primaryDB, mc, abiv1.ORMAggregateInput{
 		Model:  "testmodule.sale",
 		TxID:   txID,
-		Values: []ORMAggregateValue{{Aggregation: "count"}},
+		Values: []abiv1.ORMAggregateValue{{Aggregation: "count"}},
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMAggregate: %+v", hostErr)

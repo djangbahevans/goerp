@@ -54,39 +54,13 @@ import (
 
 // batchTooLargeHostError rejects a call whose records/IDs/matched rows
 // exceed GOERP_ORM_BULK_MAX_ROWS, before any write.
-func batchTooLargeHostError(limit, count int) *abi.HostError {
-	return &abi.HostError{
-		Code:    abi.ErrCodeBatchTooLarge,
+func batchTooLargeHostError(limit, count int) *abiv1.HostError {
+	return &abiv1.HostError{
+		Code:    abiv1.ErrCodeBatchTooLarge,
 		Message: fmt.Sprintf("this call touches %d rows, over the %d-row limit (GOERP_ORM_BULK_MAX_ROWS)", count, limit),
 		Details: map[string]any{"limit": limit, "count": count},
 	}
 }
-
-type OnConflictOption = abiv1.ORMOnConflict
-
-type ORMCreateInput = abiv1.ORMCreateInput
-
-type ORMCreateOutput = abiv1.ORMCreateOutput
-
-type ORMCreateBatchInput = abiv1.ORMCreateBatchInput
-
-type ORMCreateBatchOutput = abiv1.ORMCreateBatchOutput
-
-type ORMFirstOrCreateInput = abiv1.ORMFirstOrCreateInput
-
-type ORMFirstOrCreateOutput = abiv1.ORMFirstOrCreateOutput
-
-type ORMWriteInput = abiv1.ORMWriteInput
-
-type ORMWriteOutput = abiv1.ORMWriteOutput
-
-type ORMWriteManyInput = abiv1.ORMWriteManyInput
-
-type ORMWriteWhereInput = abiv1.ORMWriteWhereInput
-
-type ExecResult = abiv1.ORMExecResult
-
-type ORMUnlinkInput = abiv1.ORMUnlinkInput
 
 func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -98,7 +72,7 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMCreateInput
+		var input abiv1.ORMCreateInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -118,14 +92,14 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 // with ORMCreateBatch/ORMFirstOrCreate below. r is only used for
 // recomputeAfterWrite's cross-module compute dispatch — every other
 // dependency stays a plain arg, matching this file's existing style.
-func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMCreateInput) (ORMCreateOutput, *abi.HostError) {
+func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMCreateInput) (abiv1.ORMCreateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ORMCreateOutput{}, abi.CapabilityDenied("db.write")
+		return abiv1.ORMCreateOutput{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 
 	record := make(map[string]any, len(input.Record))
@@ -133,10 +107,10 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 
 	serverFilled := fillCreateServerFields(md, modCtx, record)
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 
 	if md.Backend == model.BackendTransient {
@@ -145,31 +119,31 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	defer rollback()
 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	} else if genPK != "" {
 		if pkCol, ok := primaryKeyColumn(md); ok {
 			serverFilled = append(serverFilled, pkCol)
 		}
 	}
 	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 
 	conflictRow, hostErr := lockConflictRowBeforeUpsert(ctx, tx, md, input.Model, record, input.OnConflict)
 	if hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	row, inserted, updatedFields, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
 	if hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if row == nil {
 		// OnConflictIgnore skipped this row — nothing was created, so
@@ -177,16 +151,16 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		// doc's own framing: a successful create call looks identical
 		// whether it inserted or hit the conflict target.
 		if err := commit(); err != nil {
-			return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+			return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 		}
-		return ORMCreateOutput{}, nil
+		return abiv1.ORMCreateOutput{}, nil
 	}
 
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 
 	operation := "INSERT"
@@ -197,30 +171,30 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		operation = "UPDATE"
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, operation, nil, row); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if hostErr := writeCreateActivity(ctx, tx, modCtx, input.Model, md, inserted, conflictRow, row); hostErr != nil {
-		return ORMCreateOutput{}, hostErr
+		return abiv1.ORMCreateOutput{}, hostErr
 	}
 
 	if inserted {
 		if err := emitRecordCreatedEvent(ctx, insertClient, tx, modCtx, input.Model, row); err != nil {
-			return ORMCreateOutput{}, ormSQLErrorRetryable(err)
+			return abiv1.ORMCreateOutput{}, ormSQLErrorRetryable(err)
 		}
 	} else {
 		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, row, updatedFields); err != nil {
-			return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 	}
 
 	if err := commit(); err != nil {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	// Masked only now: the audit entry, event payload and hooks above
 	// need the full stored row.
 	applyFieldMasking(modCtx, input.Model, []map[string]any{row})
-	return ORMCreateOutput{Record: row}, nil
+	return abiv1.ORMCreateOutput{Record: row}, nil
 }
 
 func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -233,7 +207,7 @@ func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMCreateBatchInput
+		var input abiv1.ORMCreateBatchInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -259,28 +233,28 @@ func makeORMCreateBatch(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.
 // create_batch, not one event per row" — and one orm.record.updated event
 // per OnConflictUpdate row, since each such row's changed_fields can
 // differ.
-func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMCreateBatchInput) (ORMCreateBatchOutput, *abi.HostError) {
+func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMCreateBatchInput) (abiv1.ORMCreateBatchOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ORMCreateBatchOutput{}, abi.CapabilityDenied("db.write")
+		return abiv1.ORMCreateBatchOutput{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMCreateBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "create_batch is not supported for Transient-backed models"}
+		return abiv1.ORMCreateBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "create_batch is not supported for Transient-backed models"}
 	}
 	if len(input.Records) == 0 {
-		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "records must not be empty"}
+		return abiv1.ORMCreateBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "records must not be empty"}
 	}
 	if maxRows := modCtx.ormBulkMaxRows(); len(input.Records) > maxRows {
-		return ORMCreateBatchOutput{}, batchTooLargeHostError(maxRows, len(input.Records))
+		return abiv1.ORMCreateBatchOutput{}, batchTooLargeHostError(maxRows, len(input.Records))
 	}
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMCreateBatchOutput{}, hostErr
+		return abiv1.ORMCreateBatchOutput{}, hostErr
 	}
 	defer rollback()
 
@@ -296,41 +270,41 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 
 		serverFilled := fillCreateServerFields(md, modCtx, record)
 		if hostErr := validateRequired(md, record, true); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		} else if genPK != "" {
 			if pkCol, ok := primaryKeyColumn(md); ok {
 				serverFilled = append(serverFilled, pkCol)
 			}
 		}
 		if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 
 		conflictRow, hostErr := lockConflictRowBeforeUpsert(ctx, tx, md, input.Model, record, input.OnConflict)
 		if hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		row, inserted, updatedFields, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
 		if hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if row == nil {
 			continue // OnConflictIgnore skipped this one
 		}
 		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		operation := "INSERT"
 		if !inserted {
@@ -339,10 +313,10 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			operation = "UPDATE"
 		}
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, operation, nil, row); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		if hostErr := writeCreateActivity(ctx, tx, modCtx, input.Model, md, inserted, conflictRow, row); hostErr != nil {
-			return ORMCreateBatchOutput{}, hostErr
+			return abiv1.ORMCreateBatchOutput{}, hostErr
 		}
 		all = append(all, row)
 		if inserted {
@@ -354,7 +328,7 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 
 	if len(createdForEvent) > 0 {
 		if err := emitRecordCreatedBatchEvent(ctx, insertClient, tx, modCtx, input.Model, createdForEvent); err != nil {
-			return ORMCreateBatchOutput{}, ormSQLErrorRetryable(err)
+			return abiv1.ORMCreateBatchOutput{}, ormSQLErrorRetryable(err)
 		}
 	}
 	// One orm.record.updated per row rather than one batched event —
@@ -363,16 +337,16 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 	// changed_fields} the same everywhere it's emitted from.
 	for _, u := range updatedForEvent {
 		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, u.row, u.changedFields); err != nil {
-			return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return abiv1.ORMCreateBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 	}
 
 	if err := commit(); err != nil {
-		return ORMCreateBatchOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.ORMCreateBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	applyFieldMasking(modCtx, input.Model, all)
-	return ORMCreateBatchOutput{Records: all}, nil
+	return abiv1.ORMCreateBatchOutput{Records: all}, nil
 }
 
 func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -385,7 +359,7 @@ func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sq
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMFirstOrCreateInput
+		var input abiv1.ORMFirstOrCreateInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -422,22 +396,22 @@ func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sq
 // sequence-acquisition against a CreateVals map that's allowed to be
 // incomplete when the record already exists — an INSERT-first attempt
 // can't know that until after already running them.
-func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMFirstOrCreateInput) (ORMFirstOrCreateOutput, *abi.HostError) {
+func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMFirstOrCreateInput) (abiv1.ORMFirstOrCreateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ORMFirstOrCreateOutput{}, abi.CapabilityDenied("db.write")
+		return abiv1.ORMFirstOrCreateOutput{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "first_or_create is not supported for Transient-backed models"}
+		return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "first_or_create is not supported for Transient-backed models"}
 	}
 
 	fields := slices.Sorted(maps.Keys(input.UniqueVals))
 	if _, hostErr := validateOnConflictTarget(md, input.Model, fields, "unique_vals"); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 
 	whereConds := make([]string, len(fields))
@@ -446,7 +420,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	for i, f := range fields {
 		v := input.UniqueVals[f]
 		if v == nil {
-			return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unique_vals[" + f + "] must not be nil"}
+			return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "unique_vals[" + f + "] must not be nil"}
 		}
 		whereConds[i] = fmt.Sprintf("%s = $%d", quoteIdentORM(f), i+1)
 		whereArgs[i] = v
@@ -456,36 +430,36 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 
 	lockKeyBytes, err := msgpack.Marshal(lockKeyPairs)
 	if err != nil {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	defer rollback()
 
 	lockKey := modCtx.TenantSlug + ":" + input.Model + ":" + hex.EncodeToString(lockKeyBytes)
 	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
-		return ORMFirstOrCreateOutput{}, ormSQLErrorRetryable(err)
+		return abiv1.ORMFirstOrCreateOutput{}, ormSQLErrorRetryable(err)
 	}
 
 	table := quoteIdentORM(modeltable.Name(md))
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1", table, whereFrag), whereArgs...)
 	if err != nil {
-		return ORMFirstOrCreateOutput{}, ormSQLError(err)
+		return abiv1.ORMFirstOrCreateOutput{}, ormSQLError(err)
 	}
 	found, err := scanRowsToMaps(rows)
 	if err != nil {
-		return ORMFirstOrCreateOutput{}, ormSQLError(err)
+		return abiv1.ORMFirstOrCreateOutput{}, ormSQLError(err)
 	}
 
 	if len(found) > 0 {
 		if err := commit(); err != nil {
-			return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+			return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 		}
 		applyFieldMasking(modCtx, input.Model, found[:1])
-		return ORMFirstOrCreateOutput{Record: found[0], Created: false}, nil
+		return abiv1.ORMFirstOrCreateOutput{Record: found[0], Created: false}, nil
 	}
 
 	record := make(map[string]any, len(input.UniqueVals)+len(input.CreateVals))
@@ -493,52 +467,52 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	maps.Copy(record, input.UniqueVals)
 	serverFilled := fillCreateServerFields(md, modCtx, record)
 	if hostErr := validateRequired(md, record, true); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, record); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, record); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	if genPK, hostErr := injectTreePathOnCreate(ctx, tx, md, record); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	} else if genPK != "" {
 		if pkCol, ok := primaryKeyColumn(md); ok {
 			serverFilled = append(serverFilled, pkCol)
 		}
 	}
 	if hostErr := acquireSequenceFields(ctx, tx, modCtx.TenantSlug, input.Model, md, record); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 
 	row, _, _, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, nil, serverFilled)
 	if hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFieldNames(row), row); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "create", row); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "INSERT", nil, row); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 	if hostErr := writeCreatedActivity(ctx, tx, modCtx, input.Model, md, row); hostErr != nil {
-		return ORMFirstOrCreateOutput{}, hostErr
+		return abiv1.ORMFirstOrCreateOutput{}, hostErr
 	}
 
 	if err := emitRecordCreatedEvent(ctx, insertClient, tx, modCtx, input.Model, row); err != nil {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	if err := commit(); err != nil {
-		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.ORMFirstOrCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	applyFieldMasking(modCtx, input.Model, []map[string]any{row})
-	return ORMFirstOrCreateOutput{Record: row, Created: true}, nil
+	return abiv1.ORMFirstOrCreateOutput{Record: row, Created: true}, nil
 }
 
 func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -551,7 +525,7 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMWriteInput
+		var input abiv1.ORMWriteInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -571,21 +545,21 @@ func makeORMWrite(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], c
 // Branches to transientWrite (host_orm_transient.go) for Transient-backed
 // models internally. The single-row update itself is writeOneRecordTx,
 // shared with ORMWriteMany/ORMWriteWhere below.
-func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMWriteInput) (ORMWriteOutput, *abi.HostError) {
+func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMWriteInput) (abiv1.ORMWriteOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ORMWriteOutput{}, abi.CapabilityDenied("db.write")
+		return abiv1.ORMWriteOutput{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 
 	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 
 	record := make(map[string]any, len(input.Record)+1)
@@ -601,55 +575,55 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	defer rollback()
 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 
 	oldData, hostErr := fetchRowBeforeWrite(ctx, tx, modCtx, input.Model, md, pkCol, input.ID)
 	if hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 
 	updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, input.Model, pkCol, input.ID, record, input.ExpectedEtag, []string{"etag"})
 	if hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 
 	if hostErr := maintainTreePathOnWrite(ctx, tx, md, pkCol, input.ID, input.Record); hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, changedFields, updated); hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "write", updated); hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "UPDATE", oldData, updated); hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 	if hostErr := writeChangeActivity(ctx, tx, modCtx, input.Model, md, oldData, updated); hostErr != nil {
-		return ORMWriteOutput{}, hostErr
+		return abiv1.ORMWriteOutput{}, hostErr
 	}
 
 	if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, updated, changedFields); err != nil {
-		return ORMWriteOutput{}, ormSQLErrorRetryable(err)
+		return abiv1.ORMWriteOutput{}, ormSQLErrorRetryable(err)
 	}
 
 	if err := commit(); err != nil {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	applyFieldMasking(modCtx, input.Model, []map[string]any{updated})
-	return ORMWriteOutput{Record: updated}, nil
+	return abiv1.ORMWriteOutput{Record: updated}, nil
 }
 
 func makeORMWriteMany(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
@@ -662,7 +636,7 @@ func makeORMWriteMany(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMWriteManyInput
+		var input abiv1.ORMWriteManyInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -683,31 +657,31 @@ func makeORMWriteMany(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx
 // explicitly asked to update. One orm.record.updated event per affected
 // record (not batched) — the doc's own explicit distinction from
 // create_batch's batching.
-func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMWriteManyInput) (ExecResult, *abi.HostError) {
+func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMWriteManyInput) (abiv1.ORMExecResult, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ExecResult{}, abi.CapabilityDenied("db.write")
+		return abiv1.ORMExecResult{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "write_many is not supported for Transient-backed models"}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "write_many is not supported for Transient-backed models"}
 	}
 	if maxRows := modCtx.ormBulkMaxRows(); len(input.IDs) > maxRows {
-		return ExecResult{}, batchTooLargeHostError(maxRows, len(input.IDs))
+		return abiv1.ORMExecResult{}, batchTooLargeHostError(maxRows, len(input.IDs))
 	}
 	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	record := make(map[string]any, len(input.Record)+1)
@@ -718,21 +692,21 @@ func ORMWriteMany(ctx context.Context, r *Runtime, db *sql.DB, insertClient *riv
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 	defer rollback()
 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 
 	result, hostErr := writeManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, input.IDs, record)
 	if hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 
 	if err := commit(); err != nil {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	return result, nil
@@ -748,7 +722,7 @@ func makeORMWriteWhere(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.T
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMWriteWhereInput
+		var input abiv1.ORMWriteWhereInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -768,33 +742,33 @@ func makeORMWriteWhere(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.T
 // A domain matching zero rows is a legitimate, non-error result
 // (ExecResult{Count: 0}) — unlike single write-by-ID, a bulk "where" that
 // happens to match nothing isn't exceptional.
-func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMWriteWhereInput) (ExecResult, *abi.HostError) {
+func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMWriteWhereInput) (abiv1.ORMExecResult, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ExecResult{}, abi.CapabilityDenied("db.write")
+		return abiv1.ORMExecResult{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "write_where is not supported for Transient-backed models"}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "write_where is not supported for Transient-backed models"}
 	}
 	if hostErr := validateRequired(md, input.Record, false); hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 	if hostErr := validateDynamicLinkPairs(md, input.Record); hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	whereFrag, whereArgs, hostErr := compileDomain(input.Domain)
 	if hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 
 	record := make(map[string]any, len(input.Record)+1)
@@ -805,7 +779,7 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 	defer rollback()
 
@@ -818,34 +792,34 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 	pkColQuoted := quoteIdentORM(pkCol)
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT %d", pkColQuoted, table, whereFrag, maxRows+1), whereArgs...)
 	if err != nil {
-		return ExecResult{}, ormSQLError(err)
+		return abiv1.ORMExecResult{}, ormSQLError(err)
 	}
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return ExecResult{}, ormSQLError(err)
+			return abiv1.ORMExecResult{}, ormSQLError(err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return ExecResult{}, ormSQLError(err)
+		return abiv1.ORMExecResult{}, ormSQLError(err)
 	}
 	if len(ids) > maxRows {
-		return ExecResult{}, batchTooLargeHostError(maxRows, len(ids))
+		return abiv1.ORMExecResult{}, batchTooLargeHostError(maxRows, len(ids))
 	}
 
 	if hostErr := checkDynamicLinkTargets(ctx, tx, modCtx, md, input.Record); hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 
 	result, hostErr := writeManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, ids, record)
 	if hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 
 	if err := commit(); err != nil {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	return result, nil
@@ -861,7 +835,7 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMUnlinkInput
+		var input abiv1.ORMUnlinkInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -881,17 +855,17 @@ func makeORMUnlink(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 // below. A missing ID aborts the whole transaction (orm.not_found),
 // matching writeManyIDsTx's own all-or-nothing semantics for WriteMany/
 // WriteWhere.
-func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input ORMUnlinkInput) (ExecResult, *abi.HostError) {
+func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMUnlinkInput) (abiv1.ORMExecResult, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ExecResult{}, abi.CapabilityDenied("db.write")
+		return abiv1.ORMExecResult{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if maxRows := modCtx.ormBulkMaxRows(); len(input.IDs) > maxRows {
-		return ExecResult{}, batchTooLargeHostError(maxRows, len(input.IDs))
+		return abiv1.ORMExecResult{}, batchTooLargeHostError(maxRows, len(input.IDs))
 	}
 
 	if md.Backend == model.BackendTransient {
@@ -900,22 +874,22 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 	defer rollback()
 
 	result, hostErr := unlinkManyIDsTx(ctx, tx, r, insertClient, modCtx, md, pkCol, input.Model, input.IDs)
 	if hostErr != nil {
-		return ExecResult{}, hostErr
+		return abiv1.ORMExecResult{}, hostErr
 	}
 
 	if err := commit(); err != nil {
-		return ExecResult{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	return result, nil
@@ -929,7 +903,7 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 // go-sdk-reference.md §22 — before either the FK check or the delete SQL
 // itself, unlike OnCreate/OnWrite's after-the-write placement (this
 // file's own package doc comment explains why those two differ).
-func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string) (ExecResult, *abi.HostError) {
+func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string) (abiv1.ORMExecResult, *abiv1.HostError) {
 	table := quoteIdentORM(modeltable.Name(md))
 	pkColQuoted := quoteIdentORM(pkCol)
 
@@ -937,10 +911,10 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 	for _, id := range ids {
 		existing, hostErr := fetchRowByPK(ctx, tx, md, pkCol, id)
 		if hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := runConstraintHook(ctx, r, modCtx, qualifiedModel, "delete", existing); hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 
 		var deletedID string
@@ -955,24 +929,24 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 		}
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return ExecResult{}, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+				return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 			}
-			return ExecResult{}, translateWriteError(err, md)
+			return abiv1.ORMExecResult{}, translateWriteError(err, md)
 		}
 
 		if hostErr := recomputeParentsAfterChildUnlink(ctx, tx, r, modCtx, qualifiedModel, existing); hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "DELETE", existing, nil); hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if err := emitRecordDeletedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, map[string]any{"id": deletedID}); err != nil {
-			return ExecResult{}, ormSQLErrorRetryable(err)
+			return abiv1.ORMExecResult{}, ormSQLErrorRetryable(err)
 		}
 
 		affected = append(affected, deletedID)
 	}
-	return ExecResult{Count: len(affected), IDs: affected}, nil
+	return abiv1.ORMExecResult{Count: len(affected), IDs: affected}, nil
 }
 
 // resolveORMWriteTx is resolveORMReadTx's (host_orm.go) write-side
@@ -986,17 +960,17 @@ func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *
 // success" shape unchanged. A borrowed transaction keeps host.db.begin's
 // own timeout behavior, not GOERP_ORM_STATEMENT_TIMEOUT — only an owned
 // transaction goes through beginTenantScopedWrite's applyORMStatementTimeout.
-func resolveORMWriteTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, commit func() error, rollback func(), hostErr *abi.HostError) {
+func resolveORMWriteTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, txID string) (tx *sql.Tx, commit func() error, rollback func(), hostErr *abiv1.HostError) {
 	if txID != "" {
 		tx, ok := modCtx.Transaction(txID)
 		if !ok {
-			return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
+			return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
 		}
 		return tx, func() error { return nil }, func() {}, nil
 	}
 	tx, err := beginTenantScopedWrite(ctx, db, modCtx)
 	if err != nil {
-		return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	return tx, tx.Commit, func() { _ = tx.Rollback() }, nil
 }
@@ -1051,7 +1025,7 @@ func declaresField(md model.ModelDeclaration, name string) bool {
 // demands presence; write (requireAll=false) only rejects a required
 // field explicitly present in the diff with a null value — a field
 // simply absent from the diff is an unchanged, already-valid column.
-func validateRequired(md model.ModelDeclaration, record map[string]any, requireAll bool) *abi.HostError {
+func validateRequired(md model.ModelDeclaration, record map[string]any, requireAll bool) *abiv1.HostError {
 	for _, f := range md.Fields {
 		if !f.Def.IsRequired {
 			continue
@@ -1068,12 +1042,12 @@ func validateRequired(md model.ModelDeclaration, record map[string]any, requireA
 		v, present := record[f.Name]
 		if !present {
 			if requireAll {
-				return &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + f.Name + " is required", Details: map[string]any{"field": f.Name}}
+				return &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + f.Name + " is required", Details: map[string]any{"field": f.Name}}
 			}
 			continue
 		}
 		if v == nil {
-			return &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + f.Name + " is required", Details: map[string]any{"field": f.Name}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + f.Name + " is required", Details: map[string]any{"field": f.Name}}
 		}
 	}
 	return nil
@@ -1096,7 +1070,7 @@ func hasField(md model.ModelDeclaration, name string) bool {
 // isn't already present in record — mutating record in place. Runs on
 // tx, immediately before the INSERT, so the lock is held for the
 // shortest time possible.
-func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelName string, md model.ModelDeclaration, record map[string]any) *abi.HostError {
+func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelName string, md model.ModelDeclaration, record map[string]any) *abiv1.HostError {
 	for _, f := range md.Fields {
 		if f.Def.Kind != model.KindSequence {
 			continue
@@ -1131,7 +1105,7 @@ func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelNam
 // satisfy is rejected outright (OnDeniedWrite Reject, the default) or
 // silently absent from the assigned names/args (Ignore) — either way before any SQL
 // runs.
-func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, record map[string]any, serverFilled []string) (assigned []string, args []any, hostErr *abi.HostError) {
+func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, record map[string]any, serverFilled []string) (assigned []string, args []any, hostErr *abiv1.HostError) {
 	fields := make(map[string]model.FieldDef, len(md.Fields))
 	for _, f := range md.Fields {
 		fields[f.Name] = f.Def
@@ -1147,10 +1121,10 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 	for k, v := range record {
 		def, known := fields[k]
 		if !known {
-			return nil, nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unknown field " + k, Details: map[string]any{"field": k}}
+			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "unknown field " + k, Details: map[string]any{"field": k}}
 		}
 		if def.IsComputed {
-			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is computed and cannot be written directly", Details: map[string]any{"field": k}}
+			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldNotWritable, Message: "field " + k + " is computed and cannot be written directly", Details: map[string]any{"field": k}}
 		}
 		// serverFilled names fillCreateServerFields's own additions
 		// (tenant_id/created_by) — goerp#992 marked both Readonly so a
@@ -1161,17 +1135,17 @@ func buildAssignment(modCtx *ModuleContext, qualifiedModel string, md model.Mode
 		// tenant_id/created_by against the same rejection meant for a
 		// client-supplied value.
 		if def.IsReadonly && !slices.Contains(serverFilled, k) {
-			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is readonly and cannot be written directly", Details: map[string]any{"field": k}}
+			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldNotWritable, Message: "field " + k + " is readonly and cannot be written directly", Details: map[string]any{"field": k}}
 		}
 		if def.Kind == model.KindOne2Many {
-			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + k + " is a One2Many relation and cannot be written directly", Details: map[string]any{"field": k}}
+			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldNotWritable, Message: "field " + k + " is a One2Many relation and cannot be written directly", Details: map[string]any{"field": k}}
 		}
 
 		if rule, denied := writeDeniedBy(modCtx, qualifiedModel, k); denied {
 			if rule.OnDeniedWrite == fieldsec.Ignore {
 				continue
 			}
-			return nil, nil, &abi.HostError{Code: abi.ErrCodeFieldWriteDenied, Message: "field " + k + " requires permission " + rule.WritePermission, Details: map[string]any{"field": k}}
+			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeFieldWriteDenied, Message: "field " + k + " requires permission " + rule.WritePermission, Details: map[string]any{"field": k}}
 		}
 
 		assigned = append(assigned, k)
@@ -1212,14 +1186,14 @@ func writeDeniedBy(modCtx *ModuleContext, qualifiedModel, field string) (fieldse
 // serverFilled), for that event's changed_fields. An OnConflictIgnore hit
 // returns (nil, false, nil, nil) — a skipped conflict is not an error,
 // just nothing to report.
-func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *OnConflictOption, serverFilled []string) (row map[string]any, inserted bool, updatedFields []string, hostErr *abi.HostError) {
+func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *abiv1.ORMOnConflict, serverFilled []string) (row map[string]any, inserted bool, updatedFields []string, hostErr *abiv1.HostError) {
 	fields, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record, serverFilled)
 	if hostErr != nil {
 		return nil, false, nil, hostErr
 	}
 	cols := quoteIdentsORM(fields)
 	if len(cols) == 0 {
-		return nil, false, nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to insert"}
+		return nil, false, nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "record has no fields to insert"}
 	}
 	placeholders := make([]string, len(args))
 	for i := range args {
@@ -1262,7 +1236,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 			slices.Sort(updatedFields)
 			insertSQL += fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", strings.Join(quotedTarget, ", "), strings.Join(setClauses, ", "))
 		default:
-			return nil, false, nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "on_conflict.policy must be \"ignore\" or \"update\", got " + onConflict.Policy}
+			return nil, false, nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "on_conflict.policy must be \"ignore\" or \"update\", got " + onConflict.Policy}
 		}
 	}
 
@@ -1280,7 +1254,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		return nil, false, nil, nil
 	}
 	if len(created) != 1 {
-		return nil, false, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "insert did not return exactly one row"}
+		return nil, false, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "insert did not return exactly one row"}
 	}
 
 	row = created[0]
@@ -1300,9 +1274,9 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 // full-table-scan fallback for conflict detection. paramName is the
 // caller's own wire field name (e.g. "on_conflict.fields", "unique_vals"),
 // used in error messages.
-func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, fields []string, paramName string) ([]string, *abi.HostError) {
+func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, fields []string, paramName string) ([]string, *abiv1.HostError) {
 	if len(fields) == 0 {
-		return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: paramName + " must not be empty"}
+		return nil, &abiv1.HostError{Code: abiv1.ErrCodeConflictTargetInvalid, Message: paramName + " must not be empty"}
 	}
 	sorted := slices.Clone(fields)
 	slices.Sort(sorted)
@@ -1320,7 +1294,7 @@ func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, 
 			return fields, nil
 		}
 	}
-	return nil, &abi.HostError{Code: abi.ErrCodeConflictTargetInvalid, Message: paramName + " " + strings.Join(fields, ", ") + " does not match any declared unique index on " + qualifiedModel}
+	return nil, &abiv1.HostError{Code: abiv1.ErrCodeConflictTargetInvalid, Message: paramName + " " + strings.Join(fields, ", ") + " does not match any declared unique index on " + qualifiedModel}
 }
 
 // writeOneRecordTx updates the row identified by id on tx — the shared
@@ -1329,7 +1303,7 @@ func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, 
 // check" semantics); a non-nil expectedEtag adds it — including when it
 // points to "", which requires the stored etag to still be its
 // never-written default rather than silently matching anything.
-func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag *string, serverFilled []string) (map[string]any, []string, *abi.HostError) {
+func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag *string, serverFilled []string) (map[string]any, []string, *abiv1.HostError) {
 	// serverFilled names the etag key its own caller already rotated into
 	// record (goerp#992 made etag Readonly) — exempted here for the same
 	// reason fillCreateServerFields's tenant_id/created_by are on create.
@@ -1338,7 +1312,7 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 		return nil, nil, hostErr
 	}
 	if len(assigned) == 0 {
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "record has no fields to update"}
+		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "record has no fields to update"}
 	}
 	sets := quoteIdentsORM(assigned)
 
@@ -1379,38 +1353,38 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 // ORMWriteMany (caller-supplied IDs) and ORMWriteWhere (IDs resolved from
 // a domain first). A missing ID or validation failure aborts the whole
 // transaction, matching the AC's all-or-nothing requirement.
-func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (ExecResult, *abi.HostError) {
+func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (abiv1.ORMExecResult, *abiv1.HostError) {
 	affected := make([]string, 0, len(ids))
 	for _, id := range ids {
 		oldData, hostErr := fetchRowBeforeWrite(ctx, tx, modCtx, qualifiedModel, md, pkCol, id)
 		if hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		updated, changedFields, hostErr := writeOneRecordTx(ctx, tx, modCtx, md, qualifiedModel, pkCol, id, record, nil, []string{"etag"})
 		if hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := maintainTreePathOnWrite(ctx, tx, md, pkCol, id, record); hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, qualifiedModel, md, changedFields, updated); hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := runConstraintHook(ctx, r, modCtx, qualifiedModel, "write", updated); hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "UPDATE", oldData, updated); hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if hostErr := writeChangeActivity(ctx, tx, modCtx, qualifiedModel, md, oldData, updated); hostErr != nil {
-			return ExecResult{}, hostErr
+			return abiv1.ORMExecResult{}, hostErr
 		}
 		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, updated, changedFields); err != nil {
-			return ExecResult{}, ormSQLErrorRetryable(err)
+			return abiv1.ORMExecResult{}, ormSQLErrorRetryable(err)
 		}
 		affected = append(affected, id)
 	}
-	return ExecResult{Count: len(affected), IDs: affected}, nil
+	return abiv1.ORMExecResult{Count: len(affected), IDs: affected}, nil
 }
 
 // changedFieldNames returns record's keys as a slice — for create/
@@ -1469,7 +1443,7 @@ func emitRecordUpdatedEvent(ctx context.Context, insertClient *river.Client[*sql
 // recursion: a recomputed field's own new value is applied directly and
 // never re-triggers a second recompute pass, matching the AC's
 // single-hop-only scope.
-func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, changedFields []string, row map[string]any) *abi.HostError {
+func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, changedFields []string, row map[string]any) *abiv1.HostError {
 	idx := modCtx.ComputedIndex()
 	if idx == nil || len(changedFields) == 0 {
 		return nil
@@ -1544,7 +1518,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 // If row's own inverse-FK value changes on write (reparenting to a
 // different parent), only the new parent recomputes here — the old
 // parent's dependents are not recomputed to reflect the child's removal.
-func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, row map[string]any) *abi.HostError {
+func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, row map[string]any) *abiv1.HostError {
 	depPK, ok := primaryKeyColumn(dep.ModelDecl)
 	if !ok {
 		return nil
@@ -1576,7 +1550,7 @@ func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx
 // LookupViaChild rather than Lookup: the child's own same-record and
 // Many2One-hop dependents, if any, are never recomputed here since the
 // row they'd apply to no longer exists.
-func recomputeParentsAfterChildUnlink(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedChildModel string, existingRow map[string]any) *abi.HostError {
+func recomputeParentsAfterChildUnlink(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, qualifiedChildModel string, existingRow map[string]any) *abiv1.HostError {
 	idx := modCtx.ComputedIndex()
 	if idx == nil {
 		return nil
@@ -1607,7 +1581,7 @@ const auditLogTableName = "audit_log"
 // absent half respectively, stored as SQL NULL. Runs inside tx, so a
 // later failure in the same request's write rolls the audit entry back
 // too — no lost or orphaned audit entries on partial failure.
-func writeAuditLogEntry(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, operation string, oldData, newData map[string]any) *abi.HostError {
+func writeAuditLogEntry(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, operation string, oldData, newData map[string]any) *abiv1.HostError {
 	reg := modCtx.DataAuditRegistry()
 	if reg == nil {
 		return nil
@@ -1743,13 +1717,13 @@ func isAuditedModel(modCtx *ModuleContext, qualifiedModel string) bool {
 // already produces the correct, more specific orm.not_found vs.
 // orm.etag_mismatch diagnosis (diagnoseZeroRowWrite) and this helper
 // must not shadow that with a generic error first.
-func fetchRowBeforeWrite(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, pkCol, pkValue string) (map[string]any, *abi.HostError) {
+func fetchRowBeforeWrite(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, pkCol, pkValue string) (map[string]any, *abiv1.HostError) {
 	if !needsRowBeforeWrite(modCtx, qualifiedModel, md) {
 		return nil, nil
 	}
 	row, hostErr := fetchRowByPK(ctx, tx, md, pkCol, pkValue)
 	if hostErr != nil {
-		if hostErr.Code == abi.ErrCodeNotFound {
+		if hostErr.Code == abiv1.ErrCodeNotFound {
 			return nil, nil
 		}
 		return nil, hostErr
@@ -1801,13 +1775,13 @@ func fkReferencingIDs(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclarat
 // fetchRowByPK re-selects one full row by primary key on tx, so a
 // Many2One-hop compute function sees the dependent record's current
 // column values rather than a stale copy.
-func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any) (map[string]any, *abi.HostError) {
+func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any) (map[string]any, *abiv1.HostError) {
 	return selectRowByPK(ctx, tx, md, pkCol, pkValue, "")
 }
 
 // selectRowByPK reads one row by primary key; lockClause (e.g. "FOR
 // UPDATE") is appended verbatim.
-func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, lockClause string) (map[string]any, *abi.HostError) {
+func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, lockClause string) (map[string]any, *abiv1.HostError) {
 	table := quoteIdentORM(modeltable.Name(md))
 	sqlStr := strings.TrimSpace(fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 %s", table, quoteIdentORM(pkCol), lockClause))
 	rows, err := tx.QueryContext(ctx, sqlStr, pkValue)
@@ -1819,7 +1793,7 @@ func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, p
 		return nil, ormSQLError(err)
 	}
 	if len(records) == 0 {
-		return nil, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+		return nil, &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 	}
 	return records[0], nil
 }
@@ -1836,7 +1810,7 @@ func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, p
 // applyTenantScope uses for app.current_user_id etc. (tenant_scope.go).
 // Scoped SET LOCAL (is_local=true), so it can't leak past this
 // transaction or suppress etag rotation on any other write in it.
-func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, field string, value any) *abi.HostError {
+func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, field string, value any) *abiv1.HostError {
 	table := quoteIdentORM(modeltable.Name(md))
 
 	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.skip_etag_trigger', 'true', true)"); err != nil {
@@ -1857,7 +1831,7 @@ func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclarati
 // translateWriteError maps a Postgres write failure to the structured
 // orm.* error the caller should see, falling back to a plain
 // orm.unavailable for anything it doesn't recognize.
-func translateWriteError(err error, md model.ModelDeclaration) *abi.HostError {
+func translateWriteError(err error, md model.ModelDeclaration) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
 		case pgStatementTimeoutSQLState:
@@ -1865,19 +1839,19 @@ func translateWriteError(err error, md model.ModelDeclaration) *abi.HostError {
 		case "23505": // unique_violation
 			for _, idx := range md.Indexes {
 				if idx.Def.IsUnique && idx.Name == pgErr.ConstraintName {
-					return &abi.HostError{
-						Code:    abi.ErrCodeUniqueViolation,
+					return &abiv1.HostError{
+						Code:    abiv1.ErrCodeUniqueViolation,
 						Message: "unique constraint violated on " + strings.Join(idx.Def.Columns, ", "),
 						Details: map[string]any{"index": idx.Name, "fields": idx.Def.Columns},
 					}
 				}
 			}
-			return &abi.HostError{Code: abi.ErrCodeUniqueViolation, Message: pgErr.Message}
+			return &abiv1.HostError{Code: abiv1.ErrCodeUniqueViolation, Message: pgErr.Message}
 		case "23503", "23001": // foreign_key_violation, restrict_violation
-			return &abi.HostError{Code: abi.ErrCodeForeignKeyViolation, Message: pgErr.Message, Details: map[string]any{"constraint": pgErr.ConstraintName}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeForeignKeyViolation, Message: pgErr.Message, Details: map[string]any{"constraint": pgErr.ConstraintName}}
 		}
 	}
-	return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 }
 
 // diagnoseZeroRowWrite disambiguates a 0-row etag-scoped UPDATE:
@@ -1886,9 +1860,9 @@ func translateWriteError(err error, md model.ModelDeclaration) *abi.HostError {
 // orm.etag_mismatch) from a genuinely missing or RLS-filtered row
 // (orm.not_found) — the same 404-shaped-denial rule this codebase's read
 // paths already follow (security-model.md).
-func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, id string, expectedEtag *string) *abi.HostError {
+func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, id string, expectedEtag *string) *abiv1.HostError {
 	if expectedEtag == nil {
-		return &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+		return &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 	}
 	var exists bool
 	checkSQL := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s = $1)", table, pkColQuoted)
@@ -1896,9 +1870,9 @@ func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, i
 		return ormSQLError(err)
 	}
 	if exists {
-		return &abi.HostError{Code: abi.ErrCodeEtagMismatch, Message: "record has been modified since it was last read"}
+		return &abiv1.HostError{Code: abiv1.ErrCodeEtagMismatch, Message: "record has been modified since it was last read"}
 	}
-	return &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+	return &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 }
 
 // emitRecordCreatedEvent inserts an orm.record.created EventDelivery job

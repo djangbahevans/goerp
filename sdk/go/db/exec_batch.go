@@ -28,12 +28,6 @@ type BatchRowError struct {
 	Details map[string]any
 }
 
-type dbExecBatchOpts = abi.DBExecBatchOpts
-
-type dbExecBatchInput = abi.DBExecBatchInput
-
-type dbExecBatchOutput = abi.DBExecBatchOutput
-
 // ExecBatch executes sql once per entry in argSets, inside a single
 // transaction, via host.db.exec_batch. It always runs with
 // continue_on_error: true — every parameter set is attempted, and a
@@ -43,8 +37,8 @@ type dbExecBatchOutput = abi.DBExecBatchOutput
 // transaction, or the host call — that means no parameter set ran at
 // all.
 func ExecBatch(sql string, argSets [][]any) (ExecBatchResult, error) {
-	in := dbExecBatchInput{SQL: sql, ParamSets: argSets, Opts: dbExecBatchOpts{ContinueOnError: true}}
-	var out dbExecBatchOutput
+	in := abi.DBExecBatchInput{SQL: sql, ParamSets: argSets, Opts: abi.DBExecBatchOpts{ContinueOnError: true}}
+	var out abi.DBExecBatchOutput
 	err := hostcall.Do(hostDBExecBatch, in, &out)
 	if err == nil {
 		return ExecBatchResult{TotalRowsAffected: int64(out.TotalRowsAffected), DurationMs: out.DurationMs}, nil

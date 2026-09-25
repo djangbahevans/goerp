@@ -3,6 +3,8 @@ package db
 import (
 	"fmt"
 	"strings"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 // Insert builds and executes a parameterized INSERT into table from
@@ -34,9 +36,9 @@ func InsertReturning[T any](table string, record any) (T, error) {
 	if len(returningCols) == 0 {
 		return zero, fmt.Errorf("db: %T has no db-mapped fields to return", zero)
 	}
-	return scanOneReturning[T](dbExecInput{
+	return scanOneReturning[T](abi.DBExecInput{
 		SQL: sql, Params: vals,
-		Opts: dbExecOpts{Returning: strings.Join(returningCols, ","), ExpectRows: true},
+		Opts: abi.DBExecOpts{Returning: strings.Join(returningCols, ","), ExpectRows: true},
 	}, returningCols)
 }
 

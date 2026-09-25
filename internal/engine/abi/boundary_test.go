@@ -22,8 +22,6 @@ var allocOnlyModule = []byte{
 	0x01, 0x20, 0x00, 0x6A, 0x24, 0x00, 0x20, 0x01, 0x0B,
 }
 
-type testEnvelope = abiv1.Envelope
-
 func newBoundaryTestModule(t *testing.T) (context.Context, wazero.Runtime, wazero.CompiledModule) {
 	t.Helper()
 	ctx := context.Background()
@@ -92,7 +90,7 @@ func TestWriteToModule_RoundTripsThroughEnvelope(t *testing.T) {
 		t.Fatalf("memory.Read out of bounds")
 	}
 
-	var env testEnvelope
+	var env abiv1.Envelope
 	if err := msgpack.Unmarshal(raw, &env); err != nil {
 		t.Fatalf("unmarshal envelope: %v", err)
 	}
@@ -117,7 +115,7 @@ func TestEncodeHostError_RoundTripsThroughEnvelope(t *testing.T) {
 	}
 	allocate := mod.ExportedFunction("allocate")
 
-	hostErr := &HostError{Code: "db.transaction_not_found", Message: "nope"}
+	hostErr := &abiv1.HostError{Code: "db.transaction_not_found", Message: "nope"}
 	packed := EncodeHostError(ctx, mod, allocate, hostErr)
 	ptr := uint32(packed >> 32)
 	length := uint32(packed)
@@ -127,7 +125,7 @@ func TestEncodeHostError_RoundTripsThroughEnvelope(t *testing.T) {
 		t.Fatalf("memory.Read out of bounds")
 	}
 
-	var env testEnvelope
+	var env abiv1.Envelope
 	if err := msgpack.Unmarshal(raw, &env); err != nil {
 		t.Fatalf("unmarshal envelope: %v", err)
 	}

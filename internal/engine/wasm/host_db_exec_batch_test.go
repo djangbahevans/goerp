@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 // TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits is
@@ -44,7 +44,7 @@ func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *te
 	for i := range n {
 		id := fmt.Sprintf("20000012-0000-0000-0000-%012d", i+1)
 		ids[i] = id
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "INSERT INTO gadget (id, name) VALUES ($1, $2)", Params: []any{id, "Before"},
 		}); hostErr != nil {
 			t.Fatalf("seed insert %d: %+v", i, hostErr)
@@ -52,10 +52,10 @@ func TestDBExecBatch_CumulativeBatchTime_ExceedsPerRowTimeout_StillCommits(t *te
 		paramSets[i] = []any{"After", id}
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "UPDATE gadget SET name = $1 WHERE id = $2 AND (SELECT pg_sleep(0.05)) IS NOT NULL",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{TimeoutMs: 300, ContinueOnError: true},
+		Opts:      abiv1.DBExecBatchOpts{TimeoutMs: 300, ContinueOnError: true},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
@@ -79,7 +79,7 @@ func TestDBExecBatch_Insert_AllSucceed(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		ParamSets: [][]any{
 			{"20000000-0000-0000-0000-000000000001", "Row A"},
@@ -99,13 +99,13 @@ func TestDBExecBatch_Insert_WithReturning(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		ParamSets: [][]any{
 			{"20000000-0000-0000-0000-000000000004", "Row D"},
 			{"20000000-0000-0000-0000-000000000005", "Row E"},
 		},
-		Opts: dbExecBatchOpts{Returning: "id, name"},
+		Opts: abiv1.DBExecBatchOpts{Returning: "id, name"},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
@@ -128,14 +128,14 @@ func TestDBExecBatch_ContinueOnError_False_StopsAtFirstFailure_RollsBackAll(t *t
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		Params: []any{"20000000-0000-0000-0000-000000000006", "Dup"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		ParamSets: [][]any{
 			{"20000000-0000-0000-0000-000000000007", "First"},         // succeeds
@@ -146,8 +146,8 @@ func TestDBExecBatch_ContinueOnError_False_StopsAtFirstFailure_RollsBackAll(t *t
 	if hostErr == nil {
 		t.Fatal("expected db.batch_error")
 	}
-	if hostErr.Code != abi.ErrCodeDBBatchError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeDBBatchError)
+	if hostErr.Code != abiv1.ErrCodeDBBatchError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeDBBatchError)
 	}
 	if hostErr.Details["index"] != 1 {
 		t.Errorf("Details[index] = %v, want 1", hostErr.Details["index"])
@@ -167,27 +167,27 @@ func TestDBExecBatch_ContinueOnError_True_CommitsSuccessesReportsFailures(t *tes
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		Params: []any{"2000000a-0000-0000-0000-000000000001", "Dup2"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		ParamSets: [][]any{
 			{"2000000a-0000-0000-0000-000000000002", "OK One"},
 			{"2000000a-0000-0000-0000-000000000003", "Dup2"}, // fails
 			{"2000000a-0000-0000-0000-000000000004", "OK Two"},
 		},
-		Opts: dbExecBatchOpts{ContinueOnError: true},
+		Opts: abiv1.DBExecBatchOpts{ContinueOnError: true},
 	})
 	if hostErr == nil {
 		t.Fatal("expected db.batch_partial_error")
 	}
-	if hostErr.Code != abi.ErrCodeDBBatchPartialError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeDBBatchPartialError)
+	if hostErr.Code != abiv1.ErrCodeDBBatchPartialError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeDBBatchPartialError)
 	}
 	if hostErr.Details["failed_count"] != 1 {
 		t.Errorf("Details[failed_count] = %v, want 1", hostErr.Details["failed_count"])
@@ -195,12 +195,12 @@ func TestDBExecBatch_ContinueOnError_True_CommitsSuccessesReportsFailures(t *tes
 	if hostErr.Details["total_rows_affected"] != 2 {
 		t.Errorf("Details[total_rows_affected] = %v, want 2", hostErr.Details["total_rows_affected"])
 	}
-	errs, ok := hostErr.Details["errors"].([]batchRowError)
+	errs, ok := hostErr.Details["errors"].([]abiv1.DBBatchRowError)
 	if !ok || len(errs) != 1 || errs[0].Index != 1 {
 		t.Errorf("Details[errors] = %v, want one entry at index 1", hostErr.Details["errors"])
 	}
-	if errs[0].Code != abi.ErrCodeDBUniqueViolation {
-		t.Errorf("errors[0].Code = %q, want %q", errs[0].Code, abi.ErrCodeDBUniqueViolation)
+	if errs[0].Code != abiv1.ErrCodeDBUniqueViolation {
+		t.Errorf("errors[0].Code = %q, want %q", errs[0].Code, abiv1.ErrCodeDBUniqueViolation)
 	}
 	_ = out // zero value on the error path — see dbExecBatchOutput{} returned alongside a non-nil hostErr
 
@@ -222,14 +222,14 @@ func TestDBExecBatch_Update_Basic(t *testing.T) {
 	ids := []string{"2000000b-0000-0000-0000-000000000001", "2000000b-0000-0000-0000-000000000002"}
 	names := []string{"Before A", "Before B"}
 	for i, id := range ids {
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, names[i]},
 		}); hostErr != nil {
 			t.Fatalf("seed insert: %+v", hostErr)
 		}
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "UPDATE widget SET name = $1 WHERE id = $2",
 		ParamSets: [][]any{
 			{"After A", ids[0]},
@@ -248,7 +248,7 @@ func TestDBExecBatch_Audit_InsertWritesOneAuditLogRowPerParamSet(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name, secret) VALUES ($1, gen_random_uuid(), $2, $3)",
 		ParamSets: [][]any{
 			{"2000000c-0000-0000-0000-000000000001", "Audited One", "shh"},
@@ -269,12 +269,12 @@ func TestDBExecBatch_SkipAudit_NoAuditLogRows(t *testing.T) {
 	primaryDB, slug, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		ParamSets: [][]any{
 			{"2000000d-0000-0000-0000-000000000001", "Unaudited"},
 		},
-		Opts: dbExecBatchOpts{SkipAudit: true},
+		Opts: abiv1.DBExecBatchOpts{SkipAudit: true},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
@@ -291,24 +291,24 @@ func TestDBExecBatch_EtagMismatch_ContinueOnError(t *testing.T) {
 	ctx := context.Background()
 
 	id := "2000000e-0000-0000-0000-000000000001"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "Etagged"},
 	}); hostErr != nil {
 		t.Fatalf("seed insert: %+v", hostErr)
 	}
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "UPDATE widget SET name = $1 WHERE id = $2 AND etag = $3",
 		ParamSets: [][]any{
 			{"Renamed", id, "stale-etag"},
 		},
-		Opts: dbExecBatchOpts{ContinueOnError: true},
+		Opts: abiv1.DBExecBatchOpts{ContinueOnError: true},
 	})
 	if hostErr == nil {
 		t.Fatal("expected db.batch_partial_error")
 	}
-	errs, ok := hostErr.Details["errors"].([]batchRowError)
-	if !ok || len(errs) != 1 || errs[0].Code != abi.ErrCodeDBEtagMismatch {
+	errs, ok := hostErr.Details["errors"].([]abiv1.DBBatchRowError)
+	if !ok || len(errs) != 1 || errs[0].Code != abiv1.ErrCodeDBEtagMismatch {
 		t.Errorf("Details[errors] = %v, want one db.etag_mismatch entry", hostErr.Details["errors"])
 	}
 }
@@ -324,7 +324,7 @@ func TestDBExecBatch_BorrowedTransaction_NotAutoCommitted(t *testing.T) {
 	// fixture schema's own cleanup) if an assertion below fails first.
 	t.Cleanup(func() { _ = tx.Rollback() })
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		ParamSets: [][]any{
 			{"2000000f-0000-0000-0000-000000000001", "In Tx"},
@@ -355,7 +355,7 @@ func TestDBExecBatch_UnknownTransactionID(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		ParamSets: [][]any{{"20000010-0000-0000-0000-000000000001", "X"}},
 		TxID:      "does-not-exist",
@@ -363,8 +363,8 @@ func TestDBExecBatch_UnknownTransactionID(t *testing.T) {
 	if hostErr == nil {
 		t.Fatal("expected db.transaction_not_found")
 	}
-	if hostErr.Code != abi.ErrCodeTransactionNotFound {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeTransactionNotFound)
+	if hostErr.Code != abiv1.ErrCodeTransactionNotFound {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeTransactionNotFound)
 	}
 }
 
@@ -372,7 +372,7 @@ func TestDBExecBatch_EmptyParamSets_NoOp(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)",
 		ParamSets: nil,
 	})

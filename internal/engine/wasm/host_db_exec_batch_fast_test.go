@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 // --- Eligibility unit tests: pure, no live Postgres needed (prepareExec
@@ -14,7 +14,7 @@ import (
 
 func TestResolveCopyPlan_Eligible_UnauditedTable_NoReadbackNeeded(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -32,7 +32,7 @@ func TestResolveCopyPlan_Eligible_UnauditedTable_NoReadbackNeeded(t *testing.T) 
 
 func TestResolveCopyPlan_Eligible_AuditedTable_PKInColumns(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -50,7 +50,7 @@ func TestResolveCopyPlan_Eligible_AuditedTable_PKInColumns(t *testing.T) {
 
 func TestResolveCopyPlan_Ineligible_AuditedTable_PKNotInColumns(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO widget (tenant_id, name) VALUES ($1, $2)", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO widget (tenant_id, name) VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -61,7 +61,7 @@ func TestResolveCopyPlan_Ineligible_AuditedTable_PKNotInColumns(t *testing.T) {
 
 func TestResolveCopyPlan_Eligible_SkipAudit_PKNotNeeded(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO widget (tenant_id, name) VALUES ($1, $2)", dbExecOpts{SkipAudit: true}, mc)
+	p, hostErr := prepareExec("INSERT INTO widget (tenant_id, name) VALUES ($1, $2)", abiv1.DBExecOpts{SkipAudit: true}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -83,7 +83,7 @@ func TestResolveCopyPlan_Eligible_SkipAudit_PKNotNeeded(t *testing.T) {
 // from that SDK entirely.
 func TestResolveCopyPlan_Eligible_RegardlessOfContinueOnError(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -94,7 +94,7 @@ func TestResolveCopyPlan_Eligible_RegardlessOfContinueOnError(t *testing.T) {
 
 func TestResolveCopyPlan_RowCountThreshold_IsStrictlyGreaterThan100(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -108,7 +108,7 @@ func TestResolveCopyPlan_RowCountThreshold_IsStrictlyGreaterThan100(t *testing.T
 
 func TestResolveCopyPlan_Ineligible_UpdateStatement(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("UPDATE gadget SET name = $1 WHERE id = $2", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("UPDATE gadget SET name = $1 WHERE id = $2", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -124,7 +124,7 @@ func TestResolveCopyPlan_Ineligible_UpdateStatement(t *testing.T) {
 // expressions the server would otherwise evaluate per row.
 func TestResolveCopyPlan_Ineligible_ComputedValueExpression(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -140,7 +140,7 @@ func TestResolveCopyPlan_Ineligible_ComputedValueExpression(t *testing.T) {
 // path actually provides.
 func TestResolveCopyPlan_Ineligible_OnConflict(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = excluded.name", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = excluded.name", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -156,7 +156,7 @@ func TestResolveCopyPlan_Ineligible_OnConflict(t *testing.T) {
 // path would silently write each row's values into the wrong columns.
 func TestResolveCopyPlan_Ineligible_OutOfOrderPlaceholders(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO widget (id, tenant_id, name) VALUES ($2, $1, $3)", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO widget (id, tenant_id, name) VALUES ($2, $1, $3)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -174,7 +174,7 @@ func TestResolveCopyPlan_Ineligible_OutOfOrderPlaceholders(t *testing.T) {
 // — a Postgres syntax error, not merely an unsupported shape.
 func TestResolveCopyPlan_Ineligible_NoExplicitColumnList(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("INSERT INTO gadget VALUES ($1, $2)", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("INSERT INTO gadget VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -185,15 +185,15 @@ func TestResolveCopyPlan_Ineligible_NoExplicitColumnList(t *testing.T) {
 
 func TestPipelineEligible(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	updateP, hostErr := prepareExec("UPDATE gadget SET name = $1 WHERE id = $2", dbExecOpts{}, mc)
+	updateP, hostErr := prepareExec("UPDATE gadget SET name = $1 WHERE id = $2", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec update: %+v", hostErr)
 	}
-	deleteP, hostErr := prepareExec("DELETE FROM gadget WHERE id = $1", dbExecOpts{}, mc)
+	deleteP, hostErr := prepareExec("DELETE FROM gadget WHERE id = $1", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec delete: %+v", hostErr)
 	}
-	insertP, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", dbExecOpts{}, mc)
+	insertP, hostErr := prepareExec("INSERT INTO gadget (id, name) VALUES ($1, $2)", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec insert: %+v", hostErr)
 	}
@@ -246,7 +246,7 @@ func TestPipelineEligible(t *testing.T) {
 // without this check.
 func TestPipelineEligible_AuditedTable_DuplicateTarget_Ineligible(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("UPDATE widget SET name = $1 WHERE id = $2", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("UPDATE widget SET name = $1 WHERE id = $2", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -276,7 +276,7 @@ func TestPipelineEligible_AuditedTable_DuplicateTarget_Ineligible(t *testing.T) 
 // check exists to catch, not an absence of anything to check.
 func TestPipelineHasDuplicateAuditTargets_NoWhereClauseParams_AlwaysDuplicate(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("UPDATE widget SET name = $1 WHERE tenant_id = '00000000-0000-0000-0000-0000000000f5'", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("UPDATE widget SET name = $1 WHERE tenant_id = '00000000-0000-0000-0000-0000000000f5'", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -296,7 +296,7 @@ func TestPipelineHasDuplicateAuditTargets_NoWhereClauseParams_AlwaysDuplicate(t 
 // stops immediately on the first failure.
 func TestPipelineEligible_EtagCheckedUpdate_Ineligible(t *testing.T) {
 	mc := newExecTestModuleContext("acme")
-	p, hostErr := prepareExec("UPDATE widget SET name = $2 WHERE id = $3 AND etag = $1", dbExecOpts{}, mc)
+	p, hostErr := prepareExec("UPDATE widget SET name = $2 WHERE id = $3 AND etag = $1", abiv1.DBExecOpts{}, mc)
 	if hostErr != nil {
 		t.Fatalf("prepareExec: %+v", hostErr)
 	}
@@ -327,10 +327,10 @@ func TestDBExecBatch_COPYPath_Insert_AuditedTable_WritesAuditAndOrderedReturning
 		paramSets[i] = []any{id, fastPathTenantID, fmt.Sprintf("Copy Row %03d", i)}
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{Returning: "id, name"},
+		Opts:      abiv1.DBExecBatchOpts{Returning: "id, name"},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
@@ -375,10 +375,10 @@ func TestDBExecBatch_COPYPath_Insert_SkipAudit_UnauditedShapeStillWorks(t *testi
 		paramSets[i] = []any{fmt.Sprintf("30100000-0000-0000-0000-%012d", i+1), fastPathTenantID, fmt.Sprintf("Skip Audit %03d", i)}
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{SkipAudit: true},
+		Opts:      abiv1.DBExecBatchOpts{SkipAudit: true},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
@@ -412,7 +412,7 @@ func TestDBExecBatch_Insert_NoExplicitColumnList_LargeBatch_StillSucceeds(t *tes
 		paramSets[i] = []any{fmt.Sprintf("30b00000-0000-0000-0000-%012d", i+1), fmt.Sprintf("No Cols %03d", i)}
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO gadget VALUES ($1, $2)",
 		ParamSets: paramSets,
 	})
@@ -441,7 +441,7 @@ func TestDBExecBatch_COPYPath_UniqueViolation_FailsWholeBatchAtomically(t *testi
 	ctx := context.Background()
 
 	dupName := "Duplicate Name"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		Params: []any{"30200000-0000-0000-0000-000000000001", fastPathTenantID, dupName},
 	}); hostErr != nil {
@@ -458,15 +458,15 @@ func TestDBExecBatch_COPYPath_UniqueViolation_FailsWholeBatchAtomically(t *testi
 		paramSets[i] = []any{fmt.Sprintf("30200000-0000-0000-0000-%012d", i+2), fastPathTenantID, name}
 	}
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		ParamSets: paramSets,
 	})
 	if hostErr == nil {
 		t.Fatal("expected db.batch_error from a real unique violation mid-COPY")
 	}
-	if hostErr.Code != abi.ErrCodeDBBatchError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeDBBatchError)
+	if hostErr.Code != abiv1.ErrCodeDBBatchError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeDBBatchError)
 	}
 
 	var count int
@@ -493,7 +493,7 @@ func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_PartialFailure_RetriesSequenti
 	ctx := context.Background()
 
 	dupName := "CoE Duplicate"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		Params: []any{"30900000-0000-0000-0000-000000000001", fastPathTenantID, dupName},
 	}); hostErr != nil {
@@ -511,21 +511,21 @@ func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_PartialFailure_RetriesSequenti
 		paramSets[i] = []any{fmt.Sprintf("30900000-0000-0000-0000-%012d", i+2), fastPathTenantID, name}
 	}
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{ContinueOnError: true},
+		Opts:      abiv1.DBExecBatchOpts{ContinueOnError: true},
 	})
 	if hostErr == nil {
 		t.Fatal("expected db.batch_partial_error")
 	}
-	if hostErr.Code != abi.ErrCodeDBBatchPartialError {
-		t.Fatalf("Code = %q, want %q — continue_on_error: true must retry via the sequential path on a fast-path failure, not return the fast path's own db.batch_error", hostErr.Code, abi.ErrCodeDBBatchPartialError)
+	if hostErr.Code != abiv1.ErrCodeDBBatchPartialError {
+		t.Fatalf("Code = %q, want %q — continue_on_error: true must retry via the sequential path on a fast-path failure, not return the fast path's own db.batch_error", hostErr.Code, abiv1.ErrCodeDBBatchPartialError)
 	}
 	if hostErr.Details["failed_count"] != 1 {
 		t.Errorf("Details[failed_count] = %v, want 1", hostErr.Details["failed_count"])
 	}
-	errs, ok := hostErr.Details["errors"].([]batchRowError)
+	errs, ok := hostErr.Details["errors"].([]abiv1.DBBatchRowError)
 	if !ok || len(errs) != 1 || errs[0].Index != failIndex {
 		t.Errorf("Details[errors] = %v, want one entry at index %d", hostErr.Details["errors"], failIndex)
 	}
@@ -571,19 +571,19 @@ func TestDBExecBatch_COPYPath_ContinueOnErrorTrue_BorrowedTx_NeverRetries_Report
 		paramSets[i] = []any{fmt.Sprintf("30a00000-0000-0000-0000-%012d", i+2), fastPathTenantID, name}
 	}
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{ContinueOnError: true},
+		Opts:      abiv1.DBExecBatchOpts{ContinueOnError: true},
 		TxID:      txID,
 	})
 	if hostErr == nil {
 		t.Fatal("expected db.batch_partial_error")
 	}
-	if hostErr.Code != abi.ErrCodeDBBatchPartialError {
-		t.Fatalf("Code = %q, want %q", hostErr.Code, abi.ErrCodeDBBatchPartialError)
+	if hostErr.Code != abiv1.ErrCodeDBBatchPartialError {
+		t.Fatalf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeDBBatchPartialError)
 	}
-	errs, ok := hostErr.Details["errors"].([]batchRowError)
+	errs, ok := hostErr.Details["errors"].([]abiv1.DBBatchRowError)
 	if !ok || len(errs) != 1 || errs[0].Index != failIndex {
 		t.Errorf("Details[errors] = %v, want one entry at index %d — a real index means the sequential path ran, never the fast path's own -1 sentinel", hostErr.Details["errors"], failIndex)
 	}
@@ -624,10 +624,10 @@ func TestDBExecBatch_COPYPath_ReadbackChunking_CrossesChunkBoundary(t *testing.T
 	// skip_audit keeps this test's own runtime down (no audit_log writes)
 	// while opts.returning still forces the exact read-back path being
 	// tested — readbackNeeded is true here purely from requestedCols.
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{Returning: "id", SkipAudit: true},
+		Opts:      abiv1.DBExecBatchOpts{Returning: "id", SkipAudit: true},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
@@ -662,7 +662,7 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_OverlappingTargets_BothEnt
 	ctx := context.Background()
 
 	id := "30f00000-0000-0000-0000-000000000001"
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name, secret) VALUES ($1, $2, $3, $4)",
 		Params: []any{id, fastPathTenantID, "Before", "mysecret"},
 	}); hostErr != nil {
@@ -674,7 +674,7 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_OverlappingTargets_BothEnt
 		{"After-1", "00000000-0000-0000-0000-000000000000", "mysecret"}, // matches via secret — same row, different bound values
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "UPDATE widget SET name = $1 WHERE id = $2 OR secret = $3",
 		ParamSets: paramSets,
 	})
@@ -729,7 +729,7 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_WritesAuditAndReturning(t 
 	for i := range n {
 		id := fmt.Sprintf("30300000-0000-0000-0000-%012d", i+1)
 		ids[i] = id
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 			Params: []any{id, fastPathTenantID, fmt.Sprintf("Before %03d", i)},
 		}); hostErr != nil {
@@ -738,10 +738,10 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_WritesAuditAndReturning(t 
 		paramSets[i] = []any{fmt.Sprintf("After %03d", i), id}
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "UPDATE widget SET name = $1 WHERE id = $2",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{Returning: "id, name"},
+		Opts:      abiv1.DBExecBatchOpts{Returning: "id, name"},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExecBatch: %+v", hostErr)
@@ -794,7 +794,7 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_CrossesAuditChunkBoundary(
 	for i := range n {
 		id := fmt.Sprintf("30700000-0000-0000-0000-%012d", i+1)
 		ids[i] = id
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 			Params: []any{id, fastPathTenantID, fmt.Sprintf("Chunk Before %04d", i)},
 		}); hostErr != nil {
@@ -803,7 +803,7 @@ func TestDBExecBatch_PipelinePath_Update_AuditedTable_CrossesAuditChunkBoundary(
 		paramSets[i] = []any{fmt.Sprintf("Chunk After %04d", i), id}
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "UPDATE widget SET name = $1 WHERE id = $2",
 		ParamSets: paramSets,
 	})
@@ -858,7 +858,7 @@ func TestDBExecBatch_PipelinePath_Delete_RemovesRows(t *testing.T) {
 	paramSets := make([][]any, n)
 	for i := range n {
 		id := fmt.Sprintf("30400000-0000-0000-0000-%012d", i+1)
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 			Params: []any{id, fastPathTenantID, fmt.Sprintf("To Delete %03d", i)},
 		}); hostErr != nil {
@@ -867,7 +867,7 @@ func TestDBExecBatch_PipelinePath_Delete_RemovesRows(t *testing.T) {
 		paramSets[i] = []any{id}
 	}
 
-	out, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	out, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "DELETE FROM widget WHERE id = $1",
 		ParamSets: paramSets,
 	})
@@ -909,7 +909,7 @@ func TestDBExecBatch_EtagCheckedUpdateBatch_UsesSequentialPath_ReportsMismatch(t
 	for i := range n {
 		id := fmt.Sprintf("30500000-0000-0000-0000-%012d", i+1)
 		ids[i] = id
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL:    "INSERT INTO widget (id, tenant_id, name, etag) VALUES ($1, $2, $3, 'v1')",
 			Params: []any{id, fastPathTenantID, fmt.Sprintf("Etag %03d", i)},
 		}); hostErr != nil {
@@ -922,18 +922,18 @@ func TestDBExecBatch_EtagCheckedUpdateBatch_UsesSequentialPath_ReportsMismatch(t
 		paramSets[i] = []any{"stale-etag", id} // every row's own real etag is "v1", not "stale-etag"
 	}
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "UPDATE widget SET name = 'Changed' WHERE id = $2 AND etag = $1",
 		ParamSets: paramSets,
 	})
 	if hostErr == nil {
 		t.Fatal("expected db.batch_error from an etag mismatch on the first row")
 	}
-	if hostErr.Code != abi.ErrCodeDBBatchError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeDBBatchError)
+	if hostErr.Code != abiv1.ErrCodeDBBatchError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeDBBatchError)
 	}
-	if hostErr.Details["code"] != abi.ErrCodeDBEtagMismatch {
-		t.Errorf("Details[code] = %v, want %q", hostErr.Details["code"], abi.ErrCodeDBEtagMismatch)
+	if hostErr.Details["code"] != abiv1.ErrCodeDBEtagMismatch {
+		t.Errorf("Details[code] = %v, want %q", hostErr.Details["code"], abiv1.ErrCodeDBEtagMismatch)
 	}
 }
 
@@ -946,7 +946,7 @@ func TestDBExecBatch_PipelinePath_ContinueOnError_FallsBackToSequential(t *testi
 	for i := range n {
 		id := fmt.Sprintf("30600000-0000-0000-0000-%012d", i+1)
 		ids[i] = id
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 			SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 			Params: []any{id, fastPathTenantID, fmt.Sprintf("CoE %03d", i)},
 		}); hostErr != nil {
@@ -958,7 +958,7 @@ func TestDBExecBatch_PipelinePath_ContinueOnError_FallsBackToSequential(t *testi
 	// only possible via the sequential path's own per-row SAVEPOINT, not
 	// the pipeline fast path this test's own eligible-shaped batch would
 	// otherwise take.
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name) VALUES ($1, $2, $3)",
 		Params: []any{"30600000-0000-0000-0000-000000000099", fastPathTenantID, "Taken"},
 	}); hostErr != nil {
@@ -974,16 +974,16 @@ func TestDBExecBatch_PipelinePath_ContinueOnError_FallsBackToSequential(t *testi
 		paramSets[i] = []any{name, id}
 	}
 
-	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, abiv1.DBExecBatchInput{
 		SQL:       "UPDATE widget SET name = $1 WHERE id = $2",
 		ParamSets: paramSets,
-		Opts:      dbExecBatchOpts{ContinueOnError: true},
+		Opts:      abiv1.DBExecBatchOpts{ContinueOnError: true},
 	})
 	if hostErr == nil {
 		t.Fatal("expected db.batch_partial_error")
 	}
-	if hostErr.Code != abi.ErrCodeDBBatchPartialError {
-		t.Errorf("Code = %q, want %q — continue_on_error must use the sequential path's own per-row partial-failure reporting, not the pipeline fast path", hostErr.Code, abi.ErrCodeDBBatchPartialError)
+	if hostErr.Code != abiv1.ErrCodeDBBatchPartialError {
+		t.Errorf("Code = %q, want %q — continue_on_error must use the sequential path's own per-row partial-failure reporting, not the pipeline fast path", hostErr.Code, abiv1.ErrCodeDBBatchPartialError)
 	}
 	if hostErr.Details["failed_count"] != 1 {
 		t.Errorf("Details[failed_count] = %v, want 1", hostErr.Details["failed_count"])

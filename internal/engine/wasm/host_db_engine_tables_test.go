@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -130,9 +131,9 @@ func TestHostDB_RejectsEngineOwnedTables(t *testing.T) {
 			"SELECT w.id FROM widget w JOIN " + name + " e ON true",
 			"SELECT id FROM widget WHERE EXISTS (SELECT 1 FROM " + name + ")",
 		} {
-			env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: sql})
-			if env.OK || env.Error.Code != abi.ErrCodeTableAccessDenied {
-				t.Errorf("query %q: envelope = %+v, want %q", sql, env, abi.ErrCodeTableAccessDenied)
+			env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: sql})
+			if env.OK || env.Error.Code != abiv1.ErrCodeTableAccessDenied {
+				t.Errorf("query %q: envelope = %+v, want %q", sql, env, abiv1.ErrCodeTableAccessDenied)
 			}
 		}
 
@@ -141,19 +142,19 @@ func TestHostDB_RejectsEngineOwnedTables(t *testing.T) {
 			"UPDATE widget SET name = 'x' FROM " + name + " e WHERE false",
 			"DELETE FROM widget WHERE EXISTS (SELECT 1 FROM " + name + ")",
 		} {
-			_, hostErr := DBExec(ctx, primaryDB, execCtx, dbExecInput{SQL: sql})
-			if hostErr == nil || hostErr.Code != abi.ErrCodeTableAccessDenied {
-				t.Errorf("exec %q: error = %v, want %q", sql, hostErr, abi.ErrCodeTableAccessDenied)
+			_, hostErr := DBExec(ctx, primaryDB, execCtx, abiv1.DBExecInput{SQL: sql})
+			if hostErr == nil || hostErr.Code != abiv1.ErrCodeTableAccessDenied {
+				t.Errorf("exec %q: error = %v, want %q", sql, hostErr, abiv1.ErrCodeTableAccessDenied)
 			}
 		}
 
 		sql := "DELETE FROM widget WHERE id = $1 AND EXISTS (SELECT 1 FROM " + name + ")"
-		_, hostErr := DBExecBatch(ctx, primaryDB, execCtx, dbExecBatchInput{
+		_, hostErr := DBExecBatch(ctx, primaryDB, execCtx, abiv1.DBExecBatchInput{
 			SQL:       sql,
 			ParamSets: [][]any{{"11111111-1111-1111-1111-111111111111"}},
 		})
-		if hostErr == nil || hostErr.Code != abi.ErrCodeTableAccessDenied {
-			t.Errorf("exec_batch %q: error = %v, want %q", sql, hostErr, abi.ErrCodeTableAccessDenied)
+		if hostErr == nil || hostErr.Code != abiv1.ErrCodeTableAccessDenied {
+			t.Errorf("exec_batch %q: error = %v, want %q", sql, hostErr, abiv1.ErrCodeTableAccessDenied)
 		}
 	}
 }
@@ -174,9 +175,9 @@ func TestHostDB_RejectsSQLExecutingFunctionsAndCatalogs(t *testing.T) {
 		"SELECT most_common_vals FROM pg_stats WHERE tablename = 'user_roles'",
 		"SELECT partman.show_partitions('tenant_" + slug + ".audit_log')",
 	} {
-		env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: sql})
-		if env.OK || env.Error.Code != abi.ErrCodeTableAccessDenied {
-			t.Errorf("query %q: envelope = %+v, want %q", sql, env, abi.ErrCodeTableAccessDenied)
+		env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: sql})
+		if env.OK || env.Error.Code != abiv1.ErrCodeTableAccessDenied {
+			t.Errorf("query %q: envelope = %+v, want %q", sql, env, abiv1.ErrCodeTableAccessDenied)
 		}
 	}
 
@@ -184,9 +185,9 @@ func TestHostDB_RejectsSQLExecutingFunctionsAndCatalogs(t *testing.T) {
 		"UPDATE widget SET secret = query_to_xml('select * from record_shares', true, false, '')::text",
 		"UPDATE pg_settings SET setting = 'system, public' WHERE name = 'search_path'",
 	} {
-		_, hostErr := DBExec(ctx, primaryDB, newExecTestModuleContext(slug), dbExecInput{SQL: sql})
-		if hostErr == nil || hostErr.Code != abi.ErrCodeTableAccessDenied {
-			t.Errorf("exec %q: error = %v, want %q", sql, hostErr, abi.ErrCodeTableAccessDenied)
+		_, hostErr := DBExec(ctx, primaryDB, newExecTestModuleContext(slug), abiv1.DBExecInput{SQL: sql})
+		if hostErr == nil || hostErr.Code != abiv1.ErrCodeTableAccessDenied {
+			t.Errorf("exec %q: error = %v, want %q", sql, hostErr, abiv1.ErrCodeTableAccessDenied)
 		}
 	}
 }
@@ -197,13 +198,13 @@ func TestHostDB_AllowsModuleTablesAlongsideEngineTables(t *testing.T) {
 	execCtx := newExecTestModuleContext(slug)
 
 	gadgetID := "20000000-0000-0000-0000-000000000001"
-	if _, hostErr := DBExec(ctx, primaryDB, execCtx, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, execCtx, abiv1.DBExecInput{
 		SQL:    "INSERT INTO gadget (id, name) VALUES ($1, 'g')",
 		Params: []any{gadgetID},
 	}); hostErr != nil {
 		t.Fatalf("insert gadget: %+v", hostErr)
 	}
-	if _, hostErr := DBExec(ctx, primaryDB, execCtx, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, execCtx, abiv1.DBExecInput{
 		SQL:    "INSERT INTO widget (id, tenant_id, name, parent_id) VALUES (gen_random_uuid(), gen_random_uuid(), 'w', $1)",
 		Params: []any{gadgetID},
 	}); hostErr != nil {
@@ -212,7 +213,7 @@ func TestHostDB_AllowsModuleTablesAlongsideEngineTables(t *testing.T) {
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostDBQueryCaller(t, ctx, r, newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter()))
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{
 		SQL: "SELECT w.name, g.name FROM widget w JOIN gadget g ON g.id = w.parent_id",
 	})
 	if !env.OK {

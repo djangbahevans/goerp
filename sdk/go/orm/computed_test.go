@@ -4,11 +4,12 @@ import (
 	"errors"
 	"testing"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-func dispatchComputedAndDecode(t *testing.T, req computeRequest) computeResponse {
+func dispatchComputedAndDecode(t *testing.T, req abi.ComputeRequest) abi.ComputeResponse {
 	t.Helper()
 	data, err := msgpack.Marshal(req)
 	if err != nil {
@@ -20,7 +21,7 @@ func dispatchComputedAndDecode(t *testing.T, req computeRequest) computeResponse
 	packed := DispatchComputed(ptr, uint32(len(data)))
 	respPtr, respLen := uint32(packed>>32), uint32(packed)
 
-	var resp computeResponse
+	var resp abi.ComputeResponse
 	if err := msgpack.Unmarshal(engine.ReadMem(respPtr, respLen), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -33,7 +34,7 @@ func TestDispatchComputed_RegisteredFn(t *testing.T) {
 		return int64(qty) * 100, nil
 	})
 
-	resp := dispatchComputedAndDecode(t, computeRequest{
+	resp := dispatchComputedAndDecode(t, abi.ComputeRequest{
 		FnName: "test_compute_total",
 		Record: map[string]any{"quantity": int8(3)},
 	})
@@ -46,7 +47,7 @@ func TestDispatchComputed_RegisteredFn(t *testing.T) {
 }
 
 func TestDispatchComputed_UnregisteredFn(t *testing.T) {
-	resp := dispatchComputedAndDecode(t, computeRequest{FnName: "test_never_registered"})
+	resp := dispatchComputedAndDecode(t, abi.ComputeRequest{FnName: "test_never_registered"})
 	if resp.Error == nil || resp.Error.Code != "orm.compute_fn_not_registered" {
 		t.Errorf("Error = %+v, want code orm.compute_fn_not_registered", resp.Error)
 	}
@@ -57,7 +58,7 @@ func TestDispatchComputed_FnReturnsError(t *testing.T) {
 		return nil, errors.New("boom")
 	})
 
-	resp := dispatchComputedAndDecode(t, computeRequest{FnName: "test_compute_fails"})
+	resp := dispatchComputedAndDecode(t, abi.ComputeRequest{FnName: "test_compute_fails"})
 	if resp.Error == nil || resp.Error.Code != "orm.backend_error" {
 		t.Errorf("Error = %+v, want code orm.backend_error", resp.Error)
 	}
@@ -70,7 +71,7 @@ func TestDispatchComputed_ContextPassedThrough(t *testing.T) {
 		return nil, nil
 	})
 
-	dispatchComputedAndDecode(t, computeRequest{FnName: "test_compute_ctx", TenantID: "acme", UserID: "u1", TraceID: "t1"})
+	dispatchComputedAndDecode(t, abi.ComputeRequest{FnName: "test_compute_ctx", TenantID: "acme", UserID: "u1", TraceID: "t1"})
 	if gotCtx.TenantID != "acme" || gotCtx.UserID != "u1" || gotCtx.TraceID != "t1" {
 		t.Errorf("ComputeContext = %+v, want TenantID=acme UserID=u1 TraceID=t1", gotCtx)
 	}

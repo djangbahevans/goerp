@@ -5,12 +5,10 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-type dbNotifyInput = abi.DBNotifyInput
-
 // Notify sends a Postgres NOTIFY on channel via host.db.notify, delivered
 // immediately.
 func Notify(channel, payload string) error {
-	return notify(dbNotifyInput{Channel: channel, Payload: payload})
+	return notify(abi.DBNotifyInput{Channel: channel, Payload: payload})
 }
 
 // Notify is Notify, scoped to tx's own open transaction — delivery is
@@ -19,10 +17,10 @@ func Notify(channel, payload string) error {
 // package's own Query/Exec convention (go-sdk-reference.md §6
 // "Transactions").
 func (tx *Tx) Notify(channel, payload string) error {
-	return notify(dbNotifyInput{Channel: channel, Payload: payload, TxID: tx.id})
+	return notify(abi.DBNotifyInput{Channel: channel, Payload: payload, TxID: tx.id})
 }
 
-func notify(in dbNotifyInput) error {
-	var out dbDurationOutput
+func notify(in abi.DBNotifyInput) error {
+	var out abi.DBDurationOutput
 	return hostcall.Do(hostDBNotify, in, &out)
 }

@@ -69,10 +69,6 @@ func compileVirtualOpFixture(t *testing.T) []byte {
 	return data
 }
 
-type wireVirtualOpRequest = abiv1.VirtualOpRequest
-
-type wireVirtualOpResponse = abiv1.VirtualOpResponse
-
 // TestInvokeHandleVirtualOp_RoundTripsThroughRealModule compiles a real Go
 // module registering orm.RegisterVirtualBackend for "legacy.item"
 // (testdata/virtualopfixture) and proves InvokeHandleVirtualOp reaches its
@@ -99,7 +95,7 @@ func TestInvokeHandleVirtualOp_RoundTripsThroughRealModule(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = inst.module.CloseWithExitCode(context.Background(), 0) })
 
-	reqBytes, err := msgpack.Marshal(wireVirtualOpRequest{
+	reqBytes, err := msgpack.Marshal(abiv1.VirtualOpRequest{
 		Model:    "legacy.item",
 		Op:       "read",
 		ID:       "item-1",
@@ -114,7 +110,7 @@ func TestInvokeHandleVirtualOp_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatalf("InvokeHandleVirtualOp: %v", err)
 	}
 
-	var resp wireVirtualOpResponse
+	var resp abiv1.VirtualOpResponse
 	if err := msgpack.Unmarshal(respBytes, &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}

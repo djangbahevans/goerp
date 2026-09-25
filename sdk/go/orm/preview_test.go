@@ -3,11 +3,12 @@ package orm
 import (
 	"testing"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-func dispatchPreviewAndDecode(t *testing.T, req previewRequest) previewResponse {
+func dispatchPreviewAndDecode(t *testing.T, req abi.PreviewRequest) abi.PreviewResponse {
 	t.Helper()
 	data, err := msgpack.Marshal(req)
 	if err != nil {
@@ -19,7 +20,7 @@ func dispatchPreviewAndDecode(t *testing.T, req previewRequest) previewResponse 
 	packed := DispatchPreview(ptr, uint32(len(data)))
 	respPtr, respLen := uint32(packed>>32), uint32(packed)
 
-	var resp previewResponse
+	var resp abi.PreviewResponse
 	if err := msgpack.Unmarshal(engine.ReadMem(respPtr, respLen), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -32,7 +33,7 @@ func TestDispatchPreview_RegisteredHook(t *testing.T) {
 		return draft
 	})
 
-	resp := dispatchPreviewAndDecode(t, previewRequest{
+	resp := dispatchPreviewAndDecode(t, abi.PreviewRequest{
 		Model:    "test.priced_order",
 		Record:   map[string]any{"customer_id": "c1"},
 		TenantID: "acme",
@@ -53,7 +54,7 @@ func TestDispatchPreview_RegisteredHook(t *testing.T) {
 // registered hook is not an error, unlike orm.DispatchVirtualOp's
 // virtual_op_not_implemented — the draft comes back exactly as given.
 func TestDispatchPreview_UnregisteredModel_PassesDraftThroughUnchanged(t *testing.T) {
-	resp := dispatchPreviewAndDecode(t, previewRequest{
+	resp := dispatchPreviewAndDecode(t, abi.PreviewRequest{
 		Model:  "test.never_registered",
 		Record: map[string]any{"a": int64(1)},
 	})

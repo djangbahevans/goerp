@@ -36,12 +36,6 @@ const defaultExecTimeout = defaultQueryTimeout
 // that only gets positional any[][] rows.
 var returningColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-type dbExecOpts = abiv1.DBExecOpts
-
-type dbExecInput = abiv1.DBExecInput
-
-type dbExecOutput = abiv1.DBExecOutput
-
 func makeDBExec(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -56,7 +50,7 @@ func makeDBExec(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Mod
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input dbExecInput
+		var input abiv1.DBExecInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -219,25 +213,25 @@ type preparedExec struct {
 // audit/etag mechanisms against modCtx's declared models — everything
 // execRow needs that stays constant across every parameter set a single
 // statement is run against.
-func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (preparedExec, *abi.HostError) {
+func prepareExec(sqlText string, opts abiv1.DBExecOpts, modCtx *ModuleContext) (preparedExec, *abiv1.HostError) {
 	tree, err := pgquery.Parse(sqlText)
 	if err != nil {
-		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return preparedExec{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 	}
 	stmt, err := parseExecStmt(tree)
 	if err != nil {
-		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return preparedExec{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 	}
 	if len(stmt.ReturningList) > 0 {
-		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: "host.db.exec statements must not include their own RETURNING clause — use opts.returning instead"}
+		return preparedExec{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: "host.db.exec statements must not include their own RETURNING clause — use opts.returning instead"}
 	}
 	if err := dbscope.ValidateTreeTableRefs(tree); err != nil {
-		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeTableAccessDenied, Message: err.Error()}
+		return preparedExec{}, &abiv1.HostError{Code: abiv1.ErrCodeTableAccessDenied, Message: err.Error()}
 	}
 
 	requestedCols, err := parseReturningColumns(opts.Returning)
 	if err != nil {
-		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return preparedExec{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 	}
 
 	table := stmt.Relation.GetRelname()
@@ -275,7 +269,7 @@ func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (prepar
 	}
 	finalSQL, err := pgquery.Deparse(tree)
 	if err != nil {
-		return preparedExec{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return preparedExec{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 	}
 
 	return preparedExec{
@@ -300,28 +294,28 @@ func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (prepar
 // doc comment in context.go); for a borrowed transaction it's a no-op,
 // since that transaction is owned by whoever called host.db.begin, not
 // by this call.
-func beginOrBorrowExecTx(qCtx context.Context, primary *sql.DB, modCtx *ModuleContext, txID string) (conn *sql.Conn, tx *sql.Tx, finish func(error) error, hostErr *abi.HostError) {
+func beginOrBorrowExecTx(qCtx context.Context, primary *sql.DB, modCtx *ModuleContext, txID string) (conn *sql.Conn, tx *sql.Tx, finish func(error) error, hostErr *abiv1.HostError) {
 	if txID != "" {
 		borrowedConn, borrowedTx, ok := modCtx.TransactionAndConn(txID)
 		if !ok {
-			return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
+			return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"}
 		}
 		return borrowedConn, borrowedTx, func(error) error { return nil }, nil
 	}
 
 	newConn, err := primary.Conn(qCtx)
 	if err != nil {
-		return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	newTx, err := newConn.BeginTx(qCtx, nil)
 	if err != nil {
 		_ = newConn.Close()
-		return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	if err := applyTenantScope(qCtx, newTx, modCtx); err != nil {
 		_ = newTx.Rollback()
 		_ = newConn.Close()
-		return nil, nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	finish = func(callErr error) error {
 		var finishErr error
@@ -363,7 +357,7 @@ type execRowResult struct {
 // DBExecBatch (host_db_exec_batch.go) instead gives each parameter set
 // its own fresh per-row timeout window, independent of the batch
 // transaction's own lifetime.
-func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedExec, params []any) (execRowResult, *abi.HostError) {
+func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedExec, params []any) (execRowResult, *abiv1.HostError) {
 	var oldRows []map[string]any
 	if (p.audited && p.stmt.Operation != "INSERT") || p.tracked {
 		var err error
@@ -371,7 +365,7 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 			Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause, FromClause: p.stmt.FromClause,
 		}, params)
 		if err != nil {
-			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+			return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 		}
 	}
 
@@ -396,17 +390,17 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 			available, err := rows.Columns()
 			if err != nil {
 				_ = rows.Close()
-				return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+				return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 			}
 			if err := validateRequestedColumns(p.requestedCols, available); err != nil {
 				_ = rows.Close()
-				return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+				return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 			}
 		}
 		var err error
 		newRows, err = scanRowsToMaps(rows)
 		if err != nil {
-			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+			return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 		}
 		rowsAffected = int64(len(newRows))
 	} else {
@@ -417,24 +411,24 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 		var err error
 		rowsAffected, err = result.RowsAffected()
 		if err != nil {
-			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+			return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 		}
 	}
 	duration := time.Since(start)
 
 	if p.hasEtagCol && isEtagMismatch(p.hadEtagCheck, rowsAffected) {
-		return execRowResult{}, &abi.HostError{Code: abi.ErrCodeDBEtagMismatch, Message: "record has been modified since it was last read"}
+		return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeDBEtagMismatch, Message: "record has been modified since it was last read"}
 	}
 
 	if p.audited {
 		if auditErr := writeAuditForExec(ctx, tx, modCtx, p.table, p.stmt, p.pkCol, p.excludeCols, oldRows, newRows); auditErr != nil {
-			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: auditErr.Error()}
+			return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: auditErr.Error()}
 		}
 	}
 
 	if p.tracked {
 		if err := writeExecChangeActivity(ctx, tx, modCtx, p.trackedName, p.trackedModel, p.trackedPKCol, oldRows, newRows); err != nil {
-			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+			return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 		}
 	}
 
@@ -450,10 +444,10 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 // statement this function runs goes through a *sql.Tx either way, since
 // host.db.exec's own etag/audit mechanisms need transactional
 // consistency between the pre-write read and the write itself.
-func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input dbExecInput) (dbExecOutput, *abi.HostError) {
+func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input abiv1.DBExecInput) (abiv1.DBExecOutput, *abiv1.HostError) {
 	p, hostErr := prepareExec(input.SQL, input.Opts, modCtx)
 	if hostErr != nil {
-		return dbExecOutput{}, hostErr
+		return abiv1.DBExecOutput{}, hostErr
 	}
 
 	timeout := defaultExecTimeout
@@ -465,22 +459,22 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 
 	_, tx, finish, hostErr := beginOrBorrowExecTx(qCtx, primary, modCtx, input.TxID)
 	if hostErr != nil {
-		return dbExecOutput{}, hostErr
+		return abiv1.DBExecOutput{}, hostErr
 	}
 
 	result, hostErr := execRow(qCtx, tx, modCtx, p, input.Params)
 	if hostErr != nil {
 		_ = finish(errors.New(hostErr.Message))
-		return dbExecOutput{}, hostErr
+		return abiv1.DBExecOutput{}, hostErr
 	}
 
 	if input.Opts.ExpectRows && result.RowsAffected == 0 {
 		_ = finish(errors.New("no rows affected"))
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeNoRowsAffected, Message: "statement matched zero rows"}
+		return abiv1.DBExecOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeNoRowsAffected, Message: "statement matched zero rows"}
 	}
 
 	if err := finish(nil); err != nil {
-		return dbExecOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.DBExecOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	if result.Duration > slowQueryThreshold {
@@ -488,7 +482,7 @@ func DBExec(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input d
 			Dur("duration", result.Duration).Msg("host.db.exec: slow exec")
 	}
 
-	output := dbExecOutput{RowsAffected: int(result.RowsAffected), DurationMs: float64(result.Duration.Microseconds()) / 1000}
+	output := abiv1.DBExecOutput{RowsAffected: int(result.RowsAffected), DurationMs: float64(result.Duration.Microseconds()) / 1000}
 	if p.requestedCols != nil {
 		output.Returning = result.Returning
 	}
@@ -528,13 +522,13 @@ func writeAuditForExec(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, t
 // underlying Postgres errors, and with FK violation detail shaped as
 // table+column (per the doc's own "structured: includes table and
 // column") rather than translateWriteError's constraint-name-only shape.
-func translateExecError(err error) *abi.HostError {
+func translateExecError(err error) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
 		case "23505": // unique_violation
-			return &abi.HostError{Code: abi.ErrCodeDBUniqueViolation, Message: pgErr.Message, Details: map[string]any{"constraint": pgErr.ConstraintName, "sqlstate": pgErr.Code}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeDBUniqueViolation, Message: pgErr.Message, Details: map[string]any{"constraint": pgErr.ConstraintName, "sqlstate": pgErr.Code}}
 		case "23503", "23001": // foreign_key_violation, restrict_violation
-			return &abi.HostError{Code: abi.ErrCodeDBForeignKeyViolation, Message: pgErr.Message, Details: map[string]any{"table": pgErr.TableName, "column": fkViolationColumn(pgErr), "sqlstate": pgErr.Code}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeDBForeignKeyViolation, Message: pgErr.Message, Details: map[string]any{"table": pgErr.TableName, "column": fkViolationColumn(pgErr), "sqlstate": pgErr.Code}}
 		default:
 			// Every other Postgres error (deadlocks, check/not-null
 			// violations, ...) stays under the generic db.exec_error
@@ -542,13 +536,13 @@ func translateExecError(err error) *abi.HostError {
 			// structured signal a caller has to distinguish, say, a
 			// deadlock (40P01, safe to retry) from anything else in
 			// this bucket without parsing Message's own free text.
-			return &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error(), Details: map[string]any{"sqlstate": pgErr.Code}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error(), Details: map[string]any{"sqlstate": pgErr.Code}}
 		}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return &abi.HostError{Code: abi.ErrCodeDBTimeout, Message: "execution exceeded its timeout", Retry: true}
+		return &abiv1.HostError{Code: abiv1.ErrCodeDBTimeout, Message: "execution exceeded its timeout", Retry: true}
 	}
-	return &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+	return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 }
 
 // fkViolationColumnRe matches the column list Postgres's own FK-violation

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -24,7 +24,7 @@ import (
 // fields must be set together" (go-sdk-reference.md §22). Pure/no DB
 // access, so it runs alongside validateRequired, before a transaction is
 // even opened.
-func validateDynamicLinkPairs(md model.ModelDeclaration, record map[string]any) *abi.HostError {
+func validateDynamicLinkPairs(md model.ModelDeclaration, record map[string]any) *abiv1.HostError {
 	for _, f := range md.Fields {
 		if f.Def.Kind != model.KindDynamicLink {
 			continue
@@ -32,8 +32,8 @@ func validateDynamicLinkPairs(md model.ModelDeclaration, record map[string]any) 
 		_, hasID := record[f.Name]
 		_, hasType := record[f.Def.ReferenceTypeField]
 		if hasID != hasType {
-			return &abi.HostError{
-				Code:    abi.ErrCodeValidationFailed,
+			return &abiv1.HostError{
+				Code:    abiv1.ErrCodeValidationFailed,
 				Message: "dynamic link fields " + f.Def.ReferenceTypeField + " and " + f.Name + " must be set together",
 				Details: map[string]any{"field": f.Name},
 			}
@@ -51,7 +51,7 @@ func validateDynamicLinkPairs(md model.ModelDeclaration, record map[string]any) 
 // cross-module lookup goerp#377 already established for the Many2One-hop
 // computed-field case). Runs inside tx so a rejection aborts the same
 // transaction as any other write validation failure.
-func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, record map[string]any) *abi.HostError {
+func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, record map[string]any) *abiv1.HostError {
 	for _, f := range md.Fields {
 		if f.Def.Kind != model.KindDynamicLink {
 			continue
@@ -63,16 +63,16 @@ func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 		}
 		typeName, ok := typeVal.(string)
 		if !ok {
-			return &abi.HostError{Code: abi.ErrCodeDynamicLinkTargetNotFound, Message: f.Def.ReferenceTypeField + " must be a string naming a model", Details: map[string]any{"field": f.Name}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeDynamicLinkTargetNotFound, Message: f.Def.ReferenceTypeField + " must be a string naming a model", Details: map[string]any{"field": f.Name}}
 		}
 
 		targetMD, ok := resolveAnyModel(modCtx, typeName)
 		if !ok {
-			return &abi.HostError{Code: abi.ErrCodeDynamicLinkTargetNotFound, Message: "model " + typeName + " is not a known model", Details: map[string]any{"field": f.Name}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeDynamicLinkTargetNotFound, Message: "model " + typeName + " is not a known model", Details: map[string]any{"field": f.Name}}
 		}
 		targetPK, ok := primaryKeyColumn(targetMD)
 		if !ok {
-			return &abi.HostError{Code: abi.ErrCodeDynamicLinkTargetNotFound, Message: "model " + typeName + " declares no primary key field", Details: map[string]any{"field": f.Name}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeDynamicLinkTargetNotFound, Message: "model " + typeName + " declares no primary key field", Details: map[string]any{"field": f.Name}}
 		}
 
 		table := quoteIdentORM(modeltable.Name(targetMD))
@@ -82,7 +82,7 @@ func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 			return ormSQLError(err)
 		}
 		if !exists {
-			return &abi.HostError{Code: abi.ErrCodeDynamicLinkTargetNotFound, Message: f.Name + " does not exist in model " + typeName, Details: map[string]any{"field": f.Name}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeDynamicLinkTargetNotFound, Message: f.Name + " does not exist in model " + typeName, Details: map[string]any{"field": f.Name}}
 		}
 	}
 	return nil

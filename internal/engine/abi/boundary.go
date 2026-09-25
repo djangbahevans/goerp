@@ -41,7 +41,7 @@ func WriteToModule(ctx context.Context, mod api.Module, allocate api.Function, v
 // EncodeHostError packs hostErr the same way WriteToModule packs a success
 // value — same envelope, same allocate/write/pack path — since errors are
 // returned in place of the normal response, not through a separate channel.
-func EncodeHostError(ctx context.Context, mod api.Module, allocate api.Function, hostErr *HostError) uint64 {
+func EncodeHostError(ctx context.Context, mod api.Module, allocate api.Function, hostErr *abiv1.HostError) uint64 {
 	return packAndWrite(ctx, mod, allocate, abiv1.Envelope{OK: false, Error: hostErr})
 }
 

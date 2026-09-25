@@ -33,10 +33,6 @@ func compileComputedFixture(t *testing.T) []byte {
 	return data
 }
 
-type wireComputeRequest = abiv1.ComputeRequest
-
-type wireComputeResponse = abiv1.ComputeResponse
-
 // TestInvokeHandleComputed_RoundTripsThroughRealModule compiles a real Go
 // module registering orm.RegisterComputed for "_compute_amount_total"
 // (testdata/computedfixture) and proves InvokeHandleComputed reaches the
@@ -60,7 +56,7 @@ func TestInvokeHandleComputed_RoundTripsThroughRealModule(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = inst.module.CloseWithExitCode(context.Background(), 0) })
 
-	reqBytes, err := msgpack.Marshal(wireComputeRequest{
+	reqBytes, err := msgpack.Marshal(abiv1.ComputeRequest{
 		FnName: "_compute_amount_total",
 		Record: map[string]any{"quantity": int8(3), "unit_price": int8(25)},
 	})
@@ -73,7 +69,7 @@ func TestInvokeHandleComputed_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatalf("InvokeHandleComputed: %v", err)
 	}
 
-	var resp wireComputeResponse
+	var resp abiv1.ComputeResponse
 	if err := msgpack.Unmarshal(respBytes, &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}

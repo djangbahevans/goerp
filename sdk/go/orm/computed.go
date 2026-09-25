@@ -33,12 +33,6 @@ func RegisterComputed(fnName string, fn ComputeFunc) {
 	computeRegistry[fnName] = fn
 }
 
-type computeRequest = abi.ComputeRequest
-
-type computeResponse = abi.ComputeResponse
-
-type computeError = abi.ComputeError
-
 // DispatchComputed decodes a computeRequest from module memory at (ptr,
 // length), routes it to the registered ComputeFunc named by req.FnName,
 // and writes back a msgpack-encoded computeResponse — the same
@@ -51,7 +45,7 @@ type computeError = abi.ComputeError
 func DispatchComputed(ptr, length uint32) uint64 {
 	buf := engine.ReadMem(ptr, length)
 
-	var req computeRequest
+	var req abi.ComputeRequest
 	if err := msgpack.Unmarshal(buf, &req); err != nil {
 		return writeComputeError("orm.invalid_request", err.Error())
 	}
@@ -67,18 +61,18 @@ func DispatchComputed(ptr, length uint32) uint64 {
 	if err != nil {
 		return writeComputeError("orm.backend_error", err.Error())
 	}
-	return writeComputeResponse(&computeResponse{Value: value})
+	return writeComputeResponse(&abi.ComputeResponse{Value: value})
 }
 
 func writeComputeError(code, message string) uint64 {
-	return writeComputeResponse(&computeResponse{Error: &computeError{Code: code, Message: message}})
+	return writeComputeResponse(&abi.ComputeResponse{Error: &abi.ComputeError{Code: code, Message: message}})
 }
 
-func writeComputeResponse(resp *computeResponse) uint64 {
+func writeComputeResponse(resp *abi.ComputeResponse) uint64 {
 	data, err := msgpack.Marshal(resp)
 	if err != nil {
-		data, _ = msgpack.Marshal(&computeResponse{
-			Error: &computeError{Code: "orm.marshal_failed", Message: err.Error()},
+		data, _ = msgpack.Marshal(&abi.ComputeResponse{
+			Error: &abi.ComputeError{Code: "orm.marshal_failed", Message: err.Error()},
 		})
 	}
 	ptr := engine.Allocate(uint32(len(data)))

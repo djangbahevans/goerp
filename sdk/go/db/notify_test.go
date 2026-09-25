@@ -3,6 +3,7 @@ package db
 import (
 	"testing"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -11,7 +12,7 @@ import (
 // own doc comment for why a struct-literal-only test can't catch a
 // typo'd msgpack tag.
 func TestDbNotifyInput_MsgpackWireShape(t *testing.T) {
-	in := dbNotifyInput{Channel: "orders", Payload: "order-123", TxID: "tx-1"}
+	in := abi.DBNotifyInput{Channel: "orders", Payload: "order-123", TxID: "tx-1"}
 	data, err := msgpack.Marshal(in)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

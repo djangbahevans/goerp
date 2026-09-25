@@ -21,10 +21,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-type ORMMutateInput = abiv1.ORMMutateInput
-
-type ORMMutateOutput = abiv1.ORMMutateOutput
-
 func makeORMMutate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -35,7 +31,7 @@ func makeORMMutate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) 
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMMutateInput
+		var input abiv1.ORMMutateInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -53,36 +49,36 @@ func makeORMMutate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx]) 
 // sees the previous caller's committed value. An audited model takes that
 // lock earlier, with SELECT ... FOR UPDATE, so old_data is the value the
 // UPDATE replaced.
-func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input ORMMutateInput) (ORMMutateOutput, *abi.HostError) {
+func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMMutateInput) (abiv1.ORMMutateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
-		return ORMMutateOutput{}, abi.CapabilityDenied("db.write")
+		return abiv1.ORMMutateOutput{}, abi.CapabilityDenied("db.write")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMMutateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMMutateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend != "" {
-		return ORMMutateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "mutate requires a table-backed model, " + input.Model + " is " + string(md.Backend)}
+		return abiv1.ORMMutateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "mutate requires a table-backed model, " + input.Model + " is " + string(md.Backend)}
 	}
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
-		return ORMMutateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
+		return abiv1.ORMMutateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
 
 	plan, hostErr := planMutation(modCtx, input.Model, md, input.Ops)
 	if hostErr != nil {
-		return ORMMutateOutput{}, hostErr
+		return abiv1.ORMMutateOutput{}, hostErr
 	}
 
 	guardFrag, guardArgs, hostErr := compileDomain(input.Guard)
 	if hostErr != nil {
-		return ORMMutateOutput{}, hostErr
+		return abiv1.ORMMutateOutput{}, hostErr
 	}
 
 	tx, commit, rollback, hostErr := resolveORMWriteTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMMutateOutput{}, hostErr
+		return abiv1.ORMMutateOutput{}, hostErr
 	}
 	defer rollback()
 
@@ -93,7 +89,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	if needsRowBeforeWrite(modCtx, input.Model, md) {
 		oldData, hostErr = lockRowByPK(ctx, tx, md, pkCol, input.ID)
 		if hostErr != nil {
-			return ORMMutateOutput{}, hostErr
+			return abiv1.ORMMutateOutput{}, hostErr
 		}
 	}
 
@@ -115,39 +111,39 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("UPDATE %s SET %s WHERE %s RETURNING *", table, strings.Join(sets, ", "), where), args...)
 	if err != nil {
-		return ORMMutateOutput{}, translateMutateError(err, md)
+		return abiv1.ORMMutateOutput{}, translateMutateError(err, md)
 	}
 	updatedRows, err := scanRowsToMaps(rows)
 	if err != nil {
-		return ORMMutateOutput{}, translateMutateError(err, md)
+		return abiv1.ORMMutateOutput{}, translateMutateError(err, md)
 	}
 	if len(updatedRows) == 0 {
-		return ORMMutateOutput{}, diagnoseZeroRowMutation(ctx, tx, table, pkColQuoted, input.ID)
+		return abiv1.ORMMutateOutput{}, diagnoseZeroRowMutation(ctx, tx, table, pkColQuoted, input.ID)
 	}
 	updated := updatedRows[0]
 
 	if hostErr := recomputeAfterWrite(ctx, tx, r, modCtx, input.Model, md, plan.fields, updated); hostErr != nil {
-		return ORMMutateOutput{}, hostErr
+		return abiv1.ORMMutateOutput{}, hostErr
 	}
 	if hostErr := runConstraintHook(ctx, r, modCtx, input.Model, "write", updated); hostErr != nil {
-		return ORMMutateOutput{}, hostErr
+		return abiv1.ORMMutateOutput{}, hostErr
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "UPDATE", oldData, updated); hostErr != nil {
-		return ORMMutateOutput{}, hostErr
+		return abiv1.ORMMutateOutput{}, hostErr
 	}
 	if hostErr := writeChangeActivity(ctx, tx, modCtx, input.Model, md, oldData, updated); hostErr != nil {
-		return ORMMutateOutput{}, hostErr
+		return abiv1.ORMMutateOutput{}, hostErr
 	}
 	if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, updated, plan.fields); err != nil {
-		return ORMMutateOutput{}, ormSQLErrorRetryable(err)
+		return abiv1.ORMMutateOutput{}, ormSQLErrorRetryable(err)
 	}
 
 	if err := commit(); err != nil {
-		return ORMMutateOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.ORMMutateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
 	applyFieldMasking(modCtx, input.Model, []map[string]any{updated})
-	return ORMMutateOutput{Record: updated}, nil
+	return abiv1.ORMMutateOutput{Record: updated}, nil
 }
 
 type mutationPlan struct {
@@ -159,9 +155,9 @@ type mutationPlan struct {
 // planMutation validates each op against the model and the caller's field
 // security. An OnDeniedWrite(Ignore) field is dropped, as host.orm.write
 // drops it.
-func planMutation(modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, ops []abiv1.ORMMutateOp) (mutationPlan, *abi.HostError) {
+func planMutation(modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, ops []abiv1.ORMMutateOp) (mutationPlan, *abiv1.HostError) {
 	if len(ops) == 0 {
-		return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "mutate requires at least one op"}
+		return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "mutate requires at least one op"}
 	}
 
 	defs := make(map[string]model.FieldDef, len(md.Fields))
@@ -176,17 +172,17 @@ func planMutation(modCtx *ModuleContext, qualifiedModel string, md model.ModelDe
 		def, known := defs[op.Field]
 		switch {
 		case !known:
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unknown field " + op.Field, Details: fieldDetails}
+			return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "unknown field " + op.Field, Details: fieldDetails}
 		case seen[op.Field]:
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + op.Field + " appears in more than one op", Details: fieldDetails}
+			return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + op.Field + " appears in more than one op", Details: fieldDetails}
 		case def.IsPrimaryKey:
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + op.Field + " is the primary key and cannot be mutated", Details: fieldDetails}
+			return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + op.Field + " is the primary key and cannot be mutated", Details: fieldDetails}
 		case def.IsComputed:
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + op.Field + " is computed and cannot be mutated", Details: fieldDetails}
+			return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + op.Field + " is computed and cannot be mutated", Details: fieldDetails}
 		case !isNumericKind(def.Kind):
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + op.Field + " is not numeric", Details: fieldDetails}
+			return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + op.Field + " is not numeric", Details: fieldDetails}
 		case def.IsReadonly:
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeFieldNotWritable, Message: "field " + op.Field + " is readonly and cannot be mutated", Details: fieldDetails}
+			return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldNotWritable, Message: "field " + op.Field + " is readonly and cannot be mutated", Details: fieldDetails}
 		}
 		seen[op.Field] = true
 
@@ -194,12 +190,12 @@ func planMutation(modCtx *ModuleContext, qualifiedModel string, md model.ModelDe
 			if rule.OnDeniedWrite == fieldsec.Ignore {
 				continue
 			}
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeFieldWriteDenied, Message: "field " + op.Field + " requires permission " + rule.WritePermission, Details: fieldDetails}
+			return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldWriteDenied, Message: "field " + op.Field + " requires permission " + rule.WritePermission, Details: fieldDetails}
 		}
 
 		delta, err := normalizeDelta(def.Kind, op.Delta)
 		if err != nil {
-			return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + op.Field + ": " + err.Error(), Details: fieldDetails}
+			return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + op.Field + ": " + err.Error(), Details: fieldDetails}
 		}
 		plan.cols = append(plan.cols, quoteIdentORM(op.Field))
 		plan.deltas = append(plan.deltas, delta)
@@ -207,7 +203,7 @@ func planMutation(modCtx *ModuleContext, qualifiedModel string, md model.ModelDe
 	}
 
 	if len(plan.cols) == 0 {
-		return mutationPlan{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "mutate has no fields to update"}
+		return mutationPlan{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "mutate has no fields to update"}
 	}
 	slices.Sort(plan.fields)
 	return plan, nil
@@ -283,9 +279,9 @@ func normalizeDelta(kind model.FieldKind, v any) (any, error) {
 
 // lockRowByPK reads the row under a row lock; a row the caller cannot
 // see yields nil, and the UPDATE that follows reports not-found.
-func lockRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, id string) (map[string]any, *abi.HostError) {
+func lockRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, id string) (map[string]any, *abiv1.HostError) {
 	row, hostErr := selectRowByPK(ctx, tx, md, pkCol, id, "FOR UPDATE")
-	if hostErr != nil && hostErr.Code == abi.ErrCodeNotFound {
+	if hostErr != nil && hostErr.Code == abiv1.ErrCodeNotFound {
 		return nil, nil
 	}
 	return row, hostErr
@@ -293,24 +289,24 @@ func lockRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkC
 
 // diagnoseZeroRowMutation separates a missing or RLS-hidden row
 // (orm.not_found, as diagnoseZeroRowWrite) from a false guard.
-func diagnoseZeroRowMutation(ctx context.Context, tx *sql.Tx, table, pkColQuoted, id string) *abi.HostError {
+func diagnoseZeroRowMutation(ctx context.Context, tx *sql.Tx, table, pkColQuoted, id string) *abiv1.HostError {
 	var exists bool
 	if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s = $1)", table, pkColQuoted), id).Scan(&exists); err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 	if !exists {
-		return &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+		return &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 	}
-	return &abi.HostError{Code: abi.ErrCodePreconditionFailed, Message: "the guard did not hold for the record's current state"}
+	return &abiv1.HostError{Code: abiv1.ErrCodePreconditionFailed, Message: "the guard did not hold for the record's current state"}
 }
 
 // translateMutateError maps overflow and CHECK violations to
 // orm.validation_failed and defers the rest to translateWriteError.
-func translateMutateError(err error, md model.ModelDeclaration) *abi.HostError {
+func translateMutateError(err error, md model.ModelDeclaration) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
 		case "22003", "23514": // numeric_value_out_of_range, check_violation
-			return &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: pgErr.Message, Details: map[string]any{"constraint": pgErr.ConstraintName}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: pgErr.Message, Details: map[string]any{"constraint": pgErr.ConstraintName}}
 		}
 	}
 	return translateWriteError(err, md)

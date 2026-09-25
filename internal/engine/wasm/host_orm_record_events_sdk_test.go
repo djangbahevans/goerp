@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/events"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -48,7 +49,7 @@ func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 	var id1 string
 
 	t.Run("created (single)", func(t *testing.T) {
-		out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+		out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 			Model:  "testmodule.item",
 			Record: map[string]any{"name": "A"},
 		})
@@ -65,7 +66,7 @@ func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 	})
 
 	t.Run("created (batch)", func(t *testing.T) {
-		out, hostErr := ORMCreateBatch(ctx, r, primaryDB, insertClient, mc, ORMCreateBatchInput{
+		out, hostErr := ORMCreateBatch(ctx, r, primaryDB, insertClient, mc, abiv1.ORMCreateBatchInput{
 			Model: "testmodule.item",
 			Records: []map[string]any{
 				{"name": "B"},
@@ -86,7 +87,7 @@ func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 	})
 
 	t.Run("updated", func(t *testing.T) {
-		if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+		if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
 			Model: "testmodule.item", ID: id1, Record: map[string]any{"name": "A renamed"},
 		}); hostErr != nil {
 			t.Fatalf("ORMWrite: %+v", hostErr)
@@ -100,7 +101,7 @@ func TestORMRecordEvents_DecodeIntoSDKPayloadTypes(t *testing.T) {
 	})
 
 	t.Run("deleted", func(t *testing.T) {
-		if _, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
+		if _, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMUnlinkInput{
 			Model: "testmodule.item", IDs: []string{id1},
 		}); hostErr != nil {
 			t.Fatalf("ORMUnlink: %+v", hostErr)

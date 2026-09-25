@@ -1,6 +1,10 @@
 package db
 
-import "testing"
+import (
+	"testing"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+)
 
 func TestQueryResult_AsMapsPairsColumnsWithValues(t *testing.T) {
 	result := &QueryResult{
@@ -31,7 +35,7 @@ func TestQueryResult_AsMapsEmptyRowsReturnsEmptySlice(t *testing.T) {
 }
 
 func TestQueryOptions_WithTimeoutSetsField(t *testing.T) {
-	var in dbQueryInput
+	var in abi.DBQueryInput
 	WithTimeout(5000)(&in)
 	if in.Opts.TimeoutMs != 5000 {
 		t.Errorf("TimeoutMs = %d, want 5000", in.Opts.TimeoutMs)
@@ -39,7 +43,7 @@ func TestQueryOptions_WithTimeoutSetsField(t *testing.T) {
 }
 
 func TestQueryOptions_WithReadOnlySetsField(t *testing.T) {
-	var in dbQueryInput
+	var in abi.DBQueryInput
 	WithReadOnly()(&in)
 	if !in.Opts.ReadOnly {
 		t.Error("ReadOnly = false, want true")

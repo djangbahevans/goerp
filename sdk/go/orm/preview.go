@@ -34,12 +34,6 @@ func RegisterPreviewHook(modelName string, hook PreviewHook) {
 	previewRegistry[modelName] = hook
 }
 
-type previewRequest = abi.PreviewRequest
-
-type previewResponse = abi.PreviewResponse
-
-type previewError = abi.PreviewError
-
 // DispatchPreview decodes a previewRequest from module memory at (ptr,
 // length), routes it to the PreviewHook registered for req.Model, and
 // writes back a msgpack-encoded previewResponse — the same decode/route/
@@ -55,25 +49,25 @@ type previewError = abi.PreviewError
 func DispatchPreview(ptr, length uint32) uint64 {
 	buf := engine.ReadMem(ptr, length)
 
-	var req previewRequest
+	var req abi.PreviewRequest
 	if err := msgpack.Unmarshal(buf, &req); err != nil {
-		return writePreviewResponse(&previewResponse{Error: &previewError{Code: "orm.invalid_request", Message: err.Error()}})
+		return writePreviewResponse(&abi.PreviewResponse{Error: &abi.PreviewError{Code: "orm.invalid_request", Message: err.Error()}})
 	}
 
 	hook, ok := previewRegistry[req.Model]
 	if !ok {
-		return writePreviewResponse(&previewResponse{Record: req.Record})
+		return writePreviewResponse(&abi.PreviewResponse{Record: req.Record})
 	}
 
 	ctx := PreviewContext{TenantID: req.TenantID, UserID: req.UserID, TraceID: req.TraceID}
-	return writePreviewResponse(&previewResponse{Record: hook(ctx, req.Record)})
+	return writePreviewResponse(&abi.PreviewResponse{Record: hook(ctx, req.Record)})
 }
 
-func writePreviewResponse(resp *previewResponse) uint64 {
+func writePreviewResponse(resp *abi.PreviewResponse) uint64 {
 	data, err := msgpack.Marshal(resp)
 	if err != nil {
-		data, _ = msgpack.Marshal(&previewResponse{
-			Error: &previewError{Code: "orm.marshal_failed", Message: err.Error()},
+		data, _ = msgpack.Marshal(&abi.PreviewResponse{
+			Error: &abi.PreviewError{Code: "orm.marshal_failed", Message: err.Error()},
 		})
 	}
 	ptr := engine.Allocate(uint32(len(data)))

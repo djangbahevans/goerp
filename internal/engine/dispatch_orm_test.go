@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/config"
@@ -286,8 +287,8 @@ func TestDispatchORMRoute_Create_ReadonlyField_400(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), abi.ErrCodeFieldNotWritable) {
-		t.Errorf("body = %s, want error code %s", w.Body.String(), abi.ErrCodeFieldNotWritable)
+	if !strings.Contains(w.Body.String(), abiv1.ErrCodeFieldNotWritable) {
+		t.Errorf("body = %s, want error code %s", w.Body.String(), abiv1.ErrCodeFieldNotWritable)
 	}
 }
 
@@ -726,8 +727,8 @@ func TestORMErrorStatus_FieldWriteErrors(t *testing.T) {
 		code string
 		want int
 	}{
-		{abi.ErrCodeFieldWriteDenied, http.StatusForbidden},
-		{abi.ErrCodeFieldNotWritable, http.StatusBadRequest},
+		{abiv1.ErrCodeFieldWriteDenied, http.StatusForbidden},
+		{abiv1.ErrCodeFieldNotWritable, http.StatusBadRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -146,7 +147,7 @@ func TestORMCreate_AuditedTable_WritesInsertRow(t *testing.T) {
 	insertClient := r.EventInsertClient()
 
 	widgetID := "10000000-0000-0000-0000-000000000001"
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.widget",
 		Record: map[string]any{"id": widgetID, "name": "Widget A", "secret": "shh"},
 	}); hostErr != nil {
@@ -192,14 +193,14 @@ func TestORMWrite_AuditedTable_WritesUpdateRowWithOldAndNewData(t *testing.T) {
 	insertClient := r.EventInsertClient()
 
 	widgetID := "10000000-0000-0000-0000-000000000002"
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.widget",
 		Record: map[string]any{"id": widgetID, "name": "Widget B", "secret": "shh"},
 	}); hostErr != nil {
 		t.Fatalf("ORMCreate: %+v", hostErr)
 	}
 
-	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.widget",
 		ID:     widgetID,
 		Record: map[string]any{"name": "Widget B Renamed"},
@@ -243,14 +244,14 @@ func TestORMUnlink_AuditedTable_WritesDeleteRowWithOldData(t *testing.T) {
 	insertClient := r.EventInsertClient()
 
 	widgetID := "10000000-0000-0000-0000-000000000003"
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.widget",
 		Record: map[string]any{"id": widgetID, "name": "Widget C", "secret": "shh"},
 	}); hostErr != nil {
 		t.Fatalf("ORMCreate: %+v", hostErr)
 	}
 
-	if _, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
+	if _, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMUnlinkInput{
 		Model: "testmodule.widget",
 		IDs:   []string{widgetID},
 	}); hostErr != nil {
@@ -290,7 +291,7 @@ func TestORMCreate_UnauditedTable_NoAuditLogRow(t *testing.T) {
 	insertClient := r.EventInsertClient()
 
 	gadgetID := "10000000-0000-0000-0000-000000000004"
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.gadget",
 		Record: map[string]any{"id": gadgetID, "name": "Gadget A"},
 	}); hostErr != nil {

@@ -11,7 +11,7 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -312,12 +312,12 @@ func insertPrimaryKeyColumn(modCtx *ModuleContext, table string) (string, bool) 
 // index is -1 for the same reason the COPY step's own failure uses it:
 // none of these failures are attributable to one specific param_sets
 // entry the way a sequential row failure is.
-func wrapCopyBatchFailure(hostErr *abi.HostError) *abi.HostError {
-	if hostErr.Code == abi.ErrCodeDBBatchError {
+func wrapCopyBatchFailure(hostErr *abiv1.HostError) *abiv1.HostError {
+	if hostErr.Code == abiv1.ErrCodeDBBatchError {
 		return hostErr
 	}
-	return &abi.HostError{
-		Code:    abi.ErrCodeDBBatchError,
+	return &abiv1.HostError{
+		Code:    abiv1.ErrCodeDBBatchError,
 		Message: hostErr.Message,
 		Details: map[string]any{"index": -1, "code": hostErr.Code, "message": hostErr.Message, "details": hostErr.Details},
 	}
@@ -325,10 +325,10 @@ func wrapCopyBatchFailure(hostErr *abi.HostError) *abi.HostError {
 
 // execBatchCopy runs a COPY-eligible INSERT batch (per resolveCopyPlan)
 // via Postgres's COPY protocol instead of one INSERT per parameter set.
-func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, p preparedExec, input dbExecBatchInput, plan copyPlan) (dbExecBatchOutput, *abi.HostError) {
+func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, p preparedExec, input abiv1.DBExecBatchInput, plan copyPlan) (abiv1.DBExecBatchOutput, *abiv1.HostError) {
 	conn, tx, finish, hostErr := beginOrBorrowExecTx(ctx, primary, modCtx, input.TxID)
 	if hostErr != nil {
-		return dbExecBatchOutput{}, hostErr
+		return abiv1.DBExecBatchOutput{}, hostErr
 	}
 
 	start := time.Now()
@@ -341,7 +341,7 @@ func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, 
 	})
 	if copyErr != nil {
 		_ = finish(copyErr)
-		return dbExecBatchOutput{}, wrapCopyBatchFailure(translateExecError(copyErr))
+		return abiv1.DBExecBatchOutput{}, wrapCopyBatchFailure(translateExecError(copyErr))
 	}
 
 	var returning [][]any
@@ -349,12 +349,12 @@ func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, 
 		newRows, hostErr := copyReadback(ctx, tx, p, plan, input.ParamSets)
 		if hostErr != nil {
 			_ = finish(errors.New(hostErr.Message))
-			return dbExecBatchOutput{}, wrapCopyBatchFailure(hostErr)
+			return abiv1.DBExecBatchOutput{}, wrapCopyBatchFailure(hostErr)
 		}
 		if p.audited {
 			if err := writeAuditForExec(ctx, tx, modCtx, p.table, p.stmt, p.pkCol, p.excludeCols, nil, newRows); err != nil {
 				_ = finish(err)
-				return dbExecBatchOutput{}, wrapCopyBatchFailure(&abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
+				return abiv1.DBExecBatchOutput{}, wrapCopyBatchFailure(&abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()})
 			}
 		}
 		if p.requestedCols != nil {
@@ -364,7 +364,7 @@ func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, 
 
 	duration, hostErr := finishBatchTx(finish, start, modCtx, input.SQL, len(input.ParamSets), "host.db.exec_batch: slow COPY batch")
 	if hostErr != nil {
-		return dbExecBatchOutput{}, hostErr
+		return abiv1.DBExecBatchOutput{}, hostErr
 	}
 	return batchOutput(int(rowsCopied), duration, returning, p.requestedCols), nil
 }
@@ -386,7 +386,7 @@ const maxReadbackChunkParams = 5000
 // so a batch large enough to need chunking here would otherwise succeed
 // at the COPY step and then hard-fail at read-back, undoing otherwise
 // valid work.
-func copyReadback(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan, paramSets [][]any) ([]map[string]any, *abi.HostError) {
+func copyReadback(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan, paramSets [][]any) ([]map[string]any, *abiv1.HostError) {
 	pkIdx := slices.Index(plan.Columns, plan.PKCol)
 
 	var allRows []map[string]any
@@ -405,7 +405,7 @@ func copyReadback(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan
 // paramSets (see copyReadback's own chunking rationale) — pkIdx is the
 // pk column's position within plan.Columns, precomputed once by the
 // caller since it's the same for every chunk.
-func copyReadbackChunk(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan, pkIdx int, paramSets [][]any) ([]map[string]any, *abi.HostError) {
+func copyReadbackChunk(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan, pkIdx int, paramSets [][]any) ([]map[string]any, *abiv1.HostError) {
 	// A plain "WHERE pk IN (...)" gives Postgres no ordering guarantee —
 	// this ABI's own contract requires opts.returning rows back in
 	// param_sets order (see host-abi-reference.md's own ABI-level output
@@ -446,22 +446,22 @@ func copyReadbackChunk(ctx context.Context, tx *sql.Tx, p preparedExec, plan cop
 
 	rows, err := tx.QueryContext(ctx, selectSQL, pkValues...)
 	if err != nil {
-		return nil, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return nil, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 	}
 	if p.requestedCols != nil {
 		available, err := rows.Columns()
 		if err != nil {
 			_ = rows.Close()
-			return nil, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+			return nil, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 		}
 		if err := validateRequestedColumns(p.requestedCols, available); err != nil {
 			_ = rows.Close()
-			return nil, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+			return nil, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 		}
 	}
 	newRows, err := scanRowsToMaps(rows)
 	if err != nil {
-		return nil, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
+		return nil, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 	}
 	return newRows, nil
 }
@@ -471,7 +471,7 @@ func copyReadbackChunk(ctx context.Context, tx *sql.Tx, p preparedExec, plan cop
 // and structured HostError that a bare error can't.
 type pipelineRowError struct {
 	index int
-	host  *abi.HostError
+	host  *abiv1.HostError
 }
 
 func (e *pipelineRowError) Error() string { return fmt.Sprintf("row %d: %s", e.index, e.host.Message) }
@@ -541,10 +541,10 @@ type pipelineRowResult struct {
 // pipelining's own round-trip savings for audited UPDATE/DELETE batches
 // specifically; unaudited batches (no pre-read at all) get the full
 // benefit already.
-func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, p preparedExec, input dbExecBatchInput) (dbExecBatchOutput, *abi.HostError) {
+func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, p preparedExec, input abiv1.DBExecBatchInput) (abiv1.DBExecBatchOutput, *abiv1.HostError) {
 	conn, tx, finish, hostErr := beginOrBorrowExecTx(ctx, primary, modCtx, input.TxID)
 	if hostErr != nil {
-		return dbExecBatchOutput{}, hostErr
+		return abiv1.DBExecBatchOutput{}, hostErr
 	}
 
 	start := time.Now()
@@ -556,7 +556,7 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 		}, input.ParamSets)
 		if err != nil {
 			_ = finish(err)
-			return dbExecBatchOutput{}, batchErrorForRowErr(-1, abi.ErrCodeExecError, "", err)
+			return abiv1.DBExecBatchOutput{}, batchErrorForRowErr(-1, abiv1.ErrCodeExecError, "", err)
 		}
 		oldRowsPerIndex = rows
 	}
@@ -598,7 +598,7 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 						available[j] = f.Name
 					}
 					if err := validateRequestedColumns(p.requestedCols, available); err != nil {
-						return &pipelineRowError{index: i, host: &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}}
+						return &pipelineRowError{index: i, host: &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}}
 					}
 				}
 				newRows, err = pgx.CollectRows(rows, pgx.RowToMap)
@@ -634,9 +634,9 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 	if pipelineErr != nil {
 		_ = finish(pipelineErr)
 		if rowErr, ok := errors.AsType[*pipelineRowError](pipelineErr); ok {
-			return dbExecBatchOutput{}, batchErrorForHostErr(rowErr.index, rowErr.host)
+			return abiv1.DBExecBatchOutput{}, batchErrorForHostErr(rowErr.index, rowErr.host)
 		}
-		return dbExecBatchOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: pipelineErr.Error(), Retry: true}
+		return abiv1.DBExecBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: pipelineErr.Error(), Retry: true}
 	}
 
 	if p.audited {
@@ -662,7 +662,7 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 		}
 		if err := insertAuditLogRows(ctx, tx, modCtx, p.table, p.stmt.Operation, p.excludeCols, entries); err != nil {
 			_ = finish(err)
-			return dbExecBatchOutput{}, batchErrorForRowErr(-1, abi.ErrCodeUnavailable, "audit write failed: ", err)
+			return abiv1.DBExecBatchOutput{}, batchErrorForRowErr(-1, abiv1.ErrCodeUnavailable, "audit write failed: ", err)
 		}
 	}
 
@@ -677,7 +677,7 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 
 	duration, hostErr := finishBatchTx(finish, start, modCtx, input.SQL, len(input.ParamSets), "host.db.exec_batch: slow pipelined batch")
 	if hostErr != nil {
-		return dbExecBatchOutput{}, hostErr
+		return abiv1.DBExecBatchOutput{}, hostErr
 	}
 	return batchOutput(totalRowsAffected, duration, returning, p.requestedCols), nil
 }

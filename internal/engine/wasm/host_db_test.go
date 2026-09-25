@@ -49,8 +49,6 @@ var hostDBCallerModule = []byte{
 	0x08, 0x00, 0x20, 0x00, 0x20, 0x01, 0x10, 0x02, 0x0B,
 }
 
-type wireEnvelope = abiv1.Envelope
-
 func openTestPrimaryDB(t *testing.T) *sql.DB {
 	t.Helper()
 
@@ -106,7 +104,7 @@ func newHostDBCaller(t *testing.T, ctx context.Context, r *Runtime, mc *ModuleCo
 // callHost writes req into the caller's own linear memory via its allocate
 // export, invokes exportName (call_begin/call_commit/call_rollback), and
 // decodes the packed ptr/len result back into a wireEnvelope.
-func callHost(t *testing.T, ctx context.Context, inst *ModuleInstance, exportName string, req any) wireEnvelope {
+func callHost(t *testing.T, ctx context.Context, inst *ModuleInstance, exportName string, req any) abiv1.Envelope {
 	t.Helper()
 
 	payload, err := msgpack.Marshal(req)
@@ -136,7 +134,7 @@ func callHost(t *testing.T, ctx context.Context, inst *ModuleInstance, exportNam
 		t.Fatalf("memory.Read out of bounds at ptr=%d len=%d", respPtr, respLen)
 	}
 
-	var env wireEnvelope
+	var env abiv1.Envelope
 	if err := msgpack.Unmarshal(respBytes, &env); err != nil {
 		t.Fatalf("unmarshal envelope: %v", err)
 	}
@@ -196,11 +194,11 @@ func TestHostDB_BeginCommit_SetsSearchPathAndCommits(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBCaller(t, ctx, r, mc)
 
-	beginEnv := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	beginEnv := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !beginEnv.OK {
 		t.Fatalf("begin failed: %+v", beginEnv.Error)
 	}
-	var beginOut dbBeginOutput
+	var beginOut abiv1.DBBeginOutput
 	if err := msgpack.Unmarshal(beginEnv.Data, &beginOut); err != nil {
 		t.Fatalf("unmarshal begin output: %v", err)
 	}
@@ -221,7 +219,7 @@ func TestHostDB_BeginCommit_SetsSearchPathAndCommits(t *testing.T) {
 		t.Errorf("search_path = %q, want %q", searchPath, want)
 	}
 
-	commitEnv := callHost(t, ctx, inst, "call_commit", dbTxIDInput{TxID: beginOut.TxID})
+	commitEnv := callHost(t, ctx, inst, "call_commit", abiv1.DBTxIDInput{TxID: beginOut.TxID})
 	if !commitEnv.OK {
 		t.Fatalf("commit failed: %+v", commitEnv.Error)
 	}
@@ -242,16 +240,16 @@ func TestHostDB_Rollback_AfterCommitIsNoopSuccess(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBCaller(t, ctx, r, mc)
 
-	beginEnv := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
-	var beginOut dbBeginOutput
+	beginEnv := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
+	var beginOut abiv1.DBBeginOutput
 	_ = msgpack.Unmarshal(beginEnv.Data, &beginOut)
 
-	commitEnv := callHost(t, ctx, inst, "call_commit", dbTxIDInput{TxID: beginOut.TxID})
+	commitEnv := callHost(t, ctx, inst, "call_commit", abiv1.DBTxIDInput{TxID: beginOut.TxID})
 	if !commitEnv.OK {
 		t.Fatalf("commit failed: %+v", commitEnv.Error)
 	}
 
-	rollbackEnv := callHost(t, ctx, inst, "call_rollback", dbTxIDInput{TxID: beginOut.TxID})
+	rollbackEnv := callHost(t, ctx, inst, "call_rollback", abiv1.DBTxIDInput{TxID: beginOut.TxID})
 	if !rollbackEnv.OK {
 		t.Errorf("rollback after commit should be a no-op success, got error %+v", rollbackEnv.Error)
 	}
@@ -268,22 +266,22 @@ func TestHostDB_Begin_NestedReturnsAlreadyOpen(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBCaller(t, ctx, r, mc)
 
-	first := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	first := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !first.OK {
 		t.Fatalf("first begin failed: %+v", first.Error)
 	}
 
-	second := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	second := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if second.OK {
 		t.Fatal("expected nested begin to fail")
 	}
-	if second.Error.Code != abi.ErrCodeTransactionAlreadyOpen {
-		t.Errorf("error code = %q, want %q", second.Error.Code, abi.ErrCodeTransactionAlreadyOpen)
+	if second.Error.Code != abiv1.ErrCodeTransactionAlreadyOpen {
+		t.Errorf("error code = %q, want %q", second.Error.Code, abiv1.ErrCodeTransactionAlreadyOpen)
 	}
 
-	var beginOut dbBeginOutput
+	var beginOut abiv1.DBBeginOutput
 	_ = msgpack.Unmarshal(first.Data, &beginOut)
-	callHost(t, ctx, inst, "call_rollback", dbTxIDInput{TxID: beginOut.TxID})
+	callHost(t, ctx, inst, "call_rollback", abiv1.DBTxIDInput{TxID: beginOut.TxID})
 }
 
 func TestHostDB_Begin_CapabilityDenied(t *testing.T) {
@@ -292,12 +290,12 @@ func TestHostDB_Begin_CapabilityDenied(t *testing.T) {
 	ctx := context.Background()
 	inst := newHostDBCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	env := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if env.OK {
 		t.Fatal("expected capability_denied for a module without CapDBWrite")
 	}
-	if env.Error.Code != abi.ErrCodeCapabilityDenied {
-		t.Errorf("error code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+	if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+		t.Errorf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 	}
 }
 
@@ -312,24 +310,24 @@ func TestHostDB_Begin_TransactionLimitExceeded(t *testing.T) {
 
 	mc1 := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst1 := newHostDBCaller(t, ctx, r, mc1)
-	first := callHost(t, ctx, inst1, "call_begin", dbBeginInput{})
+	first := callHost(t, ctx, inst1, "call_begin", abiv1.DBBeginInput{})
 	if !first.OK {
 		t.Fatalf("first begin failed: %+v", first.Error)
 	}
 
 	mc2 := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst2 := newHostDBCaller(t, ctx, r, mc2)
-	second := callHost(t, ctx, inst2, "call_begin", dbBeginInput{})
+	second := callHost(t, ctx, inst2, "call_begin", abiv1.DBBeginInput{})
 	if second.OK {
 		t.Fatal("expected the engine-wide transaction limit to be enforced")
 	}
-	if second.Error.Code != abi.ErrCodeTransactionLimitExceeded {
-		t.Errorf("error code = %q, want %q", second.Error.Code, abi.ErrCodeTransactionLimitExceeded)
+	if second.Error.Code != abiv1.ErrCodeTransactionLimitExceeded {
+		t.Errorf("error code = %q, want %q", second.Error.Code, abiv1.ErrCodeTransactionLimitExceeded)
 	}
 
-	var beginOut dbBeginOutput
+	var beginOut abiv1.DBBeginOutput
 	_ = msgpack.Unmarshal(first.Data, &beginOut)
-	callHost(t, ctx, inst1, "call_rollback", dbTxIDInput{TxID: beginOut.TxID})
+	callHost(t, ctx, inst1, "call_rollback", abiv1.DBTxIDInput{TxID: beginOut.TxID})
 }
 
 func TestModuleContext_RollbackAll_ReleasesLimiterSlot(t *testing.T) {
@@ -343,7 +341,7 @@ func TestModuleContext_RollbackAll_ReleasesLimiterSlot(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBCaller(t, ctx, r, mc)
 
-	begin := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	begin := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !begin.OK {
 		t.Fatalf("begin failed: %+v", begin.Error)
 	}

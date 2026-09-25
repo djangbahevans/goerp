@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/files"
@@ -111,12 +112,12 @@ func TestStorageUpload_CapabilityDenied(t *testing.T) {
 	ctx := context.Background()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
-	env := callHost(t, ctx, inst, "call_upload", storageUploadInput{})
+	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{})
 	if env.OK {
 		t.Fatal("expected capability_denied for a module without CapStorageWrite")
 	}
-	if env.Error.Code != abi.ErrCodeCapabilityDenied {
-		t.Errorf("error code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+	if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+		t.Errorf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 	}
 }
 
@@ -126,7 +127,7 @@ func TestStorageUpload_NilBackendUnavailable(t *testing.T) {
 	ctx := context.Background()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
-	env := callHost(t, ctx, inst, "call_upload", storageUploadInput{Filename: "a.txt", ContentType: "text/plain", Data: []byte("hi")})
+	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{Filename: "a.txt", ContentType: "text/plain", Data: []byte("hi")})
 	if env.OK {
 		t.Fatal("expected backend_unavailable for a nil storage backend")
 	}
@@ -142,9 +143,9 @@ func TestStorageUpload_FileTooLarge(t *testing.T) {
 	ctx := context.Background()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
-	env := callHost(t, ctx, inst, "call_upload", storageUploadInput{
+	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{
 		Filename: "a.txt", ContentType: "text/plain", Data: []byte("hi"),
-		Opts: storageUploadOpts{MaxSizeBytes: 1},
+		Opts: abiv1.StorageUploadOpts{MaxSizeBytes: 1},
 	})
 	if env.OK {
 		t.Fatal("expected file_too_large")
@@ -161,7 +162,7 @@ func TestStorageUpload_BlockedContentType(t *testing.T) {
 	ctx := context.Background()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
-	env := callHost(t, ctx, inst, "call_upload", storageUploadInput{
+	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{
 		Filename: "a.exe", ContentType: "application/x-executable", Data: []byte("hi"),
 	})
 	if env.OK {
@@ -182,17 +183,17 @@ func TestStorageUpload_SuccessRoundTripsFileRow(t *testing.T) {
 	ctx := context.Background()
 	inst := newHostStorageCaller(t, ctx, rt, mc)
 
-	env := callHost(t, ctx, inst, "call_upload", storageUploadInput{
+	env := callHost(t, ctx, inst, "call_upload", abiv1.StorageUploadInput{
 		Filename:    "invoice.pdf",
 		ContentType: "application/pdf",
 		Data:        []byte("%PDF-1.4 fake"),
-		Opts:        storageUploadOpts{Public: true, Purpose: "attachments"},
+		Opts:        abiv1.StorageUploadOpts{Public: true, Purpose: "attachments"},
 	})
 	if !env.OK {
 		t.Fatalf("upload failed: %+v", env.Error)
 	}
 
-	var out storageUploadOutput
+	var out abiv1.StorageUploadOutput
 	if err := msgpack.Unmarshal(env.Data, &out); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}

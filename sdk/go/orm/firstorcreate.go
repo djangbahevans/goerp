@@ -6,10 +6,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-type ormFirstOrCreateInput = abi.ORMFirstOrCreateInput
-
-type ormFirstOrCreateOutput = abi.ORMFirstOrCreateOutput
-
 // FirstOrCreate finds the record matching unique, or inserts unique
 // merged with create if none matches, via host.orm.first_or_create,
 // mapping the result into a T. unique must match a declared unique
@@ -27,8 +23,8 @@ func FirstOrCreateTx[T Model, PT ptrScanner[T]](tx *db.Tx, unique, create *Value
 
 func firstOrCreate[T Model, PT ptrScanner[T]](txID string, unique, create *Values[T]) (record T, created bool, err error) {
 	var zero T
-	var out ormFirstOrCreateOutput
-	in := ormFirstOrCreateInput{Model: resourceName[T](), UniqueVals: unique.raw(), CreateVals: create.raw(), TxID: txID}
+	var out abi.ORMFirstOrCreateOutput
+	in := abi.ORMFirstOrCreateInput{Model: resourceName[T](), UniqueVals: unique.raw(), CreateVals: create.raw(), TxID: txID}
 	if err := hostcall.Do(hostORMFirstOrCreate, in, &out); err != nil {
 		return zero, false, err
 	}

@@ -8,10 +8,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-type wirePreviewRequest = abiv1.PreviewRequest
-
-type wirePreviewResponse = abiv1.PreviewResponse
-
 // TestInvokeHandlePreview_RoundTripsThroughRealModule compiles a real Go
 // module registering orm.RegisterPreviewHook for "testmodule.priced_order"
 // (testdata/computedfixture) and proves InvokeHandlePreview reaches it
@@ -37,7 +33,7 @@ func TestInvokeHandlePreview_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatal("HasHandlePreview() = false, want true (computedfixture exports handle_orm_preview)")
 	}
 
-	reqBytes, err := msgpack.Marshal(wirePreviewRequest{
+	reqBytes, err := msgpack.Marshal(abiv1.PreviewRequest{
 		Model:    "testmodule.priced_order",
 		Record:   map[string]any{"id": "order-1"},
 		TenantID: "acme",
@@ -51,7 +47,7 @@ func TestInvokeHandlePreview_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatalf("InvokeHandlePreview: %v", err)
 	}
 
-	var resp wirePreviewResponse
+	var resp abiv1.PreviewResponse
 	if err := msgpack.Unmarshal(respBytes, &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}

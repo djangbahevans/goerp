@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -74,8 +75,8 @@ func TestHostDBNotify_Immediate_DeliversToListener(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBNotify, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	var out dbDurationOutput
-	env := callHost(t, ctx, inst, "call_notify", dbNotifyInput{Channel: "orders", Payload: "order-123"})
+	var out abiv1.DBDurationOutput
+	env := callHost(t, ctx, inst, "call_notify", abiv1.DBNotifyInput{Channel: "orders", Payload: "order-123"})
 	if !env.OK {
 		t.Fatalf("notify failed: %+v", env.Error)
 	}
@@ -103,12 +104,12 @@ func TestHostDBNotify_CapabilityDenied(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter()) // no CapDBNotify
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_notify", dbNotifyInput{Channel: "orders", Payload: "irrelevant"})
+	env := callHost(t, ctx, inst, "call_notify", abiv1.DBNotifyInput{Channel: "orders", Payload: "irrelevant"})
 	if env.OK {
 		t.Fatal("expected capability denial without db.notify")
 	}
-	if env.Error.Code != abi.ErrCodeCapabilityDenied {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+	if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 	}
 }
 
@@ -123,12 +124,12 @@ func TestHostDBNotify_TxIDNotFound(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBNotify, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_notify", dbNotifyInput{Channel: "orders", Payload: "irrelevant", TxID: "does-not-exist"})
+	env := callHost(t, ctx, inst, "call_notify", abiv1.DBNotifyInput{Channel: "orders", Payload: "irrelevant", TxID: "does-not-exist"})
 	if env.OK {
 		t.Fatal("expected an error for an unregistered tx_id")
 	}
-	if env.Error.Code != abi.ErrCodeTransactionNotFound {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeTransactionNotFound)
+	if env.Error.Code != abiv1.ErrCodeTransactionNotFound {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeTransactionNotFound)
 	}
 }
 
@@ -149,7 +150,7 @@ func TestHostDBNotify_TenantNamespacing_DifferentTenantsDontCollide(t *testing.T
 	mcA := newTestModuleContext(slugA, abi.CapDBNotify, r.TxLimiter())
 	instA := newHostDBQueryCaller(t, ctx, r, mcA)
 
-	env := callHost(t, ctx, instA, "call_notify", dbNotifyInput{Channel: "same-channel", Payload: "tenant-a-payload"})
+	env := callHost(t, ctx, instA, "call_notify", abiv1.DBNotifyInput{Channel: "same-channel", Payload: "tenant-a-payload"})
 	if !env.OK {
 		t.Fatalf("tenant A notify failed: %+v", env.Error)
 	}
@@ -174,7 +175,7 @@ func TestHostDBNotify_TxDeferred_DeliveredOnlyAfterCommit(t *testing.T) {
 
 	txID := beginLockTx(t, ctx, inst)
 
-	env := callHost(t, ctx, inst, "call_notify", dbNotifyInput{Channel: "orders", Payload: "deferred-payload", TxID: txID})
+	env := callHost(t, ctx, inst, "call_notify", abiv1.DBNotifyInput{Channel: "orders", Payload: "deferred-payload", TxID: txID})
 	if !env.OK {
 		t.Fatalf("notify failed: %+v", env.Error)
 	}
@@ -183,7 +184,7 @@ func TestHostDBNotify_TxDeferred_DeliveredOnlyAfterCommit(t *testing.T) {
 		t.Fatalf("notification delivered before commit (payload %q) — Postgres should defer it", n.Payload)
 	}
 
-	if env := callHost(t, ctx, inst, "call_commit", dbTxIDInput{TxID: txID}); !env.OK {
+	if env := callHost(t, ctx, inst, "call_commit", abiv1.DBTxIDInput{TxID: txID}); !env.OK {
 		t.Fatalf("commit failed: %+v", env.Error)
 	}
 
@@ -217,12 +218,12 @@ func TestHostDBNotify_OversizedPayload_DoesNotPoisonTransaction(t *testing.T) {
 	for i := range oversized {
 		oversized[i] = 'x'
 	}
-	env := callHost(t, ctx, inst, "call_notify", dbNotifyInput{Channel: "orders", Payload: string(oversized), TxID: txID})
+	env := callHost(t, ctx, inst, "call_notify", abiv1.DBNotifyInput{Channel: "orders", Payload: string(oversized), TxID: txID})
 	if env.OK {
 		t.Fatal("expected an error for an oversized payload")
 	}
-	if env.Error.Code != abi.ErrCodeExecError {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeExecError)
+	if env.Error.Code != abiv1.ErrCodeExecError {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeExecError)
 	}
 	if env.Error.Retry {
 		t.Error("Retry = true, want false — an oversized payload can never succeed on retry")
@@ -231,11 +232,11 @@ func TestHostDBNotify_OversizedPayload_DoesNotPoisonTransaction(t *testing.T) {
 	// The transaction must still be usable — proves the SAVEPOINT rolled
 	// back the failed pg_notify call instead of leaving the transaction
 	// aborted for every subsequent call.
-	env = callHost(t, ctx, inst, "call_notify", dbNotifyInput{Channel: "orders", Payload: "fits-fine", TxID: txID})
+	env = callHost(t, ctx, inst, "call_notify", abiv1.DBNotifyInput{Channel: "orders", Payload: "fits-fine", TxID: txID})
 	if !env.OK {
 		t.Fatalf("notify on the same transaction after an oversized payload failed: %+v", env.Error)
 	}
-	if env := callHost(t, ctx, inst, "call_commit", dbTxIDInput{TxID: txID}); !env.OK {
+	if env := callHost(t, ctx, inst, "call_commit", abiv1.DBTxIDInput{TxID: txID}); !env.OK {
 		t.Fatalf("commit failed after an oversized payload: %+v", env.Error)
 	}
 }
@@ -259,11 +260,11 @@ func TestHostDBNotify_AlreadyAbortedTransaction_DoesNotClaimRetryable(t *testing
 
 	// Poison the transaction with an unrelated failing statement, the way
 	// a module's own earlier call might.
-	if env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT 1/0", TxID: txID}); env.OK {
+	if env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT 1/0", TxID: txID}); env.OK {
 		t.Fatal("expected the division-by-zero query to fail")
 	}
 
-	env := callHost(t, ctx, inst, "call_notify", dbNotifyInput{Channel: "orders", Payload: "irrelevant", TxID: txID})
+	env := callHost(t, ctx, inst, "call_notify", abiv1.DBNotifyInput{Channel: "orders", Payload: "irrelevant", TxID: txID})
 	if env.OK {
 		t.Fatal("expected notify to fail on an already-aborted transaction")
 	}
@@ -287,12 +288,12 @@ func TestHostDBNotify_TxDeferred_DroppedOnRollback(t *testing.T) {
 
 	txID := beginLockTx(t, ctx, inst)
 
-	env := callHost(t, ctx, inst, "call_notify", dbNotifyInput{Channel: "orders", Payload: "rolled-back-payload", TxID: txID})
+	env := callHost(t, ctx, inst, "call_notify", abiv1.DBNotifyInput{Channel: "orders", Payload: "rolled-back-payload", TxID: txID})
 	if !env.OK {
 		t.Fatalf("notify failed: %+v", env.Error)
 	}
 
-	if env := callHost(t, ctx, inst, "call_rollback", dbTxIDInput{TxID: txID}); !env.OK {
+	if env := callHost(t, ctx, inst, "call_rollback", abiv1.DBTxIDInput{TxID: txID}); !env.OK {
 		t.Fatalf("rollback failed: %+v", env.Error)
 	}
 

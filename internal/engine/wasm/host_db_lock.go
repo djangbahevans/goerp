@@ -17,10 +17,6 @@ import (
 // lockTimeoutSQLState is Postgres's SQLSTATE for a lock_timeout cancellation.
 const lockTimeoutSQLState = "55P03"
 
-type dbLockInput = abiv1.DBLockInput
-
-type dbLockOutput = abiv1.DBLockOutput
-
 // makeDBLock builds host.db.lock — a tenant-namespaced Postgres advisory
 // lock scoped to the caller's own open host.db.begin transaction. TimeoutMs
 // is taken at face value (0 = try-lock); sdk/go/db's Lock/TryLock
@@ -39,14 +35,14 @@ func makeDBLock(r *Runtime) func(ctx context.Context, m api.Module, ptr, length 
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input dbLockInput
+		var input abiv1.DBLockInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
 		tx, ok := modCtx.Transaction(input.TxID)
 		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"})
 		}
 
 		// Tenant-namespaced so two tenants never collide, hashed to the
@@ -61,7 +57,7 @@ func makeDBLock(r *Runtime) func(ctx context.Context, m api.Module, ptr, length 
 
 		start := time.Now()
 		fail := func(err error) uint64 {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()})
 		}
 
 		if input.TimeoutMs == 0 {
@@ -69,7 +65,7 @@ func makeDBLock(r *Runtime) func(ctx context.Context, m api.Module, ptr, length 
 			if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT %s($1)", tryLockFn), lockKey).Scan(&acquired); err != nil {
 				return fail(err)
 			}
-			return abi.WriteToModule(ctx, m, allocate, dbLockOutput{
+			return abi.WriteToModule(ctx, m, allocate, abiv1.DBLockOutput{
 				Acquired:   acquired,
 				DurationMs: float64(time.Since(start).Microseconds()) / 1000,
 			})
@@ -107,14 +103,14 @@ func makeDBLock(r *Runtime) func(ctx context.Context, m api.Module, ptr, length 
 			if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT lock_attempt"); err != nil {
 				return rollbackAndFail(err)
 			}
-			return abi.WriteToModule(ctx, m, allocate, dbLockOutput{Acquired: true, DurationMs: duration})
+			return abi.WriteToModule(ctx, m, allocate, abiv1.DBLockOutput{Acquired: true, DurationMs: duration})
 		}
 
 		if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT lock_attempt"); err != nil {
 			return fail(err)
 		}
 		if pgErr, ok := errors.AsType[*pgconn.PgError](lockErr); ok && pgErr.Code == lockTimeoutSQLState {
-			return abi.WriteToModule(ctx, m, allocate, dbLockOutput{Acquired: false, DurationMs: duration})
+			return abi.WriteToModule(ctx, m, allocate, abiv1.DBLockOutput{Acquired: false, DurationMs: duration})
 		}
 		return fail(lockErr)
 	}

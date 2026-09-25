@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -114,7 +115,7 @@ func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 	// Rolled-back transaction: emit_tx succeeds (job insert happens inside
 	// the tx), but the rollback must take the job insert down with it.
 	rollbackTxID, rollbackTx := beginAndRegisterTx(t, ctx, primaryDB, mc)
-	env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{TxID: rollbackTxID, Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "1"})})
+	env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: rollbackTxID, Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "1"})})
 	if !env.OK {
 		t.Fatalf("emit_tx (rollback case) failed: %+v", env.Error)
 	}
@@ -128,7 +129,7 @@ func TestHostEvent_EmitTx_InsertsJobOnlyOnCommit(t *testing.T) {
 
 	// Committed transaction: the job must be visible afterward.
 	commitTxID, commitTx := beginAndRegisterTx(t, ctx, primaryDB, mc)
-	env = callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{TxID: commitTxID, Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "2"})})
+	env = callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: commitTxID, Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "2"})})
 	if !env.OK {
 		t.Fatalf("emit_tx (commit case) failed: %+v", env.Error)
 	}
@@ -150,12 +151,12 @@ func TestHostEvent_EmitTx_NoTransaction(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{TxID: "does-not-exist", Name: "sales.order.confirmed"})
+	env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: "does-not-exist", Name: "sales.order.confirmed"})
 	if env.OK {
 		t.Fatal("expected an error for a missing tx_id")
 	}
-	if env.Error.Code != abi.ErrCodeNoTransaction {
-		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeNoTransaction)
+	if env.Error.Code != abiv1.ErrCodeNoTransaction {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeNoTransaction)
 	}
 }
 
@@ -171,12 +172,12 @@ func TestHostEvent_EmitTx_UndeclaredEvent(t *testing.T) {
 	txID, tx := beginAndRegisterTx(t, ctx, primaryDB, mc)
 	defer func() { _ = tx.Rollback() }()
 
-	env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{TxID: txID, Name: "sales.order.not_declared"})
+	env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: txID, Name: "sales.order.not_declared"})
 	if env.OK {
 		t.Fatal("expected an error for an undeclared event name")
 	}
-	if env.Error.Code != abi.ErrCodeUndeclared {
-		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeUndeclared)
+	if env.Error.Code != abiv1.ErrCodeUndeclared {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeUndeclared)
 	}
 }
 
@@ -189,12 +190,12 @@ func TestHostEvent_EmitTx_CapabilityDenied(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{TxID: "irrelevant", Name: "sales.order.confirmed"})
+	env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: "irrelevant", Name: "sales.order.confirmed"})
 	if env.OK {
 		t.Fatal("expected an error without event.emit capability")
 	}
-	if env.Error.Code != abi.ErrCodeCapabilityDenied {
-		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+	if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 	}
 }
 
@@ -213,14 +214,14 @@ func TestHostEvent_EmitTx_ExplicitIdempotencyKey_DedupesAcrossCalls(t *testing.T
 
 	for i, out := range []*string{&firstEventID, &secondEventID} {
 		txID, tx := beginAndRegisterTx(t, ctx, primaryDB, mc)
-		env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{
+		env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{
 			TxID: txID, Name: "sales.order.confirmed", IdempotencyKey: key,
 			Payload: mustMarshalPayload(t, map[string]any{"attempt": i}),
 		})
 		if !env.OK {
 			t.Fatalf("emit_tx call %d failed: %+v", i, env.Error)
 		}
-		var result eventEmitTxOutput
+		var result abiv1.EventEmitTxOutput
 		if err := msgpack.Unmarshal(env.Data, &result); err != nil {
 			t.Fatalf("unmarshal output: %v", err)
 		}
@@ -252,7 +253,7 @@ func TestHostEvent_EmitTx_ManifestIdempotencyKeyField_DedupesFromPayload(t *test
 	// field via the manifest's declared idempotency_key_field.
 	for i := range 2 {
 		txID, tx := beginAndRegisterTx(t, ctx, primaryDB, mc)
-		env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{
+		env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{
 			TxID: txID, Name: "sales.order.confirmed",
 			Payload: mustMarshalPayload(t, map[string]any{"order_id": "ORD-42"}),
 		})
@@ -281,7 +282,7 @@ func TestHostEvent_EmitTx_NoIdempotencyKey_NoDedup(t *testing.T) {
 
 	for i := range 2 {
 		txID, tx := beginAndRegisterTx(t, ctx, primaryDB, mc)
-		env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{TxID: txID, Name: "sales.order.confirmed"})
+		env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: txID, Name: "sales.order.confirmed"})
 		if !env.OK {
 			t.Fatalf("emit_tx call %d failed: %+v", i, env.Error)
 		}
@@ -316,12 +317,12 @@ func TestHostEvent_EmitTx_RejectsSync(t *testing.T) {
 	txID, tx := beginAndRegisterTx(t, ctx, primaryDB, mc)
 	defer func() { _ = tx.Rollback() }()
 
-	env := callHost(t, ctx, inst, "call_emit_tx", eventEmitTxInput{TxID: txID, Name: "sales.order.confirmed", Sync: true})
+	env := callHost(t, ctx, inst, "call_emit_tx", abiv1.EventEmitTxInput{TxID: txID, Name: "sales.order.confirmed", Sync: true})
 	if env.OK {
 		t.Fatal("expected an error rejecting WithSync() on EmitTx")
 	}
-	if env.Error.Code != abi.ErrCodeSyncNotAllowed {
-		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeSyncNotAllowed)
+	if env.Error.Code != abiv1.ErrCodeSyncNotAllowed {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeSyncNotAllowed)
 	}
 }
 
@@ -335,7 +336,7 @@ func TestHostEvent_Emit_InsertsJobWithoutTransaction(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "1"})})
+	env := callHost(t, ctx, inst, "call_emit", abiv1.EventEmitInput{Name: "sales.order.confirmed", Payload: mustMarshalPayload(t, map[string]any{"order_id": "1"})})
 	if !env.OK {
 		t.Fatalf("emit failed: %+v", env.Error)
 	}
@@ -354,12 +355,12 @@ func TestHostEvent_Emit_UndeclaredEvent(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.not_declared"})
+	env := callHost(t, ctx, inst, "call_emit", abiv1.EventEmitInput{Name: "sales.order.not_declared"})
 	if env.OK {
 		t.Fatal("expected an error for an undeclared event name")
 	}
-	if env.Error.Code != abi.ErrCodeUndeclared {
-		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeUndeclared)
+	if env.Error.Code != abiv1.ErrCodeUndeclared {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeUndeclared)
 	}
 }
 
@@ -372,12 +373,12 @@ func TestHostEvent_Emit_CapabilityDenied(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.confirmed"})
+	env := callHost(t, ctx, inst, "call_emit", abiv1.EventEmitInput{Name: "sales.order.confirmed"})
 	if env.OK {
 		t.Fatal("expected an error without event.emit capability")
 	}
-	if env.Error.Code != abi.ErrCodeCapabilityDenied {
-		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+	if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 	}
 }
 
@@ -429,7 +430,7 @@ func TestHostEvent_Emit_Sync_AllSubscribersSucceed(t *testing.T) {
 	r.SetSyncEventDispatcher(dispatcher)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.shipped", Sync: true, Payload: mustMarshalPayload(t, map[string]any{})})
+	env := callHost(t, ctx, inst, "call_emit", abiv1.EventEmitInput{Name: "sales.order.shipped", Sync: true, Payload: mustMarshalPayload(t, map[string]any{})})
 	if !env.OK {
 		t.Fatalf("emit (sync) failed: %+v", env.Error)
 	}
@@ -461,12 +462,12 @@ func TestHostEvent_Emit_Sync_SubscriberFailureAggregatedAndReturned(t *testing.T
 	r.SetSyncEventDispatcher(dispatcher)
 	inst := newHostEventCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_emit", eventEmitInput{Name: "sales.order.shipped", Sync: true})
+	env := callHost(t, ctx, inst, "call_emit", abiv1.EventEmitInput{Name: "sales.order.shipped", Sync: true})
 	if env.OK {
 		t.Fatal("expected an aggregated dispatch failure")
 	}
-	if env.Error.Code != abi.ErrCodeDispatchFailed {
-		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeDispatchFailed)
+	if env.Error.Code != abiv1.ErrCodeDispatchFailed {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeDispatchFailed)
 	}
 	// Both subscribers must still have been attempted — a failing
 	// subscriber must not stop the remaining ones from running.

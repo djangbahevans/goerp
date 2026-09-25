@@ -6,10 +6,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-type ormReadInput = abi.ORMReadInput
-
-type ormReadOutput = abi.ORMReadOutput
-
 // Get fetches one record by ID via host.orm.read, mapping it into a T
 // via its own Scan method. Fields defaults to every field the caller's
 // field-security context permits when none are given. Returns
@@ -48,8 +44,8 @@ func GetManyTx[T Model, PT ptrScanner[T]](tx *db.Tx, ids []string, fields ...Any
 }
 
 func read[T Model, PT ptrScanner[T]](txID string, ids []string, fields []AnyField[T]) ([]T, error) {
-	var out ormReadOutput
-	in := ormReadInput{Model: resourceName[T](), IDs: ids, Fields: fieldNames(fields), TxID: txID}
+	var out abi.ORMReadOutput
+	in := abi.ORMReadInput{Model: resourceName[T](), IDs: ids, Fields: fieldNames(fields), TxID: txID}
 	if err := hostcall.Do(hostORMRead, in, &out); err != nil {
 		return nil, err
 	}

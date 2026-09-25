@@ -41,12 +41,6 @@ func registerHostSearch(ctx context.Context, rt wazero.Runtime, r *Runtime, db *
 	return err
 }
 
-type SearchQueryOpts = abiv1.SearchQueryOpts
-
-type SearchQueryInput = abiv1.SearchQueryInput
-
-type SearchQueryOutput = abiv1.SearchQueryOutput
-
 func makeSearchQuery(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -57,7 +51,7 @@ func makeSearchQuery(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Mod
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input SearchQueryInput
+		var input abiv1.SearchQueryInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -79,21 +73,21 @@ func makeSearchQuery(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Mod
 // search_path, not a manual tenant_id filter — this codebase's real
 // multitenancy layer, not data-layer.md §5.4's own tenant_id-column
 // pseudocode, which predates it).
-func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input SearchQueryInput) (SearchQueryOutput, *abi.HostError) {
+func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.SearchQueryInput) (abiv1.SearchQueryOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapSearchQuery) {
-		return SearchQueryOutput{}, abi.CapabilityDenied("search.query")
+		return abiv1.SearchQueryOutput{}, abi.CapabilityDenied("search.query")
 	}
 
 	searchIndexReg := modCtx.SearchIndexRegistry()
 	if searchIndexReg == nil {
-		return SearchQueryOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "no search index registry available"}
+		return abiv1.SearchQueryOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "no search index registry available"}
 	}
 	idx, ok := searchIndexReg.Index(modCtx.ModuleName, input.Index)
 	if !ok {
-		return SearchQueryOutput{}, &abi.HostError{Code: abi.ErrCodeIndexNotFound, Message: "search index " + input.Index + " is not declared by this module"}
+		return abiv1.SearchQueryOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeIndexNotFound, Message: "search index " + input.Index + " is not declared by this module"}
 	}
 	if len(idx.Searchable) == 0 {
-		return SearchQueryOutput{}, &abi.HostError{Code: abi.ErrCodeIndexNotFound, Message: "search index " + input.Index + " declares no searchable fields"}
+		return abiv1.SearchQueryOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeIndexNotFound, Message: "search index " + input.Index + " declares no searchable fields"}
 	}
 
 	limit := input.Opts.Limit
@@ -106,7 +100,7 @@ func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input S
 
 	tx, err := beginTenantScopedRead(ctx, db, modCtx)
 	if err != nil {
-		return SearchQueryOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return abiv1.SearchQueryOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -122,7 +116,7 @@ func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input S
 	var totalHits int64
 	countSQL := fmt.Sprintf("SELECT count(*) FROM %s WHERE %s", table, whereFrag)
 	if err := tx.QueryRowContext(ctx, countSQL, input.Query).Scan(&totalHits); err != nil {
-		return SearchQueryOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return abiv1.SearchQueryOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	displayCols := make([]string, len(idx.Displayed))
@@ -140,13 +134,13 @@ func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input S
 	)
 	rows, err := tx.QueryContext(ctx, listSQL, input.Query, limit, input.Opts.Offset)
 	if err != nil {
-		return SearchQueryOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return abiv1.SearchQueryOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 	defer rows.Close()
 
 	hits, err := scanRowsToMaps(rows)
 	if err != nil {
-		return SearchQueryOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return abiv1.SearchQueryOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 	for _, hit := range hits {
 		delete(hit, searchScoreAlias)
@@ -160,15 +154,15 @@ func SearchQuery(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input S
 	// input.Index (the bare index name, a different namespace).
 	applyFieldMasking(modCtx, idx.Resource, hits)
 
-	return SearchQueryOutput{Hits: hits, TotalHits: totalHits}, nil
+	return abiv1.SearchQueryOutput{Hits: hits, TotalHits: totalHits}, nil
 }
 
 // searchUnavailableError is returned by both host.search.update and
 // host.search.delete — Meilisearch-only calls against the trigram-only
 // initial build (host-abi-reference.md §12, corrected).
-func searchUnavailableError(op string) *abi.HostError {
-	return &abi.HostError{
-		Code:    abi.ErrCodeUnavailable,
+func searchUnavailableError(op string) *abiv1.HostError {
+	return &abiv1.HostError{
+		Code:    abiv1.ErrCodeUnavailable,
 		Message: "host.search." + op + " is only meaningful once Meilisearch is introduced (data-layer.md §5) — the trigram backend queries table rows directly and has no separate index to " + op,
 	}
 }

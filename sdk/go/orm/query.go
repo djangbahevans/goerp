@@ -3,6 +3,7 @@ package orm
 import (
 	"fmt"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
@@ -93,8 +94,8 @@ func (q *Query[T]) domain() string {
 // Returns (records, nextCursor, error); nextCursor is "" when there are
 // no more pages.
 func (q *Query[T]) All() ([]T, string, error) {
-	var out ormSearchReadOutput
-	in := ormSearchReadInput{
+	var out abi.ORMSearchReadOutput
+	in := abi.ORMSearchReadInput{
 		Model: q.model, Domain: q.domain(), Fields: fieldNames(q.fields),
 		Order: q.order, Limit: q.limit, Cursor: q.cursor, TxID: q.txID,
 	}
@@ -127,8 +128,8 @@ func (q *Query[T]) IDs() ([]string, error) {
 	if q.cursor != "" {
 		return nil, fmt.Errorf("orm: Query.IDs does not support Cursor (use All for cursor pagination)")
 	}
-	var out ormSearchOutput
-	in := ormSearchInput{Model: q.model, Domain: q.domain(), Order: q.order, Limit: q.limit, TxID: q.txID}
+	var out abi.ORMSearchOutput
+	in := abi.ORMSearchInput{Model: q.model, Domain: q.domain(), Order: q.order, Limit: q.limit, TxID: q.txID}
 	err := hostcall.Do(hostORMSearch, in, &out)
 	return out.IDs, err
 }
@@ -139,8 +140,8 @@ func (q *Query[T]) Count() (int64, error) {
 	if q.cursor != "" {
 		return 0, fmt.Errorf("orm: Query.Count does not support Cursor (use All for cursor pagination)")
 	}
-	var out ormSearchOutput
-	in := ormSearchInput{Model: q.model, Domain: q.domain(), TxID: q.txID}
+	var out abi.ORMSearchOutput
+	in := abi.ORMSearchInput{Model: q.model, Domain: q.domain(), TxID: q.txID}
 	err := hostcall.Do(hostORMSearch, in, &out)
 	return out.Count, err
 }

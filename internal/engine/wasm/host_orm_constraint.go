@@ -4,13 +4,8 @@ import (
 	"context"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/vmihailenco/msgpack/v5"
 )
-
-type constraintRequest = abiv1.ConstraintRequest
-
-type constraintResponse = abiv1.ConstraintResponse
 
 // runConstraintHook invokes the constraint hook registered for
 // (qualifiedModel, phase) against record, if the model's owning module
@@ -22,7 +17,7 @@ type constraintResponse = abiv1.ConstraintResponse
 // instance, the same graceful no-op runPreviewHook (host_orm_preview.go)
 // already established for "no hook registered" being the expected common
 // case, not a failure.
-func runConstraintHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, qualifiedModel, phase string, record map[string]any) *abi.HostError {
+func runConstraintHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, qualifiedModel, phase string, record map[string]any) *abiv1.HostError {
 	target, ok := modCtx.ComputeTargets()[modCtx.ModuleName]
 	if !ok || target.Pool == nil {
 		return nil
@@ -38,7 +33,7 @@ func runConstraintHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, q
 		return nil
 	}
 
-	payload, err := msgpack.Marshal(constraintRequest{
+	payload, err := msgpack.Marshal(abiv1.ConstraintRequest{
 		Model:    qualifiedModel,
 		Phase:    phase,
 		Record:   record,
@@ -47,23 +42,23 @@ func runConstraintHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, q
 		TraceID:  modCtx.TraceID,
 	})
 	if err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	respBytes, err := inst.InvokeHandleConstraint(ctx, payload)
 	if err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "constraint " + qualifiedModel + " " + phase + ": " + err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "constraint " + qualifiedModel + " " + phase + ": " + err.Error()}
 	}
 
-	var resp constraintResponse
+	var resp abiv1.ConstraintResponse
 	if err := msgpack.Unmarshal(respBytes, &resp); err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 	if resp.Error != nil {
-		return &abi.HostError{Code: resp.Error.Code, Message: resp.Error.Message}
+		return &abiv1.HostError{Code: resp.Error.Code, Message: resp.Error.Message}
 	}
 	if !resp.Allowed {
-		return &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: resp.Message, Details: map[string]any{"field": resp.Field}}
+		return &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: resp.Message, Details: map[string]any{"field": resp.Field}}
 	}
 	return nil
 }

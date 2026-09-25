@@ -47,12 +47,6 @@ func registerHostEvent(ctx context.Context, rt wazero.Runtime, r *Runtime, inser
 	return err
 }
 
-type eventEmitTxInput = abiv1.EventEmitTxInput
-
-type eventEmitInput = abiv1.EventEmitInput
-
-type eventEmitTxOutput = abiv1.EventEmitTxOutput
-
 func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -67,26 +61,26 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input eventEmitTxInput
+		var input abiv1.EventEmitTxInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
 		if input.Sync {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeSyncNotAllowed,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeSyncNotAllowed,
 				Message: "events.WithSync() is not permitted with EmitTx — use non-transactional Emit instead",
 			})
 		}
 
 		tx, ok := modCtx.Transaction(input.TxID)
 		if !ok {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeNoTransaction, Message: "tx_id does not exist or has expired"})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeNoTransaction, Message: "tx_id does not exist or has expired"})
 		}
 
 		reg := modCtx.EventRegistry()
 		if reg == nil || !reg.ModuleEmits(modCtx.ModuleName, input.Name) {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUndeclared, Message: "event " + input.Name + " is not in this module's declared emits list"})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUndeclared, Message: "event " + input.Name + " is not in this module's declared emits list"})
 		}
 
 		eventID := deriveEventID(reg, modCtx.ModuleName, modCtx.TenantID, input.Name, input.Payload, input.IdempotencyKey)
@@ -108,10 +102,10 @@ func makeEventEmitTx(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx c
 				ByState:  jobqueue.UniqueAcrossAllJobStates,
 			})
 		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true})
 		}
 
-		return abi.WriteToModule(ctx, m, allocate, eventEmitTxOutput{EventID: eventID.String()})
+		return abi.WriteToModule(ctx, m, allocate, abiv1.EventEmitTxOutput{EventID: eventID.String()})
 	}
 }
 
@@ -165,8 +159,6 @@ func newSHA1UUID(namespace uuid.UUID, name []byte) uuid.UUID {
 	return u
 }
 
-type eventEmitOutput = abiv1.EventEmitOutput
-
 // makeEventEmit builds host.event.emit, the non-transactional emit host
 // function — the only one that can honor events.WithSync(): dispatching
 // every async:false subscriber inline before the insert, sequentially,
@@ -189,14 +181,14 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input eventEmitInput
+		var input abiv1.EventEmitInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
 		reg := modCtx.EventRegistry()
 		if reg == nil || !reg.ModuleEmits(modCtx.ModuleName, input.Name) {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUndeclared, Message: "event " + input.Name + " is not in this module's declared emits list"})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUndeclared, Message: "event " + input.Name + " is not in this module's declared emits list"})
 		}
 
 		eventID := deriveEventID(reg, modCtx.ModuleName, modCtx.TenantID, input.Name, input.Payload, input.IdempotencyKey)
@@ -205,8 +197,8 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 		syncDispatched := false
 		if input.Sync {
 			if r.syncEventDispatcher == nil {
-				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-					Code:    abi.ErrCodeUnavailable,
+				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+					Code:    abiv1.ErrCodeUnavailable,
 					Message: "synchronous event dispatch is not available yet (engine still starting up)",
 					Retry:   true,
 				})
@@ -220,7 +212,7 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 				return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 			}
 			if dispatchErr := dispatchSyncSubscribers(ctx, r.syncEventDispatcher, reg, input.Name, envelope, r.syncSubscriberTimeout); dispatchErr != nil {
-				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeDispatchFailed, Message: dispatchErr.Error()})
+				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeDispatchFailed, Message: dispatchErr.Error()})
 			}
 			syncDispatched = true
 		}
@@ -239,9 +231,9 @@ func makeEventEmit(r *Runtime, insertClient *river.Client[*sql.Tx]) func(ctx con
 		if err := insertEventDelivery(ctx, insertClient, eventID, input.Name, input.Version,
 			modCtx.ModuleName, modCtx.TenantID, modCtx.UserID, modCtx.TraceID, input.Payload,
 			time.Duration(input.DelayMs)*time.Millisecond, emittedAt, syncDispatched, uniqueOpts); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true})
 		}
 
-		return abi.WriteToModule(ctx, m, allocate, eventEmitOutput{EventID: eventID.String()})
+		return abi.WriteToModule(ctx, m, allocate, abiv1.EventEmitOutput{EventID: eventID.String()})
 	}
 }

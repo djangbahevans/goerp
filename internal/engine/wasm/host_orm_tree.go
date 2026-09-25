@@ -7,7 +7,7 @@ import (
 	"strings"
 	"uuid"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -49,7 +49,7 @@ func ltreeLabel(pkValue any) string {
 // the Many2One field's own FK constraint (Tree is just a modifier on
 // Many2One) surface the real error at INSERT time, rather than
 // duplicating that check here.
-func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, record map[string]any) (genPK string, hostErr *abi.HostError) {
+func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, record map[string]any) (genPK string, hostErr *abiv1.HostError) {
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
 		return "", nil
@@ -102,7 +102,7 @@ func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDecla
 // row and every descendant's path in one UPDATE — go-sdk-reference.md
 // §22's own formula. Only called when the tree field's own column key is
 // present in the write diff; a write that doesn't touch it is a no-op.
-func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, id string, record map[string]any) *abi.HostError {
+func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, id string, record map[string]any) *abiv1.HostError {
 	pkColQuoted := quoteIdentORM(pkCol)
 	table := quoteIdentORM(modeltable.Name(md))
 
@@ -142,7 +142,7 @@ func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 				return ormSQLError(err)
 			}
 			if wouldCycle {
-				return &abi.HostError{Code: abi.ErrCodeCycleDetected, Message: "reparenting " + id + " under " + fmt.Sprint(newParentID) + " would make it its own ancestor", Details: map[string]any{"field": f.Name}}
+				return &abiv1.HostError{Code: abiv1.ErrCodeCycleDetected, Message: "reparenting " + id + " under " + fmt.Sprint(newParentID) + " would make it its own ancestor", Details: map[string]any{"field": f.Name}}
 			}
 			newPrefix = newParentPath + "." + ltreeLabel(id)
 		}
@@ -162,7 +162,7 @@ func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 // lookupTreePath returns treeField's "_path" companion column value for
 // the row identified by pkValue on md's own table — "" if no such row
 // exists.
-func lookupTreePath(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, treeField string, pkValue any) (string, *abi.HostError) {
+func lookupTreePath(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, treeField string, pkValue any) (string, *abiv1.HostError) {
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
 		return "", nil
@@ -174,7 +174,7 @@ func lookupTreePath(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, 
 // lookupOwnTreePath is lookupTreePath's shared core, taking an
 // already-quoted table/pk column pair so maintainTreePathOnWrite can
 // reuse it for the record being written without re-deriving them.
-func lookupOwnTreePath(ctx context.Context, tx *sql.Tx, table, pkColQuoted, treeField string, pkValue any) (string, *abi.HostError) {
+func lookupOwnTreePath(ctx context.Context, tx *sql.Tx, table, pkColQuoted, treeField string, pkValue any) (string, *abiv1.HostError) {
 	pathCol := quoteIdentORM(treeField + "_path")
 	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", pathCol, table, pkColQuoted)
 	var path sql.NullString
