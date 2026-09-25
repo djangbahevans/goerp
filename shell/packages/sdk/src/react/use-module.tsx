@@ -5,6 +5,7 @@ import type { CurrentTenant, CurrentUser } from "../auth/types.js";
 import { useTenant } from "../auth/use-tenant.js";
 import { useUser } from "../auth/use-user.js";
 import type { ToastAPI } from "../notifications/toast.js";
+import { type RealtimeAPI, realtime } from "../realtime/realtime-api.js";
 import { useToast } from "./use-toast.js";
 
 export interface NavigateOptions {
@@ -15,8 +16,8 @@ export interface NavigateOptions {
 // A shell path, optionally with a query string ("/contacts?stage=lead").
 export type NavigateFn = (path: string, options?: NavigateOptions) => void;
 
-// typescript-sdk-reference.md §5 "useModule". Further fields (t, realtime,
-// api) join this interface as they are built.
+// typescript-sdk-reference.md §5 "useModule". Further fields (t, api) join
+// this interface as they are built.
 export interface ModuleContext {
   user: CurrentUser;
   tenant: CurrentTenant;
@@ -24,6 +25,7 @@ export interface ModuleContext {
   navigate: NavigateFn;
   queryClient: QueryClient;
   toast: ToastAPI;
+  realtime: RealtimeAPI;
 }
 
 // The SDK has no router dependency, so the shell supplies a router-backed
@@ -55,7 +57,7 @@ export function useModule(moduleName: string): ModuleContext {
   const { check } = permissions;
 
   return useMemo(
-    () => ({ user, tenant, can: check, navigate, queryClient, toast }),
+    () => ({ user, tenant, can: check, navigate, queryClient, toast, realtime }),
     [user, tenant, check, navigate, queryClient, toast],
   );
 }
