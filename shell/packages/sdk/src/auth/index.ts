@@ -31,6 +31,12 @@ export {
   usePermissionsStatus,
 } from "./permission-provider.js";
 export type { FieldAccess, FieldAccessMap, PermissionContextValue, PermissionData } from "./permission-types.js";
+export {
+  noteTenantSuspension,
+  TenantSuspensionStore,
+  tenantSuspension,
+  useTenantSuspended,
+} from "./tenant-suspension.js";
 export { TokenRefreshScheduler, tokenRefreshScheduler, wireAutoRefresh } from "./token-refresh-scheduler.js";
 export type {
   AuthContextValue,

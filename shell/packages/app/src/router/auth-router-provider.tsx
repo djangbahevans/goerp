@@ -1,4 +1,4 @@
-import { useAuth } from "@goerp/sdk/auth";
+import { useAuth, useTenantSuspended } from "@goerp/sdk/auth";
 import { type AnyRouter, RouterProvider } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
@@ -12,6 +12,7 @@ export interface AuthRouterProviderProps {
 // bounce them to /auth/login on every reload.
 export function AuthRouterProvider({ router }: AuthRouterProviderProps): ReactNode {
   const auth = useAuth();
+  const tenantSuspended = useTenantSuspended();
   const [sessionSettled, setSessionSettled] = useState(false);
   const pending = auth.state.status === "idle" || auth.state.status === "checking";
   if (!sessionSettled && !pending) setSessionSettled(true);
@@ -22,14 +23,15 @@ export function AuthRouterProvider({ router }: AuthRouterProviderProps): ReactNo
 
   // Re-runs the gate once when the session check first settles, then whenever
   // a session starts or ends (logout, expiry) or the user's MFA-setup
-  // requirement flips (a 403 mfa_setup_required, or finishing setup) — not on every status change,
+  // requirement flips (a 403 mfa_setup_required, or finishing setup), or a
+  // 403 tenant_suspended arrives or is cleared — not on every status change,
   // which would reload route data on each token refresh. The settle re-run is
   // unconditional: a load triggered while pending decided nothing, and
   // RouterProvider skips its own mount-time load when one already resolved or
   // is still in flight — which the public router API can't tell apart from a
   // cold start. On a cold start this runs the initial route checks twice.
   const gated = useRef<string | null>(null);
-  const gateKey = `${auth.isAuthenticated}:${auth.user?.mfaSetupRequired === true}`;
+  const gateKey = `${auth.isAuthenticated}:${auth.user?.mfaSetupRequired === true}:${tenantSuspended}`;
   useEffect(() => {
     if (!sessionSettled || gated.current === gateKey) return;
     gated.current = gateKey;

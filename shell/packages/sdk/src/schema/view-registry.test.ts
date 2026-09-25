@@ -145,6 +145,12 @@ describe("buildViewRegistry — resolveRoute", () => {
     expect(buildViewRegistry(schema).getBundleUrl("contacts")).toBeNull();
   });
 
+  it("reports a module's display name, null for an unknown module", () => {
+    const registry = buildViewRegistry(schema);
+    expect(registry.getModuleDisplayName("contacts")).toBe("Contacts");
+    expect(registry.getModuleDisplayName("unknown-module")).toBeNull();
+  });
+
   it("reuses buildResourceRegistry/buildModelRegistry for resources/models rather than re-deriving them", () => {
     const schemaWithModel: MetaSchema = {
       ...schema,
@@ -420,5 +426,6 @@ describe("buildEmptyViewRegistry", () => {
     expect(registry.viewPermissions("anything")).toEqual([]);
     expect(registry.getBundleUrl("anything")).toBeNull();
     expect(registry.getBundleSHA256("anything")).toBeNull();
+    expect(registry.getModuleDisplayName("anything")).toBeNull();
   });
 });

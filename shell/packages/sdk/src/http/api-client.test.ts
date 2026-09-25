@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authMachine } from "../auth/auth-machine.js";
+import { tenantSuspension } from "../auth/tenant-suspension.js";
 import { AppError } from "../error/app-error.js";
 import { FetchAPIClient } from "./api-client.js";
 
@@ -29,6 +30,7 @@ function emptyResponse(status: number): Response {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  tenantSuspension.set(false);
 });
 
 describe("FetchAPIClient basic requests", () => {
@@ -215,6 +217,17 @@ describe("FetchAPIClient silent refresh on 401", () => {
 
     await expect(client.get("/contacts/1")).rejects.toMatchObject({ httpStatus: 403, code: "mfa_setup_required" });
     expect(transitionSpy).toHaveBeenCalledWith({ type: "mfa_setup_required" });
+  });
+
+  it("flags the tenant as suspended on a 403 tenant_suspended", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { error: { code: "tenant_suspended", message: "tenant suspended" } })),
+    );
+    const client = new FetchAPIClient();
+
+    await expect(client.get("/contacts/1")).rejects.toMatchObject({ httpStatus: 403, code: "tenant_suspended" });
+    expect(tenantSuspension.get()).toBe(true);
   });
 
   it("leaves other 403s to the caller", async () => {

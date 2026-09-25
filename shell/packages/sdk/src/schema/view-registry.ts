@@ -62,6 +62,7 @@ export interface ViewRegistry {
   viewPermissions(viewName: string): string[];
   getBundleUrl(moduleName: string): string | null;
   getBundleSHA256(moduleName: string): string | null;
+  getModuleDisplayName(moduleName: string): string | null;
 }
 
 const DEFAULT_GROUP_ICON = "folder";
@@ -262,6 +263,7 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
     viewPermissions: (viewName) => permissionsByView.get(viewName) ?? [],
     getBundleUrl: (moduleName) => schema.modules[moduleName]?.frontend?.bundle_url ?? null,
     getBundleSHA256: (moduleName) => schema.modules[moduleName]?.frontend?.bundle_sha256 ?? null,
+    getModuleDisplayName: (moduleName) => schema.modules[moduleName]?.display_name ?? null,
   };
 }
 
@@ -279,5 +281,6 @@ export function buildEmptyViewRegistry(): ViewRegistry {
     viewPermissions: () => [],
     getBundleUrl: () => null,
     getBundleSHA256: () => null,
+    getModuleDisplayName: () => null,
   };
 }

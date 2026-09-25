@@ -1,4 +1,5 @@
 import { AppError } from "../error/app-error.js";
+import { noteTenantSuspension } from "./tenant-suspension.js";
 import type {
   ChangePasswordInput,
   CurrentTenant,
@@ -81,7 +82,9 @@ async function readError(response: Response): Promise<AppError> {
     bodyDetails || Number.isFinite(retryAfter)
       ? { ...bodyDetails, ...(Number.isFinite(retryAfter) ? { retryAfter } : {}) }
       : null;
-  return new AppError({ code, message, httpStatus: response.status, details });
+  const error = new AppError({ code, message, httpStatus: response.status, details });
+  noteTenantSuspension(error);
+  return error;
 }
 
 // fetchCurrentSession backs the checking state (GET /auth/me,
@@ -95,7 +98,10 @@ export async function fetchCurrentSession(): Promise<{ user: CurrentUser; tenant
   } catch {
     return null;
   }
-  if (!response.ok) return null;
+  if (!response.ok) {
+    if (response.status === 403) await readError(response);
+    return null;
+  }
   try {
     const body = (await response.json()) as MeResponseBody;
     return { user: mapUser(body.user), tenant: mapTenant(body.tenant) };
@@ -110,7 +116,10 @@ export async function fetchCurrentSession(): Promise<{ user: CurrentUser; tenant
 export async function fetchTenantContext(): Promise<TenantContext | null> {
   try {
     const response = await fetch("/auth/tenant-context", { credentials: "include" });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      if (response.status === 403) await readError(response);
+      return null;
+    }
     const body = (await response.json()) as {
       tenant: { slug: string; name: string } | null;
       registration_enabled: boolean;

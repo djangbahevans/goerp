@@ -84,20 +84,24 @@ afterEach(() => {
 describe("/_m/$ catch-all route", () => {
   it("renders the not-found page for a path nothing resolves", async () => {
     viewRegistryRef.current = buildEmptyViewRegistry();
-    await renderAt("/_m/nonexistent");
-    expect(await screen.findByText("Page not found")).toBeTruthy();
+    const router = await renderAt("/_m/nonexistent");
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/_m/nonexistent");
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
   });
 
-  it("redirects to /403 when the resolved view's module isn't enabled", async () => {
+  it("redirects to the module-not-enabled /403 when the resolved view's module isn't enabled", async () => {
     viewRegistryRef.current = registryResolvingTo("/contacts", LIST_VIEW);
     permissionDataRef.current = { permissions: new Set(), fieldAccess: {}, modulesEnabled: new Set() };
 
-    await renderAt("/_m/contacts");
+    const router = await renderAt("/_m/contacts");
 
-    expect(await screen.findByText("You don't have permission to view this page")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "This module isn't enabled for your account" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/403");
+    expect(router.state.location.search).toEqual({ reason: "module_not_enabled", module: "contacts" });
   });
 
-  it("redirects to /403 when the resolved view requires a permission the user lacks", async () => {
+  it("redirects to the missing-permission /403 when the resolved view requires a permission the user lacks", async () => {
     const gatedView: ResolvedView = { ...LIST_VIEW, permissions: ["contacts:contact:read"] };
     viewRegistryRef.current = registryResolvingTo("/contacts", gatedView);
     permissionDataRef.current = {
@@ -106,9 +110,11 @@ describe("/_m/$ catch-all route", () => {
       modulesEnabled: new Set(["contacts"]),
     };
 
-    await renderAt("/_m/contacts");
+    const router = await renderAt("/_m/contacts");
 
-    expect(await screen.findByText("You don't have permission to view this page")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "You don't have access to this page" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/403");
+    expect(router.state.location.search).toEqual({ reason: "missing_permission" });
   });
 
   it("does not redirect when the module is enabled and every required permission is held", async () => {
@@ -125,7 +131,7 @@ describe("/_m/$ catch-all route", () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/_m/contacts");
     });
-    expect(screen.queryByText("You don't have permission to view this page")).toBeNull();
+    expect(screen.queryByText("You don't have access to this page")).toBeNull();
     expect(screen.queryByText("Page not found")).toBeNull();
   });
 });

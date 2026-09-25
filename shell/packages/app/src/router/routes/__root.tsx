@@ -1,8 +1,10 @@
-import type { AuthContextValue } from "@goerp/sdk/auth";
+import { type AuthContextValue, tenantSuspension } from "@goerp/sdk/auth";
 import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { isAuthPath } from "../../auth/safe-redirect.js";
+import { NotFoundPage } from "../../pages/errors/index.js";
 import { RootLayout } from "../root-layout.js";
 
+const TENANT_SUSPENDED_PATH = "/tenant-suspended";
 const MFA_SETUP_EXEMPT = new Set(["/auth/mfa-setup", "/auth/logout"]);
 
 export interface RouterContext {
@@ -15,6 +17,10 @@ export interface RouterContext {
 // re-runs the gate once the check does settle.
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: ({ location, context }) => {
+    // shell-ux.md §6.6: a suspended tenant has nothing else to show, signed
+    // in or not, so its page is exempt from the sign-in gate below.
+    if (location.pathname === TENANT_SUSPENDED_PATH) return;
+    if (tenantSuspension.get()) throw redirect({ to: TENANT_SUSPENDED_PATH });
     // shell-ux.md §2.7: a user the tenant requires to enroll in MFA stays on
     // the setup wizard until it's done.
     if (context.auth.user?.mfaSetupRequired && !MFA_SETUP_EXEMPT.has(location.pathname)) {
@@ -34,4 +40,5 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     throw redirect({ to: "/auth/login", search: { redirect: location.href } });
   },
   component: RootLayout,
+  notFoundComponent: NotFoundPage,
 });
