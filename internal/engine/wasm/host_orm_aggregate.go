@@ -8,6 +8,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
@@ -131,7 +132,7 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 	}
 	defer finish()
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 
 	selectExprs := make([]string, len(input.Values))
 	for i, v := range input.Values {

@@ -3,6 +3,7 @@ package tenantexport
 import (
 	"testing"
 
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -85,13 +86,13 @@ func TestPrimaryKeyColumn(t *testing.T) {
 
 func TestTableNameFor(t *testing.T) {
 	explicit := model.ModelDeclaration{Name: "widget", Table: "widgets"}
-	if got := tableNameFor(explicit); got != "widgets" {
-		t.Errorf("tableNameFor(explicit Table) = %q, want %q", got, "widgets")
+	if got := modeltable.Name(explicit); got != "widgets" {
+		t.Errorf("modeltable.Name(explicit Table) = %q, want %q", got, "widgets")
 	}
 
 	derived := model.ModelDeclaration{Name: "SalesOrder"}
-	if got := tableNameFor(derived); got != "sales_order" {
-		t.Errorf("tableNameFor(no Table) = %q, want %q", got, "sales_order")
+	if got := modeltable.Name(derived); got != "sales_order" {
+		t.Errorf("modeltable.Name(no Table) = %q, want %q", got, "sales_order")
 	}
 }
 

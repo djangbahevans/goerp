@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -103,7 +104,7 @@ func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDecla
 // present in the write diff; a write that doesn't touch it is a no-op.
 func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, id string, record map[string]any) *abi.HostError {
 	pkColQuoted := quoteIdentORM(pkCol)
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 
 	for _, f := range md.Fields {
 		if !f.Def.IsTree {
@@ -166,7 +167,7 @@ func lookupTreePath(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, 
 	if !ok {
 		return "", nil
 	}
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	return lookupOwnTreePath(ctx, tx, table, quoteIdentORM(pkCol), treeField, pkValue)
 }
 

@@ -15,10 +15,8 @@
 package dataaudit
 
 import (
-	"strings"
-	"unicode"
-
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -58,7 +56,7 @@ func (r *Registry) Register(moduleName string, audited []manifest.AuditedTable, 
 	}
 
 	for _, decl := range decls {
-		a, ok := byTable[tableNameFor(decl)]
+		a, ok := byTable[modeltable.Name(decl)]
 		if !ok {
 			continue
 		}
@@ -78,39 +76,4 @@ func (r *Registry) Lookup(qualifiedModel string) (excludeColumns map[string]bool
 		return nil, false
 	}
 	return a.ExcludeColumns, true
-}
-
-// tableNameFor resolves a model declaration's Postgres table name: its
-// explicit Table override, or snake_case(Name) otherwise — duplicating
-// internal/engine/schema.TableNameFor's own few lines rather than
-// importing internal/engine/schema, the same way
-// internal/engine/wasm.tableNameForORM already does, to keep this
-// package a leaf.
-func tableNameFor(md model.ModelDeclaration) string {
-	if md.Table != "" {
-		return md.Table
-	}
-	return snakeCase(md.Name)
-}
-
-func snakeCase(name string) string {
-	var b strings.Builder
-	prevLower := false
-	for _, r := range name {
-		switch {
-		case r == '.':
-			b.WriteByte('_')
-			prevLower = false
-		case unicode.IsUpper(r):
-			if prevLower {
-				b.WriteByte('_')
-			}
-			b.WriteRune(unicode.ToLower(r))
-			prevLower = false
-		default:
-			b.WriteRune(r)
-			prevLower = true
-		}
-	}
-	return b.String()
 }

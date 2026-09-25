@@ -13,6 +13,7 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/riverqueue/river"
@@ -85,7 +86,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	}
 	defer rollback()
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	pkColQuoted := quoteIdentORM(pkCol)
 
 	var oldData map[string]any

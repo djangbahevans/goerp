@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -196,82 +197,31 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 		t.Error("expected the widgets table to have been created by module schema sync")
 	}
 
-	var sequencesExists bool
-	if err := env.conn.QueryRow(
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'sequences')",
-		"tenant_"+slug,
-	).Scan(&sequencesExists); err != nil {
-		t.Fatalf("check sequences table: %v", err)
-	}
-	if !sequencesExists {
-		t.Error("expected the sequences table to have been created by CreateEngineTables")
-	}
-
-	var auditLogExists bool
-	if err := env.conn.QueryRow(
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'audit_log')",
-		"tenant_"+slug,
-	).Scan(&auditLogExists); err != nil {
-		t.Fatalf("check audit_log table: %v", err)
-	}
-	if !auditLogExists {
-		t.Error("expected the audit_log table to have been created by CreateEngineTables")
-	}
-
-	var eventLogExists bool
-	if err := env.conn.QueryRow(
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'event_log')",
-		"tenant_"+slug,
-	).Scan(&eventLogExists); err != nil {
-		t.Fatalf("check event_log table: %v", err)
-	}
-	if !eventLogExists {
-		t.Error("expected the event_log table to have been created by CreateEngineTables")
-	}
-
-	var recordSharesExists bool
-	if err := env.conn.QueryRow(
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'record_shares')",
-		"tenant_"+slug,
-	).Scan(&recordSharesExists); err != nil {
-		t.Fatalf("check record_shares table: %v", err)
-	}
-	if !recordSharesExists {
-		t.Error("expected the record_shares table to have been created by CreateEngineTables")
-	}
-
-	var savedFiltersExists bool
-	if err := env.conn.QueryRow(
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'saved_filters')",
-		"tenant_"+slug,
-	).Scan(&savedFiltersExists); err != nil {
-		t.Fatalf("check saved_filters table: %v", err)
-	}
-	if !savedFiltersExists {
-		t.Error("expected the saved_filters table to have been created by CreateEngineTables")
-	}
-
-	var recordActivityExists bool
-	if err := env.conn.QueryRow(
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'record_activity')",
-		"tenant_"+slug,
-	).Scan(&recordActivityExists); err != nil {
-		t.Fatalf("check record_activity table: %v", err)
-	}
-	if !recordActivityExists {
-		t.Error("expected the record_activity table to have been created by CreateEngineTables")
-	}
-
-	for _, table := range []string{"audit_log", "event_log"} {
-		var registered bool
-		if err := env.conn.QueryRow(
-			"SELECT EXISTS(SELECT 1 FROM partman.part_config WHERE parent_table = $1)",
-			"tenant_"+slug+"."+table,
-		).Scan(&registered); err != nil {
-			t.Fatalf("check pg_partman registration for %s: %v", table, err)
-		}
-		if !registered {
-			t.Errorf("expected %s to be registered with pg_partman by CreateEngineTables", table)
+	for _, g := range enginetables.Groups {
+		for _, tbl := range g.Tables {
+			var exists bool
+			if err := env.conn.QueryRow(
+				"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2)",
+				"tenant_"+slug, tbl.Name,
+			).Scan(&exists); err != nil {
+				t.Fatalf("check %s table: %v", tbl.Name, err)
+			}
+			if !exists {
+				t.Errorf("expected the %s table to have been created by CreateEngineTables", tbl.Name)
+			}
+			if !tbl.Partitioned {
+				continue
+			}
+			var registered bool
+			if err := env.conn.QueryRow(
+				"SELECT EXISTS(SELECT 1 FROM partman.part_config WHERE parent_table = $1)",
+				"tenant_"+slug+"."+tbl.Name,
+			).Scan(&registered); err != nil {
+				t.Fatalf("check pg_partman registration for %s: %v", tbl.Name, err)
+			}
+			if !registered {
+				t.Errorf("expected %s to be registered with pg_partman by CreateEngineTables", tbl.Name)
+			}
 		}
 	}
 

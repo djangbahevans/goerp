@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	pgquery "github.com/wasilibs/go-pgquery"
 	"google.golang.org/protobuf/proto"
@@ -60,7 +61,7 @@ func resolveAuditedExecTable(modCtx *ModuleContext, table string) (pkCol string,
 	}
 
 	for _, decl := range modCtx.ModelDecls() {
-		if tableNameForORM(decl) != table {
+		if modeltable.Name(decl) != table {
 			continue
 		}
 		pk, ok := primaryKeyColumn(decl)

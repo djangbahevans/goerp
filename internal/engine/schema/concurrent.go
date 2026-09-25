@@ -7,6 +7,7 @@ import (
 	"ariga.io/atlas/sql/schema"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -29,11 +30,7 @@ func findDeclaredIndex(modelDecls []model.ModelDeclaration, indexName string) (t
 	for _, md := range modelDecls {
 		for _, ni := range md.Indexes {
 			if ni.Name == indexName {
-				tbl := md.Table
-				if tbl == "" {
-					tbl = snakeCase(md.Name)
-				}
-				return tbl, ni.Def, true
+				return modeltable.Name(md), ni.Def, true
 			}
 		}
 	}

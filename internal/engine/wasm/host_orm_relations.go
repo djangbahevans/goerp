@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -88,7 +89,7 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 	}
 
 	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s IN (%s)",
-		joinQuoted(selectCols), quoteIdentORM(tableNameForORM(targetMD)), quoteIdentORM(targetPK), strings.Join(placeholders, ", "))
+		joinQuoted(selectCols), quoteIdentORM(modeltable.Name(targetMD)), quoteIdentORM(targetPK), strings.Join(placeholders, ", "))
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return err

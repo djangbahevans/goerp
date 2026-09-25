@@ -4,6 +4,7 @@ import (
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -31,7 +32,7 @@ import (
 // has nothing to enforce for this UPDATE.
 func resolveEtagTable(modCtx *ModuleContext, table string) (md model.ModelDeclaration, hasEtag bool) {
 	for _, decl := range modCtx.ModelDecls() {
-		if tableNameForORM(decl) == table {
+		if modeltable.Name(decl) == table {
 			return decl, hasField(decl, "etag")
 		}
 	}

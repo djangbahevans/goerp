@@ -16,6 +16,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -261,7 +262,7 @@ func (w *Worker) dumpModule(ctx context.Context, tenantSlug string, mod *module.
 			quotedCols[i] = quoteIdent(c)
 		}
 		sqlStr := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s ASC",
-			strings.Join(quotedCols, ", "), quoteIdent(tableNameFor(md)), quoteIdent(pkCol))
+			strings.Join(quotedCols, ", "), quoteIdent(modeltable.Name(md)), quoteIdent(pkCol))
 
 		rows, err := tx.QueryContext(ctx, sqlStr)
 		if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/vmihailenco/msgpack/v5"
@@ -189,8 +190,7 @@ func beginMigrationDDLTx(ctx context.Context, primary *sql.DB, modCtx *ModuleCon
 // since internal/engine/schema's own test suite
 // (enum_realmodule_test.go) imports this package (a real compiled-module
 // integration test), and this package importing schema back would be a
-// cycle (the same reason host_orm.go's tableNameForORM duplicates
-// schema.TableNameFor instead of importing it).
+// cycle.
 // TestMigrationDDLAdvisoryLockKeys_MatchesSchemaPackage cross-checks this
 // against schema.AdvisoryLockKeys directly (safe in a test file, since
 // only schema's test files import wasm, not schema's production code).
@@ -232,7 +232,7 @@ func buildMigrationDDL(modCtx *ModuleContext, input dbMigrationDDLInput) (string
 }
 
 // migrationDDLTableOwned reports whether table resolves (via
-// tableNameForORM, the same bare-name mapping resolveEtagTable and
+// modeltable.Name, the same bare-name mapping resolveEtagTable and
 // resolveAuditedExecTable use) to one of modCtx's own currently declared
 // models, *and* that model's fully-qualified "{module}.{resource}" name
 // — the form manifest.SchemaConfig.OwnedModels/ExtendsModels always use,
@@ -241,7 +241,7 @@ func buildMigrationDDL(modCtx *ModuleContext, input dbMigrationDDLInput) (string
 // modCtx.OwnedModels() or modCtx.ExtendsModels().
 func migrationDDLTableOwned(modCtx *ModuleContext, table string) bool {
 	for _, decl := range modCtx.ModelDecls() {
-		if tableNameForORM(decl) != table {
+		if modeltable.Name(decl) != table {
 			continue
 		}
 		qualified := decl.QualifiedName(modCtx.ModuleName)

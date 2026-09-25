@@ -13,6 +13,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -189,7 +190,7 @@ func insertActivityEntries(ctx context.Context, tx *sql.Tx, modCtx *ModuleContex
 // caller's own declared model, when that model has tracked fields.
 func resolveTrackedExecTable(modCtx *ModuleContext, table string) (md model.ModelDeclaration, qualifiedModel, pkCol string, ok bool) {
 	for _, decl := range modCtx.ModelDecls() {
-		if tableNameForORM(decl) != table {
+		if modeltable.Name(decl) != table {
 			continue
 		}
 		if !hasTrackedFields(decl) {
@@ -247,7 +248,7 @@ func lockConflictRowBeforeUpsert(ctx context.Context, tx *sql.Tx, md model.Model
 		conds[i] = fmt.Sprintf("%s = $%d", quoteIdentORM(col), i+1)
 		args[i] = v
 	}
-	sqlStr := fmt.Sprintf("SELECT * FROM %s WHERE %s FOR UPDATE", quoteIdentORM(tableNameForORM(md)), strings.Join(conds, " AND "))
+	sqlStr := fmt.Sprintf("SELECT * FROM %s WHERE %s FOR UPDATE", quoteIdentORM(modeltable.Name(md)), strings.Join(conds, " AND "))
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, ormSQLError(err)

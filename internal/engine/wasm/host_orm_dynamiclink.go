@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -74,7 +75,7 @@ func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 			return &abi.HostError{Code: abi.ErrCodeDynamicLinkTargetNotFound, Message: "model " + typeName + " declares no primary key field", Details: map[string]any{"field": f.Name}}
 		}
 
-		table := quoteIdentORM(tableNameForORM(targetMD))
+		table := quoteIdentORM(modeltable.Name(targetMD))
 		var exists bool
 		sqlStr := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s = $1)", table, quoteIdentORM(targetPK))
 		if err := tx.QueryRowContext(ctx, sqlStr, idVal).Scan(&exists); err != nil {

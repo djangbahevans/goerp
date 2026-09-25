@@ -3,10 +3,10 @@ package schema
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
 	"ariga.io/atlas/sql/postgres"
 	"ariga.io/atlas/sql/schema"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
@@ -298,10 +298,7 @@ func onDeleteOption(b model.OnDeleteBehaviour) schema.ReferenceOption {
 // TableNameFor resolves a model declaration's Postgres table name: its
 // explicit Table override, or snake_case(Name) otherwise.
 func TableNameFor(md model.ModelDeclaration) string {
-	if md.Table != "" {
-		return md.Table
-	}
-	return snakeCase(md.Name)
+	return modeltable.Name(md)
 }
 
 // dedupedOwnedTables returns modelDecls's table names via TableNameFor,
@@ -510,26 +507,4 @@ func toAtlasIndex(t *schema.Table, ni model.NamedIndex) (*schema.Index, error) {
 	}
 
 	return idx, nil
-}
-
-func snakeCase(name string) string {
-	var b strings.Builder
-	prevLower := false
-	for _, r := range name {
-		switch {
-		case r == '.':
-			b.WriteByte('_')
-			prevLower = false
-		case unicode.IsUpper(r):
-			if prevLower {
-				b.WriteByte('_')
-			}
-			b.WriteRune(unicode.ToLower(r))
-			prevLower = false
-		default:
-			b.WriteRune(r)
-			prevLower = true
-		}
-	}
-	return b.String()
 }

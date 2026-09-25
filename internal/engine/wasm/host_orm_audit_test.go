@@ -49,7 +49,7 @@ func newAuditTestDataAuditRegistry() *dataaudit.Registry {
 
 // createFixtureAuditTables creates widgets/gadgets tables plus a
 // same-shape stand-in for the real engine-owned audit_log table
-// (internal/engine/tenant/provision/activities.go's createAuditLogTable)
+// (internal/engine/enginetables's createAuditLogTable)
 // — a local copy rather than importing that package, matching every
 // other fixture table in this file being self-contained DDL.
 func createFixtureAuditTables(t *testing.T, conn *sql.DB, slug string) {
