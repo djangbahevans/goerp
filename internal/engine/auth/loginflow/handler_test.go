@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
@@ -160,12 +161,20 @@ func newFixture(t *testing.T) *fixture {
 	// per-IP window in the shared dev Redis.
 	remoteIP := randomTestIP()
 	t.Cleanup(func() {
-		for _, key := range []string{"ratelimit:login:ip:" + remoteIP, "ratelimit:login:tenant:" + tt.ID} {
+		for _, key := range []string{"ratelimit:login:ip:" + remoteIP, "ratelimit:login:tenant:" + tt.ID, "ratelimit:login:tenant_alerted:" + tt.ID} {
 			_ = cacheClient.Delete(context.Background(), key)
 		}
 	})
 
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient)
+	auditStore := authaudit.NewStore(conn, tenantStore)
+	if err := auditStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("authaudit Bootstrap() error: %v", err)
+	}
+	// Registered after the tenant's own cleanup, so it runs first:
+	// auth_audit_log.tenant_id references system.tenants.
+	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.auth_audit_log WHERE tenant_id = $1`, tt.ID) })
+
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient, auditStore)
 
 	return &fixture{
 		handler:    handler,

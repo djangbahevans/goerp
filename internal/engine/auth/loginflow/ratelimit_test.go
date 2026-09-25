@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 )
 
 // fill records n attempts against key directly, so a test can reach a
@@ -78,10 +81,60 @@ func TestLogin_RateLimitedResponseIsIdenticalForUnknownEmail(t *testing.T) {
 	}
 }
 
-func TestLogin_PerTenantLimitRejects(t *testing.T) {
+func tenantRateExceededEvents(t *testing.T, f *fixture) int {
+	t.Helper()
+	var n int
+	if err := f.conn.QueryRow(`SELECT count(*) FROM system.auth_audit_log WHERE event_type = 'login.tenant_rate_exceeded' AND tenant_id = $1`, f.tenantID).Scan(&n); err != nil {
+		t.Fatalf("count login.tenant_rate_exceeded rows: %v", err)
+	}
+	return n
+}
+
+func TestLogin_PerTenantLimitDetectsWithoutBlocking(t *testing.T) {
 	f := newFixture(t)
 	fill(t, f.cache, "ratelimit:login:tenant:"+f.tenantID, tenantLimit, tenantWindow)
 
+	for i := range 3 {
+		rec := f.doLogin(t, map[string]any{"email": f.email, "password": testPassword, "tenant": f.tenantSlug}, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("login %d over the tenant limit: status = %d, want 200: %s", i+1, rec.Code, rec.Body)
+		}
+	}
+
+	if n := tenantRateExceededEvents(t, f); n != 1 {
+		t.Fatalf("login.tenant_rate_exceeded rows = %d, want 1 per tenant per window", n)
+	}
+	var metadata string
+	if err := f.conn.QueryRow(`SELECT metadata::text FROM system.auth_audit_log WHERE event_type = 'login.tenant_rate_exceeded' AND tenant_id = $1`, f.tenantID).Scan(&metadata); err != nil {
+		t.Fatalf("read event metadata: %v", err)
+	}
+	if metadata != `{"limit": 100, "window_seconds": 60}` {
+		t.Errorf("metadata = %s, want limit 100 and window_seconds 60", metadata)
+	}
+}
+
+func TestLogin_PerTenantLimitUnderThresholdWritesNoEvent(t *testing.T) {
+	f := newFixture(t)
+
+	rec := f.doLogin(t, map[string]any{"email": f.email, "password": testPassword, "tenant": f.tenantSlug}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if n := tenantRateExceededEvents(t, f); n != 0 {
+		t.Errorf("login.tenant_rate_exceeded rows = %d, want 0 under the limit", n)
+	}
+}
+
+func TestLogin_PerEmailRejectionIsTheOnly429UnderTenantFlood(t *testing.T) {
+	f := newFixture(t)
+	fill(t, f.cache, "ratelimit:login:tenant:"+f.tenantID, tenantLimit, tenantWindow)
+
+	for i := range emailLimit {
+		rec := f.doLogin(t, map[string]any{"email": f.email, "password": "wrong", "tenant": f.tenantSlug}, nil)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status = %d, want 401 (the tenant limiter must not reject)", i+1, rec.Code)
+		}
+	}
 	rec := f.doLogin(t, map[string]any{"email": f.email, "password": testPassword, "tenant": f.tenantSlug}, nil)
 	assertRateLimited(t, rec.Code, rec.Header(), decodeBody(t, rec))
 }
@@ -134,5 +187,44 @@ func TestLogin_RateLimiterFailsOpenWhenRedisIsDown(t *testing.T) {
 	rec := f.doLogin(t, map[string]any{"email": f.email, "password": testPassword, "tenant": f.tenantSlug}, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 with Redis unavailable: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestLogin_PerTenantAuditFailureReleasesGuardForRetry(t *testing.T) {
+	f := newFixture(t)
+	closed, err := db.New(localPostgresDSN)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	_ = closed.Close()
+	working := f.handler.audit
+	f.handler.audit = authaudit.NewStore(closed, tenant.NewStore(closed))
+	fill(t, f.cache, "ratelimit:login:tenant:"+f.tenantID, tenantLimit, tenantWindow)
+
+	rec := f.doLogin(t, map[string]any{"email": f.email, "password": testPassword, "tenant": f.tenantSlug}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 when the audit write fails: %s", rec.Code, rec.Body)
+	}
+	if held, err := f.cache.Exists(t.Context(), "ratelimit:login:tenant_alerted:"+f.tenantID); err != nil || held {
+		t.Fatalf("alert guard held = %v (err %v) after a failed audit write, want released", held, err)
+	}
+
+	f.handler.audit = working
+	f.doLogin(t, map[string]any{"email": f.email, "password": testPassword, "tenant": f.tenantSlug}, nil)
+	if n := tenantRateExceededEvents(t, f); n != 1 {
+		t.Errorf("login.tenant_rate_exceeded rows after retry = %d, want 1", n)
+	}
+}
+
+func TestDetectTenantFlood_WritesEventWhenRequestContextIsCanceled(t *testing.T) {
+	f := newFixture(t)
+	fill(t, f.cache, "ratelimit:login:tenant:"+f.tenantID, tenantLimit, tenantWindow)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	f.handler.detectTenantFlood(ctx, f.tenantID)
+
+	if n := tenantRateExceededEvents(t, f); n != 1 {
+		t.Errorf("login.tenant_rate_exceeded rows = %d, want 1 despite the canceled request context", n)
 	}
 }
