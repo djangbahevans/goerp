@@ -100,6 +100,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/poolwarm"
+	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -156,22 +157,24 @@ type Engine struct {
 	tracer         trace.Tracer
 	tracerProvider *sdktrace.TracerProvider
 
-	secretsBackend    secrets.Backend
-	primaryDB         *sql.DB
-	replicaDB         *sql.DB
-	userStore         *user.Store
-	recordSharesStore *recordshares.Store
-	savedFiltersStore *savedfilters.Store
-	cacheClient       *cache.Client
-	searchClient      *search.Client
-	storageBackend    storage.Backend
-	temporalClient    *temporal.Client
-	workflowWorkers   *workflowworker.Manager
-	systemWorker      *systemworker.Worker
-	server            *httpx.Server
-	adminServer       *adminapi.Server
-	readiness         atomic.Bool
-	wsHub             *ws.Hub
+	secretsBackend      secrets.Backend
+	primaryDB           *sql.DB
+	replicaDB           *sql.DB
+	userStore           *user.Store
+	recordSharesStore   *recordshares.Store
+	savedFiltersStore   *savedfilters.Store
+	recordActivityStore *recordactivity.Store
+	filesStore          *files.Store
+	cacheClient         *cache.Client
+	searchClient        *search.Client
+	storageBackend      storage.Backend
+	temporalClient      *temporal.Client
+	workflowWorkers     *workflowworker.Manager
+	systemWorker        *systemworker.Worker
+	server              *httpx.Server
+	adminServer         *adminapi.Server
+	readiness           atomic.Bool
+	wsHub               *ws.Hub
 
 	// instanceID identifies this process for hot reload's leader-election
 	// lock value (docs/engine-internals.md §10) — generated once per
@@ -268,6 +271,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	userStore := user.NewStore(primaryPool)
 	recordSharesStore := recordshares.NewStore(primaryPool)
 	savedFiltersStore := savedfilters.NewStore(primaryPool)
+	recordActivityStore := recordactivity.NewStore(primaryPool)
 	if err := userStore.Bootstrap(ctx); err != nil {
 		_ = primaryPool.Close()
 		_ = schemaPool.Close()
@@ -1075,39 +1079,41 @@ func New(cfg *config.Config) (*Engine, error) {
 	})
 
 	e = &Engine{
-		cfg:               cfg,
-		wasmRuntime:       runtime,
-		syncPool:          syncPool,
-		tenantStore:       tenantStore,
-		sessionStore:      sessionStore,
-		signingKeySet:     signingKeySet,
-		tokenIssuer:       tokenIssuer,
-		sessionRevoker:    sessionRevoker,
-		authChecker:       authChecker,
-		tenantResolver:    tenantResolver,
-		moduleRegistry:    moduleRegistry,
-		rolePermissionMap: rolePermissionMap,
-		jobQueue:          jobQueueClient,
-		jobQueuePool:      jobQueuePool,
-		secretsBackend:    secretsBackend,
-		primaryDB:         primaryPool,
-		replicaDB:         replicaPool,
-		userStore:         userStore,
-		recordSharesStore: recordSharesStore,
-		savedFiltersStore: savedFiltersStore,
-		cacheClient:       cacheClient,
-		searchClient:      searchClient,
-		storageBackend:    storageBackend,
-		temporalClient:    temporalClient,
-		workflowWorkers:   workflowWorkers,
-		systemWorker:      systemWorker,
-		server:            server,
-		adminServer:       adminServer,
-		wsHub:             wsHub,
-		tracer:            tracer,
-		tracerProvider:    tracerProvider,
-		instanceID:        instanceID,
-		hotReload:         hotReloadCoordinator,
+		cfg:                 cfg,
+		wasmRuntime:         runtime,
+		syncPool:            syncPool,
+		tenantStore:         tenantStore,
+		sessionStore:        sessionStore,
+		signingKeySet:       signingKeySet,
+		tokenIssuer:         tokenIssuer,
+		sessionRevoker:      sessionRevoker,
+		authChecker:         authChecker,
+		tenantResolver:      tenantResolver,
+		moduleRegistry:      moduleRegistry,
+		rolePermissionMap:   rolePermissionMap,
+		jobQueue:            jobQueueClient,
+		jobQueuePool:        jobQueuePool,
+		secretsBackend:      secretsBackend,
+		primaryDB:           primaryPool,
+		replicaDB:           replicaPool,
+		userStore:           userStore,
+		recordSharesStore:   recordSharesStore,
+		savedFiltersStore:   savedFiltersStore,
+		recordActivityStore: recordActivityStore,
+		filesStore:          filesStore,
+		cacheClient:         cacheClient,
+		searchClient:        searchClient,
+		storageBackend:      storageBackend,
+		temporalClient:      temporalClient,
+		workflowWorkers:     workflowWorkers,
+		systemWorker:        systemWorker,
+		server:              server,
+		adminServer:         adminServer,
+		wsHub:               wsHub,
+		tracer:              tracer,
+		tracerProvider:      tracerProvider,
+		instanceID:          instanceID,
+		hotReload:           hotReloadCoordinator,
 
 		tenantConfigListener: tenantConfigListener,
 	}
@@ -1133,6 +1139,12 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["GET /_meta/saved-filters"] = http.HandlerFunc(e.dispatchSavedFiltersListRoute)
 	builtinRoutes["PATCH /_meta/saved-filters/{id}"] = http.HandlerFunc(e.dispatchSavedFiltersUpdateRoute)
 	builtinRoutes["DELETE /_meta/saved-filters/{id}"] = http.HandlerFunc(e.dispatchSavedFiltersDeleteRoute)
+
+	// /_meta/activity follows the identical EngineNative, not-EngineBuiltin
+	// pattern /_meta/shares establishes above.
+	builtinRoutes["GET /_meta/activity"] = http.HandlerFunc(e.dispatchActivityListRoute)
+	builtinRoutes["POST /_meta/activity"] = http.HandlerFunc(e.dispatchActivityCreateRoute)
+	builtinRoutes["DELETE /_meta/activity/{id}"] = http.HandlerFunc(e.dispatchActivityDeleteRoute)
 
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.

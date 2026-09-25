@@ -272,6 +272,34 @@ func TestDBExec_RejectsQualifiedTableReference(t *testing.T) {
 	}
 }
 
+func TestDBExec_RejectsEngineOwnedTableReference(t *testing.T) {
+	primaryDB, _, mc := setupExecTest(t)
+	ctx := context.Background()
+
+	for _, sql := range []string{
+		"INSERT INTO record_activity (model, record_id, kind, body) VALUES ('x.y', gen_random_uuid(), 'comment', 'forged')",
+		"UPDATE record_activity SET body = 'rewritten'",
+		"DELETE FROM widget WHERE id IN (SELECT record_id FROM record_activity)",
+	} {
+		_, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{SQL: sql})
+		if hostErr == nil {
+			t.Errorf("%q: expected an error for an engine-owned table reference", sql)
+			continue
+		}
+		if hostErr.Code != abi.ErrCodeTableAccessDenied {
+			t.Errorf("%q: Code = %q, want %q", sql, hostErr.Code, abi.ErrCodeTableAccessDenied)
+		}
+	}
+
+	_, hostErr := DBExecBatch(ctx, primaryDB, mc, dbExecBatchInput{
+		SQL:       "INSERT INTO record_activity (model, record_id, kind, body) VALUES ($1, $2, 'comment', $3)",
+		ParamSets: [][]any{{"x.y", "11111111-1111-1111-1111-111111111111", "forged"}},
+	})
+	if hostErr == nil || hostErr.Code != abi.ErrCodeTableAccessDenied {
+		t.Errorf("DBExecBatch error = %v, want %q", hostErr, abi.ErrCodeTableAccessDenied)
+	}
+}
+
 func TestDBExec_RejectsReturningStar(t *testing.T) {
 	primaryDB, _, mc := setupExecTest(t)
 	ctx := context.Background()

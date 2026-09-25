@@ -19,24 +19,38 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	pgquery "github.com/wasilibs/go-pgquery"
 )
 
-// ErrQualifiedTableReference is wrapped by ValidateNoQualifiedTableRefs'
+// ErrQualifiedTableReference is wrapped by ValidateTableRefs'
 // returned error for a rejected fully-qualified table reference, so a
 // caller (e.g. host.db.query/exec mapping this to the ABI's
 // db.table_access_denied error code) can match on it with errors.Is
 // rather than string-matching the message.
 var ErrQualifiedTableReference = errors.New("fully-qualified table reference is not permitted")
 
-// ValidateNoQualifiedTableRefs parses sql and rejects it if any table
+// ErrEngineOwnedTable is wrapped by ValidateTableRefs' returned
+// error for a reference to a table in engineOwnedTables.
+var ErrEngineOwnedTable = errors.New("engine-owned table is not accessible from module SQL")
+
+// engineOwnedTables are per-tenant tables only the engine may read or
+// write; an unqualified reference resolves through search_path to the
+// caller's own tenant copy, so the schema-qualification check alone
+// doesn't cover them.
+var engineOwnedTables = map[string]bool{
+	recordactivity.TableName: true,
+}
+
+// ValidateTableRefs parses sql and rejects it if any table
 // reference is schema-qualified: "SELECT * FROM contacts" is fine,
 // "SELECT * FROM tenant_acmecorp.contacts" and "SELECT * FROM
 // system.users" are both rejected — with no exception for a reference
 // that happens to name the caller's own tenant schema
 // (multitenancy-internals.md §5 Layer 2: "modules must never hardcode a
-// tenant schema name").
+// tenant schema name"). A reference to an engine-owned table
+// (engineOwnedTables) is rejected too, qualified or not.
 //
 // Never called against the schema-sync engine's own internal SQL, which
 // reads information_schema under an elevated role and, unlike
@@ -46,28 +60,36 @@ var ErrQualifiedTableReference = errors.New("fully-qualified table reference is 
 // through this package, so no runtime bypass exists for it to opt into.
 // Only host.db's own module-request-handler path is expected to call
 // this function.
-func ValidateNoQualifiedTableRefs(sql string) error {
+func ValidateTableRefs(sql string) error {
 	tree, err := pgquery.Parse(sql)
 	if err != nil {
 		return fmt.Errorf("parse SQL: %w", err)
 	}
-	return ValidateTreeNoQualifiedTableRefs(tree)
+	return ValidateTreeTableRefs(tree)
 }
 
-// ValidateTreeNoQualifiedTableRefs is ValidateNoQualifiedTableRefs against
+// ValidateTreeTableRefs is ValidateTableRefs against
 // an already-parsed tree, for a caller that also needs the same parse for
 // something else (e.g. host.db.query's own DDL-keyword rejection) and
 // would otherwise pay for parsing the same SQL text twice.
-func ValidateTreeNoQualifiedTableRefs(tree *pg_query.ParseResult) error {
-	if ref, ok := firstQualifiedTableRef(reflect.ValueOf(tree)); ok {
-		return fmt.Errorf("%w: %q — tenant scoping is automatic, use unqualified table names only", ErrQualifiedTableReference, ref)
+func ValidateTreeTableRefs(tree *pg_query.ParseResult) error {
+	rv, ok := firstDeniedTableRef(reflect.ValueOf(tree))
+	if !ok {
+		return nil
 	}
-	return nil
+	if rv.Schemaname != "" {
+		return fmt.Errorf("%w: %q — tenant scoping is automatic, use unqualified table names only", ErrQualifiedTableReference, rv.Schemaname+"."+rv.Relname)
+	}
+	return fmt.Errorf("%w: %q", ErrEngineOwnedTable, rv.Relname)
 }
 
-// firstQualifiedTableRef walks tree's protobuf AST for the first
-// *pg_query.RangeVar with a non-empty Schemaname, returning it as
-// "schema.table" and stopping there — ValidateNoQualifiedTableRefs only
+func isDeniedTableRef(rv *pg_query.RangeVar) bool {
+	return rv.Schemaname != "" || engineOwnedTables[rv.Relname]
+}
+
+// firstDeniedTableRef walks tree's protobuf AST for the first
+// *pg_query.RangeVar isDeniedTableRef rejects, returning it and stopping
+// there — ValidateTableRefs only
 // ever needs one match to reject the statement, so the walk
 // short-circuits instead of collecting every match in a statement that
 // might have many.
@@ -93,43 +115,40 @@ func ValidateTreeNoQualifiedTableRefs(tree *pg_query.ParseResult) error {
 // no-op fallthrough rather than a panic on "unhandled Kind": those are
 // the overwhelming majority of fields visited on any real input, and
 // were never in-band candidates for a table reference either way.
-func firstQualifiedTableRef(v reflect.Value) (string, bool) {
+func firstDeniedTableRef(v reflect.Value) (*pg_query.RangeVar, bool) {
 	if !v.IsValid() {
-		return "", false
+		return nil, false
 	}
 	switch v.Kind() {
 	case reflect.Pointer, reflect.Interface:
 		if v.IsNil() {
-			return "", false
+			return nil, false
 		}
 		if rv, ok := reflect.TypeAssert[*pg_query.RangeVar](v); ok {
-			if rv.Schemaname != "" {
-				return rv.Schemaname + "." + rv.Relname, true
-			}
-			return "", false
+			return rv, isDeniedTableRef(rv)
 		}
-		return firstQualifiedTableRef(v.Elem())
+		return firstDeniedTableRef(v.Elem())
 	case reflect.Struct:
 		for _, field := range v.Fields() {
 			if !field.CanInterface() {
 				continue
 			}
-			if ref, ok := firstQualifiedTableRef(field); ok {
+			if ref, ok := firstDeniedTableRef(field); ok {
 				return ref, true
 			}
 		}
 	case reflect.Slice, reflect.Array:
 		for i := range v.Len() {
-			if ref, ok := firstQualifiedTableRef(v.Index(i)); ok {
+			if ref, ok := firstDeniedTableRef(v.Index(i)); ok {
 				return ref, true
 			}
 		}
 	case reflect.Map:
 		for _, key := range v.MapKeys() {
-			if ref, ok := firstQualifiedTableRef(v.MapIndex(key)); ok {
+			if ref, ok := firstDeniedTableRef(v.MapIndex(key)); ok {
 				return ref, true
 			}
 		}
 	}
-	return "", false
+	return nil, false
 }

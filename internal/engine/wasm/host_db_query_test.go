@@ -183,6 +183,7 @@ func TestHostDBQuery_RejectsSchemaQualifiedReference(t *testing.T) {
 	cases := []string{
 		"SELECT * FROM system.users",
 		"SELECT * FROM " + tenantschema.Name(slug) + ".widgets",
+		"SELECT * FROM record_activity",
 	}
 	for _, sql := range cases {
 		env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: sql})
