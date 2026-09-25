@@ -291,7 +291,7 @@ func TestInfo_ExpiredAndRevokedReturn404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLiveByEmail() error: %v", err)
 	}
-	if err := f.invites.Revoke(t.Context(), f.tenantSlug, inv.ID); err != nil {
+	if err := f.invites.Revoke(t.Context(), f.tenantSlug, inv.ID, nil); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 

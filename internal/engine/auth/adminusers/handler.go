@@ -1,11 +1,12 @@
 // Package adminusers implements the tenant admin user endpoints
 // (shell-ux.md §5.1): the user directory and detail, suspend, unsuspend
-// and soft-delete (auth-internals.md §2 "User status lifecycle"), and one
+// and soft-delete (auth-internals.md §2 "User status lifecycle"), one
 // user's session list and revoke (auth-internals.md §4 "Session
-// management endpoints").
+// management endpoints"), and inviting users (auth-internals.md §3
+// "Invite flow").
 //
 // Like internal/engine/auth/mfareset, these are Class A tenant-facing
-// routes despite the "/admin/" prefix: Host-header tenant resolution,
+// routes, under "/admin/" or "/users/": Host-header tenant resolution,
 // session authentication and the admin role in the resolved tenant.
 package adminusers
 
@@ -32,10 +33,12 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
 const (
@@ -54,11 +57,13 @@ type Handler struct {
 	roles    *role.Store
 	sessions *session.Store
 	revoker  *sessionrevoke.Revoker
+	invites  *invite.Store
+	users    *user.Store
 	files    *files.Store
 	backend  storage.Backend
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store *Store, roles *role.Store, sessions *session.Store, revoker *sessionrevoke.Revoker, filesStore *files.Store, backend storage.Backend) *Handler {
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store *Store, roles *role.Store, sessions *session.Store, revoker *sessionrevoke.Revoker, invites *invite.Store, users *user.Store, filesStore *files.Store, backend storage.Backend) *Handler {
 	return &Handler{
 		tenants:  tenants,
 		auth:     auth,
@@ -66,6 +71,8 @@ func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store 
 		roles:    roles,
 		sessions: sessions,
 		revoker:  revoker,
+		invites:  invites,
+		users:    users,
 		files:    filesStore,
 		backend:  backend,
 	}

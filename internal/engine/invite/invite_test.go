@@ -248,7 +248,7 @@ func TestInvite_ReinvitingLiveEmailReusesRowAndRotatesToken(t *testing.T) {
 func TestResend_NonLiveInvitationReturnsErrInvitationNotLive(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	_, err := store.Resend(context.Background(), slug, "00000000-0000-0000-0000-000000000000")
+	_, err := store.Resend(context.Background(), slug, "00000000-0000-0000-0000-000000000000", nil)
 	if !errors.Is(err, ErrInvitationNotLive) {
 		t.Errorf("Resend() for a nonexistent id: error = %v, want ErrInvitationNotLive", err)
 	}
@@ -264,7 +264,7 @@ func TestRevoke_FreesEmailForFreshInvite(t *testing.T) {
 		t.Fatalf("Invite() error: %v", err)
 	}
 
-	if err := store.Revoke(context.Background(), slug, first.ID); err != nil {
+	if err := store.Revoke(context.Background(), slug, first.ID, nil); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
@@ -297,11 +297,11 @@ func TestRevoke_NonLiveReturnsErrInvitationNotLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
-	if err := store.Revoke(context.Background(), slug, inv.ID); err != nil {
+	if err := store.Revoke(context.Background(), slug, inv.ID, nil); err != nil {
 		t.Fatalf("first Revoke() error: %v", err)
 	}
 
-	if err := store.Revoke(context.Background(), slug, inv.ID); !errors.Is(err, ErrInvitationNotLive) {
+	if err := store.Revoke(context.Background(), slug, inv.ID, nil); !errors.Is(err, ErrInvitationNotLive) {
 		t.Errorf("second Revoke() on an already-revoked invitation: error = %v, want ErrInvitationNotLive", err)
 	}
 }
@@ -447,7 +447,7 @@ func TestListExpired_ReturnsOnlyExpiredLiveInvitations(t *testing.T) {
 		t.Fatalf("Invite() error: %v", err)
 	}
 	backdateExpiry(t, conn, slug, revoked.ID, time.Now().Add(-time.Hour))
-	if err := store.Revoke(ctx, slug, revoked.ID); err != nil {
+	if err := store.Revoke(ctx, slug, revoked.ID, nil); err != nil {
 		t.Fatalf("Revoke() error: %v", err)
 	}
 

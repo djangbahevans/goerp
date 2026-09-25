@@ -32,7 +32,10 @@ type Invitation struct {
 	CreatedAt  time.Time
 }
 
-var ErrInvitationNotLive = errors.New("invitation not found or no longer live")
+var (
+	ErrInvitationNotLive  = errors.New("invitation not found or no longer live")
+	ErrInvitationNotFound = errors.New("invitation not found")
+)
 
 type Store struct {
 	db     *sql.DB
@@ -148,13 +151,15 @@ func generateToken() (rawToken, tokenHash string, err error) {
 // name is strictly better than none; goerp#819's self-service rename lets
 // a user correct it themselves), then upserts the invitation — reusing a
 // live one for this email if it exists (auth-internals.md §3: sending to
-// an already-invited email is equivalent to resend). Emits user.invited
-// and sends the invite email; both are best-effort no-ops when
-// audit/mailer are nil, logged rather than failing the invite itself.
+// an already-invited email is equivalent to resend; the role and inviter
+// come from this call). Emits user.invited and sends the invite email,
+// both best-effort no-ops when audit/mailer are nil, logged rather than
+// failing the invite itself.
 // A blank name (e.g. tenant provisioning's optional --admin-name) skips
 // EnsureProfile entirely rather than persisting an empty string a display
 // layer's nil-check wouldn't catch.
 func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name string, invitedBy *string) (*Invitation, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
 	roleID, err := s.roles.GetRoleByName(ctx, tenantSlug, roleName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve role %q: %w", roleName, err)
@@ -181,7 +186,7 @@ func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name st
 		INSERT INTO %s.tenant_invitations (email, role_id, invited_by, token_hash, expires_at)
 		VALUES ($1, $2, $3, $4, NOW() + INTERVAL '7 days')
 		ON CONFLICT (email) WHERE accepted_at IS NULL AND revoked_at IS NULL
-		DO UPDATE SET token_hash = EXCLUDED.token_hash, expires_at = EXCLUDED.expires_at
+		DO UPDATE SET token_hash = EXCLUDED.token_hash, expires_at = EXCLUDED.expires_at, role_id = EXCLUDED.role_id, invited_by = EXCLUDED.invited_by
 		RETURNING `+invitationColumns, schema)
 
 	row := s.db.QueryRowContext(ctx, query, email, roleID, invitedBy, tokenHash)
@@ -190,11 +195,8 @@ func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name st
 		return nil, fmt.Errorf("upsert invitation: %w", err)
 	}
 
-	s.emit(ctx, tenantSlug, "user.invited", map[string]any{"invitation_id": inv.ID, "email": email})
-	// Whether the invitee is new vs. existing (for email copy) isn't
-	// distinguished — UserResolver only returns an id, not a found/created
-	// flag.
-	s.sendInvite(ctx, email, tenantSlug, rawToken, true)
+	s.emit(ctx, tenantSlug, "user.invited", withPerformer(map[string]any{"invitation_id": inv.ID, "email": email}, invitedBy))
+	s.sendInvite(ctx, email, tenantSlug, rawToken)
 
 	return inv, nil
 }
@@ -203,7 +205,7 @@ func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name st
 // re-sends the email. Only valid while accepted_at IS NULL AND
 // revoked_at IS NULL — ErrInvitationNotLive otherwise (already accepted,
 // already revoked, or the id doesn't exist).
-func (s *Store) Resend(ctx context.Context, tenantSlug, invitationID string) (*Invitation, error) {
+func (s *Store) Resend(ctx context.Context, tenantSlug, invitationID string, performedBy *string) (*Invitation, error) {
 	rawToken, tokenHash, err := generateToken()
 	if err != nil {
 		return nil, err
@@ -225,8 +227,8 @@ func (s *Store) Resend(ctx context.Context, tenantSlug, invitationID string) (*I
 		return nil, fmt.Errorf("resend invitation: %w", err)
 	}
 
-	s.emit(ctx, tenantSlug, "user.invite_resent", map[string]any{"invitation_id": inv.ID})
-	s.sendInvite(ctx, inv.Email, tenantSlug, rawToken, false)
+	s.emit(ctx, tenantSlug, "user.invite_resent", withPerformer(map[string]any{"invitation_id": inv.ID}, performedBy))
+	s.sendInvite(ctx, inv.Email, tenantSlug, rawToken)
 
 	return inv, nil
 }
@@ -234,7 +236,7 @@ func (s *Store) Resend(ctx context.Context, tenantSlug, invitationID string) (*I
 // Revoke immediately invalidates a still-pending invitation's token and,
 // since the partial unique index only constrains live rows, frees its
 // email for a fresh invitation. Only valid while accepted_at IS NULL.
-func (s *Store) Revoke(ctx context.Context, tenantSlug, invitationID string) error {
+func (s *Store) Revoke(ctx context.Context, tenantSlug, invitationID string, performedBy *string) error {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
 		UPDATE %s.tenant_invitations
@@ -254,9 +256,24 @@ func (s *Store) Revoke(ctx context.Context, tenantSlug, invitationID string) err
 		return ErrInvitationNotLive
 	}
 
-	s.emit(ctx, tenantSlug, "user.invite_revoked", map[string]any{"invitation_id": invitationID})
+	s.emit(ctx, tenantSlug, "user.invite_revoked", withPerformer(map[string]any{"invitation_id": invitationID}, performedBy))
 
 	return nil
+}
+
+// GetByID returns invitationID in any state, or ErrInvitationNotFound when
+// the tenant has no such invitation.
+func (s *Store) GetByID(ctx context.Context, tenantSlug, invitationID string) (*Invitation, error) {
+	schema := tenantschema.Name(tenantSlug)
+	query := fmt.Sprintf(`SELECT `+invitationColumns+` FROM %s.tenant_invitations WHERE id = $1`, schema)
+	inv, err := scanInvitation(s.db.QueryRowContext(ctx, query, invitationID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrInvitationNotFound
+		}
+		return nil, fmt.Errorf("get invitation: %w", err)
+	}
+	return inv, nil
 }
 
 // GetLiveByEmail returns the pending, unrevoked invitation for email, if
@@ -415,7 +432,7 @@ func (s *Store) ResendInvite(ctx context.Context, tenantSlug, email string) erro
 	if err != nil {
 		return err
 	}
-	_, err = s.Resend(ctx, tenantSlug, inv.ID)
+	_, err = s.Resend(ctx, tenantSlug, inv.ID, nil)
 	return err
 }
 
@@ -429,12 +446,38 @@ func (s *Store) emit(ctx context.Context, tenantSlug, eventName string, payload 
 	}
 }
 
-func (s *Store) sendInvite(ctx context.Context, email, tenantSlug, rawToken string, isNewUser bool) {
+// withPerformer adds performed_by to an audit payload when the action has
+// an acting user (a tenant admin, not the operator CLI).
+func withPerformer(payload map[string]any, performedBy *string) map[string]any {
+	if performedBy != nil {
+		payload["performed_by"] = *performedBy
+	}
+	return payload
+}
+
+// needsPassword reports whether email's account has no password yet, which
+// picks the "set up your account" email over "accept the invite" — the same
+// test acceptance uses for password_required.
+func (s *Store) needsPassword(ctx context.Context, email string) bool {
+	var needs bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT password_hash IS NULL FROM system.users WHERE email = $1 AND deleted_at IS NULL
+	`, email).Scan(&needs)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			log.Warn().Err(err).Str("email", email).Msg("invite: password lookup failed, sending new-account email")
+		}
+		return true
+	}
+	return needs
+}
+
+func (s *Store) sendInvite(ctx context.Context, email, tenantSlug, rawToken string) {
 	if s.mailer == nil {
 		log.Warn().Str("tenant", tenantSlug).Str("email", email).Msg("invite: no mailer wired, invite email not sent")
 		return
 	}
-	if err := s.mailer.SendInvite(ctx, email, tenantSlug, rawToken, isNewUser); err != nil {
+	if err := s.mailer.SendInvite(ctx, email, tenantSlug, rawToken, s.needsPassword(ctx, email)); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantSlug).Str("email", email).Msg("invite: send email failed")
 	}
 }
