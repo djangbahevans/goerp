@@ -33,8 +33,20 @@ function authWithRoles(roles: string[], overrides: Partial<AuthContextValue> = {
     amr: ["pwd"],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    theme: "system" as const,
+    locale: null,
+    timezone: null,
+    dateFormat: null,
   };
-  const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+  const tenant = {
+    id: "t1",
+    slug: "acme",
+    name: "Acme",
+    plan: "pro",
+    defaultLocale: "en",
+    defaultTimezone: "UTC",
+    availableLocales: ["en"],
+  };
   return {
     state: { status: "authenticated", user, tenant },
     isAuthenticated: true,
@@ -44,6 +56,7 @@ function authWithRoles(roles: string[], overrides: Partial<AuthContextValue> = {
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
+    updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
     ...overrides,

@@ -52,6 +52,7 @@ export type {
   ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
+  DateFormat,
   EmailVerification,
   EmailVerificationOutcome,
   InviteAcceptance,
@@ -68,6 +69,7 @@ export type {
   TenantContext,
   TOTPEnrollment,
   TOTPEnrollmentConfirmation,
+  UpdatePreferencesInput,
   VerificationEmailRequest,
 } from "./types.js";
 export { useAuth } from "./use-auth.js";

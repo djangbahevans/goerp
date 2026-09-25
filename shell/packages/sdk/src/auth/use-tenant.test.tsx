@@ -15,8 +15,20 @@ const USER: CurrentUser = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const TENANT: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const TENANT: CurrentTenant = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 
 function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
   return {
@@ -28,6 +40,7 @@ function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue 
     logout: vi.fn(),
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),
+    updatePreferences: vi.fn(),
     changePassword: vi.fn(),
     reloadSession: vi.fn(),
     ...overrides,

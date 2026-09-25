@@ -29,6 +29,10 @@ export interface CodeSelectProps {
   onChange: (code: string) => void;
   placeholder?: string | undefined;
   disabled?: boolean | undefined;
+  // Names the empty value as a real choice, e.g. "Organisation default
+  // (UTC)": it's pinned first in the list, shown in the trigger instead of
+  // the placeholder, and selecting it calls onChange("").
+  emptyLabel?: string | undefined;
 }
 
 interface Entry {
@@ -82,6 +86,7 @@ export function CodeSelect({
   onChange,
   placeholder,
   disabled = false,
+  emptyLabel,
 }: CodeSelectProps): ReactNode {
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
@@ -100,8 +105,8 @@ export function CodeSelect({
   const entries = useMemo<Entry[]>(() => {
     const withNames = codes.map((code): Entry => ({ code, name: nameOf(code) }));
     withNames.sort((a, b) => a.name.localeCompare(b.name));
-    return withNames;
-  }, [codes, nameOf]);
+    return emptyLabel === undefined ? withNames : [{ code: "", name: emptyLabel }, ...withNames];
+  }, [codes, nameOf, emptyLabel]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const matches = useMemo(() => {
@@ -119,7 +124,11 @@ export function CodeSelect({
   // raw-code degrade, same as an unresolvable Intl.DisplayNames lookup.
   const selected = value
     ? (entries.find((entry) => entry.code === value) ?? { code: value, name: nameOf(value) })
-    : undefined;
+    : emptyLabel !== undefined
+      ? { code: "", name: emptyLabel }
+      : undefined;
+  // The labelled empty value is itself the cleared state.
+  const clearable = selected !== undefined && selected.code !== "";
 
   function open(): void {
     if (disabled) return;
@@ -197,7 +206,7 @@ export function CodeSelect({
   }
 
   const triggerValue = isOpen ? query : (selected?.name ?? query);
-  const hasOverlayIcon = Boolean(leadingIcon && selected && !isOpen);
+  const hasOverlayIcon = Boolean(leadingIcon && clearable && !isOpen);
 
   return (
     <div ref={containerRef} className="relative flex flex-col">
@@ -227,7 +236,7 @@ export function CodeSelect({
           ) : undefined
         }
         end={
-          !isOpen && selected ? (
+          !isOpen && selected && clearable ? (
             <ComboboxClearButton label={selected.name} disabled={disabled} onClear={() => onChange("")} />
           ) : undefined
         }
@@ -261,7 +270,7 @@ export function CodeSelect({
                   // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG combobox-with-listbox — options are never independently focusable, only virtually "focused" via aria-activedescendant.
                   // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
                   <div
-                    key={entry.code}
+                    key={entry.code || "(empty)"}
                     id={optionElementId(listboxId, index)}
                     role="option"
                     aria-label={entry.name}

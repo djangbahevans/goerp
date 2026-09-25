@@ -13,8 +13,20 @@ const user: CurrentUser = {
   amr: ["pwd"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const tenant: CurrentTenant = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 
 const CONNECTING = 0;
 const OPEN = 1;

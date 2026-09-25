@@ -1,3 +1,8 @@
+import type { ThemePreference } from "../react/use-theme.js";
+
+// auth-internals.md §2's user_profiles.date_format.
+export type DateFormat = "day_first" | "month_first" | "iso";
+
 export interface CurrentUser {
   id: string;
   email: string;
@@ -10,6 +15,13 @@ export interface CurrentUser {
   // auth-internals.md §8 "MFA enrollment": the tenant requires MFA and the
   // user has no factor yet, so the shell holds them on /auth/mfa-setup.
   mfaSetupRequired: boolean;
+  theme: ThemePreference;
+  // BCP 47; null = the tenant's defaultLocale.
+  locale: string | null;
+  // IANA; null = the tenant's defaultTimezone.
+  timezone: string | null;
+  // null = the locale's own date order.
+  dateFormat: DateFormat | null;
 }
 
 export interface CurrentTenant {
@@ -17,6 +29,11 @@ export interface CurrentTenant {
   slug: string;
   name: string;
   plan: string;
+  // l10n-guide.md §2 "Tenant default locale".
+  defaultLocale: string;
+  defaultTimezone: string;
+  // The locales the Appearance page offers.
+  availableLocales: string[];
 }
 
 export interface LoginCredentials {
@@ -156,6 +173,10 @@ export interface UpdateProfileInput {
   avatarId?: string | undefined;
 }
 
+// updatePreferences' input: only the fields given are sent, and null resets
+// locale, timezone or dateFormat to inherit.
+export type UpdatePreferencesInput = Partial<Pick<CurrentUser, "theme" | "locale" | "timezone" | "dateFormat">>;
+
 export interface AuthContextValue {
   state: AuthState;
   isAuthenticated: boolean;
@@ -165,6 +186,10 @@ export interface AuthContextValue {
   logout: () => Promise<void>;
   submitMFA: (code: string, method?: MFAMethod) => Promise<void>;
   updateProfile: (input: UpdateProfileInput) => Promise<void>;
+  // PATCH /auth/me with the Appearance preferences (shell-ux.md §4.4).
+  // Rejects with an AppError whose code is invalid_preference and whose
+  // details.field names the rejected field.
+  updatePreferences: (input: UpdatePreferencesInput) => Promise<void>;
   changePassword: (input: ChangePasswordInput) => Promise<void>;
   // Re-reads GET /auth/me into the signed-in state, e.g. once MFA setup finishes.
   reloadSession: () => Promise<void>;

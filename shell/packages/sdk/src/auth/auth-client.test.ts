@@ -16,6 +16,7 @@ import {
   requestPasswordReset,
   resendVerificationEmail,
   submitMFACode,
+  updatePreferences,
   updateProfile,
   verifyEmail,
 } from "./auth-client.js";
@@ -49,8 +50,20 @@ describe("fetchCurrentSession", () => {
           roles: ["admin"],
           amr: ["pwd"],
           mfa_verified_at: null,
+          theme: "dark",
+          locale: "fr",
+          timezone: null,
+          date_format: "iso",
         },
-        tenant: { id: "t1", slug: "acme", name: "Acme", plan: "pro" },
+        tenant: {
+          id: "t1",
+          slug: "acme",
+          name: "Acme",
+          plan: "pro",
+          default_locale: "en",
+          default_timezone: "UTC",
+          available_locales: ["en", "fr"],
+        },
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -68,8 +81,20 @@ describe("fetchCurrentSession", () => {
         amr: ["pwd"],
         mfaVerifiedAt: null,
         mfaSetupRequired: false,
+        theme: "dark",
+        locale: "fr",
+        timezone: null,
+        dateFormat: "iso",
       },
-      tenant: { id: "t1", slug: "acme", name: "Acme", plan: "pro" },
+      tenant: {
+        id: "t1",
+        slug: "acme",
+        name: "Acme",
+        plan: "pro",
+        defaultLocale: "en",
+        defaultTimezone: "UTC",
+        availableLocales: ["en", "fr"],
+      },
     });
     expect(fetchMock).toHaveBeenCalledWith("/auth/me", { credentials: "include" });
   });
@@ -142,7 +167,15 @@ describe("TOTP enrollment", () => {
             mfa_verified_at: null,
             mfa_setup_required: true,
           },
-          tenant: { id: "t1", slug: "acme", name: "Acme", plan: "pro" },
+          tenant: {
+            id: "t1",
+            slug: "acme",
+            name: "Acme",
+            plan: "pro",
+            defaultLocale: "en",
+            defaultTimezone: "UTC",
+            availableLocales: ["en"],
+          },
         }),
       ),
     );
@@ -397,6 +430,41 @@ describe("submitMFACode", () => {
     await expect(submitMFACode("mfa-tok", "000000", "totp")).rejects.toMatchObject({
       code: "invalid_mfa_code",
     });
+  });
+});
+
+describe("updatePreferences", () => {
+  it("PATCHes only the fields given, in snake_case, with null kept as a reset", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(204, undefined));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updatePreferences({ theme: "dark", locale: null, dateFormat: "iso" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/me",
+      expect.objectContaining({
+        method: "PATCH",
+        credentials: "include",
+        body: JSON.stringify({ theme: "dark", locale: null, date_format: "iso" }),
+      }),
+    );
+  });
+
+  it("rejects with invalid_preference and the field from a 422", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(422, {
+          error: { code: "invalid_preference", message: "bad locale", details: { field: "locale" } },
+        }),
+      ),
+    );
+
+    const error = await updatePreferences({ locale: "xx" }).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe("invalid_preference");
+    expect((error as AppError).details).toEqual({ field: "locale" });
   });
 });
 

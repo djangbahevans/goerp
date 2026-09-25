@@ -9,7 +9,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
-const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const FAKE_TENANT = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 
 // Same __root.tsx-renders-CommandPalette-regardless reasoning
 // -[_m].$.test.tsx's own FAKE_AUTH comment documents.
@@ -27,6 +35,7 @@ function fakeAuth(
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile,
+    updatePreferences: vi.fn(async () => {}),
     changePassword,
     reloadSession: async () => {},
   };
@@ -64,6 +73,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     await renderProfilePage(fakeAuth(user));
 
@@ -82,6 +95,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     await renderProfilePage(fakeAuth(user));
 
@@ -100,6 +117,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     const updateProfile = vi.fn(async () => {});
     await renderProfilePage(fakeAuth(user, updateProfile));
@@ -123,6 +144,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     const updateProfile = vi.fn(async () => {});
     const toastError = vi.spyOn(toast, "error").mockImplementation(() => {});
@@ -147,6 +172,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     const updateProfile = vi.fn(async () => {
       throw new Error("network down");
@@ -173,6 +202,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     const updateProfile = vi.fn(async () => {});
     await renderProfilePage(fakeAuth(user, updateProfile));
@@ -200,6 +233,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     const updateProfile = vi.fn(async () => {});
     await renderProfilePage(fakeAuth(user, updateProfile));
@@ -222,6 +259,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     const toastSuccess = vi.spyOn(toast, "success").mockImplementation(() => {});
     await renderProfilePage(fakeAuth(user));
@@ -245,6 +286,10 @@ const ADA: CurrentUser = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
 
 function fillPasswords(current: string, next: string, confirm: string) {

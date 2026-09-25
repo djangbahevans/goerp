@@ -7,7 +7,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
-const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const FAKE_TENANT = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 
 function fakeAuth(roles: string[]): AuthContextValue {
   const user: CurrentUser = {
@@ -20,6 +28,10 @@ function fakeAuth(roles: string[]): AuthContextValue {
     amr: [],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    theme: "system" as const,
+    locale: null,
+    timezone: null,
+    dateFormat: null,
   };
   return {
     state: { status: "authenticated", user, tenant: FAKE_TENANT },
@@ -30,6 +42,7 @@ function fakeAuth(roles: string[]): AuthContextValue {
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
+    updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
   };

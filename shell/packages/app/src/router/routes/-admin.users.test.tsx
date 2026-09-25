@@ -26,8 +26,20 @@ const ME: CurrentUser = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const TENANT = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 const AUTH: AuthContextValue = {
   state: { status: "authenticated", user: ME, tenant: TENANT },
   isAuthenticated: true,
@@ -37,6 +49,7 @@ const AUTH: AuthContextValue = {
   logout: async () => {},
   submitMFA: async () => {},
   updateProfile: async () => {},
+  updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
 };

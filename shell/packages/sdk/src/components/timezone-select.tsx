@@ -9,6 +9,9 @@ export interface TimezoneSelectProps {
   onChange: (id: string) => void;
   placeholder?: string | undefined;
   disabled?: boolean | undefined;
+  // A first option standing for "no zone of its own", e.g. "Organisation
+  // default (UTC)"; selecting it calls onChange("").
+  emptyLabel?: string | undefined;
 }
 
 // Display/search/sort formatting only — not a resolved name (Intl.DisplayNames
@@ -18,7 +21,14 @@ function spacedTimezoneName(id: string): string {
   return id.replaceAll("_", " ");
 }
 
-export function TimezoneSelect({ id, value, onChange, placeholder, disabled = false }: TimezoneSelectProps): ReactNode {
+export function TimezoneSelect({
+  id,
+  value,
+  onChange,
+  placeholder,
+  disabled = false,
+  emptyLabel,
+}: TimezoneSelectProps): ReactNode {
   // Lazy useState, not a module-level constant — keeps codes reference-stable
   // across this instance's own re-renders (CodeSelect's entries memoization
   // depends on it) while still calling Intl.supportedValuesOf fresh per
@@ -47,6 +57,7 @@ export function TimezoneSelect({ id, value, onChange, placeholder, disabled = fa
       onChange={onChange}
       placeholder={placeholder}
       disabled={disabled}
+      emptyLabel={emptyLabel}
     />
   );
 }

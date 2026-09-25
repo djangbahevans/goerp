@@ -1,9 +1,10 @@
 import { useAuth } from "@goerp/sdk/auth";
 import { ActionMenu, UserAvatar } from "@goerp/sdk/components";
+import { toast } from "@goerp/sdk/notifications";
 import { useTheme } from "@goerp/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { isTenantAdmin } from "../admin/is-tenant-admin.js";
 import { openKeyboardShortcuts } from "../shortcuts/keyboard-shortcuts-control.js";
 import { titleCaseWords } from "./title-case-words.js";
@@ -22,9 +23,27 @@ function displayNameFromEmail(email: string): string {
 // chrome-header.md's UserMenu: reuses ActionMenu's panel mechanics via its
 // `trigger` slot instead of the default labeled button.
 export function UserMenu(): ReactNode {
-  const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { user, logout, updatePreferences } = useAuth();
+  const { theme, preference, setPreference } = useTheme();
   const navigate = useNavigate();
+
+  // Only the latest toggle's failure reverts, so an earlier save settling
+  // late can't undo a later toggle.
+  const latestToggle = useRef(0);
+
+  // Saved to the profile like the Appearance page's theme control
+  // (shell-ux.md §4.4), so the next sign-in doesn't undo it.
+  function toggleDarkMode() {
+    const previous = preference;
+    const next = theme === "dark" ? "light" : "dark";
+    const token = ++latestToggle.current;
+    setPreference(next);
+    updatePreferences({ theme: next }).catch(() => {
+      if (latestToggle.current !== token) return;
+      setPreference(previous);
+      toast.error("Couldn't save your theme. Try again.");
+    });
+  }
 
   if (!user) return null;
   const displayName = user.name || displayNameFromEmail(user.email);
@@ -35,7 +54,7 @@ export function UserMenu(): ReactNode {
         { label: "Profile", onClick: () => void navigate({ to: "/settings/profile" }) },
         { label: "Settings", onClick: () => void navigate({ to: "/settings" }) },
         ...(isTenantAdmin(user) ? [{ label: "Admin", onClick: () => void navigate({ to: "/admin" }) }] : []),
-        { label: "Dark mode", checked: theme === "dark", onClick: toggleTheme },
+        { label: "Dark mode", checked: theme === "dark", onClick: toggleDarkMode },
         { label: "Keyboard shortcuts", onClick: openKeyboardShortcuts },
         { type: "separator" },
         { label: "Sign out", onClick: () => void logout() },
