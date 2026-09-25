@@ -28,6 +28,18 @@ describe("ToastBus", () => {
     expect(bus.getToasts()[0]!.message).toBe("b");
   });
 
+  it("works through methods detached from the bus", () => {
+    const bus = new ToastBus();
+    const { loading, success, dismiss } = bus;
+
+    const id = loading("working");
+    success("done", { id });
+    expect(bus.getToasts()).toEqual([expect.objectContaining({ id, variant: "success" })]);
+
+    dismiss(id);
+    expect(bus.getToasts()).toHaveLength(0);
+  });
+
   it("dismiss() with no id clears every toast", () => {
     const bus = new ToastBus();
     bus.success("a");
