@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { componentRegistry } from "../schema/index.js";
 import { defineModule } from "./define-module.js";
 import { extensionBatchLoaderRegistry } from "./extension-batch-loader-registry.js";
+import { moduleApiRegistry } from "./module-api-registry.js";
 import { moduleErrorHandlerRegistry } from "./module-error-handler-registry.js";
 import { moduleNavigationRegistry } from "./module-navigation-registry.js";
 
@@ -78,19 +79,37 @@ describe("defineModule", () => {
     expect(extensionBatchLoaderRegistry.has("sales.orders_list_test_h")).toBe(false);
   });
 
-  it("clears a module's prior navigation/errorHandlers when a hot-reloaded definition omits them", () => {
+  it("registers api into ModuleApiRegistry, keyed by module name", () => {
+    const api = { listContacts: async () => [] };
+    defineModule({ name: "define_module_test_j", api });
+
+    expect(moduleApiRegistry.resolve("define_module_test_j")).toBe(api);
+  });
+
+  it("replaces a module's api when a hot-reloaded definition registers a new one", () => {
+    defineModule({ name: "define_module_test_k", api: { version: 1 } });
+    const replacement = { version: 2 };
+    defineModule({ name: "define_module_test_k", api: replacement });
+
+    expect(moduleApiRegistry.resolve("define_module_test_k")).toBe(replacement);
+  });
+
+  it("clears a module's prior navigation/errorHandlers/api when a hot-reloaded definition omits them", () => {
     defineModule({
       name: "define_module_test_i",
       navigation: () => null,
       errorHandlers: { "*": () => {} },
+      api: {},
     });
     expect(moduleNavigationRegistry.resolve("define_module_test_i")).toBeDefined();
     expect(moduleErrorHandlerRegistry.resolve("define_module_test_i", "anything")).toBeDefined();
+    expect(moduleApiRegistry.resolve("define_module_test_i")).toBeDefined();
 
     defineModule({ name: "define_module_test_i" });
 
     expect(moduleNavigationRegistry.resolve("define_module_test_i")).toBeUndefined();
     expect(moduleErrorHandlerRegistry.resolve("define_module_test_i", "anything")).toBeUndefined();
+    expect(moduleApiRegistry.resolve("define_module_test_i")).toBeUndefined();
   });
 
   it("leaves commands and dispose untouched on the returned definition, for the app's own registration step", () => {

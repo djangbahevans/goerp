@@ -54,6 +54,8 @@ export interface ModuleDefinition {
   // Keyed `{target_module}.{target_view_name}`, one loader per view.
   batchLoaders?: Record<string, ExtensionBatchLoader>;
   commands?: CommandDefinition[];
+  // The generated API client (typescript-sdk-reference.md §4); useModule(name).api returns it.
+  api?: object;
   // Returning null uses the manifest's own navigation declarations as-is.
   navigation?: ((ctx: NavigationContext) => NavigationGroup[] | null) | null;
   // Keyed by exact AppError.code, with "*" as this module's wildcard fallback.
