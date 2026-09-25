@@ -9,6 +9,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -598,5 +599,122 @@ func TestLeader_Run_ConcurrentSameModuleReloads_OneSucceedsOneRejected(t *testin
 	m := reg.Snapshot().Modules()[name]
 	if m.Manifest.Version != "1.1.0" && m.Manifest.Version != "1.2.0" {
 		t.Errorf("live version = %q, want either candidate version", m.Manifest.Version)
+	}
+}
+
+// liveTranslation returns locale's file in name@version's live frontend
+// translation set, or ok=false when it isn't served.
+func liveTranslation(t *testing.T, l *Leader, name, version, locale string) (string, bool) {
+	t.Helper()
+	key, err := module.LiveFrontendTranslationKey(t.Context(), l.Storage, name, version, locale)
+	if err != nil {
+		t.Fatalf("LiveFrontendTranslationKey() error: %v", err)
+	}
+	if key == "" {
+		return "", false
+	}
+	exists, err := l.Storage.Exists(t.Context(), key)
+	if err != nil || !exists {
+		return "", false
+	}
+	rc, _, err := l.Storage.Download(t.Context(), key)
+	if err != nil {
+		t.Fatalf("download %s: %v", key, err)
+	}
+	defer func() { _ = rc.Close() }()
+	data, _ := io.ReadAll(rc)
+	return string(data), true
+}
+
+func TestLeader_Run_SameVersionReloadReplacesTheLiveTranslationSet(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	env.activeTenant(t, slug)
+
+	name := "widgets_" + slug
+	l, _ := newLeader(t, env, nil)
+
+	src1, mf1 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
+	src1.FrontendTranslations = map[string][]byte{"en": []byte(`{"a":"A"}`), "de": []byte(`{"a":"Ä"}`)}
+	if err := l.Run(t.Context(), name, src1, mf1); err != nil {
+		t.Fatalf("first Run() error: %v", err)
+	}
+	if got, ok := liveTranslation(t, l, name, "1.0.0", "de"); !ok || got != `{"a":"Ä"}` {
+		t.Fatalf("de after the first reload = %q (served %v)", got, ok)
+	}
+
+	src2, mf2 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
+	src2.FrontendTranslations = map[string][]byte{"en": []byte(`{"a":"A2"}`)}
+	if err := l.Run(t.Context(), name, src2, mf2); err != nil {
+		t.Fatalf("second Run() error: %v", err)
+	}
+	if got, ok := liveTranslation(t, l, name, "1.0.0", "en"); !ok || got != `{"a":"A2"}` {
+		t.Errorf("en after the second reload = %q (served %v), want the new file", got, ok)
+	}
+	if _, ok := liveTranslation(t, l, name, "1.0.0", "de"); ok {
+		t.Error("de is still served after a same-version reload dropped it")
+	}
+}
+
+func TestLeader_Run_FailedReloadLeavesTheLiveTranslationsAlone(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	env.activeTenant(t, slug)
+
+	name := "widgets_" + slug
+	l, _ := newLeader(t, env, nil)
+
+	src1, mf1 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
+	src1.FrontendTranslations = map[string][]byte{"fr": []byte(`{"a":"live"}`)}
+	if err := l.Run(t.Context(), name, src1, mf1); err != nil {
+		t.Fatalf("Run() 1.0.0 error: %v", err)
+	}
+	src2, mf2 := buildSource(t, name, "1.1.0", compileFixture(t, "1"), nil)
+	if err := l.Run(t.Context(), name, src2, mf2); err != nil {
+		t.Fatalf("Run() 1.1.0 error: %v", err)
+	}
+	if _, err := env.conn.Exec(`ALTER TABLE ` + quoteIdent("tenant_"+slug) + `.widgets_widget ALTER COLUMN extra SET NOT NULL`); err != nil {
+		t.Fatalf("force extra NOT NULL: %v", err)
+	}
+
+	// Back to 1.0.0 with different strings: the downgrade check blocks it,
+	// and it runs after the package's translations are uploaded.
+	src3, mf3 := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
+	src3.FrontendTranslations = map[string][]byte{"fr": []byte(`{"a":"rejected"}`)}
+	if err := l.Run(t.Context(), name, src3, mf3); err == nil || !strings.Contains(err.Error(), "downgrade blocked") {
+		t.Fatalf("Run() back to 1.0.0 error = %v, want a blocked downgrade", err)
+	}
+
+	if got, ok := liveTranslation(t, l, name, "1.0.0", "fr"); !ok || got != `{"a":"live"}` {
+		t.Errorf("1.0.0's fr after the blocked reload = %q (served %v), want the set 1.0.0 was loaded with", got, ok)
+	}
+}
+
+func TestLeader_ActivateTranslations_SkipsAReloadAlreadySuperseded(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	env.activeTenant(t, slug)
+
+	name := "widgets_" + slug
+	l, reg := newLeader(t, env, nil)
+	src, mf := buildSource(t, name, "1.0.0", compileFixture(t, ""), nil)
+	src.FrontendTranslations = map[string][]byte{"fr": []byte(`{"a":"current"}`)}
+	if err := l.Run(t.Context(), name, src, mf); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// A slower reload of the same version whose module the registry no
+	// longer holds, finishing after the one above.
+	stale := &module.LoadedModule{Status: module.StatusReady, Manifest: reg.Snapshot().Modules()[name].Manifest}
+	digest, err := module.UploadFrontendTranslations(t.Context(), l.Storage, name, "1.0.0", map[string][]byte{"fr": []byte(`{"a":"stale"}`)})
+	if err != nil {
+		t.Fatalf("upload the stale set: %v", err)
+	}
+	if err := l.activateTranslations(t.Context(), stale, digest); err != nil {
+		t.Fatalf("activateTranslations() error: %v", err)
+	}
+
+	if got, ok := liveTranslation(t, l, name, "1.0.0", "fr"); !ok || got != `{"a":"current"}` {
+		t.Errorf("fr = %q (served %v), want the current reload's set", got, ok)
 	}
 }

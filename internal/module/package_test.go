@@ -8,6 +8,7 @@ import (
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -149,5 +150,66 @@ func TestPackageSkipWasmSkipFrontend(t *testing.T) {
 	}
 	if len(names) == 0 {
 		t.Fatal("archive has no entries at all")
+	}
+}
+
+func writeFrontendTranslations(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	tdir := filepath.Join(dir, "frontend", "translations")
+	if err := os.MkdirAll(tdir, 0o755); err != nil {
+		t.Fatalf("mkdir frontend/translations: %v", err)
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(tdir, name), []byte(data), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+}
+
+func TestPackageIncludesFrontendTranslations(t *testing.T) {
+	dir := t.TempDir()
+	writeWasmFixture(t, dir, fixtureManifest)
+	writeFrontendTranslations(t, dir, map[string]string{
+		"en.json": `{"actions.create":"New Contact"}`,
+		"fr.json": `{"actions.create":"Nouveau contact"}`,
+	})
+	if err := os.MkdirAll(filepath.Join(dir, "translations"), 0o755); err != nil {
+		t.Fatalf("mkdir translations: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "translations", "en.json"), []byte(`{"errors.not_found":"Not found"}`), 0o644); err != nil {
+		t.Fatalf("write translations/en.json: %v", err)
+	}
+
+	result, err := Package(t.Context(), dir, PackageOptions{SkipWasm: true, SkipFrontend: true})
+	if err != nil {
+		t.Fatalf("Package: %v", err)
+	}
+
+	names := zipEntryNames(t, result.ArchivePath)
+	for _, want := range []string{"translations/en.json", "frontend/translations/en.json", "frontend/translations/fr.json"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("archive entries %v are missing %s", names, want)
+		}
+	}
+}
+
+func TestPackageRejectsAnInvalidFrontendTranslation(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"bad locale name": {"english.json": `{}`},
+		"nested object":   {"en.json": `{"fields":{"name":"Name"}}`},
+	} {
+		dir := t.TempDir()
+		writeWasmFixture(t, dir, fixtureManifest)
+		writeFrontendTranslations(t, dir, files)
+
+		output := filepath.Join(dir, "out.erp")
+		_, err := Package(t.Context(), dir, PackageOptions{SkipWasm: true, SkipFrontend: true, Output: output})
+		if err == nil {
+			t.Errorf("%s: Package succeeded, want an error", name)
+			continue
+		}
+		if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+			t.Errorf("%s: a failed build left out.erp behind (stat error %v)", name, statErr)
+		}
 	}
 }

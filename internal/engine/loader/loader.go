@@ -34,6 +34,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/dbscope"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/job"
+	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -59,6 +60,10 @@ type Source struct {
 	// frontend.bundle: true, so LoadModule can tell "declared but missing"
 	// (a load failure) apart from "not declared" (nothing to verify).
 	BundleBytes []byte
+	// FrontendTranslations is the package's frontend/translations/*.json
+	// files keyed by locale (the file name without .json), nil when it has
+	// none. LoadModule validates each one.
+	FrontendTranslations map[string][]byte
 	// PackagePath is the .erp package file or loose module directory src
 	// was read from on disk. Copied onto the returned LoadedModule
 	// unchanged — LoadModule itself never reads it.
@@ -98,6 +103,13 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	if err := verifyBundle(mf, src.BundleBytes); err != nil {
 		m.Fail(err.Error())
 		return m
+	}
+
+	for locale, data := range src.FrontendTranslations {
+		if err := l10n.ValidateFrontendTranslation(locale, data); err != nil {
+			m.Fail(err.Error())
+			return m
+		}
 	}
 
 	compiled, err := rt.CompileModule(ctx, src.WasmBytes)

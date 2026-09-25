@@ -81,6 +81,10 @@ type Leader struct {
 	// in tests that don't exercise this — Run treats that the same as
 	// "nobody connected yet".
 	Hub *ws.Hub
+
+	// translationsMu orders frontend translation activations, which run
+	// after a reload's reservation is released (activateTranslations).
+	translationsMu sync.Mutex
 }
 
 // Run implements hotreload.LeaderFunc. Coordinator already guarantees only
@@ -161,6 +165,12 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	if err := module.PublishBundle(ctx, l.Storage, moduleName, &m, src.BundleBytes); err != nil {
 		return fmt.Errorf("publish frontend bundle to object storage: %w", err)
 	}
+	// Uploaded now but only made live once mod is committed below, so a
+	// reload that fails in between leaves the live strings as they were.
+	translationsDigest, err := module.UploadFrontendTranslations(ctx, l.Storage, moduleName, m.Version, src.FrontendTranslations)
+	if err != nil {
+		return fmt.Errorf("upload frontend translations to object storage: %w", err)
+	}
 
 	oldMod := currentModules(l.Registry)[moduleName]
 
@@ -215,6 +225,9 @@ func (l *Leader) Run(ctx context.Context, moduleName string, src loader.Source, 
 	published = committed // even a failed publish may have already committed mod to the registry (see publish's own doc comment) — never close a pool the registry now points to
 	if !committed {
 		return publishErr
+	}
+	if err := l.activateTranslations(ctx, mod, translationsDigest); err != nil {
+		log.Error().Err(err).Str("module", moduleName).Msg("hot reload: module published but its frontend translations were not made live")
 	}
 	if publishErr != nil {
 		// mod is live and reachable through the registry snapshot despite
@@ -377,4 +390,20 @@ func (l *Leader) checkTenantDowngrade(ctx context.Context, t tenant.Tenant, curr
 		return false, nil, fmt.Errorf("downgrade pre-check: %w", err)
 	}
 	return status == schema.DowngradeStatusBlocked, incompatibilities, nil
+}
+
+// activateTranslations makes mod's frontend translation set live, unless a
+// later reload of the same module has already replaced mod in the
+// registry. The reservation that serializes same-module reloads is
+// released before publish, so without this a slow publish could land its
+// strings on top of a newer reload's. Under translationsMu, whichever
+// reload is current when it checks activates, and a reload committing
+// after that check queues behind it and activates last.
+func (l *Leader) activateTranslations(ctx context.Context, mod *module.LoadedModule, digest string) error {
+	l.translationsMu.Lock()
+	defer l.translationsMu.Unlock()
+	if currentModules(l.Registry)[mod.Manifest.Name] != mod {
+		return nil
+	}
+	return module.ActivateFrontendTranslations(ctx, l.Storage, mod.Manifest.Name, mod.Manifest.Version, digest)
 }

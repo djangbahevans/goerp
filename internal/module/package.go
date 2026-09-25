@@ -8,14 +8,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
 // PackageOptions configures Package.
 type PackageOptions struct {
-	// Output overrides the default build/<name>-<version>.erp path
-	// (relative to dir).
+	// Output overrides the default <dir>/build/<name>-<version>.erp path.
+	// A relative Output is relative to the working directory, not dir.
 	Output                 string
 	SkipWasm, SkipFrontend bool
 	Debug                  bool
@@ -30,8 +32,9 @@ type PackageResult struct {
 
 // Package compiles a module (WASM binary and frontend bundle, unless
 // skipped) and assembles a real .erp package: a zip archive containing
-// manifest.json, module.wasm, the frontend bundle, and translations, plus
-// a sha256sum-format sidecar file for the archive itself.
+// manifest.json, module.wasm, the frontend bundle, the backend
+// translations/ and the frontend/translations/ files, plus a
+// sha256sum-format sidecar file for the archive itself.
 func Package(ctx context.Context, dir string, opts PackageOptions) (*PackageResult, error) {
 	manifestPath := filepath.Join(dir, "manifest.json")
 
@@ -78,6 +81,7 @@ func Package(ctx context.Context, dir string, opts PackageOptions) (*PackageResu
 	}
 
 	if err := writeArchive(outputPath, dir, manifestBytes); err != nil {
+		_ = os.Remove(outputPath)
 		return nil, err
 	}
 
@@ -180,6 +184,26 @@ func writeArchive(outputPath, dir string, manifestBytes []byte) error {
 			return fmt.Errorf("read %s: %w", m, err)
 		}
 		if err := addZipEntry(w, filepath.Join("translations", filepath.Base(m)), data); err != nil {
+			return err
+		}
+	}
+
+	// Checked here with the rules the engine applies when it loads the
+	// package, so a bad file fails the build instead of the install.
+	frontendDir := filepath.FromSlash(l10n.FrontendTranslationsDir)
+	frontendMatches, err := filepath.Glob(filepath.Join(dir, frontendDir, "*.json"))
+	if err != nil {
+		return err
+	}
+	for _, m := range frontendMatches {
+		data, err := os.ReadFile(m)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", m, err)
+		}
+		if err := l10n.ValidateFrontendTranslation(strings.TrimSuffix(filepath.Base(m), ".json"), data); err != nil {
+			return err
+		}
+		if err := addZipEntry(w, filepath.Join(frontendDir, filepath.Base(m)), data); err != nil {
 			return err
 		}
 	}

@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -112,13 +113,41 @@ func DiscoverOne(path string) (*loader.Source, error) {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 
+	translations, err := readDirTranslations(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+
 	return &loader.Source{
-		Name:          name,
-		ManifestBytes: manifestBytes,
-		WasmBytes:     wasmBytes,
-		BundleBytes:   bundleBytes,
-		PackagePath:   path,
+		Name:                 name,
+		ManifestBytes:        manifestBytes,
+		WasmBytes:            wasmBytes,
+		BundleBytes:          bundleBytes,
+		FrontendTranslations: translations,
+		PackagePath:          path,
 	}, nil
+}
+
+// readDirTranslations reads every frontend/translations/*.json file under a
+// loose module directory, keyed by locale, or returns nil when there are
+// none. loader.LoadModule validates the names and contents.
+func readDirTranslations(dir string) (map[string][]byte, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, filepath.FromSlash(l10n.FrontendTranslationsDir), "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var files map[string][]byte
+	for _, m := range matches {
+		data, err := os.ReadFile(m)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", m, err)
+		}
+		if files == nil {
+			files = map[string][]byte{}
+		}
+		files[strings.TrimSuffix(filepath.Base(m), ".json")] = data
+	}
+	return files, nil
 }
 
 // readDirBundle reads the single frontend/dist/bundle.*.js file under a
@@ -195,6 +224,33 @@ func readZipBundle(r *zip.Reader) ([]byte, error) {
 	return readZipMember(r, match.Name)
 }
 
+// readZipTranslations reads every frontend/translations/*.json member
+// directly under that directory, keyed by locale, or returns nil when
+// there are none. loader.LoadModule validates the names and contents.
+func readZipTranslations(r *zip.Reader) (map[string][]byte, error) {
+	const dir = l10n.FrontendTranslationsDir + "/"
+	var files map[string][]byte
+	for _, f := range r.File {
+		name, ok := strings.CutPrefix(f.Name, dir)
+		if !ok || strings.Contains(name, "/") {
+			continue
+		}
+		locale, ok := strings.CutSuffix(name, ".json")
+		if !ok {
+			continue
+		}
+		data, err := readZipMember(r, f.Name)
+		if err != nil {
+			return nil, err
+		}
+		if files == nil {
+			files = map[string][]byte{}
+		}
+		files[locale] = data
+	}
+	return files, nil
+}
+
 func readZipMember(r *zip.Reader, name string) ([]byte, error) {
 	for _, f := range r.File {
 		if f.Name != name {
@@ -259,17 +315,23 @@ func readPackageSource(path string) (*loader.Source, error) {
 		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
 
+	translations, err := readZipTranslations(&r.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+
 	name := strings.TrimSuffix(filepath.Base(path), ".erp")
 	if mf, err := manifest.Load(manifestBytes); err == nil {
 		name = mf.Name
 	}
 
 	return &loader.Source{
-		Name:          name,
-		ManifestBytes: manifestBytes,
-		WasmBytes:     wasmBytes,
-		BundleBytes:   bundleBytes,
-		PackagePath:   path,
+		Name:                 name,
+		ManifestBytes:        manifestBytes,
+		WasmBytes:            wasmBytes,
+		BundleBytes:          bundleBytes,
+		FrontendTranslations: translations,
+		PackagePath:          path,
 	}, nil
 }
 
@@ -317,16 +379,22 @@ func ParsePackage(data []byte) (*loader.Source, *manifest.Manifest, error) {
 		return nil, nil, err
 	}
 
+	translations, err := readZipTranslations(r)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	mf, err := manifest.Load(manifestBytes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid manifest: %w", err)
 	}
 
 	return &loader.Source{
-		Name:          mf.Name,
-		ManifestBytes: manifestBytes,
-		WasmBytes:     wasmBytes,
-		BundleBytes:   bundleBytes,
+		Name:                 mf.Name,
+		ManifestBytes:        manifestBytes,
+		WasmBytes:            wasmBytes,
+		BundleBytes:          bundleBytes,
+		FrontendTranslations: translations,
 	}, mf, nil
 }
 
@@ -451,6 +519,7 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 		}
 		if m.Status != module.StatusFailed {
 			publishBundle(ctx, storageBackend, src.Name, &m.Manifest, src.BundleBytes)
+			publishFrontendTranslations(ctx, storageBackend, src.Name, m.Manifest.Version, src.FrontendTranslations)
 		}
 		modules[src.Name] = m
 	}
@@ -474,6 +543,19 @@ func publishBundle(ctx context.Context, storageBackend storage.Backend, moduleNa
 		log.Warn().Str("module", moduleName).Msg("frontend bundle declared but no object storage backend is configured; bundle will not be servable")
 	default:
 		log.Warn().Err(err).Str("module", moduleName).Msg("publish frontend bundle to object storage failed")
+	}
+}
+
+// publishFrontendTranslations is publishBundle's counterpart for the
+// module's frontend/translations/*.json files, with the same posture.
+func publishFrontendTranslations(ctx context.Context, storageBackend storage.Backend, moduleName, version string, files map[string][]byte) {
+	err := module.PublishFrontendTranslations(ctx, storageBackend, moduleName, version, files)
+	switch {
+	case err == nil:
+	case errors.Is(err, module.ErrNoStorageBackend):
+		log.Warn().Str("module", moduleName).Msg("frontend translations present but no object storage backend is configured; they will not be servable")
+	default:
+		log.Warn().Err(err).Str("module", moduleName).Msg("publish frontend translations to object storage failed")
 	}
 }
 
