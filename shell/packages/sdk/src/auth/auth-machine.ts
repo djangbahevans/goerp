@@ -1,4 +1,20 @@
-import type { AuthEvent, AuthState } from "./types.js";
+import type { AuthEvent, AuthState, CurrentTenant, CurrentUser } from "./types.js";
+
+export type ExpiredSession = Extract<AuthState, { sessionExpired: true }>;
+
+export function isSessionExpired(state: AuthState): state is ExpiredSession {
+  return state.status === "unauthenticated" && "sessionExpired" in state;
+}
+
+// The user and tenant a session is (or, expired, was) for: what useAuth()
+// reports, so an expiry keeps the page, and the providers keyed on them,
+// mounted under the session-expired modal.
+export function sessionIdentity(state: AuthState): { user: CurrentUser; tenant: CurrentTenant } | null {
+  if (state.status === "authenticated" || state.status === "refreshing" || isSessionExpired(state)) {
+    return { user: state.user, tenant: state.tenant };
+  }
+  return null;
+}
 
 // The transition table shell-architecture.md §7 documents. Any event that
 // doesn't apply to the machine's current status is a no-op (returns the
@@ -55,13 +71,20 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
         : state;
 
     case "refresh_failed":
-      return state.status === "refreshing" ? { status: "unauthenticated" } : state;
+      return state.status === "refreshing"
+        ? { status: "unauthenticated", sessionExpired: true, user: state.user, tenant: state.tenant }
+        : state;
 
     case "session_expired":
-      return state.status === "authenticated" || state.status === "refreshing" ? { status: "unauthenticated" } : state;
+      return state.status === "authenticated" || state.status === "refreshing"
+        ? { status: "unauthenticated", sessionExpired: true, user: state.user, tenant: state.tenant }
+        : state;
 
     case "logout_started":
-      return state.status === "authenticated" || state.status === "refreshing" ? { status: "logging_out" } : state;
+      // Signing out of an expired session drops the user and tenant it kept.
+      return state.status === "authenticated" || state.status === "refreshing" || isSessionExpired(state)
+        ? { status: "logging_out" }
+        : state;
 
     case "logout_complete":
       return state.status === "logging_out" ? { status: "unauthenticated" } : state;

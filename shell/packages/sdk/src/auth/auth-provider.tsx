@@ -8,7 +8,7 @@ import {
   submitMFACode,
   updateProfile as updateProfileRequest,
 } from "./auth-client.js";
-import { authMachine } from "./auth-machine.js";
+import { authMachine, sessionIdentity } from "./auth-machine.js";
 import { passwordUpdateNotice } from "./password-update-notice.js";
 import type {
   AuthContextValue,
@@ -170,11 +170,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthContextValue>(() => {
     const isAuthenticated = state.status === "authenticated" || state.status === "refreshing";
+    // An expired session keeps its user and tenant, so the page under the
+    // session-expired modal (and anything keyed on them) stays as it was.
+    const identity = sessionIdentity(state);
     return {
       state,
       isAuthenticated,
-      user: isAuthenticated ? state.user : null,
-      tenant: isAuthenticated ? state.tenant : null,
+      user: identity?.user ?? null,
+      tenant: identity?.tenant ?? null,
       login,
       logout,
       submitMFA,

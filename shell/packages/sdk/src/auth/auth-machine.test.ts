@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AuthMachine, authTransition } from "./auth-machine.js";
+import { AuthMachine, authTransition, isSessionExpired, sessionIdentity } from "./auth-machine.js";
 import type { AuthState, CurrentTenant, CurrentUser } from "./types.js";
 
 const user: CurrentUser = {
@@ -103,22 +103,22 @@ describe("authTransition", () => {
     expect(authed).toEqual({ status: "authenticated", user, tenant });
   });
 
-  it("refreshing → unauthenticated on refresh_failed", () => {
+  it("refreshing → unauthenticated, marked as an expired session, on refresh_failed", () => {
     const start: AuthState = { status: "refreshing", user, tenant };
     const next = authTransition(start, { type: "refresh_failed" });
-    expect(next).toEqual({ status: "unauthenticated" });
+    expect(next).toEqual({ status: "unauthenticated", sessionExpired: true, user, tenant });
   });
 
-  it("authenticated → unauthenticated on session_expired", () => {
+  it("authenticated → unauthenticated, marked as an expired session, on session_expired", () => {
     const start: AuthState = { status: "authenticated", user, tenant };
     const next = authTransition(start, { type: "session_expired" });
-    expect(next).toEqual({ status: "unauthenticated" });
+    expect(next).toEqual({ status: "unauthenticated", sessionExpired: true, user, tenant });
   });
 
-  it("refreshing → unauthenticated on session_expired", () => {
+  it("refreshing → unauthenticated, marked as an expired session, on session_expired", () => {
     const start: AuthState = { status: "refreshing", user, tenant };
     const next = authTransition(start, { type: "session_expired" });
-    expect(next).toEqual({ status: "unauthenticated" });
+    expect(next).toEqual({ status: "unauthenticated", sessionExpired: true, user, tenant });
   });
 
   it("authenticated → authenticated on profile_updated, replacing user but keeping tenant", () => {
@@ -139,6 +139,18 @@ describe("authTransition", () => {
     const start: AuthState = { status: "unauthenticated" };
     const next = authTransition(start, { type: "profile_updated", user });
     expect(next).toBe(start);
+  });
+
+  it("an expired session signs in again like any signed-out state", () => {
+    const expired: AuthState = { status: "unauthenticated", sessionExpired: true, user, tenant };
+    expect(authTransition(expired, { type: "session_expired" })).toBe(expired);
+    const checking = authTransition(expired, { type: "login_started" });
+    expect(checking).toEqual({ status: "checking" });
+    expect(authTransition(checking, { type: "login_succeeded", user, tenant })).toEqual({
+      status: "authenticated",
+      user,
+      tenant,
+    });
   });
 
   it("authenticated → logging_out → unauthenticated", () => {
@@ -202,5 +214,28 @@ describe("AuthMachine", () => {
     // A second concurrent login attempt (or one racing the mount-time
     // check) finds the machine already "checking" and is rejected.
     expect(machine.transition({ type: "login_started" })).toBe(false);
+  });
+});
+
+describe("signing out of an expired session", () => {
+  it("drops the user and tenant it kept", () => {
+    const expired: AuthState = { status: "unauthenticated", sessionExpired: true, user, tenant };
+    const loggingOut = authTransition(expired, { type: "logout_started" });
+    expect(loggingOut).toEqual({ status: "logging_out" });
+    expect(authTransition(loggingOut, { type: "logout_complete" })).toEqual({ status: "unauthenticated" });
+  });
+});
+
+describe("isSessionExpired and sessionIdentity", () => {
+  it("tell an expired session from a sign-out and keep its user and tenant", () => {
+    const expired: AuthState = { status: "unauthenticated", sessionExpired: true, user, tenant };
+    expect(isSessionExpired(expired)).toBe(true);
+    expect(isSessionExpired({ status: "unauthenticated" })).toBe(false);
+    expect(isSessionExpired({ status: "authenticated", user, tenant })).toBe(false);
+
+    expect(sessionIdentity(expired)).toEqual({ user, tenant });
+    expect(sessionIdentity({ status: "refreshing", user, tenant })).toEqual({ user, tenant });
+    expect(sessionIdentity({ status: "unauthenticated" })).toBeNull();
+    expect(sessionIdentity({ status: "logging_out" })).toBeNull();
   });
 });

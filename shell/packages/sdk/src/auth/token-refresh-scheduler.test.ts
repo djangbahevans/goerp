@@ -68,7 +68,7 @@ describe("TokenRefreshScheduler", () => {
     expect(refresher.refreshSession).toHaveBeenCalledTimes(2);
   });
 
-  it("transitions to unauthenticated on a failed refresh and does not reschedule", async () => {
+  it("ends the session as expired on a failed refresh and does not reschedule", async () => {
     const machine = authenticatedMachine();
     const refresher = fakeRefresher(async () => ({ ok: false }));
     const scheduler = new TokenRefreshScheduler(machine, refresher);
@@ -76,7 +76,7 @@ describe("TokenRefreshScheduler", () => {
     scheduler.schedule(900);
     await vi.advanceTimersByTimeAsync(900 * 0.8 * 1000);
 
-    expect(machine.getState()).toEqual({ status: "unauthenticated" });
+    expect(machine.getState()).toEqual({ status: "unauthenticated", sessionExpired: true, user, tenant });
 
     await vi.advanceTimersByTimeAsync(10_000_000);
     expect(refresher.refreshSession).toHaveBeenCalledTimes(1); // no further attempts scheduled

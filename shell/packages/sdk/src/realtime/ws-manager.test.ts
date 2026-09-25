@@ -420,11 +420,11 @@ describe("wireWebSocketManager", () => {
     expect(socket.closed).toBe(true);
   });
 
-  it("transitions the auth machine to unauthenticated on a 4001 close", () => {
+  it("ends the session as expired on a 4001 close", () => {
     const { machine } = wiredAndAuthenticated();
 
     latestSocket().serverClose(4001, "session expired");
 
-    expect(machine.getState()).toEqual({ status: "unauthenticated" });
+    expect(machine.getState()).toMatchObject({ status: "unauthenticated", sessionExpired: true });
   });
 });

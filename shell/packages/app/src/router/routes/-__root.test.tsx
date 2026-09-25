@@ -1,9 +1,9 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext, tenantSuspension } from "@goerp/sdk/auth";
 import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
@@ -39,8 +39,16 @@ const SIGNED_OUT: AuthContextValue = {
   user: null,
   tenant: null,
 };
+const EXPIRED: AuthContextValue = {
+  ...SIGNED_OUT,
+  state: { status: "unauthenticated", sessionExpired: true, user: FAKE_USER, tenant: FAKE_TENANT },
+  user: FAKE_USER,
+  tenant: FAKE_TENANT,
+};
 
-function renderAt(path: string, auth: AuthContextValue) {
+// setAuth swaps the live auth value in place, the way AuthProvider does
+// when the machine transitions.
+function mount(path: string, auth: AuthContextValue) {
   const history = createMemoryHistory({ initialEntries: [path] });
   const router = createRouter({ routeTree, context: { auth }, history });
   const permissions = createPermissionContextValue({
@@ -48,18 +56,23 @@ function renderAt(path: string, auth: AuthContextValue) {
     fieldAccess: {},
     modulesEnabled: new Set(),
   });
-  render(
+  const ui = (value: AuthContextValue) => (
     <QueryClientProvider client={new QueryClient()}>
-      <AuthContext.Provider value={auth}>
+      <AuthContext.Provider value={value}>
         <PermissionContext.Provider value={permissions}>
           <ViewRegistryContext.Provider value={buildEmptyViewRegistry()}>
             <AuthRouterProvider router={router} />
           </ViewRegistryContext.Provider>
         </PermissionContext.Provider>
       </AuthContext.Provider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return router;
+  const { rerender } = render(ui(auth));
+  return { router, setAuth: (value: AuthContextValue) => rerender(ui(value)) };
+}
+
+function renderAt(path: string, auth: AuthContextValue) {
+  return mount(path, auth).router;
 }
 
 afterEach(() => {
@@ -142,5 +155,99 @@ describe("root layout", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/tenant-suspended"));
     expect(hasChrome()).toBe(false);
+  });
+
+  describe("session expired", () => {
+    const expiredDialog = () => screen.queryByRole("alertdialog", { name: "Your session has expired" });
+
+    it("shows the modal over the current page, with no navigation, when the session expires", async () => {
+      const { router, setAuth } = mount("/", SIGNED_IN);
+      expect(await screen.findByRole("navigation", { name: "Main" })).toBeTruthy();
+
+      act(() => setAuth(EXPIRED));
+
+      expect(await screen.findByRole("alertdialog", { name: "Your session has expired" })).toBeTruthy();
+      expect(screen.getByText("Please sign in again to continue.")).toBeTruthy();
+      expect(router.state.location.pathname).toBe("/");
+      // The page is still there behind the modal, hidden from assistive tech.
+      expect(screen.getByRole("navigation", { name: "Main", hidden: true })).toBeTruthy();
+      expect(hasChrome()).toBe(false);
+      // Queries behind the modal stop refetching on focus and polling.
+      expect(focusManager.isFocused()).toBe(false);
+    });
+
+    it("can't be dismissed and keeps focus inside the modal", async () => {
+      renderAt("/", EXPIRED);
+      const dialog = await screen.findByRole("alertdialog", { name: "Your session has expired" });
+      await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      fireEvent.pointerDown(document.body);
+
+      expect(expiredDialog()).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /close|cancel/i })).toBeNull();
+    });
+
+    it("signs in again at the login page, carrying the page it was shown over", async () => {
+      const router = renderAt("/?tab=open", EXPIRED);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
+
+      await waitFor(() => expect(router.state.location.pathname).toBe("/auth/login"));
+      expect(router.state.location.search).toEqual({ redirect: "/?tab=open" });
+      await waitFor(() => expect(expiredDialog()).toBeNull());
+      expect(focusManager.isFocused()).toBe(true);
+    });
+
+    it("redirects a signed-out visitor to login with no modal", async () => {
+      const router = renderAt("/", SIGNED_OUT);
+
+      await waitFor(() => expect(router.state.location.pathname).toBe("/auth/login"));
+      expect(expiredDialog()).toBeNull();
+    });
+
+    it("redirects to login with no modal after signing out", async () => {
+      const { router, setAuth } = mount("/", SIGNED_IN);
+      expect(await screen.findByRole("navigation", { name: "Main" })).toBeTruthy();
+
+      act(() => setAuth(SIGNED_OUT));
+
+      await waitFor(() => expect(router.state.location.pathname).toBe("/auth/login"));
+      expect(expiredDialog()).toBeNull();
+    });
+
+    it("sends a session that expires on an auth page to login instead of holding it there", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({ enrollment_id: "e1", qr_svg: "<svg/>", secret: "ABCD" }))),
+      );
+      const needsSetup = { ...FAKE_USER, mfaSetupRequired: true };
+      const { router, setAuth } = mount("/auth/mfa-setup", {
+        ...SIGNED_IN,
+        state: { status: "authenticated", user: needsSetup, tenant: FAKE_TENANT },
+        user: needsSetup,
+      });
+      expect(await screen.findByRole("heading", { name: /requires two-factor authentication/ })).toBeTruthy();
+
+      act(() =>
+        setAuth({
+          ...EXPIRED,
+          state: { status: "unauthenticated", sessionExpired: true, user: needsSetup, tenant: FAKE_TENANT },
+          user: needsSetup,
+        }),
+      );
+
+      await waitFor(() => expect(router.state.location.pathname).toBe("/auth/login"));
+      expect(expiredDialog()).toBeNull();
+    });
+
+    it("leaves a suspended tenant's page to its own sign-in flow", async () => {
+      tenantSuspension.set(true);
+      const router = renderAt("/", EXPIRED);
+
+      await waitFor(() => expect(router.state.location.pathname).toBe("/tenant-suspended"));
+      expect(await screen.findByRole("button", { name: "Sign in with a different account" })).toBeTruthy();
+      expect(expiredDialog()).toBeNull();
+    });
   });
 });

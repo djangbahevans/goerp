@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { isSessionExpired } from "../auth/auth-machine.js";
 import { useAuth } from "../auth/use-auth.js";
 import { tenantChannel, useChannelRefresh } from "../realtime/index.js";
 import { schemaRegistry } from "./schema-registry.js";
@@ -36,11 +37,15 @@ export const viewRegistryRef: { current: ViewRegistry } = { current: EMPTY_REGIS
 // this package never depends on the concrete router instance app.tsx owns.
 export function ViewRegistryProviderForTenant({
   isAuthenticated,
+  sessionExpired = false,
   tenantId,
   onUpdate,
   children,
 }: {
   isAuthenticated: boolean;
+  // Keeps the loaded registry, without refetching, while the session is
+  // expired, so the page under the session-expired modal still resolves.
+  sessionExpired?: boolean | undefined;
   tenantId: string | null;
   onUpdate?: (() => void) | undefined;
   children: ReactNode;
@@ -86,7 +91,8 @@ export function ViewRegistryProviderForTenant({
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "schema.updated", refresh);
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "module.installed", refresh);
 
-  const value = isAuthenticated ? registry : EMPTY_REGISTRY;
+  const hasSession = isAuthenticated || sessionExpired;
+  const value = hasSession ? registry : EMPTY_REGISTRY;
   // Keeps viewRegistryRef (and the router, via onUpdate) in lockstep with
   // `value` for every transition — same reasoning as
   // permission-provider.tsx's identical effect over permissionDataRef.
@@ -97,7 +103,7 @@ export function ViewRegistryProviderForTenant({
 
   return (
     <ViewRegistryContext.Provider value={value}>
-      <ViewRegistryStatusContext.Provider value={isAuthenticated ? status : "loading"}>
+      <ViewRegistryStatusContext.Provider value={hasSession ? status : "loading"}>
         {children}
       </ViewRegistryStatusContext.Provider>
     </ViewRegistryContext.Provider>
@@ -115,11 +121,12 @@ export function ViewRegistryProvider({
   onUpdate?: (() => void) | undefined;
   children: ReactNode;
 }) {
-  const { isAuthenticated, tenant } = useAuth();
+  const { isAuthenticated, state, tenant } = useAuth();
   return (
     <ViewRegistryProviderForTenant
       key={tenant?.id ?? "anonymous"}
       isAuthenticated={isAuthenticated}
+      sessionExpired={isSessionExpired(state)}
       tenantId={tenant?.id ?? null}
       onUpdate={onUpdate}
     >

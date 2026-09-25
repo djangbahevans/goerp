@@ -11,7 +11,14 @@ export {
   resendVerificationEmail,
   verifyEmail,
 } from "./auth-client.js";
-export { AuthMachine, authMachine, authTransition } from "./auth-machine.js";
+export {
+  AuthMachine,
+  authMachine,
+  authTransition,
+  type ExpiredSession,
+  isSessionExpired,
+  sessionIdentity,
+} from "./auth-machine.js";
 export { AuthContext, AuthProvider } from "./auth-provider.js";
 export { Can, type CanProps } from "./can.js";
 export {
