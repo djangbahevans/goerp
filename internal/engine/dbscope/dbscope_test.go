@@ -204,6 +204,32 @@ func TestValidateTableRefs_RejectsSystemCatalogRelations(t *testing.T) {
 	}
 }
 
+func TestValidateTableRefs_RejectsJobQueueTables(t *testing.T) {
+	cases := []string{
+		"SELECT args FROM river_job",
+		"DELETE FROM river_job WHERE kind = 'event_delivery'",
+		"UPDATE river_queue SET paused_at = now()",
+		"SELECT c.id FROM contacts c WHERE EXISTS (SELECT 1 FROM river_leader)",
+		"WITH j AS (SELECT * FROM river_job) SELECT count(*) FROM j",
+	}
+	for _, sql := range cases {
+		if err := ValidateTableRefs(sql); !errors.Is(err, ErrJobQueueTable) {
+			t.Errorf("ValidateTableRefs(%q) = %v, want ErrJobQueueTable", sql, err)
+		}
+	}
+}
+
+func TestIsReservedTableName_JobQueueTables(t *testing.T) {
+	for _, name := range []string{"river_job", "river_client_queue"} {
+		if !IsReservedTableName(name) {
+			t.Errorf("IsReservedTableName(%q) = false, want true", name)
+		}
+	}
+	if IsReservedTableName("rivers") {
+		t.Error(`IsReservedTableName("rivers") = true, want false`)
+	}
+}
+
 func TestValidateTableRefs_AllowsModuleTablesPrefixedLikeEngineTables(t *testing.T) {
 	cases := []string{
 		"SELECT * FROM roles_catalog",

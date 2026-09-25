@@ -564,8 +564,9 @@ func validateTrackedFields(models []model.ModelDeclaration) error {
 // validateReservedTableNames rejects a Postgres-backed model whose table
 // name module SQL may never reference (dbscope.IsReservedTableName): an
 // engine-owned per-tenant table or a partition name of one, which would
-// share the tenant schema with the model's table, or a pg_* name, which
-// resolves to the system catalog ahead of the tenant schema.
+// share the tenant schema with the model's table, a pg_* name, which
+// resolves to the system catalog ahead of the tenant schema, or a river_*
+// name, which module SQL can't reach.
 func validateReservedTableNames(models []model.ModelDeclaration) error {
 	for _, md := range models {
 		if md.Backend != "" {
