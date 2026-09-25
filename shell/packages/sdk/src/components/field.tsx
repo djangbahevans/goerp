@@ -56,10 +56,8 @@ export interface FieldRelationValue {
   display: string;
 }
 
-// Renders as plain text only (field.md's own "file" row: "the value's exact
-// shape is still unspecified — flagged for a follow-up"); a caller wanting
-// a clickable filename passes Field's own top-level `href`, the same
-// caller-supplied pattern the "Manager" field example already uses.
+// The engine's file object under a model.File() read key (field.md's
+// "file" row); rendered as plain text, a caller passes `href` for a link.
 export interface FieldFileValue {
   id?: string | undefined;
   name?: string | undefined;
