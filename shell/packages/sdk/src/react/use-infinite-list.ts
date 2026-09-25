@@ -2,6 +2,7 @@ import { type InfiniteData, type QueryKey, useInfiniteQuery } from "@tanstack/re
 import type { FilterParamValue } from "../http/filter-params.js";
 import { flattenFilterParams } from "../http/filter-params.js";
 import { apiClient } from "../http/index.js";
+import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
@@ -35,7 +36,7 @@ export function createInfiniteListQueryOptions<T>(
     ] as QueryKey,
     queryFn: async ({ pageParam }: { pageParam: string | undefined }): Promise<PagedResponse<T>> => {
       const entry = await registry.resolve(resource);
-      return client.get<PagedResponse<T>>(entry.listPath, {
+      const wire = await client.get<PagedResponseWire<T>>(entry.listPath, {
         params: {
           ...flattenFilterParams(options.filter),
           ...(options.sort !== undefined ? { sort: options.sort } : {}),
@@ -43,6 +44,7 @@ export function createInfiniteListQueryOptions<T>(
           ...(pageParam !== undefined ? { cursor: pageParam } : {}),
         },
       });
+      return toPagedResponse(wire);
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage: PagedResponse<T>) =>

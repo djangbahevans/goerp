@@ -21,7 +21,7 @@ const { resolveResourceMock, resolveMetadataMock, getMock, tryResolveComponentMo
         { id: "1", name: "VIP" },
         { id: "2", name: "Lead" },
       ],
-      meta: { cursor: null, hasMore: false },
+      meta: { cursor: null, has_more: false },
     })),
     tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
     mutateAsyncMock: vi.fn(async () => ({}) as { data?: Record<string, unknown> }),
