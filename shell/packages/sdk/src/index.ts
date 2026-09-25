@@ -1,5 +1,8 @@
 export const SDK_VERSION = "0.0.0";
 
+export type { ListParams } from "./api/index.js";
+export { callAction, resourceApi } from "./api/index.js";
+
 export type {
   APIClient,
   APIClientConfig,

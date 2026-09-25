@@ -1,8 +1,7 @@
 import { type InfiniteData, type QueryKey, useInfiniteQuery } from "@tanstack/react-query";
+import { type ListParams, listResource } from "../api/resource-api.js";
 import type { FilterParamValue } from "../http/filter-params.js";
-import { flattenFilterParams } from "../http/filter-params.js";
 import { apiClient } from "../http/index.js";
-import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
 import type { ResourceRegistry } from "../schema/index.js";
 import { resourceRegistry } from "../schema/index.js";
@@ -34,18 +33,18 @@ export function createInfiniteListQueryOptions<T>(
       options.sort ?? null,
       options.limit ?? null,
     ] as QueryKey,
-    queryFn: async ({ pageParam }: { pageParam: string | undefined }): Promise<PagedResponse<T>> => {
-      const entry = await registry.resolve(resource);
-      const wire = await client.get<PagedResponseWire<T>>(entry.listPath, {
-        params: {
-          ...flattenFilterParams(options.filter),
+    queryFn: ({ pageParam }: { pageParam: string | undefined }): Promise<PagedResponse<T>> =>
+      listResource<T>(
+        resource,
+        {
+          ...(options.filter !== undefined ? { filter: options.filter as NonNullable<ListParams<T>["filter"]> } : {}),
           ...(options.sort !== undefined ? { sort: options.sort } : {}),
           ...(options.limit !== undefined ? { limit: options.limit } : {}),
           ...(pageParam !== undefined ? { cursor: pageParam } : {}),
         },
-      });
-      return toPagedResponse(wire);
-    },
+        registry,
+        client,
+      ),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage: PagedResponse<T>) =>
       lastPage.meta.hasMore ? (lastPage.meta.cursor ?? undefined) : undefined,

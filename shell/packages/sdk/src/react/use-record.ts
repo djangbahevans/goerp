@@ -1,5 +1,6 @@
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { createResource, deleteResource, getResource, updateResource } from "../api/resource-api.js";
 import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { APIClient } from "../http/types.js";
@@ -13,10 +14,6 @@ import { resourceRegistry } from "../schema/index.js";
 // ticket (backlog #499/#757). Both are left off this return shape
 // entirely rather than stubbed with fake always-empty values.
 
-function fillId(path: string, id: string): string {
-  return path.replace("{id}", id);
-}
-
 export function recordQueryKey(resource: string, id: string | undefined): QueryKey {
   return ["record", resource, id ?? null];
 }
@@ -29,53 +26,32 @@ export function createRecordQueryOptions<T>(
 ) {
   return {
     queryKey: recordQueryKey(resource, id),
-    queryFn: async (): Promise<T> => {
-      const entry = await registry.resolve(resource);
-      return client.get<T>(fillId(entry.getPath, id as string));
-    },
+    queryFn: (): Promise<T> => getResource<T>(resource, id as string, registry, client),
     enabled: id !== undefined,
   };
 }
 
-// POSTs to createPath with no id, otherwise dispatches to the model's own
-// declared update method (PUT/PATCH) against the id-filled updatePath.
-// Rejects rather than silently dispatching to an empty path when the model
-// declares no create/update route (buildResourceRegistry's "" default —
-// resource-registry.ts).
-export async function saveRecord<T>(
+// POSTs with no id, otherwise updates the record through the model's own
+// declared update method.
+export function saveRecord<T>(
   resource: string,
   id: string | undefined,
   edits: Partial<T>,
   registry: Pick<ResourceRegistry, "resolve"> = resourceRegistry,
   client: Pick<APIClient, "post" | "put" | "patch"> = apiClient,
 ): Promise<T> {
-  const entry = await registry.resolve(resource);
-  if (id === undefined) {
-    if (entry.createPath === "") {
-      throw new Error(`useRecord: resource "${resource}" declares no create route`);
-    }
-    return client.post<T>(entry.createPath, edits);
-  }
-  if (entry.updatePath === "") {
-    throw new Error(`useRecord: resource "${resource}" declares no update route`);
-  }
-  const path = fillId(entry.updatePath, id);
-  return entry.updateMethod === "PATCH" ? client.patch<T>(path, edits) : client.put<T>(path, edits);
+  return id === undefined
+    ? createResource<T>(resource, edits, registry, client)
+    : updateResource<T>(resource, id, edits, undefined, registry, client);
 }
 
-// Rejects rather than silently no-op-ing when the model declares no
-// delete route (ResourceRegistryEntry.deletePath === null).
-export async function deleteRecord(
+export function deleteRecord(
   resource: string,
   id: string,
   registry: Pick<ResourceRegistry, "resolve"> = resourceRegistry,
   client: Pick<APIClient, "delete"> = apiClient,
 ): Promise<void> {
-  const entry = await registry.resolve(resource);
-  if (entry.deletePath === null) {
-    throw new Error(`useRecord: resource "${resource}" declares no delete route`);
-  }
-  await client.delete(fillId(entry.deletePath, id));
+  return deleteResource(resource, id, registry, client);
 }
 
 export interface UseRecordOptions {
