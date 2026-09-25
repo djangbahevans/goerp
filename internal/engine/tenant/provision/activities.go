@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
@@ -90,10 +89,12 @@ func NewActivities(
 }
 
 // Temporal application-error types ReserveSlug fails with when another
-// tenant holds the slug, or the slug is reserved.
+// tenant holds the slug, or the slug is reserved, and CreateTenantSchema
+// fails with when the slug can't name a Postgres role.
 const (
 	SlugTakenErrorType    = "SlugTaken"
 	SlugReservedErrorType = "SlugReserved"
+	InvalidSlugErrorType  = "InvalidSlug"
 )
 
 // ReserveSlug inserts the tenant row under the workflow-chosen tenantID
@@ -126,22 +127,15 @@ func (a *Activities) ReleaseSlugReservation(ctx context.Context, tenantID string
 	return nil
 }
 
-// CreateTenantSchema creates tenant_{slug} and gives db.EngineRole DML on
-// every table and sequence later created in it. Idempotent.
+// CreateTenantSchema creates the tenant's schema and role and their
+// grants (tenantschema.Create). Idempotent. An invalid slug fails
+// non-retryably, so the workflow releases the slug reservation.
 func (a *Activities) CreateTenantSchema(ctx context.Context, slug string) error {
-	schemaName := tenantschema.Name(slug)
-	stmts := []string{
-		"CREATE SCHEMA IF NOT EXISTS " + schemaName,
-		"GRANT USAGE ON SCHEMA " + schemaName + " TO " + db.EngineRole,
-		"ALTER DEFAULT PRIVILEGES IN SCHEMA " + schemaName + " GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO " + db.EngineRole,
-		"ALTER DEFAULT PRIVILEGES IN SCHEMA " + schemaName + " GRANT USAGE, SELECT ON SEQUENCES TO " + db.EngineRole,
+	err := tenantschema.Create(ctx, a.schemaSyncPool, slug)
+	if errors.Is(err, tenantschema.ErrInvalidSlug) {
+		return temporal.NewNonRetryableApplicationError(err.Error(), InvalidSlugErrorType, err)
 	}
-	for _, stmt := range stmts {
-		if _, err := a.schemaSyncPool.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("create tenant schema: %w", err)
-		}
-	}
-	return nil
+	return err
 }
 
 // CreateEngineTables creates every engine-owned per-tenant table

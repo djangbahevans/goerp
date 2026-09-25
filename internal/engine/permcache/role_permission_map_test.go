@@ -61,7 +61,7 @@ func (e *testEnv) activeTenant(t *testing.T, slug string) {
 	}
 	t.Cleanup(func() {
 		_, _ = e.conn.Exec("DELETE FROM system.tenants WHERE id = $1", tt.ID)
-		_, _ = e.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
+		_ = tenantschema.Drop(context.Background(), e.conn, slug)
 	})
 
 	if _, err := e.tenantStore.UpdateStatus(ctx, slug, tenant.StatusActive, nil); err != nil {

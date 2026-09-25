@@ -25,6 +25,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rs/zerolog/log"
 )
 
 // Table is one engine-owned per-tenant table. A Partitioned table's
@@ -64,7 +65,10 @@ var Groups = []Group{
 	{
 		Tables: []Table{{Name: "record_shares"}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
-			return recordshares.NewStore(pool).Bootstrap(ctx, slug)
+			if err := recordshares.NewStore(pool).Bootstrap(ctx, slug); err != nil {
+				return err
+			}
+			return secureRecordShares(ctx, pool, slug)
 		},
 	},
 	{
@@ -136,9 +140,14 @@ func RevokeAppendOnlyMutations(ctx context.Context, pool *sql.DB, tenantSlug str
 	var tables []string
 	for rows.Next() {
 		var name string
-		if err := rows.Scan(&name); err != nil {
+		var owned bool
+		if err := rows.Scan(&name, &owned); err != nil {
 			_ = rows.Close()
 			return fmt.Errorf("scan append-only table: %w", err)
+		}
+		if !owned {
+			log.Warn().Str("table", name).Msg("append-only table is not owned by the schema-sync role; cannot revoke the engine role's UPDATE and DELETE")
+			continue
 		}
 		tables = append(tables, name)
 	}
@@ -165,9 +174,10 @@ func isDroppedRelation(err error) bool {
 }
 
 // appendOnlyGrantsQuery lists tables named in $2, and their partitions, on
-// which role $3 (if it exists) can UPDATE or DELETE.
+// which role $3 (if it exists) can UPDATE or DELETE, and whether the
+// current role owns each.
 const appendOnlyGrantsQuery = `
-SELECT format('%I.%I', n.nspname, c.relname)
+SELECT format('%I.%I', n.nspname, c.relname), pg_has_role(c.relowner, 'USAGE')
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_roles r ON r.rolname = $3
@@ -312,3 +322,34 @@ CREATE TABLE IF NOT EXISTS %s.event_log (
 const createEventLogTimeIndex = `
 CREATE INDEX IF NOT EXISTS idx_event_log_time ON %s.event_log USING BRIN (emitted_at)
 `
+
+// secureRecordShares lets the tenant role read only the acting user's own
+// grants, which the share RLS policies on module tables evaluate under it,
+// while db.EngineRole reads every row (multitenancy-internals.md §5a).
+func secureRecordShares(ctx context.Context, pool *sql.DB, slug string) error {
+	role := tenantschema.Name(slug)
+	table := role + ".record_shares"
+	stmts := []string{
+		"GRANT SELECT ON " + table + " TO " + role,
+		"ALTER TABLE " + table + " ENABLE ROW LEVEL SECURITY",
+		"DROP POLICY IF EXISTS engine_all ON " + table,
+		"CREATE POLICY engine_all ON " + table + " TO " + db.EngineRole + " USING (true)",
+		"DROP POLICY IF EXISTS own_grants ON " + table,
+		"CREATE POLICY own_grants ON " + table + " FOR SELECT TO " + role +
+			" USING (shared_with_user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid)",
+	}
+	tx, err := pool.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("secure record_shares: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("secure record_shares: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("secure record_shares: %w", err)
+	}
+	return nil
+}

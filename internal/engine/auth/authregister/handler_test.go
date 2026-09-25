@@ -180,7 +180,7 @@ func (f *fixture) registration(t *testing.T) (company, slug, email string) {
 		_, _ = f.conn.Exec(`DELETE FROM system.sessions WHERE user_id IN (SELECT id FROM system.users WHERE email = $1)`, email)
 		_, _ = f.conn.Exec(`DELETE FROM system.users WHERE email = $1`, email)
 		_, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE slug = $1`, slug)
-		_, _ = f.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
+		_ = tenantschema.Drop(context.Background(), f.conn, slug)
 	})
 	return company, slug, email
 }

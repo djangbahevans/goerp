@@ -1,7 +1,6 @@
 package wasm
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -24,10 +23,6 @@ func setupEngineTablesTest(t *testing.T) (*sql.DB, string, []string) {
 	primaryDB := openTestPrimaryDB(t)
 	slug := fmt.Sprintf("dbengtables%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
-	t.Cleanup(func() {
-		_, _ = primaryDB.ExecContext(context.Background(),
-			"DELETE FROM partman.part_config WHERE parent_table LIKE $1", "tenant_"+slug+".%")
-	})
 	if err := enginetables.CreateAll(ctx, primaryDB, slug); err != nil {
 		t.Fatalf("enginetables.CreateAll: %v", err)
 	}

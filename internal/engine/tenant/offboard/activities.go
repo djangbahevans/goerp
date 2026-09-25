@@ -179,14 +179,11 @@ func (a *Activities) DeleteTenantStorageFiles(ctx context.Context, slug string) 
 	return nil
 }
 
-// DropTenantSchema drops tenant_{slug} and everything in it — the point
-// of no return (multitenancy-internals.md §9). IF EXISTS makes this
-// idempotent against a workflow retry that reaches here twice.
+// DropTenantSchema drops tenant_{slug}, everything in it and the tenant's
+// role — the point of no return (multitenancy-internals.md §9).
+// Idempotent against a workflow retry that reaches here twice.
 func (a *Activities) DropTenantSchema(ctx context.Context, slug string) error {
-	if _, err := a.schemaSyncPool.ExecContext(ctx, "DROP SCHEMA IF EXISTS "+tenantschema.Name(slug)+" CASCADE"); err != nil {
-		return fmt.Errorf("drop tenant schema: %w", err)
-	}
-	return nil
+	return tenantschema.Drop(ctx, a.schemaSyncPool, slug)
 }
 
 // MarkTenantDeleted flips the tenant to StatusDeleted — tenant.Store.

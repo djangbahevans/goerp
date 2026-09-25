@@ -36,7 +36,7 @@ func TestStartProvisioning_ProvisionsTenant(t *testing.T) {
 	env := newTestEnv(t, nil)
 	t.Cleanup(func() {
 		_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
-		_, _ = env.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
+		_ = tenantschema.Drop(context.Background(), env.conn, slug)
 	})
 
 	p := NewProvisioner(env.temporalClient, env.taskQueue)
@@ -85,7 +85,7 @@ func TestStartProvisioning_RetryReplaysSameWorkflowID(t *testing.T) {
 	env := newTestEnv(t, nil)
 	t.Cleanup(func() {
 		_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
-		_, _ = env.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
+		_ = tenantschema.Drop(context.Background(), env.conn, slug)
 	})
 
 	p := NewProvisioner(env.temporalClient, env.taskQueue)
@@ -118,7 +118,7 @@ func TestProvisionForRegistration_GrantsTheExistingUserAdminWithoutAnInvite(t *t
 	env := newTestEnv(t, nil)
 	t.Cleanup(func() {
 		_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
-		_, _ = env.conn.Exec("DROP SCHEMA IF EXISTS " + tenantschema.Name(slug) + " CASCADE")
+		_ = tenantschema.Drop(context.Background(), env.conn, slug)
 	})
 	userID := uuid.New().String()
 
