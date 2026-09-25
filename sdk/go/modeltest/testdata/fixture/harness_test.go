@@ -36,6 +36,23 @@ func TestStructResponseUsesJSONTags(t *testing.T) {
 	}
 }
 
+func TestSequenceFieldGetsConsecutiveValues(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	var numbers []any
+	for range 2 {
+		resp := h.POST("/widgets/tickets", map[string]any{})
+		if resp.StatusCode != 201 {
+			t.Fatalf("status = %d, want 201; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+		}
+		numbers = append(numbers, resp.JSON("number"))
+	}
+	// The bare counter until goerp#1168 formats it per the field's format.
+	if want := []any{float64(1), float64(2)}; !reflect.DeepEqual(numbers, want) {
+		t.Errorf("numbers = %v, want %v", numbers, want)
+	}
+}
+
 func TestPOST_NilSliceAndMapReachHandlerAsEmptyNotNull(t *testing.T) {
 	h := modeltest.NewHarness(t)
 

@@ -51,6 +51,12 @@ var Schema = model.Schema{
 			Field("optional_note", model.Text()).
 			Field("created_by_gadget_id", model.Many2One("widgets.gadget")).
 			Field("priority", model.Enum("kind_probe_priority_enum").Required()),
+		// ticket's Sequence field needs the engine-owned sequences table
+		// in the tenant schema (goerp#1167).
+		model.Define("widgets.ticket").
+			WithStandardFields().
+			Field("number", model.Sequence("TK-{seq:04}")).
+			EnableOps(model.Create, model.Get),
 		// attachment exercises DynamicLink generation end to end
 		// (go-sdk-reference.md §22 "DynamicLink") — reference_id's
 		// target varies per row via its sibling reference_type Selection
