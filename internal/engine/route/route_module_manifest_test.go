@@ -27,6 +27,7 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 			ResponseIsList: false,
 			CrudAction:     "get",
 			Name:           "get",
+			ResponseType:   &engine.TypeDesc{Kind: "object", Name: "Order"},
 		},
 	})
 	if err != nil {
@@ -52,6 +53,7 @@ func TestRegisterModuleRoutes_PopulatesManifestFromExplicitRoute(t *testing.T) {
 		ResponseIsList: false,
 		CrudAction:     "get",
 		Name:           "get",
+		ResponseType:   &engine.TypeDesc{Kind: "object", Name: "Order"},
 	}
 	if !reflect.DeepEqual(entry.Manifest, want) {
 		t.Fatalf("Manifest = %+v, want %+v", entry.Manifest, want)
@@ -76,6 +78,8 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			ResponseIsList: false,
 			CRUDAction:     "create",
 			Name:           "create",
+			RequestType:    &engine.TypeDesc{Kind: "object", Name: "OrderCreate"},
+			ResponseType:   &engine.TypeDesc{Kind: "object", Name: "Order"},
 		},
 	}
 
@@ -97,6 +101,8 @@ func TestExplicitRoutesFrom_MapsAllFields(t *testing.T) {
 			ResponseIsList: false,
 			CrudAction:     "create",
 			Name:           "create",
+			RequestType:    &engine.TypeDesc{Kind: "object", Name: "OrderCreate"},
+			ResponseType:   &engine.TypeDesc{Kind: "object", Name: "Order"},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

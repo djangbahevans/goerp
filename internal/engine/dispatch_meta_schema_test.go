@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -66,6 +67,10 @@ func newSchemaFixtureEngine(t *testing.T) *Engine {
 					Auth:        "required",
 					Permissions: []string{"widgets:widget:read"},
 					Model:       "widgets.widget",
+					RequestType: &sdkengine.TypeDesc{Kind: "object", Name: "PingRequest", Fields: []sdkengine.FieldDesc{
+						{Name: "echo", Type: sdkengine.TypeDesc{Kind: "string"}, Optional: true},
+					}},
+					ResponseType: &sdkengine.TypeDesc{Kind: "array", Elem: &sdkengine.TypeDesc{Kind: "number", Nullable: true}},
 				},
 				{
 					Auth:  "required",
@@ -223,6 +228,50 @@ func TestDispatchSchemaRoute_ReflectsRoutesViewsAndNavigation(t *testing.T) {
 	}
 	if customAction.CrudAction != "" {
 		t.Errorf("custom action route crud_action = %q, want empty", customAction.CrudAction)
+	}
+}
+
+func TestDispatchSchemaRoute_ExposesRouteBodyAndResponseTypes(t *testing.T) {
+	e := newSchemaFixtureEngine(t)
+
+	w := httptest.NewRecorder()
+	e.dispatchSchemaRoute(w, schemaRequest(http.MethodGet, "/_meta/schema"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var raw struct {
+		Modules map[string]struct {
+			Routes []map[string]jsontext.Value `json:"routes"`
+		} `json:"modules"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	byPath := map[string]map[string]jsontext.Value{}
+	for _, r := range raw.Modules["widgets"].Routes {
+		var path string
+		_ = json.Unmarshal(r["path"], &path)
+		byPath[path] = r
+	}
+
+	ping := byPath["/widgets/ping"]
+	if got, want := string(ping["request_type"]), `{"kind":"object","name":"PingRequest","fields":[{"name":"echo","type":{"kind":"string"},"optional":true}]}`; got != want {
+		t.Errorf("request_type = %s, want %s", got, want)
+	}
+	if got, want := string(ping["response_type"]), `{"kind":"array","elem":{"kind":"number","nullable":true}}`; got != want {
+		t.Errorf("response_type = %s, want %s", got, want)
+	}
+
+	confirm := byPath["/widgets/widgets/{id}/confirm"]
+	if confirm == nil {
+		t.Fatalf("no confirm route in %v", byPath)
+	}
+	for _, key := range []string{"request_type", "response_type"} {
+		if _, ok := confirm[key]; ok {
+			t.Errorf("confirm route has %q without engine.Body/engine.Returns", key)
+		}
 	}
 }
 

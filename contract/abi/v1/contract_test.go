@@ -207,6 +207,17 @@ func TestInvocationWireFields(t *testing.T) {
 		{"RouteDeclaration omits optional members", RouteDeclaration{}, []string{
 			"method", "path", "auth", "permissions", "max_body_bytes", "timeout_ms", "streaming", "websocket",
 			"raw_body", "response_is_list"}},
+		{"RouteDeclaration with body and response types", RouteDeclaration{
+			RequestType: &TypeDesc{Kind: TypeKindObject}, ResponseType: &TypeDesc{Kind: TypeKindObject},
+		}, []string{
+			"method", "path", "auth", "permissions", "max_body_bytes", "timeout_ms", "streaming", "websocket",
+			"raw_body", "response_is_list", "request_type", "response_type"}},
+		{"TypeDesc", TypeDesc{
+			Kind: TypeKindObject, Name: "Contact", Elem: &TypeDesc{}, Fields: []FieldDesc{{}}, Nullable: true,
+		}, []string{"kind", "name", "elem", "fields", "nullable"}},
+		{"TypeDesc omits optional members", TypeDesc{Kind: TypeKindString}, []string{"kind"}},
+		{"FieldDesc", FieldDesc{Name: "id", Optional: true}, []string{"name", "type", "optional"}},
+		{"FieldDesc omits optional members", FieldDesc{Name: "id"}, []string{"name", "type"}},
 		{"RateLimitDecl", RateLimitDecl{}, []string{"requests", "window_seconds", "scope"}},
 		{"EmbeddedDecl", EmbeddedDecl{}, []string{"field", "resource", "is_list"}},
 	}
@@ -214,6 +225,22 @@ func TestInvocationWireFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			requireKeys(t, wireKeys(t, tt.v), tt.want...)
 		})
+	}
+}
+
+func TestTypeKindValues(t *testing.T) {
+	for kind, want := range map[TypeKind]string{
+		TypeKindString:  "string",
+		TypeKindNumber:  "number",
+		TypeKindBoolean: "boolean",
+		TypeKindUnknown: "unknown",
+		TypeKindArray:   "array",
+		TypeKindRecord:  "record",
+		TypeKindObject:  "object",
+	} {
+		if string(kind) != want {
+			t.Errorf("kind %q, want %q", kind, want)
+		}
 	}
 }
 

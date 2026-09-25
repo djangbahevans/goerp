@@ -187,6 +187,8 @@ func routeDeclarations(routes []route) []RouteDeclaration {
 			ResponseIsList: r.responseIsList,
 			Embedded:       r.embedded,
 			PathParams:     r.pathParams,
+			RequestType:    r.requestType,
+			ResponseType:   r.responseType,
 		})
 	}
 	return decls

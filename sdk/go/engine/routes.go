@@ -15,6 +15,8 @@ type (
 	RouteDeclaration = abi.RouteDeclaration
 	RateLimitDecl    = abi.RateLimitDecl
 	EmbeddedDecl     = abi.EmbeddedDecl
+	TypeDesc         = abi.TypeDesc
+	FieldDesc        = abi.FieldDesc
 )
 
 func WriteRoutes(routes []RouteDeclaration) uint64 { return writePacked(routes) }
