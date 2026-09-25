@@ -695,7 +695,7 @@ func TestRenderModelFile_One2ManyIsSkipped(t *testing.T) {
 
 func TestRenderModelFile_UnsupportedFieldKind_Errors(t *testing.T) {
 	m := model.Define("widgets.widget").
-		Field("counter", model.Sequence("{year}").Required())
+		Field("counter", model.Sequence("{year}-{seq:04}").Required())
 
 	// Sequence is supported (string) — this test instead pins that an
 	// actually-unrecognized FieldKind value surfaces a clear error

@@ -65,7 +65,7 @@ func itemModelDecl() model.ModelDeclaration {
 	d := model.Define("item").WithStandardFields().
 		Field("name", model.Text().Required()).
 		Field("code", model.Text()).
-		Field("number", model.Sequence("{year}")).
+		Field("number", model.Sequence("IT-{seq:03}")).
 		Index("idx_items_code_unique", model.BTreeIndex("code").Unique())
 	return *d
 }
@@ -127,7 +127,7 @@ func createFixtureItemsTable(t *testing.T, conn *sql.DB, slug string) {
 		etag TEXT NOT NULL DEFAULT '',
 		name TEXT NOT NULL,
 		code TEXT,
-		number BIGINT
+		number TEXT
 	)`); err != nil {
 		t.Fatalf("create item table: %v", err)
 	}
@@ -198,8 +198,8 @@ func TestHostORM_Create_Succeeds_AcquiresSequence_EmitsEvent(t *testing.T) {
 	if out.Record["name"] != "Widget A" {
 		t.Errorf("Record[name] = %v, want Widget A", out.Record["name"])
 	}
-	if out.Record["number"] == nil {
-		t.Error("expected a Sequence value to have been acquired for number")
+	if out.Record["number"] != "IT-001" {
+		t.Errorf("Record[number] = %v, want the formatted Sequence value IT-001", out.Record["number"])
 	}
 
 	if got := countEventDeliveryJobsByName(t, primaryDB, "orm.record.created", tenantID); got != 1 {

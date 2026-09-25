@@ -1067,9 +1067,10 @@ func hasField(md model.ModelDeclaration, name string) bool {
 	return false
 }
 
-// acquireSequenceFields resolves a period key and acquires a fresh
-// counter value (goerp#340) for every Sequence-kind field on md that
-// isn't already present in record — mutating record in place. Runs on
+// acquireSequenceFields resolves a period key, acquires a fresh counter
+// value (goerp#340) and stores it formatted per the field's format for
+// every Sequence-kind field on md that isn't already present in record —
+// mutating record in place. Runs on
 // tx, immediately before the INSERT, so the lock is held for the
 // shortest time possible.
 func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelName string, md model.ModelDeclaration, record map[string]any) *abiv1.HostError {
@@ -1080,12 +1081,13 @@ func acquireSequenceFields(ctx context.Context, tx *sql.Tx, tenantSlug, modelNam
 		if _, present := record[f.Name]; present {
 			continue
 		}
-		periodKey := orm.ResolvePeriodKey(f.Def.SequenceFormat, time.Now())
+		now := time.Now()
+		periodKey := orm.ResolvePeriodKey(f.Def.SequenceFormat, now)
 		next, err := orm.AcquireNext(ctx, tx, tenantSlug, modelName, f.Name, periodKey)
 		if err != nil {
 			return ormSQLErrorRetryable(err)
 		}
-		record[f.Name] = next
+		record[f.Name] = orm.FormatSequence(f.Def.SequenceFormat, now, next)
 	}
 	return nil
 }
