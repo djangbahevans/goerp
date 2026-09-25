@@ -169,6 +169,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 		return m
 	}
 
+	if err := validateTrackedFields(models); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
 	synthesizedViews, suppressedViews, nav, err := route.SynthesizeViews(src.Name, mf.Type, models, mf.Views, mf.Navigation)
 	if err != nil {
 		m.Fail(fmt.Sprintf("synthesize views: %v", err))
@@ -503,6 +508,47 @@ func validateTransientModels(models []model.ModelDeclaration) error {
 			if op.Name == "list" {
 				return fmt.Errorf("model %s: EnableOps(List) is not allowed on a Transient model", md.Name)
 			}
+		}
+	}
+	return nil
+}
+
+// validateTrackedFields enforces .Tracked()'s load-time rules
+// (record-activity.md §4). A tracked field needs a column of its own to
+// record an old and new value from, so One2Many and non-stored computed
+// fields are rejected, as is any tracked field on a Virtual or Transient
+// model, which has no Postgres table for writes to be captured from. A
+// model with a tracked field needs a single UUID primary key, since
+// record_activity.record_id is a UUID.
+func validateTrackedFields(models []model.ModelDeclaration) error {
+	for _, md := range models {
+		tracked := false
+		for _, f := range md.Fields {
+			if !f.Def.IsTracked {
+				continue
+			}
+			tracked = true
+			if f.Def.Kind == model.KindOne2Many {
+				return fmt.Errorf("model %s: field %s: .Tracked() is not valid on a One2Many field, which has no column of its own", md.Name, f.Name)
+			}
+			if f.Def.IsComputed && !f.Def.IsStored {
+				return fmt.Errorf("model %s: field %s: .Tracked() is not valid on a non-stored computed field, which has no column of its own", md.Name, f.Name)
+			}
+		}
+		if !tracked {
+			continue
+		}
+		if md.Backend != "" {
+			return fmt.Errorf("model %s: .Tracked() fields are not valid on a %s model, which has no Postgres table to capture changes from", md.Name, md.Backend)
+		}
+		var pks []model.NamedField
+		for _, f := range md.Fields {
+			if f.Def.IsPrimaryKey {
+				pks = append(pks, f)
+			}
+		}
+		if len(pks) != 1 || pks[0].Def.Kind != model.KindUUID {
+			return fmt.Errorf("model %s: .Tracked() fields require a single UUID primary key", md.Name)
 		}
 	}
 	return nil

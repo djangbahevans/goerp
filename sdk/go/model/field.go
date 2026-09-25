@@ -175,6 +175,10 @@ type FieldDef struct {
 	// SelectionValues at module-load time.
 	WorkflowTransitions []WorkflowTransition `msgpack:"workflow_transitions,omitempty"`
 
+	// IsTracked opts the field into the record activity feed: the engine
+	// writes a change entry whenever its value changes (record-activity.md §4).
+	IsTracked bool `msgpack:"tracked,omitempty"`
+
 	// Field-level access control (go-sdk-reference.md §22 "Access
 	// control", manifest-spec.md §8a, auth-internals.md §12). A field
 	// with no ReadPermission has no read restriction — that's the
@@ -273,6 +277,11 @@ func (f FieldDef) OnDelete(d OnDeleteBehaviour) FieldDef { f.RelationOnDelete = 
 // go-sdk-reference.md §22 "Tree". The engine auto-declares a companion
 // {field}_path ltree column and maintains it on create/reparent.
 func (f FieldDef) Tree() FieldDef { f.IsTree = true; return f }
+
+// Tracked opts this field into the record activity feed — go-sdk-reference.md
+// §22 "Field modifiers", record-activity.md §4. Rejected at module load on a
+// field with no column of its own and on a Virtual or Transient model.
+func (f FieldDef) Tracked() FieldDef { f.IsTracked = true; return f }
 
 // Computed declares this field as engine-recomputed rather than
 // caller-settable — fnName is the WASM export name (go-sdk-reference.md

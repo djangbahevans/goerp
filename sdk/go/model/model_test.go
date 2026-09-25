@@ -319,3 +319,26 @@ func TestModelDeclaration_QualifiedAndResourceName(t *testing.T) {
 		}
 	}
 }
+
+func TestTracked_SurvivesMsgpackRoundTrip(t *testing.T) {
+	original := Define("order").
+		Field("state", Selection("draft", "confirmed").Tracked()).
+		Field("notes", Text())
+
+	data, err := msgpack.Marshal(Schema{Models: []*ModelDeclaration{original}})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded Schema
+	if err := msgpack.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	fields := decoded.Models[0].Fields
+	if !fields[0].Def.IsTracked {
+		t.Error("state: IsTracked = false after round-trip, want true")
+	}
+	if fields[1].Def.IsTracked {
+		t.Error("notes: IsTracked = true, want false for an untracked field")
+	}
+}

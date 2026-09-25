@@ -116,6 +116,16 @@ func pipelineEligible(p preparedExec, paramSets [][]any) bool {
 	if p.hadEtagCheck {
 		return false
 	}
+	// The pipeline path has no change-entry pass; the sequential path's
+	// execRow writes them.
+	if p.tracked {
+		return false
+	}
+	// The batched audit pre-read (captureRowsBeforeExecBatch) selects the
+	// target row as a bare composite and can't carry FROM/USING items.
+	if p.audited && len(p.stmt.FromClause) > 0 {
+		return false
+	}
 	if p.audited && pipelineHasDuplicateAuditTargets(p, paramSets) {
 		return false
 	}

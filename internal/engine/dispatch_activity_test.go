@@ -17,6 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -407,5 +408,115 @@ func TestDispatchActivityRoutes_RejectVirtualAndTransientModels(t *testing.T) {
 		if w.Code != http.StatusBadRequest || decodeErrorCode(t, w) != "activity_unsupported" {
 			t.Errorf("POST %s: status = %d, want 400 activity_unsupported; body: %s", name, w.Code, w.Body.String())
 		}
+	}
+}
+
+const activityCodeReadPermission = "testmodule:widget:read_code"
+
+// restrictWidgetCode re-registers the fixture's widget model with a read
+// rule on "code", so change entries naming it are filtered per viewer.
+func (f *dispatchActivityFixture) restrictWidgetCode(t *testing.T) {
+	t.Helper()
+	widget := model.Define("widget").WithStandardFields().
+		Field("name", model.Text().Required().Tracked()).
+		Field("code", model.Text().Tracked().Access(model.AccessRead(activityCodeReadPermission)).OnDeniedRead(model.Mask("****")))
+	if _, err := f.e.moduleRegistry.Update(map[string]*module.LoadedModule{
+		"testmodule": {
+			Status:       module.StatusReady,
+			Manifest:     manifest.Manifest{Name: "testmodule", Type: "standard", Permissions: []manifest.Permission{{Name: activityCodeReadPermission}}},
+			ModelDecls:   []model.ModelDeclaration{*widget},
+			Capabilities: abi.CapDBRead | abi.CapDBWrite,
+		},
+	}); err != nil {
+		t.Fatalf("registry Update: %v", err)
+	}
+}
+
+func (f *dispatchActivityFixture) seedChange(t *testing.T, changes string) string {
+	t.Helper()
+	var id string
+	if err := f.e.primaryDB.QueryRowContext(t.Context(), fmt.Sprintf(
+		`INSERT INTO %s.record_activity (model, record_id, kind, changes) VALUES ($1, $2, 'change', $3::jsonb) RETURNING id`,
+		tenantschema.Name(f.slug),
+	), activityTestModel, f.recordID, changes).Scan(&id); err != nil {
+		t.Fatalf("seed change entry: %v", err)
+	}
+	return id
+}
+
+func (f *dispatchActivityFixture) listAs(t *testing.T, grantCode bool, limit int, cursor string) activityListResponse {
+	t.Helper()
+	var permSet permission.PermissionBitfield
+	if grantCode {
+		idx, ok := f.e.moduleRegistry.Snapshot().PermissionRegistry().Index(activityCodeReadPermission)
+		if !ok {
+			t.Fatalf("permission %s not registered", activityCodeReadPermission)
+		}
+		permSet.Set(idx)
+	}
+	q := url.Values{"model": {activityTestModel}, "record_id": {f.recordID}, "limit": {fmt.Sprint(limit)}}
+	if cursor != "" {
+		q.Set("cursor", cursor)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/_meta/activity?"+q.Encode(), nil)
+	ctx := withTenantContext(r.Context(), &tenantresolve.TenantContext{TenantID: f.tenantID, Slug: f.slug})
+	ctx = withAuthContext(ctx, &authcheck.AuthContext{IsAuthenticated: true, UserID: f.callerID, PermissionSet: permSet})
+	w := httptest.NewRecorder()
+	f.e.dispatchActivityListRoute(w, r.WithContext(ctx))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp activityListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	return resp
+}
+
+func changedFields(entry map[string]any) []string {
+	var fields []string
+	changes, _ := entry["changes"].([]any)
+	for _, c := range changes {
+		fields = append(fields, c.(map[string]any)["field"].(string))
+	}
+	return fields
+}
+
+func TestDispatchActivityListRoute_FiltersChangeEntriesByFieldReadAccess(t *testing.T) {
+	f := newDispatchActivityFixture(t)
+	f.restrictWidgetCode(t)
+	both := f.seedChange(t, `[{"field":"name","old":"A","new":"B"},{"field":"code","old":"x","new":"y"}]`)
+	codeOnly := f.seedChange(t, `[{"field":"code","old":"y","new":"z"}]`)
+
+	denied := f.listAs(t, false, 20, "")
+	if len(denied.Data) != 1 || denied.Data[0]["id"] != both {
+		t.Fatalf("denied viewer data = %v, want only the entry that still has a readable field", denied.Data)
+	}
+	if got := changedFields(denied.Data[0]); len(got) != 1 || got[0] != "name" {
+		t.Errorf("denied viewer fields = %v, want [name] even though code's OnDeniedRead is Mask", got)
+	}
+
+	allowed := f.listAs(t, true, 20, "")
+	if len(allowed.Data) != 2 || allowed.Data[0]["id"] != codeOnly {
+		t.Fatalf("allowed viewer data = %v, want both entries, newest first", allowed.Data)
+	}
+	if got := changedFields(allowed.Data[1]); len(got) != 2 {
+		t.Errorf("allowed viewer fields = %v, want name and code", got)
+	}
+}
+
+func TestDispatchActivityListRoute_CursorSkipsPastAFullyFilteredPage(t *testing.T) {
+	f := newDispatchActivityFixture(t)
+	f.restrictWidgetCode(t)
+	visible := f.seedChange(t, `[{"field":"name","old":"A","new":"B"}]`)
+	f.seedChange(t, `[{"field":"code","old":"x","new":"y"}]`)
+
+	first := f.listAs(t, false, 1, "")
+	if len(first.Data) != 0 || !first.Meta.HasMore || first.Meta.Cursor == nil {
+		t.Fatalf("first page = %+v, want an empty page that still points past the hidden entry", first)
+	}
+	second := f.listAs(t, false, 1, *first.Meta.Cursor)
+	if len(second.Data) != 1 || second.Data[0]["id"] != visible || second.Meta.HasMore {
+		t.Errorf("second page = %+v, want the visible entry and no more pages", second)
 	}
 }

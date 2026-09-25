@@ -25,7 +25,8 @@ type auditableExecStmt struct {
 	Operation   string // "UPDATE" or "DELETE" — matches audit_log.operation's CHECK constraint
 	Table       string
 	Relation    *pg_query.RangeVar
-	WhereClause *pg_query.Node // nil for an unconditional UPDATE/DELETE
+	WhereClause *pg_query.Node   // nil for an unconditional UPDATE/DELETE
+	FromClause  []*pg_query.Node // an UPDATE's FROM or a DELETE's USING items; nil when there are none
 }
 
 // parseAuditableExecStmt extracts stmt from tree's single statement. An
@@ -39,10 +40,10 @@ func parseAuditableExecStmt(tree *pg_query.ParseResult) (stmt auditableExecStmt,
 	switch n := stmts[0].GetStmt().GetNode().(type) {
 	case *pg_query.Node_UpdateStmt:
 		rel := n.UpdateStmt.GetRelation()
-		return auditableExecStmt{Operation: "UPDATE", Table: rel.GetRelname(), Relation: rel, WhereClause: n.UpdateStmt.GetWhereClause()}, true
+		return auditableExecStmt{Operation: "UPDATE", Table: rel.GetRelname(), Relation: rel, WhereClause: n.UpdateStmt.GetWhereClause(), FromClause: n.UpdateStmt.GetFromClause()}, true
 	case *pg_query.Node_DeleteStmt:
 		rel := n.DeleteStmt.GetRelation()
-		return auditableExecStmt{Operation: "DELETE", Table: rel.GetRelname(), Relation: rel, WhereClause: n.DeleteStmt.GetWhereClause()}, true
+		return auditableExecStmt{Operation: "DELETE", Table: rel.GetRelname(), Relation: rel, WhereClause: n.DeleteStmt.GetWhereClause(), FromClause: n.DeleteStmt.GetUsingClause()}, true
 	default:
 		return auditableExecStmt{}, false
 	}
@@ -77,7 +78,7 @@ func resolveAuditedExecTable(modCtx *ModuleContext, table string) (pkCol string,
 
 // captureRowsBeforeExec reads, within tx, the current values of every
 // row stmt's WHERE clause matches. A plain read, same as
-// fetchRowForAuditBeforeWrite's own — no FOR UPDATE lock, so a
+// fetchRowBeforeWrite's own — no FOR UPDATE lock, so a
 // concurrent commit between this read and the caller's own write can
 // leave old_data stale relative to what that write actually overwrote;
 // closing that race is etag enforcement's job (goerp#458), not this
@@ -87,21 +88,81 @@ func resolveAuditedExecTable(modCtx *ModuleContext, table string) (pkCol string,
 // off the highest $n its own text references — a gap there fails with
 // "could not determine data type of parameter".
 func captureRowsBeforeExec(ctx context.Context, tx *sql.Tx, stmt auditableExecStmt, params []any) ([]map[string]any, error) {
-	whereClause, whereParams, err := renumberParams(stmt.WhereClause, params)
+	selectNode, selectParams, err := renumberParams(preReadSelectNode(stmt), params)
 	if err != nil {
 		return nil, err
 	}
-
-	selectSQL, err := deparseSelectAll(stmt.Relation, whereClause)
+	selectSQL, err := pgquery.Deparse(&pg_query.ParseResult{Stmts: []*pg_query.RawStmt{{Stmt: selectNode}}})
 	if err != nil {
 		return nil, fmt.Errorf("build audit pre-read query: %w", err)
 	}
 
-	rows, err := tx.QueryContext(ctx, selectSQL, whereParams...)
+	rows, err := tx.QueryContext(ctx, selectSQL, selectParams...)
 	if err != nil {
 		return nil, fmt.Errorf("read rows before audited exec: %w", err)
 	}
-	return scanRowsToMaps(rows)
+	scanned, err := scanRowsToMaps(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(stmt.FromClause) == 0 {
+		return scanned, nil
+	}
+	return dedupeByCtid(scanned), nil
+}
+
+// preReadSelectNode builds the SELECT that reads the rows stmt will change:
+// `SELECT * FROM relation WHERE …`, or, for an UPDATE … FROM or DELETE …
+// USING, `SELECT relation.ctid AS __ctid, relation.* FROM relation, <from
+// items> WHERE …`. Only the target table's columns are selected, and a
+// joined row that matches more than once comes back once per match, so the
+// caller de-duplicates it by __ctid. Parameter numbers are the statement's
+// own; the caller renumbers the whole node at once, since FROM items can
+// reference parameters too.
+func preReadSelectNode(stmt auditableExecStmt) *pg_query.Node {
+	targets := []*pg_query.Node{pg_query.MakeResTargetNodeWithVal(
+		pg_query.MakeColumnRefNode([]*pg_query.Node{pg_query.MakeAStarNode()}, 0), 0)}
+	from := []*pg_query.Node{{Node: &pg_query.Node_RangeVar{RangeVar: stmt.Relation}}}
+	if len(stmt.FromClause) > 0 {
+		ref := targetRowRef(stmt.Relation)
+		targets = []*pg_query.Node{
+			pg_query.MakeResTargetNodeWithNameAndVal("__ctid",
+				pg_query.MakeColumnRefNode([]*pg_query.Node{pg_query.MakeStrNode(ref), pg_query.MakeStrNode("ctid")}, 0), 0),
+			pg_query.MakeResTargetNodeWithVal(
+				pg_query.MakeColumnRefNode([]*pg_query.Node{pg_query.MakeStrNode(ref), pg_query.MakeAStarNode()}, 0), 0),
+		}
+		from = append(from, stmt.FromClause...)
+	}
+	return &pg_query.Node{Node: &pg_query.Node_SelectStmt{SelectStmt: &pg_query.SelectStmt{
+		TargetList:  targets,
+		FromClause:  from,
+		WhereClause: stmt.WhereClause,
+	}}}
+}
+
+// targetRowRef is the name a statement's own columns are qualified by: the
+// relation's alias when it has one, its table name otherwise.
+func targetRowRef(rel *pg_query.RangeVar) string {
+	if alias := rel.GetAlias().GetAliasname(); alias != "" {
+		return alias
+	}
+	return rel.GetRelname()
+}
+
+// dedupeByCtid keeps the first row per __ctid and removes that column.
+func dedupeByCtid(rows []map[string]any) []map[string]any {
+	seen := make(map[string]bool, len(rows))
+	out := rows[:0]
+	for _, row := range rows {
+		key := fmt.Sprint(row["__ctid"])
+		delete(row, "__ctid")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, row)
+	}
+	return out
 }
 
 // renumberParams deep-clones node and rewrites every ParamRef.Number to
@@ -299,26 +360,6 @@ func popBatchIdx(row map[string]any) (int, error) {
 	default:
 		return 0, fmt.Errorf("unexpected batch_idx type %T", v)
 	}
-}
-
-// deparseSelectAll renders `SELECT * FROM relation [WHERE whereClause]`
-// from already-parsed nodes lifted out of the module's own UPDATE/DELETE
-// statement.
-func deparseSelectAll(relation *pg_query.RangeVar, whereClause *pg_query.Node) (string, error) {
-	star := pg_query.MakeResTargetNodeWithVal(
-		pg_query.MakeColumnRefNode([]*pg_query.Node{pg_query.MakeAStarNode()}, 0), 0)
-
-	selectStmt := &pg_query.SelectStmt{
-		TargetList:  []*pg_query.Node{star},
-		FromClause:  []*pg_query.Node{{Node: &pg_query.Node_RangeVar{RangeVar: relation}}},
-		WhereClause: whereClause,
-	}
-	tree := &pg_query.ParseResult{
-		Stmts: []*pg_query.RawStmt{
-			{Stmt: &pg_query.Node{Node: &pg_query.Node_SelectStmt{SelectStmt: selectStmt}}},
-		},
-	}
-	return pgquery.Deparse(tree)
 }
 
 // writeExecAuditEntries writes one audit_log row per row stmt affected —

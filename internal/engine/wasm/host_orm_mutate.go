@@ -89,7 +89,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 	pkColQuoted := quoteIdentORM(pkCol)
 
 	var oldData map[string]any
-	if isAuditedModel(modCtx, input.Model) {
+	if needsRowBeforeWrite(modCtx, input.Model, md) {
 		oldData, hostErr = lockRowByPK(ctx, tx, md, pkCol, input.ID)
 		if hostErr != nil {
 			return ORMMutateOutput{}, hostErr
@@ -132,6 +132,9 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMMutateOutput{}, hostErr
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "UPDATE", oldData, updated); hostErr != nil {
+		return ORMMutateOutput{}, hostErr
+	}
+	if hostErr := writeChangeActivity(ctx, tx, modCtx, input.Model, md, oldData, updated); hostErr != nil {
 		return ORMMutateOutput{}, hostErr
 	}
 	if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, input.Model, updated, plan.fields); err != nil {
