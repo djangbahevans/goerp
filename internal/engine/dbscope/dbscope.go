@@ -43,6 +43,11 @@ var ErrEngineOwnedTable = errors.New("engine-owned table is not accessible from 
 // error for an unqualified reference to a pg_* relation.
 var ErrSystemCatalogReference = errors.New("system catalog is not accessible from module SQL")
 
+// ErrJobQueueTable is wrapped by ValidateTableRefs' returned error for an
+// unqualified reference to one of River's river_* tables, which hold every
+// tenant's queued jobs.
+var ErrJobQueueTable = errors.New("job queue table is not accessible from module SQL")
+
 // ErrDeniedFunction is wrapped by ValidateTableRefs' returned error for a
 // call to a function in deniedFunctions, or to a function qualified with
 // a schema other than pg_catalog.
@@ -79,8 +84,8 @@ var deniedFunctions = map[string]bool{
 // that happens to name the caller's own tenant schema
 // (multitenancy-internals.md §5 Layer 2: "modules must never hardcode a
 // tenant schema name"). A reference to an engine-owned per-tenant table
-// or one of its partitions, or to a pg_* system catalog relation, is
-// rejected too, qualified or not, as is any
+// or one of its partitions, to a pg_* system catalog relation, or to a
+// river_* job queue table, is rejected too, qualified or not, as is any
 // call to a function in deniedFunctions or to a schema-qualified
 // function outside pg_catalog (e.g. pg_partman's partman.* functions,
 // which run DDL against a table named by string).
@@ -119,13 +124,16 @@ func rangeVarDenial(rv *pg_query.RangeVar) error {
 	if enginetables.IsEngineOwned(rv.Relname) {
 		return fmt.Errorf("%w: %q", ErrEngineOwnedTable, rv.Relname)
 	}
+	if isJobQueueTableName(rv.Relname) {
+		return fmt.Errorf("%w: %q", ErrJobQueueTable, rv.Relname)
+	}
 	return nil
 }
 
 // IsReservedTableName reports whether module SQL may never reference a
 // table named name, so a module model must not take that name either.
 func IsReservedTableName(name string) bool {
-	return isSystemCatalogName(name) || enginetables.IsEngineOwned(name)
+	return isSystemCatalogName(name) || enginetables.IsEngineOwned(name) || isJobQueueTableName(name)
 }
 
 // isSystemCatalogName matches Postgres's pg_catalog relations, which
@@ -134,6 +142,13 @@ func IsReservedTableName(name string) bool {
 // table, and an UPDATE on pg_settings calls set_config.
 func isSystemCatalogName(name string) bool {
 	return strings.HasPrefix(name, "pg_")
+}
+
+// isJobQueueTableName matches River's tables. They live in public, which
+// is on every module transaction's search_path, so an unqualified
+// river_job resolves to the one table holding every tenant's jobs.
+func isJobQueueTableName(name string) bool {
+	return strings.HasPrefix(name, "river_")
 }
 
 func funcCallDenial(fc *pg_query.FuncCall) error {
