@@ -796,8 +796,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	// (avatar URL resolution, goerp#819) and storageUploadHandler both
 	// need it before builtinRoutes is built.
 	filesStore := files.NewStore(primaryPool)
-	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, filesStore, storageBackend)
-	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore)
+	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, filesStore, storageBackend, cfg.AvailableLocales)
+	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore, cfg.AvailableLocales)
 	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)

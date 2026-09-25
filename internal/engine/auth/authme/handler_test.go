@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,7 +124,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	filesStore := files.NewStore(conn)
 
-	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, backend)
+	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, backend, testAvailableLocales)
 
 	slug := fmt.Sprintf("authmetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Test Co")
@@ -660,4 +661,68 @@ func TestServeHTTP_RevokedSessionRejected(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
 	}
+}
+
+// A deployment's own GOERP_AVAILABLE_LOCALES, not the platform default, so
+// the tests show the configured list reaches the response.
+var testAvailableLocales = []string{"en", "pt-BR"}
+
+func (f *fixture) me(t *testing.T) meResponse {
+	t.Helper()
+	rec := f.doMe(t, f.domain, f.issueAccessToken(t))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	return resp
+}
+
+func TestServeHTTP_ReportsDefaultPreferencesAndPlatformLocaleDefaults(t *testing.T) {
+	f := newFixture(t)
+
+	resp := f.me(t)
+
+	if resp.User.Theme != "system" || resp.User.Locale != nil || resp.User.Timezone != nil || resp.User.DateFormat != nil {
+		t.Errorf("preferences = %q/%v/%v/%v, want system and three nulls", resp.User.Theme, resp.User.Locale, resp.User.Timezone, resp.User.DateFormat)
+	}
+	if resp.Tenant.DefaultLocale != "en" || resp.Tenant.DefaultTimezone != "UTC" {
+		t.Errorf("tenant defaults = %q/%q, want en/UTC", resp.Tenant.DefaultLocale, resp.Tenant.DefaultTimezone)
+	}
+	if strings.Join(resp.Tenant.AvailableLocales, ",") != "en,pt-BR" {
+		t.Errorf("tenant.available_locales = %v, want the configured [en pt-BR]", resp.Tenant.AvailableLocales)
+	}
+}
+
+func TestServeHTTP_ReportsStoredPreferences(t *testing.T) {
+	f := newFixture(t)
+	users := user.NewStore(f.conn)
+	if _, err := users.UpdateProfile(t.Context(), f.userID, user.ProfileUpdate{
+		Theme:      new("dark"),
+		Locale:     user.NullableField{Set: true, Value: new("pt-BR")},
+		Timezone:   user.NullableField{Set: true, Value: new("Africa/Accra")},
+		DateFormat: user.NullableField{Set: true, Value: new("iso")},
+	}); err != nil {
+		t.Fatalf("UpdateProfile() error: %v", err)
+	}
+
+	resp := f.me(t)
+
+	if resp.User.Theme != "dark" || deref(resp.User.Locale) != "pt-BR" || deref(resp.User.Timezone) != "Africa/Accra" || deref(resp.User.DateFormat) != "iso" {
+		t.Errorf("preferences = %q/%v/%v/%v, want dark/pt-BR/Africa/Accra/iso", resp.User.Theme, resp.User.Locale, resp.User.Timezone, resp.User.DateFormat)
+	}
+	// UpdateProfile created the row without a name, so its "" placeholder
+	// reads as no name.
+	if resp.User.Name != nil {
+		t.Errorf("user.name = %q, want nil for the placeholder name", *resp.User.Name)
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

@@ -16,6 +16,13 @@ import (
 // translations/ directory.
 const FrontendTranslationsDir = "frontend/translations"
 
+// The locale and timezone a tenant with no locale settings of its own uses
+// (l10n-guide.md §2 "Tenant default locale").
+const (
+	PlatformDefaultLocale   = "en"
+	PlatformDefaultTimezone = "UTC"
+)
+
 // localePattern is a BCP 47 tag as l10n-guide.md §2 "Locale format" uses
 // them: a language, an optional script and an optional region ("en",
 // "pt-BR", "zh-Hant-TW", "es-419"). It also keeps a locale safe to put in

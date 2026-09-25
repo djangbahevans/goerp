@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-playground/validator/v10"
@@ -236,5 +237,31 @@ func TestLoadRegistrationSettings(t *testing.T) {
 	}
 	if len(cfg.ReservedSlugs) != 2 || cfg.ReservedSlugs[0] != "wiki" || cfg.ReservedSlugs[1] != "crm" {
 		t.Errorf("ReservedSlugs = %v, want [wiki crm]", cfg.ReservedSlugs)
+	}
+}
+
+func TestLoadAvailableLocales(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got := strings.Join(cfg.AvailableLocales, ","); got != "en,fr,ar" {
+		t.Errorf("AvailableLocales = %q, want the platform default en,fr,ar", got)
+	}
+
+	t.Setenv("GOERP_AVAILABLE_LOCALES", "en,pt-BR")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got := strings.Join(cfg.AvailableLocales, ","); got != "en,pt-BR" {
+		t.Errorf("AvailableLocales = %q, want en,pt-BR", got)
+	}
+
+	t.Setenv("GOERP_AVAILABLE_LOCALES", "en,english")
+	if _, err := Load(); err == nil {
+		t.Error("Load() accepted a GOERP_AVAILABLE_LOCALES entry that isn't a BCP 47 locale")
 	}
 }
