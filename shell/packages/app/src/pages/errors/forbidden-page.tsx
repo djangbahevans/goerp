@@ -1,6 +1,7 @@
 import { useAuth } from "@goerp/sdk/auth";
 import { ViewRegistryContext } from "@goerp/sdk/schema";
 import { type ReactNode, useContext } from "react";
+import { isTenantAdmin } from "../../admin/is-tenant-admin.js";
 import { ButtonLink } from "../../router/button-link.js";
 import { ErrorLayout } from "./error-layout.js";
 
@@ -22,7 +23,7 @@ export interface ForbiddenPageProps {
 
 // shell-ux.md §6.2.
 export function ForbiddenPage({ reason, module }: ForbiddenPageProps): ReactNode {
-  const isAdmin = useAuth().user?.roles.includes("admin") === true;
+  const isAdmin = isTenantAdmin(useAuth().user);
   const registry = useContext(ViewRegistryContext);
 
   if (reason === "missing_permission") {
