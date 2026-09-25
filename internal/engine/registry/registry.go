@@ -405,8 +405,8 @@ func buildRouteTable(modules map[string]*module.LoadedModule) (*route.RouteTable
 // table, so they resolve through the same RouteTable.Lookup module routes
 // do — no second router. Safe against collision by construction:
 // RegisterModuleRoutes already rejects any module route whose top path
-// segment starts with "_", or is exactly "auth", "admin", "storage", or
-// "modules", as a reserved engine namespace.
+// segment starts with "_", or is exactly "auth", "admin", "storage",
+// "modules" or "users", as a reserved engine namespace.
 //
 // /admin/users/{id}/mfa/reset and /admin/users/{id}/roles[/{role}] are
 // tenant-facing routes despite their "/admin/" prefix — see
@@ -475,8 +475,8 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/admin/users/{id}/roles/{role}",
 	})
-	// Tenant admin user endpoints (goerp#1097), the same tenant-facing,
-	// EngineBuiltin posture as /admin/users/{id}/mfa/reset.
+	// Tenant admin user and invite endpoints (goerp#1097, goerp#1098), the
+	// same tenant-facing, EngineBuiltin posture as /admin/users/{id}/mfa/reset.
 	for _, r := range [][2]string{
 		{"GET", "/admin/users"},
 		{"GET", "/admin/users/{id}"},
@@ -485,6 +485,9 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"POST", "/admin/users/{id}/unsuspend"},
 		{"GET", "/admin/users/{id}/sessions"},
 		{"DELETE", "/admin/users/{id}/sessions/{family_id}"},
+		{"POST", "/users/invite"},
+		{"POST", "/users/invitations/{id}/resend"},
+		{"POST", "/users/invitations/{id}/revoke"},
 	} {
 		table.Register(r[0], r[1], &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},

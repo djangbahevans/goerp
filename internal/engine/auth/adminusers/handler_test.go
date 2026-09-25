@@ -49,6 +49,7 @@ type env struct {
 	checker  *authcheck.Checker
 	handler  *Handler
 	roleMap  *permcache.RolePermissionMap
+	mailer   *spyMailer
 }
 
 type fixtureTenant struct {
@@ -100,18 +101,21 @@ func newEnv(t *testing.T) *env {
 	revoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 	checker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, permcache.NewRoleCache(cacheClient), roleMap, apiKeys, false, nil, nil, nil)
 	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
+	mailer := &spyMailer{}
+	inviteStore := invite.NewStore(conn, userStore, roleStore, auditStore, mailer)
 
 	return &env{
 		conn:     conn,
 		tenants:  tenantStore,
 		users:    userStore,
 		roles:    roleStore,
-		invites:  invite.NewStore(conn, userStore, roleStore, nil, nil),
+		invites:  inviteStore,
 		sessions: sessionStore,
 		issuer:   authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore),
 		checker:  checker,
-		handler:  NewHandler(resolver, checker, NewStore(conn, auditStore), roleStore, sessionStore, revoker, nil, nil),
+		handler:  NewHandler(resolver, checker, NewStore(conn, auditStore), roleStore, sessionStore, revoker, inviteStore, userStore, nil, nil),
 		roleMap:  roleMap,
+		mailer:   mailer,
 	}
 }
 

@@ -931,7 +931,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
-	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminusers.NewStore(primaryPool, authAuditStore), roleStore, sessionStore, sessionRevoker, filesStore, storageBackend)
+	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminusers.NewStore(primaryPool, authAuditStore), roleStore, sessionStore, sessionRevoker, inviteStore, userStore, filesStore, storageBackend)
 	builtinRoutes["GET /admin/users"] = http.HandlerFunc(adminUsersHandler.ServeList)
 	builtinRoutes["GET /admin/users/{id}"] = http.HandlerFunc(adminUsersHandler.ServeGet)
 	builtinRoutes["DELETE /admin/users/{id}"] = http.HandlerFunc(adminUsersHandler.ServeDelete)
@@ -939,6 +939,9 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["POST /admin/users/{id}/unsuspend"] = http.HandlerFunc(adminUsersHandler.ServeUnsuspend)
 	builtinRoutes["GET /admin/users/{id}/sessions"] = http.HandlerFunc(adminUsersHandler.ServeSessions)
 	builtinRoutes["DELETE /admin/users/{id}/sessions/{family_id}"] = http.HandlerFunc(adminUsersHandler.ServeRevokeSession)
+	builtinRoutes["POST /users/invite"] = http.HandlerFunc(adminUsersHandler.ServeInvite)
+	builtinRoutes["POST /users/invitations/{id}/resend"] = http.HandlerFunc(adminUsersHandler.ServeResendInvitation)
+	builtinRoutes["POST /users/invitations/{id}/revoke"] = http.HandlerFunc(adminUsersHandler.ServeRevokeInvitation)
 	planChangeHandler := planchange.NewHandler(tenantResolver, authChecker, billingStore, tenantStore, cacheClient, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/tenant/plan"] = http.HandlerFunc(planChangeHandler.ServeHTTP)
 	moduleInstallWorker := &moduleinstall.Worker{
