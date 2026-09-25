@@ -57,6 +57,31 @@ var Schema = model.Schema{
 			WithStandardFields().
 			Field("number", model.Sequence("TK-{seq:04}")).
 			EnableOps(model.Create, model.Get),
+		// kind_matrix has one field of every column-backed kind, for
+		// checking each kind's JSON shape through the EnableOps routes
+		// (goerp#1165).
+		model.Define("widgets.kind_matrix").
+			WithStandardFields().
+			Field("char_field", model.Char(20)).
+			Field("text_field", model.Text()).
+			Field("integer_field", model.Integer()).
+			Field("bigint_field", model.BigInt()).
+			Field("float_field", model.Float()).
+			Field("decimal_field", model.Decimal(10, 2)).
+			Field("boolean_field", model.Boolean()).
+			Field("uuid_field", model.UUID()).
+			Field("timestamptz_field", model.TimestampTZ()).
+			Field("date_field", model.Date()).
+			Field("time_field", model.Time()).
+			Field("jsonb_field", model.JSONB()).
+			Field("bytea_field", model.Bytea()).
+			Field("selection_field", model.Selection("a", "b")).
+			Field("enum_field", model.Enum("kind_probe_priority_enum")).
+			Field("gadget_id", model.Many2One("widgets.gadget")).
+			Field("sequence_field", model.Sequence("KM-{seq:04}")).
+			Field("link_type", model.Selection("widgets.gadget")).
+			Field("dynamic_link_field", model.DynamicLink("link_type")).
+			EnableOps(model.Create, model.Get, model.List, model.Update),
 		// attachment exercises DynamicLink generation end to end
 		// (go-sdk-reference.md §22 "DynamicLink") — reference_id's
 		// target varies per row via its sibling reference_type Selection
