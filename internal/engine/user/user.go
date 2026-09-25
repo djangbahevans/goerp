@@ -43,7 +43,7 @@ const createIndex = `
 `
 
 // createUserProfilesTable matches auth-internals.md's user_profiles
-// definition, minus locale/timezone/phone — those have no consumer yet
+// definition, minus locale/timezone — those have no consumer yet
 // (separate, unfiled tickets), so they're left off rather than added
 // unused; a later ticket can add them with ALTER TABLE the same way
 // tenant.Tenant's suspended_by comment describes for its own deferred
@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS system.user_profiles (
     user_id         UUID PRIMARY KEY REFERENCES system.users(id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
     avatar_file_id  UUID,
+    phone           TEXT,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 `

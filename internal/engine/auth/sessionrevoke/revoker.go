@@ -55,6 +55,21 @@ func (r *Revoker) Revoke(ctx context.Context, sessionID, reason string) error {
 	return nil
 }
 
+// RevokeFamily revokes and blocklists every unrevoked row of one login's
+// session family.
+func (r *Revoker) RevokeFamily(ctx context.Context, familyID, reason string) error {
+	ids, err := r.sessions.RevokeFamily(ctx, familyID, reason)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := r.cache.SetWithTTL(ctx, blocklistKey(id), "1", blocklistTTL); err != nil {
+			return fmt.Errorf("blocklist session %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
 // RevokeAllForUser revokes every non-revoked session for userID and
 // blocklists each one. Sessions read before the revoking UPDATE runs is
 // what lets every one of them also get blocklisted — the bulk UPDATE
