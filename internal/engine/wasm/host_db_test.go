@@ -103,7 +103,7 @@ func newHostDBCaller(t *testing.T, ctx context.Context, r *Runtime, mc *ModuleCo
 
 // callHost writes req into the caller's own linear memory via its allocate
 // export, invokes exportName (call_begin/call_commit/call_rollback), and
-// decodes the packed ptr/len result back into a wireEnvelope.
+// decodes the packed ptr/len result back into an abiv1.Envelope.
 func callHost(t *testing.T, ctx context.Context, inst *ModuleInstance, exportName string, req any) abiv1.Envelope {
 	t.Helper()
 

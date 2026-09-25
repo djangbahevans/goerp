@@ -46,7 +46,7 @@ func newStorageHostcallTestRuntime(t *testing.T, primaryDB *sql.DB, backend stor
 // compileHostcallFixture (hostcall_e2e_test.go) compiles
 // testdata/hostcallfixture. Proves goerp#434's acceptance criterion: a
 // real compiled module can upload a file via the SDK wrapper against a
-// real engine instance and get back the decoded storageUploadOutput.
+// real engine instance and get back the decoded storage.UploadOutput.
 func compileStorageCallerFixture(t *testing.T) []byte {
 	t.Helper()
 

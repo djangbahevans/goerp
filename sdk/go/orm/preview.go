@@ -34,9 +34,9 @@ func RegisterPreviewHook(modelName string, hook PreviewHook) {
 	previewRegistry[modelName] = hook
 }
 
-// DispatchPreview decodes a previewRequest from module memory at (ptr,
+// DispatchPreview decodes an abi.PreviewRequest from module memory at (ptr,
 // length), routes it to the PreviewHook registered for req.Model, and
-// writes back a msgpack-encoded previewResponse — the same decode/route/
+// writes back a msgpack-encoded abi.PreviewResponse — the same decode/route/
 // encode shape orm.DispatchComputed (computed.go) already uses. A model
 // with no registered hook passes the draft through unchanged rather than
 // erroring — "no hook" is the expected common case, not a caller

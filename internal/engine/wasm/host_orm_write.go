@@ -740,7 +740,7 @@ func makeORMWriteWhere(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.T
 // string-interpolating the caller's domain) and applies input.Record to
 // each inside one transaction, sharing writeManyIDsTx with ORMWriteMany.
 // A domain matching zero rows is a legitimate, non-error result
-// (ExecResult{Count: 0}) — unlike single write-by-ID, a bulk "where" that
+// (ORMExecResult{Count: 0}) — unlike single write-by-ID, a bulk "where" that
 // happens to match nothing isn't exceptional.
 func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMWriteWhereInput) (abiv1.ORMExecResult, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {

@@ -33,9 +33,9 @@ func RegisterComputed(fnName string, fn ComputeFunc) {
 	computeRegistry[fnName] = fn
 }
 
-// DispatchComputed decodes a computeRequest from module memory at (ptr,
+// DispatchComputed decodes an abi.ComputeRequest from module memory at (ptr,
 // length), routes it to the registered ComputeFunc named by req.FnName,
-// and writes back a msgpack-encoded computeResponse — the same
+// and writes back a msgpack-encoded abi.ComputeResponse — the same
 // decode/route/encode shape orm.DispatchVirtualOp (virtual.go) already
 // uses for handle_virtual_op, dispatching by fn_name instead of a
 // (model, op) pair. A module exports this as
