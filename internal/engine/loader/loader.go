@@ -38,6 +38,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/orm"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -189,6 +190,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 
 	if err := validateReservedTableNames(models); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
+	if err := validateSequenceFormats(models); err != nil {
 		m.Fail(err.Error())
 		return m
 	}
@@ -658,4 +664,20 @@ func callGetVirtualBackends(ctx context.Context, inst *wasm.ModuleInstance) (map
 		return nil, fmt.Errorf("unmarshal get_virtual_backends response: %w", err)
 	}
 	return backends, nil
+}
+
+// validateSequenceFormats checks every Sequence field's format
+// (manifest-spec.md's load-time rules, "Invalid sequence format").
+func validateSequenceFormats(models []model.ModelDeclaration) error {
+	for _, md := range models {
+		for _, f := range md.Fields {
+			if f.Def.Kind != model.KindSequence {
+				continue
+			}
+			if err := orm.ValidateSequenceFormat(f.Def.SequenceFormat); err != nil {
+				return fmt.Errorf("model %s: field %s: %w", md.Name, f.Name, err)
+			}
+		}
+	}
+	return nil
 }

@@ -8,11 +8,11 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-func TestToAtlasSchema_Sequence_ColumnTypeIsBigInt(t *testing.T) {
+func TestToAtlasSchema_Sequence_ColumnTypeIsText(t *testing.T) {
 	modelDecls := []model.ModelDeclaration{
 		*model.Define("invoice").
 			Field("id", model.UUID().Required().PrimaryKey()).
-			Field("number", model.Sequence("INV-{year}-")),
+			Field("number", model.Sequence("INV-{year}-{seq:05}")),
 	}
 
 	s, err := ToAtlasSchema("tenant_acme", "sales", modelDecls, nil)
@@ -27,11 +27,11 @@ func TestToAtlasSchema_Sequence_ColumnTypeIsBigInt(t *testing.T) {
 	if !ok {
 		t.Fatal("number column not found")
 	}
-	it, ok := col.Type.Type.(*schema.IntegerType)
+	st, ok := col.Type.Type.(*schema.StringType)
 	if !ok {
-		t.Fatalf("number column type = %T, want *schema.IntegerType", col.Type.Type)
+		t.Fatalf("number column type = %T, want *schema.StringType", col.Type.Type)
 	}
-	if it.T != postgres.TypeBigInt {
-		t.Errorf("number column integer type = %q, want %q", it.T, postgres.TypeBigInt)
+	if st.T != postgres.TypeText {
+		t.Errorf("number column string type = %q, want %q", st.T, postgres.TypeText)
 	}
 }

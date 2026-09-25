@@ -106,7 +106,7 @@ func TestHostORM_CreateBatch_OnConflictUpdate_OneEventPerUpdatedRowWithOwnChange
 		Records: []map[string]any{
 			{"name": "C", "code": "BATCH-C"}, // new insert
 			{"name": "A renamed", "code": "BATCH-A"},
-			{"name": "B", "code": "BATCH-B", "number": int64(9)},
+			{"name": "B", "code": "BATCH-B", "number": "IT-900"},
 		},
 		OnConflict: &abiv1.ORMOnConflict{Fields: []string{"code"}, Policy: "update"},
 	}

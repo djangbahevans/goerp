@@ -47,8 +47,7 @@ func TestSequenceFieldGetsConsecutiveValues(t *testing.T) {
 		}
 		numbers = append(numbers, resp.JSON("number"))
 	}
-	// The bare counter until goerp#1168 formats it per the field's format.
-	if want := []any{float64(1), float64(2)}; !reflect.DeepEqual(numbers, want) {
+	if want := []any{"TK-0001", "TK-0002"}; !reflect.DeepEqual(numbers, want) {
 		t.Errorf("numbers = %v, want %v", numbers, want)
 	}
 }

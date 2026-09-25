@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,47 @@ func ResolvePeriodKey(format string, at time.Time) string {
 		"{day}", fmt.Sprintf("%02d", at.Day()),
 	)
 	return r.Replace(format)
+}
+
+var (
+	seqToken         = regexp.MustCompile(`\{seq:(\d{1,2})\}`)
+	placeholderToken = regexp.MustCompile(`\{[^{}]*\}`)
+)
+
+// maxSeqWidth fits the widest int64 counter.
+const maxSeqWidth = 20
+
+// ValidateSequenceFormat checks a Sequence field's format: its only
+// placeholders are {year}, {month} and {seq:N}, and it has exactly one
+// {seq:N}, without which every record in a period would get the same value.
+func ValidateSequenceFormat(format string) error {
+	seqs := 0
+	for _, token := range placeholderToken.FindAllString(format, -1) {
+		switch {
+		case token == "{year}", token == "{month}":
+		case seqToken.MatchString(token):
+			if width, _ := strconv.Atoi(seqToken.FindStringSubmatch(token)[1]); width < 1 || width > maxSeqWidth {
+				return fmt.Errorf("sequence format %q: %s pads to %d digits, want 1 to %d", format, token, width, maxSeqWidth)
+			}
+			seqs++
+		default:
+			return fmt.Errorf("sequence format %q: unknown placeholder %s, want {year}, {month} or {seq:N}", format, token)
+		}
+	}
+	if seqs != 1 {
+		return fmt.Errorf("sequence format %q: has %d {seq:N} placeholders, want exactly one", format, seqs)
+	}
+	return nil
+}
+
+// FormatSequence renders a Sequence field's stored value: format's period
+// tokens resolved against at (ResolvePeriodKey) and {seq:N} replaced by n
+// zero-padded to N digits.
+func FormatSequence(format string, at time.Time, n int64) string {
+	return seqToken.ReplaceAllStringFunc(ResolvePeriodKey(format, at), func(token string) string {
+		width, _ := strconv.Atoi(seqToken.FindStringSubmatch(token)[1])
+		return fmt.Sprintf("%0*d", width, n)
+	})
 }
 
 // AcquireNext atomically increments and returns the next counter value
