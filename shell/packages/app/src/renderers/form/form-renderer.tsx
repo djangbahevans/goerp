@@ -1,6 +1,9 @@
 import { ActionButton, Icon, PageHeader, PageLayout, Skeleton } from "@goerp/sdk/components";
+import { recordActivityQueryKey } from "@goerp/sdk/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { ListActions } from "../list/list-actions.js";
+import { FormChatter } from "./form-chatter.js";
 import { FormSectionRenderer } from "./form-sections.js";
 import { ShareHeaderAction } from "./form-share-action.js";
 import { FormSidebarRenderer } from "./form-sidebar.js";
@@ -23,10 +26,21 @@ export interface FormRendererProps {
 }
 
 export function FormRenderer({ view, module, recordId, testFormRecordOptions }: FormRendererProps) {
+  const queryClient = useQueryClient();
   const { record, isLoading, isError, error, refetch, isDirty, setField, save, isSaving, saveError } = useFormRecord(
     view.resource,
     recordId,
-    { autoSave: view.autosave ?? false, ...testFormRecordOptions },
+    {
+      autoSave: view.autosave ?? false,
+      // A save may write a change entry to the chatter's feed, which
+      // otherwise only refetches after the viewer's own comment or delete.
+      onSaved: () => {
+        if (recordId !== undefined) {
+          void queryClient.invalidateQueries({ queryKey: recordActivityQueryKey(view.resource, recordId) });
+        }
+      },
+      ...testFormRecordOptions,
+    },
   );
 
   const conditions = useConditionEvaluator(`form "${view.name}"`);
@@ -112,12 +126,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
             formReadonly={formReadonly}
           />
 
-          {view.chatter !== false && (
-            // Real chatter panel needs an activities API that doesn't exist yet (goerp#649).
-            <section aria-label="Activity">
-              <p>Activity feed not available yet.</p>
-            </section>
-          )}
+          {view.chatter !== false && <FormChatter view={view} recordId={recordId} />}
         </div>
 
         {view.sidebar && <FormSidebarRenderer sidebar={view.sidebar} record={record} />}

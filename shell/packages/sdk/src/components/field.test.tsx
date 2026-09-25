@@ -34,9 +34,16 @@ describe("formatFieldValue", () => {
     expect(formatFieldValue(false, "boolean", undefined, "-")).toBe("No");
   });
 
+  it("formats a bare time-of-day string", () => {
+    expect(formatFieldValue("14:30:00", "time", undefined, "-")).toBe(
+      new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(1970, 0, 1, 14, 30)),
+    );
+    expect(formatFieldValue("09:05", "time", undefined, "-")).not.toBe("-");
+  });
+
   it("formats a date-like string with dateStyle medium", () => {
     expect(formatFieldValue("2026-03-05", "date", undefined, "-")).toBe(
-      new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date("2026-03-05")),
+      new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(2026, 2, 5)),
     );
   });
 

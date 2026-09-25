@@ -112,6 +112,14 @@ export interface FieldProps {
 // way the raw number is.
 function coerceDate(value: unknown): Date | undefined {
   if (value instanceof Date) return value;
+  // A date-only ISO string is a calendar day, not UTC midnight — parsed as
+  // UTC it would show the previous day anywhere west of Greenwich.
+  const dateOnly = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  if (dateOnly) return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+  // A bare time of day ("14:30", "14:30:00") has no date for the Date
+  // constructor to parse; any fixed day serves, since only the time is shown.
+  const timeOnly = typeof value === "string" ? /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value) : null;
+  if (timeOnly) return new Date(1970, 0, 1, Number(timeOnly[1]), Number(timeOnly[2]), Number(timeOnly[3] ?? 0));
   if (typeof value === "string" || typeof value === "number") {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? undefined : date;
