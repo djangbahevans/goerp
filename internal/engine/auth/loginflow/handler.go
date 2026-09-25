@@ -4,9 +4,11 @@
 // Argon2id verification, MFA gating, and token issuance for both browser
 // (cookie) and non-browser (JSON body) clients.
 //
-// Out of scope, left to the tickets that own them: the three partitioned
-// Redis rate limiters and credential-stuffing detection (backlog #287), and the
-// full escalating account-lockout policy — doubling duration, security
+// Before the user lookup, three Redis sliding-window limiters (auth-
+// internals.md §15 "Login rate limiting") delay or reject the attempt.
+//
+// Out of scope, left to the tickets that own them: credential-stuffing
+// detection (backlog #287), and the full escalating account-lockout policy — doubling duration, security
 // notification email, audit log entry, admin manual-unlock (backlog
 // #291). This handler implements only the single-tier lockout
 // user.Store.IncrementFailedLogins already provides, enough for step 5
@@ -14,9 +16,13 @@
 package loginflow
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,6 +34,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -45,6 +52,21 @@ const maxBodyBytes = 64 * 1024
 // "no such user" from "wrong password" by response latency.
 const minResponseTime = 300 * time.Millisecond
 
+// Login rate limits (auth-internals.md §15 "Login rate limiting"). Over the
+// per-IP limit only delays the response; over the per-email or per-tenant
+// limit rejects the attempt with 429.
+const (
+	ipLimit          = 20
+	ipWindow         = 15 * time.Minute
+	ipOverLimitDelay = 500 * time.Millisecond
+
+	emailLimit  = 10
+	emailWindow = 15 * time.Minute
+
+	tenantLimit  = 100
+	tenantWindow = time.Minute
+)
+
 type Handler struct {
 	users     *user.Store
 	tenants   *tenant.Store
@@ -54,10 +76,11 @@ type Handler struct {
 	mfaTokens *mfatoken.Codec
 	policies  *password.PolicyStore
 	hasher    *password.Hasher
+	cache     *cache.Client
 }
 
-func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher) *Handler {
-	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher}
+func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client) *Handler {
+	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient}
 }
 
 type loginRequest struct {
@@ -72,9 +95,10 @@ type loginRequest struct {
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
 // json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
-// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
+// safe HTML embedding, U+2028/U+2029 escaped for safe JS embedding, and
+// map keys sorted, so identical responses are byte-identical.
 func writeJSON(w http.ResponseWriter, v any) {
-	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true), json.Deterministic(true))
 }
 
 func writeJSONError(w http.ResponseWriter, status int, code, message string) {
@@ -94,6 +118,46 @@ func writeOverloaded(w http.ResponseWriter) {
 	writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many sign-in attempts in progress, retry shortly")
 }
 
+func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(retryAfter.Seconds())))))
+	writeJSONError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "too many sign-in attempts, retry later")
+}
+
+// emailKey hashes the lowercased email, so the per-email key has a fixed
+// size and Redis never holds the address itself.
+func emailKey(email string) string {
+	sum := sha256.Sum256([]byte(email))
+	return "ratelimit:login:email:" + hex.EncodeToString(sum[:])
+}
+
+// allow records one attempt against key. A Redis failure fails open,
+// matching the engine-wide route limiter.
+func (h *Handler) allow(ctx context.Context, limiter, key string, limit int, window time.Duration) (bool, time.Duration) {
+	allowed, retryAfter, err := h.cache.SlidingWindowAllow(ctx, key, limit, window)
+	if err != nil {
+		log.Warn().Err(err).Str("limiter", limiter).Msg("loginflow: login rate limit check failed, failing open")
+		return true, 0
+	}
+	return allowed, retryAfter
+}
+
+// checkClientLimits applies the per-IP limiter, which only delays, then
+// the per-email limiter, reporting false once it has written a 429.
+func (h *Handler) checkClientLimits(w http.ResponseWriter, r *http.Request, email string) bool {
+	ctx := r.Context()
+	if ok, _ := h.allow(ctx, "ip", "ratelimit:login:ip:"+loginsession.ClientIP(r), ipLimit, ipWindow); !ok {
+		select {
+		case <-time.After(ipOverLimitDelay):
+		case <-ctx.Done():
+		}
+	}
+	if ok, retryAfter := h.allow(ctx, "email", emailKey(email), emailLimit, emailWindow); !ok {
+		writeRateLimited(w, retryAfter)
+		return false
+	}
+	return true
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	defer func() {
@@ -111,6 +175,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	email := strings.ToLower(req.Email)
+
+	if !h.checkClientLimits(w, r, email) {
+		return
+	}
+
+	// Looked up here for the per-tenant limiter's key. An unknown tenant
+	// skips that limiter and is rejected at step 4, after the user lookup.
+	t, tenantErr := h.tenants.GetBySlug(ctx, req.Tenant)
+	if tenantErr != nil && !errors.Is(tenantErr, tenant.ErrTenantNotFound) {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+	if tenantErr == nil {
+		if ok, retryAfter := h.allow(ctx, "tenant", "ratelimit:login:tenant:"+t.ID, tenantLimit, tenantWindow); !ok {
+			writeRateLimited(w, retryAfter)
+			return
+		}
+	}
 
 	// Taken before the user lookup, so an overloaded 503 looks the same
 	// whether or not the email exists (auth-internals.md §15).
@@ -153,21 +235,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: tenant membership. GetBySlug's return value isn't used
-	// directly, but the call itself is required, not just a business-logic
-	// existence check: role.Store.IsMember interpolates the slug into a
-	// schema-qualified query via tenantschema.Name, which is documented
-	// safe only because a slug reaching it has already passed
-	// system.tenants' own CHECK-constrained format — a guarantee that
-	// holds for req.Tenant only once it's round-tripped through a real
-	// tenant row lookup, not for the raw, unvalidated request field.
-	t, err := h.tenants.GetBySlug(ctx, req.Tenant)
-	if err != nil {
-		if errors.Is(err, tenant.ErrTenantNotFound) {
-			writeInvalidCredentials(w)
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+	// Step 4: tenant membership. The GetBySlug lookup above is required,
+	// not just a business-logic existence check: role.Store.IsMember
+	// interpolates the slug into a schema-qualified query via
+	// tenantschema.Name, which is documented safe only because a slug
+	// reaching it has already passed system.tenants' own CHECK-constrained
+	// format — a guarantee that holds for req.Tenant only once it's
+	// round-tripped through a real tenant row lookup, not for the raw,
+	// unvalidated request field.
+	if tenantErr != nil {
+		writeInvalidCredentials(w)
 		return
 	}
 	isMember, err := h.roles.IsMember(ctx, req.Tenant, u.ID)
