@@ -1,28 +1,24 @@
-import { EmptyState, PageLayout } from "@goerp/sdk/components";
 import { createFileRoute } from "@tanstack/react-router";
-import { RouterTextLink } from "../text-link.js";
+import { ForbiddenPage, type ForbiddenReason, isForbiddenReason } from "../../pages/errors/index.js";
 
-// First 403 page in the app — the /_m/$ catch-all route's beforeLoad
-// (goerp#671) redirects here when a resolved view's module isn't enabled
-// or its permissions aren't held; no other route guard exists yet to
-// reuse this from.
+// shell-ux.md §6.2. The /_m/$ catch-all's beforeLoad redirects here with the
+// reason, and the module for module_not_enabled.
 export const Route = createFileRoute("/403")({
-  component: ForbiddenPage,
+  validateSearch: (search: Record<string, unknown>): { reason?: ForbiddenReason; module?: string } => ({
+    ...(isForbiddenReason(search.reason) ? { reason: search.reason } : {}),
+    ...(typeof search.module === "string" ? { module: search.module } : {}),
+  }),
+  component: ForbiddenRoute,
 });
 
-function ForbiddenPage() {
+// useSearch() merges in the raw URL params, so a value validateSearch
+// dropped can still arrive here — both are re-checked before use.
+function ForbiddenRoute() {
+  const { reason, module } = Route.useSearch();
   return (
-    <PageLayout>
-      <EmptyState
-        icon="shield-alert"
-        title="You don't have permission to view this page"
-        description="If you think this is a mistake, contact your workspace administrator."
-        action={
-          <span className="text-sm">
-            <RouterTextLink to="/">Go home</RouterTextLink>
-          </span>
-        }
-      />
-    </PageLayout>
+    <ForbiddenPage
+      reason={isForbiddenReason(reason) ? reason : "missing_permission"}
+      module={typeof module === "string" ? module : undefined}
+    />
   );
 }

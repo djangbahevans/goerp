@@ -19,6 +19,7 @@ import {
   updateProfile,
   verifyEmail,
 } from "./auth-client.js";
+import { tenantSuspension } from "./tenant-suspension.js";
 
 function jsonResponse(status: number, body: unknown, statusText = "", headers: Record<string, string> = {}): Response {
   return {
@@ -32,6 +33,7 @@ function jsonResponse(status: number, body: unknown, statusText = "", headers: R
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  tenantSuspension.set(false);
 });
 
 describe("fetchCurrentSession", () => {
@@ -86,6 +88,15 @@ describe("fetchCurrentSession", () => {
       vi.fn(async () => jsonResponse(500, {})),
     );
     expect(await fetchCurrentSession()).toBeNull();
+  });
+
+  it("returns null and flags the tenant as suspended on a 403 tenant_suspended", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { error: { code: "tenant_suspended", message: "tenant suspended" } })),
+    );
+    expect(await fetchCurrentSession()).toBeNull();
+    expect(tenantSuspension.get()).toBe(true);
   });
 
   it("returns null when the request itself throws", async () => {
@@ -305,7 +316,7 @@ describe("fetchTenantContext", () => {
   it("resolves to null on a non-200 or network failure", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => jsonResponse(403, { error: { code: "tenant_suspended" } })),
+      vi.fn(async () => jsonResponse(404, { error: { code: "not_found" } })),
     );
     expect(await fetchTenantContext()).toBeNull();
 
@@ -316,6 +327,38 @@ describe("fetchTenantContext", () => {
       }),
     );
     expect(await fetchTenantContext()).toBeNull();
+  });
+});
+
+describe("tenant suspension", () => {
+  it("flags a 403 tenant_suspended tenant-context lookup and resolves to null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { error: { code: "tenant_suspended", message: "tenant suspended" } })),
+    );
+    expect(await fetchTenantContext()).toBeNull();
+    expect(tenantSuspension.get()).toBe(true);
+  });
+
+  it("flags a 403 tenant_suspended from any other auth call", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { error: { code: "tenant_suspended", message: "tenant suspended" } })),
+    );
+    await expect(login({ email: "ada@example.com", password: "pw", tenant: "acme" })).rejects.toMatchObject({
+      httpStatus: 403,
+      code: "tenant_suspended",
+    });
+    expect(tenantSuspension.get()).toBe(true);
+  });
+
+  it("leaves the flag alone for other 403s", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { error: { code: "tenant_offboarding" } })),
+    );
+    expect(await fetchTenantContext()).toBeNull();
+    expect(tenantSuspension.get()).toBe(false);
   });
 });
 

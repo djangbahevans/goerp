@@ -1,4 +1,5 @@
 import { authMachine } from "../auth/auth-machine.js";
+import { noteTenantSuspension } from "../auth/tenant-suspension.js";
 import { AppError } from "../error/app-error.js";
 import type {
   APIClient,
@@ -204,7 +205,9 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
       if (response.status === 403 && body.code === "mfa_setup_required") {
         authMachine.transition({ type: "mfa_setup_required" });
       }
-      throw toAppError(response, body);
+      const error = toAppError(response, body);
+      noteTenantSuspension(error);
+      throw error;
     }
     return response;
   }

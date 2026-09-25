@@ -1,4 +1,5 @@
 import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { AppError } from "@goerp/sdk/error";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -9,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RouteError } from "../pages/errors/index.js";
 import { RootLayout } from "./root-layout.js";
 
 vi.mock("../chrome/chrome-header.js", () => ({ ChromeHeader: () => <header /> }));
@@ -105,5 +107,56 @@ describe("RootLayout", () => {
     });
     expect(hasChrome()).toBe(true);
     expect(screen.getByRole("main").textContent).toContain("app page");
+  });
+});
+
+// Each path's loader throws the given error, rendered by the router's
+// default errorComponent the way router/index.ts wires it.
+async function renderFailingLoad(error: unknown) {
+  const rootRoute = createRootRoute({ component: RootLayout });
+  const failing = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/failing",
+    loader: () => {
+      throw error;
+    },
+    component: () => <p>never shown</p>,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([failing]),
+    history: createMemoryHistory({ initialEntries: ["/failing"] }),
+    defaultErrorComponent: RouteError,
+  });
+  await router.load();
+  const permissions = createPermissionContextValue({
+    permissions: new Set(),
+    fieldAccess: {},
+    modulesEnabled: new Set(),
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <PermissionContext.Provider value={permissions}>
+        <RouterProvider router={router} />
+      </PermissionContext.Provider>
+    </QueryClientProvider>,
+  );
+}
+
+describe("RootLayout load failures", () => {
+  it("renders a 5xx AppError as the 500 page with no chrome", async () => {
+    await renderFailingLoad(
+      new AppError({ code: "internal_error", message: "boom", httpStatus: 503, traceId: "trace-abc" }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "Something went wrong on our end" })).toBeTruthy();
+    expect(screen.getByText("Error ref: trace-abc")).toBeTruthy();
+    expect(hasChrome()).toBe(false);
+  });
+
+  it("keeps the chrome around any other load failure", async () => {
+    await renderFailingLoad(new Error("bundle failed to load"));
+
+    expect(await screen.findByText("Couldn't load this page.")).toBeTruthy();
+    expect(hasChrome()).toBe(true);
   });
 });

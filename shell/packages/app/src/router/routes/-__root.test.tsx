@@ -1,9 +1,9 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
-import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { AuthContext, createPermissionContextValue, PermissionContext, tenantSuspension } from "@goerp/sdk/auth";
 import { buildEmptyViewRegistry, ViewRegistryContext } from "@goerp/sdk/schema";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
@@ -65,15 +65,16 @@ function renderAt(path: string, auth: AuthContextValue) {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  tenantSuspension.set(false);
 });
+
+const hasChrome = () => screen.queryByRole("navigation", { name: "Main" }) !== null;
 
 describe("root layout", () => {
   it("renders an app route inside the chrome", async () => {
-    renderAt("/403", SIGNED_IN);
+    renderAt("/", SIGNED_IN);
 
-    const main = await screen.findByRole("main");
-    expect(main.textContent).toContain("You don't have permission to view this page");
-    expect(screen.getByRole("navigation", { name: "Main" })).toBeTruthy();
+    expect(await screen.findByRole("navigation", { name: "Main" })).toBeTruthy();
     expect(screen.getByRole("banner")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Skip to content" })).toBeTruthy();
   });
@@ -103,5 +104,43 @@ describe("root layout", () => {
     expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
     expect(screen.queryByRole("banner")).toBeNull();
     expect(screen.queryByRole("link", { name: "Skip to content" })).toBeNull();
+  });
+
+  it("renders an unmatched URL as the 404 page in place, with no chrome", async () => {
+    const router = renderAt("/no/such/page", SIGNED_IN);
+
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/no/such/page");
+    expect(hasChrome()).toBe(false);
+  });
+
+  it.each([
+    ["/404", "Page not found"],
+    ["/403", "You don't have access to this page"],
+  ])("renders %s with no chrome", async (path, heading) => {
+    renderAt(path, SIGNED_IN);
+
+    expect(await screen.findByRole("heading", { name: heading })).toBeTruthy();
+    expect(hasChrome()).toBe(false);
+    expect(screen.queryByRole("banner")).toBeNull();
+  });
+
+  it("sends a signed-out visitor to the tenant-suspended page once a 403 tenant_suspended arrives", async () => {
+    const router = renderAt("/auth/login", SIGNED_OUT);
+    expect(await screen.findByRole("button", { name: /sign in/i })).toBeTruthy();
+
+    act(() => tenantSuspension.set(true));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/tenant-suspended"));
+    expect(await screen.findByRole("heading", { name: "This organisation's account has been suspended" })).toBeTruthy();
+    expect(hasChrome()).toBe(false);
+  });
+
+  it("holds a signed-in user of a suspended tenant on the tenant-suspended page", async () => {
+    tenantSuspension.set(true);
+    const router = renderAt("/settings/profile", SIGNED_IN);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/tenant-suspended"));
+    expect(hasChrome()).toBe(false);
   });
 });
