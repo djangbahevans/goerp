@@ -21,6 +21,8 @@ export type { CodeFieldProps } from "./code-field.js";
 export { CodeField } from "./code-field.js";
 export type { ColorPickerProps } from "./color-picker.js";
 export { ColorPicker } from "./color-picker.js";
+export type { ConfirmDialogHostProps } from "./confirm-dialog-host.js";
+export { ConfirmDialogHost } from "./confirm-dialog-host.js";
 export type { CountdownProps } from "./countdown.js";
 export { Countdown } from "./countdown.js";
 export type { CountryFlagProps } from "./country-flag.js";

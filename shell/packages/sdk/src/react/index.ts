@@ -4,6 +4,8 @@ export type { BulkActionContextValue } from "./bulk-action-context.js";
 export { BulkActionContext, useBulkAction } from "./bulk-action-context.js";
 export type { ActionOptions, ActionResult, ErrorHandler, ErrorHandlerContext } from "./use-action.js";
 export { dispatch, splitPathAndBody, useAction } from "./use-action.js";
+export type { ConfirmOptions, ConfirmRequest, ConfirmVariant, UseConfirmResult } from "./use-confirm.js";
+export { ConfirmQueue, confirmQueue, useConfirm } from "./use-confirm.js";
 export type { UseExportResult } from "./use-export.js";
 export { useExport } from "./use-export.js";
 export type { UseInfiniteListOptions } from "./use-infinite-list.js";

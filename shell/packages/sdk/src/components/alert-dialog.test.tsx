@@ -190,4 +190,58 @@ describe("AlertDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
   });
+
+  it("enables confirm only once the requireTyping phrase matches exactly, and clears it on reopen", () => {
+    const onConfirm = vi.fn();
+    const props = { title: "Delete?", description: "...", requireTyping: "DELETE", onConfirm, onCancel: vi.fn() };
+    const { rerender } = render(<AlertDialog open {...props} />);
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    const phrase = screen.getByLabelText("Type DELETE to confirm");
+
+    fireEvent.change(phrase, { target: { value: "DELET" } });
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(phrase, { target: { value: "DELETE" } });
+    fireEvent.click(confirm);
+    expect(onConfirm).toHaveBeenCalledWith(undefined);
+
+    rerender(<AlertDialog open={false} {...props} />);
+    rerender(<AlertDialog open {...props} />);
+    expect((screen.getByLabelText("Type DELETE to confirm") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "Confirm" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("shows a tone icon beside the title for warning and danger only", async () => {
+    const props = { open: true, title: "Sure?", description: "...", onConfirm: vi.fn(), onCancel: vi.fn() };
+    const { rerender } = render(<AlertDialog {...props} tone="warning" />);
+    await vi.waitFor(() => expect(document.querySelector(".lucide-triangle-alert")).not.toBeNull());
+
+    rerender(<AlertDialog {...props} tone="danger" />);
+    await vi.waitFor(() => expect(document.querySelector(".lucide-circle-alert")).not.toBeNull());
+
+    rerender(<AlertDialog {...props} />);
+    expect(screen.getByRole("alertdialog").querySelector("svg.lucide")).toBeNull();
+  });
+
+  it("returns focus to returnFocusTo instead of the element focused on open", async () => {
+    const target = document.createElement("button");
+    document.body.append(target);
+    const props = { title: "Sure?", description: "...", onConfirm: vi.fn(), onCancel: vi.fn(), returnFocusTo: target };
+    const { rerender } = render(<AlertDialog open {...props} />);
+    await vi.waitFor(() => expect(screen.getByRole("alertdialog")).toBeTruthy());
+
+    rerender(<AlertDialog open={false} {...props} />);
+    await vi.waitFor(() => expect(document.activeElement).toBe(target));
+    target.remove();
+  });
+
+  it("calls onClosed once it has finished closing", async () => {
+    const onClosed = vi.fn();
+    const props = { title: "Sure?", description: "...", onConfirm: vi.fn(), onCancel: vi.fn(), onClosed };
+    const { rerender } = render(<AlertDialog open {...props} />);
+    await vi.waitFor(() => expect(screen.getByRole("alertdialog")).toBeTruthy());
+    expect(onClosed).not.toHaveBeenCalled();
+
+    rerender(<AlertDialog open={false} {...props} />);
+    await vi.waitFor(() => expect(onClosed).toHaveBeenCalledOnce());
+  });
 });

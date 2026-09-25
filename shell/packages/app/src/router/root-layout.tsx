@@ -1,4 +1,4 @@
-import { Toast } from "@goerp/sdk/components";
+import { ConfirmDialogHost, Toast } from "@goerp/sdk/components";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { isAuthPath } from "../auth/safe-redirect.js";
 import { ChromeLayout, CommandPalette } from "../chrome/index.js";
@@ -19,6 +19,7 @@ export function RootLayout() {
     <>
       {bare ? <Outlet /> : <ChromeLayout />}
       <Toast />
+      <ConfirmDialogHost />
       <CommandPalette />
     </>
   );

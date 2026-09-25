@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import * as v from "valibot";
 import { optionalNullable } from "../schema/optional-nullable.js";
 import { Button } from "./button.js";
+import { Icon } from "./icon.js";
 import { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
 
 // manifest-spec.md's SelectOption, as used by ConfirmInput — a schema, not
@@ -34,11 +35,24 @@ export interface AlertDialogProps {
   cancelLabel?: string | undefined;
   confirmVariant?: "primary" | "danger" | undefined;
   input?: AlertDialogInput | undefined;
+  // A warning or danger icon beside the title. Independent of confirmVariant.
+  tone?: "default" | "warning" | "danger" | undefined;
+  // A phrase the user must type exactly before confirm enables.
+  requireTyping?: string | undefined;
+  // Where focus goes on close, instead of the element focused when it opened.
+  returnFocusTo?: HTMLElement | null | undefined;
   // Called with the collected input value (possibly "" when not required
   // and left blank), or undefined when no `input` was configured.
   onConfirm: (inputValue?: string) => void;
   onCancel: () => void;
+  // Called once the dialog has finished closing and returned focus.
+  onClosed?: (() => void) | undefined;
 }
+
+const TONE_ICONS = {
+  warning: { name: "triangle-alert", className: "text-warning" },
+  danger: { name: "circle-alert", className: "text-danger" },
+} as const;
 
 const INPUT_CLASSES =
   "mt-1 w-full rounded-control border border-border px-3 py-2 text-sm text-text focus-visible:outline-none focus-visible:shadow-focus";
@@ -62,10 +76,15 @@ export function AlertDialog({
   cancelLabel = "Cancel",
   confirmVariant = "primary",
   input,
+  tone = "default",
+  requireTyping,
+  returnFocusTo,
   onConfirm,
   onCancel,
+  onClosed,
 }: AlertDialogProps): ReactNode {
   const [inputValue, setInputValue] = useState("");
+  const [typed, setTyped] = useState("");
   // Radix's own close-auto-focus restores focus via a `triggerRef` that only
   // gets populated by an `AlertDialogPrimitive.Trigger` — this component is
   // fully open-controlled and never renders one, so that ref stays null and
@@ -75,12 +94,20 @@ export function AlertDialog({
 
   useEffect(() => {
     if (open) {
-      triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      triggerRef.current =
+        returnFocusTo !== undefined
+          ? returnFocusTo
+          : document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
       setInputValue("");
+      setTyped("");
     }
-  }, [open]);
+  }, [open, returnFocusTo]);
 
-  const confirmDisabled = input?.required === true && inputValue.trim() === "";
+  const confirmDisabled =
+    (input?.required === true && inputValue.trim() === "") || (requireTyping !== undefined && typed !== requireTyping);
+  const toneIcon = tone === "default" ? undefined : TONE_ICONS[tone];
 
   return (
     <AlertDialogPrimitive.Root
@@ -102,10 +129,19 @@ export function AlertDialog({
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             triggerRef.current?.focus();
+            onClosed?.();
           }}
         >
           <div className="flex max-h-[90vh] w-full max-w-120 flex-col rounded-structural bg-surface shadow-lg">
-            <div className="px-6 pt-6">
+            <div className="flex items-start gap-3 px-6 pt-6">
+              {toneIcon && (
+                <Icon
+                  name={toneIcon.name}
+                  size={20}
+                  className={`mt-0.5 shrink-0 ${toneIcon.className}`}
+                  aria-hidden="true"
+                />
+              )}
               <AlertDialogPrimitive.Title className="text-lg font-semibold text-text">
                 {title}
               </AlertDialogPrimitive.Title>
@@ -140,6 +176,19 @@ export function AlertDialog({
                       onChange={(e: ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
                     />
                   )}
+                </label>
+              )}
+              {requireTyping !== undefined && (
+                <label className="mt-4 block text-sm text-text">
+                  Type <span className="font-mono font-semibold">{requireTyping}</span> to confirm
+                  <input
+                    type="text"
+                    className={INPUT_CLASSES}
+                    value={typed}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setTyped(e.target.value)}
+                  />
                 </label>
               )}
             </div>
