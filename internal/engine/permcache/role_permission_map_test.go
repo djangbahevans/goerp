@@ -155,6 +155,48 @@ func TestRolePermissionMap_RebuildAll_ResolvesInheritance(t *testing.T) {
 	}
 }
 
+func TestRolePermissionMap_RebuildTenant_ReplacesOnlyThatTenant(t *testing.T) {
+	env := newTestEnv(t)
+	changed, untouched := uniqueSlug(t), uniqueSlug(t)+"b"
+	env.activeTenant(t, changed)
+	env.activeTenant(t, untouched)
+	ctx := context.Background()
+	reg := permission.NewPermissionRegistry()
+	readIdx, _ := registerAndIndex(reg, "widgets.read")
+
+	m := NewRolePermissionMap()
+	if err := m.RebuildAll(ctx, env.tenantStore, env.roleStore, reg); err != nil {
+		t.Fatalf("RebuildAll() error: %v", err)
+	}
+	untouchedAdmin, _ := env.roleStore.GetRoleByName(ctx, untouched, "admin")
+	changedAdmin, _ := env.roleStore.GetRoleByName(ctx, changed, "admin")
+
+	schema := tenantschema.Name(changed)
+	var custom string
+	if err := env.conn.QueryRowContext(ctx, fmt.Sprintf("INSERT INTO %s.roles (name) VALUES ('clerk') RETURNING id", schema)).Scan(&custom); err != nil {
+		t.Fatalf("insert role: %v", err)
+	}
+	if _, err := env.conn.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s.role_permissions (role_id, permission_name) VALUES ($1, 'widgets.read')", schema), custom); err != nil {
+		t.Fatalf("grant permission: %v", err)
+	}
+	if _, err := env.conn.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s.roles WHERE id = $1", schema), changedAdmin); err != nil {
+		t.Fatalf("delete role: %v", err)
+	}
+
+	if err := m.RebuildTenant(ctx, env.roleStore, func() *permission.PermissionRegistry { return reg }, changed); err != nil {
+		t.Fatalf("RebuildTenant() error: %v", err)
+	}
+	if bits, ok := m.Lookup(custom); !ok || !bits.Has(readIdx) {
+		t.Error("new role missing after RebuildTenant")
+	}
+	if _, ok := m.Lookup(changedAdmin); ok {
+		t.Error("deleted role still present after RebuildTenant")
+	}
+	if _, ok := m.Lookup(untouchedAdmin); !ok {
+		t.Error("another tenant's role dropped by RebuildTenant")
+	}
+}
+
 // registerAndIndex is a small helper for tests that need a real,
 // registered permission index (PermissionRegistry.Register normally runs
 // at module load time against a module's declared manifest.Permission

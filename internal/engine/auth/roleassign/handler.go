@@ -191,7 +191,7 @@ func (h *Handler) ServeAssign(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.invalidateAndBroadcast(ctx, req.tenantCtx, req.targetID, body.Role, "assigned")
-	h.emitAudit(ctx, req.tenantCtx.Slug, "role.assigned", req.authCtx.UserID, req.targetID, body.Role)
+	h.emitAudit(ctx, req.tenantCtx.Slug, "role.granted", req.authCtx.UserID, req.targetID, body.Role)
 
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]any{"status": "ok"})
