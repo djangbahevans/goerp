@@ -80,6 +80,26 @@ describe("saveRecord", () => {
 
     expect(patch).toHaveBeenCalledWith("/contacts/01j", { name: "Acme" });
   });
+
+  it("rejects instead of POSTing to an empty path when the resource declares no create route", async () => {
+    const post = vi.fn();
+    const client = { post, put: vi.fn(), patch: vi.fn() } as unknown as Pick<APIClient, "post" | "put" | "patch">;
+
+    await expect(
+      saveRecord("contacts.contact", undefined, { name: "Acme" }, fakeRegistry({ createPath: "" }), client),
+    ).rejects.toThrow(/declares no create route/);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("rejects instead of PUTing to an empty path when the resource declares no update route", async () => {
+    const put = vi.fn();
+    const client = { post: vi.fn(), put, patch: vi.fn() } as unknown as Pick<APIClient, "post" | "put" | "patch">;
+
+    await expect(
+      saveRecord("contacts.contact", "01j", { name: "Acme" }, fakeRegistry({ updatePath: "" }), client),
+    ).rejects.toThrow(/declares no update route/);
+    expect(put).not.toHaveBeenCalled();
+  });
 });
 
 // The hook itself, exercised end-to-end through its own injectable
