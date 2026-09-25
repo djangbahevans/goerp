@@ -46,6 +46,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/auth/acceptinvite"
+	"github.com/djangbahevans/goerp/internal/engine/auth/adminusers"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authlogout"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
@@ -930,6 +931,14 @@ func New(cfg *config.Config) (*Engine, error) {
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
+	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminusers.NewStore(primaryPool, authAuditStore), roleStore, sessionStore, sessionRevoker, filesStore, storageBackend)
+	builtinRoutes["GET /admin/users"] = http.HandlerFunc(adminUsersHandler.ServeList)
+	builtinRoutes["GET /admin/users/{id}"] = http.HandlerFunc(adminUsersHandler.ServeGet)
+	builtinRoutes["DELETE /admin/users/{id}"] = http.HandlerFunc(adminUsersHandler.ServeDelete)
+	builtinRoutes["POST /admin/users/{id}/suspend"] = http.HandlerFunc(adminUsersHandler.ServeSuspend)
+	builtinRoutes["POST /admin/users/{id}/unsuspend"] = http.HandlerFunc(adminUsersHandler.ServeUnsuspend)
+	builtinRoutes["GET /admin/users/{id}/sessions"] = http.HandlerFunc(adminUsersHandler.ServeSessions)
+	builtinRoutes["DELETE /admin/users/{id}/sessions/{family_id}"] = http.HandlerFunc(adminUsersHandler.ServeRevokeSession)
 	planChangeHandler := planchange.NewHandler(tenantResolver, authChecker, billingStore, tenantStore, cacheClient, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/tenant/plan"] = http.HandlerFunc(planChangeHandler.ServeHTTP)
 	moduleInstallWorker := &moduleinstall.Worker{

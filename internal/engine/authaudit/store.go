@@ -117,7 +117,18 @@ type Row struct {
 // database-privilege level is backlog #300's own scope, not enforced
 // yet).
 func (s *Store) Insert(ctx context.Context, row Row) error {
-	_, err := s.db.ExecContext(ctx, `
+	return insertRow(ctx, s.db, row)
+}
+
+// InsertTx is Insert inside the caller's transaction, for an event that
+// must commit or roll back with the state change it records
+// (auth-internals.md §2 "Transactional audit").
+func (s *Store) InsertTx(ctx context.Context, tx *sql.Tx, row Row) error {
+	return insertRow(ctx, tx, row)
+}
+
+func insertRow(ctx context.Context, q db.Execer, row Row) error {
+	_, err := q.ExecContext(ctx, `
 		INSERT INTO system.auth_audit_log
 			(event_type, tenant_id, user_id, session_id, api_key_id, ip_address, user_agent, country_code, success, failure_reason, metadata)
 		VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, '')::inet, NULLIF($7, ''), NULLIF($8, ''), $9, NULLIF($10, ''), $11)
