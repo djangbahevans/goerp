@@ -768,7 +768,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		passwordHasher, tokenIssuer, inviteMailer,
 	)
 	acceptInviteHandlers := acceptinvite.NewHandlers(tenantStore, inviteStore, userStore, passwordPolicies, passwordHasher, tokenIssuer)
-	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient)
+	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
 	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)

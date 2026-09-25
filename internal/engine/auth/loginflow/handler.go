@@ -5,7 +5,8 @@
 // (cookie) and non-browser (JSON body) clients.
 //
 // Before the user lookup, three Redis sliding-window limiters (auth-
-// internals.md §15 "Login rate limiting") delay or reject the attempt.
+// internals.md §15 "Login rate limiting") delay the attempt, reject it, or
+// record a per-tenant flood in the auth audit log.
 //
 // Out of scope, left to the tickets that own them: credential-stuffing
 // detection (backlog #287), and the full escalating account-lockout policy — doubling duration, security
@@ -22,6 +23,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -34,6 +36,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -53,8 +56,9 @@ const maxBodyBytes = 64 * 1024
 const minResponseTime = 300 * time.Millisecond
 
 // Login rate limits (auth-internals.md §15 "Login rate limiting"). Over the
-// per-IP limit only delays the response; over the per-email or per-tenant
-// limit rejects the attempt with 429.
+// per-IP limit delays the response, over the per-email limit rejects the
+// attempt with 429, and over the per-tenant limit only writes an audit
+// event.
 const (
 	ipLimit          = 20
 	ipWindow         = 15 * time.Minute
@@ -77,10 +81,11 @@ type Handler struct {
 	policies  *password.PolicyStore
 	hasher    *password.Hasher
 	cache     *cache.Client
+	audit     *authaudit.Store
 }
 
-func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client) *Handler {
-	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient}
+func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client, audit *authaudit.Store) *Handler {
+	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient, audit: audit}
 }
 
 type loginRequest struct {
@@ -158,6 +163,49 @@ func (h *Handler) checkClientLimits(w http.ResponseWriter, r *http.Request, emai
 	return true
 }
 
+// tenantRateExceededMetadata is login.tenant_rate_exceeded's audit
+// metadata (auth-internals.md §15 "Login rate limiting").
+var tenantRateExceededMetadata = []byte(fmt.Sprintf(`{"limit":%d,"window_seconds":%d}`, tenantLimit, int(tenantWindow.Seconds())))
+
+// detectionTimeout bounds detectTenantFlood's Redis and audit writes, which
+// run detached from the request so a client that disconnects can't
+// suppress detection.
+const detectionTimeout = 2 * time.Second
+
+// detectTenantFlood records the attempt in the per-tenant window. Over the
+// limit it logs a warning and writes a login.tenant_rate_exceeded audit
+// event, at most once per tenant per window; the attempt proceeds either
+// way.
+func (h *Handler) detectTenantFlood(ctx context.Context, tenantID string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), detectionTimeout)
+	defer cancel()
+
+	if ok, _ := h.allow(ctx, "tenant", "ratelimit:login:tenant:"+tenantID, tenantLimit, tenantWindow); ok {
+		return
+	}
+	guardKey := "ratelimit:login:tenant_alerted:" + tenantID
+	first, err := h.cache.SetNXWithTTL(ctx, guardKey, "1", tenantWindow)
+	if err != nil {
+		log.Warn().Err(err).Str("tenant_id", tenantID).Msg("loginflow: per-tenant login rate exceeded; alert guard failed, audit event skipped")
+		return
+	}
+	if !first {
+		return
+	}
+	log.Warn().Str("tenant_id", tenantID).Msg("loginflow: per-tenant login rate exceeded")
+	if h.audit == nil {
+		return
+	}
+	row := authaudit.Row{EventType: "login.tenant_rate_exceeded", TenantID: tenantID, Success: true, Metadata: tenantRateExceededMetadata}
+	if err := h.audit.Insert(ctx, row); err != nil {
+		log.Error().Err(err).Str("tenant_id", tenantID).Msg("loginflow: write login.tenant_rate_exceeded audit event")
+		// Released so the next over-limit attempt retries the event.
+		if err := h.cache.Delete(ctx, guardKey); err != nil {
+			log.Warn().Err(err).Str("tenant_id", tenantID).Msg("loginflow: release per-tenant alert guard")
+		}
+	}
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	defer func() {
@@ -181,17 +229,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Looked up here for the per-tenant limiter's key. An unknown tenant
-	// skips that limiter and is rejected at step 4, after the user lookup.
+	// skips that limiter, which never changes the response, and is
+	// rejected at step 4, after the user lookup.
 	t, tenantErr := h.tenants.GetBySlug(ctx, req.Tenant)
 	if tenantErr != nil && !errors.Is(tenantErr, tenant.ErrTenantNotFound) {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
 	if tenantErr == nil {
-		if ok, retryAfter := h.allow(ctx, "tenant", "ratelimit:login:tenant:"+t.ID, tenantLimit, tenantWindow); !ok {
-			writeRateLimited(w, retryAfter)
-			return
-		}
+		h.detectTenantFlood(ctx, t.ID)
 	}
 
 	// Taken before the user lookup, so an overloaded 503 looks the same
