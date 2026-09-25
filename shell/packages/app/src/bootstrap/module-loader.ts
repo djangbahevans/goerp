@@ -1,4 +1,5 @@
 import type { ModuleDefinition } from "@goerp/sdk";
+import { translationLoader } from "@goerp/sdk/i18n";
 import { registerModule } from "./register-module.js";
 
 function hexEncode(bytes: ArrayBuffer): string {
@@ -126,8 +127,11 @@ export async function ensureModuleRegistered(
   const existing = registered.get(key);
   if (existing) return existing;
 
-  const promise = ensureLoaded(moduleName, bundleUrl, bundleSha256, options)
-    .then((loadedModule) => {
+  // l10n-guide.md §7: a module's translations load with its bundle. Never
+  // rejects; app.tsx refreshes them after a hot reload.
+  const translations = translationLoader.load(moduleName);
+  const promise = Promise.all([ensureLoaded(moduleName, bundleUrl, bundleSha256, options), translations])
+    .then(([loadedModule]) => {
       if (!loadedModule) return;
       if (latestKeyForModule.get(moduleName) !== key) return;
       unregisterCommands.get(moduleName)?.();
