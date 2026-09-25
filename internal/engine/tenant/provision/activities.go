@@ -7,15 +7,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/module"
-	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
-	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
-	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
@@ -143,176 +140,11 @@ func (a *Activities) CreateTenantSchema(ctx context.Context, slug string) error 
 	return nil
 }
 
-const createModuleConfigTable = `
-CREATE TABLE IF NOT EXISTS %s.module_config (
-    module_name TEXT NOT NULL,
-    key         TEXT NOT NULL,
-    value       JSONB NOT NULL,
-    value_type  TEXT NOT NULL,
-    encrypted   BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by  UUID,
-    PRIMARY KEY (module_name, key)
-)
-`
-
-const createSequencesTable = `
-CREATE TABLE IF NOT EXISTS %s.sequences (
-    model       TEXT NOT NULL,
-    field       TEXT NOT NULL,
-    period_key  TEXT NOT NULL,
-    next_value  BIGINT NOT NULL DEFAULT 0,
-    PRIMARY KEY (model, field, period_key)
-)
-`
-
-// createAuditLogTable mirrors multitenancy-internals.md's audit_log
-// schema (goerp#194) — PARTITION BY RANGE (changed_at) with a composite
-// (id, changed_at) PK, since Postgres requires the partition key in
-// every unique constraint on a partitioned table, plus a BRIN index on
-// changed_at (efficient for append-only time-series data). No
-// REVOKE SELECT ... FROM app_user, since no schema_sync_user/app_user
-// Postgres role split exists anywhere in this codebase yet (see this
-// file's own schemaSyncPool doc comment above). partman.create_parent is
-// called against this table immediately after creation, in
-// CreateEngineTables below.
-const createAuditLogTable = `
-CREATE TABLE IF NOT EXISTS %s.audit_log (
-    id          UUID NOT NULL DEFAULT uuidv7(),
-    table_name  TEXT NOT NULL,
-    record_id   UUID NOT NULL,
-    operation   TEXT NOT NULL CHECK (operation IN ('INSERT','UPDATE','DELETE')),
-    old_data    JSONB,
-    new_data    JSONB,
-    changed_by  UUID,
-    changed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    request_id  TEXT,
-    trace_id    TEXT,
-    PRIMARY KEY (id, changed_at)
-) PARTITION BY RANGE (changed_at)
-`
-
-const createAuditLogTimeIndex = `
-CREATE INDEX IF NOT EXISTS idx_audit_log_time ON %s.audit_log USING BRIN (changed_at)
-`
-
-// createEventLogTable mirrors multitenancy-internals.md's event_log
-// schema (goerp#194) — PARTITION BY RANGE (emitted_at) with a composite
-// (id, emitted_at) PK and a BRIN index on emitted_at, both required by
-// the same partition-key constraint createAuditLogTable's doc comment
-// above explains. EventDeliveryWorker's INSERT binds emitted_at itself
-// (rather than relying on the column default) so
-// "ON CONFLICT (id, emitted_at) DO NOTHING" dedups correctly across a
-// job retry — see that package's own doc comment.
-const createEventLogTable = `
-CREATE TABLE IF NOT EXISTS %s.event_log (
-    id             UUID NOT NULL DEFAULT uuidv7(),
-    event_name     TEXT NOT NULL,
-    event_version  INT NOT NULL DEFAULT 1,
-    emitter_module TEXT NOT NULL,
-    payload        BYTEA NOT NULL,
-    trace_id       TEXT,
-    user_id        UUID,
-    emitted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (id, emitted_at)
-) PARTITION BY RANGE (emitted_at)
-`
-
-const createEventLogTimeIndex = `
-CREATE INDEX IF NOT EXISTS idx_event_log_time ON %s.event_log USING BRIN (emitted_at)
-`
-
-// registerTenantPartition wraps db.RegisterPartition for a per-tenant
-// table, building the plain "tenant_<slug>.<table>" name pg_partman's
-// p_parent_table parameter needs (see that function's own doc comment for
-// why the quoted tenantschema.Name form can't be used here — goerp#194).
-func registerTenantPartition(ctx context.Context, pool *sql.DB, slug, table, controlColumn string) error {
-	return db.RegisterPartition(ctx, pool, "tenant_"+slug+"."+table, controlColumn)
-}
-
-// CreateEngineTables creates the engine-owned tables a fresh tenant needs
-// before module schema sync and config seeding can run: roles/
-// role_permissions/user_roles (role.Store.Bootstrap), tenant_invitations
-// (invite.Store.Bootstrap — requires roles to exist first, per its own
-// foreign key), record_shares (recordshares.Store.Bootstrap — goerp#472,
-// the .Shareable() model widening's compiled RLS EXISTS lookup reads
-// this uniformly regardless of which module owns the model),
-// saved_filters (savedfilters.Store.Bootstrap — goerp#635, the built-in
-// /_meta/saved-filters endpoint's own-rows-only backing table),
-// record_activity (recordactivity.Store.Bootstrap — the per-record feed
-// behind /_meta/activity), module_config (this ticket's own SeedTenantConfig step), sequences
-// (backing store for Sequence-kind fields' per-tenant counters, keyed by
-// (model, field, period_key)), audit_log (goerp#363 — host.orm's write
-// path records one row here per INSERT/UPDATE/DELETE on a module's own
-// audited_tables[]), and event_log (goerp#16 — eventdelivery.Worker
-// records one row here per dispatched domain event).
-// multitenancy-internals.md §6 step 3 lists further engine-owned tables
-// (files, notifications, notification_preferences, view_overrides) —
-// deliberately not created here: nothing in this codebase reads or
-// writes any of them yet (each is its own separate, untriaged feature
-// area). Creating unconsumed tables now would be schema no code can yet
-// verify against.
+// CreateEngineTables creates every engine-owned per-tenant table
+// (enginetables.Groups) a fresh tenant needs before module schema sync
+// and config seeding can run.
 func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error {
-	if err := role.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
-		return fmt.Errorf("bootstrap roles: %w", err)
-	}
-
-	// invite.NewStore's UserResolver/RoleResolver/Mailer args are never
-	// touched by Bootstrap itself (it only creates tenant_invitations) —
-	// nil is safe here, this instance exists for exactly one call.
-	if err := invite.NewStore(a.schemaSyncPool, nil, nil, nil, nil).Bootstrap(ctx, slug); err != nil {
-		return fmt.Errorf("bootstrap invitations: %w", err)
-	}
-
-	if err := recordshares.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
-		return fmt.Errorf("bootstrap record_shares: %w", err)
-	}
-
-	if err := savedfilters.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
-		return fmt.Errorf("bootstrap saved_filters: %w", err)
-	}
-
-	if err := recordactivity.NewStore(a.schemaSyncPool).Bootstrap(ctx, slug); err != nil {
-		return fmt.Errorf("bootstrap record_activity: %w", err)
-	}
-
-	query := fmt.Sprintf(createModuleConfigTable, tenantschema.Name(slug))
-	if _, err := a.schemaSyncPool.ExecContext(ctx, query); err != nil {
-		return fmt.Errorf("create module_config table: %w", err)
-	}
-
-	seqQuery := fmt.Sprintf(createSequencesTable, tenantschema.Name(slug))
-	if _, err := a.schemaSyncPool.ExecContext(ctx, seqQuery); err != nil {
-		return fmt.Errorf("create sequences table: %w", err)
-	}
-
-	schemaName := tenantschema.Name(slug)
-
-	auditQuery := fmt.Sprintf(createAuditLogTable, schemaName)
-	if _, err := a.schemaSyncPool.ExecContext(ctx, auditQuery); err != nil {
-		return fmt.Errorf("create audit_log table: %w", err)
-	}
-	auditIndexQuery := fmt.Sprintf(createAuditLogTimeIndex, schemaName)
-	if _, err := a.schemaSyncPool.ExecContext(ctx, auditIndexQuery); err != nil {
-		return fmt.Errorf("create audit_log time index: %w", err)
-	}
-	if err := registerTenantPartition(ctx, a.schemaSyncPool, slug, "audit_log", "changed_at"); err != nil {
-		return err
-	}
-
-	eventLogQuery := fmt.Sprintf(createEventLogTable, schemaName)
-	if _, err := a.schemaSyncPool.ExecContext(ctx, eventLogQuery); err != nil {
-		return fmt.Errorf("create event_log table: %w", err)
-	}
-	eventLogIndexQuery := fmt.Sprintf(createEventLogTimeIndex, schemaName)
-	if _, err := a.schemaSyncPool.ExecContext(ctx, eventLogIndexQuery); err != nil {
-		return fmt.Errorf("create event_log time index: %w", err)
-	}
-	if err := registerTenantPartition(ctx, a.schemaSyncPool, slug, "event_log", "emitted_at"); err != nil {
-		return err
-	}
-
-	return nil
+	return enginetables.CreateAll(ctx, a.schemaSyncPool, slug)
 }
 
 // ListModuleNames returns the name of every currently loaded module that

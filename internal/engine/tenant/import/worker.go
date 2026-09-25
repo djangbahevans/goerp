@@ -17,6 +17,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -330,7 +331,7 @@ func prepareInsert(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration) (
 	}
 
 	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT DO NOTHING",
-		quoteIdent(tableNameFor(md)), strings.Join(quotedCols, ", "), strings.Join(placeholders, ", "))
+		quoteIdent(modeltable.Name(md)), strings.Join(quotedCols, ", "), strings.Join(placeholders, ", "))
 	return tx.PrepareContext(ctx, sqlStr)
 }
 

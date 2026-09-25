@@ -1,9 +1,6 @@
 package tenantexport
 
 import (
-	"strings"
-	"unicode"
-
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
 )
@@ -42,40 +39,6 @@ func primaryKeyColumn(md model.ModelDeclaration) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// tableNameFor mirrors internal/engine/wasm/host_orm.go's own
-// tableNameForORM/snakeCaseORM (unexported there, duplicated here rather
-// than exported across a package boundary for one small helper — same
-// call this codebase already made for offboarder.go's jobIDPrefix/
-// encodeJobID vs. adminapi's).
-func tableNameFor(md model.ModelDeclaration) string {
-	if md.Table != "" {
-		return md.Table
-	}
-	return snakeCase(md.Name)
-}
-
-func snakeCase(name string) string {
-	var b strings.Builder
-	prevLower := false
-	for _, r := range name {
-		switch {
-		case r == '.':
-			b.WriteByte('_')
-			prevLower = false
-		case unicode.IsUpper(r):
-			if prevLower {
-				b.WriteByte('_')
-			}
-			b.WriteRune(unicode.ToLower(r))
-			prevLower = false
-		default:
-			b.WriteRune(r)
-			prevLower = true
-		}
-	}
-	return b.String()
 }
 
 func quoteIdent(name string) string {

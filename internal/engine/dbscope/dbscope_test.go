@@ -2,10 +2,12 @@ package dbscope
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 )
 
@@ -72,22 +74,17 @@ func TestValidateTableRefs_RejectsQualifiedReferenceAmongUnqualifiedOnes(t *test
 	}
 }
 
-// TestFirstDeniedTableRef_WalksMapValues proves the Map case actually
-// works: no field in pg_query_go's real ParseResult tree is map-typed
-// today, so ValidateTableRefs' own tests never exercise it —
-// this synthesizes a map holding a *pg_query.RangeVar directly, the shape
-// firstDeniedTableRef's own doc comment says protobuf map fields take.
-func TestFirstDeniedTableRef_WalksMapValues(t *testing.T) {
+// TestFirstDenial_WalksMapValues proves the Map case actually works: no
+// field in pg_query_go's real ParseResult tree is map-typed today, so
+// ValidateTableRefs' own tests never exercise it.
+func TestFirstDenial_WalksMapValues(t *testing.T) {
 	m := map[string]*pg_query.RangeVar{
 		"x": {Schemaname: "system", Relname: "users"},
 	}
 
-	ref, ok := firstDeniedTableRef(reflect.ValueOf(m))
-	if !ok {
-		t.Fatal("expected a qualified reference to be found inside the map, got none")
-	}
-	if ref.Schemaname != "system" || ref.Relname != "users" {
-		t.Errorf("ref = %s.%s, want system.users", ref.Schemaname, ref.Relname)
+	err := firstDenial(reflect.ValueOf(m))
+	if !errors.Is(err, ErrQualifiedTableReference) || !strings.Contains(err.Error(), "system.users") {
+		t.Errorf("firstDenial = %v, want a rejection of system.users", err)
 	}
 }
 
@@ -102,24 +99,123 @@ func TestValidateTableRefs_InvalidSQLReturnsParseError(t *testing.T) {
 }
 
 func TestValidateTableRefs_RejectsEngineOwnedTables(t *testing.T) {
+	shapes := []string{
+		"SELECT * FROM %s",
+		"INSERT INTO %s DEFAULT VALUES",
+		"UPDATE %s SET x = $1",
+		"DELETE FROM %s",
+		"SELECT c.id FROM contacts c JOIN %s e ON e.id = c.id",
+		"SELECT id FROM contacts WHERE id IN (SELECT id FROM %s)",
+		"WITH e AS (SELECT id FROM %s) SELECT * FROM e",
+		"UPDATE contacts SET name = $1 FROM %s e WHERE e.id = contacts.id",
+		"DELETE FROM contacts USING %s e WHERE e.id = contacts.id",
+		"INSERT INTO contacts (id) SELECT id FROM %s",
+		"SELECT * FROM contacts WHERE EXISTS (SELECT 1 FROM %s)",
+		"SELECT (SELECT count(*) FROM %s) FROM contacts",
+		"SELECT * FROM contacts, LATERAL (SELECT * FROM %s) e",
+		"TABLE %s",
+		"SELECT * FROM %s UNION SELECT * FROM contacts",
+	}
+	var names []string
+	for _, g := range enginetables.Groups {
+		for _, tbl := range g.Tables {
+			names = append(names, tbl.Name)
+			if tbl.Partitioned {
+				names = append(names, tbl.Name+"_p20260901", tbl.Name+"_2026_09", tbl.Name+"_default")
+			}
+		}
+	}
+	for _, name := range names {
+		for _, shape := range shapes {
+			sql := fmt.Sprintf(shape, name)
+			err := ValidateTableRefs(sql)
+			if !errors.Is(err, ErrEngineOwnedTable) {
+				t.Errorf("ValidateTableRefs(%q) = %v, want ErrEngineOwnedTable", sql, err)
+				continue
+			}
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("error = %q, want it to name %q", err.Error(), name)
+			}
+		}
+	}
+}
+
+func TestValidateTableRefs_RejectsDeniedFunctions(t *testing.T) {
 	cases := []string{
-		"SELECT * FROM record_activity WHERE record_id = $1",
-		"INSERT INTO record_activity (model, record_id, kind, body) VALUES ($1, $2, 'comment', $3)",
-		"UPDATE record_activity SET body = $1 WHERE id = $2",
-		"DELETE FROM record_activity WHERE id = $1",
-		"SELECT c.id FROM contacts c JOIN record_activity a ON a.record_id = c.id",
-		"SELECT id FROM contacts WHERE id IN (SELECT record_id FROM record_activity)",
-		"WITH a AS (SELECT record_id FROM record_activity) SELECT * FROM a",
-		"UPDATE contacts SET name = $1 FROM record_activity WHERE record_activity.record_id = contacts.id",
+		"SELECT query_to_xml('select * from record_shares', true, false, '')",
+		"SELECT pg_catalog.query_to_xml('select * from record_shares', true, false, '')",
+		"SELECT query_to_xml_and_xmlschema('select * from user_roles', true, false, '')",
+		"SELECT query_to_xmlschema('select * from user_roles', true, false, '')",
+		"SELECT cursor_to_xml('c', 10, true, false, '')",
+		"SELECT table_to_xml('record_shares', true, false, '')",
+		"SELECT schema_to_xml(current_schema(), true, false, '')",
+		"SELECT database_to_xml(true, false, '')",
+		"SELECT ts_stat('select to_tsvector(body) from record_activity')",
+		"SELECT ts_rewrite('a'::tsquery, 'select t, s from record_activity')",
+		"SELECT set_config('search_path', 'system', true)",
+		"SELECT id FROM contacts WHERE name = (SELECT query_to_xml('select 1', true, false, '')::text)",
+		"UPDATE contacts SET name = query_to_xml('select * from roles', true, false, '')::text",
+		"INSERT INTO contacts (name) VALUES (query_to_xml('select * from roles', true, false, '')::text)",
+		"SELECT partman.run_maintenance()",
+		"SELECT public.similarity(name, $1) FROM contacts",
 	}
 	for _, sql := range cases {
-		err := ValidateTableRefs(sql)
-		if !errors.Is(err, ErrEngineOwnedTable) {
-			t.Errorf("ValidateTableRefs(%q) = %v, want ErrEngineOwnedTable", sql, err)
-			continue
+		if err := ValidateTableRefs(sql); !errors.Is(err, ErrDeniedFunction) {
+			t.Errorf("ValidateTableRefs(%q) = %v, want ErrDeniedFunction", sql, err)
 		}
-		if !strings.Contains(err.Error(), "record_activity") {
-			t.Errorf("error = %q, want it to name the offending table", err.Error())
+	}
+}
+
+func TestValidateTableRefs_AllowsOrdinaryFunctions(t *testing.T) {
+	cases := []string{
+		"SELECT count(*), max(created_at) FROM contacts",
+		"SELECT lower(name), coalesce(email, '') FROM contacts",
+		"SELECT pg_catalog.lower(name) FROM contacts",
+		"SELECT similarity(name, $1) FROM contacts WHERE name % $1",
+		"SELECT current_setting('app.current_user_id', true)",
+		"SELECT xmlelement(name contact, name) FROM contacts",
+	}
+	for _, sql := range cases {
+		if err := ValidateTableRefs(sql); err != nil {
+			t.Errorf("ValidateTableRefs(%q) = %v, want nil", sql, err)
+		}
+	}
+}
+
+func TestValidateTableRefs_RejectsPlannedEngineTables(t *testing.T) {
+	for _, name := range []string{"notifications", "notification_preferences", "scheduled_activities", "view_overrides"} {
+		if err := ValidateTableRefs("SELECT * FROM " + name); !errors.Is(err, ErrEngineOwnedTable) {
+			t.Errorf("%s: err = %v, want ErrEngineOwnedTable", name, err)
+		}
+	}
+}
+
+func TestValidateTableRefs_RejectsSystemCatalogRelations(t *testing.T) {
+	cases := []string{
+		"UPDATE pg_settings SET setting = 'tenant_other, public' WHERE name = 'search_path'",
+		"SELECT attname, most_common_vals FROM pg_stats WHERE tablename = 'user_roles'",
+		"SELECT * FROM pg_class",
+		"SELECT c.id FROM contacts c WHERE EXISTS (SELECT 1 FROM pg_roles)",
+	}
+	for _, sql := range cases {
+		if err := ValidateTableRefs(sql); !errors.Is(err, ErrSystemCatalogReference) {
+			t.Errorf("ValidateTableRefs(%q) = %v, want ErrSystemCatalogReference", sql, err)
+		}
+	}
+}
+
+func TestValidateTableRefs_AllowsModuleTablesPrefixedLikeEngineTables(t *testing.T) {
+	cases := []string{
+		"SELECT * FROM roles_catalog",
+		"SELECT * FROM files_archive",
+		"SELECT * FROM sequences_config",
+		"SELECT * FROM audit_log_entries",
+		"SELECT * FROM event_log_subscriptions",
+		"SELECT * FROM audit_log_p",
+	}
+	for _, sql := range cases {
+		if err := ValidateTableRefs(sql); err != nil {
+			t.Errorf("ValidateTableRefs(%q) = %v, want nil", sql, err)
 		}
 	}
 }

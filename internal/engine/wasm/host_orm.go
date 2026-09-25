@@ -8,13 +8,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5"
@@ -156,7 +156,7 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORM
 	}
 	defer finish()
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	pkColQuoted := quoteIdentORM(pkCol)
 
 	var count int64
@@ -261,7 +261,7 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		queryColumns = slices.Concat(columns, []string{pkCol})
 	}
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	selectCols := make([]string, len(queryColumns))
 	for i, c := range queryColumns {
 		selectCols[i] = quoteIdentORM(c)
@@ -443,7 +443,7 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 	}
 	defer finish()
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 
 	selectExprs := make([]string, 0, len(dimFields)+len(input.Values)+len(dimFields))
 	for _, f := range dimFields {
@@ -621,7 +621,7 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 	}
 	defer finish()
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	selectCols := make([]string, len(columns))
 	for i, c := range columns {
 		selectCols[i] = quoteIdentORM(c)
@@ -677,42 +677,6 @@ func primaryKeyColumn(md model.ModelDeclaration) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// tableNameForORM mirrors schema.TableNameFor's Table-or-snakeCase(Name)
-// fallback exactly — duplicated locally rather than imported, since
-// internal/engine/schema's own test suite imports this package (a real
-// compiled-module integration test), and this package importing schema
-// back would be a cycle. host_orm_test.go cross-checks this against
-// schema.TableNameFor directly (safe in a test file, since only schema's
-// test files import wasm, not schema's production code).
-func tableNameForORM(md model.ModelDeclaration) string {
-	if md.Table != "" {
-		return md.Table
-	}
-	return snakeCaseORM(md.Name)
-}
-
-func snakeCaseORM(name string) string {
-	var b strings.Builder
-	prevLower := false
-	for _, r := range name {
-		switch {
-		case r == '.':
-			b.WriteByte('_')
-			prevLower = false
-		case unicode.IsUpper(r):
-			if prevLower {
-				b.WriteByte('_')
-			}
-			b.WriteRune(unicode.ToLower(r))
-			prevLower = false
-		default:
-			b.WriteRune(r)
-			prevLower = true
-		}
-	}
-	return b.String()
 }
 
 // compileDomain parses and compiles a caller-supplied search domain to a

@@ -31,9 +31,11 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/dbscope"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -170,6 +172,11 @@ func LoadModule(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfig, 
 	}
 
 	if err := validateTrackedFields(models); err != nil {
+		m.Fail(err.Error())
+		return m
+	}
+
+	if err := validateReservedTableNames(models); err != nil {
 		m.Fail(err.Error())
 		return m
 	}
@@ -549,6 +556,23 @@ func validateTrackedFields(models []model.ModelDeclaration) error {
 		}
 		if len(pks) != 1 || pks[0].Def.Kind != model.KindUUID {
 			return fmt.Errorf("model %s: .Tracked() fields require a single UUID primary key", md.Name)
+		}
+	}
+	return nil
+}
+
+// validateReservedTableNames rejects a Postgres-backed model whose table
+// name module SQL may never reference (dbscope.IsReservedTableName): an
+// engine-owned per-tenant table or a partition name of one, which would
+// share the tenant schema with the model's table, or a pg_* name, which
+// resolves to the system catalog ahead of the tenant schema.
+func validateReservedTableNames(models []model.ModelDeclaration) error {
+	for _, md := range models {
+		if md.Backend != "" {
+			continue
+		}
+		if table := modeltable.Name(md); dbscope.IsReservedTableName(table) {
+			return fmt.Errorf("model %s: table name %q is reserved", md.Name, table)
 		}
 	}
 	return nil

@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
@@ -293,7 +294,7 @@ func insertColumnNames(stmt execStmt) []string {
 // exists regardless of opts.skip_audit.
 func insertPrimaryKeyColumn(modCtx *ModuleContext, table string) (string, bool) {
 	for _, decl := range modCtx.ModelDecls() {
-		if tableNameForORM(decl) != table {
+		if modeltable.Name(decl) != table {
 			continue
 		}
 		return primaryKeyColumn(decl)

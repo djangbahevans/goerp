@@ -18,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/orm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -469,7 +470,7 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 		return ORMFirstOrCreateOutput{}, ormSQLErrorRetryable(err)
 	}
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1", table, whereFrag), whereArgs...)
 	if err != nil {
 		return ORMFirstOrCreateOutput{}, ormSQLError(err)
@@ -813,7 +814,7 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 	// into memory first, the same reasoning ORMSearch's own Limit option
 	// follows.
 	maxRows := modCtx.ormBulkMaxRows()
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	pkColQuoted := quoteIdentORM(pkCol)
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT %d", pkColQuoted, table, whereFrag, maxRows+1), whereArgs...)
 	if err != nil {
@@ -929,7 +930,7 @@ func ORMUnlink(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 // itself, unlike OnCreate/OnWrite's after-the-write placement (this
 // file's own package doc comment explains why those two differ).
 func unlinkManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string) (ExecResult, *abi.HostError) {
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	pkColQuoted := quoteIdentORM(pkCol)
 
 	affected := make([]string, 0, len(ids))
@@ -1225,7 +1226,7 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 	}
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 
@@ -1341,7 +1342,7 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	}
 	sets := quoteIdentsORM(assigned)
 
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	pkColQuoted := quoteIdentORM(pkCol)
 	setClauses := make([]string, len(sets))
 	for i, col := range sets {
@@ -1625,7 +1626,7 @@ func writeAuditLogEntry(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, 
 		recordID = newData[pkCol]
 	}
 
-	if err := insertAuditLogRow(ctx, tx, modCtx, tableNameForORM(md), recordID, operation, excludeCols, oldData, newData); err != nil {
+	if err := insertAuditLogRow(ctx, tx, modCtx, modeltable.Name(md), recordID, operation, excludeCols, oldData, newData); err != nil {
 		return ormSQLError(err)
 	}
 	return nil
@@ -1778,7 +1779,7 @@ func auditJSON(data map[string]any, excludeCols map[string]bool) (any, error) {
 // equals fkValue — the Many2One-hop case's "which dependent records point
 // at the record that just changed" query.
 func fkReferencingIDs(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclaration, depPK, fkCol string, fkValue any) ([]any, error) {
-	table := quoteIdentORM(tableNameForORM(depMD))
+	table := quoteIdentORM(modeltable.Name(depMD))
 	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", quoteIdentORM(depPK), table, quoteIdentORM(fkCol))
 	rows, err := tx.QueryContext(ctx, sqlStr, fkValue)
 	if err != nil {
@@ -1807,7 +1808,7 @@ func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pk
 // selectRowByPK reads one row by primary key; lockClause (e.g. "FOR
 // UPDATE") is appended verbatim.
 func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, lockClause string) (map[string]any, *abi.HostError) {
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 	sqlStr := strings.TrimSpace(fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 %s", table, quoteIdentORM(pkCol), lockClause))
 	rows, err := tx.QueryContext(ctx, sqlStr, pkValue)
 	if err != nil {
@@ -1836,7 +1837,7 @@ func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, p
 // Scoped SET LOCAL (is_local=true), so it can't leak past this
 // transaction or suppress etag rotation on any other write in it.
 func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, field string, value any) *abi.HostError {
-	table := quoteIdentORM(tableNameForORM(md))
+	table := quoteIdentORM(modeltable.Name(md))
 
 	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.skip_etag_trigger', 'true', true)"); err != nil {
 		return ormSQLError(err)

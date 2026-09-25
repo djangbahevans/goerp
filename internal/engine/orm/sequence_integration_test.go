@@ -43,7 +43,7 @@ func createFixtureTenantSchema(t *testing.T, conn *sql.DB, slug string) {
 	}
 }
 
-// sequencesTableDDL mirrors internal/engine/tenant/provision/activities.go's
+// sequencesTableDDL mirrors internal/engine/enginetables's
 // createSequencesTable — duplicated here rather than imported, since that
 // package's constant is unexported and provisioning a real tenant workflow
 // is out of scope for these tests.
