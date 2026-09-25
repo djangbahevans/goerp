@@ -13,6 +13,7 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/trace"
@@ -45,7 +46,7 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	entry := rr.entry
 
-	_, mod, _, ok := rr.snap.ModelByName(entry.Manifest.Model)
+	_, mod, md, ok := rr.snap.ModelByName(entry.Manifest.Model)
 	if !ok {
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
 		return
@@ -92,19 +93,19 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 	case "list":
 		e.dispatchORMList(ctx, w, r, entry, modCtx)
 	case "get":
-		e.dispatchORMGet(ctx, w, r, rr.pathParams, entry, modCtx)
+		e.dispatchORMGet(ctx, w, r, rr.pathParams, entry, modCtx, md)
 	case "create":
-		e.dispatchORMCreate(ctx, w, r, entry, modCtx, insertClient)
+		e.dispatchORMCreate(ctx, w, r, entry, modCtx, md, insertClient)
 	case "update":
-		e.dispatchORMUpdate(ctx, w, r, rr.pathParams, entry, modCtx, insertClient)
+		e.dispatchORMUpdate(ctx, w, r, rr.pathParams, entry, modCtx, md, insertClient)
 	case "delete":
 		e.dispatchORMDelete(ctx, w, rr.pathParams, entry, modCtx, insertClient)
 	case "preview":
-		e.dispatchORMPreview(ctx, w, r, entry, modCtx)
+		e.dispatchORMPreview(ctx, w, r, entry, modCtx, md)
 	case "pivot":
 		e.dispatchORMPivot(ctx, w, r, entry, modCtx)
 	case "workflow_transition":
-		e.dispatchORMWorkflowTransition(ctx, w, rr.pathParams, entry, modCtx, insertClient)
+		e.dispatchORMWorkflowTransition(ctx, w, rr.pathParams, entry, modCtx, md, insertClient)
 	default:
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", "unknown crud action: "+entry.Manifest.CrudAction)
 	}
@@ -174,7 +175,7 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"data": out.Records,
+		"data": ormRecordsToJSON(md, out.Records),
 		"meta": map[string]any{
 			"cursor":   out.NextCursor,
 			"has_more": out.NextCursor != "",
@@ -256,7 +257,7 @@ func parsePivotValues(raw string) ([]wasm.PivotValue, *abiv1.HostError) {
 	return values, nil
 }
 
-func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *http.Request, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext) {
+func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *http.Request, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration) {
 	id := pathParams["id"]
 	if id == "" {
 		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
@@ -276,7 +277,7 @@ func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *h
 		return
 	}
 
-	writeJSON(w, http.StatusOK, out.Records[0])
+	writeJSON(w, http.StatusOK, ormRecordToJSON(md, out.Records[0]))
 }
 
 // dispatchORMPreview serves the Preview CRUD op (goerp#372) —
@@ -285,8 +286,8 @@ func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *h
 // PreviewHook if the model's module has one. Unlike every other
 // CrudAction here, this never persists anything and needs no
 // insertClient — no orm.record.* event is ever emitted for a preview.
-func (e *Engine) dispatchORMPreview(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext) {
-	record, ok := decodeJSONRecord(w, r)
+func (e *Engine) dispatchORMPreview(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration) {
+	record, ok := decodeORMRecord(w, r, md)
 	if !ok {
 		return
 	}
@@ -300,11 +301,11 @@ func (e *Engine) dispatchORMPreview(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, out.Record)
+	writeJSON(w, http.StatusOK, ormRecordToJSON(md, out.Record))
 }
 
-func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
-	record, ok := decodeJSONRecord(w, r)
+func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
+	record, ok := decodeORMRecord(w, r, md)
 	if !ok {
 		return
 	}
@@ -318,17 +319,17 @@ func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, out.Record)
+	writeJSON(w, http.StatusCreated, ormRecordToJSON(md, out.Record))
 }
 
-func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
+func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
 		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
 		return
 	}
 
-	record, ok := decodeJSONRecord(w, r)
+	record, ok := decodeORMRecord(w, r, md)
 	if !ok {
 		return
 	}
@@ -349,7 +350,7 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 		return
 	}
 
-	writeJSON(w, http.StatusOK, out.Record)
+	writeJSON(w, http.StatusOK, ormRecordToJSON(md, out.Record))
 }
 
 // dispatchORMWorkflowTransition serves a .Workflow()-declared transition
@@ -376,7 +377,7 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 // pointer, so a genuinely-empty etag threads through as a real
 // precondition rather than being mistaken for "no precondition
 // supplied" (goerp#871).
-func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
+func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
 		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
@@ -438,7 +439,7 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 		return
 	}
 
-	writeJSON(w, http.StatusOK, writeOut.Record)
+	writeJSON(w, http.StatusOK, ormRecordToJSON(md, writeOut.Record))
 }
 
 func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
@@ -475,6 +476,21 @@ func decodeJSONRecord(w http.ResponseWriter, r *http.Request) (record map[string
 		return nil, false
 	}
 	return record, true
+}
+
+// decodeORMRecord is decodeJSONRecord plus ormRecordFromJSON's per-kind
+// conversion, answering a value it can't convert with 400 invalid_body.
+func decodeORMRecord(w http.ResponseWriter, r *http.Request, md model.ModelDeclaration) (map[string]any, bool) {
+	record, ok := decodeJSONRecord(w, r)
+	if !ok {
+		return nil, false
+	}
+	converted, err := ormRecordFromJSON(md, record)
+	if err != nil {
+		writeRouteError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return nil, false
+	}
+	return converted, true
 }
 
 // writeJSON marshals to a buffer before writing anything to w — unlike
