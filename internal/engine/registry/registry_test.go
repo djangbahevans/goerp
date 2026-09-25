@@ -486,6 +486,39 @@ func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnNameChange(t *testing.
 	}
 }
 
+func TestModuleRegistry_Update_SnapshotSchemaHashChangesOnRouteTypeChange(t *testing.T) {
+	// A field added to an engine.Returns type must change the hash, or
+	// goerp codegen --watch keeps the old generated types.
+	hashWith := func(t *testing.T, responseType *engine.TypeDesc) string {
+		t.Helper()
+		snap, err := (&ModuleRegistry{}).Update(map[string]*module.LoadedModule{
+			"contacts": {
+				Status:   module.StatusReady,
+				Manifest: manifest.Manifest{Type: "standard"},
+				ExplicitRoutes: []engine.RouteDeclaration{
+					{Method: "GET", Path: "/export", Auth: "required", ResponseType: responseType},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+		return snap.SchemaHash()
+	}
+
+	untyped := hashWith(t, nil)
+	typed := hashWith(t, &engine.TypeDesc{Kind: "object", Name: "Export", Fields: []engine.FieldDesc{
+		{Name: "id", Type: engine.TypeDesc{Kind: "string"}},
+	}})
+	widened := hashWith(t, &engine.TypeDesc{Kind: "object", Name: "Export", Fields: []engine.FieldDesc{
+		{Name: "id", Type: engine.TypeDesc{Kind: "string"}},
+		{Name: "total", Type: engine.TypeDesc{Kind: "number"}},
+	}})
+	if untyped == typed || typed == widened {
+		t.Errorf("SchemaHash() untyped=%s typed=%s widened=%s, want all different", untyped, typed, widened)
+	}
+}
+
 func TestModuleRegistry_Update_SnapshotSchemaHashStableAcrossIdenticalRebuilds(t *testing.T) {
 	buildModules := func() map[string]*module.LoadedModule {
 		return map[string]*module.LoadedModule{

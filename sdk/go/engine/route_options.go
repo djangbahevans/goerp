@@ -43,6 +43,8 @@ type routeConfig struct {
 	streaming    bool
 	embedded     []EmbeddedDecl
 	pathParams   map[string]string
+	requestType  *TypeDesc
+	responseType *TypeDesc
 
 	model          string
 	crudAction     string

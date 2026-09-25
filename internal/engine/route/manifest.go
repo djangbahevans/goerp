@@ -1,6 +1,10 @@
 package route
 
-import "time"
+import (
+	"time"
+
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+)
 
 type RouteManifest struct {
 	Auth        string // "required"|"optional"|"none" — RouteDeclaration.Auth's wire value
@@ -48,6 +52,11 @@ type RouteManifest struct {
 	EngineBuiltin bool
 
 	StorageBackend string // "table"|"transient"|"virtual"
+
+	// RequestType and ResponseType are the route's engine.Body/engine.Returns
+	// declarations, served in /_meta/schema for goerp codegen only.
+	RequestType  *abiv1.TypeDesc
+	ResponseType *abiv1.TypeDesc
 
 	// Workflow carries a .Workflow()-declared transition's own from/to/
 	// field/condition — set only when CrudAction is "workflow_transition".

@@ -1,6 +1,7 @@
 package registry
 
 import (
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -64,6 +65,44 @@ type SchemaRoute struct {
 	Name           string   `json:"name,omitempty"`
 	ResponseIsList bool     `json:"response_is_list"`
 	View           string   `json:"view,omitempty"`
+	// engine.Body/engine.Returns declarations, read by goerp codegen.
+	RequestType  *SchemaTypeDesc `json:"request_type,omitempty"`
+	ResponseType *SchemaTypeDesc `json:"response_type,omitempty"`
+}
+
+// SchemaTypeDesc is go-sdk-reference.md §2a's TypeDesc in JSON form.
+type SchemaTypeDesc struct {
+	Kind     string            `json:"kind"`
+	Name     string            `json:"name,omitempty"`
+	Elem     *SchemaTypeDesc   `json:"elem,omitempty"`
+	Fields   []SchemaFieldDesc `json:"fields,omitempty"`
+	Nullable bool              `json:"nullable,omitzero"`
+}
+
+// SchemaFieldDesc is one field of an object SchemaTypeDesc.
+type SchemaFieldDesc struct {
+	Name     string         `json:"name"`
+	Type     SchemaTypeDesc `json:"type"`
+	Optional bool           `json:"optional,omitzero"`
+}
+
+func schemaTypeDescFrom(d *abiv1.TypeDesc) *SchemaTypeDesc {
+	if d == nil {
+		return nil
+	}
+	out := &SchemaTypeDesc{
+		Kind:     string(d.Kind),
+		Name:     d.Name,
+		Elem:     schemaTypeDescFrom(d.Elem),
+		Nullable: d.Nullable,
+	}
+	if len(d.Fields) > 0 {
+		out.Fields = make([]SchemaFieldDesc, len(d.Fields))
+		for i, f := range d.Fields {
+			out.Fields[i] = SchemaFieldDesc{Name: f.Name, Type: *schemaTypeDescFrom(&f.Type), Optional: f.Optional}
+		}
+	}
+	return out
 }
 
 // SchemaModel is shell-architecture.md §9's ModelDef.
@@ -201,6 +240,8 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 			Name:           mf.Name,
 			ResponseIsList: mf.ResponseIsList,
 			View:           schemaViewFor(mod.Views, mf.Model, mf.CrudAction),
+			RequestType:    schemaTypeDescFrom(mf.RequestType),
+			ResponseType:   schemaTypeDescFrom(mf.ResponseType),
 		})
 	}
 

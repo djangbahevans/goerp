@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/event"
@@ -263,6 +264,8 @@ type schemaHashRoute struct {
 	CrudAction     string
 	Name           string
 	ResponseIsList bool
+	RequestType    *abiv1.TypeDesc
+	ResponseType   *abiv1.TypeDesc
 }
 
 type schemaHashModel struct {
@@ -366,6 +369,8 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 			CrudAction:     mf.CrudAction,
 			Name:           mf.Name,
 			ResponseIsList: mf.ResponseIsList,
+			RequestType:    mf.RequestType,
+			ResponseType:   mf.ResponseType,
 		})
 		hashModules[r.Entry.ModuleName] = hm
 	}

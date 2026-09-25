@@ -27,6 +27,9 @@ type ExplicitRoute struct {
 	CrudAction     string
 	Name           string
 	Scope          string
+
+	RequestType  *abiv1.TypeDesc
+	ResponseType *abiv1.TypeDesc
 }
 
 // ExplicitRoutesFrom converts a module's deserialized get_routes output
@@ -62,6 +65,8 @@ func ExplicitRoutesFrom(decls []abiv1.RouteDeclaration) []ExplicitRoute {
 			CrudAction:     d.CRUDAction,
 			Name:           d.Name,
 			Scope:          d.Scope,
+			RequestType:    d.RequestType,
+			ResponseType:   d.ResponseType,
 		}
 	}
 	return out
@@ -135,6 +140,8 @@ func RegisterModuleRoutes(table *RouteTable, moduleName, moduleType string, rout
 				ResponseIsList: r.ResponseIsList,
 				CrudAction:     r.CrudAction,
 				Name:           r.Name,
+				RequestType:    r.RequestType,
+				ResponseType:   r.ResponseType,
 			},
 		}
 		scratch.Register(r.Method, expandedPath, entry)
