@@ -51,34 +51,36 @@ const MAX_VISIBLE = 5;
 
 type Listener = (toasts: ToastMessage[]) => void;
 
+// The ToastAPI methods are arrow properties so a caller can pass one on
+// detached, e.g. `onClick={toast.dismiss}` or `const { success } = toast`.
 export class ToastBus implements ToastAPI {
   private toasts: ToastMessage[] = [];
   private readonly listeners = new Set<Listener>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  success(message: string, options?: ToastOptions): void {
+  success = (message: string, options?: ToastOptions): void => {
     this.push("success", message, options);
-  }
+  };
 
-  error(message: string, options?: ToastOptions): void {
+  error = (message: string, options?: ToastOptions): void => {
     this.push("error", message, options);
-  }
+  };
 
-  warning(message: string, options?: ToastOptions): void {
+  warning = (message: string, options?: ToastOptions): void => {
     this.push("warning", message, options);
-  }
+  };
 
-  info(message: string, options?: ToastOptions): void {
+  info = (message: string, options?: ToastOptions): void => {
     this.push("info", message, options);
-  }
+  };
 
-  loading(message: string): string {
+  loading = (message: string): string => {
     const id = crypto.randomUUID();
     this.upsert(id, "loading", message, undefined);
     return id;
-  }
+  };
 
-  dismiss(id?: string): void {
+  dismiss = (id?: string): void => {
     if (id === undefined) {
       for (const t of this.toasts) this.clearTimer(t.id);
       this.toasts = [];
@@ -87,7 +89,7 @@ export class ToastBus implements ToastAPI {
       this.toasts = this.toasts.filter((t) => t.id !== id);
     }
     this.notify();
-  }
+  };
 
   getToasts(): ToastMessage[] {
     return this.toasts;
