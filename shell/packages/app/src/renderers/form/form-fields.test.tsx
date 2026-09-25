@@ -12,7 +12,7 @@ import type { FormField } from "./form-view-types.js";
 const { getMock, tryResolveComponentMock } = vi.hoisted(() => ({
   getMock: vi.fn(async () => ({
     data: [{ id: "1", name: "VIP" }],
-    meta: { cursor: null, hasMore: false },
+    meta: { cursor: null, has_more: false },
   })),
   tryResolveComponentMock: vi.fn() as ReturnType<typeof vi.fn> & ((name?: string) => unknown),
 }));

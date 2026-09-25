@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { PagedResponseWire } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
 import type { ResourceRegistry, ResourceRegistryEntry } from "../schema/index.js";
 import { createInfiniteListQueryOptions } from "./use-infinite-list.js";
@@ -23,7 +24,7 @@ function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<Resource
   };
 }
 
-function fakeClient(response: PagedResponse<unknown>): Pick<APIClient, "get"> {
+function fakeClient(response: PagedResponseWire<unknown>): Pick<APIClient, "get"> {
   const get = vi.fn(async () => response);
   return { get } as unknown as Pick<APIClient, "get">;
 }
@@ -47,7 +48,7 @@ async function callQueryFn(
 describe("createInfiniteListQueryOptions", () => {
   it("resolves the resource and fetches its list path with flattened filter params", async () => {
     const registry = fakeRegistry();
-    const client = fakeClient({ data: [], meta: { cursor: null, hasMore: false } });
+    const client = fakeClient({ data: [], meta: { cursor: null, has_more: false } });
     const options = createInfiniteListQueryOptions(
       "contacts.contact",
       { filter: { is_active: true }, sort: "-created_at", limit: 25 },
@@ -65,7 +66,7 @@ describe("createInfiniteListQueryOptions", () => {
 
   it("sends the page param as a cursor on subsequent pages", async () => {
     const registry = fakeRegistry();
-    const client = fakeClient({ data: [], meta: { cursor: null, hasMore: false } });
+    const client = fakeClient({ data: [], meta: { cursor: null, has_more: false } });
     const options = createInfiniteListQueryOptions("contacts.contact", {}, registry, client);
 
     await callQueryFn(options, "page-2");
@@ -73,12 +74,22 @@ describe("createInfiniteListQueryOptions", () => {
     expect(client.get).toHaveBeenCalledWith("/contacts", { params: { cursor: "page-2" } });
   });
 
+  it("maps the engine's has_more and cursor onto the page", async () => {
+    const client = fakeClient({ data: [{ id: "a" }], meta: { cursor: "next", has_more: true, total: null } });
+    const options = createInfiniteListQueryOptions("contacts.contact", {}, fakeRegistry(), client);
+
+    const page = await callQueryFn(options, undefined);
+
+    expect(page).toEqual({ data: [{ id: "a" }], meta: { cursor: "next", hasMore: true } });
+    expect(options.getNextPageParam(page)).toBe("next");
+  });
+
   it("advances to the next cursor only while hasMore is true", () => {
     const options = createInfiniteListQueryOptions(
       "contacts.contact",
       {},
       fakeRegistry(),
-      fakeClient({ data: [], meta: { cursor: null, hasMore: false } }),
+      fakeClient({ data: [], meta: { cursor: null, has_more: false } }),
     );
 
     expect(options.getNextPageParam({ data: [], meta: { cursor: "next", hasMore: true } })).toBe("next");

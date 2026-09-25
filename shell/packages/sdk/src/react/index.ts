@@ -14,6 +14,22 @@ export type { PivotCellResponse, PivotResponse, PivotValueSpec, UsePivotDataOpti
 export { createPivotDataQueryOptions, usePivotData } from "./use-pivot-data.js";
 export type { UseRecordOptions, UseRecordResult } from "./use-record.js";
 export { createRecordQueryOptions, deleteRecord, recordQueryKey, saveRecord, useRecord } from "./use-record.js";
+export type {
+  ActivityAuthor,
+  ActivityEntry,
+  ActivityFieldChange,
+  ActivityKind,
+  CompletedActivity,
+  UseRecordActivityOptions,
+  UseRecordActivityResult,
+} from "./use-record-activity.js";
+export {
+  createDeleteCommentMutationOptions,
+  createPostCommentMutationOptions,
+  createRecordActivityQueryOptions,
+  recordActivityQueryKey,
+  useRecordActivity,
+} from "./use-record-activity.js";
 export type { RelationBatchSpec } from "./use-relation-labels.js";
 export { createRelationLabelsQueryOptions, mergeLabelsByKey, useRelationLabels } from "./use-relation-labels.js";
 export type { SavedFilter, UseSavedFiltersResult } from "./use-saved-filters.js";

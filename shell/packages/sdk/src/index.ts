@@ -9,6 +9,7 @@ export type {
   FilterParamValue,
   FilterRange,
   PagedResponse,
+  PagedResponseWire,
   RefreshedTokens,
   RefreshOutcome,
   RequestOptions,
@@ -23,6 +24,7 @@ export {
   isFilterIsNull,
   isFilterLike,
   isFilterRange,
+  toPagedResponse,
 } from "./http/index.js";
 export { defineModule } from "./module/define-module.js";
 export type { ModuleDefinition } from "./module/module-types.js";
