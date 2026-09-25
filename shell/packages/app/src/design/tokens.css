@@ -280,10 +280,10 @@
   }
 }
 
-/* notification-sheet.md's edge-slide entrance/exit — LTR only, since
-   translateX is a physical transform and no dir-aware infra exists yet to
-   flip it for RTL (notification-sheet.tsx's CONTENT_CLASSES comment). */
-@keyframes notification-sheet-content-show {
+/* SideSheet's edge-slide entrance/exit (notification-sheet.md, help-panel.md)
+   — LTR only, since translateX is a physical transform and no dir-aware
+   infra exists yet to flip it for RTL (side-sheet.tsx's CLASSES comment). */
+@keyframes side-sheet-content-show {
   from {
     opacity: 0;
     transform: translateX(100%);
@@ -294,7 +294,7 @@
   }
 }
 
-@keyframes notification-sheet-content-hide {
+@keyframes side-sheet-content-hide {
   from {
     opacity: 1;
     transform: translateX(0);

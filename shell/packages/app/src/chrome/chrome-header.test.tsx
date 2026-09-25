@@ -4,6 +4,7 @@ import { ChromeHeader } from "./chrome-header.js";
 
 vi.mock("./route-breadcrumb.js", () => ({ RouteBreadcrumb: () => <nav aria-label="Breadcrumb" /> }));
 vi.mock("./search-trigger.js", () => ({ SearchTrigger: () => <button type="button">search</button> }));
+vi.mock("./help-button.js", () => ({ HelpButton: () => <button type="button">help</button> }));
 vi.mock("./notification-bell.js", () => ({ NotificationBell: () => <button type="button">notifications</button> }));
 vi.mock("./user-menu.js", () => ({ UserMenu: () => <button type="button">account</button> }));
 
@@ -19,5 +20,15 @@ describe("ChromeHeader", () => {
     expect(screen.getByText("search")).toBeTruthy();
     expect(screen.getByText("notifications")).toBeTruthy();
     expect(screen.getByText("account")).toBeTruthy();
+  });
+
+  it("orders the actions search, help, notifications, account", () => {
+    render(<ChromeHeader />);
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "search",
+      "help",
+      "notifications",
+      "account",
+    ]);
   });
 });

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { HelpButton } from "./help-button.js";
 import { NotificationBell } from "./notification-bell.js";
 import { RouteBreadcrumb } from "./route-breadcrumb.js";
 import { SearchTrigger } from "./search-trigger.js";
@@ -13,6 +14,7 @@ export function ChromeHeader(): ReactNode {
       <RouteBreadcrumb />
       <div className="flex items-center gap-2">
         <SearchTrigger />
+        <HelpButton />
         <NotificationBell />
         <UserMenu />
       </div>

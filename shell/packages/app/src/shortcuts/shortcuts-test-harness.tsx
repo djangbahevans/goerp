@@ -10,6 +10,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { render } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { CommandPalette } from "../chrome/command-palette.js";
 import { GlobalShortcuts } from "./global-shortcuts.js";
@@ -58,8 +59,10 @@ function Page() {
 }
 
 // The root layout's shortcut-related pieces, under routes the shell
-// shortcuts navigate to.
-export async function renderShell(opts: { roles?: string[]; permissions?: string[]; path?: string } = {}) {
+// shortcuts navigate to, plus any `extra` chrome under test.
+export async function renderShell(
+  opts: { roles?: string[]; permissions?: string[]; path?: string; extra?: ReactNode } = {},
+) {
   const queryClient = new QueryClient();
   const permissionValue = createPermissionContextValue({
     permissions: new Set(opts.permissions ?? []),
@@ -75,6 +78,7 @@ export async function renderShell(opts: { roles?: string[]; permissions?: string
             <CommandPalette />
             <KeyboardShortcutsDialog />
             <GlobalShortcuts />
+            {opts.extra}
           </PermissionContext.Provider>
         </AuthContext.Provider>
       </QueryClientProvider>
