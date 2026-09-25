@@ -424,3 +424,44 @@ func mustQuery(t *testing.T, ctx context.Context, tx *sql.Tx, sqlText string, ar
 	}
 	return rows
 }
+
+func TestDBExec_AuditedDeleteUsing_RecordsTheDeletedRows(t *testing.T) {
+	primaryDB, slug, mc := setupExecTest(t)
+	ctx := t.Context()
+	if _, err := primaryDB.ExecContext(ctx, `CREATE TABLE tenant_`+slug+`.purge (id UUID, widget_id UUID)`); err != nil {
+		t.Fatalf("create purge table: %v", err)
+	}
+	keep, drop := "30000000-0000-0000-0000-000000000001", "30000000-0000-0000-0000-000000000002"
+	for _, id := range []string{keep, drop} {
+		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "w-" + id}}); hostErr != nil {
+			t.Fatalf("seed widget: %+v", hostErr)
+		}
+	}
+	if _, err := primaryDB.ExecContext(ctx, `INSERT INTO tenant_`+slug+`.purge VALUES (gen_random_uuid(), $1)`, drop); err != nil {
+		t.Fatalf("seed purge: %v", err)
+	}
+
+	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+		SQL:    "DELETE FROM widget w USING purge p WHERE w.id = p.widget_id AND w.name LIKE $1",
+		Params: []any{"w-%"},
+	}); hostErr != nil {
+		t.Fatalf("DBExec DELETE … USING: %+v", hostErr)
+	}
+
+	var deletes []auditLogRow
+	for _, r := range queryAuditLogRows(t, primaryDB, slug, "widget") {
+		if r.Operation == "DELETE" {
+			deletes = append(deletes, r)
+		}
+	}
+	if len(deletes) != 1 || deletes[0].RecordID != drop {
+		t.Fatalf("DELETE audit rows = %+v, want one for %s", deletes, drop)
+	}
+	var old map[string]any
+	if err := json.Unmarshal([]byte(deletes[0].OldData.String), &old); err != nil {
+		t.Fatalf("decode old_data: %v", err)
+	}
+	if _, joined := old["widget_id"]; joined {
+		t.Errorf("old_data = %v, want only widget's own columns", old)
+	}
+}

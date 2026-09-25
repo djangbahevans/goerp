@@ -12,6 +12,7 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/dbscope"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5/pgconn"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	"github.com/rs/zerolog/log"
@@ -75,6 +76,7 @@ type execStmt struct {
 	Operation     string // "INSERT", "UPDATE", or "DELETE"
 	Relation      *pg_query.RangeVar
 	WhereClause   *pg_query.Node   // nil for INSERT
+	FromClause    []*pg_query.Node // an UPDATE's FROM or a DELETE's USING items
 	ReturningList []*pg_query.Node // must be empty as parsed — see DBExec
 	stmtNode      *pg_query.Node   // the InsertStmt/UpdateStmt/DeleteStmt node itself, for injecting a RETURNING list before deparse
 }
@@ -93,9 +95,9 @@ func parseExecStmt(tree *pg_query.ParseResult) (execStmt, error) {
 	case *pg_query.Node_InsertStmt:
 		return execStmt{Operation: "INSERT", Relation: n.InsertStmt.GetRelation(), ReturningList: n.InsertStmt.GetReturningList(), stmtNode: node}, nil
 	case *pg_query.Node_UpdateStmt:
-		return execStmt{Operation: "UPDATE", Relation: n.UpdateStmt.GetRelation(), WhereClause: n.UpdateStmt.GetWhereClause(), ReturningList: n.UpdateStmt.GetReturningList(), stmtNode: node}, nil
+		return execStmt{Operation: "UPDATE", Relation: n.UpdateStmt.GetRelation(), WhereClause: n.UpdateStmt.GetWhereClause(), FromClause: n.UpdateStmt.GetFromClause(), ReturningList: n.UpdateStmt.GetReturningList(), stmtNode: node}, nil
 	case *pg_query.Node_DeleteStmt:
-		return execStmt{Operation: "DELETE", Relation: n.DeleteStmt.GetRelation(), WhereClause: n.DeleteStmt.GetWhereClause(), ReturningList: n.DeleteStmt.GetReturningList(), stmtNode: node}, nil
+		return execStmt{Operation: "DELETE", Relation: n.DeleteStmt.GetRelation(), WhereClause: n.DeleteStmt.GetWhereClause(), FromClause: n.DeleteStmt.GetUsingClause(), ReturningList: n.DeleteStmt.GetReturningList(), stmtNode: node}, nil
 	default:
 		return execStmt{}, fmt.Errorf("host.db.exec only permits INSERT, UPDATE, or DELETE statements — schema changes are handled exclusively by the schema sync engine, and reads go through host.db.query")
 	}
@@ -140,12 +142,15 @@ func parseReturningColumns(returning string) ([]string, error) {
 // exposed to the module directly: scanRowsToMaps' column-name-keyed
 // result lets projectReturning and the audit functions each pick out
 // only the columns they need afterward, without DBExec having to
-// pre-compute which specific columns either side requires.
-func returningAllResTarget() []*pg_query.Node {
-	return []*pg_query.Node{
-		pg_query.MakeResTargetNodeWithVal(
-			pg_query.MakeColumnRefNode([]*pg_query.Node{pg_query.MakeAStarNode()}, 0), 0),
+// pre-compute which specific columns either side requires. For an
+// UPDATE … FROM or DELETE … USING it's `RETURNING <target>.*`, so a joined
+// table's columns can't shadow the target's own.
+func returningAllResTarget(stmt execStmt) []*pg_query.Node {
+	fields := []*pg_query.Node{pg_query.MakeAStarNode()}
+	if len(stmt.FromClause) > 0 {
+		fields = []*pg_query.Node{pg_query.MakeStrNode(targetRowRef(stmt.Relation)), pg_query.MakeAStarNode()}
 	}
+	return []*pg_query.Node{pg_query.MakeResTargetNodeWithVal(pg_query.MakeColumnRefNode(fields, 0), 0)}
 }
 
 // validateRequestedColumns errors if any of requested doesn't appear in
@@ -199,6 +204,13 @@ type preparedExec struct {
 	excludeCols   map[string]bool
 	hasEtagCol    bool
 	hadEtagCheck  bool
+	// tracked is set for an UPDATE of a table whose model has .Tracked()
+	// fields, which writes change entries regardless of opts.skip_audit
+	// (record-activity.md §5).
+	tracked      bool
+	trackedModel model.ModelDeclaration
+	trackedName  string
+	trackedPKCol string
 }
 
 // prepareExec parses sqlText as a single INSERT/UPDATE/DELETE statement,
@@ -247,9 +259,19 @@ func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (prepar
 		}
 	}
 
-	needReturning := requestedCols != nil || (audited && stmt.Operation != "DELETE")
+	var (
+		tracked      bool
+		trackedModel model.ModelDeclaration
+		trackedName  string
+		trackedPKCol string
+	)
+	if stmt.Operation == "UPDATE" {
+		trackedModel, trackedName, trackedPKCol, tracked = resolveTrackedExecTable(modCtx, table)
+	}
+
+	needReturning := requestedCols != nil || (audited && stmt.Operation != "DELETE") || tracked
 	if needReturning {
-		setReturningList(stmt.stmtNode, returningAllResTarget())
+		setReturningList(stmt.stmtNode, returningAllResTarget(stmt))
 	}
 	finalSQL, err := pgquery.Deparse(tree)
 	if err != nil {
@@ -260,6 +282,7 @@ func prepareExec(sqlText string, opts dbExecOpts, modCtx *ModuleContext) (prepar
 		stmt: stmt, table: table, finalSQL: finalSQL, needReturning: needReturning,
 		requestedCols: requestedCols, audited: audited, pkCol: pkCol, excludeCols: excludeCols,
 		hasEtagCol: hasEtagCol, hadEtagCheck: hadEtagCheck,
+		tracked: tracked, trackedModel: trackedModel, trackedName: trackedName, trackedPKCol: trackedPKCol,
 	}, nil
 }
 
@@ -342,10 +365,10 @@ type execRowResult struct {
 // transaction's own lifetime.
 func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedExec, params []any) (execRowResult, *abi.HostError) {
 	var oldRows []map[string]any
-	if p.audited && p.stmt.Operation != "INSERT" {
+	if (p.audited && p.stmt.Operation != "INSERT") || p.tracked {
 		var err error
 		oldRows, err = captureRowsBeforeExec(ctx, tx, auditableExecStmt{
-			Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause,
+			Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause, FromClause: p.stmt.FromClause,
 		}, params)
 		if err != nil {
 			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeExecError, Message: err.Error()}
@@ -406,6 +429,12 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 	if p.audited {
 		if auditErr := writeAuditForExec(ctx, tx, modCtx, p.table, p.stmt, p.pkCol, p.excludeCols, oldRows, newRows); auditErr != nil {
 			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: auditErr.Error()}
+		}
+	}
+
+	if p.tracked {
+		if err := writeExecChangeActivity(ctx, tx, modCtx, p.trackedName, p.trackedModel, p.trackedPKCol, oldRows, newRows); err != nil {
+			return execRowResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
 		}
 	}
 
@@ -488,7 +517,7 @@ func writeAuditForExec(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, t
 		newRows = nil
 	}
 	return writeExecAuditEntries(ctx, tx, modCtx, table, auditableExecStmt{
-		Operation: stmt.Operation, Table: table, Relation: stmt.Relation, WhereClause: stmt.WhereClause,
+		Operation: stmt.Operation, Table: table, Relation: stmt.Relation, WhereClause: stmt.WhereClause, FromClause: stmt.FromClause,
 	}, pkCol, excludeCols, oldRows, newRows)
 }
 

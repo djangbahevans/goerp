@@ -135,15 +135,32 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	authors := e.newActivityAuthorResolver(tenantCtx.Slug)
-	out := make([]activityEntryResponse, len(entries))
-	for i := range entries {
-		out[i] = activityEntryToResponse(&entries[i], authors.resolve(ctx, entries[i].AuthorID))
-	}
-	meta := activityListMeta{HasMore: hasMore}
+	// The cursor is the last stored entry, taken before field-level
+	// filtering drops any, so the next page continues after it.
+	var nextCursor *string
 	if hasMore {
-		meta.Cursor = &entries[len(entries)-1].ID
+		nextCursor = &entries[len(entries)-1].ID
 	}
+
+	readable := e.readableFieldFilter(authCtx, modelName)
+	authors := e.newActivityAuthorResolver(tenantCtx.Slug)
+	out := make([]activityEntryResponse, 0, len(entries))
+	for i := range entries {
+		entry := &entries[i]
+		if entry.Kind == recordactivity.KindChange {
+			changes, keep, err := filterChanges(entry.Changes, readable)
+			if err != nil {
+				writeRouteError(w, http.StatusInternalServerError, "internal_error", "list activity failed")
+				return
+			}
+			if !keep {
+				continue
+			}
+			entry.Changes = changes
+		}
+		out = append(out, activityEntryToResponse(entry, authors.resolve(ctx, entry.AuthorID)))
+	}
+	meta := activityListMeta{HasMore: hasMore, Cursor: nextCursor}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": meta})
 }
 
@@ -290,4 +307,58 @@ func (a *activityAuthorResolver) resolve(ctx context.Context, authorID *string) 
 	}
 	a.seen[*authorID] = author
 	return author
+}
+
+// readableFieldFilter reports whether authCtx's caller can read a field of
+// modelName under its .Access() rule. A field with no read rule is readable.
+// Fails closed on an unresolved registry.
+func (e *Engine) readableFieldFilter(authCtx *authcheck.AuthContext, modelName string) func(field string) bool {
+	snap := e.moduleRegistry.Snapshot()
+	if snap == nil {
+		return func(string) bool { return false }
+	}
+	fieldSec := snap.FieldSecRegistry()
+	permReg := snap.PermissionRegistry()
+	return func(field string) bool {
+		if fieldSec == nil {
+			return true
+		}
+		rule, ok := fieldSec.Rule(modelName, field)
+		if !ok || rule.ReadPermission == "" {
+			return true
+		}
+		return hasPermission(permReg, authCtx, rule.ReadPermission)
+	}
+}
+
+// filterChanges removes every field the caller can't read from a change
+// entry's changes (record-activity.md §7), whatever the field's
+// OnDeniedRead behaviour: a masked value in a history entry still reveals
+// that the field changed. keep is false when no readable field is left.
+func filterChanges(raw jsontext.Value, readable func(field string) bool) (filtered jsontext.Value, keep bool, err error) {
+	var changes []map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &changes); err != nil {
+		return nil, false, err
+	}
+	kept := changes[:0]
+	for _, c := range changes {
+		var field string
+		if err := json.Unmarshal(c["field"], &field); err != nil {
+			return nil, false, err
+		}
+		if readable(field) {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) == 0 {
+		return nil, false, nil
+	}
+	if len(kept) == len(changes) {
+		return raw, true, nil
+	}
+	out, err := json.Marshal(kept)
+	if err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
 }

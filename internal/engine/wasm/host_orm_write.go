@@ -162,6 +162,10 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return ORMCreateOutput{}, hostErr
 	}
 
+	conflictRow, hostErr := lockConflictRowBeforeUpsert(ctx, tx, md, input.Model, record, input.OnConflict)
+	if hostErr != nil {
+		return ORMCreateOutput{}, hostErr
+	}
 	row, inserted, updatedFields, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
 	if hostErr != nil {
 		return ORMCreateOutput{}, hostErr
@@ -192,6 +196,9 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		operation = "UPDATE"
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, operation, nil, row); hostErr != nil {
+		return ORMCreateOutput{}, hostErr
+	}
+	if hostErr := writeCreateActivity(ctx, tx, modCtx, input.Model, md, inserted, conflictRow, row); hostErr != nil {
 		return ORMCreateOutput{}, hostErr
 	}
 
@@ -307,6 +314,10 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			return ORMCreateBatchOutput{}, hostErr
 		}
 
+		conflictRow, hostErr := lockConflictRowBeforeUpsert(ctx, tx, md, input.Model, record, input.OnConflict)
+		if hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
 		row, inserted, updatedFields, hostErr := createOneRecordTx(ctx, tx, modCtx, md, input.Model, record, input.OnConflict, serverFilled)
 		if hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
@@ -327,6 +338,9 @@ func ORMCreateBatch(ctx context.Context, r *Runtime, db *sql.DB, insertClient *r
 			operation = "UPDATE"
 		}
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, operation, nil, row); hostErr != nil {
+			return ORMCreateBatchOutput{}, hostErr
+		}
+		if hostErr := writeCreateActivity(ctx, tx, modCtx, input.Model, md, inserted, conflictRow, row); hostErr != nil {
 			return ORMCreateBatchOutput{}, hostErr
 		}
 		all = append(all, row)
@@ -511,6 +525,9 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "INSERT", nil, row); hostErr != nil {
 		return ORMFirstOrCreateOutput{}, hostErr
 	}
+	if hostErr := writeCreatedActivity(ctx, tx, modCtx, input.Model, md, row); hostErr != nil {
+		return ORMFirstOrCreateOutput{}, hostErr
+	}
 
 	if err := emitRecordCreatedEvent(ctx, insertClient, tx, modCtx, input.Model, row); err != nil {
 		return ORMFirstOrCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
@@ -596,7 +613,7 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, hostErr
 	}
 
-	oldData, hostErr := fetchRowForAuditBeforeWrite(ctx, tx, modCtx, input.Model, md, pkCol, input.ID)
+	oldData, hostErr := fetchRowBeforeWrite(ctx, tx, modCtx, input.Model, md, pkCol, input.ID)
 	if hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
@@ -616,6 +633,9 @@ func ORMWrite(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.C
 		return ORMWriteOutput{}, hostErr
 	}
 	if hostErr := writeAuditLogEntry(ctx, tx, modCtx, input.Model, md, "UPDATE", oldData, updated); hostErr != nil {
+		return ORMWriteOutput{}, hostErr
+	}
+	if hostErr := writeChangeActivity(ctx, tx, modCtx, input.Model, md, oldData, updated); hostErr != nil {
 		return ORMWriteOutput{}, hostErr
 	}
 
@@ -1361,7 +1381,7 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (ExecResult, *abi.HostError) {
 	affected := make([]string, 0, len(ids))
 	for _, id := range ids {
-		oldData, hostErr := fetchRowForAuditBeforeWrite(ctx, tx, modCtx, qualifiedModel, md, pkCol, id)
+		oldData, hostErr := fetchRowBeforeWrite(ctx, tx, modCtx, qualifiedModel, md, pkCol, id)
 		if hostErr != nil {
 			return ExecResult{}, hostErr
 		}
@@ -1379,6 +1399,9 @@ func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *r
 			return ExecResult{}, hostErr
 		}
 		if hostErr := writeAuditLogEntry(ctx, tx, modCtx, qualifiedModel, md, "UPDATE", oldData, updated); hostErr != nil {
+			return ExecResult{}, hostErr
+		}
+		if hostErr := writeChangeActivity(ctx, tx, modCtx, qualifiedModel, md, oldData, updated); hostErr != nil {
 			return ExecResult{}, hostErr
 		}
 		if err := emitRecordUpdatedEvent(ctx, insertClient, tx, modCtx, qualifiedModel, updated, changedFields); err != nil {
@@ -1504,6 +1527,9 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 			if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, depID, dep.Field, value); hostErr != nil {
 				return hostErr
 			}
+			if hostErr := writeRecomputedActivity(ctx, tx, modCtx, dep, depRow); hostErr != nil {
+				return hostErr
+			}
 		}
 	}
 	return nil
@@ -1536,7 +1562,10 @@ func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx
 	if hostErr != nil {
 		return hostErr
 	}
-	return applyComputedValue(ctx, tx, dep.ModelDecl, depPK, parentID, dep.Field, value)
+	if hostErr := applyComputedValue(ctx, tx, dep.ModelDecl, depPK, parentID, dep.Field, value); hostErr != nil {
+		return hostErr
+	}
+	return writeRecomputedActivity(ctx, tx, modCtx, dep, depRow)
 }
 
 // recomputeParentsAfterChildUnlink recomputes every parent computed field
@@ -1702,19 +1731,19 @@ func isAuditedModel(modCtx *ModuleContext, qualifiedModel string) bool {
 	return audited
 }
 
-// fetchRowForAuditBeforeWrite fetches qualifiedModel's row by pkValue
+// fetchRowBeforeWrite fetches qualifiedModel's row by pkValue
 // before an UPDATE runs, so writeAuditLogEntry has a real old_data
-// snapshot to record — but only when the table is actually audited, so
-// the common non-audited case pays no extra round trip. Returns a nil
-// map (not an error) when the table isn't audited, modCtx carries no
-// DataAuditRegistry at all, or the row simply doesn't exist (ID/etag
+// snapshot to record and writeChangeActivity has old values to compare —
+// but only when the table is audited or has tracked fields, so the common
+// case pays no extra round trip. Returns a nil map (not an error) when
+// neither applies, or the row simply doesn't exist (ID/etag
 // mismatch) — that last case is deliberately swallowed rather than
 // surfaced here, since the caller's own subsequent writeOneRecordTx
 // already produces the correct, more specific orm.not_found vs.
 // orm.etag_mismatch diagnosis (diagnoseZeroRowWrite) and this helper
 // must not shadow that with a generic error first.
-func fetchRowForAuditBeforeWrite(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, pkCol, pkValue string) (map[string]any, *abi.HostError) {
-	if !isAuditedModel(modCtx, qualifiedModel) {
+func fetchRowBeforeWrite(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, pkCol, pkValue string) (map[string]any, *abi.HostError) {
+	if !needsRowBeforeWrite(modCtx, qualifiedModel, md) {
 		return nil, nil
 	}
 	row, hostErr := fetchRowByPK(ctx, tx, md, pkCol, pkValue)
