@@ -59,18 +59,24 @@ const COLUMNS: DataTableColumn<AdminUser>[] = [
 export interface AdminUsersPageProps {
   search: string;
   status: AdminUserStatusFilter;
+  // A role name: only members holding it are listed.
+  roleFilter?: string | undefined;
   onSearchChange: (search: string) => void;
   onStatusChange: (status: AdminUserStatusFilter) => void;
+  onClearRole?: (() => void) | undefined;
   onOpenUser: (id: string) => void;
 }
 
-// shell-ux.md §5.1 "Users". The search and status tab live in the URL
-// (the route owns them) so returning from a user's page restores the list.
+// shell-ux.md §5.1 "Users". The search, status tab and role filter live in
+// the URL (the route owns them) so returning from a user's page restores the
+// list.
 export function AdminUsersPage({
   search,
   status,
+  roleFilter = "",
   onSearchChange,
   onStatusChange,
+  onClearRole,
   onOpenUser,
 }: AdminUsersPageProps): ReactNode {
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -107,10 +113,22 @@ export function AdminUsersPage({
             start={<Icon name="search" size={16} className="text-text-secondary" aria-hidden="true" />}
           />
         </div>
+        {roleFilter && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-text">
+            <span>
+              Showing users with the <span className="font-medium">{roleLabel(roleFilter)}</span> role.
+            </span>
+            {onClearRole && (
+              <ActionButton variant="secondary" size="sm" onClick={onClearRole}>
+                Show all roles
+              </ActionButton>
+            )}
+          </div>
+        )}
         <Tabs items={STATUS_TABS} activeId={status} onChange={(id) => onStatusChange(id as AdminUserStatusFilter)}>
           {STATUS_TABS.map((tab) => (
             <TabPanel key={tab.id} id={tab.id}>
-              <UsersTable search={search} status={tab.id} onOpenUser={onOpenUser} />
+              <UsersTable search={search} status={tab.id} roleFilter={roleFilter} onOpenUser={onOpenUser} />
             </TabPanel>
           ))}
         </Tabs>
@@ -123,11 +141,12 @@ export function AdminUsersPage({
 interface UsersTableProps {
   search: string;
   status: AdminUserStatusFilter;
+  roleFilter: string;
   onOpenUser: (id: string) => void;
 }
 
-function UsersTable({ search, status, onOpenUser }: UsersTableProps): ReactNode {
-  const query = useAdminUsers(search, status);
+function UsersTable({ search, status, roleFilter, onOpenUser }: UsersTableProps): ReactNode {
+  const query = useAdminUsers(search, status, roleFilter);
   const users = query.data?.pages.flatMap((page) => page.users) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
 
@@ -145,6 +164,8 @@ function UsersTable({ search, status, onOpenUser }: UsersTableProps): ReactNode 
 
   const empty = search ? (
     <EmptyState icon="search-x" title="No users found" description={`Nothing matches "${search}".`} />
+  ) : roleFilter ? (
+    <EmptyState icon="users" title="No users with this role" />
   ) : (
     <EmptyState icon="users" title={EMPTY_TITLES[status]} />
   );

@@ -31,7 +31,7 @@ import {
 } from "./admin-users-api.js";
 import { displayName } from "./admin-users-page.js";
 import { describeUserAgent } from "./describe-user-agent.js";
-import { ASSIGNABLE_ROLES, roleLabel } from "./roles.js";
+import { roleLabel, useAssignableRoles } from "./roles.js";
 import { UserStatusBadge } from "./user-status-badge.js";
 
 // auth-internals.md §2: users.status is platform-level, so both confirmations
@@ -241,7 +241,8 @@ function UserDetail({ user, onDeleted }: { user: AdminUserDetail; onDeleted: () 
 function RolesSection({ user, isSelf }: { user: AdminUserDetail; isSelf: boolean }): ReactNode {
   const assign = useAssignRole(user.id);
   const revoke = useRevokeRole(user.id);
-  const available = ASSIGNABLE_ROLES.filter((option) => !user.roles.includes(option.value));
+  const assignable = useAssignableRoles();
+  const available = assignable.filter((option) => !user.roles.includes(option.value));
   const [picked, setPicked] = useState("");
   const toAdd = available.some((option) => option.value === picked) ? picked : "";
 

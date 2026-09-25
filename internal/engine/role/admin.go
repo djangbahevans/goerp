@@ -17,13 +17,15 @@ var (
 )
 
 // Summary is one role as the tenant admin roles pages show it. UserCount
-// counts live grants only, the same rule IsMember applies.
+// counts live grants and InvitationCount pending invitations, each only for
+// accounts that aren't deleted, the same people the user directory lists.
 type Summary struct {
-	ID          string
-	Name        string
-	Description *string
-	IsImmutable bool
-	UserCount   int
+	ID              string
+	Name            string
+	Description     *string
+	IsImmutable     bool
+	UserCount       int
+	InvitationCount int
 }
 
 // Detail adds the role's own granted permission names, sorted.
@@ -44,18 +46,26 @@ type Change struct {
 // caller's audit row and change notification.
 type InTx func(tx *sql.Tx) error
 
-const liveGrant = `(ur.expires_at IS NULL OR ur.expires_at > NOW())`
+const (
+	liveGrant         = `(ur.expires_at IS NULL OR ur.expires_at > NOW())`
+	pendingInvitation = `(ti.accepted_at IS NULL AND ti.revoked_at IS NULL)`
+	// A deleted account keeps its grants and invitations, but no longer
+	// holds or is offered the role.
+	heldByAccount    = liveGrant + ` AND EXISTS (SELECT 1 FROM system.users u WHERE u.id = ur.user_id AND u.deleted_at IS NULL)`
+	offeredToAccount = pendingInvitation + ` AND EXISTS (SELECT 1 FROM system.users u WHERE u.email = ti.email AND u.deleted_at IS NULL)`
+)
 
 func summaryQuery(schema string) string {
 	return fmt.Sprintf(`
 		SELECT r.id, r.name, r.description, r.is_immutable,
-		       (SELECT COUNT(*) FROM %[1]s.user_roles ur WHERE ur.role_id = r.id AND `+liveGrant+`)
+		       (SELECT COUNT(*) FROM %[1]s.user_roles ur WHERE ur.role_id = r.id AND `+heldByAccount+`),
+		       (SELECT COUNT(*) FROM %[1]s.tenant_invitations ti WHERE ti.role_id = r.id AND `+offeredToAccount+`)
 		FROM %[1]s.roles r`, schema)
 }
 
 func scanSummary(sc interface{ Scan(dest ...any) error }) (Summary, error) {
 	var s Summary
-	err := sc.Scan(&s.ID, &s.Name, &s.Description, &s.IsImmutable, &s.UserCount)
+	err := sc.Scan(&s.ID, &s.Name, &s.Description, &s.IsImmutable, &s.UserCount, &s.InvitationCount)
 	return s, err
 }
 
@@ -231,8 +241,9 @@ func (s *Store) UpdateRole(ctx context.Context, tenantSlug, roleID string, chang
 
 // DeleteRole removes a custom role that no user holds and no pending
 // invitation offers. Built-in roles are ErrRoleImmutable, and a role with a
-// live grant or a pending invitation is ErrRoleInUse. Expired grants and
-// accepted or revoked invitations go with the role.
+// live grant or a pending invitation is ErrRoleInUse. Expired grants,
+// accepted or revoked invitations, and a deleted account's grants and
+// invitations go with the role.
 func (s *Store) DeleteRole(ctx context.Context, tenantSlug, roleID string, within InTx) error {
 	schema := tenantschema.Name(tenantSlug)
 	return s.inTx(ctx, func(tx *sql.Tx) error {
@@ -245,8 +256,8 @@ func (s *Store) DeleteRole(ctx context.Context, tenantSlug, roleID string, withi
 		}
 		var inUse bool
 		inUseQuery := fmt.Sprintf(`
-			SELECT EXISTS (SELECT 1 FROM %[1]s.user_roles ur WHERE ur.role_id = $1 AND `+liveGrant+`)
-			    OR EXISTS (SELECT 1 FROM %[1]s.tenant_invitations ti WHERE ti.role_id = $1 AND ti.accepted_at IS NULL AND ti.revoked_at IS NULL)`, schema)
+			SELECT EXISTS (SELECT 1 FROM %[1]s.user_roles ur WHERE ur.role_id = $1 AND `+heldByAccount+`)
+			    OR EXISTS (SELECT 1 FROM %[1]s.tenant_invitations ti WHERE ti.role_id = $1 AND `+offeredToAccount+`)`, schema)
 		if err := tx.QueryRowContext(ctx, inUseQuery, roleID).Scan(&inUse); err != nil {
 			return fmt.Errorf("check role holders: %w", err)
 		}

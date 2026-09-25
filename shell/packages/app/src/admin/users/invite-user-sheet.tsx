@@ -3,7 +3,7 @@ import { AppError } from "@goerp/sdk/error";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { SideSheet } from "../../chrome/side-sheet.js";
 import { type InviteUserResult, useInviteUser } from "./admin-users-api.js";
-import { ASSIGNABLE_ROLES, DEFAULT_INVITE_ROLE } from "./roles.js";
+import { DEFAULT_INVITE_ROLE, useAssignableRoles } from "./roles.js";
 
 export interface InviteUserSheetProps {
   open: boolean;
@@ -35,6 +35,7 @@ function errorsFor(err: unknown): FormErrors {
 // on its success view rather than while typing.
 export function InviteUserSheet({ open, onClose }: InviteUserSheetProps): ReactNode {
   const invite = useInviteUser();
+  const roles = useAssignableRoles();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState(DEFAULT_INVITE_ROLE);
@@ -111,7 +112,7 @@ export function InviteUserSheet({ open, onClose }: InviteUserSheetProps): ReactN
           </FieldWrapper>
           <FieldWrapper label="Role" required error={errors.role}>
             <Select
-              options={ASSIGNABLE_ROLES}
+              options={roles}
               value={role}
               onChange={(value) => setRole(typeof value === "string" ? value : DEFAULT_INVITE_ROLE)}
             />

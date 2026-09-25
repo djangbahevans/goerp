@@ -233,7 +233,7 @@ func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	filter := listFilter{Search: strings.TrimSpace(q.Get("q")), Status: q.Get("status"), Limit: defaultListLimit}
+	filter := listFilter{Search: strings.TrimSpace(q.Get("q")), Status: q.Get("status"), Role: q.Get("role"), Limit: defaultListLimit}
 	if filter.Status != "" && !slices.Contains(listStatuses, filter.Status) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "status must be one of active, invited, suspended")
 		return
