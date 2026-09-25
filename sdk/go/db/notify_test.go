@@ -8,7 +8,7 @@ import (
 )
 
 // TestDbNotifyInput_MsgpackWireShape checks the actual field names
-// host.db.notify sees on the wire — see TestDbExecInput_MsgpackWireShape's
+// host.db.notify sees on the wire — see TestDBExecInput_MsgpackWireShape's
 // own doc comment for why a struct-literal-only test can't catch a
 // typo'd msgpack tag.
 func TestDbNotifyInput_MsgpackWireShape(t *testing.T) {

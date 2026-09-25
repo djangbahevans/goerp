@@ -8,13 +8,13 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// TestDbExecInput_MsgpackWireShape marshals a real dbExecInput and
+// TestDBExecInput_MsgpackWireShape marshals a real abi.DBExecInput and
 // decodes the raw bytes into a generic map, checking the actual field
 // names host.db.exec sees on the wire — a struct-literal-only test
 // can't catch a typo'd msgpack tag (e.g. "expect_row" instead of
 // "expect_rows"), since Go field access doesn't go through the tag at
 // all.
-func TestDbExecInput_MsgpackWireShape(t *testing.T) {
+func TestDBExecInput_MsgpackWireShape(t *testing.T) {
 	in := abi.DBExecInput{SQL: "UPDATE widget SET name = $1", Params: []any{"x"}, TxID: "tx-1", Opts: abi.DBExecOpts{Returning: "id,name", ExpectRows: true}}
 	data, err := msgpack.Marshal(in)
 	if err != nil {

@@ -53,9 +53,9 @@ func RegisterVirtualBackend(modelName string, backend VirtualBackend) {
 	registry[modelName] = backend
 }
 
-// DispatchVirtualOp decodes a virtualOpRequest from module memory at
+// DispatchVirtualOp decodes an abi.VirtualOpRequest from module memory at
 // (ptr, length), routes it to the registered VirtualBackend's matching
-// function, and writes back a msgpack-encoded virtualOpResponse — the
+// function, and writes back a msgpack-encoded abi.VirtualOpResponse — the
 // same decode/route/encode shape sdk/go/engine.DispatchRequest already
 // uses for handle_request, just routing through the registry above
 // instead of DefaultRouter. A module exports this as

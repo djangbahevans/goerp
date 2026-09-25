@@ -202,7 +202,7 @@ func TestDBExecBatch_ContinueOnError_True_CommitsSuccessesReportsFailures(t *tes
 	if errs[0].Code != abiv1.ErrCodeDBUniqueViolation {
 		t.Errorf("errors[0].Code = %q, want %q", errs[0].Code, abiv1.ErrCodeDBUniqueViolation)
 	}
-	_ = out // zero value on the error path — see dbExecBatchOutput{} returned alongside a non-nil hostErr
+	_ = out // zero value on the error path — see abiv1.DBExecBatchOutput{} returned alongside a non-nil hostErr
 
 	for _, id := range []string{"2000000a-0000-0000-0000-000000000002", "2000000a-0000-0000-0000-000000000004"} {
 		var count int

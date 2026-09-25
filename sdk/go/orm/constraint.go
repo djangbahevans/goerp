@@ -67,10 +67,10 @@ func RegisterConstraint(modelName string, phase ConstraintPhase, fn ConstraintFu
 	constraintRegistry[constraintKey{model: modelName, phase: phase}] = fn
 }
 
-// DispatchConstraint decodes a constraintRequest from module memory at
+// DispatchConstraint decodes an abi.ConstraintRequest from module memory at
 // (ptr, length), routes it to the ConstraintFunc registered for
 // (req.Model, req.Phase), and writes back a msgpack-encoded
-// constraintResponse — the same decode/route/encode shape
+// abi.ConstraintResponse — the same decode/route/encode shape
 // orm.DispatchPreview (preview.go) already uses. A (model, phase) with no
 // registered hook is Allowed: true, not an error — "no hook" is the
 // expected common case, the same reasoning DispatchPreview uses for an
