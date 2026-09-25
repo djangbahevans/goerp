@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { FieldWrapper } from "./field-wrapper.js";
 import { Select } from "./select.js";
 
 afterEach(cleanup);
@@ -155,5 +156,16 @@ describe("Select", () => {
       expect(container.contains(listbox)).toBe(false);
       expect(document.body.contains(listbox)).toBe(true);
     });
+  });
+});
+
+describe("Select inside a FieldWrapper", () => {
+  it("is named by the wrapper's label", () => {
+    render(
+      <FieldWrapper label="Role">
+        <Select options={[{ value: "user", label: "User" }]} value="user" onChange={() => {}} />
+      </FieldWrapper>,
+    );
+    expect(screen.getByRole("combobox", { name: "Role" })).toBeTruthy();
   });
 });

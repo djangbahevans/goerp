@@ -3,13 +3,9 @@ import { AuthContext, createPermissionContextValue, PermissionContext, permissio
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
-
-vi.mock("../../admin/admin-nav.js", () => ({
-  ADMIN_NAV_GROUPS: [{ items: [{ to: "/admin/users", label: "Users", icon: "users" }] }],
-}));
 
 const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
 
