@@ -31,7 +31,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -1376,22 +1375,27 @@ func (e *Engine) invokeHandler(
 		return EngineResponse{}, fmt.Errorf("handler %s trapped: %w", handlerName, err)
 	}
 
-	// Decode into the Go Module SDK's own wire type (contract/abi/v1.Response)
-	// rather than EngineResponse directly — Body is `any` on the wire (a
-	// module returns engine.OK(myStruct), not raw bytes), while
-	// EngineResponse.Body is already-serialized bytes ready for
-	// writeResponse's w.Write. The re-encode below bridges the two.
 	var wire abiv1.Response
 	if err := msgpack.Unmarshal(respBytes, &wire); err != nil {
 		return EngineResponse{}, fmt.Errorf("unmarshal response: %w", err)
 	}
-
-	// Escape options match v1's Encoder defaults, since Body reaches the
-	// client verbatim via writeResponse's w.Write.
-	bodyBytes, err := json.Marshal(wire.Body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+	bodyBytes, err := handlerResponseBody(wire)
 	if err != nil {
-		return EngineResponse{}, fmt.Errorf("marshal response body: %w", err)
+		return EngineResponse{}, err
 	}
-
 	return EngineResponse{StatusCode: wire.StatusCode, Headers: wire.Headers, Body: bodyBytes}, nil
+}
+
+// handlerResponseBody validates a handler response's JSON body and escapes
+// it as v1's Encoder defaults do, since it reaches the client verbatim via
+// writeResponse's w.Write.
+func handlerResponseBody(wire abiv1.Response) ([]byte, error) {
+	if len(wire.Body) == 0 {
+		return nil, nil
+	}
+	body := jsontext.Value(wire.Body)
+	if err := body.Format(jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)); err != nil {
+		return nil, fmt.Errorf("validate response body: %w", err)
+	}
+	return body, nil
 }

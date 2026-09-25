@@ -1,5 +1,12 @@
 package engine
 
+import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+)
+
 func DispatchRequest(ptr, length uint32) uint64 {
 	buf := ReadMem(ptr, length)
 
@@ -20,10 +27,12 @@ func DispatchRequest(ptr, length uint32) uint64 {
 	return WriteResponse(resp)
 }
 
+// WriteResponse sends resp to the engine with its body encoded as JSON by
+// the value's json tags, the same encoding Request.ParseJSON reads.
 func WriteResponse(resp *Response) uint64 {
-	data, err := marshal(resp)
+	wire, err := wireResponse(resp)
 	if err != nil {
-		data, _ = marshal(&Response{
+		wire, _ = wireResponse(&Response{
 			StatusCode: 500,
 			Body: map[string]any{
 				"error": map[string]any{
@@ -33,8 +42,18 @@ func WriteResponse(resp *Response) uint64 {
 			},
 		})
 	}
+	return writePacked(wire)
+}
 
-	ptr := Allocate(uint32(len(data)))
-	WriteMem(ptr, data)
-	return uint64(ptr)<<32 | uint64(len(data))
+func wireResponse(resp *Response) (*abi.Response, error) {
+	wire := &abi.Response{StatusCode: resp.StatusCode, Headers: resp.Headers}
+	if resp.Body == nil {
+		return wire, nil
+	}
+	body, err := json.Marshal(resp.Body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+	if err != nil {
+		return nil, err
+	}
+	wire.Body = body
+	return wire, nil
 }

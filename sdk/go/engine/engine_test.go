@@ -1,6 +1,10 @@
 package engine
 
-import "testing"
+import (
+	"testing"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+)
 
 func TestAllocateDeallocateRoundTrip(t *testing.T) {
 	want := []byte(`{"hello":"world"}`)
@@ -39,7 +43,7 @@ func TestDispatchRequest(t *testing.T) {
 
 	respBytes := ReadMem(respPtr, respLen)
 
-	var resp Response
+	var resp abi.Response
 	if err := unmarshal(respBytes, &resp); err != nil {
 		t.Fatalf("unmarshal(resp) error: %v", err)
 	}
@@ -77,7 +81,7 @@ func TestDispatchRequest_RawBodyRouteExposesUnparsedBytes(t *testing.T) {
 	respPtr := uint32(packed >> 32)
 	respLen := uint32(packed)
 
-	var resp Response
+	var resp abi.Response
 	if err := unmarshal(ReadMem(respPtr, respLen), &resp); err != nil {
 		t.Fatalf("unmarshal(resp) error: %v", err)
 	}
@@ -122,7 +126,7 @@ func TestDispatchRequest_NonRawBodyRouteStillParsesJSON(t *testing.T) {
 	respPtr := uint32(packed >> 32)
 	respLen := uint32(packed)
 
-	var resp Response
+	var resp abi.Response
 	if err := unmarshal(ReadMem(respPtr, respLen), &resp); err != nil {
 		t.Fatalf("unmarshal(resp) error: %v", err)
 	}
@@ -148,7 +152,7 @@ func TestDispatchRequestNoRouteMatched(t *testing.T) {
 	respPtr := uint32(packed >> 32)
 	respLen := uint32(packed)
 
-	var resp Response
+	var resp abi.Response
 	if err := unmarshal(ReadMem(respPtr, respLen), &resp); err != nil {
 		t.Fatalf("unmarshal(resp) error: %v", err)
 	}

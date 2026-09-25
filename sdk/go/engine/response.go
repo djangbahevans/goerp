@@ -1,8 +1,13 @@
 package engine
 
-import abi "github.com/djangbahevans/goerp/contract/abi/v1"
-
-type Response = abi.Response
+// Response is what a handler returns. Body is encoded as JSON by its json
+// tags when the SDK hands the response to the engine; a nil Body sends no
+// body.
+type Response struct {
+	StatusCode int
+	Headers    map[string]string
+	Body       any
+}
 
 func OK(body any) *Response {
 	return &Response{StatusCode: 200, Body: body}

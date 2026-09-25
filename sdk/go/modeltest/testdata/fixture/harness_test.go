@@ -21,6 +21,21 @@ func TestPing(t *testing.T) {
 	}
 }
 
+func TestStructResponseUsesJSONTags(t *testing.T) {
+	h := modeltest.NewHarness(t)
+
+	resp := h.GET("/widgets/typed-response")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; error=%v msg=%v", resp.StatusCode, resp.JSON("error.code"), resp.JSON("error.message"))
+	}
+	var got map[string]any
+	resp.ParseJSON(&got)
+	want := map[string]any{"id": "c1", "email": nil, "updated_at": "2026-01-02T03:04:05Z"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("body = %v, want %v", got, want)
+	}
+}
+
 func TestPOST_NilSliceAndMapReachHandlerAsEmptyNotNull(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
