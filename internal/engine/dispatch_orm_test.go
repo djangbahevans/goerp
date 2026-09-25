@@ -240,6 +240,9 @@ func TestDispatchORMRoute_Create_Then_Get(t *testing.T) {
 	if fetched["id"] != id {
 		t.Errorf("fetched[id] = %v, want %v", fetched["id"], id)
 	}
+	if etag, _ := created["etag"].(string); etag == "" || fetched["etag"] != etag {
+		t.Errorf("etag: created %v, fetched %v, want the same non-empty etag", created["etag"], fetched["etag"])
+	}
 }
 
 func TestDispatchORMRoute_Get_MissingRecord_404(t *testing.T) {

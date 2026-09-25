@@ -341,11 +341,8 @@ func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromSameState_
 
 // TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins
 // is the ConcurrentTransitionsFromSameState race above, but fired directly
-// off a just-created record with no intervening write — its etag is still
-// the column's schema default (""). ExpectedEtag is a *string, so that
-// genuinely-empty etag threads through dispatchORMWorkflowTransition's
-// write as a real compare-and-swap precondition rather than being read as
-// "no precondition supplied" (goerp#871); confirm and reject are both
+// off a just-created record with no intervening write, so both transitions
+// compare against the etag create generated; confirm and reject are both
 // valid from "draft", the state every order starts in.
 func TestDispatchORMRoute_WorkflowTransition_ConcurrentTransitionsFromCreate_OnlyOneWins(t *testing.T) {
 	f := newDispatchWorkflowFixture(t)
