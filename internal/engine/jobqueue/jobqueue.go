@@ -38,6 +38,9 @@ const (
 	QueueEvents = "events"
 )
 
+// Schema holds River's tables, off every module transaction's search_path.
+const Schema = "system"
+
 // migrateLockKey serializes concurrent Migrate callers against the same
 // pool — see Migrate's own doc comment for why this is needed.
 var migrateLockKey = db.AdvisoryLockKey("jobqueue.Migrate")
@@ -71,6 +74,17 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	defer func() { _ = lockConn.Close(ctx) }()
 
+	// Committed on its own so the migrator's pool connections see it.
+	if err := pgx.BeginFunc(ctx, lockConn, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", db.SystemSchemaLockKey); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+Schema)
+		return err
+	}); err != nil {
+		return fmt.Errorf("create job queue schema: %w", err)
+	}
+
 	tx, err := lockConn.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin migration lock transaction: %w", err)
@@ -81,7 +95,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("acquire migration advisory lock: %w", err)
 	}
 
-	migrator, err := rivermigrate.New(riverpgxv5.New(pool), nil)
+	migrator, err := rivermigrate.New(riverpgxv5.New(pool), &rivermigrate.Config{Schema: Schema})
 	if err != nil {
 		return fmt.Errorf("create river migrator: %w", err)
 	}
@@ -106,8 +120,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 // tradeoff, not a correctness one.
 func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river.Client[pgx.Tx], error) {
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:  QueueConfig(cfg),
-		Workers: workers,
+		Schema:            Schema,
+		Queues:            QueueConfig(cfg),
+		Workers:           workers,
+		ReindexerSchedule: river.NeverSchedule(),
 		// Platform-wide (not per-tenant), so a single hourly job — not one
 		// per tenant — per goerp#194/data-layer.md §2.6: pg_partman's own
 		// run_maintenance() already iterates every table any tenant schema
@@ -127,6 +143,13 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				river.PeriodicInterval(time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {
 					return InviteExpiryArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: false},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(24*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return ReindexArgs{}, nil
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),

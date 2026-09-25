@@ -133,6 +133,9 @@ func NewHarness(t *testing.T, opts ...Option) *Harness {
 	if err != nil {
 		t.Fatalf("modeltest: wasm.New: %v", err)
 	}
+	// The harness connects as one role for everything, so data migrations'
+	// host.db.migration_ddl runs on the same pool as every other host call.
+	rt.SetSchemaSyncDB(primaryDB)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	mod := loader.LoadModule(ctx, rt, wasm.PoolConfig{

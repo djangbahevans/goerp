@@ -122,7 +122,7 @@ func TestEventsReplayWorker_Work_EnqueuesFanOutJobsForMatchedEvents(t *testing.T
 	eventID := uuid.NewV7().String()
 	insertFixtureEventLogRow(t, conn, slug, eventID, eventName, "sales", now)
 	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
+		_, _ = conn.Exec(`DELETE FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
 	})
 
 	replayWorker := &EventsReplayWorker{ModuleRegistry: w.ModuleRegistry, TenantStore: tenantStore, Pool: conn}
@@ -139,7 +139,7 @@ func TestEventsReplayWorker_Work_EnqueuesFanOutJobsForMatchedEvents(t *testing.T
 
 	var count int
 	var tenantID string
-	if err := conn.QueryRow(`SELECT count(*), max(args->>'tenant_id') FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count, &tenantID); err != nil {
+	if err := conn.QueryRow(`SELECT count(*), max(args->>'tenant_id') FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count, &tenantID); err != nil {
 		t.Fatalf("query river_job: %v", err)
 	}
 	if count != 1 {
@@ -162,7 +162,7 @@ func TestEventsReplayWorker_Work_DoesNotDoubleEnqueueOnRetry(t *testing.T) {
 	eventID := uuid.NewV7().String()
 	insertFixtureEventLogRow(t, conn, slug, eventID, eventName, "sales", now)
 	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
+		_, _ = conn.Exec(`DELETE FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
 	})
 
 	replayWorker := &EventsReplayWorker{ModuleRegistry: w.ModuleRegistry, TenantStore: tenantStore, Pool: conn}
@@ -181,7 +181,7 @@ func TestEventsReplayWorker_Work_DoesNotDoubleEnqueueOnRetry(t *testing.T) {
 	}
 
 	var count int
-	if err := conn.QueryRow(`SELECT count(*) FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count); err != nil {
+	if err := conn.QueryRow(`SELECT count(*) FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count); err != nil {
 		t.Fatalf("query river_job: %v", err)
 	}
 	if count != 1 {
@@ -205,7 +205,7 @@ func TestEventsReplayWorker_Work_TenantAll(t *testing.T) {
 	eventID := uuid.NewV7().String()
 	insertFixtureEventLogRow(t, conn, slug, eventID, eventName, "sales", now)
 	t.Cleanup(func() {
-		_, _ = conn.Exec(`DELETE FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
+		_, _ = conn.Exec(`DELETE FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
 	})
 
 	replayWorker := &EventsReplayWorker{ModuleRegistry: w.ModuleRegistry, TenantStore: tenantStore, Pool: conn}
@@ -221,7 +221,7 @@ func TestEventsReplayWorker_Work_TenantAll(t *testing.T) {
 	}
 
 	var count int
-	if err := conn.QueryRow(`SELECT count(*) FROM river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count); err != nil {
+	if err := conn.QueryRow(`SELECT count(*) FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID).Scan(&count); err != nil {
 		t.Fatalf("query river_job: %v", err)
 	}
 	if count != 1 {

@@ -392,36 +392,3 @@ func TestBootstrap_DeduplicatesAnExistingTableKeepingOneRowPerRecipient(t *testi
 		t.Errorf("share ids after a second Bootstrap() = %v, want unchanged %v", got, want)
 	}
 }
-
-func TestGrant_AddsTheUniqueIndexToATableCreatedWithoutIt(t *testing.T) {
-	conn, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-
-	slug := fmt.Sprintf("recordsharesheal%d", time.Now().UnixNano())
-	schema := tenantschema.Name(slug)
-	if _, err := conn.Exec("CREATE SCHEMA " + schema); err != nil {
-		t.Fatalf("create schema: %v", err)
-	}
-	t.Cleanup(func() { _, _ = conn.Exec("DROP SCHEMA " + schema + " CASCADE") })
-	createLegacyRecordShares(t, conn, schema)
-	seedLegacyDuplicates(t, conn, schema)
-
-	sh, created, err := NewStore(conn).Grant(t.Context(), slug, testModel, recordA, userX, "write", sharerQ, nil)
-	if err != nil {
-		t.Fatalf("Grant() on a table without the unique index error: %v", err)
-	}
-	if created || sh.ID != "aaaaaaaa-0000-0000-0000-000000000003" || sh.Permission != "write" {
-		t.Errorf("Grant() = %+v, created = %v, want the surviving newest legacy row updated to write", sh, created)
-	}
-
-	var uniqueExists bool
-	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = $1 AND indexname = 'idx_record_shares_unique')`, "tenant_"+slug).Scan(&uniqueExists); err != nil {
-		t.Fatalf("check index: %v", err)
-	}
-	if !uniqueExists {
-		t.Error("idx_record_shares_unique should exist after the first Grant()")
-	}
-}

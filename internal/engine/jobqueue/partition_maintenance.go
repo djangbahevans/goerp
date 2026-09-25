@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/riverqueue/river"
 )
 
@@ -25,7 +26,8 @@ func (PartitionMaintenanceArgs) InsertOpts() river.InsertOpts {
 // iterates every table any tenant schema has registered with pg_partman
 // (event_log/audit_log today) and creates any partitions that have fallen
 // short of that table's own p_premake window — a single call covers every
-// tenant schema, not one call per tenant.
+// tenant schema, not one call per tenant. It then revokes mutations on new
+// append-only partitions. Pool is the schema-sync pool.
 type PartitionMaintenanceWorker struct {
 	river.WorkerDefaults[PartitionMaintenanceArgs]
 	Pool *sql.DB
@@ -34,6 +36,9 @@ type PartitionMaintenanceWorker struct {
 func (w *PartitionMaintenanceWorker) Work(ctx context.Context, job *river.Job[PartitionMaintenanceArgs]) error {
 	if _, err := w.Pool.ExecContext(ctx, "SELECT partman.run_maintenance()"); err != nil {
 		return fmt.Errorf("run partition maintenance: %w", err)
+	}
+	if err := enginetables.RevokeAppendOnlyMutations(ctx, w.Pool, ""); err != nil {
+		return fmt.Errorf("revoke append-only partition privileges: %w", err)
 	}
 	return nil
 }

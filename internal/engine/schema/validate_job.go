@@ -38,17 +38,8 @@ func validationIdempotencyKey(tenantID, tableName, constraintName string) string
 // ValidateConstraintWorker runs ALTER TABLE ... VALIDATE CONSTRAINT for a
 // NOT VALID constraint and records the outcome.
 //
-// Pool is the engine's primary pool, which is PgBouncer-fronted under
-// transaction pooling (jobqueue.New's own doc comment) — unlike
-// SchemaSyncSession, which gets a session-scoped connection off a
-// dedicated, non-pooled DSN specifically so it can run a session-level
-// pg_advisory_lock and a separate SET search_path as independent
-// statements (db.WithAdvisoryLock explains why that split matters: two
-// autocommit statements over a transaction-pooled connection can land on
-// two different Postgres backends). Work has no such dedicated connection,
-// so it wraps SET LOCAL search_path and VALIDATE CONSTRAINT in one
-// explicit transaction instead — one transaction is guaranteed one backend
-// under PgBouncer transaction pooling regardless of pool mode.
+// Pool is the schema-sync pool, whose role owns the tables. Work runs SET
+// LOCAL search_path and VALIDATE CONSTRAINT in one transaction.
 type ValidateConstraintWorker struct {
 	river.WorkerDefaults[ValidateConstraintArgs]
 	Pool *sql.DB

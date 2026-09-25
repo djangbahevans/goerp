@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
@@ -35,15 +36,10 @@ type Activities struct {
 	inviteStore *invite.Store
 
 	// schemaSyncPool is the same pool internal/engine/schema's Stage 4
-	// sync mechanism already uses for DDL (config.Config's
-	// DBSchemaSyncDSN) — used here for every DDL statement (CREATE
-	// SCHEMA, CREATE TABLE) and the throwaway Bootstrap-only role/invite
-	// stores below. data-layer.md documents a schema_sync_user/app_user
-	// privilege split for these two pools in production, but nothing in
-	// this codebase provisions those two Postgres roles yet (grepped —
-	// zero references), so this package doesn't issue GRANT statements
-	// either; that's separate, ops-level future work once the roles
-	// actually exist.
+	// sync mechanism uses for DDL (config.Config's DBSchemaSyncDSN), whose
+	// role owns every tenant table (data-layer.md §2.2) — used here for
+	// every DDL statement and grant, and the throwaway Bootstrap-only
+	// role/invite stores below.
 	schemaSyncPool *sql.DB
 
 	syncPool   *schema.SchemaSyncPool
@@ -130,12 +126,20 @@ func (a *Activities) ReleaseSlugReservation(ctx context.Context, tenantID string
 	return nil
 }
 
-// CreateTenantSchema creates tenant_{slug} if it doesn't already exist —
-// idempotent, so a workflow retry after a transient failure here doesn't
-// itself fail on "schema already exists".
+// CreateTenantSchema creates tenant_{slug} and gives db.EngineRole DML on
+// every table and sequence later created in it. Idempotent.
 func (a *Activities) CreateTenantSchema(ctx context.Context, slug string) error {
-	if _, err := a.schemaSyncPool.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+tenantschema.Name(slug)); err != nil {
-		return fmt.Errorf("create tenant schema: %w", err)
+	schemaName := tenantschema.Name(slug)
+	stmts := []string{
+		"CREATE SCHEMA IF NOT EXISTS " + schemaName,
+		"GRANT USAGE ON SCHEMA " + schemaName + " TO " + db.EngineRole,
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA " + schemaName + " GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO " + db.EngineRole,
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA " + schemaName + " GRANT USAGE, SELECT ON SEQUENCES TO " + db.EngineRole,
+	}
+	for _, stmt := range stmts {
+		if _, err := a.schemaSyncPool.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("create tenant schema: %w", err)
+		}
 	}
 	return nil
 }

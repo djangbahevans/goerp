@@ -10,6 +10,7 @@ package enginetables
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -23,14 +24,18 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Table is one engine-owned per-tenant table. A Partitioned table's
 // pg_partman child partitions are named "<Name>_<suffix>" and live in the
 // same tenant schema, so every name with that prefix is engine-owned too.
+// db.EngineRole can insert into an AppendOnly table but not update or
+// delete from it, on the table or any of its partitions.
 type Table struct {
 	Name        string
 	Partitioned bool
+	AppendOnly  bool
 }
 
 // Group is a set of tables created together by one Create call, e.g.
@@ -89,7 +94,7 @@ var Groups = []Group{
 		Create: execEach(createSequencesTable),
 	},
 	{
-		Tables: []Table{{Name: "audit_log", Partitioned: true}},
+		Tables: []Table{{Name: "audit_log", Partitioned: true, AppendOnly: true}},
 		Create: createPartitioned("audit_log", "changed_at", createAuditLogTable, createAuditLogTimeIndex),
 	},
 	{
@@ -109,15 +114,81 @@ var plannedTables = []string{
 	"view_overrides",
 }
 
-// CreateAll creates every table in Groups in tenantSlug's schema. Every
-// Create is idempotent, so a retried provisioning run is safe.
+// CreateAll creates every table in Groups in tenantSlug's schema and
+// revokes mutations on the AppendOnly ones. Idempotent, so retries are safe.
 func CreateAll(ctx context.Context, pool *sql.DB, tenantSlug string) error {
 	for _, g := range Groups {
 		if err := g.Create(ctx, pool, tenantSlug); err != nil {
 			return fmt.Errorf("create %s: %w", g.Tables[0].Name, err)
 		}
 	}
+	return RevokeAppendOnlyMutations(ctx, pool, tenantSlug)
+}
+
+// RevokeAppendOnlyMutations revokes db.EngineRole's UPDATE and DELETE on
+// AppendOnly tables and their partitions in tenantSlug's schema, or every
+// tenant schema when empty; new partitions get both from default privileges.
+func RevokeAppendOnlyMutations(ctx context.Context, pool *sql.DB, tenantSlug string) error {
+	rows, err := pool.QueryContext(ctx, appendOnlyGrantsQuery, tenantSlug, appendOnlyTableNames(), db.EngineRole)
+	if err != nil {
+		return fmt.Errorf("find append-only tables: %w", err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan append-only table: %w", err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("find append-only tables: %w", err)
+	}
+	for _, t := range tables {
+		_, err := pool.ExecContext(ctx, "REVOKE UPDATE, DELETE ON "+t+" FROM "+db.EngineRole)
+		if isDroppedRelation(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("revoke update and delete on %s: %w", t, err)
+		}
+	}
 	return nil
+}
+
+// isDroppedRelation reports a table dropped, e.g. by offboarding, after it
+// was listed.
+func isDroppedRelation(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && (pgErr.Code == "42P01" || pgErr.Code == "3F000")
+}
+
+// appendOnlyGrantsQuery lists tables named in $2, and their partitions, on
+// which role $3 (if it exists) can UPDATE or DELETE.
+const appendOnlyGrantsQuery = `
+SELECT format('%I.%I', n.nspname, c.relname)
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_roles r ON r.rolname = $3
+LEFT JOIN pg_inherits i ON i.inhrelid = c.oid
+LEFT JOIN pg_class parent ON parent.oid = i.inhparent
+WHERE c.relkind IN ('r', 'p')
+  AND CASE WHEN $1 = '' THEN n.nspname LIKE 'tenant\_%' ELSE n.nspname = 'tenant_' || $1 END
+  AND COALESCE(parent.relname, c.relname) = ANY($2)
+  AND (has_table_privilege(r.oid, c.oid, 'UPDATE') OR has_table_privilege(r.oid, c.oid, 'DELETE'))
+`
+
+func appendOnlyTableNames() []string {
+	var names []string
+	for _, g := range Groups {
+		for _, t := range g.Tables {
+			if t.AppendOnly {
+				names = append(names, t.Name)
+			}
+		}
+	}
+	return names
 }
 
 // IsEngineOwned reports whether name is an engine-owned table in Groups,

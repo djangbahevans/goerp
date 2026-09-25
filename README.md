@@ -49,8 +49,8 @@ docker compose -f compose.dev.yml down -v
 
 | Service | Host address | Purpose | Credentials / notes |
 | --- | --- | --- | --- |
-| Postgres | `localhost:55432` | Primary database | user `goerp`, password `dev`, db `goerp`. Bound to a static non-default port to avoid clashing with a locally installed Postgres. |
-| PgBouncer | `localhost:6432` | Connection pooler in front of Postgres (transaction pooling) | Same credentials as Postgres. Prefer this over connecting to Postgres directly. |
+| Postgres | `localhost:55432` | Primary database | Superuser `goerp`, password `dev`. Database `goerp_dev` is the running engine's; database `goerp` is the test suite's. Roles `engine_user` and `schema_sync_user`, password `dev`. Bound to a static non-default port to avoid clashing with a locally installed Postgres. |
+| PgBouncer | `localhost:6432` | Connection pooler in front of Postgres (transaction pooling) | Serves `engine_user` on `goerp_dev`, the engine's primary pool, and `goerp` on `goerp` for the test suite. |
 | Redis | `localhost:6379` | Cache / pub-sub | No auth |
 | RedisInsight | [http://localhost:8001](http://localhost:8001) | Redis GUI | Connect it to `redis:6379` inside the compose network |
 | Meilisearch | [http://localhost:7700](http://localhost:7700) | Search index | Master key: `2f14b775804ecaf5dc4084d32aa034a7` |
@@ -63,12 +63,15 @@ docker compose -f compose.dev.yml down -v
 
 Point the locally-run engine binary at PgBouncer (not Postgres directly) and the other services above using their `localhost` ports. All services expose healthchecks where startup ordering matters (PgBouncer waits on Postgres being healthy).
 
+The engine logs in as two Postgres roles (data-layer.md §2.2): `engine_user` for its primary and job-queue pools, through PgBouncer, and `schema_sync_user` for schema sync, provisioning and startup bootstrap, directly. `schema_sync_user` owns the `system` schema and every tenant table; `engine_user` has DML on them and no DDL. `docker/postgres-initdb/` creates the roles, the `goerp_dev` database and the tenant-role functions when the `postgres_data` volume is first initialized, so a volume created before those scripts existed needs `docker compose -f compose.dev.yml down -v` to pick them up. A production cluster runs the same two scripts once at cluster setup: `01-roles.sql` as the superuser, without its dev-only `CREATE DATABASE goerp_dev`, then `database/setup.sql` in the engine's database, with real passwords.
+
 ### Running the engine
 
-With the stack up, the only environment variable actually required is `GOERP_DB_PRIMARY_DSN` — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` isn't required either, but without it the local storage backend fails to construct (a startup warning, not a fatal error — object storage checks then read back as unconfigured rather than actually working).
+With the stack up, the only environment variables actually required are `GOERP_DB_PRIMARY_DSN` and `GOERP_DB_SCHEMA_SYNC_DSN` — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` isn't required either, but without it the local storage backend fails to construct (a startup warning, not a fatal error — object storage checks then read back as unconfigured rather than actually working).
 
 ```bash
-export GOERP_DB_PRIMARY_DSN="postgres://goerp:dev@localhost:6432/goerp"
+export GOERP_DB_PRIMARY_DSN="postgres://engine_user:dev@localhost:6432/goerp_dev"
+export GOERP_DB_SCHEMA_SYNC_DSN="postgres://schema_sync_user:dev@localhost:55432/goerp_dev"
 export GOERP_STORAGE_LOCAL_DIR="./storage"
 
 go run ./cmd/engine

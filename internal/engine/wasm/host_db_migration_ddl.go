@@ -70,7 +70,7 @@ import (
 // outright. A genuinely nonexistent column is instead caught by Postgres
 // itself (translateMigrationDDLError's undefined_column case below).
 
-func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
+func makeDBMigrationDDL(r *Runtime) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
 		modCtx := inst.ModuleContext()
@@ -95,7 +95,11 @@ func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
-		output, hostErr := DBMigrationDDL(ctx, primary, modCtx, input)
+		schemaSyncDB := r.schemaSyncDB.Load()
+		if schemaSyncDB == nil {
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "no schema-sync database is configured"})
+		}
+		output, hostErr := DBMigrationDDL(ctx, schemaSyncDB, modCtx, input)
 		if hostErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
@@ -108,8 +112,9 @@ func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m
 // resulting statement under the same advisory lock schema sync uses —
 // separated from makeDBMigrationDDL's own capability/IsDataMigrationJob
 // gating and ABI marshaling so it's testable directly, matching DBExec's
-// own split (host_db_exec.go).
-func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input abiv1.DBMigrationDDLInput) (abiv1.DBMigrationDDLOutput, *abiv1.HostError) {
+// own split (host_db_exec.go). schemaSyncDB is the schema-sync pool, whose
+// role owns the tenant's tables.
+func DBMigrationDDL(ctx context.Context, schemaSyncDB *sql.DB, modCtx *ModuleContext, input abiv1.DBMigrationDDLInput) (abiv1.DBMigrationDDLOutput, *abiv1.HostError) {
 	sqlText, hostErr := buildMigrationDDL(modCtx, input)
 	if hostErr != nil {
 		return abiv1.DBMigrationDDLOutput{}, hostErr
@@ -118,7 +123,7 @@ func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext,
 	qCtx, cancel := context.WithTimeout(ctx, defaultExecTimeout)
 	defer cancel()
 
-	tx, cleanup, hostErr := beginMigrationDDLTx(qCtx, primary, modCtx)
+	tx, cleanup, hostErr := beginMigrationDDLTx(qCtx, schemaSyncDB, modCtx)
 	if hostErr != nil {
 		return abiv1.DBMigrationDDLOutput{}, hostErr
 	}
@@ -143,8 +148,8 @@ func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext,
 // same connection and applies tenant scope to it. cleanup unlocks and
 // closes conn; the caller must defer it exactly once as soon as it's
 // returned non-nil, regardless of how tx is later used.
-func beginMigrationDDLTx(ctx context.Context, primary *sql.DB, modCtx *ModuleContext) (tx *sql.Tx, cleanup func(), hostErr *abiv1.HostError) {
-	conn, err := primary.Conn(ctx)
+func beginMigrationDDLTx(ctx context.Context, schemaSyncDB *sql.DB, modCtx *ModuleContext) (tx *sql.Tx, cleanup func(), hostErr *abiv1.HostError) {
+	conn, err := schemaSyncDB.Conn(ctx)
 	if err != nil {
 		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}

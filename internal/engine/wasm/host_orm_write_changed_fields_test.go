@@ -22,7 +22,7 @@ type updatedEventPayload struct {
 func updatedEventPayloads(t *testing.T, primaryDB *sql.DB, tenantID string) []updatedEventPayload {
 	t.Helper()
 	rows, err := primaryDB.Query(
-		`SELECT args->>'payload' FROM river_job
+		`SELECT args->>'payload' FROM system.river_job
 		 WHERE kind = 'event_delivery' AND args->>'event_name' = 'orm.record.updated' AND args->>'tenant_id' = $1
 		 ORDER BY id`, tenantID)
 	if err != nil {

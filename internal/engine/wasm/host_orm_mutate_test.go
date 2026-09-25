@@ -426,7 +426,7 @@ func TestORMMutate_ReturnMaskedAuditedAndEventEmitted(t *testing.T) {
 		t.Fatalf("orm.record.updated jobs = %d, want 1", got)
 	}
 	var b64 string
-	if err := primaryDB.QueryRow(`SELECT args->>'payload' FROM river_job WHERE kind = 'event_delivery' AND args->>'event_name' = 'orm.record.updated' AND args->>'tenant_id' = $1`, slug).Scan(&b64); err != nil {
+	if err := primaryDB.QueryRow(`SELECT args->>'payload' FROM system.river_job WHERE kind = 'event_delivery' AND args->>'event_name' = 'orm.record.updated' AND args->>'tenant_id' = $1`, slug).Scan(&b64); err != nil {
 		t.Fatalf("read event: %v", err)
 	}
 	raw, err := base64.StdEncoding.DecodeString(b64)
