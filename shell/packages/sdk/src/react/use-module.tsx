@@ -4,6 +4,7 @@ import { PermissionContext } from "../auth/permission-provider.js";
 import type { CurrentTenant, CurrentUser } from "../auth/types.js";
 import { useTenant } from "../auth/use-tenant.js";
 import { useUser } from "../auth/use-user.js";
+import { type TranslateFn, useTranslation } from "../i18n/use-translation.js";
 import { moduleApiRegistry } from "../module/module-api-registry.js";
 import type { ToastAPI } from "../notifications/toast.js";
 import { type RealtimeAPI, realtime } from "../realtime/realtime-api.js";
@@ -22,14 +23,15 @@ export type NavigateFn = (path: string, options?: NavigateOptions) => void;
 // biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
 export interface ModuleApis {}
 
-// typescript-sdk-reference.md §5 "useModule". The t field joins this
-// interface once it is built.
+// typescript-sdk-reference.md §5 "useModule".
 export interface ModuleContext<N extends string = string> {
   // undefined at runtime when the module registered no api.
   api: N extends keyof ModuleApis ? ModuleApis[N] : unknown;
   user: CurrentUser;
   tenant: CurrentTenant;
   can: (permission: string, resourceId?: string) => boolean;
+  // useTranslation(moduleName).t: keys resolve under the module's namespace.
+  t: TranslateFn;
   navigate: NavigateFn;
   queryClient: QueryClient;
   toast: ToastAPI;
@@ -65,10 +67,11 @@ export function useModule<N extends string>(moduleName: N): ModuleContext<N> {
   const { check } = permissions;
   const getApi = useCallback(() => moduleApiRegistry.resolve(moduleName), [moduleName]);
   const api = useSyncExternalStore(subscribeToModuleApis, getApi, getApi) as ModuleContext<N>["api"];
+  const { t } = useTranslation(moduleName);
 
   return useMemo(
-    () => ({ api, user, tenant, can: check, navigate, queryClient, toast, realtime }),
-    [api, user, tenant, check, navigate, queryClient, toast],
+    () => ({ api, user, tenant, can: check, t, navigate, queryClient, toast, realtime }),
+    [api, user, tenant, check, t, navigate, queryClient, toast],
   );
 }
 

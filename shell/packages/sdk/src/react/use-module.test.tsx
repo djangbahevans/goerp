@@ -6,6 +6,8 @@ import { AuthContext } from "../auth/auth-provider.js";
 import { createPermissionContextValue, PermissionContext } from "../auth/permission-provider.js";
 import type { AuthContextValue, CurrentTenant, CurrentUser } from "../auth/types.js";
 import { usePermission } from "../auth/use-permission.js";
+import { translationStore } from "../i18n/translation-store.js";
+import { useTranslation } from "../i18n/use-translation.js";
 import { defineModule } from "../module/define-module.js";
 import { toast } from "../notifications/toast.js";
 import { ModuleNavigationProvider, type NavigateFn, useModule } from "./use-module.js";
@@ -155,6 +157,44 @@ describe("useModule", () => {
         </ModuleNavigationProvider>,
       ),
     ).toThrow(/no PermissionProvider above it/);
+  });
+
+  describe("t", () => {
+    it("translates exactly as useTranslation does for the same module", () => {
+      act(() =>
+        translationStore.set("contacts", "en", {
+          "fields.email.label": "Email Address",
+          "errors.duplicate_email": "A contact with {email} already exists",
+          "count.contacts_one": "1 contact",
+          "count.contacts_other": "{count} contacts",
+        }),
+      );
+      const { result } = renderHook(() => ({ ctx: useModule("contacts"), hook: useTranslation("contacts") }), {
+        wrapper: shell(vi.fn()),
+      });
+      const cases: [string, Record<string, unknown>?][] = [
+        ["fields.email.label"],
+        ["errors.duplicate_email", { email: "test@example.com" }],
+        ["count.contacts", { count: 1 }],
+        ["count.contacts", { count: 5 }],
+        ["fields.missing.label"],
+      ];
+      for (const [key, params] of cases) {
+        expect(result.current.ctx.t(key, params)).toBe(result.current.hook.t(key, params));
+      }
+      expect(result.current.ctx.t("fields.email.label")).toBe("Email Address");
+    });
+
+    it("gives a new context object once the module's translations load", () => {
+      const { result } = renderHook(() => useModule("use_module_test_t"), { wrapper: shell(vi.fn()) });
+      const first = result.current;
+      expect(first.t("actions.edit")).toBe("actions.edit");
+
+      act(() => translationStore.set("use_module_test_t", "en", { "actions.edit": "Edit" }));
+
+      expect(result.current).not.toBe(first);
+      expect(result.current.t("actions.edit")).toBe("Edit");
+    });
   });
 
   describe("api", () => {
