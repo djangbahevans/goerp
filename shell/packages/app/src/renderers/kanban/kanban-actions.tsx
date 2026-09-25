@@ -1,8 +1,7 @@
-import { apiClient } from "@goerp/sdk";
+import { callAction } from "@goerp/sdk";
 import type { ActionMenuItem } from "@goerp/sdk/components";
 import { moduleLink } from "@goerp/sdk/nav";
 import { toast } from "@goerp/sdk/notifications";
-import { actionRegistry, dispatch, splitPathAndBody } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useMutation } from "@tanstack/react-query";
 import type { ListAction } from "../list/list-view-types.js";
@@ -22,11 +21,7 @@ interface DynamicRouteCall {
 // shape doesn't fit a manifest-declared, per-record set of route actions.
 export function useKanbanRouteAction() {
   return useMutation({
-    mutationFn: async ({ route, variables }: DynamicRouteCall) => {
-      const entry = await actionRegistry.resolve(route);
-      const { path, body } = splitPathAndBody(entry.path, variables);
-      return dispatch(apiClient, entry.method, path, body);
-    },
+    mutationFn: ({ route, variables }: DynamicRouteCall) => callAction(route, variables),
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : String(err)),
   });
 }

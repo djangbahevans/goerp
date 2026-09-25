@@ -1,5 +1,6 @@
 import type { APIClient } from "@goerp/sdk";
 import { apiClient } from "@goerp/sdk";
+import { createRecordQueryOptions as createSDKRecordQueryOptions, saveRecord as saveSDKRecord } from "@goerp/sdk/react";
 import type { ResourceRegistry } from "@goerp/sdk/schema";
 import { resourceRegistry } from "@goerp/sdk/schema";
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -8,10 +9,6 @@ import type { Row } from "../list/list-view-types.js";
 
 // A narrow, form-scoped load/save hook — not the full useRecord (goerp#650,
 // which also needs a presence system that doesn't exist yet).
-
-function fillId(path: string, id: string): string {
-  return path.replace("{id}", id);
-}
 
 export function recordQueryKey(resource: string, id: string | undefined): QueryKey {
   return ["form-record", resource, id ?? null];
@@ -24,30 +21,19 @@ export function createRecordQueryOptions(
   client: Pick<APIClient, "get"> = apiClient,
 ) {
   return {
+    ...createSDKRecordQueryOptions<Row>(resource, id, registry, client),
     queryKey: recordQueryKey(resource, id),
-    queryFn: async (): Promise<Row> => {
-      const entry = await registry.resolve(resource);
-      return client.get<Row>(fillId(entry.getPath, id as string));
-    },
-    enabled: id !== undefined,
   };
 }
 
-// POSTs to createPath with no id, otherwise dispatches to the model's own
-// declared update method (PUT/PATCH) against the id-filled updatePath.
-export async function saveRecord(
+export function saveRecord(
   resource: string,
   id: string | undefined,
   edits: Row,
   registry: Pick<ResourceRegistry, "resolve"> = resourceRegistry,
   client: Pick<APIClient, "post" | "put" | "patch"> = apiClient,
 ): Promise<Row> {
-  const entry = await registry.resolve(resource);
-  if (id === undefined) {
-    return client.post<Row>(entry.createPath, edits);
-  }
-  const path = fillId(entry.updatePath, id);
-  return entry.updateMethod === "PATCH" ? client.patch<Row>(path, edits) : client.put<Row>(path, edits);
+  return saveSDKRecord<Row>(resource, id, edits, registry, client);
 }
 
 export interface UseFormRecordOptions {

@@ -5,14 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ListAction } from "../list/list-view-types.js";
 import { resolveKanbanActionItems, useKanbanRouteAction } from "./kanban-actions.js";
 
-const { dispatchMock, actionRegistryResolveMock, resolveViewPathMock } = vi.hoisted(() => ({
-  dispatchMock: vi.fn(),
-  actionRegistryResolveMock: vi.fn(),
+const { callActionMock, resolveViewPathMock } = vi.hoisted(() => ({
+  callActionMock: vi.fn(),
   resolveViewPathMock: vi.fn(),
 }));
-vi.mock("@goerp/sdk/react", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
-  return { ...actual, dispatch: dispatchMock, actionRegistry: { resolve: actionRegistryResolveMock } };
+vi.mock("@goerp/sdk", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@goerp/sdk")>();
+  return { ...actual, callAction: callActionMock };
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
@@ -21,8 +20,7 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  dispatchMock.mockReset();
-  actionRegistryResolveMock.mockReset();
+  callActionMock.mockReset();
   resolveViewPathMock.mockReset();
 });
 
@@ -34,15 +32,13 @@ function wrapper() {
 }
 
 describe("useKanbanRouteAction", () => {
-  it("resolves the named route and dispatches through the same registry/dispatch mechanics useAction() uses", async () => {
-    actionRegistryResolveMock.mockResolvedValue({ method: "POST", path: "/crm/leads/{id}/mark-won" });
-    dispatchMock.mockResolvedValue({ ok: true });
+  it("calls the named route through callAction, the same dispatch useAction() uses", async () => {
+    callActionMock.mockResolvedValue({ ok: true });
 
     const { result } = renderHook(() => useKanbanRouteAction(), { wrapper: wrapper() });
     result.current.mutate({ route: "crm.markWon", variables: "lead-1" });
 
-    await waitFor(() => expect(dispatchMock).toHaveBeenCalled());
-    expect(actionRegistryResolveMock).toHaveBeenCalledWith("crm.markWon");
+    await waitFor(() => expect(callActionMock).toHaveBeenCalledWith("crm.markWon", "lead-1"));
   });
 });
 
