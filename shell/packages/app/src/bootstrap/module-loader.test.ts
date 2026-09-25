@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureLoaded, ensureModuleRegistered, loadVerifiedModule } from "./module-loader";
 
-const { registerModuleMock } = vi.hoisted(() => ({ registerModuleMock: vi.fn(() => () => {}) }));
+const { registerModuleMock, loadTranslationsMock } = vi.hoisted(() => ({
+  registerModuleMock: vi.fn(() => () => {}),
+  loadTranslationsMock: vi.fn(async () => {}),
+}));
 vi.mock("./register-module.js", () => ({ registerModule: registerModuleMock }));
+vi.mock("@goerp/sdk/i18n", () => ({ translationLoader: { load: loadTranslationsMock } }));
 
 // SHA-256 test vector for FIXTURE_TEXT, precomputed independently via
 // `sha256sum` rather than by calling this module's own hashing code —
@@ -31,6 +35,7 @@ function stubFetch(response: { ok: boolean; status?: number; statusText?: string
 afterEach(() => {
   vi.unstubAllGlobals();
   registerModuleMock.mockClear();
+  loadTranslationsMock.mockClear();
 });
 
 describe("loadVerifiedModule", () => {
@@ -209,6 +214,22 @@ describe("ensureModuleRegistered", () => {
     await ensureModuleRegistered(`erm-${moduleCounter}`, "https://example.test/bundle.js", sha256, { importer });
 
     expect(registerModuleMock).toHaveBeenCalledWith(definition);
+  });
+
+  it("loads the module's translations with its bundle", async () => {
+    const { bytes, sha256 } = canned();
+    stubFetch({ ok: true, bytes });
+    const moduleName = `erm-${moduleCounter}`;
+    const importer = vi.fn(async () => ({ default: { name: moduleName } }));
+
+    await ensureModuleRegistered(moduleName, "https://example.test/bundle.js", sha256, { importer });
+
+    expect(loadTranslationsMock).toHaveBeenCalledWith(moduleName);
+  });
+
+  it("doesn't load translations for a module with no frontend bundle", async () => {
+    await ensureModuleRegistered(`erm-${moduleCounter}`, null, null);
+    expect(loadTranslationsMock).not.toHaveBeenCalled();
   });
 
   it("registers exactly once across repeated calls for the same bundle, not once per call", async () => {
