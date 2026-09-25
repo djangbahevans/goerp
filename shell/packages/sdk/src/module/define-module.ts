@@ -1,5 +1,6 @@
 import { componentRegistry } from "../schema/index.js";
 import { extensionBatchLoaderRegistry } from "./extension-batch-loader-registry.js";
+import { moduleApiRegistry } from "./module-api-registry.js";
 import { moduleErrorHandlerRegistry } from "./module-error-handler-registry.js";
 import { moduleNavigationRegistry } from "./module-navigation-registry.js";
 import type { ModuleDefinition } from "./module-types.js";
@@ -36,9 +37,10 @@ export function defineModule(definition: ModuleDefinition): ModuleDefinition {
   });
 
   // Registered unconditionally (not just when present) so a hot-reloaded
-  // module that stops declaring navigation/errorHandlers clears its prior
-  // bundle's entry — both registries treat a nullish value as "clear".
+  // module that stops declaring navigation/errorHandlers/api clears its prior
+  // bundle's entry — each registry treats a nullish value as "clear".
   moduleNavigationRegistry.register(definition.name, definition.navigation);
   moduleErrorHandlerRegistry.register(definition.name, definition.errorHandlers);
+  moduleApiRegistry.register(definition.name, definition.api);
   return definition;
 }

@@ -12,7 +12,13 @@ export type { UseInfiniteListOptions } from "./use-infinite-list.js";
 export { createInfiniteListQueryOptions, useInfiniteList } from "./use-infinite-list.js";
 export type { KanbanCardContextValue, KanbanCardProviderProps } from "./use-kanban-card.js";
 export { KanbanCardProvider, useKanbanCard } from "./use-kanban-card.js";
-export type { ModuleContext, ModuleNavigationProviderProps, NavigateFn, NavigateOptions } from "./use-module.js";
+export type {
+  ModuleApis,
+  ModuleContext,
+  ModuleNavigationProviderProps,
+  NavigateFn,
+  NavigateOptions,
+} from "./use-module.js";
 export { ModuleNavigationProvider, useModule } from "./use-module.js";
 export type { PivotCellResponse, PivotResponse, PivotValueSpec, UsePivotDataOptions } from "./use-pivot-data.js";
 export { createPivotDataQueryOptions, usePivotData } from "./use-pivot-data.js";

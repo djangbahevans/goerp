@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { AuthContext } from "../auth/auth-provider.js";
 import { createPermissionContextValue, PermissionContext } from "../auth/permission-provider.js";
 import type { AuthContextValue, CurrentTenant, CurrentUser } from "../auth/types.js";
 import { usePermission } from "../auth/use-permission.js";
+import { defineModule } from "../module/define-module.js";
 import { toast } from "../notifications/toast.js";
 import { ModuleNavigationProvider, type NavigateFn, useModule } from "./use-module.js";
 import { useToast } from "./use-toast.js";
@@ -39,6 +40,21 @@ const permissions = createPermissionContextValue({
   fieldAccess: {},
   modulesEnabled: new Set(["contacts"]),
 });
+
+interface Contact {
+  id: string;
+  name: string;
+}
+
+const contactsApi = {
+  listContacts: async (_params?: { limit?: number }): Promise<Contact[]> => [],
+};
+
+declare module "./use-module.js" {
+  interface ModuleApis {
+    contacts: typeof contactsApi;
+  }
+}
 
 afterEach(cleanup);
 
@@ -139,5 +155,38 @@ describe("useModule", () => {
         </ModuleNavigationProvider>,
       ),
     ).toThrow(/no PermissionProvider above it/);
+  });
+
+  describe("api", () => {
+    it("returns the client the module registered with defineModule", async () => {
+      defineModule({ name: "contacts", api: contactsApi });
+      const { result } = renderHook(() => useModule("contacts"), { wrapper: shell(vi.fn()) });
+      expect(result.current.api).toBe(contactsApi);
+      await expect(result.current.api.listContacts({ limit: 20 })).resolves.toEqual([]);
+    });
+
+    it("is undefined for a module that registered no api", () => {
+      defineModule({ name: "use_module_test_no_api" });
+      const { result } = renderHook(() => useModule("use_module_test_no_api"), { wrapper: shell(vi.fn()) });
+      expect(result.current.api).toBeUndefined();
+    });
+
+    it("switches to the new client when a hot-reloaded module re-registers", () => {
+      defineModule({ name: "use_module_test_reload", api: { version: 1 } });
+      const { result } = renderHook(() => useModule("use_module_test_reload"), { wrapper: shell(vi.fn()) });
+      const first = result.current;
+      const replacement = { version: 2 };
+      act(() => {
+        defineModule({ name: "use_module_test_reload", api: replacement });
+      });
+      expect(result.current.api).toBe(replacement);
+      expect(result.current).not.toBe(first);
+    });
+
+    it("types api from ModuleApis, and as unknown for a name outside it", () => {
+      expectTypeOf<ReturnType<typeof useModule<"contacts">>["api"]>().toEqualTypeOf<typeof contactsApi>();
+      expectTypeOf<ReturnType<typeof useModule<"contacts">>["api"]["listContacts"]>().toBeFunction();
+      expectTypeOf<ReturnType<typeof useModule<"billing">>["api"]>().toBeUnknown();
+    });
   });
 });
