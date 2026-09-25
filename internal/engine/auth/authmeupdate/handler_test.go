@@ -103,7 +103,7 @@ func newFixture(t *testing.T) *fixture {
 
 	filesStore := files.NewStore(conn)
 
-	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore)
+	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, testAvailableLocales)
 
 	slug := fmt.Sprintf("authmeupdatetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Update Test Co")
@@ -234,17 +234,9 @@ func TestServeHTTP_SavesNameOnly(t *testing.T) {
 
 	rec := f.doPatch(t, f.domain, accessToken, `{"name": "Ada Lovelace"}`)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
-	var resp updateResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if resp.Name != "Ada Lovelace" {
-		t.Errorf("response name = %q, want %q", resp.Name, "Ada Lovelace")
-	}
-
 	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
 	if err != nil {
 		t.Fatalf("GetProfile() error: %v", err)
@@ -261,11 +253,11 @@ func TestServeHTTP_RenameOverwritesExistingName(t *testing.T) {
 	f := newFixture(t)
 	accessToken := f.issueAccessToken(t)
 
-	if rec := f.doPatch(t, f.domain, accessToken, `{"name": "First Name"}`); rec.Code != http.StatusOK {
-		t.Fatalf("first PATCH status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec := f.doPatch(t, f.domain, accessToken, `{"name": "First Name"}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("first PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
-	if rec := f.doPatch(t, f.domain, accessToken, `{"name": "Second Name"}`); rec.Code != http.StatusOK {
-		t.Fatalf("second PATCH status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec := f.doPatch(t, f.domain, accessToken, `{"name": "Second Name"}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("second PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 
 	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
@@ -284,8 +276,8 @@ func TestServeHTTP_SetsAvatarFromRealUploadedFile(t *testing.T) {
 
 	rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "Ada Lovelace", "avatar_id": %q}`, fileID))
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
 	if err != nil {
@@ -328,11 +320,11 @@ func TestServeHTTP_ReplacingAvatarMarksOldFileDeleted(t *testing.T) {
 	oldFileID := f.insertFile(t, "avatars")
 	newFileID := f.insertFile(t, "avatars")
 
-	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "Ada Lovelace", "avatar_id": %q}`, oldFileID)); rec.Code != http.StatusOK {
-		t.Fatalf("first PATCH status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "Ada Lovelace", "avatar_id": %q}`, oldFileID)); rec.Code != http.StatusNoContent {
+		t.Fatalf("first PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
-	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "Ada Lovelace", "avatar_id": %q}`, newFileID)); rec.Code != http.StatusOK {
-		t.Fatalf("second PATCH status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "Ada Lovelace", "avatar_id": %q}`, newFileID)); rec.Code != http.StatusNoContent {
+		t.Fatalf("second PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 
 	oldFile, err := f.filesStore.GetByID(context.Background(), f.tenantSlug, oldFileID)
@@ -357,11 +349,11 @@ func TestServeHTTP_EmptyStringAvatarIDClearsAvatarAndMarksOldFileDeleted(t *test
 	accessToken := f.issueAccessToken(t)
 	fileID := f.insertFile(t, "avatars")
 
-	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "Ada Lovelace", "avatar_id": %q}`, fileID)); rec.Code != http.StatusOK {
-		t.Fatalf("first PATCH status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "Ada Lovelace", "avatar_id": %q}`, fileID)); rec.Code != http.StatusNoContent {
+		t.Fatalf("first PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
-	if rec := f.doPatch(t, f.domain, accessToken, `{"name": "Ada Lovelace", "avatar_id": ""}`); rec.Code != http.StatusOK {
-		t.Fatalf("second PATCH status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec := f.doPatch(t, f.domain, accessToken, `{"name": "Ada Lovelace", "avatar_id": ""}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("second PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 
 	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
@@ -386,11 +378,11 @@ func TestServeHTTP_AbsentAvatarIDLeavesExistingAvatarUntouched(t *testing.T) {
 	accessToken := f.issueAccessToken(t)
 	fileID := f.insertFile(t, "avatars")
 
-	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "First", "avatar_id": %q}`, fileID)); rec.Code != http.StatusOK {
-		t.Fatalf("first PATCH status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "First", "avatar_id": %q}`, fileID)); rec.Code != http.StatusNoContent {
+		t.Fatalf("first PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
-	if rec := f.doPatch(t, f.domain, accessToken, `{"name": "Second"}`); rec.Code != http.StatusOK {
-		t.Fatalf("second PATCH status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	if rec := f.doPatch(t, f.domain, accessToken, `{"name": "Second"}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("second PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 
 	profile, err := f.userStore.GetProfile(context.Background(), f.userID)
@@ -436,6 +428,116 @@ func TestServeHTTP_MalformedBodyRejected(t *testing.T) {
 	accessToken := f.issueAccessToken(t)
 
 	rec := f.doPatch(t, f.domain, accessToken, `{not json`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+var testAvailableLocales = []string{"en", "fr", "ar"}
+
+func (f *fixture) profile(t *testing.T) *user.Profile {
+	t.Helper()
+	profile, err := f.userStore.GetProfile(t.Context(), f.userID)
+	if err != nil {
+		t.Fatalf("GetProfile() error: %v", err)
+	}
+	return profile
+}
+
+func TestServeHTTP_ThemeOnlyLeavesNameAndAvatarUntouched(t *testing.T) {
+	f := newFixture(t)
+	accessToken := f.issueAccessToken(t)
+	fileID := f.insertFile(t, "avatar")
+	if rec := f.doPatch(t, f.domain, accessToken, fmt.Sprintf(`{"name": "Ada Lovelace", "avatar_id": %q}`, fileID)); rec.Code != http.StatusNoContent {
+		t.Fatalf("first PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec := f.doPatch(t, f.domain, accessToken, `{"theme": "dark"}`)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
+	}
+	profile := f.profile(t)
+	if profile.Theme != "dark" {
+		t.Errorf("theme = %q, want dark", profile.Theme)
+	}
+	if profile.Name != "Ada Lovelace" || profile.AvatarFileID == nil || *profile.AvatarFileID != fileID {
+		t.Errorf("name/avatar = %q/%v, want Ada Lovelace/%q untouched", profile.Name, profile.AvatarFileID, fileID)
+	}
+}
+
+func TestServeHTTP_SetsAndResetsPreferences(t *testing.T) {
+	f := newFixture(t)
+	accessToken := f.issueAccessToken(t)
+
+	rec := f.doPatch(t, f.domain, accessToken, `{"locale": "fr", "timezone": "Africa/Accra", "date_format": "day_first"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
+	}
+	profile := f.profile(t)
+	if profile.Locale == nil || *profile.Locale != "fr" || profile.Timezone == nil || *profile.Timezone != "Africa/Accra" ||
+		profile.DateFormat == nil || *profile.DateFormat != "day_first" {
+		t.Fatalf("preferences = %v/%v/%v, want fr/Africa/Accra/day_first", profile.Locale, profile.Timezone, profile.DateFormat)
+	}
+
+	rec = f.doPatch(t, f.domain, accessToken, `{"locale": null, "date_format": null}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("reset status = %d, want 204; body = %s", rec.Code, rec.Body.String())
+	}
+	profile = f.profile(t)
+	if profile.Locale != nil || profile.DateFormat != nil {
+		t.Errorf("locale/date_format = %v/%v, want both reset to nil", profile.Locale, profile.DateFormat)
+	}
+	if profile.Timezone == nil || *profile.Timezone != "Africa/Accra" {
+		t.Errorf("timezone = %v, want Africa/Accra (absent from the reset body)", profile.Timezone)
+	}
+}
+
+func TestServeHTTP_InvalidPreferenceRejected(t *testing.T) {
+	cases := []struct {
+		body  string
+		field string
+	}{
+		{`{"locale": "de"}`, "locale"},
+		{`{"timezone": "Mars/Olympus"}`, "timezone"},
+		{`{"timezone": "Local"}`, "timezone"},
+		{`{"theme": "sepia"}`, "theme"},
+		{`{"theme": null}`, "theme"},
+		{`{"date_format": "yyyy"}`, "date_format"},
+		{`{"locale": 5}`, "locale"},
+	}
+	f := newFixture(t)
+	accessToken := f.issueAccessToken(t)
+
+	for _, tc := range cases {
+		t.Run(tc.body, func(t *testing.T) {
+			rec := f.doPatch(t, f.domain, accessToken, tc.body)
+
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422; body = %s", rec.Code, rec.Body.String())
+			}
+			var resp struct {
+				Error struct {
+					Code    string            `json:"code"`
+					Details map[string]string `json:"details"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if resp.Error.Code != "invalid_preference" || resp.Error.Details["field"] != tc.field {
+				t.Errorf("error = %s/%v, want invalid_preference with field %q", resp.Error.Code, resp.Error.Details, tc.field)
+			}
+		})
+	}
+}
+
+func TestServeHTTP_NullNameRejected(t *testing.T) {
+	f := newFixture(t)
+	accessToken := f.issueAccessToken(t)
+
+	rec := f.doPatch(t, f.domain, accessToken, `{"name": null}`)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)

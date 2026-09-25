@@ -297,7 +297,7 @@ func (a *activityAuthorResolver) resolve(ctx context.Context, authorID *string) 
 	profile, err := a.e.userStore.GetProfile(ctx, *authorID)
 	switch {
 	case err == nil:
-		author.Name = &profile.Name
+		author.Name = profile.DisplayName()
 		if profile.AvatarFileID != nil {
 			author.AvatarURL = authme.AvatarURL(ctx, a.e.filesStore, a.e.storageBackend, a.tenantSlug, *authorID, *profile.AvatarFileID)
 		}

@@ -17,7 +17,7 @@ func TestBuildChain_AuthMeReachesHandlerThroughRealRouteTable(t *testing.T) {
 	f := newChainFixture(t)
 
 	userStore := user.NewStore(f.conn)
-	authMeHandler := authme.NewHandler(f.resolver, f.checker, userStore, nil, nil)
+	authMeHandler := authme.NewHandler(f.resolver, f.checker, userStore, nil, nil, []string{"en"})
 	h := f.chain(map[string]http.Handler{"GET /auth/me": authMeHandler})
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)

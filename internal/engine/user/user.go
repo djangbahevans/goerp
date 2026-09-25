@@ -42,19 +42,22 @@ const createIndex = `
         ON system.users (email) WHERE deleted_at IS NULL;
 `
 
-// createUserProfilesTable matches auth-internals.md's user_profiles
-// definition, minus locale/timezone — those have no consumer yet
-// (separate, unfiled tickets), so they're left off rather than added
-// unused; a later ticket can add them with ALTER TABLE the same way
-// tenant.Tenant's suspended_by comment describes for its own deferred
-// column. avatar_file_id (goerp#819) stores a files.id, not a URL —
+// createUserProfilesTable matches auth-internals.md §2's user_profiles.
+// avatar_file_id (goerp#819) stores a files.id, not a URL —
 // storage.SignedURL expires (max 24h), so a resolvable URL is generated
-// fresh on every GET /auth/me rather than persisted here.
+// fresh on every GET /auth/me rather than persisted here. A NULL locale,
+// timezone or date_format inherits the tenant default (l10n-guide.md §2).
 const createUserProfilesTable = `
 CREATE TABLE IF NOT EXISTS system.user_profiles (
     user_id         UUID PRIMARY KEY REFERENCES system.users(id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
     avatar_file_id  UUID,
+    locale          TEXT,
+    timezone        TEXT,
+    theme           TEXT NOT NULL DEFAULT 'system'
+                        CHECK (theme IN ('light', 'dark', 'system')),
+    date_format     TEXT
+                        CHECK (date_format IN ('day_first', 'month_first', 'iso')),
     phone           TEXT,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )

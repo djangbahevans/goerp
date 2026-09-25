@@ -9,10 +9,12 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -123,6 +125,9 @@ type Config struct {
 	// (multitenancy-internals.md §1 "Reserved slugs").
 	ReservedSlugs            []string `env:"GOERP_RESERVED_SLUGS"`
 	RequireEmailVerification string   `env:"GOERP_REQUIRE_EMAIL_VERIFICATION" envDefault:"tenant_choice" validate:"oneof=required tenant_choice off"`
+	// AvailableLocales are the locales a user can choose on the Appearance
+	// page when their tenant sets none of its own (l10n-guide.md §2).
+	AvailableLocales []string `env:"GOERP_AVAILABLE_LOCALES" envDefault:"en,fr,ar" validate:"min=1"`
 	// TermsURL is the terms of service the register page links to and
 	// requires accepting; unset, the page shows no terms checkbox.
 	TermsURL string `env:"GOERP_TERMS_URL" validate:"omitempty,http_url"`
@@ -179,9 +184,16 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	err := validate.Struct(cfg)
+	if err := validate.Struct(cfg); err != nil {
+		return cfg, err
+	}
+	for _, locale := range cfg.AvailableLocales {
+		if !l10n.ValidLocale(locale) {
+			return cfg, fmt.Errorf("GOERP_AVAILABLE_LOCALES: %q is not a BCP 47 locale", locale)
+		}
+	}
 
-	return cfg, err
+	return cfg, nil
 }
 
 func isLoopback(fl validator.FieldLevel) bool {

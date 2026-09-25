@@ -111,7 +111,7 @@ func (h *Handlers) Info(w http.ResponseWriter, r *http.Request) {
 
 	var name *string
 	if p, err := h.users.GetProfile(ctx, u.ID); err == nil {
-		name = &p.Name
+		name = p.DisplayName()
 	} else if !errors.Is(err, user.ErrProfileNotFound) {
 		writeInternal(w)
 		return

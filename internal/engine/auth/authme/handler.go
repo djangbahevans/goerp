@@ -25,6 +25,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -38,15 +39,16 @@ import (
 const avatarURLExpiry = time.Hour
 
 type Handler struct {
-	tenants *tenantresolve.Resolver
-	auth    *authcheck.Checker
-	users   *user.Store
-	files   *files.Store
-	backend storage.Backend
+	tenants          *tenantresolve.Resolver
+	auth             *authcheck.Checker
+	users            *user.Store
+	files            *files.Store
+	backend          storage.Backend
+	availableLocales []string
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, backend storage.Backend) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, backend: backend}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, backend storage.Backend, availableLocales []string) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, backend: backend, availableLocales: availableLocales}
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -73,16 +75,15 @@ type meResponse struct {
 	Tenant meTenant `json:"tenant"`
 }
 
-// meUser deliberately omits locale/timezone (typescript-sdk-reference.md
-// §6's CurrentUser) — user.Profile has no backing columns for them yet (a
-// separate, unfiled user-profile-fields ticket). Name/AvatarURL come from
-// user.Store.GetProfile (goerp#817) and are nil for a user with no
-// system.user_profiles row (pre-goerp#817 users, or any invite path other
-// than tenant provisioning until a general invite endpoint exists) — the
-// frontend falls back to a derived display name in that case rather than
-// this handler inventing one. AvatarURL is a freshly-generated signed URL
-// (goerp#819), resolved from Profile.AvatarFileID on every request — never
-// persisted, since signed URLs expire.
+// meUser is typescript-sdk-reference.md's CurrentUser on the wire.
+// Name/AvatarURL come from user.Store.GetProfile (goerp#817) and are nil for
+// a user with no system.user_profiles row, or whose row holds
+// user.UpdateProfile's placeholder name — the frontend falls back to a
+// derived display name in that case rather than this handler inventing
+// one. AvatarURL is a freshly-generated signed URL (goerp#819), resolved
+// from Profile.AvatarFileID on every request — never persisted, since
+// signed URLs expire. A nil Locale/Timezone/DateFormat inherits the
+// tenant default.
 type meUser struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
@@ -94,17 +95,24 @@ type meUser struct {
 	MFAVerifiedAt *time.Time `json:"mfa_verified_at"`
 	// MFASetupRequired drives the shell's forced-enrollment redirect
 	// (auth-internals.md §8 "MFA enrollment").
-	MFASetupRequired bool `json:"mfa_setup_required"`
+	MFASetupRequired bool    `json:"mfa_setup_required"`
+	Theme            string  `json:"theme"`
+	Locale           *string `json:"locale"`
+	Timezone         *string `json:"timezone"`
+	DateFormat       *string `json:"date_format"`
 }
 
-// meTenant deliberately omits logoUrl/locale/timezone/currency
-// (CurrentTenant) — tenant.Tenant has no backing columns for them yet
-// (a separate, unfiled tenant-locale-settings ticket).
+// meTenant is CurrentTenant on the wire. A tenant has no locale settings of
+// its own yet (backlog #1046), so its locale defaults are the platform's
+// (l10n-guide.md §2).
 type meTenant struct {
-	ID   string `json:"id"`
-	Slug string `json:"slug"`
-	Name string `json:"name"`
-	Plan string `json:"plan"`
+	ID               string   `json:"id"`
+	Slug             string   `json:"slug"`
+	Name             string   `json:"name"`
+	Plan             string   `json:"plan"`
+	DefaultLocale    string   `json:"default_locale"`
+	DefaultTimezone  string   `json:"default_timezone"`
+	AvailableLocales []string `json:"available_locales"`
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -146,16 +154,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A profile lookup failure degrades to nil name/avatarUrl (the
-	// frontend already derives a display name for that case) rather than
-	// failing the whole session check — id/email/roles above already
-	// resolved successfully, and this field is cosmetic, not a session
-	// validity signal.
+	// A profile lookup failure degrades to nil name/avatarUrl and default
+	// preferences (the frontend already derives a display name for that
+	// case) rather than failing the whole session check — id/email/roles
+	// above already resolved successfully, and these fields are cosmetic,
+	// not a session validity signal.
 	var name, avatarURL *string
+	prefs := user.Profile{Theme: "system"}
 	profile, err := h.users.GetProfile(ctx, authCtx.UserID)
 	switch {
 	case err == nil:
-		name = &profile.Name
+		prefs = *profile
+		name = profile.DisplayName()
 		if profile.AvatarFileID != nil {
 			avatarURL = AvatarURL(ctx, h.files, h.backend, tenantCtx.Slug, authCtx.UserID, *profile.AvatarFileID)
 		}
@@ -184,12 +194,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			AMR:              authCtx.AMR,
 			MFAVerifiedAt:    authCtx.MFAVerifiedAt,
 			MFASetupRequired: setupRequired,
+			Theme:            prefs.Theme,
+			Locale:           prefs.Locale,
+			Timezone:         prefs.Timezone,
+			DateFormat:       prefs.DateFormat,
 		},
 		Tenant: meTenant{
-			ID:   tenantCtx.TenantID,
-			Slug: tenantCtx.Slug,
-			Name: tenantCtx.Name,
-			Plan: string(tenantCtx.Plan),
+			ID:               tenantCtx.TenantID,
+			Slug:             tenantCtx.Slug,
+			Name:             tenantCtx.Name,
+			Plan:             string(tenantCtx.Plan),
+			DefaultLocale:    l10n.PlatformDefaultLocale,
+			DefaultTimezone:  l10n.PlatformDefaultTimezone,
+			AvailableLocales: h.availableLocales,
 		},
 	})
 }
