@@ -6,7 +6,7 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/vmihailenco/msgpack/v5"
@@ -62,7 +62,7 @@ func transientTTL(md model.ModelDeclaration) time.Duration {
 // WithStandardFields()'s id column has) and unconditionally creates the
 // Redis hash — a fresh key can never collide on etag, so there's no
 // precondition to check.
-func transientCreate(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any) (ORMCreateOutput, *abi.HostError) {
+func transientCreate(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any) (abiv1.ORMCreateOutput, *abiv1.HostError) {
 	id, _ := record["id"].(string)
 	if id == "" {
 		id = uuid.NewV7().String()
@@ -75,16 +75,16 @@ func transientCreate(ctx context.Context, cacheClient *cache.Client, modCtx *Mod
 
 	data, err := msgpack.Marshal(record)
 	if err != nil {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	key := transientKey(modCtx.TenantSlug, qualifiedModel, id)
 	if _, err := cacheClient.CompareAndSetHash(ctx, key, transientEtagHashField, false, false, "", transientDataHashField, string(data), etag, transientTTL(md)); err != nil {
-		return ORMCreateOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
 	applyFieldMasking(modCtx, qualifiedModel, []map[string]any{record})
-	return ORMCreateOutput{Record: record}, nil
+	return abiv1.ORMCreateOutput{Record: record}, nil
 }
 
 // transientRead supports exactly one ID at a time — a Transient model
@@ -92,25 +92,25 @@ func transientCreate(ctx context.Context, cacheClient *cache.Client, modCtx *Mod
 // time), so there is no batch-read use case to support either. An
 // expired or never-created key returns orm.not_found, per
 // go-sdk-reference.md §22.
-func transientRead(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, qualifiedModel string, ids []string) (ORMReadOutput, *abi.HostError) {
+func transientRead(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, qualifiedModel string, ids []string) (abiv1.ORMReadOutput, *abiv1.HostError) {
 	if len(ids) != 1 {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "Transient models support reading exactly one ID at a time"}
+		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "Transient models support reading exactly one ID at a time"}
 	}
 
 	key := transientKey(modCtx.TenantSlug, qualifiedModel, ids[0])
 	fields, found, err := cacheClient.GetHash(ctx, key)
 	if err != nil {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	if !found {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 	}
 
 	var record map[string]any
 	if err := msgpack.Unmarshal([]byte(fields[transientDataHashField]), &record); err != nil {
-		return ORMReadOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return abiv1.ORMReadOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
-	return ORMReadOutput{Records: []map[string]any{record}}, nil
+	return abiv1.ORMReadOutput{Records: []map[string]any{record}}, nil
 }
 
 // transientWrite requires the record to already exist — unlike create,
@@ -124,12 +124,12 @@ func transientRead(ctx context.Context, cacheClient *cache.Client, modCtx *Modul
 // optimistic-locking precondition," distinct from a pointer to "" (a
 // real precondition requiring the stored etag to still be its
 // never-written default).
-func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, id string, record map[string]any, newEtag string, expectedEtag *string) (ORMWriteOutput, *abi.HostError) {
+func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, id string, record map[string]any, newEtag string, expectedEtag *string) (abiv1.ORMWriteOutput, *abiv1.HostError) {
 	key := transientKey(modCtx.TenantSlug, qualifiedModel, id)
 
 	data, err := msgpack.Marshal(record)
 	if err != nil {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	checkEtag := expectedEtag != nil
@@ -139,52 +139,52 @@ func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *Modu
 	}
 	ok, err := cacheClient.CompareAndSetHash(ctx, key, transientEtagHashField, true, checkEtag, expectedEtagVal, transientDataHashField, string(data), newEtag, transientTTL(md))
 	if err != nil {
-		return ORMWriteOutput{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return abiv1.ORMWriteOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	if !ok {
-		return ORMWriteOutput{}, diagnoseTransientZeroRowWrite(ctx, cacheClient, key)
+		return abiv1.ORMWriteOutput{}, diagnoseTransientZeroRowWrite(ctx, cacheClient, key)
 	}
 
 	applyFieldMasking(modCtx, qualifiedModel, []map[string]any{record})
-	return ORMWriteOutput{Record: record}, nil
+	return abiv1.ORMWriteOutput{Record: record}, nil
 }
 
 // diagnoseTransientZeroRowWrite disambiguates a failed CompareAndSetHash
 // the same way diagnoseZeroRowWrite does for the Table path: re-checking
 // existence tells a stale etag (found, orm.etag_mismatch) apart from a
 // missing or already-expired key (orm.not_found).
-func diagnoseTransientZeroRowWrite(ctx context.Context, cacheClient *cache.Client, key string) *abi.HostError {
+func diagnoseTransientZeroRowWrite(ctx context.Context, cacheClient *cache.Client, key string) *abiv1.HostError {
 	_, found, err := cacheClient.GetHash(ctx, key)
 	if err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 	if found {
-		return &abi.HostError{Code: abi.ErrCodeEtagMismatch, Message: "record has been modified since it was last read"}
+		return &abiv1.HostError{Code: abiv1.ErrCodeEtagMismatch, Message: "record has been modified since it was last read"}
 	}
-	return &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+	return &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 }
 
 // transientUnlink deletes multiple Transient-backed records from
 // host.cache — one Delete per ID, not atomic the way the SQL-backed path
 // is inside a transaction: a missing ID partway through aborts, but
 // whatever was already deleted stays deleted.
-func transientUnlink(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, qualifiedModel string, ids []string) (ExecResult, *abi.HostError) {
+func transientUnlink(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, qualifiedModel string, ids []string) (abiv1.ORMExecResult, *abiv1.HostError) {
 	affected := make([]string, 0, len(ids))
 	for _, id := range ids {
 		key := transientKey(modCtx.TenantSlug, qualifiedModel, id)
 
 		_, found, err := cacheClient.GetHash(ctx, key)
 		if err != nil {
-			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 		if !found {
-			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeNotFound, Message: "record not found"}
+			return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 		}
 
 		if err := cacheClient.Delete(ctx, key); err != nil {
-			return ExecResult{}, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+			return abiv1.ORMExecResult{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 		}
 		affected = append(affected, id)
 	}
-	return ExecResult{Count: len(affected), IDs: affected}, nil
+	return abiv1.ORMExecResult{Count: len(affected), IDs: affected}, nil
 }

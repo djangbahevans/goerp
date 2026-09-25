@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -64,7 +65,7 @@ func TestORMWrite_EmitsChangedFieldsWithoutEtag(t *testing.T) {
 	_, mc, tenantID := setupMutateStockTenant(t, primaryDB, "writechanged", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
-	if _, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
 		Model: "testmodule.stock", ID: mutateStockID,
 		Record: map[string]any{"name": "Nut", "on_hand": int64(7)},
 	}); hostErr != nil {
@@ -95,7 +96,7 @@ func TestORMWrite_IgnoredFieldIsNotListedAsChanged(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newWriteFieldSecModuleContextForTenant(slug, slug)
 
-	if _, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
 		Model: "testmodule.widget", ID: id,
 		Record: map[string]any{"name": "Renamed", "internal_flag": true},
 	}); hostErr != nil {
@@ -120,7 +121,7 @@ func TestORMWriteManyAndWhere_EachEventCarriesChangedFields(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	insertClient := r.EventInsertClient()
 
-	if _, hostErr := ORMWriteMany(ctx, r, primaryDB, insertClient, mc, ORMWriteManyInput{
+	if _, hostErr := ORMWriteMany(ctx, r, primaryDB, insertClient, mc, abiv1.ORMWriteManyInput{
 		Model: "testmodule.stock", IDs: []string{mutateStockID, second},
 		Record: map[string]any{"reserved": int64(1), "name": "Bulk"},
 	}); hostErr != nil {
@@ -134,7 +135,7 @@ func TestORMWriteManyAndWhere_EachEventCarriesChangedFields(t *testing.T) {
 		assertChangedFields(t, e.ChangedFields, "name", "reserved")
 	}
 
-	if _, hostErr := ORMWriteWhere(ctx, r, primaryDB, insertClient, mc, ORMWriteWhereInput{
+	if _, hostErr := ORMWriteWhere(ctx, r, primaryDB, insertClient, mc, abiv1.ORMWriteWhereInput{
 		Model: "testmodule.stock", Domain: "record.on_hand = 4",
 		Record: map[string]any{"weight": 2.5},
 	}); hostErr != nil {

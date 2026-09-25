@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -74,7 +75,7 @@ func TestSearchQuery_FieldSecurity_DeniedFieldsMaskedPerBehaviour(t *testing.T) 
 	// No permissions granted — every restricted field should be denied.
 	modCtx := newSearchFieldSecModuleContext(slug)
 
-	out, hostErr := SearchQuery(ctx, primaryDB, modCtx, SearchQueryInput{Index: "widgets", Query: "Widget"})
+	out, hostErr := SearchQuery(ctx, primaryDB, modCtx, abiv1.SearchQueryInput{Index: "widgets", Query: "Widget"})
 	if hostErr != nil {
 		t.Fatalf("SearchQuery: %+v", hostErr)
 	}
@@ -108,7 +109,7 @@ func TestSearchQuery_FieldSecurity_GrantedPermissionAllowsField(t *testing.T) {
 
 	modCtx := newSearchFieldSecModuleContext(slug, "contacts:contact:financials_read")
 
-	out, hostErr := SearchQuery(ctx, primaryDB, modCtx, SearchQueryInput{Index: "widgets", Query: "Widget"})
+	out, hostErr := SearchQuery(ctx, primaryDB, modCtx, abiv1.SearchQueryInput{Index: "widgets", Query: "Widget"})
 	if hostErr != nil {
 		t.Fatalf("SearchQuery: %+v", hostErr)
 	}

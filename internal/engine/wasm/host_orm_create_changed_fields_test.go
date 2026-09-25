@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -41,7 +42,7 @@ func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
 	mc, tenantID := newORMCreateChangedFieldsModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	insertClient := r.EventInsertClient()
 
-	first := ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
+	first := abiv1.ORMCreateInput{Model: "testmodule.item", Record: map[string]any{
 		"name": "A", "code": "DUP3",
 	}}
 	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, first); hostErr != nil {
@@ -52,12 +53,12 @@ func TestHostORM_Create_OnConflictUpdate_EmitsChangedFields(t *testing.T) {
 	// fills it from modCtx.UserID, so it must not show up as a changed
 	// field on the update arm. id/tenant_id are now Readonly (goerp#992)
 	// and are always engine-filled instead of supplied.
-	second := ORMCreateInput{
+	second := abiv1.ORMCreateInput{
 		Model: "testmodule.item",
 		Record: map[string]any{
 			"name": "B updated", "code": "DUP3",
 		},
-		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "update"},
+		OnConflict: &abiv1.ORMOnConflict{Fields: []string{"code"}, Policy: "update"},
 	}
 	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, second); hostErr != nil {
 		t.Fatalf("OnConflictUpdate create failed: %+v", hostErr)
@@ -87,7 +88,7 @@ func TestHostORM_CreateBatch_OnConflictUpdate_OneEventPerUpdatedRowWithOwnChange
 	mc, tenantID := newORMCreateChangedFieldsModuleContext(slug, []model.ModelDeclaration{itemModelDecl()})
 	insertClient := r.EventInsertClient()
 
-	seed := ORMCreateBatchInput{Model: "testmodule.item", Records: []map[string]any{
+	seed := abiv1.ORMCreateBatchInput{Model: "testmodule.item", Records: []map[string]any{
 		{"name": "A", "code": "BATCH-A"},
 		{"name": "B", "code": "BATCH-B"},
 	}}
@@ -100,14 +101,14 @@ func TestHostORM_CreateBatch_OnConflictUpdate_OneEventPerUpdatedRowWithOwnChange
 	// don't need to know or repeat the seed rows' generated ids; only
 	// "name"/"number" distinguish the two update rows from each other for
 	// the purpose of this assertion.
-	upsert := ORMCreateBatchInput{
+	upsert := abiv1.ORMCreateBatchInput{
 		Model: "testmodule.item",
 		Records: []map[string]any{
 			{"name": "C", "code": "BATCH-C"}, // new insert
 			{"name": "A renamed", "code": "BATCH-A"},
 			{"name": "B", "code": "BATCH-B", "number": int64(9)},
 		},
-		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "update"},
+		OnConflict: &abiv1.ORMOnConflict{Fields: []string{"code"}, Policy: "update"},
 	}
 	if _, hostErr := ORMCreateBatch(ctx, r, primaryDB, insertClient, mc, upsert); hostErr != nil {
 		t.Fatalf("upsert create_batch failed: %+v", hostErr)

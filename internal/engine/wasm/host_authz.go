@@ -18,17 +18,6 @@ func registerHostAuthz(ctx context.Context, rt wazero.Runtime, r *Runtime) error
 	return err
 }
 
-type authzFieldCheckKind = abiv1.AuthzFieldCheckKind
-
-const (
-	authzFieldCheckRead  = abiv1.AuthzFieldCheckRead
-	authzFieldCheckWrite = abiv1.AuthzFieldCheckWrite
-)
-
-type authzFieldCheckInput = abiv1.AuthzFieldCheckInput
-
-type authzFieldCheckOutput = abiv1.AuthzFieldCheckOutput
-
 // makeAuthzFieldCheck reports whether modCtx's caller may read or write
 // modelName.fieldName, per the field's declared FieldSecurityRule (if
 // any) — a no-rule field is always allowed. userID is the caller's own
@@ -51,20 +40,20 @@ func makeAuthzFieldCheck(r *Runtime) func(ctx context.Context, m api.Module, ptr
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input authzFieldCheckInput
+		var input abiv1.AuthzFieldCheckInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
 		if input.UserID != modCtx.UserID {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    "authz.user_id_mismatch",
 				Message: "user_id must match the caller's own user",
 			})
 		}
 
 		allowed := evaluateFieldCheck(modCtx, input.Model, input.Field, input.Kind)
-		return abi.WriteToModule(ctx, m, allocate, authzFieldCheckOutput{Allowed: allowed})
+		return abi.WriteToModule(ctx, m, allocate, abiv1.AuthzFieldCheckOutput{Allowed: allowed})
 	}
 }
 
@@ -72,7 +61,7 @@ func makeAuthzFieldCheck(r *Runtime) func(ctx context.Context, m api.Module, ptr
 // modelName.fieldName per the field's declared FieldSecurityRule — a
 // field with no declared rule, or a rule with no permission set for
 // kind, is always allowed.
-func evaluateFieldCheck(modCtx *ModuleContext, modelName, fieldName string, kind authzFieldCheckKind) bool {
+func evaluateFieldCheck(modCtx *ModuleContext, modelName, fieldName string, kind abiv1.AuthzFieldCheckKind) bool {
 	fieldSecReg := modCtx.FieldSecRegistry()
 	if fieldSecReg == nil {
 		return true
@@ -83,7 +72,7 @@ func evaluateFieldCheck(modCtx *ModuleContext, modelName, fieldName string, kind
 	}
 
 	permissionName := rule.ReadPermission
-	if kind == authzFieldCheckWrite {
+	if kind == abiv1.AuthzFieldCheckWrite {
 		permissionName = rule.WritePermission
 	}
 	if permissionName == "" {

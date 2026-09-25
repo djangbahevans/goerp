@@ -30,36 +30,28 @@ type Tx struct {
 // opaque.
 func (tx *Tx) TxID() string { return tx.id }
 
-type dbBeginInput = abi.DBBeginInput
-
-type dbBeginOutput = abi.DBBeginOutput
-
-type dbTxIDInput = abi.DBTxIDInput
-
-type dbDurationOutput = abi.DBDurationOutput
-
 // BeginOption configures Begin — WithIsolation, ReadOnly.
-type BeginOption func(*dbBeginInput)
+type BeginOption func(*abi.DBBeginInput)
 
 // WithIsolation sets the transaction's SQL isolation level (e.g.
 // "serializable"). Unset uses the database's default.
 func WithIsolation(level string) BeginOption {
-	return func(in *dbBeginInput) { in.Isolation = level }
+	return func(in *abi.DBBeginInput) { in.Isolation = level }
 }
 
 // ReadOnly marks the transaction read-only.
 func ReadOnly() BeginOption {
-	return func(in *dbBeginInput) { in.ReadOnly = true }
+	return func(in *abi.DBBeginInput) { in.ReadOnly = true }
 }
 
 // Begin opens a new transaction via host.db.begin.
 func Begin(opts ...BeginOption) (*Tx, error) {
-	var in dbBeginInput
+	var in abi.DBBeginInput
 	for _, opt := range opts {
 		opt(&in)
 	}
 
-	var out dbBeginOutput
+	var out abi.DBBeginOutput
 	if err := hostcall.Do(hostDBBegin, in, &out); err != nil {
 		return nil, err
 	}
@@ -72,8 +64,8 @@ func (tx *Tx) Commit() error {
 		return nil
 	}
 
-	var out dbDurationOutput
-	if err := hostcall.Do(hostDBCommit, dbTxIDInput{TxID: tx.id}, &out); err != nil {
+	var out abi.DBDurationOutput
+	if err := hostcall.Do(hostDBCommit, abi.DBTxIDInput{TxID: tx.id}, &out); err != nil {
 		return err
 	}
 	tx.committed = true
@@ -87,8 +79,8 @@ func (tx *Tx) Rollback() error {
 		return nil
 	}
 
-	var out dbDurationOutput
-	return hostcall.Do(hostDBRollback, dbTxIDInput{TxID: tx.id}, &out)
+	var out abi.DBDurationOutput
+	return hostcall.Do(hostDBRollback, abi.DBTxIDInput{TxID: tx.id}, &out)
 }
 
 // Query is Query, scoped to tx's own open transaction — a generic

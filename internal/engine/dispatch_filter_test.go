@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/domain"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -158,8 +158,8 @@ func TestCompileListFilter_IsNullNonBooleanValueReturnsDomainInvalid(t *testing.
 	if hostErr == nil {
 		t.Fatal("expected an error for a non-boolean isnull value")
 	}
-	if hostErr.Code != abi.ErrCodeDomainInvalid {
-		t.Errorf("code = %q, want %q", hostErr.Code, abi.ErrCodeDomainInvalid)
+	if hostErr.Code != abiv1.ErrCodeDomainInvalid {
+		t.Errorf("code = %q, want %q", hostErr.Code, abiv1.ErrCodeDomainInvalid)
 	}
 }
 
@@ -169,8 +169,8 @@ func TestCompileListFilter_UndeclaredFieldReturnsFieldUnknown(t *testing.T) {
 	if hostErr == nil {
 		t.Fatal("expected an error for an undeclared filter field")
 	}
-	if hostErr.Code != abi.ErrCodeFieldUnknown {
-		t.Errorf("code = %q, want %q", hostErr.Code, abi.ErrCodeFieldUnknown)
+	if hostErr.Code != abiv1.ErrCodeFieldUnknown {
+		t.Errorf("code = %q, want %q", hostErr.Code, abiv1.ErrCodeFieldUnknown)
 	}
 }
 
@@ -210,8 +210,8 @@ func TestCompileListFilter_UnknownOperatorReturnsDomainInvalid(t *testing.T) {
 	if hostErr == nil {
 		t.Fatal("expected an error for an unknown filter operator")
 	}
-	if hostErr.Code != abi.ErrCodeDomainInvalid {
-		t.Errorf("code = %q, want %q", hostErr.Code, abi.ErrCodeDomainInvalid)
+	if hostErr.Code != abiv1.ErrCodeDomainInvalid {
+		t.Errorf("code = %q, want %q", hostErr.Code, abiv1.ErrCodeDomainInvalid)
 	}
 }
 

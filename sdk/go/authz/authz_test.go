@@ -3,11 +3,12 @@ package authz
 import (
 	"testing"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestFieldCheckInput_MsgpackRoundTrip(t *testing.T) {
-	in := fieldCheckInput{
+	in := abi.AuthzFieldCheckInput{
 		UserID: "user_1",
 		Model:  "contacts.contact",
 		Field:  "credit_limit",
@@ -19,7 +20,7 @@ func TestFieldCheckInput_MsgpackRoundTrip(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var got fieldCheckInput
+	var got abi.AuthzFieldCheckInput
 	if err := msgpack.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -29,14 +30,14 @@ func TestFieldCheckInput_MsgpackRoundTrip(t *testing.T) {
 }
 
 func TestFieldCheckOutput_MsgpackRoundTrip(t *testing.T) {
-	out := fieldCheckOutput{Allowed: true}
+	out := abi.AuthzFieldCheckOutput{Allowed: true}
 
 	raw, err := msgpack.Marshal(out)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var got fieldCheckOutput
+	var got abi.AuthzFieldCheckOutput
 	if err := msgpack.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}

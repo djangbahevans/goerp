@@ -15,26 +15,20 @@ type ExecResult struct {
 	DurationMs   float64
 }
 
-type dbExecOpts = abi.DBExecOpts
-
-type dbExecInput = abi.DBExecInput
-
-type dbExecOutput = abi.DBExecOutput
-
 // Exec executes a parameterized INSERT/UPDATE/DELETE via host.db.exec.
 func Exec(sql string, args ...any) (ExecResult, error) {
-	return exec(dbExecInput{SQL: sql, Params: args})
+	return exec(abi.DBExecInput{SQL: sql, Params: args})
 }
 
 // Exec is Exec, scoped to tx's own open transaction — a method rather
 // than an ExecTx-suffixed free function, since Tx and this method are
 // both defined in db itself (go-sdk-reference.md §6 "Transactions").
 func (tx *Tx) Exec(sql string, args ...any) (ExecResult, error) {
-	return exec(dbExecInput{SQL: sql, Params: args, TxID: tx.id})
+	return exec(abi.DBExecInput{SQL: sql, Params: args, TxID: tx.id})
 }
 
-func exec(in dbExecInput) (ExecResult, error) {
-	var out dbExecOutput
+func exec(in abi.DBExecInput) (ExecResult, error) {
+	var out abi.DBExecOutput
 	if err := hostcall.Do(hostDBExec, in, &out); err != nil {
 		return ExecResult{}, wrapExecError(err)
 	}
@@ -67,9 +61,9 @@ func execReturning[T any](sql string, args []any, txID string) (T, error) {
 	if len(cols) == 0 {
 		return zero, fmt.Errorf("db: %T has no db-mapped fields to return", zero)
 	}
-	return scanOneReturning[T](dbExecInput{
+	return scanOneReturning[T](abi.DBExecInput{
 		SQL: sql, Params: args, TxID: txID,
-		Opts: dbExecOpts{Returning: strings.Join(cols, ","), ExpectRows: true},
+		Opts: abi.DBExecOpts{Returning: strings.Join(cols, ","), ExpectRows: true},
 	}, cols)
 }
 
@@ -77,9 +71,9 @@ func execReturning[T any](sql string, args []any, txID string) (T, error) {
 // opts.returning/expect_rows set from cols — and scans the single
 // matched row into a new T, aligned against cols. Shared by
 // ExecReturning and InsertReturning (insert.go).
-func scanOneReturning[T any](in dbExecInput, cols []string) (T, error) {
+func scanOneReturning[T any](in abi.DBExecInput, cols []string) (T, error) {
 	var zero T
-	var out dbExecOutput
+	var out abi.DBExecOutput
 	if err := hostcall.Do(hostDBExec, in, &out); err != nil {
 		return zero, wrapExecError(err)
 	}

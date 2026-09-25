@@ -11,10 +11,6 @@ import (
 // record body for a call that could touch many rows.
 type ExecResult = abi.ORMExecResult
 
-type ormWriteInput = abi.ORMWriteInput
-
-type ormWriteOutput = abi.ORMWriteOutput
-
 // Write updates one record by ID via host.orm.write. A nil expectedEtag
 // writes unconditionally; a non-nil expectedEtag enforces optimistic
 // locking against the stored value — including a pointer to "" for a
@@ -31,12 +27,10 @@ func WriteTx[T Model](tx *db.Tx, id string, vals *Values[T], expectedEtag *strin
 }
 
 func write[T Model](txID, id string, vals *Values[T], expectedEtag *string) error {
-	var out ormWriteOutput
-	in := ormWriteInput{Model: resourceName[T](), ID: id, Record: vals.raw(), ExpectedEtag: expectedEtag, TxID: txID}
+	var out abi.ORMWriteOutput
+	in := abi.ORMWriteInput{Model: resourceName[T](), ID: id, Record: vals.raw(), ExpectedEtag: expectedEtag, TxID: txID}
 	return hostcall.Do(hostORMWrite, in, &out)
 }
-
-type ormWriteManyInput = abi.ORMWriteManyInput
 
 // WriteMany applies the same field changes to every ID via
 // host.orm.write_many — no etag check, since a bulk write has no single
@@ -52,12 +46,10 @@ func WriteManyTx[T Model](tx *db.Tx, ids []string, vals *Values[T]) (ExecResult,
 
 func writeMany[T Model](txID string, ids []string, vals *Values[T]) (ExecResult, error) {
 	var out ExecResult
-	in := ormWriteManyInput{Model: resourceName[T](), IDs: ids, Record: vals.raw(), TxID: txID}
+	in := abi.ORMWriteManyInput{Model: resourceName[T](), IDs: ids, Record: vals.raw(), TxID: txID}
 	err := hostcall.Do(hostORMWriteMany, in, &out)
 	return out, err
 }
-
-type ormWriteWhereInput = abi.ORMWriteWhereInput
 
 // WriteWhere applies the same field changes to every record matching
 // cond via host.orm.write_where — WriteMany with the ID list resolved
@@ -82,7 +74,7 @@ func WriteWhereTx[T Model](tx *db.Tx, cond BoundCondition[T], vals *Values[T]) (
 
 func writeWhere[T Model](txID string, cond BoundCondition[T], vals *Values[T]) (ExecResult, error) {
 	var out ExecResult
-	in := ormWriteWhereInput{Model: resourceName[T](), Domain: cond.expr, Record: vals.raw(), TxID: txID}
+	in := abi.ORMWriteWhereInput{Model: resourceName[T](), Domain: cond.expr, Record: vals.raw(), TxID: txID}
 	err := hostcall.Do(hostORMWriteWhere, in, &out)
 	return out, err
 }

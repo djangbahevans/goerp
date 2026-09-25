@@ -70,15 +70,6 @@ import (
 // outright. A genuinely nonexistent column is instead caught by Postgres
 // itself (translateMigrationDDLError's undefined_column case below).
 
-const (
-	migrationDDLOpDropColumn = abiv1.DBMigrationDDLOpDropColumn
-	migrationDDLOpDropTable  = abiv1.DBMigrationDDLOpDropTable
-)
-
-type dbMigrationDDLInput = abiv1.DBMigrationDDLInput
-
-type dbMigrationDDLOutput = abiv1.DBMigrationDDLOutput
-
 func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -89,8 +80,8 @@ func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m
 			return abi.EncodeHostError(ctx, m, allocate, abi.CapabilityDenied("db.migration_ddl"))
 		}
 		if !modCtx.IsDataMigrationJob {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeMigrationDDLNotInContext,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeMigrationDDLNotInContext,
 				Message: "host.db.migration_ddl may only be called from inside a data migration handler",
 			})
 		}
@@ -99,7 +90,7 @@ func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input dbMigrationDDLInput
+		var input abiv1.DBMigrationDDLInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -118,10 +109,10 @@ func makeDBMigrationDDL(r *Runtime, primary *sql.DB) func(ctx context.Context, m
 // separated from makeDBMigrationDDL's own capability/IsDataMigrationJob
 // gating and ABI marshaling so it's testable directly, matching DBExec's
 // own split (host_db_exec.go).
-func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input dbMigrationDDLInput) (dbMigrationDDLOutput, *abi.HostError) {
+func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, input abiv1.DBMigrationDDLInput) (abiv1.DBMigrationDDLOutput, *abiv1.HostError) {
 	sqlText, hostErr := buildMigrationDDL(modCtx, input)
 	if hostErr != nil {
-		return dbMigrationDDLOutput{}, hostErr
+		return abiv1.DBMigrationDDLOutput{}, hostErr
 	}
 
 	qCtx, cancel := context.WithTimeout(ctx, defaultExecTimeout)
@@ -129,20 +120,20 @@ func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext,
 
 	tx, cleanup, hostErr := beginMigrationDDLTx(qCtx, primary, modCtx)
 	if hostErr != nil {
-		return dbMigrationDDLOutput{}, hostErr
+		return abiv1.DBMigrationDDLOutput{}, hostErr
 	}
 	defer cleanup()
 
 	start := time.Now()
 	if _, execErr := tx.ExecContext(qCtx, sqlText); execErr != nil {
 		_ = tx.Rollback()
-		return dbMigrationDDLOutput{}, translateMigrationDDLError(execErr)
+		return abiv1.DBMigrationDDLOutput{}, translateMigrationDDLError(execErr)
 	}
 	if err := tx.Commit(); err != nil {
-		return dbMigrationDDLOutput{}, &abi.HostError{Code: abi.ErrCodeCommitFailed, Message: err.Error()}
+		return abiv1.DBMigrationDDLOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 	}
 
-	return dbMigrationDDLOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000}, nil
+	return abiv1.DBMigrationDDLOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000}, nil
 }
 
 // beginMigrationDDLTx acquires a *sql.Conn, takes the same pg_advisory_lock
@@ -152,19 +143,19 @@ func DBMigrationDDL(ctx context.Context, primary *sql.DB, modCtx *ModuleContext,
 // same connection and applies tenant scope to it. cleanup unlocks and
 // closes conn; the caller must defer it exactly once as soon as it's
 // returned non-nil, regardless of how tx is later used.
-func beginMigrationDDLTx(ctx context.Context, primary *sql.DB, modCtx *ModuleContext) (tx *sql.Tx, cleanup func(), hostErr *abi.HostError) {
+func beginMigrationDDLTx(ctx context.Context, primary *sql.DB, modCtx *ModuleContext) (tx *sql.Tx, cleanup func(), hostErr *abiv1.HostError) {
 	conn, err := primary.Conn(ctx)
 	if err != nil {
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
 	lockA, lockB := migrationDDLAdvisoryLockKeys(modCtx.TenantSlug, modCtx.ModuleName)
 	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1, $2)", lockA, lockB); err != nil {
 		_ = conn.Close()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, nil, &abi.HostError{Code: abi.ErrCodeDBTimeout, Message: "timed out waiting for the schema sync lock (a sync is in progress for this module/tenant)", Retry: true}
+			return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeDBTimeout, Message: "timed out waiting for the schema sync lock (a sync is in progress for this module/tenant)", Retry: true}
 		}
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	cleanup = func() {
 		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1, $2)", lockA, lockB)
@@ -174,12 +165,12 @@ func beginMigrationDDLTx(ctx context.Context, primary *sql.DB, modCtx *ModuleCon
 	newTx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		cleanup()
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 	if err := applyTenantScope(ctx, newTx, modCtx); err != nil {
 		_ = newTx.Rollback()
 		cleanup()
-		return nil, nil, &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error(), Retry: true}
+		return nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}
 
 	return newTx, cleanup, nil
@@ -210,24 +201,24 @@ func migrationDDLAdvisoryLockKeys(tenantSlug, moduleName string) (int32, int32) 
 // since-removed model's table is rejected rather than allowed, and why
 // DropColumn's own column argument isn't checked against the current
 // declaration the same way.
-func buildMigrationDDL(modCtx *ModuleContext, input dbMigrationDDLInput) (string, *abi.HostError) {
+func buildMigrationDDL(modCtx *ModuleContext, input abiv1.DBMigrationDDLInput) (string, *abiv1.HostError) {
 	if !returningColumnRe.MatchString(input.Table) {
-		return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: fmt.Sprintf("table %q is not a valid identifier", input.Table)}
+		return "", &abiv1.HostError{Code: abiv1.ErrCodeMigrationDDLError, Message: fmt.Sprintf("table %q is not a valid identifier", input.Table)}
 	}
 	if !migrationDDLTableOwned(modCtx, input.Table) {
-		return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLNotOwned, Message: fmt.Sprintf("table %q is not owned or extended by module %q", input.Table, modCtx.ModuleName)}
+		return "", &abiv1.HostError{Code: abiv1.ErrCodeMigrationDDLNotOwned, Message: fmt.Sprintf("table %q is not owned or extended by module %q", input.Table, modCtx.ModuleName)}
 	}
 
 	switch input.Op {
-	case migrationDDLOpDropColumn:
+	case abiv1.DBMigrationDDLOpDropColumn:
 		if !returningColumnRe.MatchString(input.Column) {
-			return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: fmt.Sprintf("column %q is not a valid identifier", input.Column)}
+			return "", &abiv1.HostError{Code: abiv1.ErrCodeMigrationDDLError, Message: fmt.Sprintf("column %q is not a valid identifier", input.Column)}
 		}
 		return "ALTER TABLE " + quoteIdentORM(input.Table) + " DROP COLUMN " + quoteIdentORM(input.Column), nil
-	case migrationDDLOpDropTable:
+	case abiv1.DBMigrationDDLOpDropTable:
 		return "DROP TABLE " + quoteIdentORM(input.Table), nil
 	default:
-		return "", &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: fmt.Sprintf("unknown op %q", input.Op)}
+		return "", &abiv1.HostError{Code: abiv1.ErrCodeMigrationDDLError, Message: fmt.Sprintf("unknown op %q", input.Op)}
 	}
 }
 
@@ -258,17 +249,17 @@ func migrationDDLTableOwned(modCtx *ModuleContext, table string) bool {
 // the column against the caller's current declaration. Everything else
 // stays under the generic db.migration_ddl_error, carrying its own
 // SQLSTATE.
-func translateMigrationDDLError(err error) *abi.HostError {
+func translateMigrationDDLError(err error) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
 		case "42703", "42P01": // undefined_column, undefined_table
-			return &abi.HostError{Code: abi.ErrCodeMigrationDDLTargetNotFound, Message: pgErr.Message}
+			return &abiv1.HostError{Code: abiv1.ErrCodeMigrationDDLTargetNotFound, Message: pgErr.Message}
 		default:
-			return &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: pgErr.Message, Details: map[string]any{"sqlstate": pgErr.Code}}
+			return &abiv1.HostError{Code: abiv1.ErrCodeMigrationDDLError, Message: pgErr.Message, Details: map[string]any{"sqlstate": pgErr.Code}}
 		}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return &abi.HostError{Code: abi.ErrCodeDBTimeout, Message: "migration DDL exceeded its timeout", Retry: true}
+		return &abiv1.HostError{Code: abiv1.ErrCodeDBTimeout, Message: "migration DDL exceeded its timeout", Retry: true}
 	}
-	return &abi.HostError{Code: abi.ErrCodeMigrationDDLError, Message: err.Error()}
+	return &abiv1.HostError{Code: abiv1.ErrCodeMigrationDDLError, Message: err.Error()}
 }

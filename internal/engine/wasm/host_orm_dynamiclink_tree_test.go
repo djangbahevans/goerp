@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -70,7 +71,7 @@ func TestORMCreate_Tree_RootGetsSingleLabelPath(t *testing.T) {
 	mc := newTreeTestModuleContext(slug, decls)
 	insertClient := r.EventInsertClient()
 
-	created, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	created, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.category",
 		Record: map[string]any{"name": "Root"},
 	})
@@ -98,7 +99,7 @@ func TestORMCreate_Tree_ChildGetsParentPathPlusOwnLabel(t *testing.T) {
 	mc := newTreeTestModuleContext(slug, decls)
 	insertClient := r.EventInsertClient()
 
-	rootOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	rootOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.category",
 		Record: map[string]any{"name": "Root"},
 	})
@@ -107,7 +108,7 @@ func TestORMCreate_Tree_ChildGetsParentPathPlusOwnLabel(t *testing.T) {
 	}
 	rootID, _ := rootOut.Record["id"].(string)
 
-	childOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	childOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.category",
 		Record: map[string]any{"name": "Child", "parent_id": rootID},
 	})
@@ -135,26 +136,26 @@ func TestORMWrite_Tree_ReparentUpdatesWholeSubtree(t *testing.T) {
 	mc := newTreeTestModuleContext(slug, decls)
 	insertClient := r.EventInsertClient()
 
-	aOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "A"}})
+	aOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "A"}})
 	if hostErr != nil {
 		t.Fatalf("create A: %+v", hostErr)
 	}
 	aID, _ := aOut.Record["id"].(string)
 
-	bOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "B", "parent_id": aID}})
+	bOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "B", "parent_id": aID}})
 	if hostErr != nil {
 		t.Fatalf("create B: %+v", hostErr)
 	}
 	bID, _ := bOut.Record["id"].(string)
 
-	cOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "C", "parent_id": bID}})
+	cOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "C", "parent_id": bID}})
 	if hostErr != nil {
 		t.Fatalf("create C: %+v", hostErr)
 	}
 	cID, _ := cOut.Record["id"].(string)
 
 	// Reparent B (and its descendant C) to root — parent_id: nil.
-	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.category",
 		ID:     bID,
 		Record: map[string]any{"parent_id": nil},
@@ -186,13 +187,13 @@ func TestORMWrite_Tree_CycleDetected(t *testing.T) {
 	mc := newTreeTestModuleContext(slug, decls)
 	insertClient := r.EventInsertClient()
 
-	aOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "A"}})
+	aOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "A"}})
 	if hostErr != nil {
 		t.Fatalf("create A: %+v", hostErr)
 	}
 	aID, _ := aOut.Record["id"].(string)
 
-	bOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "B", "parent_id": aID}})
+	bOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{Model: "testmodule.category", Record: map[string]any{"name": "B", "parent_id": aID}})
 	if hostErr != nil {
 		t.Fatalf("create B: %+v", hostErr)
 	}
@@ -201,7 +202,7 @@ func TestORMWrite_Tree_CycleDetected(t *testing.T) {
 	aPathBefore := categoryPath(t, primaryDB, slug, aID)
 
 	// Reparent A (the ancestor) under B (its own descendant) — a cycle.
-	_, hostErr = ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+	_, hostErr = ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.category",
 		ID:     aID,
 		Record: map[string]any{"parent_id": bID},
@@ -209,8 +210,8 @@ func TestORMWrite_Tree_CycleDetected(t *testing.T) {
 	if hostErr == nil {
 		t.Fatal("expected orm.cycle_detected, got nil error")
 	}
-	if hostErr.Code != abi.ErrCodeCycleDetected {
-		t.Errorf("hostErr.Code = %q, want %q", hostErr.Code, abi.ErrCodeCycleDetected)
+	if hostErr.Code != abiv1.ErrCodeCycleDetected {
+		t.Errorf("hostErr.Code = %q, want %q", hostErr.Code, abiv1.ErrCodeCycleDetected)
 	}
 
 	if got := categoryPath(t, primaryDB, slug, aID); got != aPathBefore {
@@ -271,14 +272,14 @@ func TestORMCreate_DynamicLink_MissingPairField_Rejected(t *testing.T) {
 	mc := newTreeTestModuleContext(slug, decls)
 	insertClient := r.EventInsertClient()
 
-	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model: "testmodule.comment",
 		Record: map[string]any{
 			"reference_id": "60000000-0000-0000-0000-000000000002", // reference_type missing
 		},
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeValidationFailed {
-		t.Fatalf("hostErr = %+v, want code %s", hostErr, abi.ErrCodeValidationFailed)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeValidationFailed {
+		t.Fatalf("hostErr = %+v, want code %s", hostErr, abiv1.ErrCodeValidationFailed)
 	}
 }
 
@@ -299,15 +300,15 @@ func TestORMCreate_DynamicLink_NonexistentTarget_Rejected(t *testing.T) {
 		})
 	insertClient := r.EventInsertClient()
 
-	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model: "testmodule.comment",
 		Record: map[string]any{
 			"reference_type": "salesmod.target_order",
 			"reference_id":   "60000000-0000-0000-0000-000000000099", // never created
 		},
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeDynamicLinkTargetNotFound {
-		t.Fatalf("hostErr = %+v, want code %s", hostErr, abi.ErrCodeDynamicLinkTargetNotFound)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeDynamicLinkTargetNotFound {
+		t.Fatalf("hostErr = %+v, want code %s", hostErr, abiv1.ErrCodeDynamicLinkTargetNotFound)
 	}
 }
 
@@ -333,7 +334,7 @@ func TestORMCreate_DynamicLink_ValidCrossModuleTarget_Succeeds(t *testing.T) {
 		})
 	insertClient := r.EventInsertClient()
 
-	out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	out, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model: "testmodule.comment",
 		Record: map[string]any{
 			"reference_type": "salesmod.target_order",

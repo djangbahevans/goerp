@@ -18,17 +18,13 @@ const (
 	Write = abi.AuthzFieldCheckWrite
 )
 
-type fieldCheckInput = abi.AuthzFieldCheckInput
-
-type fieldCheckOutput = abi.AuthzFieldCheckOutput
-
 // FieldCheck reports whether userID — the calling module's own request
 // user — may access modelName.fieldName per the field's declared
 // .Access() rule (a field with no declared rule always returns true).
 // modelName is the qualified "{module}.{model}" name, not a table name.
 func FieldCheck(userID, modelName, fieldName string, kind AccessKind) (bool, error) {
-	var out fieldCheckOutput
-	err := hostcall.Do(hostAuthzFieldCheck, fieldCheckInput{
+	var out abi.AuthzFieldCheckOutput
+	err := hostcall.Do(hostAuthzFieldCheck, abi.AuthzFieldCheckInput{
 		UserID: userID,
 		Model:  modelName,
 		Field:  fieldName,

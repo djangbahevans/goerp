@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -100,15 +101,15 @@ func TestORMCreate_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	mc := newWriteFieldSecModuleContext(slug) // no permissions granted
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+	env := callORMHost(t, ctx, inst, "call_create", abiv1.ORMCreateInput{
 		Model:  "testmodule.widget",
 		Record: map[string]any{"name": "Widget A", "discount_percent": int64(10)},
 	}, nil)
 	if env.OK {
 		t.Fatal("expected create to be rejected for the write-denied discount_percent field")
 	}
-	if env.Error.Code != abi.ErrCodeFieldWriteDenied {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeFieldWriteDenied)
+	if env.Error.Code != abiv1.ErrCodeFieldWriteDenied {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeFieldWriteDenied)
 	}
 	if env.Error.Details["field"] != "discount_percent" {
 		t.Errorf("Error.Details[field] = %v, want discount_percent", env.Error.Details["field"])
@@ -135,8 +136,8 @@ func TestORMCreate_FieldSecurity_IgnoreStripsFieldSilently(t *testing.T) {
 	mc := newWriteFieldSecModuleContext(slug) // no permissions granted
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	var out ORMCreateOutput
-	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+	var out abiv1.ORMCreateOutput
+	env := callORMHost(t, ctx, inst, "call_create", abiv1.ORMCreateInput{
 		Model:  "testmodule.widget",
 		Record: map[string]any{"name": "Widget B", "internal_flag": true},
 	}, &out)
@@ -172,8 +173,8 @@ func TestORMCreate_FieldSecurity_GrantedPermissionWritesNormally(t *testing.T) {
 	mc := newWriteFieldSecModuleContext(slug, "sales:order:set_discount")
 	inst := newHostORMWriteCaller(t, ctx, r, mc)
 
-	var out ORMCreateOutput
-	env := callORMHost(t, ctx, inst, "call_create", ORMCreateInput{
+	var out abiv1.ORMCreateOutput
+	env := callORMHost(t, ctx, inst, "call_create", abiv1.ORMCreateInput{
 		Model:  "testmodule.widget",
 		Record: map[string]any{"name": "Widget C", "discount_percent": int64(15)},
 	}, &out)
@@ -198,8 +199,8 @@ func TestORMWrite_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	granted := newWriteFieldSecModuleContext(slug, "sales:order:set_discount")
 	createInst := newHostORMWriteCaller(t, ctx, r, granted)
 
-	var created ORMCreateOutput
-	callORMHost(t, ctx, createInst, "call_create", ORMCreateInput{
+	var created abiv1.ORMCreateOutput
+	callORMHost(t, ctx, createInst, "call_create", abiv1.ORMCreateInput{
 		Model:  "testmodule.widget",
 		Record: map[string]any{"name": "Widget D", "discount_percent": int64(5)},
 	}, &created)
@@ -211,7 +212,7 @@ func TestORMWrite_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	denied := newWriteFieldSecModuleContext(slug)
 	writeInst := newHostORMWriteCaller(t, ctx, r, denied)
 
-	env := callORMHost(t, ctx, writeInst, "call_write", ORMWriteInput{
+	env := callORMHost(t, ctx, writeInst, "call_write", abiv1.ORMWriteInput{
 		Model:  "testmodule.widget",
 		ID:     id,
 		Record: map[string]any{"discount_percent": int64(50)},
@@ -219,8 +220,8 @@ func TestORMWrite_FieldSecurity_RejectDeniesEntireRequest(t *testing.T) {
 	if env.OK {
 		t.Fatal("expected write to be rejected for the write-denied discount_percent field")
 	}
-	if env.Error.Code != abi.ErrCodeFieldWriteDenied {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeFieldWriteDenied)
+	if env.Error.Code != abiv1.ErrCodeFieldWriteDenied {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeFieldWriteDenied)
 	}
 
 	var discount int

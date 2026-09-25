@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/config"
@@ -163,7 +164,7 @@ func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 
 	insertClient := r.EventInsertClient()
 
-	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	createOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model: "testmodule.order",
 		Record: map[string]any{
 			"quantity": int64(3), "unit_price": int64(25),
@@ -177,7 +178,7 @@ func TestRecomputeAfterWrite_SameRecordDependency(t *testing.T) {
 	}
 	orderID, _ := createOut.Record["id"].(string)
 
-	writeOut, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+	writeOut, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.order",
 		ID:     orderID,
 		Record: map[string]any{"quantity": int64(4)},
@@ -214,7 +215,7 @@ func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 
 	insertClient := r.EventInsertClient()
 
-	contactOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	contactOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.contact",
 		Record: map[string]any{"credit_limit": int64(1000)},
 	})
@@ -223,7 +224,7 @@ func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 	}
 	contactID, _ := contactOut.Record["id"].(string)
 
-	orderOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	orderOut, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.hop_order",
 		Record: map[string]any{"customer_id": contactID},
 	})
@@ -243,7 +244,7 @@ func TestRecomputeAfterWrite_Many2OneHopDependency(t *testing.T) {
 		t.Fatalf("touched_flag before contact write = %v, want NULL", before.Int64)
 	}
 
-	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.contact",
 		ID:     contactID,
 		Record: map[string]any{"credit_limit": int64(2000)},
@@ -275,13 +276,13 @@ func TestORMWrite_ComputedField_RejectedAsFieldNotWritable(t *testing.T) {
 
 	insertClient := r.EventInsertClient()
 
-	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	_, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model: "testmodule.order",
 		Record: map[string]any{
 			"quantity": int64(1), "unit_price": int64(1), "amount_total": int64(999),
 		},
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeFieldNotWritable {
-		t.Fatalf("ORMCreate with a computed field in payload: hostErr = %+v, want code %s", hostErr, abi.ErrCodeFieldNotWritable)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeFieldNotWritable {
+		t.Fatalf("ORMCreate with a computed field in payload: hostErr = %+v, want code %s", hostErr, abiv1.ErrCodeFieldNotWritable)
 	}
 }

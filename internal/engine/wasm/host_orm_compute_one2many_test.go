@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -93,7 +94,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildCreate(t *testing.T) {
 	parentID := "30000000-0000-0000-0000-000000000001"
 	lineID := "30000000-0000-0000-0000-000000000002"
 
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.line_order",
 		Record: map[string]any{"id": parentID, "tenant_id": tenantID},
 	}); hostErr != nil {
@@ -108,7 +109,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildCreate(t *testing.T) {
 		t.Fatalf("lines_total before child create = %v, want NULL", before.Int64)
 	}
 
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.order_line",
 		Record: map[string]any{"id": lineID, "tenant_id": tenantID, "order_id": parentID, "quantity": int64(5)},
 	}); hostErr != nil {
@@ -151,13 +152,13 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildWrite(t *testing.T) {
 	parentID := "31000000-0000-0000-0000-000000000001"
 	lineID := "31000000-0000-0000-0000-000000000002"
 
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.line_order",
 		Record: map[string]any{"id": parentID, "tenant_id": tenantID},
 	}); hostErr != nil {
 		t.Fatalf("create line_order: %+v", hostErr)
 	}
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.order_line",
 		Record: map[string]any{"id": lineID, "tenant_id": tenantID, "order_id": parentID, "quantity": int64(5)},
 	}); hostErr != nil {
@@ -174,7 +175,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildWrite(t *testing.T) {
 		t.Fatalf("reset lines_total: %v", err)
 	}
 
-	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, ORMWriteInput{
+	if _, hostErr := ORMWrite(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.order_line",
 		ID:     lineID,
 		Record: map[string]any{"quantity": int64(9)},
@@ -218,13 +219,13 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildUnlink(t *testing.T) {
 	parentID := "32000000-0000-0000-0000-000000000001"
 	lineID := "32000000-0000-0000-0000-000000000002"
 
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.line_order",
 		Record: map[string]any{"id": parentID, "tenant_id": tenantID},
 	}); hostErr != nil {
 		t.Fatalf("create line_order: %+v", hostErr)
 	}
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.order_line",
 		Record: map[string]any{"id": lineID, "tenant_id": tenantID, "order_id": parentID, "quantity": int64(5)},
 	}); hostErr != nil {
@@ -237,7 +238,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_OnChildUnlink(t *testing.T) {
 		t.Fatalf("reset lines_total: %v", err)
 	}
 
-	if _, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, ORMUnlinkInput{
+	if _, hostErr := ORMUnlink(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMUnlinkInput{
 		Model: "testmodule.order_line",
 		IDs:   []string{lineID},
 	}); hostErr != nil {
@@ -280,7 +281,7 @@ func TestRecomputeAfterWrite_One2ManyHopDependency_ChildWithoutParent_NoOp(t *te
 	lineID := "33000000-0000-0000-0000-000000000001"
 
 	// order_id is omitted — an orphan child not linked to any parent yet.
-	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.order_line",
 		Record: map[string]any{"id": lineID, "tenant_id": tenantID, "quantity": int64(5)},
 	}); hostErr != nil {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -36,11 +37,11 @@ func TestModuleContext_RawConn_SharesPhysicalConnectionWithTransaction(t *testin
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBCaller(t, ctx, r, mc)
 
-	beginEnv := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	beginEnv := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !beginEnv.OK {
 		t.Fatalf("begin failed: %+v", beginEnv.Error)
 	}
-	var beginOut dbBeginOutput
+	var beginOut abiv1.DBBeginOutput
 	if err := msgpack.Unmarshal(beginEnv.Data, &beginOut); err != nil {
 		t.Fatalf("unmarshal begin output: %v", err)
 	}
@@ -71,7 +72,7 @@ func TestModuleContext_RawConn_SharesPhysicalConnectionWithTransaction(t *testin
 		t.Errorf("count = %d, want 1 — the raw pgx INSERT and the *sql.Tx query must share the same uncommitted transaction", count)
 	}
 
-	if env := callHost(t, ctx, inst, "call_rollback", dbTxIDInput{TxID: txID}); !env.OK {
+	if env := callHost(t, ctx, inst, "call_rollback", abiv1.DBTxIDInput{TxID: txID}); !env.OK {
 		t.Fatalf("rollback failed: %+v", env.Error)
 	}
 }
@@ -103,11 +104,11 @@ func TestHostDBCommit_ReleasesPinnedConnBackToPool(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBCaller(t, ctx, r, mc)
 
-	beginEnv := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	beginEnv := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !beginEnv.OK {
 		t.Fatalf("begin failed: %+v", beginEnv.Error)
 	}
-	var beginOut dbBeginOutput
+	var beginOut abiv1.DBBeginOutput
 	if err := msgpack.Unmarshal(beginEnv.Data, &beginOut); err != nil {
 		t.Fatalf("unmarshal begin output: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestHostDBCommit_ReleasesPinnedConnBackToPool(t *testing.T) {
 		t.Fatal("conn already closed before commit")
 	}
 
-	if env := callHost(t, ctx, inst, "call_commit", dbTxIDInput{TxID: beginOut.TxID}); !env.OK {
+	if env := callHost(t, ctx, inst, "call_commit", abiv1.DBTxIDInput{TxID: beginOut.TxID}); !env.OK {
 		t.Fatalf("commit failed: %+v", env.Error)
 	}
 
@@ -140,11 +141,11 @@ func TestHostDBRollback_ReleasesPinnedConnBackToPool(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBCaller(t, ctx, r, mc)
 
-	beginEnv := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	beginEnv := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !beginEnv.OK {
 		t.Fatalf("begin failed: %+v", beginEnv.Error)
 	}
-	var beginOut dbBeginOutput
+	var beginOut abiv1.DBBeginOutput
 	if err := msgpack.Unmarshal(beginEnv.Data, &beginOut); err != nil {
 		t.Fatalf("unmarshal begin output: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestHostDBRollback_ReleasesPinnedConnBackToPool(t *testing.T) {
 		t.Fatal("RawConn: not found")
 	}
 
-	if env := callHost(t, ctx, inst, "call_rollback", dbTxIDInput{TxID: beginOut.TxID}); !env.OK {
+	if env := callHost(t, ctx, inst, "call_rollback", abiv1.DBTxIDInput{TxID: beginOut.TxID}); !env.OK {
 		t.Fatalf("rollback failed: %+v", env.Error)
 	}
 

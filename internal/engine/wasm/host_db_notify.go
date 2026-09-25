@@ -20,8 +20,6 @@ import (
 // "Program Limit Exceeded" class the payload cap might otherwise suggest.
 const invalidParameterValueSQLState = "22023"
 
-type dbNotifyInput = abiv1.DBNotifyInput
-
 // makeDBNotify builds host.db.notify — a tenant-namespaced Postgres
 // NOTIFY, sent immediately against primary if no tx_id is supplied, or on
 // the caller's own open host.db.begin transaction otherwise. Postgres
@@ -41,7 +39,7 @@ func makeDBNotify(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.M
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input dbNotifyInput
+		var input abiv1.DBNotifyInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -61,7 +59,7 @@ func makeDBNotify(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.M
 		if input.TxID != "" {
 			tx, ok := modCtx.Transaction(input.TxID)
 			if !ok {
-				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"})
+				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeTransactionNotFound, Message: "transaction ID does not exist or has expired"})
 			}
 			notifyErr = notifyOnTx(qCtx, tx, channel, input.Payload)
 		} else {
@@ -71,7 +69,7 @@ func makeDBNotify(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.M
 			return abi.EncodeHostError(ctx, m, allocate, translateNotifyError(notifyErr))
 		}
 
-		return abi.WriteToModule(ctx, m, allocate, dbDurationOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000})
+		return abi.WriteToModule(ctx, m, allocate, abiv1.DBDurationOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000})
 	}
 }
 
@@ -111,9 +109,9 @@ func notifyOnTx(ctx context.Context, tx *sql.Tx, channel, payload string) error 
 // aborted transaction can never succeed without an explicit rollback
 // first, and this function has no way to distinguish that case from a
 // real transient one.
-func translateNotifyError(err error) *abi.HostError {
+func translateNotifyError(err error) *abiv1.HostError {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == invalidParameterValueSQLState {
-		return &abi.HostError{Code: abi.ErrCodeExecError, Message: pgErr.Message}
+		return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: pgErr.Message}
 	}
-	return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 }

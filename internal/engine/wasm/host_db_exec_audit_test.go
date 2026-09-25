@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 )
 
@@ -433,7 +434,7 @@ func TestDBExec_AuditedDeleteUsing_RecordsTheDeletedRows(t *testing.T) {
 	}
 	keep, drop := "30000000-0000-0000-0000-000000000001", "30000000-0000-0000-0000-000000000002"
 	for _, id := range []string{keep, drop} {
-		if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "w-" + id}}); hostErr != nil {
+		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "w-" + id}}); hostErr != nil {
 			t.Fatalf("seed widget: %+v", hostErr)
 		}
 	}
@@ -441,7 +442,7 @@ func TestDBExec_AuditedDeleteUsing_RecordsTheDeletedRows(t *testing.T) {
 		t.Fatalf("seed purge: %v", err)
 	}
 
-	if _, hostErr := DBExec(ctx, primaryDB, mc, dbExecInput{
+	if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{
 		SQL:    "DELETE FROM widget w USING purge p WHERE w.id = p.widget_id AND w.name LIKE $1",
 		Params: []any{"w-%"},
 	}); hostErr != nil {

@@ -8,10 +8,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-type wireConstraintRequest = abiv1.ConstraintRequest
-
-type wireConstraintResponse = abiv1.ConstraintResponse
-
 // TestInvokeHandleConstraint_RoundTripsThroughRealModule compiles a real
 // Go module registering orm.RegisterConstraint for
 // ("testmodule.order", orm.OnDelete) (testdata/computedfixture) and
@@ -38,7 +34,7 @@ func TestInvokeHandleConstraint_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatal("HasHandleConstraint() = false, want true (computedfixture exports handle_orm_constraint)")
 	}
 
-	reqBytes, err := msgpack.Marshal(wireConstraintRequest{
+	reqBytes, err := msgpack.Marshal(abiv1.ConstraintRequest{
 		Model:  "testmodule.order",
 		Phase:  "delete",
 		Record: map[string]any{"state": "confirmed"},
@@ -52,7 +48,7 @@ func TestInvokeHandleConstraint_RoundTripsThroughRealModule(t *testing.T) {
 		t.Fatalf("InvokeHandleConstraint: %v", err)
 	}
 
-	var resp wireConstraintResponse
+	var resp abiv1.ConstraintResponse
 	if err := msgpack.Unmarshal(respBytes, &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}

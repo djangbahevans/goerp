@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-func unmarshalEnvelope(t *testing.T, env wireEnvelope, out any) error {
+func unmarshalEnvelope(t *testing.T, env abiv1.Envelope, out any) error {
 	t.Helper()
 	return msgpack.Unmarshal(env.Data, out)
 }
@@ -20,11 +21,11 @@ func unmarshalEnvelope(t *testing.T, env wireEnvelope, out any) error {
 func beginLockTx(t *testing.T, ctx context.Context, inst *ModuleInstance) string {
 	t.Helper()
 
-	env := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	env := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !env.OK {
 		t.Fatalf("begin failed: %+v", env.Error)
 	}
-	var out dbBeginOutput
+	var out abiv1.DBBeginOutput
 	if err := unmarshalEnvelope(t, env, &out); err != nil {
 		t.Fatalf("unmarshal begin output: %v", err)
 	}
@@ -44,8 +45,8 @@ func TestHostDBLock_TryLock_AcquiresWhenFree(t *testing.T) {
 
 	txID := beginLockTx(t, ctx, inst)
 
-	var out dbLockOutput
-	env := callHost(t, ctx, inst, "call_lock", dbLockInput{Key: "widget-a", TxID: txID})
+	var out abiv1.DBLockOutput
+	env := callHost(t, ctx, inst, "call_lock", abiv1.DBLockInput{Key: "widget-a", TxID: txID})
 	if !env.OK {
 		t.Fatalf("lock failed: %+v", env.Error)
 	}
@@ -68,12 +69,12 @@ func TestHostDBLock_TxIDNotFound(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_lock", dbLockInput{Key: "widget-a", TxID: "does-not-exist"})
+	env := callHost(t, ctx, inst, "call_lock", abiv1.DBLockInput{Key: "widget-a", TxID: "does-not-exist"})
 	if env.OK {
 		t.Fatal("expected an error for an unregistered tx_id")
 	}
-	if env.Error.Code != abi.ErrCodeTransactionNotFound {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeTransactionNotFound)
+	if env.Error.Code != abiv1.ErrCodeTransactionNotFound {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeTransactionNotFound)
 	}
 }
 
@@ -88,12 +89,12 @@ func TestHostDBLock_CapabilityDenied(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter()) // no CapDBWrite
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_lock", dbLockInput{Key: "widget-a", TxID: "irrelevant"})
+	env := callHost(t, ctx, inst, "call_lock", abiv1.DBLockInput{Key: "widget-a", TxID: "irrelevant"})
 	if env.OK {
 		t.Fatal("expected capability denial without db.write")
 	}
-	if env.Error.Code != abi.ErrCodeCapabilityDenied {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+	if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 	}
 }
 
@@ -113,8 +114,8 @@ func TestHostDBLock_TryLock_ContendsAcrossTransactions_ReleasesOnCommit(t *testi
 	inst2 := newHostDBQueryCaller(t, ctx, r, mc2)
 
 	tx1 := beginLockTx(t, ctx, inst1)
-	var out1 dbLockOutput
-	env := callHost(t, ctx, inst1, "call_lock", dbLockInput{Key: "inventory:sku-1", TxID: tx1})
+	var out1 abiv1.DBLockOutput
+	env := callHost(t, ctx, inst1, "call_lock", abiv1.DBLockInput{Key: "inventory:sku-1", TxID: tx1})
 	if !env.OK {
 		t.Fatalf("first lock failed: %+v", env.Error)
 	}
@@ -126,8 +127,8 @@ func TestHostDBLock_TryLock_ContendsAcrossTransactions_ReleasesOnCommit(t *testi
 	}
 
 	tx2 := beginLockTx(t, ctx, inst2)
-	var out2 dbLockOutput
-	env = callHost(t, ctx, inst2, "call_lock", dbLockInput{Key: "inventory:sku-1", TxID: tx2})
+	var out2 abiv1.DBLockOutput
+	env = callHost(t, ctx, inst2, "call_lock", abiv1.DBLockInput{Key: "inventory:sku-1", TxID: tx2})
 	if !env.OK {
 		t.Fatalf("second lock call failed: %+v", env.Error)
 	}
@@ -138,11 +139,11 @@ func TestHostDBLock_TryLock_ContendsAcrossTransactions_ReleasesOnCommit(t *testi
 		t.Error("second caller acquired a lock the first still holds")
 	}
 
-	if env := callHost(t, ctx, inst1, "call_commit", dbTxIDInput{TxID: tx1}); !env.OK {
+	if env := callHost(t, ctx, inst1, "call_commit", abiv1.DBTxIDInput{TxID: tx1}); !env.OK {
 		t.Fatalf("commit tx1 failed: %+v", env.Error)
 	}
 
-	env = callHost(t, ctx, inst2, "call_lock", dbLockInput{Key: "inventory:sku-1", TxID: tx2})
+	env = callHost(t, ctx, inst2, "call_lock", abiv1.DBLockInput{Key: "inventory:sku-1", TxID: tx2})
 	if !env.OK {
 		t.Fatalf("third lock call failed: %+v", env.Error)
 	}
@@ -170,8 +171,8 @@ func TestHostDBLock_TenantNamespacing_DifferentTenantsDontCollide(t *testing.T) 
 	instB := newHostDBQueryCaller(t, ctx, r, mcB)
 
 	txA := beginLockTx(t, ctx, instA)
-	var outA dbLockOutput
-	env := callHost(t, ctx, instA, "call_lock", dbLockInput{Key: "same-key", TxID: txA})
+	var outA abiv1.DBLockOutput
+	env := callHost(t, ctx, instA, "call_lock", abiv1.DBLockInput{Key: "same-key", TxID: txA})
 	if !env.OK {
 		t.Fatalf("tenant A lock call failed: %+v", env.Error)
 	}
@@ -183,8 +184,8 @@ func TestHostDBLock_TenantNamespacing_DifferentTenantsDontCollide(t *testing.T) 
 	}
 
 	txB := beginLockTx(t, ctx, instB)
-	var outB dbLockOutput
-	env = callHost(t, ctx, instB, "call_lock", dbLockInput{Key: "same-key", TxID: txB})
+	var outB abiv1.DBLockOutput
+	env = callHost(t, ctx, instB, "call_lock", abiv1.DBLockInput{Key: "same-key", TxID: txB})
 	if !env.OK {
 		t.Fatalf("tenant B lock call failed: %+v", env.Error)
 	}
@@ -210,8 +211,8 @@ func TestHostDBLock_Shared_MultipleReadersCanHoldSimultaneously(t *testing.T) {
 	inst2 := newHostDBQueryCaller(t, ctx, r, mc2)
 
 	tx1 := beginLockTx(t, ctx, inst1)
-	var out1 dbLockOutput
-	env := callHost(t, ctx, inst1, "call_lock", dbLockInput{Key: "shared-key", TxID: tx1, Shared: true})
+	var out1 abiv1.DBLockOutput
+	env := callHost(t, ctx, inst1, "call_lock", abiv1.DBLockInput{Key: "shared-key", TxID: tx1, Shared: true})
 	if !env.OK {
 		t.Fatalf("first shared lock failed: %+v", env.Error)
 	}
@@ -223,8 +224,8 @@ func TestHostDBLock_Shared_MultipleReadersCanHoldSimultaneously(t *testing.T) {
 	}
 
 	tx2 := beginLockTx(t, ctx, inst2)
-	var out2 dbLockOutput
-	env = callHost(t, ctx, inst2, "call_lock", dbLockInput{Key: "shared-key", TxID: tx2, Shared: true})
+	var out2 abiv1.DBLockOutput
+	env = callHost(t, ctx, inst2, "call_lock", abiv1.DBLockInput{Key: "shared-key", TxID: tx2, Shared: true})
 	if !env.OK {
 		t.Fatalf("second shared lock failed: %+v", env.Error)
 	}
@@ -252,8 +253,8 @@ func TestHostDBLock_BlockingTimeout_ReturnsAcquiredFalseWithoutPoisoningTransact
 	inst2 := newHostDBQueryCaller(t, ctx, r, mc2)
 
 	tx1 := beginLockTx(t, ctx, inst1)
-	var out1 dbLockOutput
-	env := callHost(t, ctx, inst1, "call_lock", dbLockInput{Key: "blocking-key", TxID: tx1})
+	var out1 abiv1.DBLockOutput
+	env := callHost(t, ctx, inst1, "call_lock", abiv1.DBLockInput{Key: "blocking-key", TxID: tx1})
 	if !env.OK {
 		t.Fatalf("first lock failed: %+v", env.Error)
 	}
@@ -265,8 +266,8 @@ func TestHostDBLock_BlockingTimeout_ReturnsAcquiredFalseWithoutPoisoningTransact
 	}
 
 	tx2 := beginLockTx(t, ctx, inst2)
-	var out2 dbLockOutput
-	env = callHost(t, ctx, inst2, "call_lock", dbLockInput{Key: "blocking-key", TxID: tx2, TimeoutMs: 200})
+	var out2 abiv1.DBLockOutput
+	env = callHost(t, ctx, inst2, "call_lock", abiv1.DBLockInput{Key: "blocking-key", TxID: tx2, TimeoutMs: 200})
 	if !env.OK {
 		t.Fatalf("blocking lock call failed: %+v", env.Error)
 	}
@@ -282,8 +283,8 @@ func TestHostDBLock_BlockingTimeout_ReturnsAcquiredFalseWithoutPoisoningTransact
 
 	// The transaction must still be usable — proves ROLLBACK TO SAVEPOINT
 	// un-aborted it after the lock_timeout cancellation.
-	var out3 dbLockOutput
-	env = callHost(t, ctx, inst2, "call_lock", dbLockInput{Key: "another-key", TxID: tx2})
+	var out3 abiv1.DBLockOutput
+	env = callHost(t, ctx, inst2, "call_lock", abiv1.DBLockInput{Key: "another-key", TxID: tx2})
 	if !env.OK {
 		t.Fatalf("lock call on the same transaction after a timeout failed: %+v", env.Error)
 	}
@@ -293,7 +294,7 @@ func TestHostDBLock_BlockingTimeout_ReturnsAcquiredFalseWithoutPoisoningTransact
 	if !out3.Acquired {
 		t.Error("expected tx2 to still be usable and acquire an unrelated free lock")
 	}
-	if env := callHost(t, ctx, inst2, "call_commit", dbTxIDInput{TxID: tx2}); !env.OK {
+	if env := callHost(t, ctx, inst2, "call_commit", abiv1.DBTxIDInput{TxID: tx2}); !env.OK {
 		t.Fatalf("commit tx2 failed after a lock timeout: %+v", env.Error)
 	}
 }
@@ -315,19 +316,19 @@ func TestHostDBLock_OutOfRangeTimeout_DoesNotPoisonTransaction(t *testing.T) {
 
 	txID := beginLockTx(t, ctx, inst)
 
-	env := callHost(t, ctx, inst, "call_lock", dbLockInput{Key: "bad-timeout-key", TxID: txID, TimeoutMs: -500})
+	env := callHost(t, ctx, inst, "call_lock", abiv1.DBLockInput{Key: "bad-timeout-key", TxID: txID, TimeoutMs: -500})
 	if env.OK {
 		t.Fatal("expected an error for an out-of-range timeout_ms")
 	}
-	if env.Error.Code != abi.ErrCodeUnavailable {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeUnavailable)
+	if env.Error.Code != abiv1.ErrCodeUnavailable {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeUnavailable)
 	}
 
 	// The transaction must still be usable — proves the failed SET LOCAL
 	// rolled back to the savepoint instead of leaving the transaction
 	// aborted.
-	var out dbLockOutput
-	env = callHost(t, ctx, inst, "call_lock", dbLockInput{Key: "unrelated-key", TxID: txID})
+	var out abiv1.DBLockOutput
+	env = callHost(t, ctx, inst, "call_lock", abiv1.DBLockInput{Key: "unrelated-key", TxID: txID})
 	if !env.OK {
 		t.Fatalf("lock call on the same transaction after a bad timeout failed: %+v", env.Error)
 	}
@@ -337,7 +338,7 @@ func TestHostDBLock_OutOfRangeTimeout_DoesNotPoisonTransaction(t *testing.T) {
 	if !out.Acquired {
 		t.Error("expected the transaction to still be usable and acquire an unrelated free lock")
 	}
-	if env := callHost(t, ctx, inst, "call_commit", dbTxIDInput{TxID: txID}); !env.OK {
+	if env := callHost(t, ctx, inst, "call_commit", abiv1.DBTxIDInput{TxID: txID}); !env.OK {
 		t.Fatalf("commit failed after an out-of-range timeout: %+v", env.Error)
 	}
 }

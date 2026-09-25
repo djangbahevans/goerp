@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/config"
@@ -224,8 +225,8 @@ func TestDispatchORMRoute_WorkflowTransition_WrongCurrentState_409(t *testing.T)
 	if err := json.Unmarshal(w.Body.Bytes(), &errBody); err != nil {
 		t.Fatalf("decode error response: %v", err)
 	}
-	if errBody["error"]["code"] != abi.ErrCodeInvalidTransition {
-		t.Errorf("error code = %q, want %q", errBody["error"]["code"], abi.ErrCodeInvalidTransition)
+	if errBody["error"]["code"] != abiv1.ErrCodeInvalidTransition {
+		t.Errorf("error code = %q, want %q", errBody["error"]["code"], abiv1.ErrCodeInvalidTransition)
 	}
 }
 

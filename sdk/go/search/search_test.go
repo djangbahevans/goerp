@@ -3,14 +3,15 @@ package search
 import (
 	"testing"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestSearchQueryInput_MsgpackRoundTrip(t *testing.T) {
-	in := searchQueryInput{
+	in := abi.SearchQueryInput{
 		Index: "contacts",
 		Query: "acme",
-		Opts:  searchQueryOpts{Limit: 10, Offset: 5},
+		Opts:  abi.SearchQueryOpts{Limit: 10, Offset: 5},
 	}
 
 	raw, err := msgpack.Marshal(in)
@@ -18,7 +19,7 @@ func TestSearchQueryInput_MsgpackRoundTrip(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var got searchQueryInput
+	var got abi.SearchQueryInput
 	if err := msgpack.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -28,7 +29,7 @@ func TestSearchQueryInput_MsgpackRoundTrip(t *testing.T) {
 }
 
 func TestSearchQueryOutput_MsgpackRoundTrip(t *testing.T) {
-	out := searchQueryOutput{
+	out := abi.SearchQueryOutput{
 		Hits:      []map[string]any{{"id": "1", "name": "Acme"}},
 		TotalHits: 1,
 	}
@@ -38,7 +39,7 @@ func TestSearchQueryOutput_MsgpackRoundTrip(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var got searchQueryOutput
+	var got abi.SearchQueryOutput
 	if err := msgpack.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -48,7 +49,7 @@ func TestSearchQueryOutput_MsgpackRoundTrip(t *testing.T) {
 }
 
 func TestSearchOptions_SetFields(t *testing.T) {
-	var in searchQueryInput
+	var in abi.SearchQueryInput
 
 	WithFilter("is_active = true")(&in)
 	WithSort("name:asc", "created_at:desc")(&in)

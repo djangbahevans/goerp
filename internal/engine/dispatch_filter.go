@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -68,10 +68,10 @@ func escapeDomainLiteral(value string) string {
 // one operator with no comparison operand at all — its filter[...] value
 // selects IS NULL vs. IS NOT NULL rather than supplying a literal.
 //
-// An unknown field or operator is a *abi.HostError (orm.field_unknown /
+// An unknown field or operator is a *abiv1.HostError (orm.field_unknown /
 // orm.domain_invalid) — never a silently-dropped filter. A query with no
 // filter[...] params compiles to the unfiltered domain "true".
-func compileListFilter(q url.Values, qualifiedModel string, md model.ModelDeclaration) (string, *abi.HostError) {
+func compileListFilter(q url.Values, qualifiedModel string, md model.ModelDeclaration) (string, *abiv1.HostError) {
 	declared := make(map[string]bool, len(md.Fields))
 	for _, f := range md.Fields {
 		declared[f.Name] = true
@@ -102,7 +102,7 @@ func compileListFilter(q url.Values, qualifiedModel string, md model.ModelDeclar
 			continue
 		}
 		if !declared[field] {
-			return "", &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + field + " is not declared on " + qualifiedModel}
+			return "", &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + field + " is not declared on " + qualifiedModel}
 		}
 		if len(values) == 0 || values[0] == "" {
 			continue
@@ -126,14 +126,14 @@ func compileListFilter(q url.Values, qualifiedModel string, md model.ModelDeclar
 			case "false":
 				clauses = append(clauses, clause{key: key, expr: fmt.Sprintf("record.%s IS NOT NULL", field)})
 			default:
-				return "", &abi.HostError{Code: abi.ErrCodeDomainInvalid, Message: "filter[" + field + "][isnull] must be true or false"}
+				return "", &abiv1.HostError{Code: abiv1.ErrCodeDomainInvalid, Message: "filter[" + field + "][isnull] must be true or false"}
 			}
 			continue
 		}
 
 		sqlOp, ok := filterOperators[op]
 		if !ok {
-			return "", &abi.HostError{Code: abi.ErrCodeDomainInvalid, Message: "unknown filter operator " + op}
+			return "", &abiv1.HostError{Code: abiv1.ErrCodeDomainInvalid, Message: "unknown filter operator " + op}
 		}
 		clauses = append(clauses, clause{key: key, expr: fmt.Sprintf("record.%s %s %s", field, sqlOp, escapeDomainLiteral(value))})
 	}

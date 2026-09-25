@@ -17,38 +17,32 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-type searchQueryOpts = abi.SearchQueryOpts
-
-type searchQueryInput = abi.SearchQueryInput
-
-type searchQueryOutput = abi.SearchQueryOutput
-
 // SearchOption configures Query.
-type SearchOption func(*searchQueryInput)
+type SearchOption func(*abi.SearchQueryInput)
 
 // WithFilter sets a Meilisearch filter expression.
 func WithFilter(expr string) SearchOption {
-	return func(in *searchQueryInput) { in.Opts.Filter = expr }
+	return func(in *abi.SearchQueryInput) { in.Opts.Filter = expr }
 }
 
 // WithSort orders hits by one or more "field:asc"/"field:desc" clauses.
 func WithSort(fields ...string) SearchOption {
-	return func(in *searchQueryInput) { in.Opts.Sort = fields }
+	return func(in *abi.SearchQueryInput) { in.Opts.Sort = fields }
 }
 
 // WithLimit caps the number of hits returned (default 20, max 1000).
 func WithLimit(n int) SearchOption {
-	return func(in *searchQueryInput) { in.Opts.Limit = n }
+	return func(in *abi.SearchQueryInput) { in.Opts.Limit = n }
 }
 
 // WithOffset skips the first n hits, for pagination.
 func WithOffset(n int) SearchOption {
-	return func(in *searchQueryInput) { in.Opts.Offset = n }
+	return func(in *abi.SearchQueryInput) { in.Opts.Offset = n }
 }
 
 // WithFacets requests facet counts for the given fields.
 func WithFacets(fields ...string) SearchOption {
-	return func(in *searchQueryInput) { in.Opts.Facets = fields }
+	return func(in *abi.SearchQueryInput) { in.Opts.Facets = fields }
 }
 
 // SearchResult is Query's own result, Hits mapped into T via its own
@@ -68,12 +62,12 @@ type SearchResult[T any] struct {
 // Query searches indexName — one of the calling module's own declared
 // search_indexes entries — via host.search.query.
 func Query[T any](indexName, query string, opts ...SearchOption) (SearchResult[T], error) {
-	in := searchQueryInput{Index: indexName, Query: query}
+	in := abi.SearchQueryInput{Index: indexName, Query: query}
 	for _, opt := range opts {
 		opt(&in)
 	}
 
-	var out searchQueryOutput
+	var out abi.SearchQueryOutput
 	if err := hostcall.Do(hostSearchQuery, in, &out); err != nil {
 		return SearchResult[T]{}, err
 	}

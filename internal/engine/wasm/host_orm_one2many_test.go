@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -36,8 +37,8 @@ func TestHostORM_SearchRead_One2Many_ExcludedFromDefaultFields(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDeclWithOne2Many()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ORMSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget"}, &out)
+	var out abiv1.ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", abiv1.ORMSearchReadInput{Model: "testmodule.widget"}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}
@@ -59,12 +60,12 @@ func TestHostORM_SearchRead_One2Many_ExplicitRequestRejected(t *testing.T) {
 	mc := newORMTestModuleContext(slug, []model.ModelDeclaration{widgetModelDeclWithOne2Many()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.widget", Fields: []string{"tag_ids"}}, nil)
+	env := callORMHost(t, ctx, inst, "call_search_read", abiv1.ORMSearchReadInput{Model: "testmodule.widget", Fields: []string{"tag_ids"}}, nil)
 	if env.OK {
 		t.Fatal("expected an error when explicitly requesting a One2Many field")
 	}
-	if env.Error.Code != abi.ErrCodeFieldUnknown {
-		t.Fatalf("error code = %q, want %q", env.Error.Code, abi.ErrCodeFieldUnknown)
+	if env.Error.Code != abiv1.ErrCodeFieldUnknown {
+		t.Fatalf("error code = %q, want %q", env.Error.Code, abiv1.ErrCodeFieldUnknown)
 	}
 }
 
@@ -81,14 +82,14 @@ func TestORMCreate_One2Many_RejectedAsFieldNotWritable(t *testing.T) {
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "contact-1", []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: decls})
 
-	_, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMCreateInput{
+	_, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
 		Model: "testmodule.widget",
 		Record: map[string]any{
 			"id": "22222222-2222-2222-2222-222222222222", "name": "Widget B",
 			"tag_ids": []string{"33333333-3333-3333-3333-333333333333"},
 		},
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeFieldNotWritable {
-		t.Fatalf("ORMCreate with a One2Many field in payload: hostErr = %+v, want code %s", hostErr, abi.ErrCodeFieldNotWritable)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeFieldNotWritable {
+		t.Fatalf("ORMCreate with a One2Many field in payload: hostErr = %+v, want code %s", hostErr, abiv1.ErrCodeFieldNotWritable)
 	}
 }

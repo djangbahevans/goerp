@@ -1,7 +1,7 @@
 package engine
 
 import (
-	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 )
 
@@ -14,6 +14,6 @@ import (
 // reads its caller's permissions via host.authz — so it is left untagged
 // and the module's decode ignores the extra key.
 type EngineRequest struct {
-	abi.Request
+	abiv1.Request
 	PermissionSet permission.PermissionBitfield
 }

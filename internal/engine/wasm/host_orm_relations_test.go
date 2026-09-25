@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
@@ -65,8 +66,8 @@ func TestHostORM_SearchRead_ExpandsMany2One(t *testing.T) {
 	mc := newORMTestModuleContext(slug, contactAndOrderModels())
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ORMSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.order"}, &out)
+	var out abiv1.ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", abiv1.ORMSearchReadInput{Model: "testmodule.order"}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}
@@ -121,8 +122,8 @@ func TestHostORM_SearchRead_ExpandsMany2One_NilFK(t *testing.T) {
 	mc := newORMTestModuleContext(slug, contactAndOrderModels())
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ORMSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.order"}, &out)
+	var out abiv1.ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", abiv1.ORMSearchReadInput{Model: "testmodule.order"}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}
@@ -168,8 +169,8 @@ func TestHostORM_SearchRead_ExpandsMany2One_NoDisplayNameField(t *testing.T) {
 	mc := newORMTestModuleContext(slug, modelDecls)
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ORMSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.order"}, &out)
+	var out abiv1.ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", abiv1.ORMSearchReadInput{Model: "testmodule.order"}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}
@@ -213,8 +214,8 @@ func TestHostORM_Read_ExpandsMany2One(t *testing.T) {
 	mc := newORMTestModuleContext(slug, contactAndOrderModels())
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ORMReadOutput
-	env := callORMHost(t, ctx, inst, "call_read", ORMReadInput{Model: "testmodule.order", IDs: []string{orderID}}, &out)
+	var out abiv1.ORMReadOutput
+	env := callORMHost(t, ctx, inst, "call_read", abiv1.ORMReadInput{Model: "testmodule.order", IDs: []string{orderID}}, &out)
 	if !env.OK {
 		t.Fatalf("read failed: %+v", env.Error)
 	}
@@ -257,8 +258,8 @@ func TestHostORM_SearchRead_ExpandsMany2One_MultipleRowsShareTarget(t *testing.T
 	mc := newORMTestModuleContext(slug, contactAndOrderModels())
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ORMSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.order"}, &out)
+	var out abiv1.ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", abiv1.ORMSearchReadInput{Model: "testmodule.order"}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}
@@ -326,8 +327,8 @@ func TestHostORM_SearchRead_RelationExpansionRespectsRLS(t *testing.T) {
 	mc := NewModuleContext("req-1", "testmodule", "user-1", "55555555-5555-5555-5555-555555555555", []string{"admin"}, nil, "tenant-id-1", slug, "trace-1", abi.CapDBRead, nil, ModuleSnapshot{ModelDecls: contactAndOrderModels()})
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ORMSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "testmodule.order"}, &out)
+	var out abiv1.ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", abiv1.ORMSearchReadInput{Model: "testmodule.order"}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}

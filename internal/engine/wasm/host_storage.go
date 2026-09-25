@@ -43,12 +43,6 @@ func registerHostStorage(ctx context.Context, rt wazero.Runtime, r *Runtime, bac
 	return err
 }
 
-type storageUploadOpts = abiv1.StorageUploadOpts
-
-type storageUploadInput = abiv1.StorageUploadInput
-
-type storageUploadOutput = abiv1.StorageUploadOutput
-
 func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.Store, limits storageUploadLimits) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -62,7 +56,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 		// storage.New (engine.go) is a warn-only dependency — a fully
 		// successful Engine.New() can still leave this nil.
 		if backend == nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    "storage.backend_unavailable",
 				Message: "no object storage backend is configured",
 			})
@@ -72,21 +66,21 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input storageUploadInput
+		var input abiv1.StorageUploadInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
 
 		size := int64(len(input.Data))
 		if size > limits.maxFileBytes || (input.Opts.MaxSizeBytes > 0 && size > input.Opts.MaxSizeBytes) {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    "storage.file_too_large",
 				Message: fmt.Sprintf("upload of %d bytes exceeds the maximum allowed size", size),
 			})
 		}
 
 		if !storage.ContentTypeAllowed(input.ContentType, limits.allowedTypes, limits.blockedTypes) {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    "storage.invalid_content_type",
 				Message: fmt.Sprintf("content type %q is not permitted", input.ContentType),
 			})
@@ -97,7 +91,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			purpose = defaultUploadPurpose
 		}
 		if !storage.ValidPurpose(purpose) {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    "storage.invalid_purpose",
 				Message: fmt.Sprintf("purpose %q is not a valid storage key segment", purpose),
 			})
@@ -113,7 +107,7 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			ContentType: input.ContentType,
 			Public:      input.Opts.Public,
 		}); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code:    "storage.backend_unavailable",
 				Message: err.Error(),
 				Retry:   true,
@@ -137,14 +131,14 @@ func makeStorageUpload(r *Runtime, backend storage.Backend, filesStore *files.St
 			// The upload itself already succeeded, so the delete error
 			// (if any) isn't the primary failure to report.
 			_ = backend.Delete(ctx, key)
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-				Code:    abi.ErrCodeUnavailable,
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+				Code:    abiv1.ErrCodeUnavailable,
 				Message: err.Error(),
 				Retry:   true,
 			})
 		}
 
-		out := storageUploadOutput{
+		out := abiv1.StorageUploadOutput{
 			FileID:         fileID.String(),
 			StorageKey:     key,
 			SizeBytes:      size,

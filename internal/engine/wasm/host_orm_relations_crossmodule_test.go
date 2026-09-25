@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -99,8 +100,8 @@ func searchReadCustomer(t *testing.T, ctx context.Context, mc *ModuleContext, pr
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	inst := newHostORMCaller(t, ctx, r, mc)
 
-	var out ORMSearchReadOutput
-	env := callORMHost(t, ctx, inst, "call_search_read", ORMSearchReadInput{Model: "sales.order"}, &out)
+	var out abiv1.ORMSearchReadOutput
+	env := callORMHost(t, ctx, inst, "call_search_read", abiv1.ORMSearchReadInput{Model: "sales.order"}, &out)
 	if !env.OK {
 		t.Fatalf("search_read failed: %+v", env.Error)
 	}
@@ -139,7 +140,7 @@ func TestHostORM_ExpandsMany2One_CrossModuleTarget(t *testing.T) {
 	})
 
 	t.Run("read", func(t *testing.T) {
-		out, hostErr := ORMRead(ctx, primaryDB, nil, mc, ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}})
+		out, hostErr := ORMRead(ctx, primaryDB, nil, mc, abiv1.ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}})
 		if hostErr != nil {
 			t.Fatalf("ORMRead: %+v", hostErr)
 		}
@@ -161,7 +162,7 @@ func TestHostORM_ExpandsMany2One_TargetModuleNotLoadedYieldsNull(t *testing.T) {
 		t.Fatalf("customer = %+v, want nil for a target module that isn't loaded", customer)
 	}
 
-	out, hostErr := ORMRead(ctx, primaryDB, nil, mc, ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}})
+	out, hostErr := ORMRead(ctx, primaryDB, nil, mc, abiv1.ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}})
 	if hostErr != nil {
 		t.Fatalf("ORMRead: %+v", hostErr)
 	}
@@ -180,9 +181,9 @@ func TestHostORM_ExpandsMany2One_LoadedModuleMissingModelIsError(t *testing.T) {
 	}}
 	mc := newCrossModuleContext(slug, &other, false)
 
-	_, hostErr := ORMRead(ctx, primaryDB, nil, mc, ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeUnavailable {
-		t.Fatalf("hostErr = %+v, want %s", hostErr, abi.ErrCodeUnavailable)
+	_, hostErr := ORMRead(ctx, primaryDB, nil, mc, abiv1.ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}})
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeUnavailable {
+		t.Fatalf("hostErr = %+v, want %s", hostErr, abiv1.ErrCodeUnavailable)
 	}
 }
 
@@ -248,7 +249,7 @@ func TestORMRead_SkipFieldSecurityLeavesExpandedRelationUnmasked(t *testing.T) {
 	contact := crossModuleContactDecl(model.Text().Required().Access(model.AccessRead(crossModuleReadPerm)).OnDeniedRead(model.Omit))
 	mc := newCrossModuleContext(slug, &contact, false)
 
-	out, hostErr := ORMRead(ctx, primaryDB, nil, mc, ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}}, SkipFieldSecurity())
+	out, hostErr := ORMRead(ctx, primaryDB, nil, mc, abiv1.ORMReadInput{Model: "sales.order", IDs: []string{crossModuleOrderID}}, SkipFieldSecurity())
 	if hostErr != nil {
 		t.Fatalf("ORMRead: %+v", hostErr)
 	}

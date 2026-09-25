@@ -9,6 +9,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -51,14 +52,14 @@ func TestORMCreateBatch_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 		records[i] = map[string]any{"id": uuid.New().String(), "name": fmt.Sprintf("Item %d", i)}
 	}
 
-	_, hostErr := ORMCreateBatch(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMCreateBatchInput{
+	_, hostErr := ORMCreateBatch(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMCreateBatchInput{
 		Model: "testmodule.hard_item", Records: records,
 	})
 	if hostErr == nil {
 		t.Fatal("expected orm.batch_too_large for 4 records over a 3-row limit")
 	}
-	if hostErr.Code != abi.ErrCodeBatchTooLarge {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeBatchTooLarge)
+	if hostErr.Code != abiv1.ErrCodeBatchTooLarge {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeBatchTooLarge)
 	}
 	if hostErr.Details["limit"] != 3 || hostErr.Details["count"] != 4 {
 		t.Errorf("Details = %#v, want limit=3 count=4", hostErr.Details)
@@ -83,7 +84,7 @@ func TestORMCreateBatch_AtBulkMaxRows_Succeeds(t *testing.T) {
 		records[i] = map[string]any{"id": uuid.New().String(), "name": fmt.Sprintf("Item %d", i)}
 	}
 
-	out, hostErr := ORMCreateBatch(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMCreateBatchInput{
+	out, hostErr := ORMCreateBatch(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMCreateBatchInput{
 		Model: "testmodule.hard_item", Records: records,
 	})
 	if hostErr != nil {
@@ -115,14 +116,14 @@ func TestORMWriteMany_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newORMBulkBoundsModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()}, 3, 0)
 
-	_, hostErr := ORMWriteMany(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMWriteManyInput{
+	_, hostErr := ORMWriteMany(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMWriteManyInput{
 		Model: "testmodule.hard_item", IDs: ids, Record: map[string]any{"name": "Changed"},
 	})
 	if hostErr == nil {
 		t.Fatal("expected orm.batch_too_large for 4 IDs over a 3-row limit")
 	}
-	if hostErr.Code != abi.ErrCodeBatchTooLarge {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeBatchTooLarge)
+	if hostErr.Code != abiv1.ErrCodeBatchTooLarge {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeBatchTooLarge)
 	}
 
 	var stillOriginal int
@@ -150,14 +151,14 @@ func TestORMWriteWhere_OverBulkMaxRows_BatchTooLargeAndNoWrite(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newORMBulkBoundsModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()}, 3, 0)
 
-	_, hostErr := ORMWriteWhere(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMWriteWhereInput{
+	_, hostErr := ORMWriteWhere(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMWriteWhereInput{
 		Model: "testmodule.hard_item", Domain: "record.name = 'Original'", Record: map[string]any{"name": "Changed"},
 	})
 	if hostErr == nil {
 		t.Fatal("expected orm.batch_too_large for a domain matching 4 rows over a 3-row limit")
 	}
-	if hostErr.Code != abi.ErrCodeBatchTooLarge {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeBatchTooLarge)
+	if hostErr.Code != abiv1.ErrCodeBatchTooLarge {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeBatchTooLarge)
 	}
 
 	var stillOriginal int
@@ -185,7 +186,7 @@ func TestORMWriteWhere_AtBulkMaxRows_Succeeds(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newORMBulkBoundsModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()}, 3, 0)
 
-	out, hostErr := ORMWriteWhere(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMWriteWhereInput{
+	out, hostErr := ORMWriteWhere(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMWriteWhereInput{
 		Model: "testmodule.hard_item", Domain: "record.name = 'Original'", Record: map[string]any{"name": "Changed"},
 	})
 	if hostErr != nil {
@@ -214,14 +215,14 @@ func TestORMUnlink_OverBulkMaxRows_BatchTooLargeAndNoDelete(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newORMBulkBoundsModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()}, 3, 0)
 
-	_, hostErr := ORMUnlink(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMUnlinkInput{
+	_, hostErr := ORMUnlink(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMUnlinkInput{
 		Model: "testmodule.hard_item", IDs: ids,
 	})
 	if hostErr == nil {
 		t.Fatal("expected orm.batch_too_large for 4 IDs over a 3-row limit")
 	}
-	if hostErr.Code != abi.ErrCodeBatchTooLarge {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeBatchTooLarge)
+	if hostErr.Code != abiv1.ErrCodeBatchTooLarge {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeBatchTooLarge)
 	}
 	if got := countHardItems(t, primaryDB, slug); got != 4 {
 		t.Errorf("hard_item rows = %d, want 4 (no record deleted)", got)
@@ -263,14 +264,14 @@ func TestORMStatementTimeout_LockContention_ReturnsOrmTimeoutAndRollsBack(t *tes
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newORMBulkBoundsModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()}, 0, 200*time.Millisecond)
 
-	_, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
+	_, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
 		Model: "testmodule.hard_item", ID: id, Record: map[string]any{"name": "Changed"},
 	})
 	if hostErr == nil {
 		t.Fatal("expected a timeout error while the row was locked, got success")
 	}
-	if hostErr.Code != abi.ErrCodeORMTimeout {
-		t.Errorf("error code = %v, want %v", hostErr.Code, abi.ErrCodeORMTimeout)
+	if hostErr.Code != abiv1.ErrCodeORMTimeout {
+		t.Errorf("error code = %v, want %v", hostErr.Code, abiv1.ErrCodeORMTimeout)
 	}
 	if !hostErr.Retry {
 		t.Error("expected Retry to be true for a timeout")
@@ -303,7 +304,7 @@ func TestORMStatementTimeout_DoesNotFireWithinTheTimeout(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newORMBulkBoundsModuleContext(slug, []model.ModelDeclaration{hardDeleteItemModelDecl()}, 0, 5*time.Second)
 
-	_, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
+	_, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
 		Model: "testmodule.hard_item", ID: id, Record: map[string]any{"name": "Changed"},
 	})
 	if hostErr != nil {
@@ -313,8 +314,8 @@ func TestORMStatementTimeout_DoesNotFireWithinTheTimeout(t *testing.T) {
 
 func TestOrmSQLError_MapsStatementTimeoutSQLState(t *testing.T) {
 	err := ormSQLError(&pgconn.PgError{Code: pgStatementTimeoutSQLState, Message: "canceling statement due to statement timeout"})
-	if err.Code != abi.ErrCodeORMTimeout {
-		t.Errorf("Code = %v, want %v", err.Code, abi.ErrCodeORMTimeout)
+	if err.Code != abiv1.ErrCodeORMTimeout {
+		t.Errorf("Code = %v, want %v", err.Code, abiv1.ErrCodeORMTimeout)
 	}
 	if !err.Retry {
 		t.Error("expected Retry to be true")
@@ -323,15 +324,15 @@ func TestOrmSQLError_MapsStatementTimeoutSQLState(t *testing.T) {
 
 func TestOrmSQLError_OtherErrorsFallBackToUnavailable(t *testing.T) {
 	err := ormSQLError(errors.New("connection reset"))
-	if err.Code != abi.ErrCodeUnavailable {
-		t.Errorf("Code = %v, want %v", err.Code, abi.ErrCodeUnavailable)
+	if err.Code != abiv1.ErrCodeUnavailable {
+		t.Errorf("Code = %v, want %v", err.Code, abiv1.ErrCodeUnavailable)
 	}
 }
 
 func TestTranslateWriteError_MapsStatementTimeoutSQLState(t *testing.T) {
 	err := translateWriteError(&pgconn.PgError{Code: pgStatementTimeoutSQLState}, hardDeleteItemModelDecl())
-	if err.Code != abi.ErrCodeORMTimeout {
-		t.Errorf("Code = %v, want %v", err.Code, abi.ErrCodeORMTimeout)
+	if err.Code != abiv1.ErrCodeORMTimeout {
+		t.Errorf("Code = %v, want %v", err.Code, abiv1.ErrCodeORMTimeout)
 	}
 	if !err.Retry {
 		t.Error("expected Retry to be true")

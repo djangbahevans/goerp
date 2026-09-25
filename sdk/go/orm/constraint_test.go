@@ -3,11 +3,12 @@ package orm
 import (
 	"testing"
 
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-func dispatchConstraintAndDecode(t *testing.T, req constraintRequest) constraintResponse {
+func dispatchConstraintAndDecode(t *testing.T, req abi.ConstraintRequest) abi.ConstraintResponse {
 	t.Helper()
 	data, err := msgpack.Marshal(req)
 	if err != nil {
@@ -19,7 +20,7 @@ func dispatchConstraintAndDecode(t *testing.T, req constraintRequest) constraint
 	packed := DispatchConstraint(ptr, uint32(len(data)))
 	respPtr, respLen := uint32(packed>>32), uint32(packed)
 
-	var resp constraintResponse
+	var resp abi.ConstraintResponse
 	if err := msgpack.Unmarshal(engine.ReadMem(respPtr, respLen), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestDispatchConstraint_RegisteredHook_Rejects(t *testing.T) {
 		return Allow()
 	})
 
-	resp := dispatchConstraintAndDecode(t, constraintRequest{
+	resp := dispatchConstraintAndDecode(t, abi.ConstraintRequest{
 		Model:  "test.order",
 		Phase:  string(OnDelete),
 		Record: map[string]any{"state": "confirmed"},
@@ -58,7 +59,7 @@ func TestDispatchConstraint_RegisteredHook_Allows(t *testing.T) {
 		return Allow()
 	})
 
-	resp := dispatchConstraintAndDecode(t, constraintRequest{
+	resp := dispatchConstraintAndDecode(t, abi.ConstraintRequest{
 		Model:  "test.order",
 		Phase:  string(OnDelete),
 		Record: map[string]any{"state": "draft"},
@@ -81,7 +82,7 @@ func TestDispatchConstraint_UnregisteredPhase_PassesThroughAllowed(t *testing.T)
 	})
 
 	// Same model, but OnCreate has no registered hook.
-	resp := dispatchConstraintAndDecode(t, constraintRequest{
+	resp := dispatchConstraintAndDecode(t, abi.ConstraintRequest{
 		Model: "test.order",
 		Phase: string(OnCreate),
 	})
@@ -94,7 +95,7 @@ func TestDispatchConstraint_UnregisteredPhase_PassesThroughAllowed(t *testing.T)
 }
 
 func TestDispatchConstraint_UnregisteredModel_PassesThroughAllowed(t *testing.T) {
-	resp := dispatchConstraintAndDecode(t, constraintRequest{Model: "test.never_registered", Phase: string(OnWrite)})
+	resp := dispatchConstraintAndDecode(t, abi.ConstraintRequest{Model: "test.never_registered", Phase: string(OnWrite)})
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}

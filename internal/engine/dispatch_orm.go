@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/djangbahevans/goerp/internal/engine/abi"
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/riverqueue/river"
@@ -155,7 +155,7 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 		return
 	}
 
-	out, hostErr := wasm.ORMSearchRead(ctx, e.primaryDB, modCtx, wasm.ORMSearchReadInput{
+	out, hostErr := wasm.ORMSearchRead(ctx, e.primaryDB, modCtx, abiv1.ORMSearchReadInput{
 		Model:  entry.Manifest.Model,
 		Domain: domainExpr,
 		Fields: fields,
@@ -240,7 +240,7 @@ func splitNonEmpty(raw string) []string {
 // field/aggregation) is orm.validation_failed, the same code ORMPivot
 // uses for an unrecognized aggregation name, since both are caller input
 // errors rather than a specific-field lookup failure.
-func parsePivotValues(raw string) ([]wasm.PivotValue, *abi.HostError) {
+func parsePivotValues(raw string) ([]wasm.PivotValue, *abiv1.HostError) {
 	if raw == "" {
 		return nil, nil
 	}
@@ -249,7 +249,7 @@ func parsePivotValues(raw string) ([]wasm.PivotValue, *abi.HostError) {
 	for _, part := range parts {
 		field, agg, ok := strings.Cut(part, ":")
 		if !ok || field == "" || agg == "" {
-			return nil, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "values entry " + part + " must be field:aggregation"}
+			return nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "values entry " + part + " must be field:aggregation"}
 		}
 		values = append(values, wasm.PivotValue{Field: field, Aggregation: agg})
 	}
@@ -263,7 +263,7 @@ func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *h
 		return
 	}
 
-	out, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, wasm.ORMReadInput{
+	out, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, abiv1.ORMReadInput{
 		Model: entry.Manifest.Model,
 		IDs:   []string{id},
 	})
@@ -272,7 +272,7 @@ func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *h
 		return
 	}
 	if len(out.Records) == 0 {
-		writeRouteError(w, http.StatusNotFound, abi.ErrCodeNotFound, "record not found")
+		writeRouteError(w, http.StatusNotFound, abiv1.ErrCodeNotFound, "record not found")
 		return
 	}
 
@@ -309,7 +309,7 @@ func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r
 		return
 	}
 
-	out, hostErr := wasm.ORMCreate(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMCreateInput{
+	out, hostErr := wasm.ORMCreate(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, abiv1.ORMCreateInput{
 		Model:  entry.Manifest.Model,
 		Record: record,
 	})
@@ -338,7 +338,7 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 		expectedEtag = new(values[0])
 	}
 
-	out, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMWriteInput{
+	out, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, abiv1.ORMWriteInput{
 		Model:        entry.Manifest.Model,
 		ID:           id,
 		Record:       record,
@@ -405,7 +405,7 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 	// naming wf.Field/"etag" explicitly — readableColumns rejects an
 	// unknown field name outright, and a .Workflow() model built without
 	// WithStandardFields() wouldn't declare "etag" at all.
-	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, wasm.ORMReadInput{
+	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, abiv1.ORMReadInput{
 		Model: entry.Manifest.Model,
 		IDs:   []string{id},
 	}, wasm.SkipFieldSecurity())
@@ -414,20 +414,20 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 		return
 	}
 	if len(readOut.Records) == 0 {
-		writeRouteError(w, http.StatusNotFound, abi.ErrCodeNotFound, "record not found")
+		writeRouteError(w, http.StatusNotFound, abiv1.ErrCodeNotFound, "record not found")
 		return
 	}
 
 	record := readOut.Records[0]
 	current, _ := record[wf.Field].(string)
 	if current != wf.From {
-		writeRouteError(w, http.StatusConflict, abi.ErrCodeInvalidTransition,
+		writeRouteError(w, http.StatusConflict, abiv1.ErrCodeInvalidTransition,
 			entry.Manifest.Name+" requires "+wf.Field+" to be "+wf.From+", but it is "+current)
 		return
 	}
 	etag, _ := record["etag"].(string)
 
-	writeOut, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMWriteInput{
+	writeOut, hostErr := wasm.ORMWrite(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, abiv1.ORMWriteInput{
 		Model:        entry.Manifest.Model,
 		ID:           id,
 		Record:       map[string]any{wf.Field: wf.To},
@@ -448,7 +448,7 @@ func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, p
 		return
 	}
 
-	_, hostErr := wasm.ORMUnlink(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, wasm.ORMUnlinkInput{
+	_, hostErr := wasm.ORMUnlink(ctx, e.wasmRuntime, e.primaryDB, insertClient, e.cacheClient, modCtx, abiv1.ORMUnlinkInput{
 		Model: entry.Manifest.Model,
 		IDs:   []string{id},
 	})
@@ -499,15 +499,15 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	}
 }
 
-// writeHostError translates a host.orm *abi.HostError into the same
+// writeHostError translates a host.orm *abiv1.HostError into the same
 // {"error": {"code","message"}} envelope writeRouteError already
 // produces, so an ORM-dispatched failure looks identical, over HTTP, to
 // any other route error.
-func writeHostError(w http.ResponseWriter, hostErr *abi.HostError) {
+func writeHostError(w http.ResponseWriter, hostErr *abiv1.HostError) {
 	writeRouteError(w, ormErrorStatus(hostErr.Code), hostErr.Code, hostErr.Message)
 }
 
-// ormErrorStatus maps a host.orm *abi.HostError's Code to an HTTP status.
+// ormErrorStatus maps a host.orm *abiv1.HostError's Code to an HTTP status.
 // No such mapping exists anywhere else in the codebase yet — sdk/go/engine's
 // documented FromHostError (go-sdk-reference.md) was never built either —
 // this is the first real one, grounded in the two documented precedents
@@ -516,15 +516,15 @@ func writeHostError(w http.ResponseWriter, hostErr *abi.HostError) {
 // erp-design.md's status table).
 func ormErrorStatus(code string) int {
 	switch code {
-	case abi.ErrCodeNotFound, abi.ErrCodeModelNotFound:
+	case abiv1.ErrCodeNotFound, abiv1.ErrCodeModelNotFound:
 		return http.StatusNotFound
-	case abi.ErrCodeEtagMismatch, abi.ErrCodeUniqueViolation, abi.ErrCodeForeignKeyViolation, abi.ErrCodeInvalidTransition:
+	case abiv1.ErrCodeEtagMismatch, abiv1.ErrCodeUniqueViolation, abiv1.ErrCodeForeignKeyViolation, abiv1.ErrCodeInvalidTransition:
 		return http.StatusConflict
-	case abi.ErrCodeValidationFailed, abi.ErrCodeFieldUnknown, abi.ErrCodeFieldNotWritable, abi.ErrCodeDomainInvalid, abi.ErrCodeTransientNotListable:
+	case abiv1.ErrCodeValidationFailed, abiv1.ErrCodeFieldUnknown, abiv1.ErrCodeFieldNotWritable, abiv1.ErrCodeDomainInvalid, abiv1.ErrCodeTransientNotListable:
 		return http.StatusBadRequest
-	case abi.ErrCodeCapabilityDenied, abi.ErrCodeFieldWriteDenied, abi.ErrCodeFieldReadDenied:
+	case abiv1.ErrCodeCapabilityDenied, abiv1.ErrCodeFieldWriteDenied, abiv1.ErrCodeFieldReadDenied:
 		return http.StatusForbidden
-	case abi.ErrCodeUnavailable:
+	case abiv1.ErrCodeUnavailable:
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError

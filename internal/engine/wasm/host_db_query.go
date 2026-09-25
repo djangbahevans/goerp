@@ -37,12 +37,6 @@ const slowQueryThreshold = 1 * time.Second
 // the generic db.query_error.
 var errResultTooLarge = errors.New("result set exceeds the maximum of 50,000 rows")
 
-type dbQueryOpts = abiv1.DBQueryOpts
-
-type dbQueryInput = abiv1.DBQueryInput
-
-type dbQueryOutput = abiv1.DBQueryOutput
-
 // makeDBQuery builds host.db.query (forceReplica false, opts.read_only
 // still routes it to r's replica when set) or host.db.query_replica
 // (forceReplica true, always routes to replica regardless of opts).
@@ -60,7 +54,7 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input dbQueryInput
+		var input abiv1.DBQueryInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -69,13 +63,13 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 		// anything executes.
 		tree, err := pgquery.Parse(input.SQL)
 		if err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeQueryError, Message: err.Error()})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeQueryError, Message: err.Error()})
 		}
 		if err := requireSelectOnly(tree); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeQueryError, Message: err.Error()})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeQueryError, Message: err.Error()})
 		}
 		if err := dbscope.ValidateTreeTableRefs(tree); err != nil {
-			return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{Code: abi.ErrCodeTableAccessDenied, Message: err.Error()})
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeTableAccessDenied, Message: err.Error()})
 		}
 
 		timeout := defaultQueryTimeout
@@ -96,15 +90,15 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 			// replica" guarantee can't be honored here; reject rather than
 			// silently running on primary.
 			if forceReplica {
-				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-					Code:    abi.ErrCodeReplicaUnavailable,
+				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+					Code:    abiv1.ErrCodeReplicaUnavailable,
 					Message: "host.db.query_replica cannot run inside an existing transaction, which is always bound to primary",
 				})
 			}
 			tx, ok := modCtx.Transaction(input.TxID)
 			if !ok {
-				return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-					Code:    abi.ErrCodeTransactionNotFound,
+				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+					Code:    abiv1.ErrCodeTransactionNotFound,
 					Message: "transaction ID does not exist or has expired",
 				})
 			}
@@ -116,8 +110,8 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 			if forceReplica || input.Opts.ReadOnly {
 				replica := r.replicaDB.Load()
 				if replica == nil {
-					return abi.EncodeHostError(ctx, m, allocate, &abi.HostError{
-						Code:    abi.ErrCodeReplicaUnavailable,
+					return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
+						Code:    abiv1.ErrCodeReplicaUnavailable,
 						Message: "no read replica is configured",
 					})
 				}
@@ -168,7 +162,7 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 				Dur("duration", duration).Msg("host.db.query: slow query")
 		}
 
-		return abi.WriteToModule(ctx, m, allocate, dbQueryOutput{
+		return abi.WriteToModule(ctx, m, allocate, abiv1.DBQueryOutput{
 			Rows:         values,
 			ColumnNames:  cols,
 			RowsAffected: 0,
@@ -250,13 +244,13 @@ func scanRowValues(rows *sql.Rows, numCols int) ([]any, error) {
 // §5 "host.db.commit" establishes the same Retry convention for a
 // transient, retry-safe failure), db.query_error for everything else
 // (SQL syntax errors, constraint violations, other Postgres errors).
-func queryHostError(err error) *abi.HostError {
+func queryHostError(err error) *abiv1.HostError {
 	switch {
 	case errors.Is(err, errResultTooLarge):
-		return &abi.HostError{Code: abi.ErrCodeResultTooLarge, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeResultTooLarge, Message: err.Error()}
 	case errors.Is(err, context.DeadlineExceeded):
-		return &abi.HostError{Code: abi.ErrCodeDBTimeout, Message: "query exceeded its timeout", Retry: true}
+		return &abiv1.HostError{Code: abiv1.ErrCodeDBTimeout, Message: "query exceeded its timeout", Retry: true}
 	default:
-		return &abi.HostError{Code: abi.ErrCodeQueryError, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeQueryError, Message: err.Error()}
 	}
 }

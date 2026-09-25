@@ -212,6 +212,6 @@ func TestAlloc_ModuleReturningZeroSurfacesAllocationFailed(t *testing.T) {
 
 	_, err := rt.CallAndRead(ctx, "failing", "anything", []byte("x"))
 	if !errors.Is(err, abi.ErrAllocationFailed) {
-		t.Fatalf("err = %v, want errors.Is(err, abi.ErrAllocationFailed)", err)
+		t.Fatalf("err = %v, want errors.Is(err, abiv1.ErrAllocationFailed)", err)
 	}
 }

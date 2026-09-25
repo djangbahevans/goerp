@@ -111,14 +111,14 @@ func (f *activityFixture) createTicket(t *testing.T, id string, record map[strin
 	t.Helper()
 	rec := map[string]any{"id": id}
 	maps.Copy(rec, record)
-	if _, hostErr := ORMCreate(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, ORMCreateInput{Model: "testmodule.ticket", Record: rec}); hostErr != nil {
+	if _, hostErr := ORMCreate(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, abiv1.ORMCreateInput{Model: "testmodule.ticket", Record: rec}); hostErr != nil {
 		t.Fatalf("ORMCreate: %+v", hostErr)
 	}
 }
 
 func (f *activityFixture) write(t *testing.T, id string, record map[string]any) {
 	t.Helper()
-	if _, hostErr := ORMWrite(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, ORMWriteInput{Model: "testmodule.ticket", ID: id, Record: record}); hostErr != nil {
+	if _, hostErr := ORMWrite(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, abiv1.ORMWriteInput{Model: "testmodule.ticket", ID: id, Record: record}); hostErr != nil {
 		t.Fatalf("ORMWrite: %+v", hostErr)
 	}
 }
@@ -138,7 +138,7 @@ func TestORMCreate_TrackedModel_WritesCreatedEntry(t *testing.T) {
 	f := newActivityFixture(t, trackedTestUserID)
 	f.createTicket(t, ticketA, map[string]any{"title": "Printer jam", "state": "open"})
 
-	if _, hostErr := ORMCreate(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, abiv1.ORMCreateInput{
 		Model: "testmodule.gadget", Record: map[string]any{"id": ticketB, "name": "untracked"},
 	}); hostErr != nil {
 		t.Fatalf("ORMCreate gadget: %+v", hostErr)
@@ -210,7 +210,7 @@ func TestORMWrite_RolledBackTransaction_LeavesNoEntry(t *testing.T) {
 	ctx := t.Context()
 	const txID = "activity-tx"
 	tx := registerTenantScopedTestTx(t, ctx, f.db, f.mc, txID)
-	if _, hostErr := ORMWrite(ctx, f.r, f.db, f.r.EventInsertClient(), nil, f.mc, ORMWriteInput{
+	if _, hostErr := ORMWrite(ctx, f.r, f.db, f.r.EventInsertClient(), nil, f.mc, abiv1.ORMWriteInput{
 		Model: "testmodule.ticket", ID: ticketA, Record: map[string]any{"state": "closed"}, TxID: txID,
 	}); hostErr != nil {
 		t.Fatalf("ORMWrite: %+v", hostErr)
@@ -229,7 +229,7 @@ func TestORMWriteMany_WritesOneChangeEntryPerRecord(t *testing.T) {
 	f.createTicket(t, ticketA, map[string]any{"state": "open"})
 	f.createTicket(t, ticketB, map[string]any{"state": "open"})
 
-	if _, hostErr := ORMWriteMany(t.Context(), f.r, f.db, f.r.EventInsertClient(), f.mc, ORMWriteManyInput{
+	if _, hostErr := ORMWriteMany(t.Context(), f.r, f.db, f.r.EventInsertClient(), f.mc, abiv1.ORMWriteManyInput{
 		Model: "testmodule.ticket", IDs: []string{ticketA, ticketB}, Record: map[string]any{"state": "closed"},
 	}); hostErr != nil {
 		t.Fatalf("ORMWriteMany: %+v", hostErr)
@@ -250,7 +250,7 @@ func TestORMMutate_Increment_WritesChangeEntry(t *testing.T) {
 	f := newActivityFixture(t, trackedTestUserID)
 	f.createTicket(t, ticketA, map[string]any{"points": 3})
 
-	if _, hostErr := ORMMutate(t.Context(), f.r, f.db, f.r.EventInsertClient(), f.mc, ORMMutateInput{
+	if _, hostErr := ORMMutate(t.Context(), f.r, f.db, f.r.EventInsertClient(), f.mc, abiv1.ORMMutateInput{
 		Model: "testmodule.ticket", ID: ticketA, Ops: []abiv1.ORMMutateOp{{Field: "points", Delta: 2}},
 	}); hostErr != nil {
 		t.Fatalf("ORMMutate: %+v", hostErr)
@@ -270,10 +270,10 @@ func TestORMCreate_OnConflictUpdate_WritesChangeEntryForAnExistingRow(t *testing
 	f := newActivityFixture(t, trackedTestUserID)
 	f.createTicket(t, ticketA, map[string]any{"code": "T-1", "state": "open"})
 
-	if _, hostErr := ORMCreate(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, ORMCreateInput{
+	if _, hostErr := ORMCreate(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, abiv1.ORMCreateInput{
 		Model:      "testmodule.ticket",
 		Record:     map[string]any{"id": ticketB, "code": "T-1", "state": "closed"},
-		OnConflict: &OnConflictOption{Fields: []string{"code"}, Policy: "update"},
+		OnConflict: &abiv1.ORMOnConflict{Fields: []string{"code"}, Policy: "update"},
 	}); hostErr != nil {
 		t.Fatalf("ORMCreate upsert: %+v", hostErr)
 	}
@@ -293,10 +293,10 @@ func TestDBExec_TrackedUpdate_WritesChangeEntriesEvenWithSkipAudit(t *testing.T)
 	f.createTicket(t, ticketB, map[string]any{"state": "open", "title": "b"})
 	ctx := t.Context()
 
-	if _, hostErr := DBExec(ctx, f.db, f.mc, dbExecInput{SQL: "UPDATE ticket SET state = $1", Params: []any{"closed"}, Opts: dbExecOpts{SkipAudit: true}}); hostErr != nil {
+	if _, hostErr := DBExec(ctx, f.db, f.mc, abiv1.DBExecInput{SQL: "UPDATE ticket SET state = $1", Params: []any{"closed"}, Opts: abiv1.DBExecOpts{SkipAudit: true}}); hostErr != nil {
 		t.Fatalf("DBExec: %+v", hostErr)
 	}
-	if _, hostErr := DBExec(ctx, f.db, f.mc, dbExecInput{SQL: "UPDATE ticket SET title = $1", Params: []any{"renamed"}}); hostErr != nil {
+	if _, hostErr := DBExec(ctx, f.db, f.mc, abiv1.DBExecInput{SQL: "UPDATE ticket SET title = $1", Params: []any{"renamed"}}); hostErr != nil {
 		t.Fatalf("DBExec untracked: %+v", hostErr)
 	}
 
@@ -321,7 +321,7 @@ func TestDBExecBatch_TrackedUpdate_WritesChangeEntries(t *testing.T) {
 	f.createTicket(t, ticketA, map[string]any{"state": "open"})
 	f.createTicket(t, ticketB, map[string]any{"state": "open"})
 
-	if _, hostErr := DBExecBatch(t.Context(), f.db, f.mc, dbExecBatchInput{
+	if _, hostErr := DBExecBatch(t.Context(), f.db, f.mc, abiv1.DBExecBatchInput{
 		SQL:       "UPDATE ticket SET state = $1 WHERE id = $2",
 		ParamSets: [][]any{{"closed", ticketA}, {"closed", ticketB}},
 	}); hostErr != nil {
@@ -392,10 +392,10 @@ func TestDBExec_TrackedUpdateFrom_CapturesOnlyTheTargetTableOncePerRow(t *testin
 		t.Fatalf("seed staging: %v", err)
 	}
 
-	out, hostErr := DBExec(ctx, f.db, f.mc, dbExecInput{
+	out, hostErr := DBExec(ctx, f.db, f.mc, abiv1.DBExecInput{
 		SQL:    "UPDATE ticket t SET state = s.new_state FROM staging s WHERE t.id = s.ticket_id AND s.new_state = $1",
 		Params: []any{"closed"},
-		Opts:   dbExecOpts{Returning: "id"},
+		Opts:   abiv1.DBExecOpts{Returning: "id"},
 	})
 	if hostErr != nil {
 		t.Fatalf("DBExec UPDATE … FROM: %+v", hostErr)

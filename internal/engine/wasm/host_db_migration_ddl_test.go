@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/vmihailenco/msgpack/v5"
@@ -143,8 +144,8 @@ func TestDBMigrationDDL_DropColumn_Owned(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
-		Op: migrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
+		Op: abiv1.DBMigrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
 	})
 	if hostErr != nil {
 		t.Fatalf("DBMigrationDDL: %+v", hostErr)
@@ -158,8 +159,8 @@ func TestDBMigrationDDL_DropTable_Owned(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
-		Op: migrationDDLOpDropTable, Table: "widget",
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
+		Op: abiv1.DBMigrationDDLOpDropTable, Table: "widget",
 	})
 	if hostErr != nil {
 		t.Fatalf("DBMigrationDDL: %+v", hostErr)
@@ -173,8 +174,8 @@ func TestDBMigrationDDL_DropColumn_ViaExtendsModels(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
-		Op: migrationDDLOpDropColumn, Table: "shared", Column: "extra",
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
+		Op: abiv1.DBMigrationDDLOpDropColumn, Table: "shared", Column: "extra",
 	})
 	if hostErr != nil {
 		t.Fatalf("DBMigrationDDL: %+v", hostErr)
@@ -188,14 +189,14 @@ func TestDBMigrationDDL_RejectsUnownedTable(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
-		Op: migrationDDLOpDropTable, Table: "gadget",
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
+		Op: abiv1.DBMigrationDDLOpDropTable, Table: "gadget",
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error dropping a table declared but not owned/extended")
 	}
-	if hostErr.Code != abi.ErrCodeMigrationDDLNotOwned {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeMigrationDDLNotOwned)
+	if hostErr.Code != abiv1.ErrCodeMigrationDDLNotOwned {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeMigrationDDLNotOwned)
 	}
 	if !tableExists(t, primaryDB, slug, "gadget") {
 		t.Error("gadget table was dropped despite failing the ownership check")
@@ -206,14 +207,14 @@ func TestDBMigrationDDL_RejectsUndeclaredTable(t *testing.T) {
 	primaryDB, _, mc := setupMigrationDDLTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
-		Op: migrationDDLOpDropTable, Table: "orphan_table",
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
+		Op: abiv1.DBMigrationDDLOpDropTable, Table: "orphan_table",
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error dropping a table with no matching declaration at all")
 	}
-	if hostErr.Code != abi.ErrCodeMigrationDDLNotOwned {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeMigrationDDLNotOwned)
+	if hostErr.Code != abiv1.ErrCodeMigrationDDLNotOwned {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeMigrationDDLNotOwned)
 	}
 }
 
@@ -221,14 +222,14 @@ func TestDBMigrationDDL_RejectsUnknownColumn(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
-		Op: migrationDDLOpDropColumn, Table: "widget", Column: "does_not_exist",
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
+		Op: abiv1.DBMigrationDDLOpDropColumn, Table: "widget", Column: "does_not_exist",
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error dropping a column that doesn't exist on the real table")
 	}
-	if hostErr.Code != abi.ErrCodeMigrationDDLTargetNotFound {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeMigrationDDLTargetNotFound)
+	if hostErr.Code != abiv1.ErrCodeMigrationDDLTargetNotFound {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeMigrationDDLTargetNotFound)
 	}
 	if !columnExists(t, primaryDB, slug, "widget", "legacy_name") {
 		t.Error("unrelated legacy_name column was affected")
@@ -264,8 +265,8 @@ func TestDBMigrationDDL_DropColumn_AlreadyRemovedFromDeclaration(t *testing.T) {
 		})
 	mc.IsDataMigrationJob = true
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
-		Op: migrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
+		Op: abiv1.DBMigrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
 	})
 	if hostErr != nil {
 		t.Fatalf("DBMigrationDDL: %+v", hostErr)
@@ -279,14 +280,14 @@ func TestDBMigrationDDL_RejectsInvalidIdentifiers(t *testing.T) {
 	primaryDB, slug, mc := setupMigrationDDLTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
-		Op: migrationDDLOpDropTable, Table: "widget; DROP TABLE gadget;--",
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
+		Op: abiv1.DBMigrationDDLOpDropTable, Table: "widget; DROP TABLE gadget;--",
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for a non-identifier table value")
 	}
-	if hostErr.Code != abi.ErrCodeMigrationDDLError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeMigrationDDLError)
+	if hostErr.Code != abiv1.ErrCodeMigrationDDLError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeMigrationDDLError)
 	}
 	if !tableExists(t, primaryDB, slug, "gadget") || !tableExists(t, primaryDB, slug, "widget") {
 		t.Error("an injected statement affected the database")
@@ -297,14 +298,14 @@ func TestDBMigrationDDL_RejectsUnknownOp(t *testing.T) {
 	primaryDB, _, mc := setupMigrationDDLTest(t)
 	ctx := context.Background()
 
-	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, dbMigrationDDLInput{
+	_, hostErr := DBMigrationDDL(ctx, primaryDB, mc, abiv1.DBMigrationDDLInput{
 		Op: "truncate_table", Table: "widget",
 	})
 	if hostErr == nil {
 		t.Fatal("expected an error for an unknown op")
 	}
-	if hostErr.Code != abi.ErrCodeMigrationDDLError {
-		t.Errorf("Code = %q, want %q", hostErr.Code, abi.ErrCodeMigrationDDLError)
+	if hostErr.Code != abiv1.ErrCodeMigrationDDLError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeMigrationDDLError)
 	}
 }
 
@@ -346,12 +347,12 @@ func TestHostDBMigrationDDL_WiredThroughWASMBoundary(t *testing.T) {
 		mc.IsDataMigrationJob = true
 		inst := newCaller(t, mc, "nocap")
 
-		env := callHost(t, ctx, inst, "call_migration_ddl", dbMigrationDDLInput{Op: migrationDDLOpDropTable, Table: "widget"})
+		env := callHost(t, ctx, inst, "call_migration_ddl", abiv1.DBMigrationDDLInput{Op: abiv1.DBMigrationDDLOpDropTable, Table: "widget"})
 		if env.OK {
 			t.Fatal("expected capability_denied, got success")
 		}
-		if env.Error.Code != abi.ErrCodeCapabilityDenied {
-			t.Errorf("Code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+		if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+			t.Errorf("Code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 		}
 	})
 
@@ -359,12 +360,12 @@ func TestHostDBMigrationDDL_WiredThroughWASMBoundary(t *testing.T) {
 		mc := newMigrationDDLTestModuleContext(slug, false)
 		inst := newCaller(t, mc, "notmigration")
 
-		env := callHost(t, ctx, inst, "call_migration_ddl", dbMigrationDDLInput{Op: migrationDDLOpDropTable, Table: "widget"})
+		env := callHost(t, ctx, inst, "call_migration_ddl", abiv1.DBMigrationDDLInput{Op: abiv1.DBMigrationDDLOpDropTable, Table: "widget"})
 		if env.OK {
 			t.Fatal("expected db.migration_ddl_not_in_migration_context, got success")
 		}
-		if env.Error.Code != abi.ErrCodeMigrationDDLNotInContext {
-			t.Errorf("Code = %q, want %q", env.Error.Code, abi.ErrCodeMigrationDDLNotInContext)
+		if env.Error.Code != abiv1.ErrCodeMigrationDDLNotInContext {
+			t.Errorf("Code = %q, want %q", env.Error.Code, abiv1.ErrCodeMigrationDDLNotInContext)
 		}
 	})
 
@@ -372,13 +373,13 @@ func TestHostDBMigrationDDL_WiredThroughWASMBoundary(t *testing.T) {
 		mc := newMigrationDDLTestModuleContext(slug, true)
 		inst := newCaller(t, mc, "migration")
 
-		env := callHost(t, ctx, inst, "call_migration_ddl", dbMigrationDDLInput{
-			Op: migrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
+		env := callHost(t, ctx, inst, "call_migration_ddl", abiv1.DBMigrationDDLInput{
+			Op: abiv1.DBMigrationDDLOpDropColumn, Table: "widget", Column: "legacy_name",
 		})
 		if !env.OK {
 			t.Fatalf("migration_ddl failed: %+v", env.Error)
 		}
-		var out dbMigrationDDLOutput
+		var out abiv1.DBMigrationDDLOutput
 		if err := msgpack.Unmarshal(env.Data, &out); err != nil {
 			t.Fatalf("unmarshal output: %v", err)
 		}

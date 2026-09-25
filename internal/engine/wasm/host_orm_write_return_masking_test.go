@@ -10,6 +10,7 @@ import (
 
 	"github.com/vmihailenco/msgpack/v5"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
@@ -161,7 +162,7 @@ func TestORMCreate_FieldSecurity_ReturnedRecordMasked(t *testing.T) {
 	mc := newMaskedWriteModuleContext(slug)
 
 	id := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	out, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMCreateInput{
+	out, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
 		Model: "testmodule.widget",
 		Record: map[string]any{
 			"id": id, "name": "Widget B", "credit_limit": int64(900), "bank_account": "9876543210", "notes": "private",
@@ -188,7 +189,7 @@ func TestORMCreate_FieldSecurity_GrantedPermissionReturnsRealValue(t *testing.T)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newMaskedWriteModuleContext(slug, maskedWriteBankAccountPermission)
 
-	out, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMCreateInput{
+	out, hostErr := ORMCreate(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMCreateInput{
 		Model: "testmodule.widget",
 		Record: map[string]any{
 			"id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "name": "Widget C", "credit_limit": int64(900), "bank_account": "9876543210", "notes": "private",
@@ -215,7 +216,7 @@ func TestORMWrite_FieldSecurity_ReturnedRecordMaskedIncludingUntouchedFields(t *
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newMaskedWriteModuleContext(slug)
 
-	out, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
+	out, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.widget",
 		ID:     id,
 		Record: map[string]any{"name": "Widget A Renamed"},
@@ -242,7 +243,7 @@ func TestORMWrite_FieldSecurity_GrantedPermissionReturnsRealValue(t *testing.T) 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newMaskedWriteModuleContext(slug, maskedWriteBankAccountPermission)
 
-	out, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
+	out, hostErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.widget",
 		ID:     id,
 		Record: map[string]any{"name": "Widget A Renamed"},
@@ -265,7 +266,7 @@ func TestORMCreateBatch_FieldSecurity_ReturnedRecordsMasked(t *testing.T) {
 	mc := newMaskedWriteModuleContext(slug)
 
 	firstID := "cccccccc-cccc-cccc-cccc-cccccccccccc"
-	out, hostErr := ORMCreateBatch(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMCreateBatchInput{
+	out, hostErr := ORMCreateBatch(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMCreateBatchInput{
 		Model: "testmodule.widget",
 		Records: []map[string]any{
 			{"id": firstID, "name": "Widget D", "credit_limit": int64(1), "bank_account": "1111222233", "notes": "n1"},
@@ -293,7 +294,7 @@ func TestORMFirstOrCreate_FieldSecurity_BothBranchesMasked(t *testing.T) {
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 	mc := newMaskedWriteModuleContext(slug)
 
-	found, hostErr := ORMFirstOrCreate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMFirstOrCreateInput{
+	found, hostErr := ORMFirstOrCreate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMFirstOrCreateInput{
 		Model:      "testmodule.widget",
 		UniqueVals: map[string]any{"name": "Widget A"},
 	})
@@ -307,7 +308,7 @@ func TestORMFirstOrCreate_FieldSecurity_BothBranchesMasked(t *testing.T) {
 	assertStoredWidgetUnchanged(t, primaryDB, slug, existingID, 5000, "1234567890", "internal notes")
 
 	createdID := "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
-	created, hostErr := ORMFirstOrCreate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMFirstOrCreateInput{
+	created, hostErr := ORMFirstOrCreate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMFirstOrCreateInput{
 		Model:      "testmodule.widget",
 		UniqueVals: map[string]any{"name": "Widget F"},
 		CreateVals: map[string]any{"id": createdID, "credit_limit": int64(7), "bank_account": "5555666677", "notes": "n3"},
@@ -361,7 +362,7 @@ func TestORMTransient_FieldSecurity_CreateAndWriteReturnsMasked(t *testing.T) {
 			PermissionRegistry: permReg,
 		})
 
-	created, hostErr := ORMCreate(ctx, rt, primaryDB, rt.EventInsertClient(), cacheClient, mc, ORMCreateInput{
+	created, hostErr := ORMCreate(ctx, rt, primaryDB, rt.EventInsertClient(), cacheClient, mc, abiv1.ORMCreateInput{
 		Model:  "testmodule.wizard_item",
 		Record: map[string]any{"name": "Step 1", "secret": "abcdef1234", "scratch": "tmp"},
 	})
@@ -378,7 +379,7 @@ func TestORMTransient_FieldSecurity_CreateAndWriteReturnsMasked(t *testing.T) {
 		t.Errorf("created scratch (Omit) should be absent, got %v", created.Record["scratch"])
 	}
 
-	written, hostErr := ORMWrite(ctx, rt, primaryDB, rt.EventInsertClient(), cacheClient, mc, ORMWriteInput{
+	written, hostErr := ORMWrite(ctx, rt, primaryDB, rt.EventInsertClient(), cacheClient, mc, abiv1.ORMWriteInput{
 		Model:  "testmodule.wizard_item",
 		ID:     id,
 		Record: map[string]any{"name": "Step 2", "secret": "zyxwvu9876"},
@@ -393,7 +394,7 @@ func TestORMTransient_FieldSecurity_CreateAndWriteReturnsMasked(t *testing.T) {
 		t.Errorf("written name = %v, want unaffected", written.Record["name"])
 	}
 
-	readOut, hostErr := ORMRead(ctx, primaryDB, cacheClient, mc, ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}})
+	readOut, hostErr := ORMRead(ctx, primaryDB, cacheClient, mc, abiv1.ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}})
 	if hostErr != nil {
 		t.Fatalf("ORMRead: %+v", hostErr)
 	}
@@ -401,7 +402,7 @@ func TestORMTransient_FieldSecurity_CreateAndWriteReturnsMasked(t *testing.T) {
 		t.Errorf("read secret = %v, want the masked \"****9876\"", got)
 	}
 
-	rawOut, hostErr := ORMRead(ctx, primaryDB, cacheClient, mc, ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, SkipFieldSecurity())
+	rawOut, hostErr := ORMRead(ctx, primaryDB, cacheClient, mc, abiv1.ORMReadInput{Model: "testmodule.wizard_item", IDs: []string{id}}, SkipFieldSecurity())
 	if hostErr != nil {
 		t.Fatalf("ORMRead (SkipFieldSecurity): %+v", hostErr)
 	}

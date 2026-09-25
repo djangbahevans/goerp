@@ -1,6 +1,10 @@
 package db
 
-import "testing"
+import (
+	"testing"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
+)
 
 func TestTx_RollbackAfterCommitIsNoop(t *testing.T) {
 	// A committed Tx's Rollback must short-circuit before ever reaching
@@ -28,7 +32,7 @@ func TestTx_TxIDReturnsUnderlyingID(t *testing.T) {
 }
 
 func TestBeginOptions_SetInputFields(t *testing.T) {
-	var in dbBeginInput
+	var in abi.DBBeginInput
 	for _, opt := range []BeginOption{WithIsolation("serializable"), ReadOnly()} {
 		opt(&in)
 	}

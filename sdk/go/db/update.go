@@ -3,6 +3,8 @@ package db
 import (
 	"fmt"
 	"strings"
+
+	abi "github.com/djangbahevans/goerp/contract/abi/v1"
 )
 
 // UpdateByID reads table's row's current etag, then issues an
@@ -42,7 +44,7 @@ func UpdateByID(table, id string, patch map[string]any) (ExecResult, error) {
 	sql := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d AND etag = $%d", table, strings.Join(setClauses, ", "), idPlaceholder, etagPlaceholder)
 
 	params := append(vals, id, etag)
-	return exec(dbExecInput{SQL: sql, Params: params, Opts: dbExecOpts{ExpectRows: true}})
+	return exec(abi.DBExecInput{SQL: sql, Params: params, Opts: abi.DBExecOpts{ExpectRows: true}})
 }
 
 // etagRow is currentEtag's own single-column mapping target.

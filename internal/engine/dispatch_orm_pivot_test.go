@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/config"
@@ -304,7 +305,7 @@ func TestDispatchORMRoute_Pivot_ReadDeniedFieldReturns403(t *testing.T) {
 		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
 	}
 	errObj, _ := body["error"].(map[string]any)
-	if errObj["code"] != abi.ErrCodeFieldReadDenied {
-		t.Errorf("error code = %v, want %v", errObj["code"], abi.ErrCodeFieldReadDenied)
+	if errObj["code"] != abiv1.ErrCodeFieldReadDenied {
+		t.Errorf("error code = %v, want %v", errObj["code"], abiv1.ErrCodeFieldReadDenied)
 	}
 }

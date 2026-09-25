@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/vmihailenco/msgpack/v5"
@@ -65,11 +66,11 @@ func TestHostDBQuery_UnqualifiedSelect_ReturnsRowsAndColumns(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT name FROM widgets ORDER BY name"})
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets ORDER BY name"})
 	if !env.OK {
 		t.Fatalf("query failed: %+v", env.Error)
 	}
-	var out dbQueryOutput
+	var out abiv1.DBQueryOutput
 	if err := msgpack.Unmarshal(env.Data, &out); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
@@ -109,11 +110,11 @@ func TestHostDBQuery_UnqualifiedSelect_ResolvesAgainstCallersOwnTenant(t *testin
 	mc := newTestModuleContext(slugA, abi.CapDBRead, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT name FROM widgets"})
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets"})
 	if !env.OK {
 		t.Fatalf("query failed: %+v", env.Error)
 	}
-	var out dbQueryOutput
+	var out abiv1.DBQueryOutput
 	if err := msgpack.Unmarshal(env.Data, &out); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
@@ -134,11 +135,11 @@ func TestHostDBQuery_ParameterizedSelect(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT name FROM widgets WHERE name = $1", Params: []any{"gizmo"}})
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets WHERE name = $1", Params: []any{"gizmo"}})
 	if !env.OK {
 		t.Fatalf("query failed: %+v", env.Error)
 	}
-	var out dbQueryOutput
+	var out abiv1.DBQueryOutput
 	if err := msgpack.Unmarshal(env.Data, &out); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
@@ -159,12 +160,12 @@ func TestHostDBQuery_MissingCapabilityDenied(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBWrite, r.TxLimiter()) // no CapDBRead
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT name FROM widgets"})
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets"})
 	if env.OK {
 		t.Fatal("expected a capability-denied error, got success")
 	}
-	if env.Error.Code != abi.ErrCodeCapabilityDenied {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeCapabilityDenied)
+	if env.Error.Code != abiv1.ErrCodeCapabilityDenied {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeCapabilityDenied)
 	}
 }
 
@@ -186,13 +187,13 @@ func TestHostDBQuery_RejectsSchemaQualifiedReference(t *testing.T) {
 		"SELECT * FROM record_activity",
 	}
 	for _, sql := range cases {
-		env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: sql})
+		env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: sql})
 		if env.OK {
 			t.Errorf("query %q: expected an error, got success", sql)
 			continue
 		}
-		if env.Error.Code != abi.ErrCodeTableAccessDenied {
-			t.Errorf("query %q: Error.Code = %q, want %q", sql, env.Error.Code, abi.ErrCodeTableAccessDenied)
+		if env.Error.Code != abiv1.ErrCodeTableAccessDenied {
+			t.Errorf("query %q: Error.Code = %q, want %q", sql, env.Error.Code, abiv1.ErrCodeTableAccessDenied)
 		}
 	}
 }
@@ -227,13 +228,13 @@ func TestHostDBQuery_RejectsNonSelectStatements(t *testing.T) {
 		"INSERT INTO widgets (name) VALUES ('evil')",
 	}
 	for _, sql := range cases {
-		env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: sql})
+		env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: sql})
 		if env.OK {
 			t.Errorf("query %q: expected an error, got success", sql)
 			continue
 		}
-		if env.Error.Code != abi.ErrCodeQueryError {
-			t.Errorf("query %q: Error.Code = %q, want %q", sql, env.Error.Code, abi.ErrCodeQueryError)
+		if env.Error.Code != abiv1.ErrCodeQueryError {
+			t.Errorf("query %q: Error.Code = %q, want %q", sql, env.Error.Code, abiv1.ErrCodeQueryError)
 		}
 	}
 }
@@ -250,12 +251,12 @@ func TestHostDBQuery_RejectsSelectInto(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT * INTO shadow FROM widgets"})
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT * INTO shadow FROM widgets"})
 	if env.OK {
 		t.Fatal("expected an error for SELECT ... INTO, got success")
 	}
-	if env.Error.Code != abi.ErrCodeQueryError {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeQueryError)
+	if env.Error.Code != abiv1.ErrCodeQueryError {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeQueryError)
 	}
 }
 
@@ -271,11 +272,11 @@ func TestHostDBQueryReplica_TxIDIsRejected(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBRead|abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	beginEnv := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	beginEnv := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !beginEnv.OK {
 		t.Fatalf("begin failed: %+v", beginEnv.Error)
 	}
-	var beginOut dbBeginOutput
+	var beginOut abiv1.DBBeginOutput
 	if err := msgpack.Unmarshal(beginEnv.Data, &beginOut); err != nil {
 		t.Fatalf("unmarshal begin output: %v", err)
 	}
@@ -284,15 +285,15 @@ func TestHostDBQueryReplica_TxIDIsRejected(t *testing.T) {
 	// never opens against a replica) — host.db.query_replica's "always
 	// routes to replica" guarantee can't be honored with a tx_id, so it
 	// must be rejected rather than silently running on primary.
-	env := callHost(t, ctx, inst, "call_query_replica", dbQueryInput{SQL: "SELECT name FROM widgets", TxID: beginOut.TxID})
+	env := callHost(t, ctx, inst, "call_query_replica", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets", TxID: beginOut.TxID})
 	if env.OK {
 		t.Fatal("expected an error, got success")
 	}
-	if env.Error.Code != abi.ErrCodeReplicaUnavailable {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeReplicaUnavailable)
+	if env.Error.Code != abiv1.ErrCodeReplicaUnavailable {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeReplicaUnavailable)
 	}
 
-	_ = callHost(t, ctx, inst, "call_rollback", dbTxIDInput{TxID: beginOut.TxID})
+	_ = callHost(t, ctx, inst, "call_rollback", abiv1.DBTxIDInput{TxID: beginOut.TxID})
 }
 
 func TestHostDBQuery_TxID_RunsInsideExistingTransactionWithoutClosingIt(t *testing.T) {
@@ -307,20 +308,20 @@ func TestHostDBQuery_TxID_RunsInsideExistingTransactionWithoutClosingIt(t *testi
 	mc := newTestModuleContext(slug, abi.CapDBRead|abi.CapDBWrite, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	beginEnv := callHost(t, ctx, inst, "call_begin", dbBeginInput{})
+	beginEnv := callHost(t, ctx, inst, "call_begin", abiv1.DBBeginInput{})
 	if !beginEnv.OK {
 		t.Fatalf("begin failed: %+v", beginEnv.Error)
 	}
-	var beginOut dbBeginOutput
+	var beginOut abiv1.DBBeginOutput
 	if err := msgpack.Unmarshal(beginEnv.Data, &beginOut); err != nil {
 		t.Fatalf("unmarshal begin output: %v", err)
 	}
 
-	queryEnv := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT name FROM widgets", TxID: beginOut.TxID})
+	queryEnv := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets", TxID: beginOut.TxID})
 	if !queryEnv.OK {
 		t.Fatalf("query failed: %+v", queryEnv.Error)
 	}
-	var out dbQueryOutput
+	var out abiv1.DBQueryOutput
 	if err := msgpack.Unmarshal(queryEnv.Data, &out); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
@@ -334,7 +335,7 @@ func TestHostDBQuery_TxID_RunsInsideExistingTransactionWithoutClosingIt(t *testi
 	if _, ok := mc.Transaction(beginOut.TxID); !ok {
 		t.Fatal("expected the transaction to still be registered after call_query")
 	}
-	commitEnv := callHost(t, ctx, inst, "call_commit", dbTxIDInput{TxID: beginOut.TxID})
+	commitEnv := callHost(t, ctx, inst, "call_commit", abiv1.DBTxIDInput{TxID: beginOut.TxID})
 	if !commitEnv.OK {
 		t.Fatalf("commit failed: %+v", commitEnv.Error)
 	}
@@ -352,12 +353,12 @@ func TestHostDBQuery_TxIDNotFound(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT name FROM widgets", TxID: "does-not-exist"})
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets", TxID: "does-not-exist"})
 	if env.OK {
 		t.Fatal("expected an error, got success")
 	}
-	if env.Error.Code != abi.ErrCodeTransactionNotFound {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeTransactionNotFound)
+	if env.Error.Code != abiv1.ErrCodeTransactionNotFound {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeTransactionNotFound)
 	}
 }
 
@@ -373,12 +374,12 @@ func TestHostDBQuery_ReadOnlyWithNoReplicaConfiguredIsRejected(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT name FROM widgets", Opts: dbQueryOpts{ReadOnly: true}})
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets", Opts: abiv1.DBQueryOpts{ReadOnly: true}})
 	if env.OK {
 		t.Fatal("expected an error, got success")
 	}
-	if env.Error.Code != abi.ErrCodeReplicaUnavailable {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeReplicaUnavailable)
+	if env.Error.Code != abiv1.ErrCodeReplicaUnavailable {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeReplicaUnavailable)
 	}
 }
 
@@ -394,12 +395,12 @@ func TestHostDBQueryReplica_AlwaysRejectedWithNoReplicaConfiguredEvenWithoutOpts
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query_replica", dbQueryInput{SQL: "SELECT name FROM widgets"})
+	env := callHost(t, ctx, inst, "call_query_replica", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets"})
 	if env.OK {
 		t.Fatal("expected an error, got success")
 	}
-	if env.Error.Code != abi.ErrCodeReplicaUnavailable {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeReplicaUnavailable)
+	if env.Error.Code != abiv1.ErrCodeReplicaUnavailable {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeReplicaUnavailable)
 	}
 }
 
@@ -420,17 +421,17 @@ func TestHostDBQuery_ReadOnlyRoutesToConfiguredReplica(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		export string
-		input  dbQueryInput
+		input  abiv1.DBQueryInput
 	}{
-		{"read_only", "call_query", dbQueryInput{SQL: "SELECT name FROM widgets", Opts: dbQueryOpts{ReadOnly: true}}},
-		{"query_replica", "call_query_replica", dbQueryInput{SQL: "SELECT name FROM widgets"}},
+		{"read_only", "call_query", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets", Opts: abiv1.DBQueryOpts{ReadOnly: true}}},
+		{"query_replica", "call_query_replica", abiv1.DBQueryInput{SQL: "SELECT name FROM widgets"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := callHost(t, ctx, inst, tc.export, tc.input)
 			if !env.OK {
 				t.Fatalf("query failed: %+v", env.Error)
 			}
-			var out dbQueryOutput
+			var out abiv1.DBQueryOutput
 			if err := msgpack.Unmarshal(env.Data, &out); err != nil {
 				t.Fatalf("unmarshal output: %v", err)
 			}
@@ -453,12 +454,12 @@ func TestHostDBQuery_TimeoutReturnsDBTimeoutAndRetry(t *testing.T) {
 	mc := newTestModuleContext(slug, abi.CapDBRead, r.TxLimiter())
 	inst := newHostDBQueryCaller(t, ctx, r, mc)
 
-	env := callHost(t, ctx, inst, "call_query", dbQueryInput{SQL: "SELECT pg_sleep(1)", Opts: dbQueryOpts{TimeoutMs: 50}})
+	env := callHost(t, ctx, inst, "call_query", abiv1.DBQueryInput{SQL: "SELECT pg_sleep(1)", Opts: abiv1.DBQueryOpts{TimeoutMs: 50}})
 	if env.OK {
 		t.Fatal("expected a timeout error, got success")
 	}
-	if env.Error.Code != abi.ErrCodeDBTimeout {
-		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abi.ErrCodeDBTimeout)
+	if env.Error.Code != abiv1.ErrCodeDBTimeout {
+		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeDBTimeout)
 	}
 	if !env.Error.Retry {
 		t.Error("expected Retry to be true for a timeout")

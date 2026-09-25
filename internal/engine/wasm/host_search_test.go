@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
@@ -80,7 +81,7 @@ func TestSearchQuery_RanksBySimilarityAndExcludesSoftDeleted(t *testing.T) {
 
 	modCtx := newSearchModuleContext(slug, abi.CapSearchQuery, []manifest.SearchIndex{widgetSearchIndex()})
 
-	out, hostErr := SearchQuery(ctx, primaryDB, modCtx, SearchQueryInput{Index: "widgets", Query: "Widget"})
+	out, hostErr := SearchQuery(ctx, primaryDB, modCtx, abiv1.SearchQueryInput{Index: "widgets", Query: "Widget"})
 	if hostErr != nil {
 		t.Fatalf("SearchQuery: %+v", hostErr)
 	}
@@ -112,9 +113,9 @@ func TestSearchQuery_CapabilityDenied(t *testing.T) {
 
 	modCtx := newSearchModuleContext(slug, 0, []manifest.SearchIndex{widgetSearchIndex()})
 
-	_, hostErr := SearchQuery(ctx, primaryDB, modCtx, SearchQueryInput{Index: "widgets", Query: "Widget"})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeCapabilityDenied {
-		t.Fatalf("hostErr = %+v, want code %q", hostErr, abi.ErrCodeCapabilityDenied)
+	_, hostErr := SearchQuery(ctx, primaryDB, modCtx, abiv1.SearchQueryInput{Index: "widgets", Query: "Widget"})
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeCapabilityDenied {
+		t.Fatalf("hostErr = %+v, want code %q", hostErr, abiv1.ErrCodeCapabilityDenied)
 	}
 }
 
@@ -127,9 +128,9 @@ func TestSearchQuery_UndeclaredIndexReturnsError(t *testing.T) {
 
 	modCtx := newSearchModuleContext(slug, abi.CapSearchQuery, nil)
 
-	_, hostErr := SearchQuery(ctx, primaryDB, modCtx, SearchQueryInput{Index: "nonexistent", Query: "x"})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeIndexNotFound {
-		t.Fatalf("hostErr = %+v, want code %q", hostErr, abi.ErrCodeIndexNotFound)
+	_, hostErr := SearchQuery(ctx, primaryDB, modCtx, abiv1.SearchQueryInput{Index: "nonexistent", Query: "x"})
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeIndexNotFound {
+		t.Fatalf("hostErr = %+v, want code %q", hostErr, abiv1.ErrCodeIndexNotFound)
 	}
 }
 
@@ -140,8 +141,8 @@ func TestSearchQuery_UpdateAndDeleteReturnUnavailable(t *testing.T) {
 	// own SearchQuery-core-only testing style.
 	for _, op := range []string{"update", "delete"} {
 		hostErr := searchUnavailableError(op)
-		if hostErr.Code != abi.ErrCodeUnavailable {
-			t.Errorf("searchUnavailableError(%q).Code = %q, want %q", op, hostErr.Code, abi.ErrCodeUnavailable)
+		if hostErr.Code != abiv1.ErrCodeUnavailable {
+			t.Errorf("searchUnavailableError(%q).Code = %q, want %q", op, hostErr.Code, abiv1.ErrCodeUnavailable)
 		}
 	}
 }

@@ -6,14 +6,9 @@ import (
 	"strings"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
-	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/vmihailenco/msgpack/v5"
 )
-
-type previewRequest = abiv1.PreviewRequest
-
-type previewResponse = abiv1.PreviewResponse
 
 // This file holds Preview's dispatch (goerp#372) — not one of host.orm's
 // six CRUD operations, so unlike every other file in this package it has
@@ -36,10 +31,10 @@ type ORMPreviewOutput struct {
 // the model's own module registered one — runs its PreviewHook against
 // the result. Nothing is ever written to the database and no
 // orm.record.* event fires (go-sdk-reference.md §22 "Preview action").
-func ORMPreview(ctx context.Context, r *Runtime, modCtx *ModuleContext, input ORMPreviewInput) (ORMPreviewOutput, *abi.HostError) {
+func ORMPreview(ctx context.Context, r *Runtime, modCtx *ModuleContext, input ORMPreviewInput) (ORMPreviewOutput, *abiv1.HostError) {
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMPreviewOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return ORMPreviewOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 
 	draft := make(map[string]any, len(input.Record))
@@ -96,7 +91,7 @@ func dependenciesPresent(depends []string, draft map[string]any) bool {
 // checked before ever borrowing an instance, so this is a clean no-op for
 // the common case (go-sdk-reference.md §22: "No module code is required
 // for the common case").
-func runPreviewHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, modelName string, draft *map[string]any) *abi.HostError {
+func runPreviewHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, modelName string, draft *map[string]any) *abiv1.HostError {
 	// A model with no computed fields and no preview hook needs no WASM
 	// instance for Preview at all — checking Pool availability first
 	// (rather than always borrowing via borrowModuleInstance, which
@@ -119,7 +114,7 @@ func runPreviewHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, mode
 		return nil
 	}
 
-	payload, err := msgpack.Marshal(previewRequest{
+	payload, err := msgpack.Marshal(abiv1.PreviewRequest{
 		Model:    modelName,
 		Record:   *draft,
 		TenantID: modCtx.TenantID,
@@ -127,20 +122,20 @@ func runPreviewHook(ctx context.Context, r *Runtime, modCtx *ModuleContext, mode
 		TraceID:  modCtx.TraceID,
 	})
 	if err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	respBytes, err := inst.InvokeHandlePreview(ctx, payload)
 	if err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: "preview " + modelName + ": " + err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: "preview " + modelName + ": " + err.Error()}
 	}
 
-	var resp previewResponse
+	var resp abiv1.PreviewResponse
 	if err := msgpack.Unmarshal(respBytes, &resp); err != nil {
-		return &abi.HostError{Code: abi.ErrCodeUnavailable, Message: err.Error()}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 	if resp.Error != nil {
-		return &abi.HostError{Code: resp.Error.Code, Message: resp.Error.Message}
+		return &abiv1.HostError{Code: resp.Error.Code, Message: resp.Error.Message}
 	}
 	*draft = resp.Record
 	return nil

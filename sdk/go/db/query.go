@@ -33,18 +33,16 @@ func (r *QueryResult) AsMaps() []map[string]any {
 	return maps
 }
 
-type dbQueryInput = abi.DBQueryInput
-
 // QueryOption configures Query/QueryReplica — WithTimeout, WithReadOnly.
 // Scoping a query to an open transaction is a tx.Query[T]/tx.QueryOne[T]
 // method call instead (db.go) — there's no WithTx QueryOption here, so it
 // doesn't collide with the package-level db.WithTx(fn) convenience
 // wrapper (db.go).
-type QueryOption func(*dbQueryInput)
+type QueryOption func(*abi.DBQueryInput)
 
 // WithTimeout overrides host.db.query's default timeout.
 func WithTimeout(ms int64) QueryOption {
-	return func(in *dbQueryInput) { in.Opts.TimeoutMs = ms }
+	return func(in *abi.DBQueryInput) { in.Opts.TimeoutMs = ms }
 }
 
 // WithReadOnly routes a Query call (one that would otherwise run against
@@ -53,7 +51,7 @@ func WithTimeout(ms int64) QueryOption {
 // which is already unconditionally replica-routed regardless of this
 // option.
 func WithReadOnly() QueryOption {
-	return func(in *dbQueryInput) { in.Opts.ReadOnly = true }
+	return func(in *abi.DBQueryInput) { in.Opts.ReadOnly = true }
 }
 
 // Query runs a parameterized SELECT via host.db.query — rejects anything
@@ -104,7 +102,7 @@ func QueryReplicaRaw(sql string, params []any, opts ...QueryOption) (*QueryResul
 // transaction-scoped path (tx *Tx) Query[T]/QueryOne[T] (db.go) call it
 // through by passing tx's own ID as txID instead of "".
 func query(invoke hostcall.Invoke, sql string, params []any, opts []QueryOption, txID string) (*QueryResult, error) {
-	in := dbQueryInput{SQL: sql, Params: params, TxID: txID}
+	in := abi.DBQueryInput{SQL: sql, Params: params, TxID: txID}
 	for _, opt := range opts {
 		opt(&in)
 	}

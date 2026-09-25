@@ -14,12 +14,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-type ORMAggregateValue = abiv1.ORMAggregateValue
-
-type ORMAggregateInput = abiv1.ORMAggregateInput
-
-type ORMAggregateOutput = abiv1.ORMAggregateOutput
-
 func makeORMAggregate(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -30,7 +24,7 @@ func makeORMAggregate(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Mo
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.MemoryFault())
 		}
-		var input ORMAggregateInput
+		var input abiv1.ORMAggregateInput
 		if err := msgpack.Unmarshal(inputBytes, &input); err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, abi.DeserializeError(err))
 		}
@@ -55,20 +49,20 @@ func aggregateValueAlias(v abiv1.ORMAggregateValue) string {
 // ORMPivot's capability check, tenant-scoped read transaction and
 // per-field read-permission check, but runs no GROUP BY at all, so a
 // single row always comes back regardless of how many rows match.
-func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMAggregateInput) (ORMAggregateOutput, *abi.HostError) {
+func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.ORMAggregateInput) (abiv1.ORMAggregateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
-		return ORMAggregateOutput{}, abi.CapabilityDenied("db.read")
+		return abiv1.ORMAggregateOutput{}, abi.CapabilityDenied("db.read")
 	}
 
 	md, ok := resolveModel(modCtx, input.Model)
 	if !ok {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
+		return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " is not declared by this module"}
 	}
 	if md.Backend == model.BackendTransient {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to aggregate"}
+		return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeTransientNotListable, Message: "model " + input.Model + " is Transient — there is no table to aggregate"}
 	}
 	if len(input.Values) == 0 {
-		return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "aggregate requires at least one values entry"}
+		return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "aggregate requires at least one values entry"}
 	}
 
 	declared := make(map[string]model.FieldDef, len(md.Fields))
@@ -85,50 +79,50 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 			// Field is optional: COUNT(*) when absent, COUNT(field) when present.
 		case "count_distinct":
 			if v.Field == "" {
-				return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "aggregation " + v.Aggregation + " requires a field", Details: map[string]any{"aggregation": v.Aggregation}}
+				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "aggregation " + v.Aggregation + " requires a field", Details: map[string]any{"aggregation": v.Aggregation}}
 			}
 		default:
 			if _, ok := aggregateSQLFuncs[v.Aggregation]; !ok {
-				return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "unknown aggregation " + v.Aggregation, Details: map[string]any{"aggregation": v.Aggregation}}
+				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "unknown aggregation " + v.Aggregation, Details: map[string]any{"aggregation": v.Aggregation}}
 			}
 			if v.Field == "" {
-				return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "aggregation " + v.Aggregation + " requires a field", Details: map[string]any{"aggregation": v.Aggregation}}
+				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "aggregation " + v.Aggregation + " requires a field", Details: map[string]any{"aggregation": v.Aggregation}}
 			}
 		}
 
 		if v.Field != "" {
 			def, ok := declared[v.Field]
 			if !ok {
-				return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + v.Field + " is not declared on " + input.Model, Details: map[string]any{"field": v.Field}}
+				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + v.Field + " is not declared on " + input.Model, Details: map[string]any{"field": v.Field}}
 			}
 			if def.Kind == model.KindOne2Many {
-				return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeFieldUnknown, Message: "field " + v.Field + " is a One2Many relation and cannot be aggregated", Details: map[string]any{"field": v.Field}}
+				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldUnknown, Message: "field " + v.Field + " is a One2Many relation and cannot be aggregated", Details: map[string]any{"field": v.Field}}
 			}
 			if (v.Aggregation == "sum" || v.Aggregation == "avg" || v.Aggregation == "min" || v.Aggregation == "max") && !isNumericKind(def.Kind) {
-				return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "field " + v.Field + " is not numeric", Details: map[string]any{"field": v.Field}}
+				return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "field " + v.Field + " is not numeric", Details: map[string]any{"field": v.Field}}
 			}
 			if fieldSecReg != nil {
 				if rule, ok := fieldSecReg.Rule(input.Model, v.Field); ok && rule.ReadPermission != "" && !callerHasPermission(modCtx, permReg, rule.ReadPermission) {
-					return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeFieldReadDenied, Message: "field " + v.Field + " requires permission " + rule.ReadPermission, Details: map[string]any{"field": v.Field}}
+					return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeFieldReadDenied, Message: "field " + v.Field + " requires permission " + rule.ReadPermission, Details: map[string]any{"field": v.Field}}
 				}
 			}
 		}
 
 		alias := aggregateValueAlias(v)
 		if seenAliases[alias] {
-			return ORMAggregateOutput{}, &abi.HostError{Code: abi.ErrCodeValidationFailed, Message: "values entry " + alias + " appears more than once"}
+			return abiv1.ORMAggregateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "values entry " + alias + " appears more than once"}
 		}
 		seenAliases[alias] = true
 	}
 
 	whereFrag, args, hostErr := compileDomain(input.Domain)
 	if hostErr != nil {
-		return ORMAggregateOutput{}, hostErr
+		return abiv1.ORMAggregateOutput{}, hostErr
 	}
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
-		return ORMAggregateOutput{}, hostErr
+		return abiv1.ORMAggregateOutput{}, hostErr
 	}
 	defer finish()
 
@@ -155,16 +149,16 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s", strings.Join(selectExprs, ", "), table, whereFrag)
 	sqlRows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
-		return ORMAggregateOutput{}, ormSQLError(err)
+		return abiv1.ORMAggregateOutput{}, ormSQLError(err)
 	}
 	defer sqlRows.Close()
 
 	records, err := scanRowsToMaps(sqlRows)
 	if err != nil {
-		return ORMAggregateOutput{}, ormSQLError(err)
+		return abiv1.ORMAggregateOutput{}, ormSQLError(err)
 	}
 
 	// A query with no GROUP BY always returns exactly one row, already
 	// keyed by the alias each selectExprs entry gave its aggregate.
-	return ORMAggregateOutput{Values: records[0]}, nil
+	return abiv1.ORMAggregateOutput{Values: records[0]}, nil
 }

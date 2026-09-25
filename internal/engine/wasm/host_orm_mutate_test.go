@@ -59,9 +59,7 @@ func setupMutateStockTenant(t *testing.T, primaryDB *sql.DB, prefix string, onHa
 	return slug, mc, tenantID
 }
 
-func mutateOps(ops ...abiMutateOp) []abiMutateOp { return ops }
-
-type abiMutateOp = abiv1.ORMMutateOp
+func mutateOps(ops ...abiv1.ORMMutateOp) []abiv1.ORMMutateOp { return ops }
 
 func storedOnHand(t *testing.T, primaryDB *sql.DB, slug string) int {
 	t.Helper()
@@ -78,10 +76,10 @@ func TestORMMutate_DecrementWithGuard_AppliesAndRotatesEtag(t *testing.T) {
 	slug, mc, _ := setupMutateStockTenant(t, primaryDB, "mutateok", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
-	out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+	out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.stock",
 		ID:    mutateStockID,
-		Ops:   mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(-4)}, abiMutateOp{Field: "reserved", Delta: int64(4)}),
+		Ops:   mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(-4)}, abiv1.ORMMutateOp{Field: "reserved", Delta: int64(4)}),
 		Guard: "record.on_hand >= 4",
 	})
 	if hostErr != nil {
@@ -107,9 +105,9 @@ func TestORMMutate_ChangedFieldsAreSortedRegardlessOfOpOrder(t *testing.T) {
 	_, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutatesorted", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
-	if _, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+	if _, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.stock", ID: mutateStockID,
-		Ops: mutateOps(abiMutateOp{Field: "reserved", Delta: int64(1)}, abiMutateOp{Field: "on_hand", Delta: int64(-1)}),
+		Ops: mutateOps(abiv1.ORMMutateOp{Field: "reserved", Delta: int64(1)}, abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(-1)}),
 	}); hostErr != nil {
 		t.Fatalf("ORMMutate: %+v", hostErr)
 	}
@@ -127,10 +125,10 @@ func TestORMMutate_FloatAndDecimalFields(t *testing.T) {
 	slug, mc, _ := setupMutateStockTenant(t, primaryDB, "mutatefloat", 10)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
-	if _, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+	if _, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.stock",
 		ID:    mutateStockID,
-		Ops:   mutateOps(abiMutateOp{Field: "weight", Delta: 0.25}, abiMutateOp{Field: "price", Delta: int64(2)}),
+		Ops:   mutateOps(abiv1.ORMMutateOp{Field: "weight", Delta: 0.25}, abiv1.ORMMutateOp{Field: "price", Delta: int64(2)}),
 	}); hostErr != nil {
 		t.Fatalf("ORMMutate: %+v", hostErr)
 	}
@@ -154,9 +152,9 @@ func TestORMMutate_NullFieldCountsAsZero(t *testing.T) {
 		t.Fatalf("null reserved: %v", err)
 	}
 
-	out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+	out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.stock", ID: mutateStockID,
-		Ops: mutateOps(abiMutateOp{Field: "reserved", Delta: int64(3)}),
+		Ops: mutateOps(abiv1.ORMMutateOp{Field: "reserved", Delta: int64(3)}),
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMMutate: %+v", hostErr)
@@ -172,13 +170,13 @@ func TestORMMutate_FalseGuard_FailsPreconditionAndLeavesRecordUnchanged(t *testi
 	slug, mc, tenantID := setupMutateStockTenant(t, primaryDB, "mutateguard", 3)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
-	_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+	_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.stock", ID: mutateStockID,
-		Ops:   mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(-5)}),
+		Ops:   mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(-5)}),
 		Guard: "record.on_hand >= 5",
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodePreconditionFailed {
-		t.Fatalf("hostErr = %+v, want %s", hostErr, abi.ErrCodePreconditionFailed)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodePreconditionFailed {
+		t.Fatalf("hostErr = %+v, want %s", hostErr, abiv1.ErrCodePreconditionFailed)
 	}
 	if got := storedOnHand(t, primaryDB, slug); got != 3 {
 		t.Errorf("stored on_hand = %d, want 3 (unchanged)", got)
@@ -194,13 +192,13 @@ func TestORMMutate_UnknownRecord_NotFound(t *testing.T) {
 	_, mc, _ := setupMutateStockTenant(t, primaryDB, "mutatemissing", 3)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
-	_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+	_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.stock", ID: "50000000-0000-0000-0000-0000000000ff",
-		Ops:   mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(-1)}),
+		Ops:   mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(-1)}),
 		Guard: "record.on_hand >= 1",
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeNotFound {
-		t.Fatalf("hostErr = %+v, want %s", hostErr, abi.ErrCodeNotFound)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeNotFound {
+		t.Fatalf("hostErr = %+v, want %s", hostErr, abiv1.ErrCodeNotFound)
 	}
 }
 
@@ -218,15 +216,15 @@ func TestORMMutate_ConcurrentDecrements_NeverGoBelowGuard(t *testing.T) {
 	for range callers {
 		wg.Go(func() {
 			<-start
-			_, hostErr := ORMMutate(ctx, r, primaryDB, insertClient, mc, ORMMutateInput{
+			_, hostErr := ORMMutate(ctx, r, primaryDB, insertClient, mc, abiv1.ORMMutateInput{
 				Model: "testmodule.stock", ID: mutateStockID,
-				Ops:   mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(-1)}),
+				Ops:   mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(-1)}),
 				Guard: "record.on_hand >= 1",
 			})
 			switch {
 			case hostErr == nil:
 				succeeded.Add(1)
-			case hostErr.Code == abi.ErrCodePreconditionFailed:
+			case hostErr.Code == abiv1.ErrCodePreconditionFailed:
 				rejected.Add(1)
 			default:
 				other.Add(1)
@@ -277,39 +275,39 @@ func TestORMMutate_Validation(t *testing.T) {
 	tests := []struct {
 		name  string
 		model string
-		ops   []abiMutateOp
+		ops   []abiv1.ORMMutateOp
 		guard string
 	}{
-		{"non-numeric field", "testmodule.stock", mutateOps(abiMutateOp{Field: "name", Delta: int64(1)}), ""},
-		{"primary key", "testmodule.stock", mutateOps(abiMutateOp{Field: "id", Delta: int64(1)}), ""},
-		{"computed field", "testmodule.order", mutateOps(abiMutateOp{Field: "amount_total", Delta: int64(1)}), ""},
-		{"unknown field", "testmodule.stock", mutateOps(abiMutateOp{Field: "nope", Delta: int64(1)}), ""},
+		{"non-numeric field", "testmodule.stock", mutateOps(abiv1.ORMMutateOp{Field: "name", Delta: int64(1)}), ""},
+		{"primary key", "testmodule.stock", mutateOps(abiv1.ORMMutateOp{Field: "id", Delta: int64(1)}), ""},
+		{"computed field", "testmodule.order", mutateOps(abiv1.ORMMutateOp{Field: "amount_total", Delta: int64(1)}), ""},
+		{"unknown field", "testmodule.stock", mutateOps(abiv1.ORMMutateOp{Field: "nope", Delta: int64(1)}), ""},
 		{"no ops", "testmodule.stock", nil, ""},
-		{"duplicate field", "testmodule.stock", mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(1)}, abiMutateOp{Field: "on_hand", Delta: int64(2)}), ""},
-		{"fractional delta on integer field", "testmodule.stock", mutateOps(abiMutateOp{Field: "on_hand", Delta: 1.5}), ""},
-		{"delta outside int32 on integer field", "testmodule.stock", mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(1) << 40}), ""},
-		{"non-numeric delta", "testmodule.stock", mutateOps(abiMutateOp{Field: "on_hand", Delta: "1"}), ""},
-		{"transient model", "testmodule.session_counter", mutateOps(abiMutateOp{Field: "hits", Delta: int64(1)}), ""},
-		{"virtual model", "testmodule.ledger_view", mutateOps(abiMutateOp{Field: "hits", Delta: int64(1)}), ""},
+		{"duplicate field", "testmodule.stock", mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(1)}, abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(2)}), ""},
+		{"fractional delta on integer field", "testmodule.stock", mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: 1.5}), ""},
+		{"delta outside int32 on integer field", "testmodule.stock", mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(1) << 40}), ""},
+		{"non-numeric delta", "testmodule.stock", mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: "1"}), ""},
+		{"transient model", "testmodule.session_counter", mutateOps(abiv1.ORMMutateOp{Field: "hits", Delta: int64(1)}), ""},
+		{"virtual model", "testmodule.ledger_view", mutateOps(abiv1.ORMMutateOp{Field: "hits", Delta: int64(1)}), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+			_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 				Model: tt.model, ID: mutateStockID, Ops: tt.ops, Guard: tt.guard,
 			})
-			if hostErr == nil || hostErr.Code != abi.ErrCodeValidationFailed {
-				t.Errorf("hostErr = %+v, want %s", hostErr, abi.ErrCodeValidationFailed)
+			if hostErr == nil || hostErr.Code != abiv1.ErrCodeValidationFailed {
+				t.Errorf("hostErr = %+v, want %s", hostErr, abiv1.ErrCodeValidationFailed)
 			}
 		})
 	}
 
 	t.Run("invalid guard", func(t *testing.T) {
-		_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+		_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 			Model: "testmodule.stock", ID: mutateStockID,
-			Ops: mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(1)}), Guard: "record.on_hand >>> 1",
+			Ops: mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(1)}), Guard: "record.on_hand >>> 1",
 		})
-		if hostErr == nil || hostErr.Code != abi.ErrCodeDomainInvalid {
-			t.Errorf("hostErr = %+v, want %s", hostErr, abi.ErrCodeDomainInvalid)
+		if hostErr == nil || hostErr.Code != abiv1.ErrCodeDomainInvalid {
+			t.Errorf("hostErr = %+v, want %s", hostErr, abiv1.ErrCodeDomainInvalid)
 		}
 	})
 
@@ -317,12 +315,12 @@ func TestORMMutate_Validation(t *testing.T) {
 		if _, err := primaryDB.Exec(`UPDATE tenant_` + slug + `.stocks SET on_hand = 2147483647`); err != nil {
 			t.Fatalf("seed max int: %v", err)
 		}
-		_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+		_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 			Model: "testmodule.stock", ID: mutateStockID,
-			Ops: mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(1)}),
+			Ops: mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(1)}),
 		})
-		if hostErr == nil || hostErr.Code != abi.ErrCodeValidationFailed {
-			t.Errorf("hostErr = %+v, want %s", hostErr, abi.ErrCodeValidationFailed)
+		if hostErr == nil || hostErr.Code != abiv1.ErrCodeValidationFailed {
+			t.Errorf("hostErr = %+v, want %s", hostErr, abiv1.ErrCodeValidationFailed)
 		}
 	})
 }
@@ -342,17 +340,17 @@ func TestORMMutate_FieldWriteSecurity(t *testing.T) {
 
 	t.Run("denied field is write-denied, as for orm.Write", func(t *testing.T) {
 		mc := newWriteFieldSecModuleContext(slug)
-		_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+		_, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 			Model: "testmodule.widget", ID: id,
-			Ops: mutateOps(abiMutateOp{Field: "discount_percent", Delta: int64(1)}),
+			Ops: mutateOps(abiv1.ORMMutateOp{Field: "discount_percent", Delta: int64(1)}),
 		})
-		if hostErr == nil || hostErr.Code != abi.ErrCodeFieldWriteDenied {
-			t.Fatalf("hostErr = %+v, want %s", hostErr, abi.ErrCodeFieldWriteDenied)
+		if hostErr == nil || hostErr.Code != abiv1.ErrCodeFieldWriteDenied {
+			t.Fatalf("hostErr = %+v, want %s", hostErr, abiv1.ErrCodeFieldWriteDenied)
 		}
 		if hostErr.Details["field"] != "discount_percent" {
 			t.Errorf("Details[field] = %v, want discount_percent", hostErr.Details["field"])
 		}
-		_, writeErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, ORMWriteInput{
+		_, writeErr := ORMWrite(ctx, r, primaryDB, r.EventInsertClient(), nil, mc, abiv1.ORMWriteInput{
 			Model: "testmodule.widget", ID: id, Record: map[string]any{"discount_percent": int64(6)},
 		})
 		if writeErr == nil || writeErr.Code != hostErr.Code {
@@ -369,9 +367,9 @@ func TestORMMutate_FieldWriteSecurity(t *testing.T) {
 
 	t.Run("granted permission writes", func(t *testing.T) {
 		mc := newWriteFieldSecModuleContext(slug, "sales:order:set_discount")
-		out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+		out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 			Model: "testmodule.widget", ID: id,
-			Ops: mutateOps(abiMutateOp{Field: "discount_percent", Delta: int64(1)}),
+			Ops: mutateOps(abiv1.ORMMutateOp{Field: "discount_percent", Delta: int64(1)}),
 		})
 		if hostErr != nil {
 			t.Fatalf("ORMMutate: %+v", hostErr)
@@ -392,9 +390,9 @@ func TestPlanMutation_ReadonlyNumericField_NotWritable(t *testing.T) {
 	}
 	mc, _ := newORMWriteTestModuleContext("planreadonly", []model.ModelDeclaration{decl})
 
-	_, hostErr := planMutation(mc, "testmodule.counter", decl, []abiMutateOp{{Field: "version", Delta: int64(1)}})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeFieldNotWritable {
-		t.Fatalf("hostErr = %+v, want %s", hostErr, abi.ErrCodeFieldNotWritable)
+	_, hostErr := planMutation(mc, "testmodule.counter", decl, []abiv1.ORMMutateOp{{Field: "version", Delta: int64(1)}})
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeFieldNotWritable {
+		t.Fatalf("hostErr = %+v, want %s", hostErr, abiv1.ErrCodeFieldNotWritable)
 	}
 }
 
@@ -407,9 +405,9 @@ func TestORMMutate_ReturnMaskedAuditedAndEventEmitted(t *testing.T) {
 	mc := newMaskedWriteModuleContext(slug)
 	r := newHostDBTestRuntime(t, primaryDB, 10)
 
-	out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, ORMMutateInput{
+	out, hostErr := ORMMutate(ctx, r, primaryDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.widget", ID: existingID,
-		Ops: mutateOps(abiMutateOp{Field: "credit_limit", Delta: int64(-1000)}),
+		Ops: mutateOps(abiv1.ORMMutateOp{Field: "credit_limit", Delta: int64(-1000)}),
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMMutate: %+v", hostErr)
@@ -465,10 +463,10 @@ func TestORMMutate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	tx := registerTenantScopedTestTx(t, ctx, primaryDB, mc, txID)
 	defer func() { _ = tx.Rollback() }()
 
-	mutate := func(delta int64, guard string) *abi.HostError {
-		_, hostErr := ORMMutate(ctx, r, primaryDB, insertClient, mc, ORMMutateInput{
+	mutate := func(delta int64, guard string) *abiv1.HostError {
+		_, hostErr := ORMMutate(ctx, r, primaryDB, insertClient, mc, abiv1.ORMMutateInput{
 			Model: "testmodule.stock", ID: mutateStockID, TxID: txID,
-			Ops: mutateOps(abiMutateOp{Field: "on_hand", Delta: delta}), Guard: guard,
+			Ops: mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: delta}), Guard: guard,
 		})
 		return hostErr
 	}
@@ -476,8 +474,8 @@ func TestORMMutate_TxID_ParticipatesInCallersTransaction(t *testing.T) {
 	if hostErr := mutate(-4, "record.on_hand >= 4"); hostErr != nil {
 		t.Fatalf("first mutate: %+v", hostErr)
 	}
-	if hostErr := mutate(-100, "record.on_hand >= 100"); hostErr == nil || hostErr.Code != abi.ErrCodePreconditionFailed {
-		t.Fatalf("second mutate = %+v, want %s", hostErr, abi.ErrCodePreconditionFailed)
+	if hostErr := mutate(-100, "record.on_hand >= 100"); hostErr == nil || hostErr.Code != abiv1.ErrCodePreconditionFailed {
+		t.Fatalf("second mutate = %+v, want %s", hostErr, abiv1.ErrCodePreconditionFailed)
 	}
 	// A false guard is not a SQL error, so the caller's transaction stays usable.
 	if hostErr := mutate(-1, "record.on_hand >= 1"); hostErr != nil {
@@ -523,7 +521,7 @@ func TestORMMutate_RecomputesDependentsAndRunsConstraintHook(t *testing.T) {
 	open := "70000000-0000-0000-0000-000000000001"
 	locked := "70000000-0000-0000-0000-000000000002"
 	for _, o := range []struct{ id, state string }{{open, "draft"}, {locked, "locked"}} {
-		if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, ORMCreateInput{
+		if _, hostErr := ORMCreate(ctx, r, primaryDB, insertClient, nil, mc, abiv1.ORMCreateInput{
 			Model: "testmodule.order",
 			Record: map[string]any{
 				"id": o.id, "tenant_id": "00000000-0000-0000-0000-000000000001",
@@ -534,9 +532,9 @@ func TestORMMutate_RecomputesDependentsAndRunsConstraintHook(t *testing.T) {
 		}
 	}
 
-	out, hostErr := ORMMutate(ctx, r, primaryDB, insertClient, mc, ORMMutateInput{
+	out, hostErr := ORMMutate(ctx, r, primaryDB, insertClient, mc, abiv1.ORMMutateInput{
 		Model: "testmodule.order", ID: open,
-		Ops: mutateOps(abiMutateOp{Field: "quantity", Delta: int64(2)}),
+		Ops: mutateOps(abiv1.ORMMutateOp{Field: "quantity", Delta: int64(2)}),
 	})
 	if hostErr != nil {
 		t.Fatalf("ORMMutate: %+v", hostErr)
@@ -545,12 +543,12 @@ func TestORMMutate_RecomputesDependentsAndRunsConstraintHook(t *testing.T) {
 		t.Errorf("amount_total = %v, want 125 (5 * 25)", out.Record["amount_total"])
 	}
 
-	_, hostErr = ORMMutate(ctx, r, primaryDB, insertClient, mc, ORMMutateInput{
+	_, hostErr = ORMMutate(ctx, r, primaryDB, insertClient, mc, abiv1.ORMMutateInput{
 		Model: "testmodule.order", ID: locked,
-		Ops: mutateOps(abiMutateOp{Field: "quantity", Delta: int64(2)}),
+		Ops: mutateOps(abiv1.ORMMutateOp{Field: "quantity", Delta: int64(2)}),
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeValidationFailed {
-		t.Fatalf("hostErr = %+v, want %s from the write constraint hook", hostErr, abi.ErrCodeValidationFailed)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeValidationFailed {
+		t.Fatalf("hostErr = %+v, want %s from the write constraint hook", hostErr, abiv1.ErrCodeValidationFailed)
 	}
 	var quantity int
 	if err := primaryDB.QueryRow(`SELECT quantity FROM tenant_` + slug + `."order" WHERE id = '` + locked + `'`).Scan(&quantity); err != nil {
@@ -589,22 +587,22 @@ func TestORMMutate_RowHiddenByRLS_NotFoundNotPreconditionFailed(t *testing.T) {
 	mc := NewModuleContext("req-1", "testmodule", "user-1", repID, []string{"admin"}, nil, slug, slug, "trace-1",
 		abi.CapDBRead|abi.CapDBWrite, nil, ModuleSnapshot{ModelDecls: []model.ModelDeclaration{decl}})
 
-	_, hostErr := ORMMutate(ctx, r, writerDB, r.EventInsertClient(), mc, ORMMutateInput{
+	_, hostErr := ORMMutate(ctx, r, writerDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.stock", ID: theirs,
-		Ops:   mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(-1)}),
+		Ops:   mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(-1)}),
 		Guard: "record.on_hand >= 1",
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodeNotFound {
-		t.Errorf("hidden row: hostErr = %+v, want %s", hostErr, abi.ErrCodeNotFound)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodeNotFound {
+		t.Errorf("hidden row: hostErr = %+v, want %s", hostErr, abiv1.ErrCodeNotFound)
 	}
 
-	_, hostErr = ORMMutate(ctx, r, writerDB, r.EventInsertClient(), mc, ORMMutateInput{
+	_, hostErr = ORMMutate(ctx, r, writerDB, r.EventInsertClient(), mc, abiv1.ORMMutateInput{
 		Model: "testmodule.stock", ID: mine,
-		Ops:   mutateOps(abiMutateOp{Field: "on_hand", Delta: int64(-9)}),
+		Ops:   mutateOps(abiv1.ORMMutateOp{Field: "on_hand", Delta: int64(-9)}),
 		Guard: "record.on_hand >= 9",
 	})
-	if hostErr == nil || hostErr.Code != abi.ErrCodePreconditionFailed {
-		t.Errorf("visible row, false guard: hostErr = %+v, want %s", hostErr, abi.ErrCodePreconditionFailed)
+	if hostErr == nil || hostErr.Code != abiv1.ErrCodePreconditionFailed {
+		t.Errorf("visible row, false guard: hostErr = %+v, want %s", hostErr, abiv1.ErrCodePreconditionFailed)
 	}
 
 	var onHand int
