@@ -32,7 +32,8 @@ export function KanbanQuickCreateRow({ groupId, fields, onSubmit }: KanbanQuickC
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLFormElement>): void {
-    if (event.key === "Escape") close();
+    // An open dropdown inside the form handles its own Escape first.
+    if (event.key === "Escape" && !event.defaultPrevented) close();
   }
 
   if (!open) {

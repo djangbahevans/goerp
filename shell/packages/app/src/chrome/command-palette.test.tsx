@@ -9,10 +9,11 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./command-palette.js";
+import { openCommandPalette } from "./command-palette-control.js";
 import { commandRegistry } from "./command-registry.js";
 import type { Command } from "./command-types.js";
 
@@ -86,7 +87,7 @@ async function renderPalette(opts: { permissions?: string[]; auth?: AuthContextV
 }
 
 function openPalette() {
-  fireEvent.keyDown(document, { key: "k", metaKey: true });
+  act(() => openCommandPalette());
 }
 
 const unregisterFns: Array<() => void> = [];
@@ -112,7 +113,7 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens on Cmd/Ctrl+K from anywhere", async () => {
+  it("opens on an open request", async () => {
     await renderPalette();
     openPalette();
     expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();

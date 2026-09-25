@@ -1,4 +1,4 @@
-import { Button } from "@goerp/sdk/components";
+import { Button, EscapeLayer } from "@goerp/sdk/components";
 import { modelRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
@@ -18,27 +18,15 @@ export function ShareHeaderAction({ resource, recordId }: { resource: string; re
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   // Same disclosure dismissal ActionMenu's own panel uses — outside click
-  // or Escape closes it, Escape stops there rather than also closing an
-  // ancestor Escape-closable overlay, and closing returns focus to the
-  // trigger either way.
+  // or Escape closes it, and Escape returns focus to the trigger.
   useEffect(() => {
     if (!open) return;
     function handlePointerDown(event: MouseEvent): void {
       if (containerRef.current?.contains(event.target as Node)) return;
       setOpen(false);
     }
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      setOpen(false);
-      triggerRef.current?.focus();
-    }
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [open]);
 
   if (!model?.shareable || recordId === undefined) return null;
@@ -56,20 +44,27 @@ export function ShareHeaderAction({ resource, recordId }: { resource: string; re
         Share
       </Button>
       {open && (
-        <div
-          id={panelId}
-          role="dialog"
-          aria-labelledby={headingId}
-          className="absolute top-full right-0 z-(--z-dropdown) mt-1 w-90 max-w-[calc(100vw-2rem)] rounded-structural border border-border bg-surface p-3 text-sm shadow-md"
+        <EscapeLayer
+          onEscape={() => {
+            setOpen(false);
+            triggerRef.current?.focus();
+          }}
         >
-          <SharePanel
-            resource={resource}
-            recordId={recordId}
-            label={model.label}
-            permissions={model.share_permissions ?? []}
-            headingId={headingId}
-          />
-        </div>
+          <div
+            id={panelId}
+            role="dialog"
+            aria-labelledby={headingId}
+            className="absolute top-full right-0 z-(--z-dropdown) mt-1 w-90 max-w-[calc(100vw-2rem)] rounded-structural border border-border bg-surface p-3 text-sm shadow-md"
+          >
+            <SharePanel
+              resource={resource}
+              recordId={recordId}
+              label={model.label}
+              permissions={model.share_permissions ?? []}
+              headingId={headingId}
+            />
+          </div>
+        </EscapeLayer>
       )}
     </div>
   );

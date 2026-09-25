@@ -1,4 +1,4 @@
-import { EmptyState, formatRelativeTime, IconButton, Skeleton } from "@goerp/sdk/components";
+import { EmptyState, EscapeLayer, formatRelativeTime, IconButton, Skeleton } from "@goerp/sdk/components";
 import type { Notification } from "@goerp/sdk/notifications";
 import { useMarkRead, useNotifications } from "@goerp/sdk/notifications";
 import { useNavigate } from "@tanstack/react-router";
@@ -14,7 +14,7 @@ export interface NotificationSheetProps {
 // Hand-rolled, not @radix-ui/react-dialog: Dialog.Content's FocusScope
 // hardcodes loop:true regardless of `modal`, so Tab never escapes the
 // panel even with modal={false} (confirmed empirically) — this panel owns
-// its own portal, focus, and Escape handling instead.
+// its own portal and focus handling instead.
 // Matches --duration-fast — same timer-based exit-animation pattern as
 // Toast (toast.tsx), which also has no Radix Presence to lean on.
 const EXIT_DURATION_MS = 150;
@@ -122,15 +122,6 @@ export function NotificationSheet({ open, onClose }: NotificationSheetProps): Re
     if (!open) triggerRef.current?.focus();
   }, [open, rendered]);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
-
   function handleOpen(notification: Notification): void {
     markRead(notification.id);
     if (notification.actionUrl) void navigate({ to: notification.actionUrl });
@@ -152,45 +143,47 @@ export function NotificationSheet({ open, onClose }: NotificationSheetProps): Re
         className={`${OVERLAY_CLASSES} ${open ? OVERLAY_ENTER_CLASSES : OVERLAY_EXIT_CLASSES}`}
         onClick={onClose}
       />
-      <div
-        role="dialog"
-        aria-labelledby={headingId}
-        style={CONTENT_STYLE}
-        className={`${CONTENT_CLASSES} ${open ? CONTENT_ENTER_CLASSES : CONTENT_EXIT_CLASSES}`}
-      >
-        <div className="flex items-center justify-between border-border border-b p-4">
-          <h2
-            id={headingId}
-            ref={headingRef}
-            tabIndex={-1}
-            className="font-semibold text-lg text-text focus:outline-none"
-          >
-            Notifications
-          </h2>
-          <IconButton icon="x" label="Close" size="sm" onClick={onClose} />
-        </div>
+      <EscapeLayer onEscape={onClose}>
+        <div
+          role="dialog"
+          aria-labelledby={headingId}
+          style={CONTENT_STYLE}
+          className={`${CONTENT_CLASSES} ${open ? CONTENT_ENTER_CLASSES : CONTENT_EXIT_CLASSES}`}
+        >
+          <div className="flex items-center justify-between border-border border-b p-4">
+            <h2
+              id={headingId}
+              ref={headingRef}
+              tabIndex={-1}
+              className="font-semibold text-lg text-text focus:outline-none"
+            >
+              Notifications
+            </h2>
+            <IconButton icon="x" label="Close" size="sm" onClick={onClose} />
+          </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
-          {isLoading ? (
-            <div className="p-4">
-              <Skeleton lines={5} />
-            </div>
-          ) : notifications.length === 0 ? (
-            <EmptyState title="No notifications yet" />
-          ) : (
-            <>
-              {notifications.map((notification) => (
-                <NotificationItem key={notification.id} notification={notification} onOpen={handleOpen} />
-              ))}
-              {isFetchingNextPage && (
-                <div className="flex justify-center p-3 text-text-secondary text-sm" aria-live="polite">
-                  Loading more…
-                </div>
-              )}
-            </>
-          )}
+          <div className="min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
+            {isLoading ? (
+              <div className="p-4">
+                <Skeleton lines={5} />
+              </div>
+            ) : notifications.length === 0 ? (
+              <EmptyState title="No notifications yet" />
+            ) : (
+              <>
+                {notifications.map((notification) => (
+                  <NotificationItem key={notification.id} notification={notification} onOpen={handleOpen} />
+                ))}
+                {isFetchingNextPage && (
+                  <div className="flex justify-center p-3 text-text-secondary text-sm" aria-live="polite">
+                    Loading more…
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      </EscapeLayer>
     </>,
     document.body,
   );

@@ -4,6 +4,7 @@ import { isAuthPath } from "../auth/safe-redirect.js";
 import { SessionExpiredGate } from "../auth/session-expired-modal.js";
 import { ChromeLayout, CommandPalette } from "../chrome/index.js";
 import { isErrorPath, rendersErrorPage } from "../pages/errors/index.js";
+import { GlobalShortcuts, KeyboardShortcutsDialog } from "../shortcuts/index.js";
 
 // shell-architecture.md §6: /auth/* pages and error pages render bare,
 // everything else inside the chrome. Keyed on the resolved location and
@@ -23,6 +24,8 @@ export function RootLayout() {
       <ConfirmDialogHost />
       <SessionExpiredGate />
       <CommandPalette />
+      <KeyboardShortcutsDialog />
+      <GlobalShortcuts />
     </>
   );
 }

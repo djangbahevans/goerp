@@ -4,6 +4,7 @@ import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Badge, type BadgeColor } from "./badge.js";
+import { EscapeLayer } from "./escape-layer.js";
 import { fieldInputClassName } from "./field-input-styles.js";
 import {
   optionElementId,
@@ -234,10 +235,6 @@ function SelectMultiple({
         if (option) toggle(option);
         break;
       }
-      case "Escape":
-        event.preventDefault();
-        close();
-        break;
       default:
         break;
     }
@@ -281,42 +278,44 @@ function SelectMultiple({
       </button>
       {isOpen &&
         createPortal(
-          <span
-            ref={panelRef}
-            id={listboxId}
-            role="listbox"
-            aria-multiselectable="true"
-            style={
-              position
-                ? { position: "fixed", top: position.top, left: position.left }
-                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
-            }
-            className={MULTI_PANEL_CLASSES}
-          >
-            {options.map((option, index) => (
-              // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG listbox-button pattern — options are never independently focusable, only virtually "focused" via aria-activedescendant on the trigger button.
-              // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the trigger button's own onKeyDown.
-              <div
-                key={option.value}
-                id={optionElementId(listboxId, index)}
-                role="option"
-                aria-selected={selectedSet.has(option.value)}
-                aria-disabled={option.disabled}
-                onMouseEnter={option.disabled ? undefined : () => setHighlightedIndex(index)}
-                onClick={option.disabled ? undefined : () => toggle(option)}
-                className={`${ROW_CLASSES} ${option.disabled ? "cursor-not-allowed opacity-50" : ""} ${
-                  index === activeIndex ? "bg-surface-hover" : ""
-                }`}
-              >
-                {selectedSet.has(option.value) ? (
-                  <Check size={16} className="shrink-0 text-primary" aria-hidden />
-                ) : (
-                  <span aria-hidden className="inline-block w-4" />
-                )}
-                <OptionLabel option={option} />
-              </div>
-            ))}
-          </span>,
+          <EscapeLayer onEscape={close}>
+            <span
+              ref={panelRef}
+              id={listboxId}
+              role="listbox"
+              aria-multiselectable="true"
+              style={
+                position
+                  ? { position: "fixed", top: position.top, left: position.left }
+                  : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
+              }
+              className={MULTI_PANEL_CLASSES}
+            >
+              {options.map((option, index) => (
+                // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG listbox-button pattern — options are never independently focusable, only virtually "focused" via aria-activedescendant on the trigger button.
+                // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the trigger button's own onKeyDown.
+                <div
+                  key={option.value}
+                  id={optionElementId(listboxId, index)}
+                  role="option"
+                  aria-selected={selectedSet.has(option.value)}
+                  aria-disabled={option.disabled}
+                  onMouseEnter={option.disabled ? undefined : () => setHighlightedIndex(index)}
+                  onClick={option.disabled ? undefined : () => toggle(option)}
+                  className={`${ROW_CLASSES} ${option.disabled ? "cursor-not-allowed opacity-50" : ""} ${
+                    index === activeIndex ? "bg-surface-hover" : ""
+                  }`}
+                >
+                  {selectedSet.has(option.value) ? (
+                    <Check size={16} className="shrink-0 text-primary" aria-hidden />
+                  ) : (
+                    <span aria-hidden className="inline-block w-4" />
+                  )}
+                  <OptionLabel option={option} />
+                </div>
+              ))}
+            </span>
+          </EscapeLayer>,
           document.body,
         )}
     </div>

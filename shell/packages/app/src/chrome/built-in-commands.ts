@@ -1,17 +1,21 @@
 import { useAuth } from "@goerp/sdk/auth";
 import { useMemo } from "react";
+import { openKeyboardShortcuts } from "../shortcuts/keyboard-shortcuts-control.js";
 import type { Command } from "./command-types.js";
 
-// shell-architecture.md §18 source 1. Only "Sign Out" is wired up — the
-// other example built-ins (navigate to settings, toggle theme, open
-// keyboard shortcut help) each need infrastructure that doesn't exist in
-// this app yet (a settings route, a theme system, a shortcuts-help
-// surface); adding them as commands with nowhere to go would be
-// misleading rather than deferred.
+// shell-architecture.md §18 source 1.
 export function useBuiltInCommands(): Command[] {
   const { logout } = useAuth();
   return useMemo<Command[]>(
     () => [
+      {
+        id: "builtin.keyboard-shortcuts",
+        label: "Keyboard shortcuts",
+        group: "Commands",
+        keywords: ["hotkeys", "help"],
+        shortcut: "Mod+/",
+        action: openKeyboardShortcuts,
+      },
       {
         id: "builtin.sign-out",
         label: "Sign Out",

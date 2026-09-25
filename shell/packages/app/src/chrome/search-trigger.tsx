@@ -1,20 +1,10 @@
 import { Search } from "lucide-react";
 import type { ReactNode } from "react";
+import { formatShortcutText, IS_MAC } from "../shortcuts/shortcut.js";
 import { openCommandPalette } from "./command-palette-control.js";
 
-function isMac(): boolean {
-  if (typeof navigator === "undefined") return false;
-  // || not ?? — navigator.platform is a string, not nullable, so an empty
-  // string (privacy-hardened browsers) needs the same fallthrough a
-  // missing value would get.
-  const platform = navigator.platform || navigator.userAgent || "";
-  return /Mac|iPod|iPhone|iPad/.test(platform);
-}
-
-// Computed once per module load, not per render — the platform doesn't
-// change during a session.
-const shortcutHint = isMac() ? "⌘K" : "Ctrl K";
-const shortcutLabel = isMac() ? "Cmd+K" : "Ctrl+K";
+const shortcutHint = formatShortcutText("Mod+K");
+const shortcutLabel = IS_MAC ? "Cmd+K" : "Ctrl+K";
 
 // chrome-header.md: opens the same CommandPalette the global shortcut does.
 export function SearchTrigger(): ReactNode {

@@ -7,6 +7,7 @@ import type { ResourceMetadataRegistry } from "../schema/index.js";
 import { resourceListPath, resourceMetadataRegistry } from "../schema/index.js";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { EmptyState } from "./empty-state.js";
+import { EscapeLayer } from "./escape-layer.js";
 import {
   optionElementId,
   useFloatingPanelPosition,
@@ -288,10 +289,6 @@ export function RelationPicker({
         else void createFromQuery();
         break;
       }
-      case "Escape":
-        event.preventDefault();
-        dismiss();
-        break;
       default:
         break;
     }
@@ -352,52 +349,56 @@ export function RelationPicker({
       />
       {isOpen &&
         createPortal(
-          <span
-            ref={panelRef}
-            id={listboxId}
-            role="listbox"
-            style={
-              position
-                ? { position: "fixed", top: position.top, left: position.left, width: position.width }
-                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
-            }
-            className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
-          >
-            {status === "error" ? (
-              <EmptyState
-                title="Module not installed"
-                description={`The module providing "${resource}" isn't installed, so this field can't search it.`}
-              />
-            ) : status === "loading" ? (
-              <Skeleton lines={3} />
-            ) : entries.length === 0 ? (
-              <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
-                No results for &quot;{debouncedQuery}&quot;
-              </span>
-            ) : (
-              entries.map((entry, index) => (
-                // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG combobox-with-listbox — options are never independently focusable, only virtually "focused" via aria-activedescendant.
-                // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
-                <div
-                  key={entry.kind === "option" ? entry.row.id : "create"}
-                  id={optionElementId(listboxId, index)}
-                  role="option"
-                  aria-selected={index === activeIndex}
-                  aria-disabled={disabled}
-                  onMouseEnter={disabled ? undefined : () => setHighlightedIndex(index)}
-                  onClick={
-                    disabled ? undefined : () => (entry.kind === "option" ? selectRow(entry.row) : createFromQuery())
-                  }
-                  title={entry.kind === "option" ? String(entry.row[labelField] ?? entry.row.id) : undefined}
-                  className={`truncate rounded-control px-2 py-1 text-left text-sm text-text ${
-                    disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                  } ${index === activeIndex ? "bg-surface-hover" : ""}`}
-                >
-                  {entry.kind === "option" ? String(entry.row[labelField] ?? entry.row.id) : `Create "${query.trim()}"`}
-                </div>
-              ))
-            )}
-          </span>,
+          <EscapeLayer onEscape={dismiss}>
+            <span
+              ref={panelRef}
+              id={listboxId}
+              role="listbox"
+              style={
+                position
+                  ? { position: "fixed", top: position.top, left: position.left, width: position.width }
+                  : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
+              }
+              className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
+            >
+              {status === "error" ? (
+                <EmptyState
+                  title="Module not installed"
+                  description={`The module providing "${resource}" isn't installed, so this field can't search it.`}
+                />
+              ) : status === "loading" ? (
+                <Skeleton lines={3} />
+              ) : entries.length === 0 ? (
+                <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
+                  No results for &quot;{debouncedQuery}&quot;
+                </span>
+              ) : (
+                entries.map((entry, index) => (
+                  // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG combobox-with-listbox — options are never independently focusable, only virtually "focused" via aria-activedescendant.
+                  // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
+                  <div
+                    key={entry.kind === "option" ? entry.row.id : "create"}
+                    id={optionElementId(listboxId, index)}
+                    role="option"
+                    aria-selected={index === activeIndex}
+                    aria-disabled={disabled}
+                    onMouseEnter={disabled ? undefined : () => setHighlightedIndex(index)}
+                    onClick={
+                      disabled ? undefined : () => (entry.kind === "option" ? selectRow(entry.row) : createFromQuery())
+                    }
+                    title={entry.kind === "option" ? String(entry.row[labelField] ?? entry.row.id) : undefined}
+                    className={`truncate rounded-control px-2 py-1 text-left text-sm text-text ${
+                      disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                    } ${index === activeIndex ? "bg-surface-hover" : ""}`}
+                  >
+                    {entry.kind === "option"
+                      ? String(entry.row[labelField] ?? entry.row.id)
+                      : `Create "${query.trim()}"`}
+                  </div>
+                ))
+              )}
+            </span>
+          </EscapeLayer>,
           document.body,
         )}
     </div>

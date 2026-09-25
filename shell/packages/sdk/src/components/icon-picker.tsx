@@ -4,6 +4,7 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
+import { EscapeLayer } from "./escape-layer.js";
 import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { Icon } from "./icon.js";
 import { TextInput } from "./text-input.js";
@@ -151,10 +152,6 @@ export function IconPicker({ id, value, onChange, placeholder, disabled = false 
         if (name) selectName(name);
         break;
       }
-      case "Escape":
-        event.preventDefault();
-        close();
-        break;
       default:
         break;
     }
@@ -192,76 +189,78 @@ export function IconPicker({ id, value, onChange, placeholder, disabled = false 
       />
       {isOpen &&
         createPortal(
-          <span
-            ref={panelRef}
-            style={
-              position
-                ? { position: "fixed", top: position.top, left: position.left }
-                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
-            }
-            className="z-(--z-dropdown) w-80 rounded-structural border border-border bg-surface p-2 shadow-md"
-          >
-            {matches.length === 0 ? (
-              <span id={panelId} aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
-                No results for &quot;{query}&quot;
-              </span>
-            ) : (
-              // A composite ARIA widget (WAI-ARIA APG Grid pattern), not
-              // tabular data — div/role is the correct choice here, not
-              // <table>/<tr>/<td>, the same override CodeSelect's own
-              // role="option" rows already need for its listbox pattern.
-              // biome-ignore lint/a11y/useSemanticElements: see comment above.
-              <div ref={scrollElementRef} id={panelId} role="grid" aria-label="Icons" className="h-80 overflow-auto">
-                <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
-                  {rowVirtualizer.getVirtualItems().map((virtualRow) => (
-                    // biome-ignore lint/a11y/useSemanticElements: see the role="grid" comment above.
-                    // biome-ignore lint/a11y/useFocusableInteractive: a row groups gridcells visually; only the cells themselves are ever virtually focused, via the input's aria-activedescendant.
-                    <div
-                      key={virtualRow.key}
-                      role="row"
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start}px)`,
-                        gridTemplateColumns: `repeat(${GRID_COLUMNS}, 1fr)`,
-                      }}
-                      className="grid gap-1"
-                    >
-                      {(rows[virtualRow.index] ?? []).map((name, col) => {
-                        const flatIndex = virtualRow.index * GRID_COLUMNS + col;
-                        return (
-                          // Never independently focusable, only virtually
-                          // "focused" via the input's aria-activedescendant —
-                          // same ARIA APG combobox pattern CodeSelect's own
-                          // role="option" rows use.
-                          // biome-ignore lint/a11y/useFocusableInteractive: see comment above.
-                          // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
-                          // biome-ignore lint/a11y/useSemanticElements: see the role="grid" comment above.
-                          <div
-                            key={name}
-                            id={`${panelId}-cell-${flatIndex}`}
-                            role="gridcell"
-                            aria-label={name}
-                            aria-selected={name === value}
-                            title={name}
-                            onMouseEnter={() => setActiveIndex(flatIndex)}
-                            onClick={() => selectName(name)}
-                            className={`flex h-10 w-10 cursor-pointer items-center justify-center rounded-control ${
-                              flatIndex === clampedActiveIndex ? "bg-surface-hover" : ""
-                            } ${name === value ? "ring-2 ring-primary" : ""}`}
-                          >
-                            <Icon name={name} size={18} />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
+          <EscapeLayer onEscape={close}>
+            <span
+              ref={panelRef}
+              style={
+                position
+                  ? { position: "fixed", top: position.top, left: position.left }
+                  : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
+              }
+              className="z-(--z-dropdown) w-80 rounded-structural border border-border bg-surface p-2 shadow-md"
+            >
+              {matches.length === 0 ? (
+                <span id={panelId} aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
+                  No results for &quot;{query}&quot;
+                </span>
+              ) : (
+                // A composite ARIA widget (WAI-ARIA APG Grid pattern), not
+                // tabular data — div/role is the correct choice here, not
+                // <table>/<tr>/<td>, the same override CodeSelect's own
+                // role="option" rows already need for its listbox pattern.
+                // biome-ignore lint/a11y/useSemanticElements: see comment above.
+                <div ref={scrollElementRef} id={panelId} role="grid" aria-label="Icons" className="h-80 overflow-auto">
+                  <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
+                    {rowVirtualizer.getVirtualItems().map((virtualRow) => (
+                      // biome-ignore lint/a11y/useSemanticElements: see the role="grid" comment above.
+                      // biome-ignore lint/a11y/useFocusableInteractive: a row groups gridcells visually; only the cells themselves are ever virtually focused, via the input's aria-activedescendant.
+                      <div
+                        key={virtualRow.key}
+                        role="row"
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualRow.start}px)`,
+                          gridTemplateColumns: `repeat(${GRID_COLUMNS}, 1fr)`,
+                        }}
+                        className="grid gap-1"
+                      >
+                        {(rows[virtualRow.index] ?? []).map((name, col) => {
+                          const flatIndex = virtualRow.index * GRID_COLUMNS + col;
+                          return (
+                            // Never independently focusable, only virtually
+                            // "focused" via the input's aria-activedescendant —
+                            // same ARIA APG combobox pattern CodeSelect's own
+                            // role="option" rows use.
+                            // biome-ignore lint/a11y/useFocusableInteractive: see comment above.
+                            // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
+                            // biome-ignore lint/a11y/useSemanticElements: see the role="grid" comment above.
+                            <div
+                              key={name}
+                              id={`${panelId}-cell-${flatIndex}`}
+                              role="gridcell"
+                              aria-label={name}
+                              aria-selected={name === value}
+                              title={name}
+                              onMouseEnter={() => setActiveIndex(flatIndex)}
+                              onClick={() => selectName(name)}
+                              className={`flex h-10 w-10 cursor-pointer items-center justify-center rounded-control ${
+                                flatIndex === clampedActiveIndex ? "bg-surface-hover" : ""
+                              } ${name === value ? "ring-2 ring-primary" : ""}`}
+                            >
+                              <Icon name={name} size={18} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </span>,
+              )}
+            </span>
+          </EscapeLayer>,
           document.body,
         )}
     </div>

@@ -1,9 +1,9 @@
-import { AlertDialog, Icon, IconButton, Skeleton } from "@goerp/sdk/components";
+import { AlertDialog, EscapeLayer, Icon, IconButton, Skeleton } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import type { SavedFilter } from "@goerp/sdk/react";
 import { useSavedFilters } from "@goerp/sdk/react";
 import { defaultParseSearch } from "@tanstack/react-router";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FilterValue, ListStateHandle } from "./use-list-state.js";
@@ -116,13 +116,6 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
     triggerRef.current?.focus();
   }
 
-  function handlePanelKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      closeAndRefocus();
-    }
-  }
-
   // Full replace, not a merge: any currently-set filter absent from the
   // target is explicitly cleared.
   function handleApply(filter: SavedFilter): void {
@@ -172,48 +165,49 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
       </button>
       {open &&
         createPortal(
-          <div
-            ref={panelRef}
-            role="dialog"
-            aria-labelledby={headingId}
-            onKeyDown={handlePanelKeyDown}
-            style={
-              position
-                ? { position: "fixed", top: position.top, left: position.left }
-                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
-            }
-            className="z-(--z-dropdown) min-w-40 max-w-70 rounded-structural border border-border bg-surface py-1 shadow-md"
-          >
-            <h2
-              id={headingId}
-              ref={headingRef}
-              tabIndex={-1}
-              className="px-3 pt-2 pb-1 font-medium text-sm text-text focus:outline-none"
+          <EscapeLayer onEscape={closeAndRefocus}>
+            <div
+              ref={panelRef}
+              role="dialog"
+              aria-labelledby={headingId}
+              style={
+                position
+                  ? { position: "fixed", top: position.top, left: position.left }
+                  : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
+              }
+              className="z-(--z-dropdown) min-w-40 max-w-70 rounded-structural border border-border bg-surface py-1 shadow-md"
             >
-              Saved filters
-            </h2>
-            {isLoading ? (
-              <div className="px-3 py-2">
-                <Skeleton lines={3} />
-              </div>
-            ) : filters.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-text-secondary">No saved filters yet.</p>
-            ) : (
-              filters.map((filter) => (
-                <SavedFilterRow
-                  key={filter.id}
-                  filter={filter}
-                  onApply={handleApply}
-                  onSetDefault={handleSetDefault}
-                  onRemove={handleRemove}
-                />
-              ))
-            )}
-            <button type="button" className={ROW_BUTTON_CLASSES} onClick={() => setSaveDialogOpen(true)}>
-              <Icon name="plus" size={14} className="flex-none" aria-hidden="true" />
-              Save current filter
-            </button>
-          </div>,
+              <h2
+                id={headingId}
+                ref={headingRef}
+                tabIndex={-1}
+                className="px-3 pt-2 pb-1 font-medium text-sm text-text focus:outline-none"
+              >
+                Saved filters
+              </h2>
+              {isLoading ? (
+                <div className="px-3 py-2">
+                  <Skeleton lines={3} />
+                </div>
+              ) : filters.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-text-secondary">No saved filters yet.</p>
+              ) : (
+                filters.map((filter) => (
+                  <SavedFilterRow
+                    key={filter.id}
+                    filter={filter}
+                    onApply={handleApply}
+                    onSetDefault={handleSetDefault}
+                    onRemove={handleRemove}
+                  />
+                ))
+              )}
+              <button type="button" className={ROW_BUTTON_CLASSES} onClick={() => setSaveDialogOpen(true)}>
+                <Icon name="plus" size={14} className="flex-none" aria-hidden="true" />
+                Save current filter
+              </button>
+            </div>
+          </EscapeLayer>,
           document.body,
         )}
       <AlertDialog

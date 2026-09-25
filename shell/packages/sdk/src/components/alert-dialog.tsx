@@ -5,7 +5,7 @@ import * as v from "valibot";
 import { optionalNullable } from "../schema/optional-nullable.js";
 import { Button } from "./button.js";
 import { Icon } from "./icon.js";
-import { MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
+import { MODAL_CONTENT_CLASSES, MODAL_OVERLAY_CLASSES } from "./modal-overlay.js";
 
 // manifest-spec.md's SelectOption, as used by ConfirmInput — a schema, not
 // just a type, so ActionConfirmInputSchema can extend it directly.
@@ -56,13 +56,6 @@ const TONE_ICONS = {
 
 const INPUT_CLASSES =
   "mt-1 w-full rounded-control border border-border px-3 py-2 text-sm text-text focus-visible:outline-none focus-visible:shadow-focus";
-
-// Content is the full-viewport flex-centering/focus-trap boundary; the
-// visible panel is a plain inner div, so the boundary can size to the whole
-// viewport (required for centering) independently of the panel's own
-// max-width/max-height.
-const CONTENT_CLASSES =
-  "fixed inset-0 z-(--z-modal) flex items-center justify-center p-4 focus:outline-none data-[state=open]:animate-[alert-dialog-content-show_var(--duration-slow)_ease-out] data-[state=closed]:animate-[alert-dialog-content-hide_var(--duration-slow)_ease-in] motion-reduce:data-[state=open]:animate-[fade-in_var(--duration-slow)_ease-out] motion-reduce:data-[state=closed]:animate-[fade-out_var(--duration-slow)_ease-in]";
 
 // manifest-spec.md §9.1 "ConfirmDialog object": "Rendered via the SDK's
 // AlertDialog component — named to avoid colliding with this manifest
@@ -125,7 +118,7 @@ export function AlertDialog({
         <AlertDialogPrimitive.Overlay className={MODAL_OVERLAY_CLASSES} />
         <AlertDialogPrimitive.Content
           aria-modal="true"
-          className={CONTENT_CLASSES}
+          className={MODAL_CONTENT_CLASSES}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             triggerRef.current?.focus();

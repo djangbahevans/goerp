@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useOptionalPermission } from "../auth/use-permission.js";
 import { AlertDialog, type AlertDialogInput } from "./alert-dialog.js";
 import { Button } from "./button.js";
+import { EscapeLayer } from "./escape-layer.js";
 import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { Icon, type IconNameLike } from "./icon.js";
 
@@ -240,15 +241,6 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
         event.preventDefault();
         move(-1);
         break;
-      case "Escape":
-        event.preventDefault();
-        // Stops here rather than also closing an ancestor dialog/popover
-        // that has its own Escape-to-close listener — only the innermost
-        // open layer should respond to one Escape press.
-        event.stopPropagation();
-        setOpen(false);
-        triggerRef.current?.focus();
-        break;
       case "Tab":
         // No preventDefault, and no synchronous setOpen here: the roving
         // tabindex leaves only one item in the native Tab order, so a
@@ -295,47 +287,54 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
       )}
       {open &&
         createPortal(
-          <span
-            ref={panelRef}
-            role="menu"
-            onKeyDown={handleMenuKeyDown}
-            style={
-              position
-                ? { position: "fixed", top: position.top, left: position.left }
-                : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
-            }
-            className="z-(--z-dropdown) max-h-80 min-w-40 max-w-70 overflow-y-auto rounded-structural border border-border bg-surface py-1 shadow-md"
+          <EscapeLayer
+            onEscape={() => {
+              setOpen(false);
+              triggerRef.current?.focus();
+            }}
           >
-            {items.map((item, index) => {
-              // items is a static prop array with no unique identifier
-              // field on ActionMenuItem (`label` is optional and callers
-              // may repeat it, e.g. the same label gated by different
-              // permissions) — index is the only stable key available.
-              if (item.type === "separator") {
-                // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-                return <hr key={index} className="mx-2 my-1 border-t border-border" />;
+            <span
+              ref={panelRef}
+              role="menu"
+              onKeyDown={handleMenuKeyDown}
+              style={
+                position
+                  ? { position: "fixed", top: position.top, left: position.left }
+                  : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
               }
-              return (
-                <ActionMenuItemButton
+              className="z-(--z-dropdown) max-h-80 min-w-40 max-w-70 overflow-y-auto rounded-structural border border-border bg-surface py-1 shadow-md"
+            >
+              {items.map((item, index) => {
+                // items is a static prop array with no unique identifier
+                // field on ActionMenuItem (`label` is optional and callers
+                // may repeat it, e.g. the same label gated by different
+                // permissions) — index is the only stable key available.
+                if (item.type === "separator") {
                   // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-                  key={index}
-                  item={item}
-                  tabIndex={index === activeIndex ? 0 : -1}
-                  itemRef={getItemRefCallback(index)}
-                  onSelect={() => {
-                    setOpen(false);
-                    triggerRef.current?.focus();
-                  }}
-                  onConfirmNeeded={() => {
-                    setConfirmItem(item);
-                    setConfirmOpen(true);
-                    setOpen(false);
-                    triggerRef.current?.focus();
-                  }}
-                />
-              );
-            })}
-          </span>,
+                  return <hr key={index} className="mx-2 my-1 border-t border-border" />;
+                }
+                return (
+                  <ActionMenuItemButton
+                    // biome-ignore lint/suspicious/noArrayIndexKey: see above.
+                    key={index}
+                    item={item}
+                    tabIndex={index === activeIndex ? 0 : -1}
+                    itemRef={getItemRefCallback(index)}
+                    onSelect={() => {
+                      setOpen(false);
+                      triggerRef.current?.focus();
+                    }}
+                    onConfirmNeeded={() => {
+                      setConfirmItem(item);
+                      setConfirmOpen(true);
+                      setOpen(false);
+                      triggerRef.current?.focus();
+                    }}
+                  />
+                );
+              })}
+            </span>
+          </EscapeLayer>,
           document.body,
         )}
       {confirmItem?.confirm && (
