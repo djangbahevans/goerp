@@ -15,8 +15,20 @@ const user: CurrentUser = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const tenant: CurrentTenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const tenant: CurrentTenant = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 
 function session(overrides: Partial<CurrentUser> = {}, permissions: string[] = ["sales:order:confirm"]) {
   const auth = {

@@ -15,8 +15,20 @@ const ME_BODY = {
     roles: [],
     amr: ["pwd"],
     mfa_verified_at: null,
+    theme: "system",
+    locale: null,
+    timezone: null,
+    date_format: null,
   },
-  tenant: { id: "t1", slug: "acme", name: "Acme", plan: "pro" },
+  tenant: {
+    id: "t1",
+    slug: "acme",
+    name: "Acme",
+    plan: "pro",
+    default_locale: "en",
+    default_timezone: "UTC",
+    available_locales: ["en"],
+  },
 };
 
 function json(status: number, body: unknown): Response {

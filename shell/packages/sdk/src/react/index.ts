@@ -52,7 +52,7 @@ export {
 } from "./use-saved-filters.js";
 export type { GrantShareInput, RecordShare, SharePermission, UseSharesResult } from "./use-shares.js";
 export { createSharesQueryOptions, useShares } from "./use-shares.js";
-export type { Theme, UseThemeResult } from "./use-theme.js";
-export { themeStore, useTheme } from "./use-theme.js";
+export type { Theme, ThemePreference, UseThemeResult } from "./use-theme.js";
+export { ThemeStore, themeStore, useTheme } from "./use-theme.js";
 export type { UseToastResult } from "./use-toast.js";
 export { useToast } from "./use-toast.js";

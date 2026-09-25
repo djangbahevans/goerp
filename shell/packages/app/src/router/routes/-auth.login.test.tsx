@@ -19,8 +19,20 @@ const FAKE_USER = {
   amr: ["pwd"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
+const FAKE_TENANT = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme Corp",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 
 type LoginImpl = (credentials: LoginCredentials, setState: (state: AuthState) => void) => Promise<void>;
 
@@ -46,6 +58,7 @@ function FakeAuthProvider({
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
+    updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
   };

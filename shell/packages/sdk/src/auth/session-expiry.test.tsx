@@ -7,7 +7,7 @@ import { sessionIdentity } from "./auth-machine.js";
 import { AuthContext } from "./auth-provider.js";
 import { PermissionContext, PermissionProvider } from "./permission-provider.js";
 import type { PermissionData } from "./permission-types.js";
-import type { AuthContextValue, AuthState } from "./types.js";
+import type { AuthContextValue, AuthState, CurrentUser } from "./types.js";
 
 const { fetchPermissionsMock, getSchemaMock } = vi.hoisted(() => ({
   fetchPermissionsMock: vi.fn<() => Promise<PermissionData>>(),
@@ -23,7 +23,7 @@ vi.mock("../realtime/ws-manager.js", () => ({
   wsManager: { subscribe: () => () => {} },
 }));
 
-const user = {
+const user: CurrentUser = {
   id: "u1",
   email: "ada@example.com",
   contactId: null,
@@ -33,8 +33,20 @@ const user = {
   amr: ["pwd"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const tenant = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 const SCHEMA = {
   modules: {
     sales: {
@@ -66,6 +78,7 @@ function authFor(state: AuthState): AuthContextValue {
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
+    updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
   };

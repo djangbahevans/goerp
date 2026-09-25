@@ -23,7 +23,7 @@ export function SegmentedField({ options, value, onChange, disabled = false }: S
   // the rest of the wiring too.
   const labelledValue = options.some((option) => option.value === value) ? value : options[0]?.value;
   return (
-    <div className="inline-flex divide-x divide-border overflow-hidden rounded-control border border-border">
+    <div className="inline-flex self-start divide-x divide-border overflow-hidden rounded-control border border-border">
       {options.map((option) => (
         <label
           key={option.value}

@@ -1,5 +1,6 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { themeStore } from "@goerp/sdk/react";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -23,8 +24,20 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     amr: [],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    theme: "system" as const,
+    locale: null,
+    timezone: null,
+    dateFormat: null,
   };
-  const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+  const tenant = {
+    id: "t1",
+    slug: "acme",
+    name: "Acme",
+    plan: "pro",
+    defaultLocale: "en",
+    defaultTimezone: "UTC",
+    availableLocales: ["en"],
+  };
   return {
     state: { status: "authenticated", user, tenant },
     isAuthenticated: true,
@@ -34,6 +47,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     logout: vi.fn(async () => {}),
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),
+    updatePreferences: vi.fn(async () => {}),
     changePassword: vi.fn(),
     reloadSession: vi.fn(),
     ...overrides,
@@ -123,6 +137,28 @@ describe("UserMenu", () => {
     expect(screen.getByRole("menuitemcheckbox", { name: "Dark mode" }).getAttribute("aria-checked")).toBe("true");
   });
 
+  it("saves the toggled theme to the profile", async () => {
+    themeStore.setPreference("light");
+    const updatePreferences = vi.fn(async () => {});
+    await renderUserMenu(fakeAuth({ updatePreferences }));
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Dark mode" }));
+
+    expect(updatePreferences).toHaveBeenCalledWith({ theme: "dark" });
+  });
+
+  it("reverts the theme when saving it fails", async () => {
+    themeStore.setPreference("light");
+    const updatePreferences = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    await renderUserMenu(fakeAuth({ updatePreferences }));
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Dark mode" }));
+
+    await waitFor(() => expect(themeStore.getPreference()).toBe("light"));
+  });
+
   it("Sign out calls logout()", async () => {
     const logout = vi.fn(async () => {});
     await renderUserMenu(fakeAuth({ logout }));
@@ -148,6 +184,10 @@ describe("UserMenu", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     await renderUserMenu(fakeAuth({ user }));
     expect(screen.getByRole("button", { name: "@example.com's account menu" })).toBeTruthy();
@@ -164,6 +204,10 @@ describe("UserMenu", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     await renderUserMenu(fakeAuth({ user }));
     expect(screen.getByRole("button", { name: "Jane Doe's account menu" })).toBeTruthy();
@@ -180,6 +224,10 @@ describe("UserMenu", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      theme: "system" as const,
+      locale: null,
+      timezone: null,
+      dateFormat: null,
     };
     await renderUserMenu(fakeAuth({ user }));
     expect(screen.getByRole("button", { name: "Ada Lovelace's account menu" })).toBeTruthy();

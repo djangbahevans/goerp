@@ -193,4 +193,32 @@ describe("TimezoneSelect", () => {
     expect(onChange).toHaveBeenCalledWith("typed");
     spy.mockRestore();
   });
+
+  describe("emptyLabel", () => {
+    it("shows the label in the trigger for the empty value, with no clear button", () => {
+      render(<TimezoneSelect value="" onChange={vi.fn()} emptyLabel="Organisation default (UTC)" />);
+      expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("Organisation default (UTC)");
+      expect(screen.queryByRole("button")).toBeNull();
+    });
+
+    it("pins the label first in the list and selecting it calls onChange with an empty string", async () => {
+      const onChange = vi.fn();
+      render(<TimezoneSelect value="Africa/Accra" onChange={onChange} emptyLabel="Organisation default (UTC)" />);
+      fireEvent.focus(screen.getByRole("combobox"));
+      const options = await screen.findAllByRole("option");
+      expect(options[0]?.textContent).toBe("Organisation default (UTC)");
+      expect(options.length).toBe(Intl.supportedValuesOf("timeZone").length + 1);
+
+      fireEvent.click(nth(options, 0));
+
+      expect(onChange).toHaveBeenCalledWith("");
+    });
+
+    it("keeps a real zone clearable", () => {
+      const onChange = vi.fn();
+      render(<TimezoneSelect value="Africa/Accra" onChange={onChange} emptyLabel="Organisation default (UTC)" />);
+      fireEvent.click(screen.getByRole("button", { name: "Clear Africa/Accra" }));
+      expect(onChange).toHaveBeenCalledWith("");
+    });
+  });
 });

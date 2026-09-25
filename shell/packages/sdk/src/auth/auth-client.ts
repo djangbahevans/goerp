@@ -1,9 +1,11 @@
 import { AppError } from "../error/app-error.js";
+import type { ThemePreference } from "../react/use-theme.js";
 import { noteTenantSuspension } from "./tenant-suspension.js";
 import type {
   ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
+  DateFormat,
   EmailVerification,
   EmailVerificationOutcome,
   InviteAcceptance,
@@ -20,6 +22,7 @@ import type {
   TenantContext,
   TOTPEnrollment,
   TOTPEnrollmentConfirmation,
+  UpdatePreferencesInput,
   UpdateProfileInput,
   VerificationEmailRequest,
 } from "./types.js";
@@ -35,12 +38,19 @@ interface MeResponseBody {
     amr: string[];
     mfa_verified_at: string | null;
     mfa_setup_required?: boolean;
+    theme: ThemePreference;
+    locale: string | null;
+    timezone: string | null;
+    date_format: DateFormat | null;
   };
   tenant: {
     id: string;
     slug: string;
     name: string;
     plan: string;
+    default_locale: string;
+    default_timezone: string;
+    available_locales: string[];
   };
 }
 
@@ -55,11 +65,23 @@ function mapUser(user: MeResponseBody["user"]): CurrentUser {
     amr: user.amr,
     mfaVerifiedAt: user.mfa_verified_at,
     mfaSetupRequired: user.mfa_setup_required === true,
+    theme: user.theme,
+    locale: user.locale,
+    timezone: user.timezone,
+    dateFormat: user.date_format,
   };
 }
 
 function mapTenant(tenant: MeResponseBody["tenant"]): CurrentTenant {
-  return { id: tenant.id, slug: tenant.slug, name: tenant.name, plan: tenant.plan };
+  return {
+    id: tenant.id,
+    slug: tenant.slug,
+    name: tenant.name,
+    plan: tenant.plan,
+    defaultLocale: tenant.default_locale,
+    defaultTimezone: tenant.default_timezone,
+    availableLocales: tenant.available_locales,
+  };
 }
 
 // A 429's Retry-After header (whole seconds) surfaces as
@@ -195,6 +217,23 @@ export async function updateProfile(input: UpdateProfileInput): Promise<void> {
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: input.name, avatar_id: input.avatarId }),
+  });
+  if (!response.ok) throw await readError(response);
+}
+
+// updatePreferences backs PATCH /auth/me for the Appearance page
+// (shell-ux.md §4.4): only the fields given are sent.
+export async function updatePreferences(input: UpdatePreferencesInput): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (input.theme !== undefined) body.theme = input.theme;
+  if (input.locale !== undefined) body.locale = input.locale;
+  if (input.timezone !== undefined) body.timezone = input.timezone;
+  if (input.dateFormat !== undefined) body.date_format = input.dateFormat;
+  const response = await fetch("/auth/me", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   if (!response.ok) throw await readError(response);
 }

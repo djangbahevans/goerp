@@ -20,8 +20,20 @@ const FAKE_USER = {
   amr: ["pwd", "totp"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
+const FAKE_TENANT = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme Corp",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 
 type SubmitImpl = (code: string, method: MFAMethod, setState: (state: AuthState) => void) => Promise<void>;
 
@@ -51,6 +63,7 @@ function FakeAuthProvider({
     logout: async () => {},
     submitMFA: (code, method = "totp") => submitImpl(code, method, setState),
     updateProfile: async () => {},
+    updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
   };

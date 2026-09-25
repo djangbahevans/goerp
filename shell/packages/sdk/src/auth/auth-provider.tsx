@@ -1,11 +1,14 @@
 import { createContext, type ReactNode, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { AppError } from "../error/app-error.js";
+import { localeStore } from "../i18n/use-locale.js";
+import { themeStore } from "../react/use-theme.js";
 import {
   changePassword as changePasswordRequest,
   fetchCurrentSession,
   login as loginRequest,
   logout as logoutRequest,
   submitMFACode,
+  updatePreferences as updatePreferencesRequest,
   updateProfile as updateProfileRequest,
 } from "./auth-client.js";
 import { authMachine, sessionIdentity } from "./auth-machine.js";
@@ -13,12 +16,27 @@ import { passwordUpdateNotice } from "./password-update-notice.js";
 import type {
   AuthContextValue,
   ChangePasswordInput,
+  CurrentTenant,
+  CurrentUser,
   LoginCredentials,
   MFAMethod,
+  UpdatePreferencesInput,
   UpdateProfileInput,
 } from "./types.js";
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
+
+// shell-ux.md §4.4: the profile's theme replaces the local one when a
+// session starts, and the locale follows user → tenant default
+// (l10n-guide.md §2), so both carry across devices.
+function applySessionPreferences(session: { user: CurrentUser; tenant: CurrentTenant }): void {
+  themeStore.setPreference(session.user.theme);
+  try {
+    localeStore.setLocale(session.user.locale ?? session.tenant.defaultLocale);
+  } catch {
+    // An unparseable locale keeps the current one.
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const state = useSyncExternalStore(authMachine.subscribe, authMachine.getState);
@@ -35,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!authMachine.transition({ type: "check_session" })) return;
     void fetchCurrentSession().then((session) => {
       if (session) {
+        applySessionPreferences(session);
         authMachine.transition({ type: "session_checked", user: session.user, tenant: session.tenant });
       } else {
         authMachine.transition({ type: "session_check_failed" });
@@ -78,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authMachine.transition({ type: "login_failed" });
       throw new Error("login succeeded but the session check that follows it failed");
     }
+    applySessionPreferences(session);
     authMachine.transition({ type: "login_succeeded", user: session.user, tenant: session.tenant });
   }, []);
 
@@ -120,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authMachine.transition({ type: "mfa_failed" });
         throw new Error("mfa verification succeeded but the session check that follows it failed");
       }
+      applySessionPreferences(session);
       authMachine.transition({ type: "mfa_verified", user: session.user, tenant: session.tenant });
     } finally {
       mfaInFlight.current = false;
@@ -139,6 +160,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("updateProfile succeeded but the session check that follows it failed");
     }
     authMachine.transition({ type: "profile_updated", user: session.user });
+  }, []);
+
+  const updatePreferences = useCallback(async (input: UpdatePreferencesInput): Promise<void> => {
+    const current = authMachine.getState();
+    if (current.status !== "authenticated" && current.status !== "refreshing") {
+      throw new Error("updatePreferences called outside the authenticated state");
+    }
+
+    await updatePreferencesRequest(input);
+
+    // The preferences are saved at this point, so a failed re-read keeps
+    // the current session rather than reporting the save as failed.
+    const session = await fetchCurrentSession();
+    if (session) authMachine.transition({ type: "profile_updated", user: session.user });
   }, []);
 
   const changePassword = useCallback(async (input: ChangePasswordInput): Promise<void> => {
@@ -182,10 +217,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       submitMFA,
       updateProfile,
+      updatePreferences,
       changePassword,
       reloadSession,
     };
-  }, [state, login, logout, submitMFA, updateProfile, changePassword, reloadSession]);
+  }, [state, login, logout, submitMFA, updateProfile, updatePreferences, changePassword, reloadSession]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

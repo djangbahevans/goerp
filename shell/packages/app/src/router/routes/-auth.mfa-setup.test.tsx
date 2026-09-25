@@ -19,8 +19,20 @@ const USER: CurrentUser = {
   amr: ["pwd"],
   mfaVerifiedAt: null,
   mfaSetupRequired: true,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const TENANT = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
+const TENANT = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme Corp",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 const CODES = Array.from({ length: 10 }, (_, i) => `AAAA${i}-BBBBB`);
 
 type ConfirmReply = { status: number; body: unknown };
@@ -47,6 +59,7 @@ function FakeAuthProvider({
     logout: async () => setState({ status: "unauthenticated" }),
     submitMFA: async () => {},
     updateProfile: async () => {},
+    updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {
       reloadSession();

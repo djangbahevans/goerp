@@ -15,8 +15,20 @@ export function storyAuth(roles: string[]): AuthContextValue {
     amr: ["pwd"],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    theme: "system" as const,
+    locale: null,
+    timezone: null,
+    dateFormat: null,
   };
-  const tenant = { id: "t1", slug: "acme", name: "Acme Corp", plan: "pro" };
+  const tenant = {
+    id: "t1",
+    slug: "acme",
+    name: "Acme Corp",
+    plan: "pro",
+    defaultLocale: "en",
+    defaultTimezone: "UTC",
+    availableLocales: ["en"],
+  };
   return {
     state: { status: "authenticated", user, tenant },
     isAuthenticated: true,
@@ -26,6 +38,7 @@ export function storyAuth(roles: string[]): AuthContextValue {
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
+    updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
   };

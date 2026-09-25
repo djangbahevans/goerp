@@ -23,8 +23,20 @@ const FAKE_USER = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  theme: "system" as const,
+  locale: null,
+  timezone: null,
+  dateFormat: null,
 };
-const FAKE_TENANT = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const FAKE_TENANT = {
+  id: "t1",
+  slug: "acme",
+  name: "Acme",
+  plan: "pro",
+  defaultLocale: "en",
+  defaultTimezone: "UTC",
+  availableLocales: ["en"],
+};
 const FAKE_AUTH: AuthContextValue = {
   state: { status: "authenticated", user: FAKE_USER, tenant: FAKE_TENANT },
   isAuthenticated: true,
@@ -34,6 +46,7 @@ const FAKE_AUTH: AuthContextValue = {
   logout: async () => {},
   submitMFA: async () => {},
   updateProfile: async () => {},
+  updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
 };

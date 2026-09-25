@@ -27,8 +27,20 @@ function fakeAuth(roles: string[]): AuthContextValue {
     amr: [],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    theme: "system" as const,
+    locale: null,
+    timezone: null,
+    dateFormat: null,
   };
-  const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+  const tenant = {
+    id: "t1",
+    slug: "acme",
+    name: "Acme",
+    plan: "pro",
+    defaultLocale: "en",
+    defaultTimezone: "UTC",
+    availableLocales: ["en"],
+  };
   return {
     state: { status: "authenticated", user, tenant },
     isAuthenticated: true,
@@ -38,6 +50,7 @@ function fakeAuth(roles: string[]): AuthContextValue {
     logout: vi.fn(async () => {}),
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),
+    updatePreferences: vi.fn(),
     changePassword: vi.fn(),
     reloadSession: vi.fn(),
   };
