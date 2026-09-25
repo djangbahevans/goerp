@@ -37,6 +37,7 @@ type typeDescContact struct {
 	Count     int64          `json:"count,string"`
 	Raw       jsontext.Value `json:"raw"`
 	Avatar    []byte         `json:"avatar"`
+	Digest    [4]byte        `json:"digest"`
 	Extra     any            `json:"extra,omitzero"`
 	internal  string
 	Lookup    map[string]string `json:"lookup,omitempty"`
@@ -46,6 +47,8 @@ type typeDescNode struct {
 	Value    int             `json:"value"`
 	Children []*typeDescNode `json:"children"`
 }
+
+type typeDescByte byte
 
 type typeDescList []typeDescList
 
@@ -86,6 +89,8 @@ func TestDescribeType(t *testing.T) {
 		{"slice is array", reflect.TypeFor[[]int](), TypeDesc{Kind: abi.TypeKindArray, Elem: &num}},
 		{"string-keyed map is record", reflect.TypeFor[map[string]string](), TypeDesc{Kind: abi.TypeKindRecord, Elem: &str}},
 		{"time.Time is string", reflect.TypeFor[time.Time](), str},
+		{"byte array is a base64 string", reflect.TypeFor[[32]byte](), str},
+		{"named byte slice is a number array", reflect.TypeFor[[]typeDescByte](), TypeDesc{Kind: abi.TypeKindArray, Elem: &num}},
 		{"interface is unknown", reflect.TypeFor[any](), TypeDesc{Kind: abi.TypeKindUnknown}},
 		{"struct", reflect.TypeFor[typeDescContact](), TypeDesc{
 			Kind: abi.TypeKindObject,
@@ -112,6 +117,7 @@ func TestDescribeType(t *testing.T) {
 				{Name: "count", Type: str},
 				{Name: "raw", Type: TypeDesc{Kind: abi.TypeKindUnknown}},
 				{Name: "avatar", Type: str},
+				{Name: "digest", Type: str},
 				{Name: "extra", Type: TypeDesc{Kind: abi.TypeKindUnknown}, Optional: true},
 				{Name: "lookup", Type: TypeDesc{Kind: abi.TypeKindRecord, Elem: &str}, Optional: true},
 			},

@@ -26,6 +26,7 @@ func Returns[T any]() CommonOption {
 
 var (
 	timeType            = reflect.TypeFor[time.Time]()
+	byteType            = reflect.TypeFor[byte]()
 	jsonMarshalerType   = reflect.TypeFor[json.Marshaler]()
 	jsonMarshalerToType = reflect.TypeFor[json.MarshalerTo]()
 	textMarshalerType   = reflect.TypeFor[encoding.TextMarshaler]()
@@ -72,8 +73,9 @@ func describe(t reflect.Type, inProgress map[reflect.Type]bool) TypeDesc {
 		reflect.Float32, reflect.Float64:
 		return TypeDesc{Kind: abi.TypeKindNumber}
 	case reflect.Slice, reflect.Array:
-		// A []byte is sent as a base64 string.
-		if t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8 {
+		// A []byte or [N]byte is sent as a base64 string; a named byte type's
+		// elements are sent as numbers.
+		if t.Elem() == byteType {
 			return TypeDesc{Kind: abi.TypeKindString}
 		}
 		return TypeDesc{Kind: abi.TypeKindArray, Elem: new(describe(t.Elem(), inProgress))}
