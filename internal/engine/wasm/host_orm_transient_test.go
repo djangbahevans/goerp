@@ -134,20 +134,16 @@ func TestHostORM_Transient_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T
 	}
 }
 
-// TestHostORM_Transient_Write_EmptyEtagFromCreate_EnforcesCAS is the
-// Table-backend goerp#871 regression (host_orm_write_test.go) reproduced
-// against the Transient backend: transientCreate leaves a fresh record's
-// etag at "" unless the caller supplies one, and transientWrite's *string
-// ExpectedEtag must thread that genuine "" through CompareAndSetHash as a
-// real precondition rather than treating it as "no precondition
-// supplied."
-func TestHostORM_Transient_Write_EmptyEtagFromCreate_EnforcesCAS(t *testing.T) {
+// TestHostORM_Transient_Write_EtagFromCreate_EnforcesCAS is
+// TestHostORM_Write_EtagFromCreate_EnforcesCAS (host_orm_write_test.go)
+// against the Transient backend.
+func TestHostORM_Transient_Write_EtagFromCreate_EnforcesCAS(t *testing.T) {
 	ctx := context.Background()
 	cacheClient := openTestCacheClient(t)
 	primaryDB := openTestPrimaryDB(t)
 	rt := newHostORMTransientTestRuntime(t, primaryDB, cacheClient)
 
-	slug := fmt.Sprintf("transientemptyetagtest%d", time.Now().UnixNano())
+	slug := fmt.Sprintf("transientcreateetagtest%d", time.Now().UnixNano())
 	md := transientItemModelDecl(time.Minute)
 	mc := newTransientTestModuleContext(slug, []model.ModelDeclaration{md})
 
@@ -161,23 +157,30 @@ func TestHostORM_Transient_Write_EmptyEtagFromCreate_EnforcesCAS(t *testing.T) {
 	}
 	id := created.Record["id"].(string)
 	t.Cleanup(func() { _ = cacheClient.Delete(context.Background(), transientKey(slug, "testmodule.wizard_item", id)) })
-	if got := created.Record["etag"].(string); got != "" {
-		t.Fatalf("Record[etag] after create = %q, want \"\"", got)
+	createdEtag, _ := created.Record["etag"].(string)
+	if createdEtag == "" {
+		t.Fatal("Record[etag] after create is empty, want an engine-generated etag")
+	}
+
+	env := callORMHost(t, ctx, writeInst, "call_write", abiv1.ORMWriteInput{
+		Model: "testmodule.wizard_item", ID: id, Record: map[string]any{"name": "Blank etag"}, ExpectedEtag: new(""),
+	}, nil)
+	if env.OK || env.Error.Code != abiv1.ErrCodeEtagMismatch {
+		t.Fatalf("write expecting \"\" = %+v, want %s", env.Error, abiv1.ErrCodeEtagMismatch)
 	}
 
 	var firstOut abiv1.ORMWriteOutput
-	env := callORMHost(t, ctx, writeInst, "call_write", abiv1.ORMWriteInput{
-		Model: "testmodule.wizard_item", ID: id, Record: map[string]any{"name": "First writer"}, ExpectedEtag: new(""),
-	}, &firstOut)
-	if !env.OK {
-		t.Fatalf("first write (against the real empty etag) failed: %+v", env.Error)
+	if env := callORMHost(t, ctx, writeInst, "call_write", abiv1.ORMWriteInput{
+		Model: "testmodule.wizard_item", ID: id, Record: map[string]any{"name": "First writer"}, ExpectedEtag: new(createdEtag),
+	}, &firstOut); !env.OK {
+		t.Fatalf("first write (against the created etag) failed: %+v", env.Error)
 	}
 
 	env = callORMHost(t, ctx, writeInst, "call_write", abiv1.ORMWriteInput{
-		Model: "testmodule.wizard_item", ID: id, Record: map[string]any{"name": "Second writer"}, ExpectedEtag: new(""),
+		Model: "testmodule.wizard_item", ID: id, Record: map[string]any{"name": "Second writer"}, ExpectedEtag: new(createdEtag),
 	}, nil)
 	if env.OK {
-		t.Fatal("expected a second write reusing the stale empty etag to fail")
+		t.Fatal("expected a second write reusing the stale created etag to fail")
 	}
 	if env.Error.Code != abiv1.ErrCodeEtagMismatch {
 		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeEtagMismatch)

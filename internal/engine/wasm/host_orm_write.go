@@ -997,9 +997,9 @@ func beginTenantScopedWrite(ctx context.Context, db *sql.DB, modCtx *ModuleConte
 // fillCreateServerFields sets, when the record omits them, the standard
 // fields whose value is the request's own on a create: tenant_id from the
 // request's tenant and created_by from its user (left unset for a
-// system-created record or a non-UUID principal). A supplied value is kept.
-// It returns the columns it filled, which an upsert must not overwrite on an
-// existing row.
+// system-created record or a non-UUID principal), and etag. A supplied
+// value is kept. It returns the columns it filled, which an upsert doesn't
+// copy onto an existing row, except that a row it changes gets the new etag.
 func fillCreateServerFields(md model.ModelDeclaration, modCtx *ModuleContext, record map[string]any) (filled []string) {
 	fillIfOmitted := func(field, value string) {
 		if value == "" || !declaresField(md, field) {
@@ -1014,6 +1014,8 @@ func fillCreateServerFields(md model.ModelDeclaration, modCtx *ModuleContext, re
 	if _, err := uuid.Parse(modCtx.UserID); err == nil {
 		fillIfOmitted("created_by", modCtx.UserID)
 	}
+	// The same fresh value an update rotates etag to (ORMWrite).
+	fillIfOmitted("etag", uuid.NewV7().String())
 	return filled
 }
 
@@ -1224,6 +1226,12 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 				}
 				setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", cols[i], cols[i]))
 				updatedFields = append(updatedFields, f)
+			}
+			// A row the upsert changes gets a new etag, like any update.
+			if len(setClauses) > 0 {
+				if i := slices.Index(fields, "etag"); i >= 0 {
+					setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", cols[i], cols[i]))
+				}
 			}
 			if len(setClauses) == 0 {
 				// Every assigned field was server-filled — there's no

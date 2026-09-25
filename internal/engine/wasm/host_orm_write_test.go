@@ -517,19 +517,15 @@ func TestHostORM_Write_CorrectEtag_SucceedsAndRotatesEtag(t *testing.T) {
 	}
 }
 
-// TestHostORM_Write_EmptyEtagFromCreate_EnforcesCAS reproduces goerp#871:
-// a freshly created record's etag is still its schema default (""),
-// since ORMCreate never rotates it. A *string ExpectedEtag lets that
-// genuinely-empty value thread through as a real compare-and-swap
-// precondition instead of being mistaken for "no precondition supplied"
-// — a second write reusing the same just-created (by-then-stale) empty
-// etag must fail with orm.etag_mismatch, not silently overwrite the
-// first write's result.
-func TestHostORM_Write_EmptyEtagFromCreate_EnforcesCAS(t *testing.T) {
+// TestHostORM_Write_EtagFromCreate_EnforcesCAS: a created record has a
+// real etag, a write expecting it succeeds once, and a second write reusing
+// it fails. An expected etag of "" is a precondition too, not "no
+// precondition" (goerp#871), so it fails against the record's real etag.
+func TestHostORM_Write_EtagFromCreate_EnforcesCAS(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()
 
-	slug := fmt.Sprintf("ormwriteemptyetagtest%d", time.Now().UnixNano())
+	slug := fmt.Sprintf("ormwritecreateetagtest%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	createFixtureItemsTable(t, primaryDB, slug)
 
@@ -545,23 +541,30 @@ func TestHostORM_Write_EmptyEtagFromCreate_EnforcesCAS(t *testing.T) {
 		t.Fatalf("create failed: %+v", env.Error)
 	}
 	id, _ := created.Record["id"].(string)
-	if got := created.Record["etag"].(string); got != "" {
-		t.Fatalf("Record[etag] after create = %q, want the column default \"\"", got)
+	createdEtag, _ := created.Record["etag"].(string)
+	if createdEtag == "" {
+		t.Fatal("Record[etag] after create is empty, want an engine-generated etag")
+	}
+
+	env := callORMHost(t, ctx, inst, "call_write", abiv1.ORMWriteInput{
+		Model: "testmodule.item", ID: id, Record: map[string]any{"name": "Blank etag"}, ExpectedEtag: new(""),
+	}, nil)
+	if env.OK || env.Error.Code != abiv1.ErrCodeEtagMismatch {
+		t.Fatalf("write expecting \"\" = %+v, want %s", env.Error, abiv1.ErrCodeEtagMismatch)
 	}
 
 	var firstOut abiv1.ORMWriteOutput
-	env := callORMHost(t, ctx, inst, "call_write", abiv1.ORMWriteInput{
-		Model: "testmodule.item", ID: id, Record: map[string]any{"name": "First writer"}, ExpectedEtag: new(""),
-	}, &firstOut)
-	if !env.OK {
-		t.Fatalf("first write (against the real empty etag) failed: %+v", env.Error)
+	if env := callORMHost(t, ctx, inst, "call_write", abiv1.ORMWriteInput{
+		Model: "testmodule.item", ID: id, Record: map[string]any{"name": "First writer"}, ExpectedEtag: new(createdEtag),
+	}, &firstOut); !env.OK {
+		t.Fatalf("first write (against the created etag) failed: %+v", env.Error)
 	}
 
 	env = callORMHost(t, ctx, inst, "call_write", abiv1.ORMWriteInput{
-		Model: "testmodule.item", ID: id, Record: map[string]any{"name": "Second writer"}, ExpectedEtag: new(""),
+		Model: "testmodule.item", ID: id, Record: map[string]any{"name": "Second writer"}, ExpectedEtag: new(createdEtag),
 	}, nil)
 	if env.OK {
-		t.Fatal("expected a second write reusing the stale empty etag to fail")
+		t.Fatal("expected a second write reusing the stale created etag to fail")
 	}
 	if env.Error.Code != abiv1.ErrCodeEtagMismatch {
 		t.Errorf("Error.Code = %q, want %q", env.Error.Code, abiv1.ErrCodeEtagMismatch)

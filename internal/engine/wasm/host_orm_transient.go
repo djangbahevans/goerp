@@ -122,8 +122,7 @@ func transientRead(ctx context.Context, cacheClient *cache.Client, modCtx *Modul
 // just-deleted key. checkEtag is only true when the caller actually
 // supplied an expectedEtag (a non-nil pointer) — nil means "no
 // optimistic-locking precondition," distinct from a pointer to "" (a
-// real precondition requiring the stored etag to still be its
-// never-written default).
+// real precondition, which fails against the etag every create sets).
 func transientWrite(ctx context.Context, cacheClient *cache.Client, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, id string, record map[string]any, newEtag string, expectedEtag *string) (abiv1.ORMWriteOutput, *abiv1.HostError) {
 	key := transientKey(modCtx.TenantSlug, qualifiedModel, id)
 
