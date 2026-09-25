@@ -30,6 +30,16 @@ type echoBody struct {
 	Meta map[string]string `json:"meta"`
 }
 
+// typedResponse is /typed-response's body (goerp#1158): its keys on the wire
+// must be its json tag names, with omitempty and json:"-" applied.
+type typedResponse struct {
+	ID        string    `json:"id"`
+	Note      string    `json:"note,omitempty"`
+	Secret    string    `json:"-"`
+	Email     *string   `json:"email"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 func init() {
 	engine.Action("widgets.gizmo", engine.List, func(req *engine.Request) *engine.Response {
 		return engine.OK(map[string]string{"served_by": "module", "action": req.Action})
@@ -215,6 +225,14 @@ func init() {
 			"query_method_ids": idsOf(viaMethod),
 			"from_func_ids":    idsOf(viaFrom),
 			"soft_deleted":     afterDelete.DeletedAt != nil,
+		})
+	}, engine.Auth(engine.AuthNone))
+
+	engine.GET("/typed-response", func(req *engine.Request) *engine.Response {
+		return engine.OK(typedResponse{
+			ID:        "c1",
+			Secret:    "hidden",
+			UpdatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 		})
 	}, engine.Auth(engine.AuthNone))
 

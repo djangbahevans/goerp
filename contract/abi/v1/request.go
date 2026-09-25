@@ -36,9 +36,10 @@ type Request struct {
 }
 
 // Response is the wire shape a handle_request invocation returns. Body is
-// whatever value the handler returned, encoded as msgpack.
+// the response body as JSON, encoded by the module; the engine validates it
+// and sends it as-is. An empty Body sends no body.
 type Response struct {
 	StatusCode int               `msgpack:"status"`
 	Headers    map[string]string `msgpack:"headers"`
-	Body       any               `msgpack:"body"`
+	Body       []byte            `msgpack:"body"`
 }
