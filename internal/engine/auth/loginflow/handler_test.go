@@ -6,8 +6,10 @@ import (
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -45,6 +48,9 @@ type fixture struct {
 	mfaTokens  *mfatoken.Codec
 	tenantID   string
 	conn       *sql.DB
+	cache      *cache.Client
+	email      string
+	remoteIP   string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -144,7 +150,22 @@ func newFixture(t *testing.T) *fixture {
 	if err := configStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
 	}
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second))
+	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
+	if err != nil {
+		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
+	}
+	t.Cleanup(func() { _ = cacheClient.Close() })
+
+	// A per-fixture client IP keeps one test's attempts out of another's
+	// per-IP window in the shared dev Redis.
+	remoteIP := randomTestIP()
+	t.Cleanup(func() {
+		for _, key := range []string{"ratelimit:login:ip:" + remoteIP, "ratelimit:login:tenant:" + tt.ID} {
+			_ = cacheClient.Delete(context.Background(), key)
+		}
+	})
+
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient)
 
 	return &fixture{
 		handler:    handler,
@@ -156,6 +177,9 @@ func newFixture(t *testing.T) *fixture {
 		mfaTokens:  mfaTokens,
 		tenantID:   tt.ID,
 		conn:       conn,
+		cache:      cacheClient,
+		email:      email,
+		remoteIP:   remoteIP,
 	}
 }
 
@@ -202,14 +226,27 @@ func lockMFATokenSigningKeyTable(t *testing.T, pool *sql.DB) {
 	})
 }
 
+// randomTestIP returns an address in 198.18.0.0/15, reserved for
+// benchmarking, so it never collides with a real client.
+func randomTestIP() string {
+	n := rand.Uint32()
+	return fmt.Sprintf("198.%d.%d.%d", 18+n>>16&1, n>>8&0xff, n&0xff)
+}
+
+// doLogin also clears the per-email window for the email it submits, so
+// repeated runs against the shared dev Redis don't accumulate attempts.
 func (f *fixture) doLogin(t *testing.T, body map[string]any, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
+	if email, ok := body["email"].(string); ok {
+		key := emailKey(strings.ToLower(email))
+		t.Cleanup(func() { _ = f.cache.Delete(context.Background(), key) })
+	}
 	b, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal request body: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(b))
-	req.RemoteAddr = "203.0.113.7:54321"
+	req.RemoteAddr = f.remoteIP + ":54321"
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
