@@ -1,6 +1,7 @@
-import { useAuth, useTenantSuspended } from "@goerp/sdk/auth";
+import { isSessionExpired, useAuth, useTenantSuspended } from "@goerp/sdk/auth";
 import { type AnyRouter, RouterProvider } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { isAuthPath } from "../auth/safe-redirect.js";
 
 export interface AuthRouterProviderProps {
   router: AnyRouter;
@@ -31,7 +32,13 @@ export function AuthRouterProvider({ router }: AuthRouterProviderProps): ReactNo
   // is still in flight — which the public router API can't tell apart from a
   // cold start. On a cold start this runs the initial route checks twice.
   const gated = useRef<string | null>(null);
-  const gateKey = `${auth.isAuthenticated}:${auth.user?.mfaSetupRequired === true}:${tenantSuspended}`;
+  // An expiry off the auth pages counts as still signed in here: the page
+  // stays put under the session-expired modal rather than reloading its data
+  // into 401s. On an auth page (e.g. /auth/mfa-setup) it re-runs the gate,
+  // the same as a sign-out.
+  const signedIn =
+    auth.isAuthenticated || (isSessionExpired(auth.state) && !isAuthPath(router.state.location.pathname));
+  const gateKey = `${signedIn}:${auth.user?.mfaSetupRequired === true}:${tenantSuspended}`;
   useEffect(() => {
     if (!sessionSettled || gated.current === gateKey) return;
     gated.current = gateKey;

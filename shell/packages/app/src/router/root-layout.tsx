@@ -1,6 +1,7 @@
 import { ConfirmDialogHost, Toast } from "@goerp/sdk/components";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { isAuthPath } from "../auth/safe-redirect.js";
+import { SessionExpiredGate } from "../auth/session-expired-modal.js";
 import { ChromeLayout, CommandPalette } from "../chrome/index.js";
 import { isErrorPath, rendersErrorPage } from "../pages/errors/index.js";
 
@@ -20,6 +21,7 @@ export function RootLayout() {
       {bare ? <Outlet /> : <ChromeLayout />}
       <Toast />
       <ConfirmDialogHost />
+      <SessionExpiredGate />
       <CommandPalette />
     </>
   );

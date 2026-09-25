@@ -1,4 +1,4 @@
-import { createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
+import { AuthContext, type AuthContextValue, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -18,6 +18,31 @@ vi.mock("../chrome/chrome-sidebar.js", () => ({ ChromeSidebar: () => <nav aria-l
 vi.mock("../chrome/command-palette.js", () => ({ CommandPalette: () => null }));
 
 afterEach(cleanup);
+
+const user = {
+  id: "u1",
+  email: "ada@example.com",
+  contactId: null,
+  name: "Ada",
+  avatarUrl: null,
+  roles: [],
+  amr: ["pwd"],
+  mfaVerifiedAt: null,
+  mfaSetupRequired: false,
+};
+const tenant = { id: "t1", slug: "acme", name: "Acme", plan: "pro" };
+const SIGNED_IN: AuthContextValue = {
+  state: { status: "authenticated", user, tenant },
+  isAuthenticated: true,
+  user,
+  tenant,
+  login: async () => {},
+  logout: async () => {},
+  submitMFA: async () => {},
+  updateProfile: async () => {},
+  changePassword: async () => {},
+  reloadSession: async () => {},
+};
 
 function deferred() {
   let resolve: () => void = () => {};
@@ -57,9 +82,11 @@ async function renderAt(path: string) {
   });
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <PermissionContext.Provider value={permissions}>
-        <RouterProvider router={router} />
-      </PermissionContext.Provider>
+      <AuthContext.Provider value={SIGNED_IN}>
+        <PermissionContext.Provider value={permissions}>
+          <RouterProvider router={router} />
+        </PermissionContext.Provider>
+      </AuthContext.Provider>
     </QueryClientProvider>,
   );
   pending = true;
@@ -135,9 +162,11 @@ async function renderFailingLoad(error: unknown) {
   });
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <PermissionContext.Provider value={permissions}>
-        <RouterProvider router={router} />
-      </PermissionContext.Provider>
+      <AuthContext.Provider value={SIGNED_IN}>
+        <PermissionContext.Provider value={permissions}>
+          <RouterProvider router={router} />
+        </PermissionContext.Provider>
+      </AuthContext.Provider>
     </QueryClientProvider>,
   );
 }

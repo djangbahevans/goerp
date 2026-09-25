@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { tenantChannel, useChannelRefresh, userChannel } from "../realtime/index.js";
+import { isSessionExpired } from "./auth-machine.js";
 import { fetchPermissions } from "./permission-client.js";
 import type { PermissionContextValue, PermissionData } from "./permission-types.js";
 import { useAuth } from "./use-auth.js";
@@ -48,11 +49,15 @@ export function createPermissionContextValue(data: PermissionData): PermissionCo
 // instead of standing up a full AuthProvider/auth machine.
 export function PermissionProviderForUser({
   isAuthenticated,
+  sessionExpired = false,
   tenantId,
   userId,
   children,
 }: {
   isAuthenticated: boolean;
+  // Keeps the loaded permissions, without refetching, while the session is
+  // expired, so the page under the session-expired modal keeps its access.
+  sessionExpired?: boolean | undefined;
   tenantId: string | null;
   userId: string | null;
   children: ReactNode;
@@ -97,7 +102,8 @@ export function PermissionProviderForUser({
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "plan.changed", refresh);
   useChannelRefresh(isAuthenticated, userId && userChannel(userId), "role.changed", refresh);
 
-  const data = isAuthenticated ? loadedData : EMPTY_DATA;
+  const hasSession = isAuthenticated || sessionExpired;
+  const data = hasSession ? loadedData : EMPTY_DATA;
   // Keeps permissionDataRef in lockstep with `data` for every transition
   // (login, logout, refetch, account switch via the key= remount above) —
   // a single effect here is simpler and harder to get wrong than mirroring
@@ -108,7 +114,7 @@ export function PermissionProviderForUser({
   const value = useMemo(() => createPermissionContextValue(data), [data]);
   return (
     <PermissionContext.Provider value={value}>
-      <PermissionsStatusContext.Provider value={isAuthenticated ? status : "loading"}>
+      <PermissionsStatusContext.Provider value={hasSession ? status : "loading"}>
         {children}
       </PermissionsStatusContext.Provider>
     </PermissionContext.Provider>
@@ -118,11 +124,12 @@ export function PermissionProviderForUser({
 // Keyed by user id so switching accounts on the same tab remounts with a fresh EMPTY_DATA instead of
 // exposing the previous user's permissions until the new fetch resolves.
 export function PermissionProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated, user, tenant } = useAuth();
+  const { isAuthenticated, state, user, tenant } = useAuth();
   return (
     <PermissionProviderForUser
       key={user?.id ?? "anonymous"}
       isAuthenticated={isAuthenticated}
+      sessionExpired={isSessionExpired(state)}
       tenantId={tenant?.id ?? null}
       userId={user?.id ?? null}
     >

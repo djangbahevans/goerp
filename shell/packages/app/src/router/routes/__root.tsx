@@ -1,4 +1,4 @@
-import { type AuthContextValue, tenantSuspension } from "@goerp/sdk/auth";
+import { type AuthContextValue, isSessionExpired, tenantSuspension } from "@goerp/sdk/auth";
 import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { isAuthPath } from "../../auth/safe-redirect.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
@@ -23,7 +23,11 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     if (tenantSuspension.get()) throw redirect({ to: TENANT_SUSPENDED_PATH });
     // shell-ux.md §2.7: a user the tenant requires to enroll in MFA stays on
     // the setup wizard until it's done.
-    if (context.auth.user?.mfaSetupRequired && !MFA_SETUP_EXEMPT.has(location.pathname)) {
+    if (
+      context.auth.isAuthenticated &&
+      context.auth.user?.mfaSetupRequired &&
+      !MFA_SETUP_EXEMPT.has(location.pathname)
+    ) {
       // From an auth page (e.g. /auth/login right after signing in), carry
       // its own destination forward rather than the auth page itself.
       const onward = isAuthPath(location.pathname)
@@ -37,6 +41,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     if (isAuthPath(location.pathname)) return;
     const { status } = context.auth.state;
     if (status === "idle" || status === "checking" || context.auth.isAuthenticated) return;
+    // shell-ux.md §6.4: an expired session keeps its page under the
+    // session-expired modal, which does the redirect to sign in.
+    if (isSessionExpired(context.auth.state)) return;
     throw redirect({ to: "/auth/login", search: { redirect: location.href } });
   },
   component: RootLayout,

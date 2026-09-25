@@ -117,6 +117,11 @@ export type AuthState =
   | { status: "checking" }
   | { status: "authenticated"; user: CurrentUser; tenant: CurrentTenant }
   | { status: "unauthenticated" }
+  // The session ended without the user signing out (a refresh failed), so
+  // the shell keeps the page under a sign-in-again modal (shell-ux.md §6.4).
+  // It keeps the user and tenant it expired for, so the providers keyed on
+  // them don't remount the page.
+  | { status: "unauthenticated"; sessionExpired: true; user: CurrentUser; tenant: CurrentTenant }
   | { status: "refreshing"; user: CurrentUser; tenant: CurrentTenant }
   | { status: "mfa_required"; challengeToken: string; methods: MFAMethod[] }
   | { status: "logging_out" };
