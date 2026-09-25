@@ -47,10 +47,10 @@ func (m *spyMailer) count() int {
 	return len(m.sent)
 }
 
-func (e *env) invite(t *testing.T, ft fixtureTenant, token string, body map[string]string) (int, invitationResponse, string) {
+func (e *env) invite(t *testing.T, ft fixtureTenant, token string, body map[string]string) (int, inviteResponse, string) {
 	t.Helper()
 	rec := do(t, ft, token, request{serve: e.handler.ServeInvite, method: http.MethodPost, path: "/users/invite", body: body})
-	var out invitationResponse
+	var out inviteResponse
 	var errBody struct {
 		Error struct {
 			Code string `json:"code"`
@@ -124,7 +124,7 @@ func TestServeInvite_NewEmail(t *testing.T) {
 	e.cleanupUserByEmail(t, email)
 
 	code, out, _ := e.invite(t, ft, token, map[string]string{"email": "  " + strings.ToUpper(email) + " ", "name": "New Person", "role": "user"})
-	if code != http.StatusOK || out.InvitationID == "" || out.ExpiresAt.Before(time.Now().Add(6*24*time.Hour)) {
+	if code != http.StatusOK || out.InvitationID == "" || out.ExpiresAt.Before(time.Now().Add(6*24*time.Hour)) || out.ExistingAccount {
 		t.Fatalf("invite = %d %+v", code, out)
 	}
 	invitee, err := e.users.GetByEmail(t.Context(), email)
@@ -164,9 +164,9 @@ func TestServeInvite_ExistingAccountFromAnotherTenant(t *testing.T) {
 	}
 	token := e.issue(t, ft, admin)
 
-	code, _, _ := e.invite(t, ft, token, map[string]string{"email": email, "role": "user"})
-	if code != http.StatusOK {
-		t.Fatalf("invite status = %d", code)
+	code, out, _ := e.invite(t, ft, token, map[string]string{"email": email, "role": "user"})
+	if code != http.StatusOK || !out.ExistingAccount {
+		t.Fatalf("invite = %d %+v, want existing_account true", code, out)
 	}
 	reused, err := e.users.GetByEmail(t.Context(), email)
 	if err != nil || reused.ID != existing || reused.Status != "active" {

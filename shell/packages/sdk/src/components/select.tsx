@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { Badge, type BadgeColor } from "./badge.js";
 import { EscapeLayer } from "./escape-layer.js";
 import { fieldInputClassName } from "./field-input-styles.js";
+import { useFieldControl } from "./field-wrapper.js";
 import {
   optionElementId,
   useFloatingPanelPosition,
@@ -323,5 +324,7 @@ function SelectMultiple({
 }
 
 export function Select({ multiple = false, ...props }: SelectProps): ReactNode {
-  return multiple ? <SelectMultiple {...props} /> : <SelectSingle {...props} />;
+  // Inside a FieldWrapper, the trigger takes the wrapper's id so its label names it, as TextInput does.
+  const id = useFieldControl()?.id ?? props.id;
+  return multiple ? <SelectMultiple {...props} id={id} /> : <SelectSingle {...props} id={id} />;
 }

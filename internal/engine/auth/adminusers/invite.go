@@ -26,6 +26,15 @@ type invitationResponse struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
+// inviteResponse adds existing_account: the invitee already has a password,
+// so accepting adds them to this tenant rather than setting up an account.
+// It is reported only after the invite is sent, so it can't be used to
+// probe for accounts without emailing the address.
+type inviteResponse struct {
+	invitationResponse
+	ExistingAccount bool `json:"existing_account"`
+}
+
 // ServeInvite is POST /users/invite.
 func (h *Handler) ServeInvite(w http.ResponseWriter, r *http.Request) {
 	c, ok := h.authorize(w, r)
@@ -81,7 +90,11 @@ func (h *Handler) ServeInvite(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err, "invite failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, invitationResponse{InvitationID: inv.ID, ExpiresAt: inv.ExpiresAt})
+	writeJSON(w, http.StatusOK, inviteResponse{
+		InvitationID:    inv.ID,
+		ExpiresAt:       inv.ExpiresAt,
+		ExistingAccount: existing != nil && existing.PasswordHash != nil,
+	})
 }
 
 // invitation returns the {id} invitation when it belongs to the caller's
