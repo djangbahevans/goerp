@@ -406,15 +406,61 @@ describe("/auth/login", () => {
     expect(router.state.location.search).toEqual({ redirect: "/settings/profile" });
   });
 
-  it("shows 'Create an account' only when registration is enabled", async () => {
-    stubTenantContext(SUBDOMAIN_TENANT);
+  it("shows 'Create an account' only on the shared host with registration enabled", async () => {
+    stubTenantContext({ tenant: null, registration_enabled: false });
     await renderLogin();
     expect(screen.queryByRole("link", { name: "Create an account" })).toBeNull();
     cleanup();
 
     stubTenantContext({ ...SUBDOMAIN_TENANT, registration_enabled: true });
     await renderLogin();
+    expect(screen.queryByRole("link", { name: "Create an account" })).toBeNull();
+    cleanup();
+
+    stubTenantContext({ tenant: null, registration_enabled: true });
+    await renderLogin();
     expect(screen.getByRole("link", { name: "Create an account" }).getAttribute("href")).toBe("/auth/register");
+  });
+
+  it("shows 'Workspace not found' instead of the form on an unknown host", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/auth/tenant-context") {
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: "tenant_not_found",
+                message: "no workspace",
+                details: { app_url: "http://localhost:5173" },
+              },
+            }),
+            { status: 404 },
+          );
+        }
+        return new Response(null, { status: 404 });
+      }),
+    );
+    const history = createMemoryHistory({ initialEntries: ["/auth/login"] });
+    const router = createRouter({ routeTree, context: { auth: undefined! }, history });
+    await router.load();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <FakeAuthProvider initial={{ status: "unauthenticated" }} loginImpl={vi.fn<LoginImpl>(async () => {})}>
+          <PermissionContext.Provider value={createPermissionContextValue(permissionDataRef.current)}>
+            <AuthRouterProvider router={router} />
+          </PermissionContext.Provider>
+        </FakeAuthProvider>
+      </QueryClientProvider>,
+    );
+
+    const heading = await screen.findByRole("heading", { name: "Workspace not found" });
+    expect(screen.getByText(window.location.hostname)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Go to sign in" }).getAttribute("href")).toBe(
+      "http://localhost:5173/auth/login",
+    );
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 
   it("redirects an already-authenticated visitor straight through", async () => {

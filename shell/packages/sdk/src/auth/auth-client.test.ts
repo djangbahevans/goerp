@@ -336,6 +336,7 @@ describe("fetchTenantContext", () => {
           tenant: { slug: "acme", name: "Acme Corp" },
           registration_enabled: true,
           terms_url: "https://example.com/terms",
+          app_url: "https://app.goerp.io",
         }),
       ),
     );
@@ -344,6 +345,8 @@ describe("fetchTenantContext", () => {
       tenant: { slug: "acme", name: "Acme Corp" },
       registrationEnabled: true,
       termsUrl: "https://example.com/terms",
+      appUrl: "https://app.goerp.io",
+      workspaceNotFound: false,
     });
   });
 
@@ -353,7 +356,32 @@ describe("fetchTenantContext", () => {
       vi.fn(async () => jsonResponse(200, { tenant: null, registration_enabled: false })),
     );
 
-    expect(await fetchTenantContext()).toEqual({ tenant: null, registrationEnabled: false, termsUrl: null });
+    expect(await fetchTenantContext()).toEqual({
+      tenant: null,
+      registrationEnabled: false,
+      termsUrl: null,
+      appUrl: null,
+      workspaceNotFound: false,
+    });
+  });
+
+  it("maps a 404 tenant_not_found to a workspace-not-found context carrying the app URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(404, {
+          error: { code: "tenant_not_found", message: "no workspace", details: { app_url: "https://app.goerp.io" } },
+        }),
+      ),
+    );
+
+    expect(await fetchTenantContext()).toEqual({
+      tenant: null,
+      registrationEnabled: false,
+      termsUrl: null,
+      appUrl: "https://app.goerp.io",
+      workspaceNotFound: true,
+    });
   });
 
   it("resolves to null on a non-200 or network failure", async () => {

@@ -125,13 +125,17 @@ export interface InviteAcceptance extends InviteLink {
 export type InviteAcceptOutcome = "signed_in" | "login_required";
 
 // The pre-login tenant lookup (GET /auth/tenant-context). tenant is null on
-// a shared-domain deployment, where the Host alone doesn't identify one.
+// the shared-domain host, where the Host alone doesn't identify one, and
+// when workspaceNotFound: the Host names no workspace at all.
 export interface TenantContext {
   tenant: { slug: string; name: string } | null;
   registrationEnabled: boolean;
   // The terms of service registration requires accepting; null when the
   // platform configures none.
   termsUrl: string | null;
+  // The app's URL on the shared-domain host.
+  appUrl: string | null;
+  workspaceNotFound: boolean;
 }
 
 export type MFAMethod = "totp" | "webauthn" | "recovery_code";

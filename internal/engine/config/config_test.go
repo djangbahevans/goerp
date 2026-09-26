@@ -233,6 +233,12 @@ func TestLoadRegistrationSettings(t *testing.T) {
 	}
 	t.Setenv("GOERP_TERMS_URL", "https://example.com/terms")
 
+	t.Setenv("GOERP_APP_BASE_URL", "app.goerp.io")
+	if _, err := Load(); err == nil {
+		t.Error("Load() accepted a GOERP_APP_BASE_URL that isn't an http(s) URL")
+	}
+	t.Setenv("GOERP_APP_BASE_URL", "https://app.goerp.io")
+
 	t.Setenv("GOERP_RESERVED_SLUGS", "wiki,crm")
 	t.Setenv("GOERP_REQUIRE_EMAIL_VERIFICATION", "sometimes")
 	if _, err := Load(); err == nil {

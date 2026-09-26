@@ -7,6 +7,7 @@ import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "r
 import { AuthLayout } from "./auth-layout.js";
 import { handoffURL } from "./handoff-url.js";
 import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
+import { WorkspaceNotFound } from "./workspace-not-found.js";
 
 // Why the user was sent here — set by the MFA challenge page when a
 // rejected attempt has spent its single-use mfa_token, or by the
@@ -172,6 +173,8 @@ export function LoginPage({
     }
   };
 
+  if (tenantContext.data?.workspaceNotFound) return <WorkspaceNotFound appUrl={tenantContext.data.appUrl} />;
+
   return (
     <AuthLayout>
       <div className="mb-6 flex flex-col gap-1">
@@ -265,7 +268,7 @@ export function LoginPage({
         </Button>
       </form>
 
-      {tenantContext.data?.registrationEnabled && (
+      {tenantContext.data?.registrationEnabled && !resolvedTenant && (
         <p className="mt-6 text-center text-sm text-text-secondary">
           Don't have an account? <TextLink href="/auth/register">Create an account</TextLink>
         </p>

@@ -17,6 +17,7 @@ import { confirmBlurError, NewPasswordFields, validateNewPassword } from "./new-
 import { policyMessageAsSentence } from "./password-messages.js";
 import { deriveSlug, isValidSlug } from "./slug.js";
 import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
+import { sharedHostURL, WorkspaceNotFound } from "./workspace-not-found.js";
 
 const SLUG_CHECK_DEBOUNCE_MS = 500;
 // Used when a 429 arrives without a parseable Retry-After header.
@@ -69,10 +70,16 @@ export function RegisterPage({
   });
   const registrationEnabled = tenantContext.data?.registrationEnabled === true;
   const termsUrl = tenantContext.data?.termsUrl ?? null;
+  const workspaceNotFound = tenantContext.data?.workspaceNotFound === true;
+  const onTenantHost = Boolean(tenantContext.data?.tenant);
+  const appUrl = tenantContext.data?.appUrl ?? null;
 
+  // Registration founds a new tenant, so it runs only on the shared-domain host.
   useEffect(() => {
-    if (tenantContext.isFetched && !registrationEnabled) redirect("/auth/login");
-  }, [tenantContext.isFetched, registrationEnabled, redirect]);
+    if (!tenantContext.isFetched || workspaceNotFound) return;
+    if (!registrationEnabled) redirect("/auth/login");
+    else if (onTenantHost) redirect(sharedHostURL(appUrl, "/auth/register") ?? "/auth/login");
+  }, [tenantContext.isFetched, workspaceNotFound, registrationEnabled, onTenantHost, appUrl, redirect]);
 
   const cardHeadingRef = useRef<HTMLHeadingElement>(null);
 
@@ -194,6 +201,8 @@ export function RegisterPage({
     }
   };
 
+  if (workspaceNotFound) return <WorkspaceNotFound appUrl={appUrl} />;
+
   if (phase.kind === "check_email") {
     return (
       <CheckEmailCard email={phase.email} tenantSlug={phase.tenantSlug} resend={resend} headingRef={cardHeadingRef} />
@@ -216,8 +225,8 @@ export function RegisterPage({
     );
   }
 
-  // Nothing renders until the platform confirms registration is on.
-  if (!registrationEnabled) return <AuthLayout>{null}</AuthLayout>;
+  // Nothing renders until the platform confirms registration is on here.
+  if (!registrationEnabled || onTenantHost) return <AuthLayout>{null}</AuthLayout>;
 
   return (
     <AuthLayout>

@@ -50,8 +50,16 @@ const SUBDOMAIN: TenantContext = {
   tenant: { slug: "acme", name: "Acme Corp" },
   registrationEnabled: false,
   termsUrl: null,
+  appUrl: "https://app.goerp.io",
+  workspaceNotFound: false,
 };
-const SHARED_DOMAIN: TenantContext = { tenant: null, registrationEnabled: true, termsUrl: null };
+const SHARED_DOMAIN: TenantContext = {
+  tenant: null,
+  registrationEnabled: true,
+  termsUrl: null,
+  appUrl: "https://app.goerp.io",
+  workspaceNotFound: false,
+};
 
 const meta = {
   title: "Shell/Auth/LoginPage",

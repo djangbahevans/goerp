@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
+import { WorkspaceNotFound } from "./workspace-not-found.js";
 
 type Phase =
   | { kind: "idle" }
@@ -86,6 +87,8 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
       );
     }
   };
+
+  if (tenantContext.data?.workspaceNotFound) return <WorkspaceNotFound appUrl={tenantContext.data.appUrl} />;
 
   if (phase.kind === "sent") {
     return (
