@@ -12,6 +12,7 @@ import { Check } from "lucide-react";
 import { type ReactNode, type RefObject, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
+import { handoffURL } from "./handoff-url.js";
 import { confirmBlurError, NewPasswordFields, validateNewPassword } from "./new-password-fields.js";
 import { policyMessageAsSentence } from "./password-messages.js";
 import { deriveSlug, isValidSlug } from "./slug.js";
@@ -152,6 +153,9 @@ export function RegisterPage({
         companyName: company.trim(),
       });
       switch (outcome.kind) {
+        case "handoff":
+          redirect(handoffURL(outcome.handoff, "/"));
+          return;
         case "signed_in":
           redirect("/");
           return;

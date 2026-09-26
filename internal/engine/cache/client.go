@@ -123,6 +123,20 @@ func (c *Client) Get(ctx context.Context, key string) (value string, found bool,
 	return value, true, nil
 }
 
+// GetDel reads key's value and deletes it in one atomic step (GETDEL),
+// so a single-use value is handed out at most once under concurrent
+// reads. found is false, with a nil error, when key isn't set.
+func (c *Client) GetDel(ctx context.Context, key string) (value string, found bool, err error) {
+	value, err = c.rdb.GetDel(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("getdel %q: %w", key, err)
+	}
+	return value, true, nil
+}
+
 // Delete removes key. Not an error if key wasn't set.
 func (c *Client) Delete(ctx context.Context, key string) error {
 	if err := c.rdb.Del(ctx, key).Err(); err != nil {

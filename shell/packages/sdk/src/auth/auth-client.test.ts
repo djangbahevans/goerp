@@ -7,6 +7,7 @@ import {
   checkSlug,
   confirmPasswordReset,
   confirmTOTPEnrollment,
+  exchangeHandoff,
   fetchCurrentSession,
   fetchInviteInfo,
   fetchTenantContext,
@@ -252,6 +253,15 @@ describe("login", () => {
     const result = await login(credentials);
 
     expect(result).toEqual({ kind: "mfa_required", challengeToken: "mfa-tok", methods: ["totp", "webauthn"] });
+  });
+
+  it("returns the handoff a shared-domain sign-in answers with", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { handoff: { host: "acme.localhost", code: "c0de" } })),
+    );
+
+    expect(await login(credentials)).toEqual({ kind: "handoff", handoff: { host: "acme.localhost", code: "c0de" } });
   });
 
   it("throws an AppError built from the error response on failure", async () => {
@@ -681,7 +691,54 @@ describe("resendVerificationEmail", () => {
   });
 });
 
+describe("exchangeHandoff", () => {
+  it("posts the code and returns the session or MFA result", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { expires_in: 900, password_update_recommended: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await exchangeHandoff("c0de")).toEqual({ kind: "authenticated", passwordUpdateRecommended: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/handoff",
+      expect.objectContaining({ method: "POST", credentials: "include", body: JSON.stringify({ code: "c0de" }) }),
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { mfa_required: true, mfa_token: "tok", mfa_methods: ["totp"] })),
+    );
+    expect(await exchangeHandoff("c0de")).toEqual({ kind: "mfa_required", challengeToken: "tok", methods: ["totp"] });
+  });
+
+  it("rejects a spent code with its AppError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(401, { error: { code: "auth.handoff_code_invalid", message: "sign-in handoff expired" } }),
+      ),
+    );
+
+    await expect(exchangeHandoff("spent")).rejects.toMatchObject({ code: "auth.handoff_code_invalid" });
+  });
+});
+
 describe("register", () => {
+  it("resolves the handoff a shared-domain registration answers with", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(201, { tenant_slug: "acme-corp", handoff: { host: "acme-corp.localhost", code: "c0de" } }),
+      ),
+    );
+
+    await expect(
+      register({ name: "Kwame Mensah", email: "kwame@acme.test", password: "pw", companyName: "Acme Corp" }),
+    ).resolves.toEqual({
+      kind: "handoff",
+      tenantSlug: "acme-corp",
+      handoff: { host: "acme-corp.localhost", code: "c0de" },
+    });
+  });
+
   const input = { name: "Kwame Mensah", email: "kwame@acme.test", password: "pw", companyName: "Acme Corp" };
 
   it("posts the form in the API's field names and resolves signed_in on a 201", async () => {

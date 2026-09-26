@@ -57,6 +57,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authsessions"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/emailverify"
+	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaenroll"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareset"
@@ -291,12 +292,13 @@ func New(cfg *config.Config) (*Engine, error) {
 	// provisioning (goerp#149), not here at engine startup.
 	roleStore := role.NewStore(primaryPool)
 	inviteMailer := mailer.New(mailer.Config{
-		Host:    cfg.SMTPHost,
-		Port:    cfg.SMTPPort,
-		User:    cfg.SMTPUser,
-		Pass:    cfg.SMTPPass,
-		From:    cfg.SMTPFrom,
-		BaseURL: cfg.AppBaseURL,
+		Host:           cfg.SMTPHost,
+		Port:           cfg.SMTPPort,
+		User:           cfg.SMTPUser,
+		Pass:           cfg.SMTPPass,
+		From:           cfg.SMTPFrom,
+		BaseURL:        cfg.AppBaseURL,
+		PlatformDomain: cfg.PlatformDomain,
 	})
 	// authAuditStore satisfies invite.AuditEmitter directly (goerp#400).
 	authAuditStore := authaudit.NewStore(primaryPool, tenantStore)
@@ -635,6 +637,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	passwordPolicies := password.NewPolicyStore(tenantConfigStore)
 	passwordHasher := password.NewHasher(cfg.Argon2MemoryBudgetMB, cfg.Argon2AcquireTimeout)
+	handoffStore := handoff.NewStore(cacheClient, tenantResolver, cfg.PlatformDomain)
 	registerHandlers := authregister.NewHandlers(
 		authregister.Config{
 			Enabled:            cfg.RegistrationEnabled,
@@ -642,10 +645,10 @@ func New(cfg *config.Config) (*Engine, error) {
 			ProvisionTimeout:   max(cfg.ServerWriteTimeout-10*time.Second, 5*time.Second),
 		},
 		userStore, tenantStore, tenantprovision.NewProvisioner(temporalClient, systemworker.TaskQueue),
-		passwordHasher, tokenIssuer, inviteMailer,
+		passwordHasher, tokenIssuer, inviteMailer, handoffStore,
 	)
 	acceptInviteHandlers := acceptinvite.NewHandlers(tenantStore, inviteStore, userStore, passwordPolicies, passwordHasher, tokenIssuer)
-	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore)
+	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
 	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
@@ -686,6 +689,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"GET /auth/accept-invite/info":       http.HandlerFunc(acceptInviteHandlers.Info),
 		"POST /auth/accept-invite":           http.HandlerFunc(acceptInviteHandlers.Accept),
 		"POST /auth/login":                   loginHandler,
+		"POST /auth/handoff":                 http.HandlerFunc(loginHandler.ServeHandoff),
 		"POST /auth/password-reset/request":  passwordResetRequestHandler,
 		"POST /auth/password-reset/confirm":  passwordResetConfirmHandler,
 		"POST /auth/verify-email":            verifyEmailConfirmHandler,

@@ -903,3 +903,26 @@ func TestNewUsesFailoverClientWhenSentinelsConfigured(t *testing.T) {
 		t.Fatal("New() with unreachable Sentinel addrs: expected an error, got nil")
 	}
 }
+
+func TestGetDel_ReturnsValueOnceThenMisses(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	c, err := New(ctx, localRedisConfig())
+	skipIfUnreachable(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	key := "cache-test:" + t.Name()
+	t.Cleanup(func() { _ = c.Delete(context.Background(), key) })
+	if err := c.SetWithTTL(ctx, key, "once", time.Minute); err != nil {
+		t.Fatalf("SetWithTTL() error: %v", err)
+	}
+
+	value, found, err := c.GetDel(ctx, key)
+	if err != nil || !found || value != "once" {
+		t.Fatalf("first GetDel() = %q, %v, %v; want \"once\", true, nil", value, found, err)
+	}
+	if _, found, err := c.GetDel(ctx, key); err != nil || found {
+		t.Fatalf("second GetDel() found = %v, err = %v; want false, nil", found, err)
+	}
+}

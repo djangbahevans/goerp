@@ -19,6 +19,7 @@ import type {
   PasswordResetRequest,
   RegisterOutcome,
   Registration,
+  SignInHandoff,
   TenantContext,
   TOTPEnrollment,
   TOTPEnrollmentConfirmation,
@@ -159,7 +160,24 @@ export async function fetchTenantContext(): Promise<TenantContext | null> {
 
 export type LoginResult =
   | { kind: "authenticated"; passwordUpdateRecommended: boolean }
-  | { kind: "mfa_required"; challengeToken: string; methods: MFAMethod[] };
+  | { kind: "mfa_required"; challengeToken: string; methods: MFAMethod[] }
+  | { kind: "handoff"; handoff: SignInHandoff };
+
+type LoginResponseBody = {
+  handoff?: SignInHandoff;
+  mfa_required?: boolean;
+  mfa_token?: string;
+  mfa_methods?: MFAMethod[];
+  password_update_recommended?: boolean;
+};
+
+function toLoginResult(body: LoginResponseBody): LoginResult {
+  if (body.handoff) return { kind: "handoff", handoff: body.handoff };
+  if (body.mfa_required && body.mfa_token) {
+    return { kind: "mfa_required", challengeToken: body.mfa_token, methods: body.mfa_methods ?? [] };
+  }
+  return { kind: "authenticated", passwordUpdateRecommended: body.password_update_recommended === true };
+}
 
 // login backs POST /auth/login (auth-internals.md §3). A successful full
 // login carries no user/tenant data of its own (only expires_in, per the
@@ -178,17 +196,22 @@ export async function login(credentials: LoginCredentials): Promise<LoginResult>
     }),
   });
   if (!response.ok) throw await readError(response);
+  return toLoginResult((await response.json()) as LoginResponseBody);
+}
 
-  const body = (await response.json()) as {
-    mfa_required?: boolean;
-    mfa_token?: string;
-    mfa_methods?: MFAMethod[];
-    password_update_recommended?: boolean;
-  };
-  if (body.mfa_required && body.mfa_token) {
-    return { kind: "mfa_required", challengeToken: body.mfa_token, methods: body.mfa_methods ?? [] };
-  }
-  return { kind: "authenticated", passwordUpdateRecommended: body.password_update_recommended === true };
+// exchangeHandoff backs POST /auth/handoff (auth-internals.md §3
+// "Shared-domain handoff"): on the tenant's own host, it trades a handoff
+// code for the session or an MFA challenge. A 401
+// auth.handoff_code_invalid means the code expired or was already used.
+export async function exchangeHandoff(code: string): Promise<LoginResult> {
+  const response = await fetch("/auth/handoff", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) throw await readError(response);
+  return toLoginResult((await response.json()) as LoginResponseBody);
 }
 
 // submitMFACode backs POST /auth/mfa/verify (auth-internals.md §8). Same
@@ -359,6 +382,7 @@ export async function register(input: Registration): Promise<RegisterOutcome> {
   if (!response.ok) throw await readError(response);
   const body = (await response.json().catch(() => ({}))) as {
     tenant_slug?: string;
+    handoff?: SignInHandoff;
     login_required?: boolean;
     requires_email_verification?: boolean;
     provisioning_pending?: boolean;
@@ -368,6 +392,7 @@ export async function register(input: Registration): Promise<RegisterOutcome> {
     if (body.requires_email_verification) return { kind: "verification_required", tenantSlug };
     return { kind: "provisioning_pending", tenantSlug };
   }
+  if (body.handoff) return { kind: "handoff", tenantSlug, handoff: body.handoff };
   return body.login_required ? { kind: "login_required", tenantSlug } : { kind: "signed_in", tenantSlug };
 }
 

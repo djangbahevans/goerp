@@ -50,6 +50,7 @@ function fakeAuth(): AuthContextValue {
     user,
     tenant,
     login: vi.fn(),
+    completeHandoff: vi.fn(),
     logout: vi.fn(),
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),

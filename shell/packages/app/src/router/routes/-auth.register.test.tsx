@@ -28,7 +28,8 @@ const SIGNED_OUT: AuthContextValue = {
   isAuthenticated: false,
   user: null,
   tenant: null,
-  login: async () => {},
+  login: async () => null,
+  completeHandoff: async () => {},
   logout: async () => {},
   submitMFA: async () => {},
   updateProfile: async () => {},
@@ -156,6 +157,26 @@ describe("RegisterPage", () => {
     submit();
 
     await waitFor(() => expect(redirect).toHaveBeenCalledWith("/auth/login"));
+  });
+
+  it("continues on the new tenant's host when the response is a handoff", async () => {
+    const { redirect } = await renderPage({
+      register: async () => ({
+        kind: "handoff",
+        tenantSlug: "acme-corp",
+        handoff: { host: "acme-corp.localhost", code: "c0de" },
+      }),
+    });
+
+    await fillForm();
+    submit();
+
+    const port = window.location.port ? `:${window.location.port}` : "";
+    await waitFor(() =>
+      expect(redirect).toHaveBeenCalledWith(
+        `${window.location.protocol}//acme-corp.localhost${port}/auth/handoff?code=c0de`,
+      ),
+    );
   });
 
   it("validates empty fields without calling the API", async () => {

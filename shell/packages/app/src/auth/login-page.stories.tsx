@@ -14,6 +14,7 @@ function authWith(login: AuthContextValue["login"]): AuthContextValue {
     user: null,
     tenant: null,
     login,
+    completeHandoff: async () => {},
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
@@ -66,7 +67,7 @@ export const SubdomainTenant: Story = {
   decorators: [
     withProviders(
       SUBDOMAIN,
-      authWith(async () => {}),
+      authWith(async () => null),
     ),
   ],
 };
@@ -75,7 +76,7 @@ export const SharedDomainWithRegistration: Story = {
   decorators: [
     withProviders(
       SHARED_DOMAIN,
-      authWith(async () => {}),
+      authWith(async () => null),
     ),
   ],
 };
@@ -129,7 +130,7 @@ export const EmailVerifiedNotice: Story = {
   decorators: [
     withProviders(
       SUBDOMAIN,
-      authWith(async () => {}),
+      authWith(async () => null),
     ),
   ],
 };

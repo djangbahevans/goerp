@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/smtp"
 	"net/url"
+	"strings"
 )
 
 type Config struct {
@@ -20,9 +21,12 @@ type Config struct {
 	User string
 	Pass string
 	From string
-	// BaseURL is the main application server's externally-reachable
-	// address, used to build the accept-invite link.
-	BaseURL string
+	// BaseURL is the app's URL on the shared-domain host
+	// (GOERP_APP_BASE_URL). A tenant's links keep its scheme and port on
+	// the tenant's default domain, {slug}.{PlatformDomain}, where a link
+	// that signs the user in leaves a usable session.
+	BaseURL        string
+	PlatformDomain string
 }
 
 // SMTPMailer implements internal/engine/invite.Mailer.
@@ -34,11 +38,25 @@ func New(cfg Config) *SMTPMailer {
 	return &SMTPMailer{cfg: cfg}
 }
 
+// tenantBaseURL is cfg.BaseURL with its host replaced by tenantSlug's
+// default domain, keeping the scheme, any port and any path.
+func (m *SMTPMailer) tenantBaseURL(tenantSlug string) string {
+	u, err := url.Parse(m.cfg.BaseURL)
+	if err != nil || u.Host == "" {
+		return m.cfg.BaseURL
+	}
+	host := tenantSlug + "." + m.cfg.PlatformDomain
+	if port := u.Port(); port != "" {
+		host = net.JoinHostPort(host, port)
+	}
+	return u.Scheme + "://" + host + strings.TrimSuffix(u.Path, "/")
+}
+
 // SendInvite matches auth-internals.md §3's two subject/body variants,
 // depending on whether the invitee already has a system.users row.
 func (m *SMTPMailer) SendInvite(ctx context.Context, email, tenantSlug, rawToken string, isNewUser bool) error {
 	link := fmt.Sprintf("%s/auth/accept-invite?token=%s&tenant=%s",
-		m.cfg.BaseURL, url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
+		m.tenantBaseURL(tenantSlug), url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
 
 	var subject, text, html string
 	if isNewUser {
@@ -74,7 +92,7 @@ func (m *SMTPMailer) SendMFAReset(ctx context.Context, email string) error {
 // "Password reset", template auth.password_reset.
 func (m *SMTPMailer) SendPasswordReset(ctx context.Context, email, tenantSlug, rawToken string) error {
 	link := fmt.Sprintf("%s/auth/reset-password?token=%s&tenant=%s",
-		m.cfg.BaseURL, url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
+		m.tenantBaseURL(tenantSlug), url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
 
 	const subject = "Reset your password"
 	text := fmt.Sprintf("A password reset was requested for your account.\n\n"+
@@ -103,7 +121,7 @@ func (m *SMTPMailer) SendPasswordResetConfirmed(ctx context.Context, email strin
 // carries the tenant so confirming can sign the user into it.
 func (m *SMTPMailer) SendVerifyEmail(ctx context.Context, email, tenantSlug, rawToken string) error {
 	link := fmt.Sprintf("%s/auth/verify-email?token=%s&tenant=%s",
-		m.cfg.BaseURL, url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
+		m.tenantBaseURL(tenantSlug), url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
 
 	const subject = "Verify your email address"
 	text := fmt.Sprintf("Confirm your email address to finish setting up your account "+

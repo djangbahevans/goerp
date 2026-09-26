@@ -4,7 +4,9 @@ import { localeStore } from "../i18n/use-locale.js";
 import { themeStore } from "../react/use-theme.js";
 import {
   changePassword as changePasswordRequest,
+  exchangeHandoff,
   fetchCurrentSession,
+  type LoginResult,
   login as loginRequest,
   logout as logoutRequest,
   submitMFACode,
@@ -20,6 +22,7 @@ import type {
   CurrentUser,
   LoginCredentials,
   MFAMethod,
+  SignInHandoff,
   UpdatePreferencesInput,
   UpdateProfileInput,
 } from "./types.js";
@@ -66,7 +69,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (state.status === "unauthenticated") passwordUpdateNotice.set(false);
   }, [state.status]);
 
-  const login = useCallback(async (credentials: LoginCredentials): Promise<void> => {
+  // signIn runs one sign-in request through the auth machine: a login, or
+  // a handoff exchange on the tenant's host. It resolves to the handoff
+  // when the sign-in must continue on another host.
+  const signIn = useCallback(async (request: () => Promise<LoginResult>): Promise<SignInHandoff | null> => {
     // login_started only applies from "unauthenticated" (or an abandoned
     // "mfa_required" challenge) — rejects outright
     // if the mount-time session check (or another login) hasn't finished,
@@ -75,18 +81,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("login() called while the auth machine wasn't unauthenticated or mfa_required");
     }
 
-    const result = await loginRequest(credentials).catch((err: unknown) => {
+    const result = await request().catch((err: unknown) => {
       authMachine.transition({ type: "login_failed" });
       throw err;
     });
 
+    if (result.kind === "handoff") {
+      // No session here; the tenant's host completes the sign-in.
+      authMachine.transition({ type: "login_failed" });
+      return result.handoff;
+    }
     if (result.kind === "mfa_required") {
       authMachine.transition({
         type: "login_requires_mfa",
         challengeToken: result.challengeToken,
         methods: result.methods,
       });
-      return;
+      return null;
     }
 
     // Every sign-in writes the flag, set or cleared, so a later user in this
@@ -99,7 +110,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     applySessionPreferences(session);
     authMachine.transition({ type: "login_succeeded", user: session.user, tenant: session.tenant });
+    return null;
   }, []);
+
+  const login = useCallback(
+    (credentials: LoginCredentials): Promise<SignInHandoff | null> => signIn(() => loginRequest(credentials)),
+    [signIn],
+  );
+
+  const completeHandoff = useCallback(
+    async (code: string): Promise<void> => {
+      await signIn(() => exchangeHandoff(code));
+    },
+    [signIn],
+  );
 
   // mfaInFlight guards against a double-submit racing two verify calls for
   // the same challenge: auth-internals.md §8 step 4 consumes the mfa_token
@@ -214,6 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: identity?.user ?? null,
       tenant: identity?.tenant ?? null,
       login,
+      completeHandoff,
       logout,
       submitMFA,
       updateProfile,
@@ -221,7 +246,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       changePassword,
       reloadSession,
     };
-  }, [state, login, logout, submitMFA, updateProfile, updatePreferences, changePassword, reloadSession]);
+  }, [
+    state,
+    login,
+    completeHandoff,
+    logout,
+    submitMFA,
+    updateProfile,
+    updatePreferences,
+    changePassword,
+    reloadSession,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
