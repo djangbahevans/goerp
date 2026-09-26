@@ -10,6 +10,7 @@ import {
   exchangeHandoff,
   fetchCurrentSession,
   fetchInviteInfo,
+  fetchSessions,
   fetchTenantContext,
   login,
   logout,
@@ -17,6 +18,8 @@ import {
   register,
   requestPasswordReset,
   resendVerificationEmail,
+  revokeOtherSessions,
+  revokeSession,
   selectTenant,
   submitMFACode,
   tenantSelectionFrom,
@@ -996,6 +999,77 @@ describe("acceptInvite", () => {
       "/auth/accept-invite",
       expect.objectContaining({ body: JSON.stringify({ token: "t", tenant: "acme" }) }),
     );
+  });
+});
+
+describe("session management", () => {
+  it("fetchSessions maps each session", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, {
+        sessions: [
+          {
+            id: "fam-1",
+            user_agent: "Mozilla/5.0",
+            ip_address: "41.66.18.2",
+            country_code: "GH",
+            signed_in_at: "2026-09-01T10:00:00Z",
+            last_active_at: "2026-09-26T09:00:00Z",
+            persistent: true,
+            current: true,
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchSessions()).toEqual([
+      {
+        id: "fam-1",
+        userAgent: "Mozilla/5.0",
+        ipAddress: "41.66.18.2",
+        countryCode: "GH",
+        signedInAt: "2026-09-01T10:00:00Z",
+        lastActiveAt: "2026-09-26T09:00:00Z",
+        persistent: true,
+        current: true,
+      },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith("/auth/sessions", expect.objectContaining({ credentials: "include" }));
+  });
+
+  it("revokeSession deletes the session family", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(204, null));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await revokeSession("fam-2");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/sessions/fam-2",
+      expect.objectContaining({ method: "DELETE", credentials: "include" }),
+    );
+  });
+
+  it("revokeSession rejects with the server's error code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(400, {
+          error: { code: "cannot_revoke_current_session", message: "sign out to end the current session" },
+        }),
+      ),
+    );
+    await expect(revokeSession("fam-1")).rejects.toMatchObject({
+      code: "cannot_revoke_current_session",
+      httpStatus: 400,
+    });
+  });
+
+  it("revokeOtherSessions resolves to the number revoked", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { revoked: 3 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await revokeOtherSessions()).toBe(3);
+    expect(fetchMock).toHaveBeenCalledWith("/auth/sessions", expect.objectContaining({ method: "DELETE" }));
   });
 });
 

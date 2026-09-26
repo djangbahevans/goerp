@@ -2,6 +2,7 @@ import { AppError } from "../error/app-error.js";
 import type { ThemePreference } from "../react/use-theme.js";
 import { noteTenantSuspension } from "./tenant-suspension.js";
 import type {
+  ActiveSession,
   ChangePasswordInput,
   CurrentTenant,
   CurrentUser,
@@ -418,6 +419,56 @@ export async function confirmTOTPEnrollment(input: TOTPEnrollmentConfirmation): 
   if (!response.ok) throw await readError(response);
   const body = (await response.json()) as { recovery_codes: string[] | null };
   return body.recovery_codes ?? null;
+}
+
+interface SessionWire {
+  id: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  country_code: string | null;
+  signed_in_at: string;
+  last_active_at: string;
+  persistent: boolean;
+  current: boolean;
+}
+
+// fetchSessions backs GET /auth/sessions (auth-internals.md §4 "Session
+// management endpoints"): the caller's sessions in this tenant, the current
+// one first.
+export async function fetchSessions(signal?: AbortSignal): Promise<ActiveSession[]> {
+  const response = await fetch("/auth/sessions", { credentials: "include", ...(signal ? { signal } : {}) });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { sessions: SessionWire[] };
+  return body.sessions.map((s) => ({
+    id: s.id,
+    userAgent: s.user_agent,
+    ipAddress: s.ip_address,
+    countryCode: s.country_code,
+    signedInAt: s.signed_in_at,
+    lastActiveAt: s.last_active_at,
+    persistent: s.persistent,
+    current: s.current,
+  }));
+}
+
+// revokeSession backs DELETE /auth/sessions/{id}. Rejects with
+// session_not_found (404), or cannot_revoke_current_session (400) for the
+// caller's own session, which ends through logout instead.
+export async function revokeSession(id: string): Promise<void> {
+  const response = await fetch(`/auth/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) throw await readError(response);
+}
+
+// revokeOtherSessions backs DELETE /auth/sessions: ends every session but
+// the caller's own and resolves to how many it ended.
+export async function revokeOtherSessions(): Promise<number> {
+  const response = await fetch("/auth/sessions", { method: "DELETE", credentials: "include" });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { revoked: number };
+  return body.revoked;
 }
 
 // resendVerificationEmail backs POST /auth/verify-email/resend

@@ -6,12 +6,15 @@ export {
   confirmTOTPEnrollment,
   exchangeHandoff,
   fetchInviteInfo,
+  fetchSessions,
   fetchTenantContext,
   GLOBAL_PASSWORD_MIN_LENGTH,
   passwordMinLengthFrom,
   register,
   requestPasswordReset,
   resendVerificationEmail,
+  revokeOtherSessions,
+  revokeSession,
   tenantSelectionFrom,
   verifyEmail,
 } from "./auth-client.js";
@@ -50,6 +53,7 @@ export {
 } from "./tenant-suspension.js";
 export { TokenRefreshScheduler, tokenRefreshScheduler, wireAutoRefresh } from "./token-refresh-scheduler.js";
 export type {
+  ActiveSession,
   AuthContextValue,
   AuthEvent,
   AuthState,
