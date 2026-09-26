@@ -1,0 +1,20 @@
+{
+  "abi_version": "1",
+  "capabilities": [
+    "db.read",
+    "db.write"
+  ],
+  "checksum": "sha256:empty",
+  "depends_on": [],
+  "description": "Contacts, for driving the shell's list and form views locally",
+  "display_name": "CRM",
+  "engine": ">=0.1.0",
+  "name": "crm",
+  "schema": {
+    "owned_models": [
+      "crm.contact"
+    ]
+  },
+  "type": "domain",
+  "version": "0.1.0"
+}
