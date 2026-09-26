@@ -11,6 +11,8 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/billing"
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
@@ -21,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/temporal"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -56,6 +59,7 @@ type testEnv struct {
 	conn           *sql.DB
 	tenantStore    *tenant.Store
 	inviteStore    *invite.Store
+	cacheClient    *cache.Client
 	activities     *Activities
 	temporalClient *temporal.Client
 	taskQueue      string
@@ -95,7 +99,13 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 		t.Fatalf("registry Update() error: %v", err)
 	}
 
-	activities := NewActivities(tenantStore, inviteStore, role.NewStore(conn), conn, syncPool, diffEngine, reg, "goerp.test")
+	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
+	if err != nil {
+		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
+	}
+	t.Cleanup(func() { _ = cacheClient.Close() })
+
+	activities := NewActivities(tenantStore, inviteStore, role.NewStore(conn), conn, syncPool, diffEngine, reg, "goerp.test", cacheClient)
 
 	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:7233")
 	t.Setenv("GOERP_TEMPORAL_NAMESPACE", "default")
@@ -123,6 +133,7 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 		conn:           conn,
 		tenantStore:    tenantStore,
 		inviteStore:    inviteStore,
+		cacheClient:    cacheClient,
 		activities:     activities,
 		temporalClient: temporalClient,
 		taskQueue:      taskQueue,
@@ -332,5 +343,44 @@ func TestReserveSlug_ReservedSlugFailsNonRetryably(t *testing.T) {
 	appErr, ok := errors.AsType[*sdktemporal.ApplicationError](err)
 	if !ok || appErr.Type() != SlugReservedErrorType || !appErr.NonRetryable() {
 		t.Errorf("ReserveSlug(app) error = %v, want a non-retryable %s", err, SlugReservedErrorType)
+	}
+}
+
+func TestActivateTenant_DropsAStaleNotFoundForTheNewSubdomain(t *testing.T) {
+	env := newTestEnv(t, nil)
+	ctx := t.Context()
+	billingStore := billing.NewStore(env.conn)
+	if err := billingStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("billing Bootstrap() error: %v", err)
+	}
+	resolver := tenantresolve.NewResolver(env.tenantStore, env.cacheClient, billingStore)
+	slug := uniqueSlug(t)
+	domain := slug + ".goerp.test"
+	t.Cleanup(func() {
+		_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
+		_ = env.cacheClient.Delete(context.Background(), tenantresolve.DomainCacheKey(domain))
+	})
+
+	if _, err := resolver.ResolveByHost(ctx, domain); !errors.Is(err, tenantresolve.ErrTenantNotFound) {
+		t.Fatalf("ResolveByHost() before provisioning error = %v, want ErrTenantNotFound", err)
+	}
+
+	tenantID, err := env.activities.ReserveSlug(ctx, slug, "Stale Cache Co", uuid.NewV7().String())
+	if err != nil {
+		t.Fatalf("ReserveSlug() error: %v", err)
+	}
+	if err := env.activities.RegisterDomain(ctx, tenantID, slug); err != nil {
+		t.Fatalf("RegisterDomain() error: %v", err)
+	}
+	if err := env.activities.ActivateTenant(ctx, slug); err != nil {
+		t.Fatalf("ActivateTenant() error: %v", err)
+	}
+
+	got, err := resolver.ResolveByHost(ctx, domain)
+	if err != nil {
+		t.Fatalf("ResolveByHost() after provisioning error: %v, want the new tenant", err)
+	}
+	if got.Slug != slug {
+		t.Errorf("ResolveByHost() slug = %q, want %q", got.Slug, slug)
 	}
 }
