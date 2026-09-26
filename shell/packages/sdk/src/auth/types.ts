@@ -84,10 +84,17 @@ export interface Registration {
 // login_required: the account and workspace exist but no session was
 // issued. verification_required: the account must verify its email first.
 // provisioning_pending: the workspace is still being set up.
-export type RegisterOutcome = {
-  kind: "signed_in" | "login_required" | "verification_required" | "provisioning_pending";
-  tenantSlug: string;
-};
+// A sign-in on the shared-domain login host, handed to the tenant's own
+// host, where /auth/handoff exchanges the code for the session
+// (auth-internals.md §3 "Shared-domain handoff").
+export interface SignInHandoff {
+  host: string;
+  code: string;
+}
+
+export type RegisterOutcome =
+  | { kind: "signed_in" | "login_required" | "verification_required" | "provisioning_pending"; tenantSlug: string }
+  | { kind: "handoff"; tenantSlug: string; handoff: SignInHandoff };
 
 export interface VerificationEmailRequest {
   email: string;
@@ -182,7 +189,12 @@ export interface AuthContextValue {
   isAuthenticated: boolean;
   user: CurrentUser | null;
   tenant: CurrentTenant | null;
-  login: (credentials: LoginCredentials) => Promise<void>;
+  // Resolves to a handoff when the sign-in must continue on the tenant's
+  // own host, null when it completed (or reached MFA) here.
+  login: (credentials: LoginCredentials) => Promise<SignInHandoff | null>;
+  // Exchanges a handoff code on the tenant's host, then continues as login
+  // does: signed in, or at the MFA challenge.
+  completeHandoff: (code: string) => Promise<void>;
   logout: () => Promise<void>;
   submitMFA: (code: string, method?: MFAMethod) => Promise<void>;
   updateProfile: (input: UpdateProfileInput) => Promise<void>;

@@ -16,14 +16,18 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/billing"
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
@@ -101,7 +105,10 @@ type fixture struct {
 	issuer      *authtoken.Issuer
 	provisioner *fakeProvisioner
 	mailer      *fakeMailer
+	handoffs    *handoff.Store
 }
+
+const testPlatformDomain = "register.test"
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
@@ -136,6 +143,17 @@ func newFixture(t *testing.T) *fixture {
 	}
 	roleStore := role.NewStore(conn)
 
+	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
+	if err != nil {
+		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
+	}
+	t.Cleanup(func() { _ = cacheClient.Close() })
+	billingStore := billing.NewStore(conn)
+	if err := billingStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("billing Bootstrap() error: %v", err)
+	}
+	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
+
 	return &fixture{
 		conn:        conn,
 		users:       userStore,
@@ -144,6 +162,7 @@ func newFixture(t *testing.T) *fixture {
 		issuer:      authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore),
 		provisioner: &fakeProvisioner{conn: conn, tenants: tenantStore, roles: roleStore},
 		mailer:      &fakeMailer{sent: map[string]string{}, done: make(chan struct{}, 4)},
+		handoffs:    handoff.NewStore(cacheClient, resolver, testPlatformDomain),
 	}
 }
 
@@ -165,7 +184,7 @@ func lockSigningKeyTable(t *testing.T, pool *sql.DB) {
 }
 
 func (f *fixture) handlers(enabled bool, policy string) *Handlers {
-	return NewHandlers(Config{Enabled: enabled, VerificationPolicy: policy, ProvisionTimeout: 10 * time.Second}, f.users, f.tenants, f.provisioner, password.NewHasher(256, time.Second), f.issuer, f.mailer)
+	return NewHandlers(Config{Enabled: enabled, VerificationPolicy: policy, ProvisionTimeout: 10 * time.Second}, f.users, f.tenants, f.provisioner, password.NewHasher(256, time.Second), f.issuer, f.mailer, f.handoffs)
 }
 
 // registration returns a unique company name and email, cleaning up the
@@ -261,6 +280,34 @@ func TestCheckSlug(t *testing.T) {
 		if rec.Code != http.StatusOK || decode(t, rec)["available"] != want {
 			t.Errorf("check-slug(%q) = %d %s, want available=%v", slug, rec.Code, rec.Body.String(), want)
 		}
+	}
+}
+
+func TestRegister_BrowserOnSharedHostGetsHandoff(t *testing.T) {
+	f := newFixture(t)
+	h := f.handlers(true, VerificationOff)
+	company, slug, email := f.registration(t)
+
+	b, err := json.Marshal(body(company, email))
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewReader(b))
+	req.Host = "app." + testPlatformDomain
+	req.RemoteAddr = "203.0.113.7:54321"
+	rec := httptest.NewRecorder()
+	h.Register(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s, want 201", rec.Code, rec.Body.String())
+	}
+	resp := decode(t, rec)
+	ho, _ := resp["handoff"].(map[string]any)
+	if resp["tenant_slug"] != slug || ho == nil || ho["host"] != slug+"."+testPlatformDomain || ho["code"] == "" {
+		t.Errorf("body = %v, want tenant_slug %q and a handoff to %s.%s", resp, slug, slug, testPlatformDomain)
+	}
+	if len(rec.Result().Cookies()) != 0 {
+		t.Errorf("cookies = %v, want none on the shared host", rec.Result().Cookies())
 	}
 }
 

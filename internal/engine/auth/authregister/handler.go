@@ -22,6 +22,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/emailverify"
+	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -62,10 +63,11 @@ type Handlers struct {
 	hasher      *password.Hasher
 	issuer      *authtoken.Issuer
 	mailer      emailverify.Mailer
+	handoffs    *handoff.Store
 }
 
-func NewHandlers(cfg Config, users *user.Store, tenants *tenant.Store, provisioner Provisioner, hasher *password.Hasher, issuer *authtoken.Issuer, mailer emailverify.Mailer) *Handlers {
-	return &Handlers{cfg: cfg, users: users, tenants: tenants, provisioner: provisioner, hasher: hasher, issuer: issuer, mailer: mailer}
+func NewHandlers(cfg Config, users *user.Store, tenants *tenant.Store, provisioner Provisioner, hasher *password.Hasher, issuer *authtoken.Issuer, mailer emailverify.Mailer, handoffs *handoff.Store) *Handlers {
+	return &Handlers{cfg: cfg, users: users, tenants: tenants, provisioner: provisioner, hasher: hasher, issuer: issuer, mailer: mailer, handoffs: handoffs}
 }
 
 // requiresVerification is auth-internals.md §3's registration-time
@@ -266,6 +268,26 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 		// tenant_slug lets the page offer "Resend email" (auth-internals.md
 		// §3 "Resend email verification").
 		writeJSON(w, http.StatusAccepted, map[string]any{"requires_email_verification": true, "tenant_slug": slug})
+		return
+	}
+
+	// Registration normally runs on the shared-domain host, which no
+	// tenant owns, so a browser is signed in on the new tenant's own host
+	// (auth-internals.md §3 "Shared-domain handoff").
+	t, err := h.tenants.GetBySlug(ctx, slug)
+	if err != nil {
+		log.Error().Err(err).Str("slug", slug).Msg("authregister: looking up the new tenant failed")
+		writeJSON(w, http.StatusCreated, map[string]any{"tenant_slug": slug, "login_required": true})
+		return
+	}
+	if h.handoffs.Needed(ctx, r, t.ID) {
+		resp, err := h.handoffs.Issue(ctx, handoff.Grant{UserID: userID, TenantID: t.ID}, slug)
+		if err != nil {
+			log.Error().Err(err).Str("user_id", userID).Msg("authregister: issuing handoff failed")
+			writeJSON(w, http.StatusCreated, map[string]any{"tenant_slug": slug, "login_required": true})
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"tenant_slug": slug, "handoff": resp})
 		return
 	}
 

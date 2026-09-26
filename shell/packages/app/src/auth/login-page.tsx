@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
+import { handoffURL } from "./handoff-url.js";
 import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
 
 // Why the user was sent here — set by the MFA challenge page when a
@@ -29,6 +30,12 @@ export interface LoginPageProps {
   notice?: LoginNotice | undefined;
   // Storybook substitutes this; the route never passes it.
   resendVerification?: ResendVerification | undefined;
+  // Leaves for another host; tests substitute it.
+  leave?: ((href: string) => void) | undefined;
+}
+
+function assignLocation(href: string): void {
+  window.location.assign(href);
 }
 
 type Phase = { kind: "idle" } | { kind: "submitting" } | { kind: "locked"; seconds: number; key: number };
@@ -46,7 +53,12 @@ function withRedirect(path: string, redirectTo: string): string {
   return `${path}?${new URLSearchParams({ redirect: redirectTo })}`;
 }
 
-export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageProps): ReactNode {
+export function LoginPage({
+  redirectTo,
+  notice,
+  resendVerification,
+  leave = assignLocation,
+}: LoginPageProps): ReactNode {
   const { state, login } = useAuth();
   const navigate = useNavigate();
   const tenantContext = useQuery({
@@ -128,8 +140,14 @@ export function LoginPage({ redirectTo, notice, resendVerification }: LoginPageP
     loginSubmitted.current = true;
     try {
       // Success re-renders as authenticated or mfa_required, and the effects
-      // above navigate from there.
-      await login({ email: email.trim(), password, tenant, remember });
+      // above navigate from there. A shared-domain sign-in continues on the
+      // tenant's own host, so the page stays submitting while it leaves.
+      const handoff = await login({ email: email.trim(), password, tenant, remember });
+      if (handoff) {
+        loginSubmitted.current = false;
+        leave(handoffURL(handoff, redirectTo));
+        return;
+      }
       setPhase({ kind: "idle" });
     } catch (err) {
       loginSubmitted.current = false;

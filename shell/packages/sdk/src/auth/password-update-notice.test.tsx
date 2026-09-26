@@ -43,7 +43,7 @@ function json(status: number, body: unknown): Response {
 
 // Routes each auth endpoint to a canned response; signedIn flips /auth/me
 // from 401 to 200 once a sign-in has succeeded.
-function stubAuthServer(responses: { login?: unknown; verify?: unknown }) {
+function stubAuthServer(responses: { login?: unknown; verify?: unknown; handoff?: unknown }) {
   let signedIn = false;
   vi.stubGlobal(
     "fetch",
@@ -51,9 +51,14 @@ function stubAuthServer(responses: { login?: unknown; verify?: unknown }) {
       switch (url) {
         case "/auth/me":
           return signedIn ? json(200, ME_BODY) : json(401, {});
-        case "/auth/login":
-          if (!(responses.login as { mfa_required?: boolean }).mfa_required) signedIn = true;
+        case "/auth/login": {
+          const body = responses.login as { mfa_required?: boolean; handoff?: unknown };
+          if (!body.mfa_required && !body.handoff) signedIn = true;
           return json(200, responses.login);
+        }
+        case "/auth/handoff":
+          signedIn = true;
+          return json(200, responses.handoff);
         case "/auth/mfa/verify":
           signedIn = true;
           return json(200, responses.verify);
@@ -200,5 +205,30 @@ describe("AuthProvider and the password update notice", () => {
     await act(() => auth().login({ email: "ada@example.com", password: "pw", tenant: "acme" }));
     await act(() => auth().changePassword({ currentPassword: "pw", newPassword: "a new passphrase" }));
     expect(notice.get()).toBe(false);
+  });
+});
+
+describe("AuthProvider and the shared-domain handoff", () => {
+  it("resolves a shared-domain login to its handoff and stays signed out", async () => {
+    stubAuthServer({ login: { handoff: { host: "acme.localhost", code: "c0de" } } });
+    const { auth } = await mountProvider();
+
+    let handoff: unknown;
+    await act(async () => {
+      handoff = await auth().login({ email: "ada@example.com", password: "pw", tenant: "acme" });
+    });
+
+    expect(handoff).toEqual({ host: "acme.localhost", code: "c0de" });
+    expect(auth().state.status).toBe("unauthenticated");
+  });
+
+  it("signs in on the tenant's host by exchanging the code", async () => {
+    stubAuthServer({ handoff: { expires_in: 900, password_update_recommended: true } });
+    const { auth, notice } = await mountProvider();
+
+    await act(() => auth().completeHandoff("c0de"));
+
+    expect(auth().state.status).toBe("authenticated");
+    expect(notice.get()).toBe(true);
   });
 });

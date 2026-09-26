@@ -2,7 +2,10 @@
 // "Login flow"'s documented 11-step order: email normalization, user
 // lookup, status check, tenant membership check, brute-force check,
 // Argon2id verification, MFA gating, and token issuance for both browser
-// (cookie) and non-browser (JSON body) clients.
+// (cookie) and non-browser (JSON body) clients. A browser signing in on a
+// host that doesn't resolve to the tenant gets a handoff code instead of
+// a session, and POST /auth/handoff (ServeHandoff) on the tenant's own
+// host exchanges it (auth-internals.md §3 "Shared-domain handoff").
 //
 // Before the user lookup, three Redis sliding-window limiters (auth-
 // internals.md §15 "Login rate limiting") delay the attempt, reject it, or
@@ -33,6 +36,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
@@ -41,6 +45,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
@@ -82,10 +87,12 @@ type Handler struct {
 	hasher    *password.Hasher
 	cache     *cache.Client
 	audit     *authaudit.Store
+	resolver  *tenantresolve.Resolver
+	handoffs  *handoff.Store
 }
 
-func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client, audit *authaudit.Store) *Handler {
-	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient, audit: audit}
+func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client, audit *authaudit.Store, resolver *tenantresolve.Resolver, handoffs *handoff.Store) *Handler {
+	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient, audit: audit, resolver: resolver, handoffs: handoffs}
 }
 
 type loginRequest struct {
@@ -349,18 +356,45 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		updateRecommended = password.UpdateRecommended(u.PasswordSetAtPolicyTenantID, u.PasswordSetAtPolicyVersion, t.ID, policyVersion)
 	}
 
+	// Step 10, shared-domain host: the session is issued on the tenant's
+	// own host instead (auth-internals.md §3 "Shared-domain handoff").
+	if h.handoffs.Needed(ctx, r, t.ID) {
+		resp, err := h.handoffs.Issue(ctx, handoff.Grant{
+			UserID:                    u.ID,
+			TenantID:                  t.ID,
+			Remember:                  req.Remember,
+			PasswordUpdateRecommended: updateRecommended,
+		}, t.Slug)
+		if err != nil {
+			log.Error().Err(err).Str("user_id", u.ID).Msg("loginflow: issue handoff")
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, map[string]any{"handoff": resp})
+		return
+	}
+
+	h.completeLogin(w, r, u.ID, t.ID, t.Slug, req.DeviceID, req.Remember, updateRecommended)
+}
+
+// completeLogin is login steps 10-11: an mfa_required challenge when the
+// user has a factor enrolled, otherwise the session.
+func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, tenantID, tenantSlug, bodyDeviceID string, remember, updateRecommended bool) {
+	ctx := r.Context()
+
 	// Step 10: MFA gating. Whether MFA is enrolled is the only signal
 	// available today — the per-tenant enforcement-mode policy
 	// (optional/required/required_for_roles, goerp#308) doesn't exist
 	// yet, so any enrolled factor is treated as required.
-	factors, err := h.mfa.ListActiveByUser(ctx, u.ID)
+	factors, err := h.mfa.ListActiveByUser(ctx, userID)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
 	if len(factors) > 0 {
-		mfaToken, _, err := h.mfaTokens.Issue(u.ID, t.ID, r.Header.Get("Origin"), mfatoken.IssueOptions{
-			Remember:                  req.Remember,
+		mfaToken, _, err := h.mfaTokens.Issue(userID, tenantID, r.Header.Get("Origin"), mfatoken.IssueOptions{
+			Remember:                  remember,
 			PasswordUpdateRecommended: updateRecommended,
 		})
 		if err != nil {
@@ -378,27 +412,106 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Step 11: full session issuance.
 	nonBrowser := loginsession.IsNonBrowser(r)
-	deviceID, deviceIDIsFresh := loginsession.ResolveDeviceID(r, req.DeviceID, nonBrowser)
+	deviceID, deviceIDIsFresh := loginsession.ResolveDeviceID(r, bodyDeviceID, nonBrowser)
 
 	tokens, err := h.issuer.Issue(ctx, authtoken.LoginParams{
-		UserID:      u.ID,
-		TenantSlug:  req.Tenant,
+		UserID:      userID,
+		TenantSlug:  tenantSlug,
 		DeviceID:    deviceID,
 		UserAgent:   r.UserAgent(),
 		IPAddress:   loginsession.ClientIP(r),
 		CountryCode: "",
-		Persistent:  nonBrowser || req.Remember,
+		Persistent:  nonBrowser || remember,
 	})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
-	if err := h.users.ResetLoginState(ctx, u.ID, loginsession.ClientIP(r)); err != nil {
+	if err := h.users.ResetLoginState(ctx, userID, loginsession.ClientIP(r)); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
 
 	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, updateRecommended)
+}
+
+type handoffRequest struct {
+	Code string `json:"code"`
+}
+
+func writeHandoffInvalid(w http.ResponseWriter) {
+	writeJSONError(w, http.StatusUnauthorized, "auth.handoff_code_invalid", "sign-in handoff expired or already used")
+}
+
+// ServeHandoff is POST /auth/handoff: on the tenant's own host, it
+// exchanges a handoff code for login steps 10-11 (auth-internals.md §3
+// "Shared-domain handoff").
+func (h *Handler) ServeHandoff(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	tc, err := h.resolver.ResolveByHost(ctx, r.Host)
+	if err != nil {
+		switch {
+		case errors.Is(err, tenantresolve.ErrTenantNotFound):
+			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		case errors.Is(err, tenantresolve.ErrTenantSuspended):
+			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
+			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+		default:
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		}
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var req handoffRequest
+	if err := json.UnmarshalRead(r.Body, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		return
+	}
+
+	grant, err := h.handoffs.Consume(ctx, req.Code)
+	if errors.Is(err, handoff.ErrInvalidCode) {
+		writeHandoffInvalid(w)
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("loginflow: consume handoff code")
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+	if grant.TenantID != tc.TenantID {
+		writeHandoffInvalid(w)
+		return
+	}
+
+	// The grant is a snapshot of a login moments ago; the account may
+	// have changed since.
+	u, err := h.users.GetByID(ctx, grant.UserID)
+	if errors.Is(err, user.ErrUserNotFound) {
+		writeHandoffInvalid(w)
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+	if u.Status != user.StatusActive {
+		writeHandoffInvalid(w)
+		return
+	}
+	isMember, err := h.roles.IsMember(ctx, tc.Slug, u.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+	if !isMember {
+		writeHandoffInvalid(w)
+		return
+	}
+
+	h.completeLogin(w, r, u.ID, tc.TenantID, tc.Slug, "", grant.Remember, grant.PasswordUpdateRecommended)
 }
 
 // enrolledMethods returns the distinct set of credential types among

@@ -16,17 +16,20 @@ import (
 	"github.com/alexedwards/argon2id"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -52,7 +55,14 @@ type fixture struct {
 	cache      *cache.Client
 	email      string
 	remoteIP   string
+	// host resolves to the fixture's tenant; doLogin sends it unless a
+	// test sets its own Host header.
+	host string
 }
+
+// testPlatformDomain is the fixture's GOERP_PLATFORM_DOMAIN, so a
+// handoff's host is {slug}.loginflow.test.
+const testPlatformDomain = "loginflow.test"
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
@@ -106,6 +116,10 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
+	host := slug + "." + testPlatformDomain
+	if _, err := tenantStore.CreateDomain(ctx, tt.ID, host, tenant.DomainSubdomain, true); err != nil {
+		t.Fatalf("CreateDomain() error: %v", err)
+	}
 
 	email := slug + "@example.com"
 	userID, err := userStore.FindOrCreateInvited(ctx, email)
@@ -174,7 +188,14 @@ func newFixture(t *testing.T) *fixture {
 	// auth_audit_log.tenant_id references system.tenants.
 	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.auth_audit_log WHERE tenant_id = $1`, tt.ID) })
 
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient, auditStore)
+	billingStore := billing.NewStore(conn)
+	if err := billingStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("billing Bootstrap() error: %v", err)
+	}
+	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
+	handoffs := handoff.NewStore(cacheClient, resolver, testPlatformDomain)
+
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient, auditStore, resolver, handoffs)
 
 	return &fixture{
 		handler:    handler,
@@ -189,6 +210,7 @@ func newFixture(t *testing.T) *fixture {
 		cache:      cacheClient,
 		email:      email,
 		remoteIP:   remoteIP,
+		host:       host,
 	}
 }
 
@@ -256,7 +278,12 @@ func (f *fixture) doLogin(t *testing.T, body map[string]any, headers map[string]
 	}
 	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(b))
 	req.RemoteAddr = f.remoteIP + ":54321"
+	req.Host = f.host
 	for k, v := range headers {
+		if k == "Host" {
+			req.Host = v
+			continue
+		}
 		req.Header.Set(k, v)
 	}
 	rec := httptest.NewRecorder()

@@ -146,11 +146,14 @@ type Config struct {
 	// SMTP (invite emails) — defaults match compose.dev.yml's Mailpit
 	// (localhost:1025, no auth); a real deployment overrides Host/Port/
 	// User/Pass to point at its own relay.
-	SMTPHost   string `env:"GOERP_SMTP_HOST" envDefault:"localhost"`
-	SMTPPort   int    `env:"GOERP_SMTP_PORT" envDefault:"1025"`
-	SMTPUser   string `env:"GOERP_SMTP_USER"`
-	SMTPPass   string `env:"GOERP_SMTP_PASSWORD"`
-	SMTPFrom   string `env:"GOERP_SMTP_FROM" envDefault:"noreply@goerp.local"`
+	SMTPHost string `env:"GOERP_SMTP_HOST" envDefault:"localhost"`
+	SMTPPort int    `env:"GOERP_SMTP_PORT" envDefault:"1025"`
+	SMTPUser string `env:"GOERP_SMTP_USER"`
+	SMTPPass string `env:"GOERP_SMTP_PASSWORD"`
+	SMTPFrom string `env:"GOERP_SMTP_FROM" envDefault:"noreply@goerp.local"`
+	// AppBaseURL is the app's URL on the shared-domain host. Emailed links
+	// keep its scheme and port on the tenant's default domain,
+	// {slug}.{PlatformDomain}.
 	AppBaseURL string `env:"GOERP_APP_BASE_URL" envDefault:"http://localhost:8080"`
 
 	// Observability — engine-internals.md's own env var table names these

@@ -1,4 +1,4 @@
-import type { AuthContextValue, AuthState, LoginCredentials } from "@goerp/sdk/auth";
+import type { AuthContextValue, AuthState, LoginCredentials, SignInHandoff } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext, permissionDataRef } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -34,7 +34,9 @@ const FAKE_TENANT = {
   availableLocales: ["en"],
 };
 
-type LoginImpl = (credentials: LoginCredentials, setState: (state: AuthState) => void) => Promise<void>;
+// Resolves to a SignInHandoff for a shared-domain sign-in; anything else
+// means the sign-in finished here.
+type LoginImpl = (credentials: LoginCredentials, setState: (state: AuthState) => void) => Promise<unknown>;
 
 // A stateful stand-in for AuthProvider, so each test drives its own auth
 // state instead of sharing the process-wide authMachine singleton.
@@ -54,7 +56,8 @@ function FakeAuthProvider({
     isAuthenticated,
     user: isAuthenticated ? state.user : null,
     tenant: isAuthenticated ? state.tenant : null,
-    login: (credentials) => loginImpl(credentials, setState),
+    login: async (credentials) => ((await loginImpl(credentials, setState)) as SignInHandoff | undefined) ?? null,
+    completeHandoff: async () => {},
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
@@ -115,6 +118,25 @@ afterEach(() => {
 });
 
 describe("/auth/login", () => {
+  it("leaves for the tenant's host when a shared-domain sign-in answers with a handoff", async () => {
+    stubTenantContext({ tenant: null, registration_enabled: false });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, protocol: "http:", port: "5173", assign });
+    const loginImpl = vi.fn<LoginImpl>(async () => ({ host: "acme.localhost", code: "c0de" }));
+    const { router, submit } = await renderLogin({ url: "/auth/login?redirect=%2Fsettings%2Fprofile", loginImpl });
+
+    fillCredentials();
+    fireEvent.change(await screen.findByLabelText("Company"), { target: { value: "acme" } });
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith(
+        "http://acme.localhost:5173/auth/handoff?code=c0de&redirect=%2Fsettings%2Fprofile",
+      ),
+    );
+    expect(router.state.location.pathname).toBe("/auth/login");
+  });
+
   it("sends the subdomain-resolved tenant and remember choice, then redirects to ?redirect", async () => {
     stubTenantContext(SUBDOMAIN_TENANT);
     const loginImpl = vi.fn<LoginImpl>(async (_credentials, setState) => {

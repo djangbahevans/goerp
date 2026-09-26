@@ -162,12 +162,14 @@ func newTestMailer(t *testing.T, srv *fakeSMTPServer, user, pass string) *SMTPMa
 	t.Helper()
 	ip, port := srv.addr()
 	return New(Config{
-		Host:    ip,
-		Port:    port,
-		User:    user,
-		Pass:    pass,
-		From:    "noreply@goerp.local",
-		BaseURL: "http://localhost:8080",
+		Host: ip,
+		Port: port,
+		User: user,
+		Pass: pass,
+		From: "noreply@goerp.local",
+		// Dev's shape: the shell on :5173, tenants on {slug}.localhost.
+		BaseURL:        "http://localhost:5173",
+		PlatformDomain: "localhost",
 	})
 }
 
@@ -202,8 +204,8 @@ func TestSMTPMailer_SendInvite_NewUser(t *testing.T) {
 	if !strings.Contains(msg.data, "set up your account") {
 		t.Errorf("new-user email should mention setting up an account, got: %s", msg.data)
 	}
-	if !strings.Contains(msg.data, "token=raw-token-123") || !strings.Contains(msg.data, "tenant=acmecorp") {
-		t.Errorf("email should contain the accept-invite link with token and tenant, got: %s", msg.data)
+	if !strings.Contains(msg.data, "http://acmecorp.localhost:5173/auth/accept-invite?token=raw-token-123&tenant=acmecorp") {
+		t.Errorf("email should contain the accept-invite link on the tenant's host, got: %s", msg.data)
 	}
 }
 
@@ -236,7 +238,7 @@ func TestSMTPMailer_SendPasswordReset_ContainsResetLink(t *testing.T) {
 	if len(msg.to) != 1 || msg.to[0] != "<kwame@example.com>" {
 		t.Errorf("to = %v, want [<kwame@example.com>]", msg.to)
 	}
-	if !strings.Contains(msg.data, "http://localhost:8080/auth/reset-password?token=raw-token-123&tenant=acmecorp") {
+	if !strings.Contains(msg.data, "http://acmecorp.localhost:5173/auth/reset-password?token=raw-token-123&tenant=acmecorp") {
 		t.Errorf("email should contain the reset link with token and tenant, got: %s", msg.data)
 	}
 }
@@ -281,7 +283,7 @@ func TestSMTPMailer_SendVerifyEmail_ContainsVerifyLink(t *testing.T) {
 	}
 
 	msg := waitForMessage(t, srv)
-	if !strings.Contains(msg.data, "http://localhost:8080/auth/verify-email?token=raw-token-123&tenant=acmecorp") {
+	if !strings.Contains(msg.data, "http://acmecorp.localhost:5173/auth/verify-email?token=raw-token-123&tenant=acmecorp") {
 		t.Errorf("email should contain the verification link, got: %s", msg.data)
 	}
 }
@@ -380,6 +382,20 @@ func TestBuildMessage_IsValidMultipartAlternative(t *testing.T) {
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestTenantBaseURL_KeepsSchemeAndPortOnTheTenantsDomain(t *testing.T) {
+	for _, tc := range []struct{ baseURL, platformDomain, want string }{
+		{"https://app.goerp.io", "goerp.io", "https://acme.goerp.io"},
+		{"http://localhost:5173", "localhost", "http://acme.localhost:5173"},
+		{"http://localhost:5173/", "localhost", "http://acme.localhost:5173"},
+		{"https://erp.example.com/app/", "example.com", "https://acme.example.com/app"},
+	} {
+		m := New(Config{BaseURL: tc.baseURL, PlatformDomain: tc.platformDomain})
+		if got := m.tenantBaseURL("acme"); got != tc.want {
+			t.Errorf("tenantBaseURL(%q, %q) = %q, want %q", tc.baseURL, tc.platformDomain, got, tc.want)
 		}
 	}
 }
