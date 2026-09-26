@@ -1,3 +1,5 @@
+import { AppError } from "@goerp/sdk/error";
+import { toast } from "@goerp/sdk/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -431,11 +433,15 @@ describe("FieldInput", () => {
     }
   });
 
-  it("barcode: a failed on_scan_route lookup leaves the already-scanned code in place, with no second onChange", async () => {
+  it.each([
+    ["a network error", new TypeError("Failed to fetch")],
+    ["a 5xx", new AppError({ code: "internal", message: "boom", httpStatus: 503 })],
+  ])("barcode: %s from on_scan_route keeps the scanned code and shows an error toast", async (_, lookupError) => {
     vi.useFakeTimers();
+    const toastError = vi.spyOn(toast, "error").mockImplementation(() => {});
     try {
       detectMock.mockResolvedValue([{ rawValue: "9781234567897" }]);
-      mutateAsyncMock.mockRejectedValue(new Error("not found"));
+      mutateAsyncMock.mockRejectedValue(lookupError);
       const onChange = renderField({ field: "barcode", type: "barcode", on_scan_route: "inventory.findByBarcode" }, "");
       fireEvent.click(screen.getByRole("button", { name: "Scan barcode" }));
       await act(async () => {
@@ -443,7 +449,29 @@ describe("FieldInput", () => {
       });
       expect(onChange).toHaveBeenCalledWith("9781234567897");
       expect(onChange).toHaveBeenCalledTimes(1);
+      expect(toastError).toHaveBeenCalledWith("Couldn't look up that code.");
     } finally {
+      toastError.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("barcode: a 4xx from on_scan_route keeps the scanned code and leaves the toast to useAction", async () => {
+    vi.useFakeTimers();
+    const toastError = vi.spyOn(toast, "error").mockImplementation(() => {});
+    try {
+      detectMock.mockResolvedValue([{ rawValue: "9781234567897" }]);
+      mutateAsyncMock.mockRejectedValue(new AppError({ code: "not_found", message: "not found", httpStatus: 404 }));
+      const onChange = renderField({ field: "barcode", type: "barcode", on_scan_route: "inventory.findByBarcode" }, "");
+      fireEvent.click(screen.getByRole("button", { name: "Scan barcode" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(onChange).toHaveBeenCalledWith("9781234567897");
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(toastError).not.toHaveBeenCalled();
+    } finally {
+      toastError.mockRestore();
       vi.useRealTimers();
     }
   });

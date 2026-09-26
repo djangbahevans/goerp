@@ -98,7 +98,13 @@ export type { SliderFieldProps } from "./slider-field.js";
 export { SliderField } from "./slider-field.js";
 export type { SpinnerProps } from "./spinner.js";
 export { Spinner } from "./spinner.js";
-export type { StatCardChange, StatCardChangeDirection, StatCardColor, StatCardProps } from "./stat-card.js";
+export type {
+  StatCardChange,
+  StatCardChangeDirection,
+  StatCardColor,
+  StatCardFormat,
+  StatCardProps,
+} from "./stat-card.js";
 export { StatCard } from "./stat-card.js";
 export type { StatusDotColor, StatusDotProps } from "./status-dot.js";
 export { StatusDot } from "./status-dot.js";

@@ -54,6 +54,12 @@ describe("StatCard", () => {
     expect(screen.getByText("Revenue").nextElementSibling?.textContent).toBe(expected);
   });
 
+  it("formats the value as a percentage when format is percent", () => {
+    render(<StatCard label="Conversion" value={0.125} format="percent" />);
+    const expected = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 2 }).format(0.125);
+    expect(screen.getByText("Conversion").nextElementSibling?.textContent).toBe(expected);
+  });
+
   it("tints the value for an at-risk color", () => {
     render(<StatCard label="Out of Stock" value={3} color="red" />);
     expect(screen.getByText("3").className).toContain("text-danger");

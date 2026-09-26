@@ -1,6 +1,7 @@
 import { PermissionContext } from "@goerp/sdk/auth";
 import { MODAL_OVERLAY_CLASSES } from "@goerp/sdk/components";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { useLocation } from "@tanstack/react-router";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { formatShortcutText } from "../shortcuts/shortcut.js";
@@ -63,7 +64,9 @@ export function CommandPalette(): ReactNode {
   }
 
   const builtInCommands = useBuiltInCommands();
-  const recentCommands = useRecentCommands();
+  const { pathname } = useLocation();
+  // The current page is excluded: navigating to it is a no-op.
+  const recentCommands = useRecentCommands().filter((c) => c.id !== `recent:${pathname}`);
   const registeredCommands = useSyncExternalStore(
     (listener) => commandRegistry.subscribe(listener),
     () => commandRegistry.getAll(),
@@ -153,7 +156,11 @@ export function CommandPalette(): ReactNode {
             <div id={listboxId} role="listbox" aria-live="polite" className="flex-1 overflow-y-auto p-2">
               {results.length === 0 && query.trim() !== "" ? (
                 <p className="px-2 py-3 text-sm text-text-secondary">No results for "{query}"</p>
-              ) : results.length === 0 ? null : (
+              ) : results.length === 0 ? (
+                <p className="px-2 py-3 text-sm text-text-secondary">
+                  Start typing to search pages, records and commands.
+                </p>
+              ) : (
                 rows.map(({ command, showGroupHeader }, index) => (
                   <div key={command.id}>
                     {showGroupHeader && (

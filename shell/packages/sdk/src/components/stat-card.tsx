@@ -14,6 +14,8 @@ export interface StatCardChange {
 // danger) for an at-risk metric — never an arbitrary color.
 export type StatCardColor = "red" | "orange";
 
+export type StatCardFormat = "currency" | "percent";
+
 export interface StatCardProps {
   label: string;
   // `undefined` is a real, expected value — the query hasn't resolved yet.
@@ -23,7 +25,7 @@ export interface StatCardProps {
   // no icon library is wired in yet, same posture as ActionButton's icon.
   icon?: string | undefined;
   color?: StatCardColor | undefined;
-  format?: "currency" | undefined;
+  format?: StatCardFormat | undefined;
   currency?: string | undefined;
   href?: string | undefined;
 }
@@ -38,8 +40,8 @@ const COLOR_CLASSES: Record<StatCardColor, string> = {
   orange: "text-warning",
 };
 
-function formatValue(value: number | string, format: "currency" | undefined, currency: string | undefined): string {
-  return format === "currency" ? formatFieldValue(value, "currency", currency, "—") : String(value);
+function formatValue(value: number | string, format: StatCardFormat | undefined, currency: string | undefined): string {
+  return format === undefined ? String(value) : formatFieldValue(value, format, currency, "—");
 }
 
 export function StatCard({ label, value, change, icon, color, format, currency, href }: StatCardProps): ReactNode {

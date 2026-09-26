@@ -91,12 +91,14 @@ async function renderPalette(opts: { permissions?: string[]; auth?: AuthContextV
     ),
   });
   const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: () => null });
+  const contactsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/contacts", component: () => null });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([indexRoute]),
+    routeTree: rootRoute.addChildren([indexRoute, contactsRoute]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
   render(<RouterProvider router={router} />);
+  return router;
 }
 
 function openPalette() {
@@ -260,6 +262,26 @@ describe("CommandPalette", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "zzz-no-match" } });
 
     expect(screen.getByText('No results for "zzz-no-match"')).toBeTruthy();
+  });
+
+  it("shows a hint instead of an empty list when there's no history yet", async () => {
+    await renderPalette();
+    openPalette();
+
+    expect(screen.getByText("Start typing to search pages, records and commands.")).toBeTruthy();
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
+  it("lists earlier pages under Recent, excluding the current page", async () => {
+    const router = await renderPalette();
+    await act(async () => {
+      router.history.push("/contacts");
+      await router.load();
+    });
+    openPalette();
+
+    expect(screen.getAllByRole("option").map((el) => el.textContent)).toEqual(["/"]);
+    expect(screen.queryByText("Start typing to search pages, records and commands.")).toBeNull();
   });
 
   it("shows the built-in Sign Out command and calls logout when executed", async () => {
