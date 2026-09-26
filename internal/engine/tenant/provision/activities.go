@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
@@ -15,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenant/sync"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/jackc/pgx/v5"
@@ -64,6 +66,10 @@ type Activities struct {
 	// subdomain (RegisterDomain) — e.g. slug "acme" + platformDomain
 	// "goerp.io" = "acme.goerp.io".
 	platformDomain string
+
+	// cacheClient is Redis, fail-hard constructed in Engine.New; nil only
+	// in tests that never resolve the tenant by host.
+	cacheClient *cache.Client
 }
 
 func NewActivities(
@@ -75,6 +81,7 @@ func NewActivities(
 	diffEngine *schema.SchemaDiffEngine,
 	moduleRegistry *registry.ModuleRegistry,
 	platformDomain string,
+	cacheClient *cache.Client,
 ) *Activities {
 	return &Activities{
 		tenantStore:    tenantStore,
@@ -85,6 +92,7 @@ func NewActivities(
 		diffEngine:     diffEngine,
 		registry:       moduleRegistry,
 		platformDomain: platformDomain,
+		cacheClient:    cacheClient,
 	}
 }
 
@@ -347,10 +355,19 @@ func (a *Activities) RegisterDomain(ctx context.Context, tenantID, slug string) 
 
 // ActivateTenant flips the tenant to StatusActive — the last step, after
 // which ActiveTenants (and therefore Stage 4 schema sync, and anything
-// else scoped to "active tenants only") starts seeing this tenant.
+// else scoped to "active tenants only") starts seeing this tenant. It then
+// drops the subdomain's host-lookup cache entry, which may hold a "not
+// found" from a visit before the tenant existed, so the new workspace
+// resolves at once. Best-effort, like offboarding's invalidation.
 func (a *Activities) ActivateTenant(ctx context.Context, slug string) error {
 	if _, err := a.tenantStore.UpdateStatus(ctx, slug, tenant.StatusActive, nil); err != nil {
 		return fmt.Errorf("activate tenant: %w", err)
+	}
+	if a.cacheClient != nil {
+		domain := slug + "." + a.platformDomain
+		if err := a.cacheClient.Delete(ctx, tenantresolve.DomainCacheKey(domain)); err != nil {
+			log.Warn().Err(err).Str("slug", slug).Str("domain", domain).Msg("provision: domain cache invalidation failed")
+		}
 	}
 	return nil
 }

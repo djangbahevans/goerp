@@ -721,7 +721,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	// ProvisionTenantWorkflow's activities need moduleRegistry/diffEngine,
 	// which don't exist until here — registered on systemWorker (built
 	// earlier, alongside temporalClient) now, started later in Start.
-	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, roleStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain)
+	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, roleStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain, cacheClient)
 	systemWorker.RegisterWorkflow(tenantprovision.Workflow)
 	systemWorker.RegisterActivity(provisionActivities)
 
