@@ -48,6 +48,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     tenant,
     login: vi.fn(),
     completeHandoff: vi.fn(),
+    selectTenant: vi.fn(),
     logout: vi.fn(async () => {}),
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),

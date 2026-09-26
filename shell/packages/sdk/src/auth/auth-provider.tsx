@@ -9,6 +9,7 @@ import {
   type LoginResult,
   login as loginRequest,
   logout as logoutRequest,
+  selectTenant as selectTenantRequest,
   submitMFACode,
   updatePreferences as updatePreferencesRequest,
   updateProfile as updateProfileRequest,
@@ -122,6 +123,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (code: string): Promise<void> => {
       await signIn(() => exchangeHandoff(code));
     },
+    [signIn],
+  );
+
+  const selectTenant = useCallback(
+    (selectionToken: string, tenant: string): Promise<SignInHandoff | null> =>
+      signIn(() => selectTenantRequest(selectionToken, tenant)),
     [signIn],
   );
 
@@ -239,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       tenant: identity?.tenant ?? null,
       login,
       completeHandoff,
+      selectTenant,
       logout,
       submitMFA,
       updateProfile,
@@ -250,6 +258,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     state,
     login,
     completeHandoff,
+    selectTenant,
     logout,
     submitMFA,
     updateProfile,

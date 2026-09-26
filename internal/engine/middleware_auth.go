@@ -142,16 +142,19 @@ func authMiddleware(checker *authcheck.Checker) func(http.Handler) http.Handler 
 }
 
 // authenticateErrorResponse maps a Checker.Authenticate error to a status
-// code and error code. auth-internals.md §9 step 11 is the only step
-// documented with a distinct status for one particular cause ("permissions
-// declared and user lacks them: 403") — every other rejection (invalid/
-// expired/blocklisted token, inactive user, non-member) collapses to a
-// single generic 401, matching the convention this codebase's existing
-// direct-primitives handlers (mfareverify) already use rather than
-// leaking which specific check failed.
+// code and error code. Two causes have a distinct documented status: a
+// missing declared permission (auth-internals.md §9 step 11, 403
+// permission_denied) and a valid credential for an account with no live
+// role in this tenant (§3 "Tenant membership check in the auth
+// middleware", 403 tenant_membership_required). Every other rejection
+// (invalid/expired/blocklisted token, inactive user) collapses to a single
+// generic 401 rather than leaking which specific check failed.
 func authenticateErrorResponse(err error) (int, string) {
-	if errors.Is(err, authcheck.ErrPermissionDenied) {
+	switch {
+	case errors.Is(err, authcheck.ErrPermissionDenied):
 		return http.StatusForbidden, "permission_denied"
+	case errors.Is(err, authcheck.ErrNotTenantMember):
+		return http.StatusForbidden, "tenant_membership_required"
 	}
 	return http.StatusUnauthorized, "unauthenticated"
 }

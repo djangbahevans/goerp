@@ -10,6 +10,7 @@ export {
   register,
   requestPasswordReset,
   resendVerificationEmail,
+  tenantSelectionFrom,
   verifyEmail,
 } from "./auth-client.js";
 export {
@@ -69,6 +70,7 @@ export type {
   Registration,
   SignInHandoff,
   TenantContext,
+  TenantSelection,
   TOTPEnrollment,
   TOTPEnrollmentConfirmation,
   UpdatePreferencesInput,

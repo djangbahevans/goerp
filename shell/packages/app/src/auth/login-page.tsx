@@ -1,4 +1,4 @@
-import { fetchTenantContext, useAuth, type VerificationEmailRequest } from "@goerp/sdk/auth";
+import { fetchTenantContext, tenantSelectionFrom, useAuth, type VerificationEmailRequest } from "@goerp/sdk/auth";
 import { Button, Checkbox, Countdown, FieldWrapper, PasswordField, TextInput, TextLink } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useQuery } from "@tanstack/react-query";
@@ -6,6 +6,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
 import { handoffURL } from "./handoff-url.js";
+import { pendingTenantSelection } from "./tenant-selection.js";
 import { ResendStatus, type ResendVerification, useVerificationResend } from "./verification-resend.js";
 import { WorkspaceNotFound } from "./workspace-not-found.js";
 
@@ -44,7 +45,6 @@ type Phase = { kind: "idle" } | { kind: "submitting" } | { kind: "locked"; secon
 interface FieldErrors {
   email?: string;
   password?: string;
-  company?: string;
 }
 
 // Used when a 429 arrives without a parseable Retry-After header.
@@ -73,7 +73,6 @@ export function LoginPage({
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [company, setCompany] = useState("");
   const [remember, setRemember] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -107,7 +106,6 @@ export function LoginPage({
   }, [state.status, navigate, redirectTo]);
 
   const resolvedTenant = tenantContext.data?.tenant ?? null;
-  const showCompanyField = tenantContext.isFetched && resolvedTenant === null;
   const submitting = phase.kind === "submitting";
   const locked = phase.kind === "locked";
   // login() rejects outright while the mount-time session check (or a
@@ -126,11 +124,12 @@ export function LoginPage({
     event.preventDefault();
     if (inputsDisabled || sessionCheckPending || !tenantContext.isFetched) return;
 
-    const tenant = resolvedTenant?.slug ?? company.trim();
+    // On the shared-domain host there is no tenant to send; the engine
+    // finds the account's tenants itself.
+    const tenant = resolvedTenant?.slug;
     const errors: FieldErrors = {};
     if (!email.trim()) errors.email = "Enter your email address.";
     if (!password) errors.password = "Enter your password.";
-    if (showCompanyField && !tenant) errors.company = "Enter your company.";
     setFieldErrors(errors);
     setFormError(null);
     setUnverified(null);
@@ -152,6 +151,12 @@ export function LoginPage({
       setPhase({ kind: "idle" });
     } catch (err) {
       loginSubmitted.current = false;
+      const selection = tenantSelectionFrom(err);
+      if (selection) {
+        pendingTenantSelection.set(selection);
+        void navigate({ href: withRedirect("/auth/select-tenant", redirectTo) });
+        return;
+      }
       if (isAppError(err) && err.isRateLimited()) {
         const retryAfter = err.details?.retryAfter;
         const seconds = typeof retryAfter === "number" && retryAfter > 0 ? retryAfter : DEFAULT_LOCKOUT_SECONDS;
@@ -195,20 +200,6 @@ export function LoginPage({
         ))}
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-        {showCompanyField && (
-          <FieldWrapper label="Company" error={fieldErrors.company}>
-            <TextInput
-              autoComplete="organization"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              value={company}
-              disabled={inputsDisabled}
-              onChange={setCompany}
-            />
-          </FieldWrapper>
-        )}
-
         <FieldWrapper label="Email" error={fieldErrors.email}>
           <TextInput
             ref={emailRef}

@@ -21,6 +21,7 @@ import type {
   Registration,
   SignInHandoff,
   TenantContext,
+  TenantSelection,
   TOTPEnrollment,
   TOTPEnrollmentConfirmation,
   UpdatePreferencesInput,
@@ -210,6 +211,37 @@ export async function login(credentials: LoginCredentials): Promise<LoginResult>
       tenant: credentials.tenant,
       remember: credentials.remember ?? false,
     }),
+  });
+  if (!response.ok) throw await readError(response);
+  return toLoginResult((await response.json()) as LoginResponseBody);
+}
+
+// tenantSelectionFrom reads the tenants and selection_token out of a
+// login's 409 tenant_required, or null for any other error.
+export function tenantSelectionFrom(err: unknown): TenantSelection | null {
+  if (!(err instanceof AppError) || err.httpStatus !== 409 || err.code !== "tenant_required") return null;
+  const token = err.details?.selection_token;
+  const raw = err.details?.tenants;
+  if (typeof token !== "string" || token === "" || !Array.isArray(raw)) return null;
+  const tenants = raw.flatMap((entry: unknown) => {
+    if (entry === null || typeof entry !== "object") return [];
+    const { slug, name } = entry as { slug?: unknown; name?: unknown };
+    return typeof slug === "string" && typeof name === "string" ? [{ slug, name }] : [];
+  });
+  return { tenants, selectionToken: token };
+}
+
+// selectTenant backs POST /auth/select-tenant (auth-internals.md §3
+// "Cross-tenant user membership"): it finishes a tenantless login for the
+// chosen tenant. A 401 auth.selection_token_invalid means the token
+// expired or was already used; a 403 tenant_membership_required means the
+// account no longer belongs to that tenant.
+export async function selectTenant(selectionToken: string, tenant: string): Promise<LoginResult> {
+  const response = await fetch("/auth/select-tenant", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selection_token: selectionToken, tenant }),
   });
   if (!response.ok) throw await readError(response);
   return toLoginResult((await response.json()) as LoginResponseBody);

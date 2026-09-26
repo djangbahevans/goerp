@@ -484,6 +484,30 @@ func TestResend_SendsNothingOutsidePendingMembership(t *testing.T) {
 	}
 }
 
+func TestResend_NoTenantNamed_SendsForTheAccountsOnlyTenant(t *testing.T) {
+	f := newFixture(t)
+	if _, err := tenant.NewStore(f.conn).UpdateStatus(t.Context(), f.tenantSlug, tenant.StatusActive, nil); err != nil {
+		t.Fatalf("activate fixture tenant: %v", err)
+	}
+
+	if rec := f.doResend(t, f.email, ""); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	link := f.mailer.waitSent(t)
+	if link.email != f.email || link.tenant != f.tenantSlug {
+		t.Errorf("sent link = %+v, want one for %s in %s", link, f.email, f.tenantSlug)
+	}
+}
+
+func TestResend_NoTenantNamed_NoActiveMembershipSendsNothing(t *testing.T) {
+	f := newFixture(t)
+
+	if rec := f.doResend(t, f.email, ""); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	f.mailer.assertNoneSent(t)
+}
+
 func TestResend_NotATenantMember_SendsNothing(t *testing.T) {
 	f := newFixture(t)
 	otherSlug := fmt.Sprintf("verifyother%d", time.Now().UnixNano())

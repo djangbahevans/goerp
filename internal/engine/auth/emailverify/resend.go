@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -99,9 +100,10 @@ func (h *ResendHandler) resend(ctx context.Context, req resendRequest) error {
 }
 
 // resolve reports ok only for a pending_verification account that is a
-// member of the named tenant. GetBySlug runs before IsMember because
-// IsMember interpolates the slug into a schema name, which is safe only
-// for a slug read back from a real row.
+// member of the named tenant, or, with no tenant named, of exactly one
+// tenant. GetBySlug runs before IsMember because IsMember interpolates the
+// slug into a schema name, which is safe only for a slug read back from a
+// real row.
 func (h *ResendHandler) resolve(ctx context.Context, email, tenantSlug string) (*user.User, *tenant.Tenant, bool, error) {
 	u, err := h.users.GetByEmail(ctx, email)
 	if err != nil {
@@ -112,6 +114,14 @@ func (h *ResendHandler) resolve(ctx context.Context, email, tenantSlug string) (
 	}
 	if u.Status != user.StatusPendingVerification {
 		return nil, nil, false, nil
+	}
+
+	if tenantSlug == "" {
+		memberships, err := membership.TenantsOf(ctx, h.tenants, h.roles, u.ID)
+		if err != nil || len(memberships) != 1 {
+			return nil, nil, false, err
+		}
+		return u, &memberships[0], true, nil
 	}
 
 	t, err := h.tenants.GetBySlug(ctx, tenantSlug)

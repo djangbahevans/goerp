@@ -38,6 +38,7 @@ function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue 
     tenant: TENANT,
     login: vi.fn(),
     completeHandoff: vi.fn(),
+    selectTenant: vi.fn(),
     logout: vi.fn(),
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),

@@ -36,6 +36,7 @@ export function storyAuth(roles: string[]): AuthContextValue {
     tenant,
     login: async () => null,
     completeHandoff: async () => {},
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},

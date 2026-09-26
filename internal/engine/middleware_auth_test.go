@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -565,5 +566,24 @@ func TestRouteAuthMiddleware_EngineNativeAloneDoesNotBypassCheck(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 — EngineNative alone (without EngineBuiltin) must not bypass routeAuthMiddleware", w.Code)
+	}
+}
+
+func TestAuthenticateErrorResponse(t *testing.T) {
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{authcheck.ErrPermissionDenied, http.StatusForbidden, "permission_denied"},
+		{fmt.Errorf("authenticate: %w", authcheck.ErrNotTenantMember), http.StatusForbidden, "tenant_membership_required"},
+		{authcheck.ErrUserNotActive, http.StatusUnauthorized, "unauthenticated"},
+		{errors.New("token expired"), http.StatusUnauthorized, "unauthenticated"},
+	}
+	for _, c := range cases {
+		status, code := authenticateErrorResponse(c.err)
+		if status != c.status || code != c.code {
+			t.Errorf("authenticateErrorResponse(%v) = %d, %q, want %d, %q", c.err, status, code, c.status, c.code)
+		}
 	}
 }

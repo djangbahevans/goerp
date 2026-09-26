@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/auth/tenantselect"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
@@ -195,7 +196,7 @@ func newFixture(t *testing.T) *fixture {
 	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 	handoffs := handoff.NewStore(cacheClient, resolver, testPlatformDomain)
 
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient, auditStore, resolver, handoffs)
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient, auditStore, resolver, handoffs, tenantselect.NewStore(cacheClient))
 
 	return &fixture{
 		handler:    handler,

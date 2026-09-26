@@ -57,6 +57,7 @@ function FakeAuthProvider({
     tenant: isAuthenticated ? state.tenant : null,
     login: async () => null,
     completeHandoff: async () => {},
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},

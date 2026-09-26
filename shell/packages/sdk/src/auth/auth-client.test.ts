@@ -16,7 +16,9 @@ import {
   register,
   requestPasswordReset,
   resendVerificationEmail,
+  selectTenant,
   submitMFACode,
+  tenantSelectionFrom,
   updatePreferences,
   updateProfile,
   verifyEmail,
@@ -746,6 +748,60 @@ describe("exchangeHandoff", () => {
     );
 
     await expect(exchangeHandoff("spent")).rejects.toMatchObject({ code: "auth.handoff_code_invalid" });
+  });
+});
+
+describe("tenant selection", () => {
+  it("reads a login's 409 tenant_required into the tenants and token", async () => {
+    const tenants = [
+      { slug: "acme", name: "Acme Corp" },
+      { slug: "globex", name: "Globex" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(409, {
+          error: { code: "tenant_required", message: "choose", details: { tenants, selection_token: "tok" } },
+        }),
+      ),
+    );
+
+    const err = await login({ email: "ada@example.com", password: "pw" }).catch((e: unknown) => e);
+    expect(tenantSelectionFrom(err)).toEqual({ tenants, selectionToken: "tok" });
+  });
+
+  it("returns null for any other error", () => {
+    expect(
+      tenantSelectionFrom(new AppError({ code: "invalid_credentials", message: "no", httpStatus: 401 })),
+    ).toBeNull();
+    expect(tenantSelectionFrom(new TypeError("network"))).toBeNull();
+  });
+
+  it("posts the pick and returns the handoff", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { handoff: { host: "acme.goerp.io", code: "c0de" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await selectTenant("tok", "acme")).toEqual({
+      kind: "handoff",
+      handoff: { host: "acme.goerp.io", code: "c0de" },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/select-tenant",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ selection_token: "tok", tenant: "acme" }),
+      }),
+    );
+  });
+
+  it("rejects a spent token with its AppError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(401, { error: { code: "auth.selection_token_invalid", message: "expired" } })),
+    );
+
+    await expect(selectTenant("spent", "acme")).rejects.toMatchObject({ code: "auth.selection_token_invalid" });
   });
 });
 
