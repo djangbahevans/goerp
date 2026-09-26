@@ -50,6 +50,30 @@ export {
   createSavedFiltersSetDefaultMutationOptions,
   useSavedFilters,
 } from "./use-saved-filters.js";
+export type {
+  MarkActivityDoneInput,
+  MyScheduledActivity,
+  ScheduleActivityInput,
+  ScheduledActivity,
+  ScheduledActivityChanges,
+  UpdateScheduledActivityInput,
+  UseMyActivitiesOptions,
+  UseMyActivitiesResult,
+  UseScheduledActivitiesResult,
+} from "./use-scheduled-activities.js";
+export {
+  createCancelActivityMutationOptions,
+  createMarkActivityDoneMutationOptions,
+  createMyActivitiesQueryOptions,
+  createScheduleActivityMutationOptions,
+  createScheduledActivitiesQueryOptions,
+  createUpdateActivityMutationOptions,
+  myScheduledActivitiesQueryKey,
+  recordScheduledActivitiesQueryKey,
+  scheduledActivitiesQueryKey,
+  useMyActivities,
+  useScheduledActivities,
+} from "./use-scheduled-activities.js";
 export type { GrantShareInput, RecordShare, SharePermission, UseSharesResult } from "./use-shares.js";
 export { createSharesQueryOptions, useShares } from "./use-shares.js";
 export type { Theme, ThemePreference, UseThemeResult } from "./use-theme.js";
