@@ -1,6 +1,7 @@
 import {
   checkSlug as checkSlugAvailability,
   fetchTenantContext,
+  GLOBAL_PASSWORD_MIN_LENGTH,
   type RegisterOutcome,
   type Registration,
   register as registerAccount,
@@ -73,6 +74,8 @@ export function RegisterPage({
   const workspaceNotFound = tenantContext.data?.workspaceNotFound === true;
   const onTenantHost = Boolean(tenantContext.data?.tenant);
   const appUrl = tenantContext.data?.appUrl ?? null;
+  // Registration founds a new tenant, so the global minimum applies.
+  const minLength = tenantContext.data?.passwordMinLength ?? GLOBAL_PASSWORD_MIN_LENGTH;
 
   // Registration founds a new tenant, so it runs only on the shared-domain host.
   useEffect(() => {
@@ -132,7 +135,7 @@ export function RegisterPage({
     const found: FieldErrors = {};
     if (!name.trim()) found.name = "Enter your name.";
     if (!email.trim()) found.email = "Enter your email address.";
-    const password = validateNewPassword(next, confirm, strongEnough, "password");
+    const password = validateNewPassword(next, confirm, strongEnough, "password", minLength);
     if (password.next) found.next = password.next;
     if (password.confirm) found.confirm = password.confirm;
     if (!company.trim()) found.company = "Enter your company name.";
@@ -261,6 +264,7 @@ export function RegisterPage({
           disabled={inputsDisabled}
           nextLabel="Password"
           confirmLabel="Confirm password"
+          minLength={minLength}
         />
         <div className="flex flex-col gap-1">
           <TextField

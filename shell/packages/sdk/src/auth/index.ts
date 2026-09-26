@@ -7,6 +7,8 @@ export {
   exchangeHandoff,
   fetchInviteInfo,
   fetchTenantContext,
+  GLOBAL_PASSWORD_MIN_LENGTH,
+  passwordMinLengthFrom,
   register,
   requestPasswordReset,
   resendVerificationEmail,

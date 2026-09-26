@@ -32,6 +32,7 @@ const TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 const CODES = Array.from({ length: 10 }, (_, i) => `AAAA${i}-BBBBB`);
 

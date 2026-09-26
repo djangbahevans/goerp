@@ -4,7 +4,9 @@ import {
   createPermissionContextValue,
   PermissionContext,
   permissionDataRef,
+  type TenantContext,
 } from "@goerp/sdk/auth";
+import { AppError } from "@goerp/sdk/error";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -163,9 +165,12 @@ describe("/auth/reset-password", () => {
 });
 
 describe("ResetPasswordPage", () => {
-  async function renderPage(outcome: "signed_in" | "login_required") {
+  async function renderPage(
+    outcome: "signed_in" | "login_required" | (() => Promise<"signed_in" | "login_required">),
+    minLength = 12,
+  ) {
     const redirect = vi.fn();
-    const confirmReset = vi.fn(async () => outcome);
+    const confirmReset = vi.fn(typeof outcome === "function" ? outcome : async () => outcome);
     const rootRoute = createRootRoute({});
     const page = createRoute({
       getParentRoute: () => rootRoute,
@@ -177,7 +182,13 @@ describe("ResetPasswordPage", () => {
       history: createMemoryHistory({ initialEntries: ["/"] }),
     });
     await router.load();
-    render(<RouterProvider router={router} />);
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["auth", "tenant-context"], { ...SHARED_CONTEXT, passwordMinLength: minLength });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
     return { redirect, confirmReset };
   }
 
@@ -199,4 +210,39 @@ describe("ResetPasswordPage", () => {
 
     await waitFor(() => expect(redirect).toHaveBeenCalledWith("/auth/login"));
   });
+
+  it("shows and enforces the tenant's minimum length", async () => {
+    await renderPage("signed_in", 30);
+
+    expect(await screen.findByText(/At least 30 characters/)).toBeTruthy();
+    await fillPasswords(STRONG);
+    submit();
+    expect(await screen.findByText(/at least 30 characters, rated Fair or better/)).toBeTruthy();
+  });
+
+  it("takes the minimum from a length rejection", async () => {
+    await renderPage(async () => {
+      throw new AppError({
+        code: "auth.password_too_weak",
+        message: "password is too short",
+        httpStatus: 422,
+        details: { min_length: 30 },
+      });
+    });
+
+    await fillPasswords(STRONG);
+    submit();
+
+    expect(await screen.findByText("Password is too short.")).toBeTruthy();
+    expect(screen.getByText(/At least 30 characters/)).toBeTruthy();
+  });
 });
+
+const SHARED_CONTEXT: TenantContext = {
+  tenant: null,
+  registrationEnabled: false,
+  termsUrl: null,
+  appUrl: "https://app.goerp.test",
+  workspaceNotFound: false,
+  passwordMinLength: 12,
+};

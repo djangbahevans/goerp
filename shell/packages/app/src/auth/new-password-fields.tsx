@@ -1,27 +1,31 @@
+import { GLOBAL_PASSWORD_MIN_LENGTH } from "@goerp/sdk/auth";
 import { PasswordField, PasswordStrengthMeter } from "@goerp/sdk/components";
 import type { ReactNode } from "react";
 import { PASSWORD_MISMATCH } from "./password-messages.js";
 
-const TOO_WEAK = "Choose a stronger password: at least 12 characters, rated Fair or better.";
+function tooWeak(minLength: number): string {
+  return `Choose a stronger password: at least ${minLength} characters, rated Fair or better.`;
+}
 
 export interface NewPasswordErrors {
   next?: string | undefined;
   confirm?: string | undefined;
 }
 
-// shell-ux.md §2.4/§2.5's client-side rules: refuse under 12 characters or
-// below strength score 2 (strongEnough, from the meter), and require the
-// confirmation to match.
+// shell-ux.md §2.4/§2.5's client-side rules: refuse under the effective
+// minimum length or below strength score 2 (strongEnough, from the meter),
+// and require the confirmation to match.
 // noun is "password" where there's no old one to replace (registration).
 export function validateNewPassword(
   next: string,
   confirm: string,
   strongEnough: boolean,
   noun = "new password",
+  minLength = GLOBAL_PASSWORD_MIN_LENGTH,
 ): NewPasswordErrors {
   const errors: NewPasswordErrors = {};
   if (!next) errors.next = `Enter a ${noun}.`;
-  else if (!strongEnough) errors.next = TOO_WEAK;
+  else if (!strongEnough) errors.next = tooWeak(minLength);
   if (!confirm) errors.confirm = `Confirm your ${noun}.`;
   else if (confirm !== next) errors.confirm = PASSWORD_MISMATCH;
   return errors;
@@ -43,6 +47,8 @@ export interface NewPasswordFieldsProps {
   disabled?: boolean | undefined;
   nextLabel?: string | undefined;
   confirmLabel?: string | undefined;
+  // The effective minimum password length.
+  minLength?: number | undefined;
 }
 
 export function NewPasswordFields({
@@ -56,6 +62,7 @@ export function NewPasswordFields({
   disabled,
   nextLabel = "New password",
   confirmLabel = "Confirm new password",
+  minLength = GLOBAL_PASSWORD_MIN_LENGTH,
 }: NewPasswordFieldsProps): ReactNode {
   return (
     <>
@@ -68,7 +75,7 @@ export function NewPasswordFields({
           error={errors.next}
           disabled={disabled}
         />
-        <PasswordStrengthMeter password={next} onValidityChange={onStrengthChange} />
+        <PasswordStrengthMeter password={next} minLength={minLength} onValidityChange={onStrengthChange} />
       </div>
       <PasswordField
         label={confirmLabel}

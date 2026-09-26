@@ -114,3 +114,16 @@ func TestEffective_IgnoresTenantMinLengthAboveGlobalMax(t *testing.T) {
 		t.Errorf("policy = %+v, want Global", policy)
 	}
 }
+
+func TestMinLength_TenantOrGlobal(t *testing.T) {
+	store, config, tenantID := newPolicyEnv(t)
+	if got := store.MinLength(t.Context(), ""); got != Global.MinLength {
+		t.Errorf("MinLength(no tenant) = %d, want %d", got, Global.MinLength)
+	}
+	if err := config.Set(t.Context(), tenantID, KeyMinLength, "16"); err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+	if got := store.MinLength(t.Context(), tenantID); got != 16 {
+		t.Errorf("MinLength(tenant) = %d, want 16", got)
+	}
+}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -45,10 +46,11 @@ type Handler struct {
 	files            *files.Store
 	backend          storage.Backend
 	availableLocales []string
+	policies         *password.PolicyStore
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, backend storage.Backend, availableLocales []string) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, backend: backend, availableLocales: availableLocales}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, backend storage.Backend, availableLocales []string, policies *password.PolicyStore) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, backend: backend, availableLocales: availableLocales, policies: policies}
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -113,6 +115,9 @@ type meTenant struct {
 	DefaultLocale    string   `json:"default_locale"`
 	DefaultTimezone  string   `json:"default_timezone"`
 	AvailableLocales []string `json:"available_locales"`
+	// PasswordMinLength is the effective minimum password length
+	// (auth-internals.md §3 "Password strength validation").
+	PasswordMinLength int `json:"password_min_length"`
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -200,13 +205,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			DateFormat:       prefs.DateFormat,
 		},
 		Tenant: meTenant{
-			ID:               tenantCtx.TenantID,
-			Slug:             tenantCtx.Slug,
-			Name:             tenantCtx.Name,
-			Plan:             string(tenantCtx.Plan),
-			DefaultLocale:    l10n.PlatformDefaultLocale,
-			DefaultTimezone:  l10n.PlatformDefaultTimezone,
-			AvailableLocales: h.availableLocales,
+			ID:                tenantCtx.TenantID,
+			Slug:              tenantCtx.Slug,
+			Name:              tenantCtx.Name,
+			Plan:              string(tenantCtx.Plan),
+			DefaultLocale:     l10n.PlatformDefaultLocale,
+			DefaultTimezone:   l10n.PlatformDefaultTimezone,
+			AvailableLocales:  h.availableLocales,
+			PasswordMinLength: h.policies.MinLength(ctx, tenantCtx.TenantID),
 		},
 	})
 }

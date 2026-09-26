@@ -53,6 +53,7 @@ interface MeResponseBody {
     default_locale: string;
     default_timezone: string;
     available_locales: string[];
+    password_min_length?: number;
   };
 }
 
@@ -83,7 +84,24 @@ function mapTenant(tenant: MeResponseBody["tenant"]): CurrentTenant {
     defaultLocale: tenant.default_locale,
     defaultTimezone: tenant.default_timezone,
     availableLocales: tenant.available_locales,
+    passwordMinLength: minLengthOr(tenant.password_min_length),
   };
+}
+
+// The global minimum password length (auth-internals.md §3 "Password
+// strength validation"): the fallback when a response carries none.
+export const GLOBAL_PASSWORD_MIN_LENGTH = 12;
+
+function minLengthOr(value: unknown): number {
+  return typeof value === "number" && value > 0 ? value : GLOBAL_PASSWORD_MIN_LENGTH;
+}
+
+// passwordMinLengthFrom reads details.min_length off a 422
+// auth.password_too_weak, or null for any other error.
+export function passwordMinLengthFrom(err: unknown): number | null {
+  if (!(err instanceof AppError) || err.code !== "auth.password_too_weak") return null;
+  const value = err.details?.min_length;
+  return typeof value === "number" && value > 0 ? value : null;
 }
 
 // A 429's Retry-After header (whole seconds) surfaces as
@@ -155,6 +173,7 @@ export async function fetchTenantContext(): Promise<TenantContext | null> {
         termsUrl: null,
         appUrl: nonEmptyString(error.details?.app_url),
         workspaceNotFound: true,
+        passwordMinLength: GLOBAL_PASSWORD_MIN_LENGTH,
       };
     }
     const body = (await response.json()) as {
@@ -162,6 +181,7 @@ export async function fetchTenantContext(): Promise<TenantContext | null> {
       registration_enabled: boolean;
       terms_url?: string | null;
       app_url?: string;
+      password_min_length?: number;
     };
     return {
       tenant: body.tenant ? { slug: body.tenant.slug, name: body.tenant.name } : null,
@@ -169,6 +189,7 @@ export async function fetchTenantContext(): Promise<TenantContext | null> {
       termsUrl: nonEmptyString(body.terms_url),
       appUrl: nonEmptyString(body.app_url),
       workspaceNotFound: false,
+      passwordMinLength: minLengthOr(body.password_min_length),
     };
   } catch {
     return null;
@@ -468,12 +489,14 @@ export async function fetchInviteInfo(link: InviteLink): Promise<InviteInfo> {
     email: string;
     name: string | null;
     password_required: boolean;
+    password_min_length?: number;
   };
   return {
     tenantName: body.tenant_name,
     email: body.email,
     name: body.name,
     passwordRequired: body.password_required,
+    passwordMinLength: minLengthOr(body.password_min_length),
   };
 }
 

@@ -1,6 +1,14 @@
-import { confirmPasswordReset, type PasswordResetConfirmation, type PasswordResetOutcome } from "@goerp/sdk/auth";
+import {
+  confirmPasswordReset,
+  fetchTenantContext,
+  GLOBAL_PASSWORD_MIN_LENGTH,
+  type PasswordResetConfirmation,
+  type PasswordResetOutcome,
+  passwordMinLengthFrom,
+} from "@goerp/sdk/auth";
 import { Button, Countdown } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
+import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { ButtonLink } from "../router/button-link.js";
 import { AuthLayout } from "./auth-layout.js";
@@ -52,6 +60,16 @@ export function ResetPasswordPage({
   const [errors, setErrors] = useState<NewPasswordErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>(token ? { kind: "idle" } : { kind: "expired" });
+  const tenantContext = useQuery({
+    queryKey: ["auth", "tenant-context"],
+    queryFn: fetchTenantContext,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
+  // A 422's details.min_length is the rule the engine applied, which the
+  // tenant-context lookup can't know on the shared-domain host.
+  const [rejectedMinLength, setRejectedMinLength] = useState<number | null>(null);
+  const minLength = rejectedMinLength ?? tenantContext.data?.passwordMinLength ?? GLOBAL_PASSWORD_MIN_LENGTH;
 
   // Only a 404 moves here from the form, whose focused button unmounts.
   useEffect(() => {
@@ -70,7 +88,7 @@ export function ResetPasswordPage({
     event.preventDefault();
     if (inputsDisabled || !token) return;
 
-    const found = validateNewPassword(next, confirm, strongEnough);
+    const found = validateNewPassword(next, confirm, strongEnough, undefined, minLength);
     setErrors(found);
     setFormError(null);
     if (Object.keys(found).length > 0) return;
@@ -92,6 +110,7 @@ export function ResetPasswordPage({
       }
       setPhase({ kind: "idle" });
       if (isAppError(err) && err.code === "auth.password_too_weak") {
+        setRejectedMinLength(passwordMinLengthFrom(err) ?? rejectedMinLength);
         setErrors({ next: policyMessageAsSentence(err.message) });
       } else {
         setFormError(
@@ -135,6 +154,7 @@ export function ResetPasswordPage({
           onStrengthChange={setStrongEnough}
           errors={errors}
           disabled={inputsDisabled}
+          minLength={minLength}
         />
 
         <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">

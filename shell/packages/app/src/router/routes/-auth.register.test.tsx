@@ -46,6 +46,7 @@ const ENABLED: TenantContext = {
   termsUrl: null,
   appUrl: "https://app.goerp.test",
   workspaceNotFound: false,
+  passwordMinLength: 12,
 };
 
 afterEach(() => {

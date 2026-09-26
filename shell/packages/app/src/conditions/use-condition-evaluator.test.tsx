@@ -28,6 +28,7 @@ const tenant: CurrentTenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 function session(overrides: Partial<CurrentUser> = {}, permissions: string[] = ["sales:order:confirm"]) {

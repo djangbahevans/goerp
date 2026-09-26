@@ -71,6 +71,33 @@ func (s *PolicyStore) Effective(ctx context.Context, tenantID string) (Policy, i
 	return effective, version, nil
 }
 
+// MinLength is the effective minimum password length for a form to show:
+// Effective's for tenantID, or Global's when tenantID is "" or its policy
+// can't be read (logged).
+func (s *PolicyStore) MinLength(ctx context.Context, tenantID string) int {
+	if tenantID == "" {
+		return Global.MinLength
+	}
+	policy, _, err := s.Effective(ctx, tenantID)
+	if err != nil {
+		log.Warn().Err(err).Str("tenant_id", tenantID).Msg("password: effective min length lookup failed, reporting the global minimum")
+		return Global.MinLength
+	}
+	return policy.MinLength
+}
+
+// TooWeakBody is the 422 auth.password_too_weak body: err's message, with
+// the minimum length p enforces as details.min_length.
+func TooWeakBody(err error, p Policy) map[string]any {
+	return map[string]any{
+		"error": map[string]any{
+			"code":    "auth.password_too_weak",
+			"message": err.Error(),
+			"details": map[string]any{"min_length": p.MinLength},
+		},
+	}
+}
+
 func parseInt(tenantID string, values map[string]string, key string, dst *int) {
 	v, ok := values[key]
 	if !ok {

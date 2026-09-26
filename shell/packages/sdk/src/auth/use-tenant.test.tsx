@@ -28,6 +28,7 @@ const TENANT: CurrentTenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue {

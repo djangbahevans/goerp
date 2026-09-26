@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
@@ -17,7 +19,7 @@ func TestBuildChain_AuthMeReachesHandlerThroughRealRouteTable(t *testing.T) {
 	f := newChainFixture(t)
 
 	userStore := user.NewStore(f.conn)
-	authMeHandler := authme.NewHandler(f.resolver, f.checker, userStore, nil, nil, []string{"en"})
+	authMeHandler := authme.NewHandler(f.resolver, f.checker, userStore, nil, nil, []string{"en"}, password.NewPolicyStore(tenantconfig.NewStore(f.conn)))
 	h := f.chain(map[string]http.Handler{"GET /auth/me": authMeHandler})
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)

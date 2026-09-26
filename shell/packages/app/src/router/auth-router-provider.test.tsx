@@ -31,6 +31,7 @@ const FAKE_TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 const AUTHENTICATED: AuthState = { status: "authenticated", user: FAKE_USER, tenant: FAKE_TENANT };
 

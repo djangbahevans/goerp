@@ -39,6 +39,7 @@ function auth(timezone: string | null, defaultTimezone = "UTC"): AuthContextValu
     defaultLocale: "en",
     defaultTimezone,
     availableLocales: ["en"],
+    passwordMinLength: 12,
   };
   return {
     state: { status: "authenticated", user, tenant },

@@ -516,6 +516,9 @@ func TestConfirm_WeakPassword_Returns422AndKeepsToken(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "auth.password_too_weak" {
 		t.Fatalf("status = %d, body = %s, want 422 auth.password_too_weak", rec.Code, rec.Body.String())
 	}
+	if got := minLengthDetail(t, rec); got != float64(password.Global.MinLength) {
+		t.Errorf("details.min_length = %v, want %d", got, password.Global.MinLength)
+	}
 	if !f.passwordMatches(t, oldPassword) {
 		t.Error("password changed despite failing validation")
 	}
@@ -666,4 +669,11 @@ func TestConfirm_Overloaded_Returns503AndKeepsToken(t *testing.T) {
 	if retry := f.doConfirm(t, token, newPassword); retry.Code != http.StatusOK {
 		t.Errorf("retry status = %d, want 200 — an overloaded confirm must not consume the token", retry.Code)
 	}
+}
+
+func minLengthDetail(t *testing.T, rec *httptest.ResponseRecorder) any {
+	t.Helper()
+	e, _ := decodeBody(t, rec)["error"].(map[string]any)
+	details, _ := e["details"].(map[string]any)
+	return details["min_length"]
 }

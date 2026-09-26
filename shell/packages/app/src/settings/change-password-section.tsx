@@ -1,4 +1,4 @@
-import { useAuth } from "@goerp/sdk/auth";
+import { GLOBAL_PASSWORD_MIN_LENGTH, passwordMinLengthFrom, useAuth } from "@goerp/sdk/auth";
 import { Button, PasswordField, PasswordStrengthMeter, SectionCard } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
@@ -20,7 +20,7 @@ interface FieldErrors {
 // form's "Save changes": it's a separate request that signs out every other
 // session.
 export function ChangePasswordSection(): ReactNode {
-  const { changePassword } = useAuth();
+  const { changePassword, tenant } = useAuth();
   const hash = useLocation({ select: (location) => location.hash });
   const sectionRef = useRef<HTMLDivElement>(null);
 
@@ -29,6 +29,10 @@ export function ChangePasswordSection(): ReactNode {
   const [confirm, setConfirm] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  // A 422's details.min_length is the rule the engine applied, should the
+  // tenant's policy have changed since the session was loaded.
+  const [rejectedMinLength, setRejectedMinLength] = useState<number | null>(null);
+  const minLength = rejectedMinLength ?? tenant?.passwordMinLength ?? GLOBAL_PASSWORD_MIN_LENGTH;
 
   useEffect(() => {
     if (hash !== CHANGE_PASSWORD_ANCHOR) return;
@@ -66,6 +70,7 @@ export function ChangePasswordSection(): ReactNode {
         setCurrent("");
         setErrors({ current: "Current password is incorrect." });
       } else if (isAppError(err) && err.code === "auth.password_too_weak") {
+        setRejectedMinLength(passwordMinLengthFrom(err) ?? rejectedMinLength);
         setErrors({ next: policyMessageAsSentence(err.message) });
       } else {
         toast.error("Couldn't change your password. Try again.");
@@ -97,7 +102,7 @@ export function ChangePasswordSection(): ReactNode {
               disabled={submitting}
             />
             {/* Guidance only: the server's tenant policy decides. */}
-            <PasswordStrengthMeter password={next} />
+            <PasswordStrengthMeter password={next} minLength={minLength} />
           </div>
           <PasswordField
             label="Confirm new password"

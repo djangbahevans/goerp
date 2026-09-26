@@ -354,6 +354,9 @@ func TestAccept_WeakPasswordReturns422AndKeepsTheInvite(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "auth.password_too_weak" {
 		t.Fatalf("status = %d, body = %s, want 422 auth.password_too_weak", rec.Code, rec.Body.String())
 	}
+	if got := minLengthDetail(t, rec); got != float64(password.Global.MinLength) {
+		t.Errorf("details.min_length = %v, want %d", got, password.Global.MinLength)
+	}
 	if f.isMember(t, userID) {
 		t.Error("membership granted despite a rejected password")
 	}
@@ -421,5 +424,33 @@ func TestAccept_SuspendedInviteeIsNotReactivated(t *testing.T) {
 	}
 	if f.isMember(t, userID) {
 		t.Error("membership granted to a suspended invitee")
+	}
+}
+
+func minLengthDetail(t *testing.T, rec *httptest.ResponseRecorder) any {
+	t.Helper()
+	e, _ := decodeBody(t, rec)["error"].(map[string]any)
+	details, _ := e["details"].(map[string]any)
+	return details["min_length"]
+}
+
+func TestInfoAndAccept_UseTheTenantsMinimumLength(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "30"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	_, token := f.invite(t, f.newEmail())
+
+	info := f.doInfo(t, f.tenantSlug, token)
+	if got := decodeBody(t, info)["password_min_length"]; got != float64(30) {
+		t.Errorf("info password_min_length = %v, want the tenant's 30", got)
+	}
+
+	rec := f.doAccept(t, token, newPassword)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %s, want 422 for a password under the tenant's minimum", rec.Code, rec.Body.String())
+	}
+	if got := minLengthDetail(t, rec); got != float64(30) {
+		t.Errorf("details.min_length = %v, want 30", got)
 	}
 }

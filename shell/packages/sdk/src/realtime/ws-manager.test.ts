@@ -26,6 +26,7 @@ const tenant: CurrentTenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 const CONNECTING = 0;

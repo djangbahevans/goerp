@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
@@ -24,6 +25,7 @@ type Handler struct {
 	termsURL            *string
 	appBaseURL          string
 	sharedHost          string
+	policies            *password.PolicyStore
 }
 
 type Config struct {
@@ -32,10 +34,11 @@ type Config struct {
 	TermsURL string
 	// AppBaseURL is GOERP_APP_BASE_URL; its host is the shared domain.
 	AppBaseURL string
+	Policies   *password.PolicyStore
 }
 
 func NewHandler(tenants *tenantresolve.Resolver, cfg Config) *Handler {
-	h := &Handler{tenants: tenants, registrationEnabled: cfg.RegistrationEnabled, appBaseURL: cfg.AppBaseURL}
+	h := &Handler{tenants: tenants, registrationEnabled: cfg.RegistrationEnabled, appBaseURL: cfg.AppBaseURL, policies: cfg.Policies}
 	if cfg.TermsURL != "" {
 		h.termsURL = &cfg.TermsURL
 	}
@@ -64,6 +67,9 @@ type response struct {
 	RegistrationEnabled bool           `json:"registration_enabled"`
 	TermsURL            *string        `json:"terms_url"`
 	AppURL              string         `json:"app_url"`
+	// PasswordMinLength is the effective minimum password length: the
+	// resolved tenant's, or the global one on the shared domain.
+	PasswordMinLength int `json:"password_min_length"`
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -85,9 +91,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tenantCtx, err := h.tenants.ResolveByHost(r.Context(), r.Host)
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, response{Tenant: &tenantSummary{Slug: tenantCtx.Slug, Name: tenantCtx.Name}, RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL, AppURL: h.appBaseURL})
+		writeJSON(w, http.StatusOK, response{Tenant: &tenantSummary{Slug: tenantCtx.Slug, Name: tenantCtx.Name}, RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL, AppURL: h.appBaseURL, PasswordMinLength: h.policies.MinLength(r.Context(), tenantCtx.TenantID)})
 	case errors.Is(err, tenantresolve.ErrTenantNotFound) && h.isSharedHost(r.Host):
-		writeJSON(w, http.StatusOK, response{RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL, AppURL: h.appBaseURL})
+		writeJSON(w, http.StatusOK, response{RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL, AppURL: h.appBaseURL, PasswordMinLength: password.Global.MinLength})
 	case errors.Is(err, tenantresolve.ErrTenantNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]any{
 			"error": map[string]any{"code": "tenant_not_found", "message": "no workspace at this address", "details": map[string]string{"app_url": h.appBaseURL}},

@@ -46,6 +46,7 @@ function authWithRoles(roles: string[], overrides: Partial<AuthContextValue> = {
     defaultLocale: "en",
     defaultTimezone: "UTC",
     availableLocales: ["en"],
+    passwordMinLength: 12,
   };
   return {
     state: { status: "authenticated", user, tenant },

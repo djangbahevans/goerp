@@ -30,6 +30,7 @@ const TENANT: CurrentTenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en", "fr", "ar"],
+  passwordMinLength: 12,
 };
 
 function withAuth(user: CurrentUser, updatePreferences: AuthContextValue["updatePreferences"]): Decorator {

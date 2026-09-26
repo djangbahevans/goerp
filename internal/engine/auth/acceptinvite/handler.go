@@ -119,10 +119,11 @@ func (h *Handlers) Info(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]any{
-		"tenant_name":       t.Name,
-		"email":             u.Email,
-		"name":              name,
-		"password_required": u.PasswordHash == nil,
+		"tenant_name":         t.Name,
+		"email":               u.Email,
+		"name":                name,
+		"password_required":   u.PasswordHash == nil,
+		"password_min_length": h.policies.MinLength(ctx, t.ID),
 	})
 }
 
@@ -162,7 +163,9 @@ func (h *Handlers) Accept(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := policy.Validate(req.Password, u.Email); err != nil {
-			writeJSONError(w, http.StatusUnprocessableEntity, "auth.password_too_weak", err.Error())
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			writeJSON(w, password.TooWeakBody(err, policy))
 			return
 		}
 		slot, err := h.hasher.Acquire(ctx)

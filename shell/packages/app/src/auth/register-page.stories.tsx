@@ -12,6 +12,7 @@ const ENABLED: TenantContext = {
   termsUrl: null,
   appUrl: "https://app.goerp.io",
   workspaceNotFound: false,
+  passwordMinLength: 12,
 };
 
 // The tenant-context query is pre-seeded so no story hits the network.

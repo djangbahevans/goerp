@@ -5,6 +5,7 @@ import {
   type InviteAcceptOutcome,
   type InviteInfo,
   type InviteLink,
+  passwordMinLengthFrom,
 } from "@goerp/sdk/auth";
 import { Button, Countdown, FieldWrapper, Spinner, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
@@ -148,6 +149,10 @@ function NewAccountForm({
   const [errors, setErrors] = useState<NewPasswordErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  // A 422's details.min_length is the rule the engine applied, should the
+  // tenant's policy have changed since the info lookup.
+  const [rejectedMinLength, setRejectedMinLength] = useState<number | null>(null);
+  const minLength = rejectedMinLength ?? info.passwordMinLength;
 
   const submitting = phase.kind === "submitting";
   const locked = phase.kind === "locked";
@@ -157,7 +162,7 @@ function NewAccountForm({
     event.preventDefault();
     if (inputsDisabled) return;
 
-    const found = validateNewPassword(next, confirm, strongEnough);
+    const found = validateNewPassword(next, confirm, strongEnough, undefined, minLength);
     setErrors(found);
     setFormError(null);
     if (Object.keys(found).length > 0) return;
@@ -179,6 +184,7 @@ function NewAccountForm({
       }
       setPhase({ kind: "idle" });
       if (isAppError(err) && err.code === "auth.password_too_weak") {
+        setRejectedMinLength(passwordMinLengthFrom(err) ?? rejectedMinLength);
         setErrors({ next: policyMessageAsSentence(err.message) });
       } else {
         setFormError(acceptErrorMessage(err));
@@ -216,6 +222,7 @@ function NewAccountForm({
           onStrengthChange={setStrongEnough}
           errors={errors}
           disabled={inputsDisabled}
+          minLength={minLength}
         />
 
         <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">

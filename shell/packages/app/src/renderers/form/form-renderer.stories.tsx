@@ -265,6 +265,7 @@ const RECORD: Row = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
   is_vip: true,
   founded: "2016-04-01",
   account_manager: { id: "u1", display_name: "Jordan Lee" },

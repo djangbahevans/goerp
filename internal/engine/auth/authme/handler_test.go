@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
@@ -124,7 +125,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	filesStore := files.NewStore(conn)
 
-	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, backend, testAvailableLocales)
+	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, backend, testAvailableLocales, password.NewPolicyStore(configStore))
 
 	slug := fmt.Sprintf("authmetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Test Co")
@@ -725,4 +726,28 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func TestServeHTTP_ReportsTheEffectivePasswordMinLength(t *testing.T) {
+	f := newFixture(t)
+	accessToken := f.issueAccessToken(t)
+	me := func() int {
+		t.Helper()
+		rec := f.doMe(t, f.domain, accessToken)
+		var resp meResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		return resp.Tenant.PasswordMinLength
+	}
+
+	if got := me(); got != password.Global.MinLength {
+		t.Errorf("tenant.password_min_length = %d, want the global %d", got, password.Global.MinLength)
+	}
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "14"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	if got := me(); got != 14 {
+		t.Errorf("tenant.password_min_length = %d, want the tenant's 14", got)
+	}
 }
