@@ -49,7 +49,8 @@ export interface LoginCredentials {
 
 export interface PasswordResetRequest {
   email: string;
-  tenant: string;
+  // Omitted on the shared-domain host: the account's own tenants.
+  tenant?: string | undefined;
 }
 
 export interface PasswordResetConfirmation {

@@ -90,9 +90,14 @@ func (m *SMTPMailer) SendMFAReset(ctx context.Context, email string) error {
 
 // SendPasswordReset carries the reset link — auth-internals.md §3
 // "Password reset", template auth.password_reset.
+// With no tenantSlug (an account in several tenants that named none), the
+// link is on the shared-domain host and names no tenant.
 func (m *SMTPMailer) SendPasswordReset(ctx context.Context, email, tenantSlug, rawToken string) error {
 	link := fmt.Sprintf("%s/auth/reset-password?token=%s&tenant=%s",
 		m.tenantBaseURL(tenantSlug), url.QueryEscape(rawToken), url.QueryEscape(tenantSlug))
+	if tenantSlug == "" {
+		link = fmt.Sprintf("%s/auth/reset-password?token=%s", strings.TrimSuffix(m.cfg.BaseURL, "/"), url.QueryEscape(rawToken))
+	}
 
 	const subject = "Reset your password"
 	text := fmt.Sprintf("A password reset was requested for your account.\n\n"+

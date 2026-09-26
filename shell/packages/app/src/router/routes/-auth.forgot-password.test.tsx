@@ -147,22 +147,15 @@ describe("/auth/forgot-password", () => {
     expect(unregistered.container.innerHTML).toBe(registeredHtml);
   });
 
-  it("asks for the company on a shared domain and sends it as the tenant", async () => {
+  it("asks only for the email on a shared domain and sends no tenant", async () => {
     const fetchMock = stubFetch(SHARED_DOMAIN);
     const { submit } = await renderPage();
+    expect(screen.queryByLabelText("Company")).toBeNull();
 
     submitEmail(submit, "ada@example.com");
-    expect(await screen.findByText("Enter your company.")).toBeTruthy();
-    expect(resetCalls(fetchMock)).toHaveLength(0);
-
-    fireEvent.change(screen.getByLabelText("Company"), { target: { value: " globex " } });
-    fireEvent.click(submit);
 
     await screen.findByText(SUCCESS_MESSAGE);
-    expect(JSON.parse(String(resetCalls(fetchMock)[0]?.[1]?.body))).toEqual({
-      email: "ada@example.com",
-      tenant: "globex",
-    });
+    expect(JSON.parse(String(resetCalls(fetchMock)[0]?.[1]?.body))).toEqual({ email: "ada@example.com" });
   });
 
   it("requires an email without calling the endpoint", async () => {
