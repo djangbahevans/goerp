@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Go: Debug Engine (dev)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/engine",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "GOERP_DB_PRIMARY_DSN": "postgres://engine_user:dev@localhost:6432/goerp_dev",
+        "GOERP_DB_SCHEMA_SYNC_DSN": "postgres://schema_sync_user:dev@localhost:55432/goerp_dev",
+        "GOERP_ADMIN_TOKEN": "dev-admin-token",
+        "GOERP_STORAGE_LOCAL_DIR": "${workspaceFolder}/storage",
+        "GOERP_MODULE_DIR": "${workspaceFolder}/.dev/modules",
+        "GOERP_PLATFORM_DOMAIN": "localhost",
+        "GOERP_REGISTRATION_ENABLED": "true",
+        "GOERP_APP_BASE_URL": "http://localhost:5173",
+        "GOERP_ENV": "development"
+      }
+    }
+  ]
+}

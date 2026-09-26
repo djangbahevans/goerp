@@ -8,6 +8,7 @@ GOERP_ADMIN_TOKEN ?= dev-admin-token
 GOERP_STORAGE_LOCAL_DIR ?= $(CURDIR)/storage
 GOERP_MODULE_DIR ?= $(CURDIR)/.dev/modules
 GOERP_PLATFORM_DOMAIN ?= localhost
+GOERP_REGISTRATION_ENABLED ?= true
 
 # The package lists of the CLI and engine jobs in .github/workflows/go.yml,
 # which run these targets with CI's own GO_TEST_FLAGS.
@@ -34,6 +35,7 @@ engine: ## Run the engine against the dev infrastructure, loading modules from G
 	GOERP_STORAGE_LOCAL_DIR='$(GOERP_STORAGE_LOCAL_DIR)' \
 	GOERP_MODULE_DIR='$(GOERP_MODULE_DIR)' \
 	GOERP_PLATFORM_DOMAIN='$(GOERP_PLATFORM_DOMAIN)' \
+	GOERP_REGISTRATION_ENABLED='$(GOERP_REGISTRATION_ENABLED)' \
 	go run ./cmd/engine
 
 module: ## Build module M (e.g. M=modules/demo) into GOERP_MODULE_DIR; restart the engine to load it

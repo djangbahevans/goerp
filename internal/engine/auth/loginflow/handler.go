@@ -165,7 +165,7 @@ func (h *Handler) checkClientLimits(w http.ResponseWriter, r *http.Request, emai
 
 // tenantRateExceededMetadata is login.tenant_rate_exceeded's audit
 // metadata (auth-internals.md §15 "Login rate limiting").
-var tenantRateExceededMetadata = []byte(fmt.Sprintf(`{"limit":%d,"window_seconds":%d}`, tenantLimit, int(tenantWindow.Seconds())))
+var tenantRateExceededMetadata = fmt.Appendf(nil, `{"limit":%d,"window_seconds":%d}`, tenantLimit, int(tenantWindow.Seconds()))
 
 // detectionTimeout bounds detectTenantFlood's Redis and audit writes, which
 // run detached from the request so a client that disconnects can't
