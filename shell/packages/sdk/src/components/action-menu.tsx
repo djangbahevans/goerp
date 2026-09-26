@@ -41,6 +41,20 @@ export interface ActionMenuItem {
   // If set, a confirmation dialog gates onClick — activating the item
   // opens it instead of firing immediately, closing the menu either way.
   confirm?: ActionMenuItemConfirm | undefined;
+  // A trailing count pill (chrome-header.md's "My activities" item), hidden
+  // at 0 and capped at "99+". Ignored on a checkable item.
+  badge?: number | undefined;
+}
+
+const BADGE_CAP = 99;
+
+function ItemBadge({ count }: { count: number | undefined }): ReactNode {
+  if (!count || count <= 0) return null;
+  return (
+    <span className="ms-auto flex-none rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-text-inverse">
+      {count > BADGE_CAP ? `${BADGE_CAP}+` : count}
+    </span>
+  );
 }
 
 // Renders the trigger button when a caller needs a different visual (e.g.
@@ -163,6 +177,7 @@ function ActionMenuItemButton({
     >
       {item.icon && <Icon name={item.icon} size={14} className="flex-none" aria-hidden="true" />}
       {item.label}
+      <ItemBadge count={item.badge} />
     </button>
   );
 }

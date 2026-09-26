@@ -374,6 +374,33 @@ describe("ActionMenu", () => {
     });
   });
 
+  describe("badges (chrome-header.md's My activities item)", () => {
+    function openWithBadge(badge: number | undefined) {
+      render(
+        withPermissions(
+          [],
+          <ActionMenu label="Actions" items={[{ label: "My activities", onClick: vi.fn(), badge }]} />,
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      return screen.getByRole("menuitem", { name: /My activities/ });
+    }
+
+    it("shows the count after the label", () => {
+      expect(openWithBadge(3).textContent).toBe("My activities3");
+    });
+
+    it("caps the count at 99+", () => {
+      expect(openWithBadge(120).textContent).toBe("My activities99+");
+    });
+
+    it("hides the badge at zero or when unset", () => {
+      expect(openWithBadge(0).textContent).toBe("My activities");
+      cleanup();
+      expect(openWithBadge(undefined).textContent).toBe("My activities");
+    });
+  });
+
   describe("checked items (chrome-header.md's UserMenu theme toggle)", () => {
     it("renders a checkable item as menuitemcheckbox with the right aria-checked", () => {
       render(

@@ -117,7 +117,7 @@ export function nextSortValue(sort: string | undefined, field: string): string |
 }
 
 // manifest-spec.md's row_click/row_click_param: `row_click` resolves via
-// viewPathRegistry to a RouteSchema path (shell-architecture.md's
+// viewPathRegistry.resolveRecord to a RouteSchema path (shell-architecture.md's
 // expanded-path convention, e.g. "/contacts/{id}") — a bare `{id}` token,
 // not the `{record.field}` templating column.href/renderHref use for a
 // different purpose (manifest-driven href/format strings). `row_click_param`
@@ -263,7 +263,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
     }
     let cancelled = false;
     viewPathRegistry
-      .resolve(rowClickView, module)
+      .resolveRecord(rowClickView, module)
       .then((path) => {
         if (!cancelled) setRowClickPath(path);
       })
