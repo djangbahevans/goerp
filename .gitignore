@@ -24,3 +24,6 @@ sdk/go/modeltest/testdata/*/module.wasm
 # OS / editor cruft.
 .DS_Store
 .idea/
+
+# make engine / make module (GOERP_MODULE_DIR default).
+/.dev/
