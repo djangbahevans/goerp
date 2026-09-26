@@ -184,6 +184,18 @@ func createFixtureTenantSchema(t *testing.T, conn *sql.DB, slug string) {
 	}
 }
 
+// grantFixtureTables grants the tenant role DML on hand-made module tables,
+// as schema sync does for the tables it creates.
+func grantFixtureTables(t *testing.T, conn *sql.DB, slug string, tables ...string) {
+	t.Helper()
+	name := tenantschema.Name(slug)
+	for _, table := range tables {
+		if _, err := conn.Exec("GRANT SELECT, INSERT, UPDATE, DELETE ON " + name + "." + table + " TO " + name); err != nil {
+			t.Fatalf("grant tenant role on %s: %v", table, err)
+		}
+	}
+}
+
 func TestHostDB_BeginCommit_SetsSearchPathAndCommits(t *testing.T) {
 	primaryDB := openTestPrimaryDB(t)
 	ctx := context.Background()

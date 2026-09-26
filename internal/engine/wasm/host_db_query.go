@@ -80,8 +80,9 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 		defer cancel()
 
 		var (
-			q      *sql.Tx
-			finish func(error) error
+			q        *sql.Tx
+			finish   func(error) error
+			asTenant func(func() *abiv1.HostError) *abiv1.HostError
 		)
 		if input.TxID != "" {
 			// A borrowed transaction is already bound to whatever pool
@@ -105,6 +106,7 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 			q = tx
 			// Owned by whoever called host.db.begin.
 			finish = func(error) error { return nil }
+			asTenant = func(fn func() *abiv1.HostError) *abiv1.HostError { return withTenantRole(qCtx, tx, modCtx, fn) }
 		} else {
 			target := primary
 			if forceReplica || input.Opts.ReadOnly {
@@ -122,11 +124,12 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 			if err != nil {
 				return abi.EncodeHostError(ctx, m, allocate, queryHostError(err))
 			}
-			if err := applyTenantScope(qCtx, tx, modCtx); err != nil {
+			if err := applyTenantScopeAsTenantRole(qCtx, tx, modCtx); err != nil {
 				_ = tx.Rollback()
 				return abi.EncodeHostError(ctx, m, allocate, queryHostError(err))
 			}
 			q = tx
+			asTenant = func(fn func() *abiv1.HostError) *abiv1.HostError { return fn() }
 			finish = func(callErr error) error {
 				if callErr != nil {
 					return tx.Rollback()
@@ -135,21 +138,30 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 			}
 		}
 
-		start := time.Now()
-		rows, err := q.QueryContext(qCtx, input.SQL, input.Params...)
-		if err != nil {
-			_ = finish(err)
-			return abi.EncodeHostError(ctx, m, allocate, queryHostError(err))
+		var (
+			cols     []string
+			values   [][]any
+			duration time.Duration
+		)
+		hostErr := asTenant(func() *abiv1.HostError {
+			start := time.Now()
+			defer func() { duration = time.Since(start) }()
+			rows, err := q.QueryContext(qCtx, input.SQL, input.Params...)
+			if err != nil {
+				return queryHostError(err)
+			}
+			var scanErr error
+			cols, values, scanErr = scanRowsToSlices(rows, maxQueryResultRows)
+			if scanErr != nil {
+				return queryHostError(scanErr)
+			}
+			return nil
+		})
+		if hostErr != nil {
+			_ = finish(errors.New(hostErr.Message))
+			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
-
-		cols, values, scanErr := scanRowsToSlices(rows, maxQueryResultRows)
-		finishErr := finish(scanErr)
-		duration := time.Since(start)
-
-		if scanErr != nil {
-			return abi.EncodeHostError(ctx, m, allocate, queryHostError(scanErr))
-		}
-		if finishErr != nil {
+		if finishErr := finish(nil); finishErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, queryHostError(finishErr))
 		}
 

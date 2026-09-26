@@ -3,8 +3,12 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"strings"
+
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
 // applyTenantScope sets tx's search_path to modCtx's tenant schema, plus
@@ -42,4 +46,43 @@ func applyORMStatementTimeout(ctx context.Context, tx *sql.Tx, modCtx *ModuleCon
 	ms := modCtx.ormStatementTimeout().Milliseconds()
 	_, err := tx.ExecContext(ctx, `SELECT set_config('statement_timeout', $1, true)`, strconv.FormatInt(ms, 10))
 	return err
+}
+
+// applyTenantScopeAsTenantRole is applyTenantScope for a transaction that
+// runs only module SQL, so it switches to the tenant role for good.
+func applyTenantScopeAsTenantRole(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext) error {
+	_, err := tx.ExecContext(ctx, `SELECT set_config('search_path', $1, true),
+		set_config('app.current_user_id', $2, true),
+		set_config('app.current_user_contact_id', $3, true),
+		set_config('app.current_user_roles', $4, true),
+		set_config('role', $5, true)`,
+		"tenant_"+modCtx.TenantSlug+", public",
+		modCtx.UserID, modCtx.ContactID, strings.Join(modCtx.Roles, ","),
+		"tenant_"+modCtx.TenantSlug,
+	)
+	return err
+}
+
+// withTenantRole runs fn's module SQL as the tenant role, then switches tx
+// back to its login role, even when fn fails (data-layer.md §2.2).
+func withTenantRole(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, fn func() *abiv1.HostError) *abiv1.HostError {
+	if _, err := tx.ExecContext(ctx, "SET LOCAL ROLE "+tenantschema.Name(modCtx.TenantSlug)); err != nil {
+		return roleSwitchError("switch to tenant role", err)
+	}
+	hostErr := fn()
+	_, resetErr := tx.ExecContext(context.WithoutCancel(ctx), "SET LOCAL ROLE NONE")
+	if hostErr != nil {
+		return hostErr
+	}
+	if resetErr != nil {
+		return roleSwitchError("reset tenant role", resetErr)
+	}
+	return nil
+}
+
+func roleSwitchError(op string, err error) *abiv1.HostError {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &abiv1.HostError{Code: abiv1.ErrCodeDBTimeout, Message: op + ": timed out", Retry: true}
+	}
+	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: op + ": " + err.Error()}
 }
