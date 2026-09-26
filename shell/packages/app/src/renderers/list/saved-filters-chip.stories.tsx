@@ -80,15 +80,21 @@ export const Populated: Story = {
 // setDefault/remove against the real apiClient, which has no backend to
 // reach in Storybook and would only exercise the (already unit-tested)
 // error path.
-export const RowActionsVisibleOnHover: Story = {
+// The row's actions reveal on :hover or :focus-within (one CSS rule).
+// Synthetic userEvent.hover can't enter the browser's :hover state, so this
+// exercises the focus path; real-pointer hover shares the same reveal.
+export const RowActionsVisibleOnFocus: Story = {
   decorators: [withClient(clientSeededWith("contacts_list", POPULATED_FILTERS))],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Saved filters" }));
 
     const body = within(document.body);
-    await userEvent.hover(body.getByText("Archived"));
-    await expect(body.getByRole("button", { name: "Set 'Archived' as default" })).toBeVisible();
+    const setDefault = body.getByRole("button", { name: "Set 'Archived' as default" });
+    await expect(setDefault).not.toBeVisible();
+
+    body.getByRole("button", { name: "Archived" }).focus();
+    await expect(setDefault).toBeVisible();
     await expect(body.getByRole("button", { name: "Delete 'Archived'" })).toBeVisible();
   },
 };

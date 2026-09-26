@@ -179,6 +179,9 @@ export const WeekView: Story = {
 
 export const QuickCreate: Story = {
   name: "quick_create: opens the confirm popover on an empty date",
+  // Quick create needs a target: CalendarRenderer enables it only when
+  // on_date_click is declared too.
+  args: { view: { ...view, on_date_click: "activity_form" } },
   decorators: [withCalendarProviders(defaultClient(), "/")],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
