@@ -377,6 +377,33 @@ export const GroupedByState: Story = {
   },
 };
 
+export const GroupedScrolledHorizontally: Story = {
+  name: "group_by_options: group labels stay pinned while the tables scroll sideways",
+  decorators: [
+    withListProviders(defaultClient(), "/?group_by=state"),
+    (Story) => (
+      <div style={{ width: 420 }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const tables = await waitFor(() => canvas.getAllByRole("table"));
+    const scroller = (tables[0] as HTMLElement).parentElement as HTMLElement;
+    await expect(scroller.scrollWidth).toBeGreaterThan(scroller.clientWidth);
+
+    const label = canvas.getByText("state = confirmed");
+    const header = canvas.getAllByRole("columnheader", { name: "Reference" })[0] as HTMLElement;
+    const labelLeft = label.getBoundingClientRect().left;
+    const headerLeft = header.getBoundingClientRect().left;
+
+    scroller.scrollLeft = 300;
+    await waitFor(() => expect(header.getBoundingClientRect().left).toBeLessThan(headerLeft));
+    await expect(label.getBoundingClientRect().left).toBe(labelLeft);
+  },
+};
+
 // Same fixture rows under every sort key the click cycle can reach, so
 // clicking through asc -> desc -> unsorted never gets stuck waiting on an
 // uncached (real, unmocked) network fetch.

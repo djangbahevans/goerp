@@ -540,7 +540,10 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                     under the shared scroll container above. */}
                 {!isTree && listState.groupBy && (
                   <caption className="bg-bg-subtle p-3 text-left text-sm font-medium text-text-secondary">
-                    {listState.groupBy} = {group.key}
+                    {/* Pinned so the label stays in view when the shared container scrolls horizontally. */}
+                    <span className="sticky left-3 inline-block">
+                      {listState.groupBy} = {group.key}
+                    </span>
                   </caption>
                 )}
                 {/* <col> widths, not each cell's own inline width, are what
