@@ -41,28 +41,29 @@ export function Toast({ bus = toastBus }: ToastProps): ReactNode {
   const [toasts, setToasts] = useState<ToastMessage[]>(() => bus.getToasts());
   const [leaving, setLeaving] = useState<ToastMessage[]>([]);
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // Diffed outside a state updater: StrictMode runs updaters twice, which
+  // would queue each removed toast into `leaving` twice.
+  const shownRef = useRef(toasts);
 
   useEffect(() => {
     const timers = timersRef.current;
 
     const sync = (next: ToastMessage[]) => {
-      setToasts((prev) => {
-        const nextIds = new Set(next.map((t) => t.id));
-        const removed = prev.filter((t) => !nextIds.has(t.id));
-        if (removed.length > 0) {
-          setLeaving((cur) => [...cur, ...removed]);
-          for (const t of removed) {
-            timers.set(
-              t.id,
-              setTimeout(() => {
-                setLeaving((cur) => cur.filter((c) => c.id !== t.id));
-                timers.delete(t.id);
-              }, EXIT_DURATION_MS),
-            );
-          }
-        }
-        return next;
-      });
+      const nextIds = new Set(next.map((t) => t.id));
+      const removed = shownRef.current.filter((t) => !nextIds.has(t.id));
+      shownRef.current = next;
+      setToasts(next);
+      if (removed.length === 0) return;
+      setLeaving((cur) => [...cur, ...removed]);
+      for (const t of removed) {
+        timers.set(
+          t.id,
+          setTimeout(() => {
+            setLeaving((cur) => cur.filter((c) => c.id !== t.id));
+            timers.delete(t.id);
+          }, EXIT_DURATION_MS),
+        );
+      }
     };
 
     sync(bus.getToasts());

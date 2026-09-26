@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastBus } from "../notifications/toast.js";
 import { Toast } from "./toast.js";
@@ -80,6 +81,25 @@ describe("Toast", () => {
         vi.advanceTimersByTime(150);
       });
       expect(screen.queryByText("Saved")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("renders a leaving toast once under StrictMode", () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new ToastBus();
+      bus.success("Saved");
+      render(
+        <StrictMode>
+          <Toast bus={bus} />
+        </StrictMode>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss: Saved" }));
+
+      expect(screen.getAllByText("Saved")).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
