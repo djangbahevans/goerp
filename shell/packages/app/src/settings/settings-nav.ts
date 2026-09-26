@@ -5,6 +5,7 @@ export const SETTINGS_NAV_GROUPS: SectionNavGroup[] = [
   {
     items: [
       { to: "/settings/profile", label: "Profile", icon: "user" },
+      { to: "/settings/security", label: "Security", icon: "shield" },
       { to: "/settings/appearance", label: "Appearance", icon: "palette" },
     ],
   },

@@ -16,6 +16,7 @@ import {
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import { type ReactNode, useState } from "react";
+import { describeUserAgent } from "../../auth/describe-user-agent.js";
 import {
   type AdminUserDetail,
   type AdminUserSession,
@@ -30,7 +31,6 @@ import {
   useUnsuspendUser,
 } from "./admin-users-api.js";
 import { displayName } from "./admin-users-page.js";
-import { describeUserAgent } from "./describe-user-agent.js";
 import { roleLabel, useAssignableRoles } from "./roles.js";
 import { UserStatusBadge } from "./user-status-badge.js";
 

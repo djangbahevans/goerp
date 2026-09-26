@@ -232,6 +232,21 @@ export interface AuthContextValue {
   reloadSession: () => Promise<void>;
 }
 
+// One entry of GET /auth/sessions (auth-internals.md §4 "Session management
+// endpoints"): a sign-in, identified by its session family.
+export interface ActiveSession {
+  id: string;
+  // Raw and unparsed; the shell labels it "browser on OS".
+  userAgent: string | null;
+  ipAddress: string | null;
+  // ISO 3166-1 alpha-2.
+  countryCode: string | null;
+  signedInAt: string;
+  lastActiveAt: string;
+  persistent: boolean;
+  current: boolean;
+}
+
 // POST /auth/mfa/enroll/totp (auth-internals.md §8 "MFA enrollment").
 export interface TOTPEnrollment {
   enrollmentId: string;
