@@ -65,7 +65,9 @@ jobs:
 
   storybook-tests:
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
+    # Disabled while the headless browser crashes mid-run (goerp#1245).
+    # Re-enable by restoring: if: needs.changes.outputs.frontend == 'true'
+    if: false
     runs-on: ubuntu-latest
 
     steps:
@@ -107,9 +109,8 @@ jobs:
           if [ "${{ needs.changes.outputs.frontend }}" != "true" ]; then
             exit 0
           fi
-          for result in "${{ needs.build-and-typecheck.result }}" "${{ needs.storybook-tests.result }}"; do
-            if [ "$result" != "success" ]; then
-              echo "build-and-typecheck: ${{ needs.build-and-typecheck.result }}, storybook-tests: ${{ needs.storybook-tests.result }}"
-              exit 1
-            fi
-          done
+          # storybook-tests is disabled (goerp#1245); add its result back here when it's re-enabled.
+          if [ "${{ needs.build-and-typecheck.result }}" != "success" ]; then
+            echo "build-and-typecheck: ${{ needs.build-and-typecheck.result }}"
+            exit 1
+          fi
