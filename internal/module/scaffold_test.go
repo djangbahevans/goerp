@@ -6,16 +6,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/config"
+	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	enginemodule "github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
+	"github.com/djangbahevans/goerp/internal/engine/wasm"
 )
 
 func TestCreateScaffoldsExpectedLayout(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "demo_module")
 
-	if err := Create(dir, "demo_module", "domain", ""); err != nil {
+	if err := Create(dir, "demo_module", "domain", "", ""); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -39,12 +45,58 @@ func TestCreateScaffoldsExpectedLayout(t *testing.T) {
 // TestCreateScaffoldsCompilableSchemaPackage is goerp#958's own acceptance
 // criterion: a freshly scaffolded module's schema/schema.go compiles and
 // cmd/module/main.go imports it and calls engine.WriteModels(schema.Schema).
-// A scaffolded module's go.mod carries no require for this repo's own SDK
-// (Create never runs `go get`/`go mod tidy` — that's on whoever scaffolds
-// the module, same as today), so this test adds a go.work workspace over
-// the scaffold and this repo's checkout to resolve the SDK import instead
-// of editing the scaffolded go.mod itself.
 func TestCreateScaffoldsCompilableSchemaPackage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	dir := createInWorkspace(ctx, t)
+
+	cmd := exec.CommandContext(ctx, "go", "build", "-buildmode=c-shared", "-o", os.DevNull, "./cmd/module")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build ./cmd/module: %v\n%s", err, out)
+	}
+}
+
+// A scaffolded module must survive the engine's real load path, not just
+// compile: the loader invokes exports the module has to declare itself.
+func TestCreateScaffoldsModuleTheLoaderAccepts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	dir := createInWorkspace(ctx, t)
+
+	pkg, err := Package(ctx, dir, PackageOptions{Output: filepath.Join(t.TempDir(), "demo_module.erp"), SkipFrontend: true})
+	if err != nil {
+		t.Fatalf("Package: %v", err)
+	}
+	src, err := moduleboot.DiscoverOne(pkg.ArchivePath)
+	if err != nil || src == nil {
+		t.Fatalf("DiscoverOne(%s) = %v, %v", pkg.ArchivePath, src, err)
+	}
+
+	rt, err := wasm.New(&config.Config{
+		CompilationCache:  filepath.Join(t.TempDir(), "cache"),
+		PoolMaxMemoryByes: 64 << 20,
+		Environment:       string(config.Production),
+	}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("wasm.New: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+
+	m := loader.LoadModule(ctx, rt, wasm.PoolConfig{MaxSize: 1, BorrowTimeout: time.Second}, *src)
+	if m.Status == enginemodule.StatusFailed {
+		t.Fatalf("scaffolded module failed to load: %s", m.FailureReason)
+	}
+	// Registered after rt.Close so LIFO cleanup drains the pool first.
+	t.Cleanup(func() { m.Pool.DrainAndClose(context.Background(), 5*time.Second) })
+}
+
+// createInWorkspace scaffolds a module with no pinned SDK version and adds a
+// go.work over it and this repo's checkout, so the SDK import resolves to
+// the code under test rather than a published version.
+func createInWorkspace(ctx context.Context, t *testing.T) string {
+	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
@@ -55,12 +107,9 @@ func TestCreateScaffoldsCompilableSchemaPackage(t *testing.T) {
 	}
 
 	dir := filepath.Join(t.TempDir(), "demo_module")
-	if err := Create(dir, "demo_module", "domain", "github.com/acmecorp"); err != nil {
+	if err := Create(dir, "demo_module", "domain", "github.com/acmecorp", ""); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
 
 	workInit := exec.CommandContext(ctx, "go", "work", "init", ".", repoRoot)
 	workInit.Dir = dir
@@ -68,18 +117,13 @@ func TestCreateScaffoldsCompilableSchemaPackage(t *testing.T) {
 		t.Fatalf("go work init: %v\n%s", err, out)
 	}
 
-	cmd := exec.CommandContext(ctx, "go", "build", "-buildmode=c-shared", "-o", os.DevNull, "./cmd/module")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build ./cmd/module: %v\n%s", err, out)
-	}
+	return dir
 }
 
 func TestCreateGoModUsesOrgPrefix(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "demo_module")
 
-	if err := Create(dir, "demo_module", "domain", "github.com/acmecorp"); err != nil {
+	if err := Create(dir, "demo_module", "domain", "github.com/acmecorp", ""); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -100,7 +144,7 @@ func TestCreateGoModUsesOrgPrefix(t *testing.T) {
 func TestCreateManifestPassesRealLoader(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "demo_module")
 
-	if err := Create(dir, "demo_module", "domain", ""); err != nil {
+	if err := Create(dir, "demo_module", "domain", "", ""); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -111,6 +155,20 @@ func TestCreateManifestPassesRealLoader(t *testing.T) {
 
 	if _, err := manifest.Load(data); err != nil {
 		t.Fatalf("scaffolded manifest failed to load: %v", err)
+	}
+}
+
+func TestGoModContentPinsSDKVersion(t *testing.T) {
+	got := string(goModContent("github.com/acmecorp/demo_module", "v0.3.0"))
+	want := "module github.com/acmecorp/demo_module\n\ngo " + scaffoldGoVersion + "\n\nrequire github.com/djangbahevans/goerp v0.3.0\n"
+	if got != want {
+		t.Errorf("goModContent = %q, want %q", got, want)
+	}
+}
+
+func TestGoModContentOmitsRequireWithoutSDKVersion(t *testing.T) {
+	if got := string(goModContent("demo_module", "")); strings.Contains(got, "require") {
+		t.Errorf("goModContent with no SDK version = %q, want no require", got)
 	}
 }
 

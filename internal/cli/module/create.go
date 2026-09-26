@@ -22,12 +22,27 @@ func newCreateCmd() *cobra.Command {
 				targetDir = name
 			}
 
-			if err := internalmodule.Create(targetDir, name, moduleType, org); err != nil {
+			sdkVersion := internalmodule.SDKVersion()
+			if err := internalmodule.Create(targetDir, name, moduleType, org, sdkVersion); err != nil {
 				return err
 			}
 
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "created module %q in %s\n", name, targetDir)
-			return err
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "created module %q in %s\n", name, targetDir); err != nil {
+				return err
+			}
+
+			stderr := cmd.ErrOrStderr()
+			if sdkVersion == "" {
+				_, err := fmt.Fprintf(stderr, "this goerp is a development build, so the SDK version isn't pinned.\n%s", sdkNextStep(targetDir))
+				return err
+			}
+			if err := internalmodule.Tidy(cmd.Context(), targetDir); err != nil {
+				_, err := fmt.Fprintf(stderr, "could not resolve SDK %s (%v)\nif you were offline, run `go mod tidy` in %s; otherwise %s",
+					sdkVersion, err, targetDir, sdkNextStep(targetDir))
+				return err
+			}
+
+			return nil
 		},
 	}
 
@@ -36,4 +51,9 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&org, "org", "", "Go module path prefix (e.g. github.com/yourorg)")
 
 	return cmd
+}
+
+func sdkNextStep(dir string) string {
+	return fmt.Sprintf("next: in %s, run `go get %s@latest`, or `go mod edit -replace %s=<path to a goerp checkout>`, then `go mod tidy`\n",
+		dir, internalmodule.SDKModulePath, internalmodule.SDKModulePath)
 }
