@@ -135,6 +135,7 @@ export const Default: Story = {
     await expect(canvas.getByText("Acme Corp")).toBeInTheDocument();
     await expect(canvas.getByText("$45,000")).toBeInTheDocument();
     await expect(canvas.getByText("No cards in this column.")).toBeInTheDocument();
+    await expect(canvas.getByRole("heading", { level: 1, name: "Pipeline" })).toBeInTheDocument();
   },
 };
 
@@ -208,6 +209,7 @@ export const Embedded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByText("Acme Corp")).toBeInTheDocument());
+    await expect(canvas.queryByRole("heading", { name: "Pipeline" })).not.toBeInTheDocument();
   },
 };
 
@@ -245,7 +247,7 @@ export const WithActions: Story = {
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await waitFor(() => expect(canvas.getByText("Mark Won")).toBeInTheDocument());
+    await waitFor(() => expect(canvas.getAllByRole("button", { name: "Mark Won" }).length).toBeGreaterThan(0));
     await expect(canvas.getAllByRole("button", { name: "Column actions" })[0]).toBeInTheDocument();
   },
 };

@@ -46,9 +46,3 @@ export interface PivotGridProps {
   isRecomputing?: boolean | undefined;
   emptyState?: ReactNode | undefined;
 }
-
-export interface PivotViewProps extends PivotGridProps {
-  title?: string | undefined;
-  allowDownload?: boolean | undefined;
-  onDownload?: (() => void) | undefined;
-}

@@ -276,6 +276,15 @@ describe("KanbanRenderer", () => {
     );
   });
 
+  it("puts its actions in a page header titled with the view label when full-page", async () => {
+    useInfiniteListMock.mockReturnValue(pagedResult([]));
+
+    await renderKanbanRenderer({}, { ...view, actions: [{ label: "New Lead", type: "create", view: "leads_form" }] });
+
+    const heading = screen.getByRole("heading", { level: 1, name: view.label });
+    expect(heading.closest("header")?.textContent).toContain("New Lead");
+  });
+
   it("hides a create action when embedded, per view-system.md's suppressed-actions contract", async () => {
     useInfiniteListMock.mockReturnValue(pagedResult([]));
 

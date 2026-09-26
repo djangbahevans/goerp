@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { PivotView } from "./pivot-view.js";
+import { PivotGrid } from "./pivot-grid.js";
 import type { PivotCell, PivotHeaderNode, PivotValueColumn } from "./pivot-view-types.js";
 
 // view-system.md §8's sales_pivot example (rows: [customer_name],
@@ -108,23 +108,20 @@ function mockCells(): PivotCell[] {
   return cells;
 }
 
-const meta: Meta<typeof PivotView> = {
-  title: "Renderers/PivotView",
-  component: PivotView,
+const meta: Meta<typeof PivotGrid> = {
+  title: "Renderers/PivotGrid",
+  component: PivotGrid,
   args: {
-    title: "Sales Analysis",
     rowHeaders: ROW_HEADERS,
     columnHeaders: COLUMN_HEADERS,
     values: VALUES,
     cells: mockCells(),
-    allowDownload: true,
-    onDownload: () => {},
   },
 };
 
 export default meta;
 
-type Story = StoryObj<typeof PivotView>;
+type Story = StoryObj<typeof PivotGrid>;
 
 export const Default: Story = {
   name: "Loaded, expanded 2-level nesting",
@@ -132,7 +129,6 @@ export const Default: Story = {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Acme Corp")).toBeInTheDocument();
     await expect(canvas.getByText("$45,000.00")).toBeInTheDocument();
-    await expect(canvas.getByRole("button", { name: "Download" })).toBeInTheDocument();
   },
 };
 
@@ -154,8 +150,6 @@ export const Loading: Story = {
   name: "Loading (Parquet/Arrow download + WASM worker init, or server request in flight)",
   args: { isLoading: true },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByText("Sales Analysis")).toBeInTheDocument();
     await expect(canvasElement.querySelector("[data-skeleton='table']")).toBeTruthy();
   },
 };

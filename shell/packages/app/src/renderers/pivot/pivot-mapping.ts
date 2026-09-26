@@ -80,7 +80,7 @@ function toCellValue(raw: number | string | null): number | null {
 // path — buildHeaderTree never sees a leaf path to build a node from, so
 // rowHeaders/columnHeaders would come back genuinely empty. PivotGrid
 // treats an empty axis as "no data" (pivot-grid.tsx's own empty-state
-// check), not "no breakdown requested" — a real difference PivotView has
+// check), not "no breakdown requested" — a real difference PivotGrid has
 // no other way to tell apart, so a single implicit Total node stands in
 // for the declared-empty axis instead, keyed identically to how every
 // cell on that axis already resolves its own key (pathKey([]) === "[]").
@@ -95,7 +95,7 @@ export interface MappedPivotData {
 }
 
 // Resolves the backend's flat, ROLLUP-shaped PivotResponse (view-system.md
-// §8's use_wasm: false contract) into the PivotGrid/PivotView primitive's
+// §8's use_wasm: false contract) into the PivotGrid primitive's
 // props (pivot-view-types.ts) — the concern PR #755 (goerp#718) explicitly
 // deferred to goerp#646.
 export function mapPivotResponse(response: PivotResponse, rows: string[], columns: string[]): MappedPivotData {

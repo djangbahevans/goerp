@@ -652,6 +652,72 @@ describe("ListRenderer", () => {
     expect(screen.getByText("state = done")).toBeTruthy();
   });
 
+  describe("page composition and toolbar", () => {
+    const rows = [
+      { id: "1", name: "Ada", state: "draft" },
+      { id: "2", name: "Bea", state: "done" },
+    ];
+    function mockRows() {
+      useInfiniteListMock.mockReturnValue({
+        data: { pages: [{ data: rows, meta: { cursor: null, hasMore: false } }] },
+        isLoading: false,
+        isError: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+        refetch: vi.fn(),
+        error: null,
+      });
+    }
+    const groupedView: ListViewDeclaration = {
+      ...view,
+      columns: [...(view.columns ?? []), { field: "state", label: "Stage" }],
+      group_by_options: ["state"],
+    };
+
+    it("shows None in the labeled group-by trigger while ungrouped", async () => {
+      mockRows();
+
+      await renderListRenderer({}, fullAccess, "/", groupedView);
+
+      const trigger = screen.getByRole("combobox", { name: /Group by/ });
+      expect(trigger.textContent).toBe("None");
+      expect(screen.getAllByRole("table")).toHaveLength(1);
+    });
+
+    it("labels a group-by option with its column's label", async () => {
+      mockRows();
+
+      await renderListRenderer({}, fullAccess, "/?group_by=state", groupedView);
+
+      expect(screen.getByRole("combobox", { name: /Group by/ }).textContent).toBe("Stage");
+    });
+
+    it("titles a full-page render with the view label and puts its actions in the page header", async () => {
+      mockRows();
+
+      await renderListRenderer({}, fullAccess, "/", {
+        ...view,
+        actions: [{ label: "New Contact", type: "create", view: "contacts_form" }],
+      });
+
+      const heading = screen.getByRole("heading", { level: 1, name: "Contacts" });
+      expect(heading.closest("header")?.textContent).toContain("New Contact");
+    });
+
+    it("renders no page heading when embedded, keeping its actions in the toolbar", async () => {
+      mockRows();
+
+      await renderListRenderer({ embedded: true, showCreateAction: true }, fullAccess, "/", {
+        ...view,
+        actions: [{ label: "New Contact", type: "create", view: "contacts_form" }],
+      });
+
+      expect(screen.queryByRole("heading", { name: "Contacts" })).toBeNull();
+      expect(screen.getByText("New Contact")).toBeTruthy();
+    });
+  });
+
   it("still shows a group caption for a bucket whose grouped field is empty/missing", async () => {
     useInfiniteListMock.mockReturnValue({
       data: {

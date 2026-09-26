@@ -268,7 +268,8 @@ export const Default: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const table = await waitFor(() => canvas.getByRole("table", { name: "Orders" }));
-    const body = within(table);
+    // tbody only: "Confirmed" is also a column header.
+    const body = within(table.querySelector("tbody") as HTMLElement);
 
     await expect(body.getByText("SO-1042")).toBeInTheDocument();
     // Locale-formatted like column-renderers.tsx's own currency case,
@@ -282,8 +283,12 @@ export const Default: Story = {
     await expect(body.getByText("Acme Corp")).toBeInTheDocument();
     await expect(body.getByText("Globex Inc")).toBeInTheDocument();
 
-    await expect(canvas.getByText("Active")).toBeInTheDocument(); // the boolean filter
-    await expect(canvas.getByRole("button", { name: "New Order" })).toBeInTheDocument();
+    await expect(canvas.getByRole("combobox", { name: /Active/ })).toBeInTheDocument(); // the boolean filter
+    const heading = canvas.getByRole("heading", { level: 1, name: "Orders" });
+    await expect(
+      within(heading.closest("header") as HTMLElement).getByRole("button", { name: "New Order" }),
+    ).toBeInTheDocument();
+    await expect(canvas.getByRole("combobox", { name: /Group by/ })).toHaveTextContent("None");
 
     // BulkActions integration: selecting a row surfaces the export action
     // and the row itself picks up the --color-primary-subtle selected fill.
@@ -364,7 +369,7 @@ export const GroupedByState: Story = {
     const canvas = within(canvasElement);
     // Select (select.tsx) is a Radix combobox trigger, not a native
     // <select> — its current value shows as the trigger's own text.
-    await expect(canvas.getByRole("combobox", { name: "Group by" }).textContent).toBe("state");
+    await expect(canvas.getByRole("combobox", { name: /Group by/ }).textContent).toBe("Status");
     const tables = await waitFor(() => canvas.getAllByRole("table"));
     await expect(tables).toHaveLength(2);
     await expect(canvas.getByText("state = confirmed")).toBeInTheDocument();
@@ -478,6 +483,7 @@ export const Embedded: Story = {
     const canvas = within(canvasElement);
     const table = await waitFor(() => canvas.getByRole("table", { name: "Orders" }));
     await expect(within(table).getByText("SO-1042")).toBeInTheDocument();
+    await expect(canvas.queryByRole("heading", { name: "Orders" })).not.toBeInTheDocument();
   },
 };
 

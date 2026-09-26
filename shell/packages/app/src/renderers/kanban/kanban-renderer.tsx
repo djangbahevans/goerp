@@ -5,6 +5,7 @@ import { createInfiniteListQueryOptions, saveRecord, useInfiniteList, useRelatio
 import { componentRegistry, resourceMetadataRegistry } from "@goerp/sdk/schema";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { fileUrlOf } from "../list/column-renderers.js";
@@ -12,6 +13,7 @@ import { ListActions } from "../list/list-actions.js";
 import { ListFilters } from "../list/list-filters.js";
 import type { ListAction, Row } from "../list/list-view-types.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
+import { ViewPage, ViewToolbar } from "../view-chrome.js";
 import { resolveKanbanActionItems, useKanbanRouteAction } from "./kanban-actions.js";
 import { KanbanBoard } from "./kanban-board.js";
 import { bucketRowsByGroup, deriveGroupIds, splitCardFields } from "./kanban-grouping.js";
@@ -118,12 +120,29 @@ export function KanbanRenderer({
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : String(err)),
   });
 
+  const viewActions = view.actions ?? [];
+  const listActions =
+    viewActions.length > 0 ? (
+      <ListActions
+        actions={viewActions}
+        module={module}
+        viewName={view.name}
+        {...(embedded !== undefined ? { embedded } : {})}
+        {...(showCreateAction !== undefined ? { showCreateAction } : {})}
+      />
+    ) : undefined;
+  const page = (children: ReactNode) => (
+    <ViewPage embedded={embedded} title={view.label} {...(!embedded && listActions ? { actions: listActions } : {})}>
+      {children}
+    </ViewPage>
+  );
+
   if (isLoading) {
-    return <Skeleton type="card" />;
+    return page(<Skeleton type="card" />);
   }
 
   if (isError) {
-    return (
+    return page(
       <div role="alert" className="flex flex-col items-center gap-2 py-6 text-center">
         <Icon name="circle-alert" size={20} className="text-danger" aria-hidden="true" />
         <p className="text-text">Couldn't load {view.label}.</p>
@@ -136,7 +155,7 @@ export function KanbanRenderer({
         >
           Retry
         </ActionButton>
-      </div>
+      </div>,
     );
   }
 
@@ -220,27 +239,20 @@ export function KanbanRenderer({
     };
   });
 
-  const viewActions = view.actions ?? [];
-
-  return (
-    <>
-      <ListFilters
-        filters={view.filters ?? []}
-        values={listState.filter}
-        onChange={listState.setFilter}
-        viewName={view.name}
-      />
-      {viewActions.length > 0 && (
-        <div className="flex items-center justify-between gap-2">
-          <ListActions
-            actions={viewActions}
-            module={module}
+  return page(
+    <div className="flex flex-col gap-4">
+      <ViewToolbar
+        standalone
+        filters={
+          <ListFilters
+            filters={view.filters ?? []}
+            values={listState.filter}
+            onChange={listState.setFilter}
             viewName={view.name}
-            {...(embedded !== undefined ? { embedded } : {})}
-            {...(showCreateAction !== undefined ? { showCreateAction } : {})}
           />
-        </div>
-      )}
+        }
+        {...(embedded && listActions ? { controls: listActions } : {})}
+      />
       {groupIds.length === 0 ? (
         <EmptyState title={`No ${view.label.toLowerCase()} found.`} />
       ) : (
@@ -256,6 +268,6 @@ export function KanbanRenderer({
           onLoadMore={handleLoadMore}
         />
       )}
-    </>
+    </div>,
   );
 }

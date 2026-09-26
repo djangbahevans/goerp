@@ -204,7 +204,11 @@ export function BulkActions({ actions, selectedIds, clearSelection }: BulkAction
   if (selectedIds.length === 0) return null;
 
   return (
-    <div role="toolbar" aria-label="Bulk actions" className="flex items-center gap-2">
+    <div
+      role="toolbar"
+      aria-label="Bulk actions"
+      className="flex flex-wrap items-center gap-2 border-border border-b bg-primary-subtle px-3 py-2"
+    >
       <span aria-live="polite" className="text-sm text-text-secondary">
         {selectedIds.length} selected
       </span>

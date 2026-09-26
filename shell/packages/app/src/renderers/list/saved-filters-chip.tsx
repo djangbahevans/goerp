@@ -1,4 +1,4 @@
-import { AlertDialog, EscapeLayer, Icon, IconButton, Skeleton } from "@goerp/sdk/components";
+import { AlertDialog, Button, EscapeLayer, Icon, IconButton, Skeleton } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import type { SavedFilter } from "@goerp/sdk/react";
 import { useSavedFilters } from "@goerp/sdk/react";
@@ -13,15 +13,6 @@ export interface SavedFiltersChipProps {
   viewName: string;
   listState: ListStateHandle;
 }
-
-// Mirrors button-styles.ts's "secondary"/"sm" pieces, with
-// --radius-full swapped in for --radius-control.
-const TRIGGER_CLASSES = [
-  "inline-flex h-7 items-center gap-2 rounded-full border border-border bg-surface px-2 font-medium text-sm text-text",
-  "hover:bg-surface-hover hover:border-border-strong active:bg-surface-active",
-  "transition-colors ease-out duration-(--duration-fast) motion-reduce:transition-none",
-  "focus-visible:outline-none focus-visible:shadow-focus",
-].join(" ");
 
 const ROW_BUTTON_CLASSES =
   "flex min-w-0 flex-1 items-center gap-2 truncate rounded-control px-3 py-2 text-left text-sm text-text hover:bg-surface-hover focus-visible:outline-none focus-visible:shadow-focus";
@@ -152,17 +143,16 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
 
   return (
     <>
-      <button
+      <Button
         ref={triggerRef}
-        type="button"
+        variant="secondary"
+        icon="bookmark"
         aria-haspopup="dialog"
         aria-expanded={open}
-        className={TRIGGER_CLASSES}
         onClick={() => setOpen((prev) => !prev)}
       >
-        <Icon name="bookmark" size={14} aria-hidden="true" />
         Saved filters
-      </button>
+      </Button>
       {open &&
         createPortal(
           <EscapeLayer onEscape={closeAndRefocus}>
