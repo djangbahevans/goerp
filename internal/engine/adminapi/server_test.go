@@ -33,9 +33,12 @@ func TestNewServerRegisteredRouteRequiresAuth(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	if err := s.Listen(); err != nil {
+		t.Fatalf("Listen() error: %v", err)
+	}
 	go func() {
-		if err := s.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			t.Errorf("Start() error: %v", err)
+		if err := s.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("Serve() error: %v", err)
 		}
 	}()
 	t.Cleanup(func() {

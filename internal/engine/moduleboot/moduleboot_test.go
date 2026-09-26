@@ -18,6 +18,8 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/loader"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 // okModule exports allocate/deallocate/get_routes/get_model_declarations/
@@ -461,6 +463,45 @@ func TestLoadCascading_DependentOfFailedModuleIsSkipped(t *testing.T) {
 	standalone, ok := modules["standalone"]
 	if !ok || standalone.Status != module.StatusSyncing {
 		t.Fatalf("standalone = %+v, want StatusSyncing (unaffected)", standalone)
+	}
+}
+
+func TestLoadCascading_LogsWarningPerFailedModule(t *testing.T) {
+	var buf bytes.Buffer
+	original := log.Logger
+	log.Logger = zerolog.New(&buf)
+	t.Cleanup(func() { log.Logger = original })
+
+	rt := newTestRuntime(t)
+	garbage := []byte("not a wasm binary")
+	ordered := []loader.Source{
+		{Name: "widgets", ManifestBytes: manifestJSON(t, "widgets", garbage, nil), WasmBytes: garbage},
+		{Name: "gadgets", ManifestBytes: manifestJSON(t, "gadgets", okModule, []string{"widgets"}), WasmBytes: okModule},
+		{Name: "standalone", ManifestBytes: manifestJSON(t, "standalone", okModule, nil), WasmBytes: okModule},
+	}
+	modules := LoadCascading(t.Context(), rt, testPoolCfg(), nil, ordered)
+
+	warnings := map[string]map[string]any{}
+	for line := range strings.Lines(buf.String()) {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("unmarshal log line %q: %v", line, err)
+		}
+		if entry["level"] == "warn" {
+			if name, ok := entry["module"].(string); ok {
+				warnings[name] = entry
+			}
+		}
+	}
+
+	if got := warnings["widgets"]; got == nil || got["reason"] != modules["widgets"].FailureReason || got["reason"] == "" {
+		t.Errorf("widgets warning = %v, want one carrying its FailureReason %q", got, modules["widgets"].FailureReason)
+	}
+	if got := warnings["gadgets"]; got == nil || got["upstream"] != "widgets" {
+		t.Errorf("gadgets warning = %v, want one naming upstream \"widgets\"", got)
+	}
+	if got := warnings["standalone"]; got != nil {
+		t.Errorf("standalone warning = %v, want none for a module that loaded", got)
 	}
 }
 

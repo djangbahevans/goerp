@@ -13,6 +13,8 @@ package httpx
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 type Server struct {
 	cfg       *Config
 	http      *http.Server
+	listener  net.Listener
 	readyFn   func(context.Context) error
 	healthFn  HealthFn
 	modulesFn ModulesFn
@@ -79,15 +82,36 @@ func (s *Server) SetModulesFn(fn ModulesFn) {
 func (s *Server) HealthHandler() http.HandlerFunc { return s.handleHealth }
 func (s *Server) ReadyHandler() http.HandlerFunc  { return s.handleReady }
 
-// Start listens and serves, using TLS when both TLSCertFile and
-// TLSKeyFile are configured; otherwise TLS is assumed to terminate
-// upstream (a load balancer or ingress) and this serves plain HTTP.
-func (s *Server) Start() error {
-	log.Info().Str("addr", s.cfg.ListenAddr).Msg("http server listening")
-	if s.cfg.TLSCertFile != "" && s.cfg.TLSKeyFile != "" {
-		return s.http.ListenAndServeTLS(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+// Listen binds ListenAddr, so a taken port fails here, synchronously,
+// rather than inside Serve's goroutine.
+func (s *Server) Listen() error {
+	ln, err := net.Listen("tcp", s.cfg.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("bind http listener on %s: %w", s.cfg.ListenAddr, err)
 	}
-	return s.http.ListenAndServe()
+	s.listener = ln
+	log.Info().Str("addr", ln.Addr().String()).Msg("http server listening")
+	return nil
+}
+
+// Serve serves on the listener Listen bound, using TLS when both
+// TLSCertFile and TLSKeyFile are configured; otherwise TLS is assumed to
+// terminate upstream (a load balancer or ingress) and this serves plain
+// HTTP.
+func (s *Server) Serve() error {
+	if s.cfg.TLSCertFile != "" && s.cfg.TLSKeyFile != "" {
+		return s.http.ServeTLS(s.listener, s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
+	}
+	return s.http.Serve(s.listener)
+}
+
+// Close releases the listener Listen bound, for a startup that fails
+// before Serve runs.
+func (s *Server) Close() error {
+	if s.listener == nil {
+		return nil
+	}
+	return s.listener.Close()
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

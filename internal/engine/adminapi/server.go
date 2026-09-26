@@ -17,6 +17,8 @@ package adminapi
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -44,6 +46,8 @@ type Server struct {
 	router *http.ServeMux
 	top    *http.ServeMux
 	http   *http.Server
+
+	listener net.Listener
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -96,9 +100,29 @@ func (s *Server) UnauthenticatedRouter() *http.ServeMux {
 	return s.top
 }
 
-func (s *Server) Start() error {
-	log.Info().Str("addr", s.cfg.ListenAddr).Msg("admin http server listening")
-	return s.http.ListenAndServe()
+// Listen binds ListenAddr, so a taken port fails here, synchronously,
+// rather than inside Serve's goroutine.
+func (s *Server) Listen() error {
+	ln, err := net.Listen("tcp", s.cfg.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("bind admin http listener on %s: %w", s.cfg.ListenAddr, err)
+	}
+	s.listener = ln
+	log.Info().Str("addr", ln.Addr().String()).Msg("admin http server listening")
+	return nil
+}
+
+func (s *Server) Serve() error {
+	return s.http.Serve(s.listener)
+}
+
+// Close releases the listener Listen bound, for a startup that fails
+// before Serve runs.
+func (s *Server) Close() error {
+	if s.listener == nil {
+		return nil
+	}
+	return s.listener.Close()
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

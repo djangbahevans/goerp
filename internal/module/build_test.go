@@ -4,15 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
-
-	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
 func requireNpm(t *testing.T) {
@@ -143,6 +140,11 @@ func TestBuildFrontendProducesHashedBundleAndManifest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 
+	sourceManifest, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest.json: %v", err)
+	}
+
 	result, err := BuildFrontend(ctx, dir, false)
 	if err != nil {
 		t.Fatalf("BuildFrontend: %v", err)
@@ -165,22 +167,12 @@ func TestBuildFrontendProducesHashedBundleAndManifest(t *testing.T) {
 		t.Errorf("BundleSHA256 = %q, want %q", result.BundleSHA256, want)
 	}
 
-	manifestData, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	after, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	if err != nil {
 		t.Fatalf("read manifest.json: %v", err)
 	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(manifestData, &decoded); err != nil {
-		t.Fatalf("unmarshal manifest.json: %v", err)
-	}
-	frontend, _ := decoded["frontend"].(map[string]any)
-	if frontend["bundle_sha256"] != want {
-		t.Errorf("manifest frontend.bundle_sha256 = %v, want %q", frontend["bundle_sha256"], want)
-	}
-
-	if _, err := manifest.Load(manifestData); err != nil {
-		t.Errorf("patched manifest failed to load: %v", err)
+	if string(after) != string(sourceManifest) {
+		t.Errorf("BuildFrontend modified the source manifest.json:\n%s", after)
 	}
 }
 

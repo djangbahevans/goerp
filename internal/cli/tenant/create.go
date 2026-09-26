@@ -2,7 +2,9 @@ package tenant
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/cli/adminclient"
@@ -95,14 +97,20 @@ func waitForActive(cmd *cobra.Command, client *adminclient.Client, slug string, 
 	path := fmt.Sprintf("/admin/tenants/%s", slug)
 
 	for {
-		data, err := client.Get(cmd.Context(), path)
-		if err != nil {
-			return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
-		}
-
+		// The provisioning workflow inserts the tenant row after POST
+		// returns, so a 404 means "not created yet", not failure.
 		var resp tenantStatusResponse
-		if err := json.Unmarshal(data, &resp); err != nil {
-			return fmt.Errorf("decode tenant status response: %w", err)
+		data, err := client.Get(cmd.Context(), path)
+		apiErr, isAPIErr := errors.AsType[*adminclient.APIError](err)
+		switch {
+		case isAPIErr && apiErr.HTTPStatus == http.StatusNotFound:
+			resp.Status = "not created"
+		case err != nil:
+			return adminclient.WithJSONErrorEnvelope(cmd, err, jsonOut)
+		default:
+			if err := json.Unmarshal(data, &resp); err != nil {
+				return fmt.Errorf("decode tenant status response: %w", err)
+			}
 		}
 
 		if resp.Status == "active" {

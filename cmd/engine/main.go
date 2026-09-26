@@ -38,15 +38,22 @@ func main() {
 		log.Fatal().Err(err).Msg("engine failed to start")
 	}
 
-	<-ctx.Done()
+	exitCode := 0
+	select {
+	case <-ctx.Done():
+		log.Info().Msg("shutdown signal received")
+	case err := <-eng.ServeErrors():
+		log.Error().Err(err).Msg("engine server failed, shutting down")
+		exitCode = 1
+	}
 	stop()
-	log.Info().Msg("shutdown signal received")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
-
-	if err = eng.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+	err = eng.Shutdown(shutdownCtx)
+	cancel()
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		log.Err(err).Msg("unclean shutdown")
-		os.Exit(1)
+		exitCode = 1
 	}
+	os.Exit(exitCode)
 }

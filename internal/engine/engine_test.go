@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +149,44 @@ func TestNewEmptyAdminTokenFailsHard(t *testing.T) {
 	_, err := New(cfg)
 	if err == nil {
 		t.Fatal("New() with an empty GOERP_ADMIN_TOKEN: expected an error, got nil")
+	}
+}
+
+func TestStart_FailsWhenAListenerCannotBind(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(cfg *config.Config, addr string)
+	}{
+		{"http", func(cfg *config.Config, addr string) { cfg.ListenAddr = addr }},
+		{"admin", func(cfg *config.Config, addr string) { cfg.AdminAddr = addr }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			held, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("hold a test port: %v", err)
+			}
+			t.Cleanup(func() { _ = held.Close() })
+			addr := held.Addr().String()
+
+			cfg := baseTestConfig(t)
+			tc.set(cfg, addr)
+
+			e, newErr := New(cfg)
+			skipIfInfraUnreachable(t, newErr)
+			t.Cleanup(func() { _ = e.primaryDB.Close() })
+
+			err = e.Start(t.Context())
+			if err == nil {
+				_ = e.Shutdown(t.Context())
+				t.Fatalf("Start() = nil, want an error for the held address %s", addr)
+			}
+			if !strings.Contains(err.Error(), addr) {
+				t.Errorf("Start() error = %q, want it to name %s", err, addr)
+			}
+			if e.readiness.Load() {
+				t.Error("readiness = true after a failed Start, want false")
+			}
+		})
 	}
 }
 
