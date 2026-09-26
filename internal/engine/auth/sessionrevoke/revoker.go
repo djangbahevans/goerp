@@ -109,6 +109,26 @@ func (r *Revoker) RevokeOthersForUser(ctx context.Context, userID, keepSessionID
 	return nil
 }
 
+// RevokeOtherFamiliesForUserInTenant revokes and blocklists every
+// session of userID in tenantID outside keepSessionID's family — a user
+// signing out their other sessions in this tenant while staying signed in.
+// It returns every family it revoked rows of; a family with an empty
+// LiveRowID had already expired.
+func (r *Revoker) RevokeOtherFamiliesForUserInTenant(ctx context.Context, userID, tenantID, keepSessionID, reason string) ([]session.RevokedFamily, error) {
+	families, err := r.sessions.RevokeOtherFamiliesForUserInTenant(ctx, userID, tenantID, keepSessionID, reason)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range families {
+		for _, id := range f.RowIDs {
+			if err := r.cache.SetWithTTL(ctx, blocklistKey(id), "1", blocklistTTL); err != nil {
+				return nil, fmt.Errorf("blocklist session %s: %w", id, err)
+			}
+		}
+	}
+	return families, nil
+}
+
 // RevokeAllForUserInTenant revokes every non-revoked session for userID
 // within tenantID and blocklists each one — goerp#306's admin MFA reset,
 // which must only revoke a target's sessions in the admin's own tenant,

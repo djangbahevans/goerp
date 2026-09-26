@@ -54,6 +54,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authmeupdate"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authrefresh"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authregister"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authsessions"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/emailverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
@@ -665,6 +666,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
+	authSessionsHandler := authsessions.NewHandler(tenantResolver, authChecker, sessionStore, sessionRevoker, authAuditStore)
 	tenantContextHandler := tenantcontext.NewHandler(tenantResolver, cfg.RegistrationEnabled, cfg.TermsURL)
 	storageUploadHandler := storageupload.NewHandler(tenantResolver, authChecker, storageBackend, filesStore, storageupload.Limits{
 		MaxFileBytes: cfg.StorageMaxFileBytes,
@@ -689,6 +691,9 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/verify-email/resend":     verifyEmailResendHandler,
 		"GET /auth/tenant-context":           tenantContextHandler,
 		"POST /auth/logout":                  authLogoutHandler,
+		"GET /auth/sessions":                 http.HandlerFunc(authSessionsHandler.ServeList),
+		"DELETE /auth/sessions":              http.HandlerFunc(authSessionsHandler.ServeRevokeOthers),
+		"DELETE /auth/sessions/{family_id}":  http.HandlerFunc(authSessionsHandler.ServeRevoke),
 		"POST /auth/mfa/verify":              mfaVerifyHandler,
 		"POST /auth/mfa/reverify":            mfaReverifyHandler,
 		"POST /auth/mfa/enroll/totp":         http.HandlerFunc(mfaEnrollHandlers.Begin),
