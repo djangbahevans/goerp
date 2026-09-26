@@ -39,7 +39,13 @@ const SIGNED_OUT: AuthContextValue = {
 };
 
 const STRONG = "Plinth-Quartz-Meadow-47";
-const ENABLED: TenantContext = { tenant: null, registrationEnabled: true, termsUrl: null };
+const ENABLED: TenantContext = {
+  tenant: null,
+  registrationEnabled: true,
+  termsUrl: null,
+  appUrl: "https://app.goerp.test",
+  workspaceNotFound: false,
+};
 
 afterEach(() => {
   cleanup();
@@ -121,10 +127,36 @@ describe("/auth/register", () => {
 
 describe("RegisterPage", () => {
   it("redirects to sign in without rendering the form when registration is off", async () => {
-    const { redirect } = await renderPage({}, { tenant: null, registrationEnabled: false, termsUrl: null });
+    const { redirect } = await renderPage({}, { ...ENABLED, registrationEnabled: false });
 
     await waitFor(() => expect(redirect).toHaveBeenCalledWith("/auth/login"));
     expect(screen.queryByLabelText("Full name")).toBeNull();
+  });
+
+  it("sends a tenant host's visitor to the shared host's register page without rendering the form", async () => {
+    const { redirect } = await renderPage({}, { ...ENABLED, tenant: { slug: "acme", name: "Acme Corp" } });
+
+    await waitFor(() => expect(redirect).toHaveBeenCalledWith("https://app.goerp.test/auth/register"));
+    expect(screen.queryByLabelText("Full name")).toBeNull();
+  });
+
+  it("keeps a tenant host's visitor on this host's sign in when registration is off", async () => {
+    const { redirect } = await renderPage(
+      {},
+      { ...ENABLED, registrationEnabled: false, tenant: { slug: "acme", name: "Acme Corp" } },
+    );
+
+    await waitFor(() => expect(redirect).toHaveBeenCalledWith("/auth/login"));
+  });
+
+  it("shows the workspace-not-found card instead of redirecting on an unknown host", async () => {
+    const { redirect } = await renderPage({}, { ...ENABLED, registrationEnabled: false, workspaceNotFound: true });
+
+    expect(await screen.findByRole("heading", { name: "Workspace not found" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Go to sign in" }).getAttribute("href")).toBe(
+      "https://app.goerp.test/auth/login",
+    );
+    expect(redirect).not.toHaveBeenCalled();
   });
 
   it("redirects to sign in when the tenant context can't be loaded", async () => {

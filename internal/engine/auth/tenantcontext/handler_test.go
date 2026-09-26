@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,8 @@ type fixture struct {
 	slug        string
 	domain      string
 	resolver    *tenantresolve.Resolver
+	sharedHost  string
+	appBaseURL  string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -68,7 +71,13 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = cacheClient.Delete(context.Background(), tenantresolve.DomainCacheKey(domain)) })
 
 	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
-	return &fixture{handler: NewHandler(resolver, false, ""), resolver: resolver, tenantStore: tenantStore, cache: cacheClient, slug: slug, domain: domain}
+	sharedHost := "shared-" + slug + ".goerp.test"
+	appBaseURL := "https://" + sharedHost
+	return &fixture{
+		handler:  NewHandler(resolver, Config{AppBaseURL: appBaseURL}),
+		resolver: resolver, tenantStore: tenantStore, cache: cacheClient,
+		slug: slug, domain: domain, sharedHost: sharedHost, appBaseURL: appBaseURL,
+	}
 }
 
 func (f *fixture) get(t *testing.T, host string) (*httptest.ResponseRecorder, map[string]any) {
@@ -102,18 +111,44 @@ func TestServeHTTP_ResolvedHostReturnsTenant(t *testing.T) {
 	if v, ok := body["terms_url"]; !ok || v != nil {
 		t.Errorf("terms_url = %v (present=%v), want explicit null when unconfigured", v, ok)
 	}
+	if body["app_url"] != f.appBaseURL {
+		t.Errorf("app_url = %v, want %q", body["app_url"], f.appBaseURL)
+	}
 }
 
-func TestServeHTTP_UnresolvedHostReturnsNullTenant(t *testing.T) {
+func TestServeHTTP_SharedHostReturnsNullTenant(t *testing.T) {
 	f := newFixture(t)
 
-	rec, body := f.get(t, "shared-"+f.slug+".goerp.test")
+	for _, host := range []string{f.sharedHost, strings.ToUpper(f.sharedHost) + ":5173"} {
+		rec, body := f.get(t, host)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("host %q: status = %d, body = %s, want 200", host, rec.Code, rec.Body.String())
+		}
+		if v, ok := body["tenant"]; !ok || v != nil {
+			t.Errorf("host %q: tenant = %v (present=%v), want explicit null", host, v, ok)
+		}
+		if body["app_url"] != f.appBaseURL {
+			t.Errorf("host %q: app_url = %v, want %q", host, body["app_url"], f.appBaseURL)
+		}
 	}
-	if v, ok := body["tenant"]; !ok || v != nil {
-		t.Errorf("tenant = %v (present=%v), want explicit null", v, ok)
+}
+
+func TestServeHTTP_UnknownHostReturns404WithAppURL(t *testing.T) {
+	f := newFixture(t)
+
+	rec, body := f.get(t, "typo-"+f.slug+".goerp.test")
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s, want 404", rec.Code, rec.Body.String())
+	}
+	errBody, _ := body["error"].(map[string]any)
+	if errBody["code"] != "tenant_not_found" {
+		t.Errorf("error.code = %v, want tenant_not_found", errBody["code"])
+	}
+	details, _ := errBody["details"].(map[string]any)
+	if details["app_url"] != f.appBaseURL {
+		t.Errorf("error.details.app_url = %v, want %q", details["app_url"], f.appBaseURL)
 	}
 }
 
@@ -136,10 +171,10 @@ func TestServeHTTP_SuspendedTenantReturns403(t *testing.T) {
 
 func TestServeHTTP_ReportsPlatformRegistrationSetting(t *testing.T) {
 	f := newFixture(t)
-	f.handler = NewHandler(f.resolver, true, "")
+	f.handler = NewHandler(f.resolver, Config{RegistrationEnabled: true, AppBaseURL: f.appBaseURL})
 
 	_, resolved := f.get(t, f.domain)
-	_, shared := f.get(t, "shared-"+f.slug+".goerp.test")
+	_, shared := f.get(t, f.sharedHost)
 
 	if resolved["registration_enabled"] != true || shared["registration_enabled"] != true {
 		t.Errorf("registration_enabled = %v (resolved), %v (shared), want true for both", resolved["registration_enabled"], shared["registration_enabled"])
@@ -149,10 +184,10 @@ func TestServeHTTP_ReportsPlatformRegistrationSetting(t *testing.T) {
 func TestServeHTTP_ReportsConfiguredTermsURL(t *testing.T) {
 	f := newFixture(t)
 	const termsURL = "https://example.com/terms"
-	f.handler = NewHandler(f.resolver, true, termsURL)
+	f.handler = NewHandler(f.resolver, Config{RegistrationEnabled: true, TermsURL: termsURL, AppBaseURL: f.appBaseURL})
 
 	_, resolved := f.get(t, f.domain)
-	_, shared := f.get(t, "shared-"+f.slug+".goerp.test")
+	_, shared := f.get(t, f.sharedHost)
 
 	if resolved["terms_url"] != termsURL || shared["terms_url"] != termsURL {
 		t.Errorf("terms_url = %v (resolved), %v (shared), want %q for both", resolved["terms_url"], shared["terms_url"], termsURL)

@@ -6,7 +6,13 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } fr
 import { expect, fn, userEvent, within } from "storybook/test";
 import { RegisterPage } from "./register-page.js";
 
-const ENABLED: TenantContext = { tenant: null, registrationEnabled: true, termsUrl: null };
+const ENABLED: TenantContext = {
+  tenant: null,
+  registrationEnabled: true,
+  termsUrl: null,
+  appUrl: "https://app.goerp.io",
+  workspaceNotFound: false,
+};
 
 // The tenant-context query is pre-seeded so no story hits the network.
 function withProviders(tenantContext: TenantContext): Decorator {

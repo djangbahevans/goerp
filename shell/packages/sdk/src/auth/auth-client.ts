@@ -133,25 +133,41 @@ export async function fetchCurrentSession(): Promise<{ user: CurrentUser; tenant
   }
 }
 
-// fetchTenantContext backs GET /auth/tenant-context. Any failure resolves
-// to null — the login page then falls back to asking for the company slug,
-// the same form a shared-domain deployment gets.
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+// fetchTenantContext backs GET /auth/tenant-context. A 404 tenant_not_found
+// resolves to a workspaceNotFound context; any other failure resolves to
+// null — the login page then falls back to asking for the company slug,
+// the same form the shared-domain host gets.
 export async function fetchTenantContext(): Promise<TenantContext | null> {
   try {
     const response = await fetch("/auth/tenant-context", { credentials: "include" });
     if (!response.ok) {
-      if (response.status === 403) await readError(response);
-      return null;
+      if (response.status !== 403 && response.status !== 404) return null;
+      const error = await readError(response);
+      if (error.httpStatus !== 404 || error.code !== "tenant_not_found") return null;
+      return {
+        tenant: null,
+        registrationEnabled: false,
+        termsUrl: null,
+        appUrl: nonEmptyString(error.details?.app_url),
+        workspaceNotFound: true,
+      };
     }
     const body = (await response.json()) as {
       tenant: { slug: string; name: string } | null;
       registration_enabled: boolean;
       terms_url?: string | null;
+      app_url?: string;
     };
     return {
       tenant: body.tenant ? { slug: body.tenant.slug, name: body.tenant.name } : null,
       registrationEnabled: body.registration_enabled === true,
-      termsUrl: typeof body.terms_url === "string" && body.terms_url !== "" ? body.terms_url : null,
+      termsUrl: nonEmptyString(body.terms_url),
+      appUrl: nonEmptyString(body.app_url),
+      workspaceNotFound: false,
     };
   } catch {
     return null;

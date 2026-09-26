@@ -76,6 +76,42 @@ afterEach(() => {
 });
 
 describe("/auth/forgot-password", () => {
+  it("shows 'Workspace not found' instead of the form on an unknown host", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          {
+            error: {
+              code: "tenant_not_found",
+              message: "no workspace",
+              details: { app_url: "https://app.goerp.test" },
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    );
+    const history = createMemoryHistory({ initialEntries: ["/auth/forgot-password"] });
+    const router = createRouter({ routeTree, context: { auth: SIGNED_OUT }, history });
+    await router.load();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AuthContext.Provider value={SIGNED_OUT}>
+          <PermissionContext.Provider value={createPermissionContextValue(permissionDataRef.current)}>
+            <AuthRouterProvider router={router} />
+          </PermissionContext.Provider>
+        </AuthContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Workspace not found" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Go to sign in" }).getAttribute("href")).toBe(
+      "https://app.goerp.test/auth/login",
+    );
+    expect(screen.queryByRole("button", { name: "Send reset link" })).toBeNull();
+  });
+
   it("sends the email with the subdomain-resolved tenant, then shows the generic success state", async () => {
     const fetchMock = stubFetch(SUBDOMAIN_TENANT);
     const { submit } = await renderPage();

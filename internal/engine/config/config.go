@@ -153,8 +153,9 @@ type Config struct {
 	SMTPFrom string `env:"GOERP_SMTP_FROM" envDefault:"noreply@goerp.local"`
 	// AppBaseURL is the app's URL on the shared-domain host. Emailed links
 	// keep its scheme and port on the tenant's default domain,
-	// {slug}.{PlatformDomain}.
-	AppBaseURL string `env:"GOERP_APP_BASE_URL" envDefault:"http://localhost:8080"`
+	// {slug}.{PlatformDomain}. Its host is the one unresolved host
+	// GET /auth/tenant-context treats as the shared domain.
+	AppBaseURL string `env:"GOERP_APP_BASE_URL" envDefault:"http://localhost:8080" validate:"http_url"`
 
 	// Observability — engine-internals.md's own env var table names these
 	// two bare (not GOERP_-prefixed) to match the standard OTel SDK
