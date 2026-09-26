@@ -96,7 +96,7 @@ describe("FormRenderer", () => {
   });
 
   it("non-autosave: shows a Save button, disabled until dirty, that calls save() on click", () => {
-    const save = vi.fn(async () => {});
+    const save = vi.fn();
     useFormRecordMock.mockReturnValue(handle({ isDirty: true, save }));
     renderForm();
     const button = screen.getByText("Save");

@@ -4,7 +4,7 @@
     "types": ["vite/client"],
     "noEmit": true
   },
-  "include": [".storybook", "../*/src/**/*.stories.tsx"],
+  "include": [".storybook", "vitest.config.ts", "../*/src/**/*.stories.tsx"],
   // A new composite package under packages/* needs an entry here too — the
   // "include" glob above picks up its stories automatically, this doesn't.
   "references": [{ "path": "../sdk" }, { "path": "../app" }]

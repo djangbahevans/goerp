@@ -152,16 +152,15 @@ describe("useFormRecord", () => {
     await waitFor(() => expect(result.current.record).toEqual({ id: "01j" }));
 
     result.current.setField({ name: "Acme" });
-    const savePromise = result.current.save();
+    result.current.save();
     await waitFor(() => expect(result.current.isSaving).toBe(true));
 
     resolvePut({ id: "01j", name: "Acme" });
-    await savePromise;
     await waitFor(() => expect(result.current.isSaving).toBe(false));
     expect(result.current.isDirty).toBe(false);
   });
 
-  it("save(): a rejected mutation surfaces saveError and leaves the edit dirty", async () => {
+  it("save(): a rejected mutation surfaces saveError, never a rejection, and leaves the edit dirty", async () => {
     const registry = fakeRegistry();
     const put = vi.fn(async () => {
       throw new Error("conflict");
@@ -174,7 +173,7 @@ describe("useFormRecord", () => {
     await waitFor(() => expect(result.current.record).toEqual({ id: "01j" }));
 
     result.current.setField({ name: "Acme" });
-    await expect(result.current.save()).rejects.toThrow("conflict");
+    expect(result.current.save()).toBeUndefined();
 
     await waitFor(() => expect(result.current.saveError?.message).toBe("conflict"));
     expect(result.current.isDirty).toBe(true);

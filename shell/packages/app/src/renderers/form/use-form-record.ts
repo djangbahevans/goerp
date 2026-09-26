@@ -56,7 +56,8 @@ export interface FormRecordHandle {
   refetch: () => void;
   isDirty: boolean;
   setField: (patch: Record<string, unknown>) => void;
-  save: () => Promise<void>;
+  // Fire-and-forget: a failure lands in saveError, never as a rejection.
+  save: () => void;
   isSaving: boolean;
   saveError: Error | null;
 }
@@ -94,17 +95,17 @@ export function useFormRecord(
     setEdits((prev) => ({ ...prev, ...patch }));
   };
 
-  // Debounced autosave, reset on every edit while dirty. mutateAsync is a
+  // Debounced autosave, reset on every edit while dirty. mutate is a
   // stable bound reference (MutationObserver binds it once in its own
   // constructor), so calling it directly here needs no ref.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `edits` re-arms the timer; not read directly in the body.
   useEffect(() => {
     if (!options.autoSave || !isDirty) return;
     const timer = setTimeout(() => {
-      void mutation.mutateAsync();
+      mutation.mutate();
     }, options.autoSaveDelay ?? 2000);
     return () => clearTimeout(timer);
-  }, [edits, isDirty, options.autoSave, options.autoSaveDelay, mutation.mutateAsync]);
+  }, [edits, isDirty, options.autoSave, options.autoSaveDelay, mutation.mutate]);
 
   return {
     record,
@@ -114,9 +115,7 @@ export function useFormRecord(
     refetch: () => void refetch(),
     isDirty,
     setField,
-    save: async () => {
-      await mutation.mutateAsync();
-    },
+    save: () => mutation.mutate(),
     isSaving: mutation.isPending,
     saveError: mutation.error as Error | null,
   };

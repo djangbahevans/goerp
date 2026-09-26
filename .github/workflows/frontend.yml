@@ -63,14 +63,53 @@ jobs:
         working-directory: shell
         run: npm run build
 
+  storybook-tests:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: shell/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: shell
+        run: npm install
+
+      - name: Cache Playwright Browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('shell/package-lock.json') }}
+
+      - name: Install Chromium
+        working-directory: shell
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Story Tests
+        working-directory: shell
+        run: npm run test-storybook
+
   ci-gate:
-    needs: [changes, build-and-typecheck]
+    needs: [changes, build-and-typecheck, storybook-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require build-and-typecheck to have passed when it ran
+      - name: Require every frontend job to have passed when it ran
         run: |
-          if [ "${{ needs.changes.outputs.frontend }}" = "true" ] && [ "${{ needs.build-and-typecheck.result }}" != "success" ]; then
-            echo "build-and-typecheck did not succeed (result: ${{ needs.build-and-typecheck.result }})"
-            exit 1
+          if [ "${{ needs.changes.outputs.frontend }}" != "true" ]; then
+            exit 0
           fi
+          for result in "${{ needs.build-and-typecheck.result }}" "${{ needs.storybook-tests.result }}"; do
+            if [ "$result" != "success" ]; then
+              echo "build-and-typecheck: ${{ needs.build-and-typecheck.result }}, storybook-tests: ${{ needs.storybook-tests.result }}"
+              exit 1
+            fi
+          done
