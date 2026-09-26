@@ -137,12 +137,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         // does, at a smaller scale — sticky, not scrolled away with a long
         // field list.
         <footer className="sticky bottom-0 flex items-center gap-4 border-t border-border bg-bg p-4">
-          <ActionButton
-            variant="primary"
-            loading={isSaving}
-            disabled={!isDirty || formReadonly}
-            onClick={() => void save()}
-          >
+          <ActionButton variant="primary" loading={isSaving} disabled={!isDirty || formReadonly} onClick={save}>
             Save
           </ActionButton>
           {saveError && (

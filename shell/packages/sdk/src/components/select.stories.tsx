@@ -82,8 +82,10 @@ export const Multiple: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // The panel is portaled to document.body, outside the story canvas.
+    const body = within(document.body);
     await userEvent.click(canvas.getByRole("combobox"));
-    await waitFor(() => expect(canvas.getByRole("option", { name: "Done" })).toBeInTheDocument());
+    await waitFor(() => expect(body.getByRole("option", { name: "Done" })).toBeInTheDocument());
   },
 };
 

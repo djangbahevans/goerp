@@ -4,3 +4,5 @@ dist-types/
 *.tsbuildinfo
 routeTree.gen.ts
 storybook-static/
+# Vitest browser mode writes failure screenshots next to each story file.
+__screenshots__/

@@ -47,8 +47,10 @@ export const SingleSelect: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // The panel is portaled to document.body, outside the story canvas.
+    const body = within(document.body);
     await userEvent.click(canvas.getByRole("combobox"));
-    await waitFor(() => expect(canvas.getByRole("option", { name: "Acme Corp" })).toBeInTheDocument());
+    await waitFor(() => expect(body.getByRole("option", { name: "Acme Corp" })).toBeInTheDocument());
   },
 };
 
@@ -71,10 +73,12 @@ export const MultiSelect: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // The panel is portaled to document.body, outside the story canvas.
+    const body = within(document.body);
     await userEvent.click(canvas.getByRole("combobox"));
     // Already-selected "Acme Corp" is excluded from the result list.
-    await waitFor(() => expect(canvas.getByRole("option", { name: "Acme Industries" })).toBeInTheDocument());
-    await expect(canvas.queryByRole("option", { name: "Acme Corp" })).not.toBeInTheDocument();
+    await waitFor(() => expect(body.getByRole("option", { name: "Acme Industries" })).toBeInTheDocument());
+    await expect(body.queryByRole("option", { name: "Acme Corp" })).not.toBeInTheDocument();
   },
 };
 
@@ -87,10 +91,12 @@ export const Creatable: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // The panel is portaled to document.body, outside the story canvas.
+    const body = within(document.body);
     const input = canvas.getByRole("combobox");
     await userEvent.click(input);
     await userEvent.type(input, "Brand New Co");
-    await waitFor(() => expect(canvas.getByRole("option", { name: 'Create "Brand New Co"' })).toBeInTheDocument());
+    await waitFor(() => expect(body.getByRole("option", { name: 'Create "Brand New Co"' })).toBeInTheDocument());
   },
 };
 
@@ -102,7 +108,8 @@ export const Loading: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("combobox"));
-    await waitFor(() => expect(canvasElement.querySelector("[data-skeleton='lines']")).toBeInTheDocument());
+    // The panel is portaled to document.body, outside the story canvas.
+    await waitFor(() => expect(document.body.querySelector("[data-skeleton='lines']")).toBeInTheDocument());
   },
 };
 
@@ -113,8 +120,10 @@ export const NoResults: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // The panel is portaled to document.body, outside the story canvas.
+    const body = within(document.body);
     await userEvent.click(canvas.getByRole("combobox"));
-    await waitFor(() => expect(canvas.getByText('No results for ""')).toBeInTheDocument());
+    await waitFor(() => expect(body.getByText('No results for ""')).toBeInTheDocument());
   },
 };
 
@@ -131,8 +140,10 @@ export const UnregisteredResource: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // The panel is portaled to document.body, outside the story canvas.
+    const body = within(document.body);
     await userEvent.click(canvas.getByRole("combobox"));
-    await waitFor(() => expect(canvas.getByText("Module not installed")).toBeInTheDocument());
+    await waitFor(() => expect(body.getByText("Module not installed")).toBeInTheDocument());
   },
 };
 

@@ -2,6 +2,7 @@
   "name": "@goerp/storybook",
   "private": true,
   "version": "0.0.0",
+  "type": "module",
   "description": "Unified Storybook catalog for @goerp/sdk and @goerp/shell-app's components.",
   "scripts": {
     "build-deps": "npm run build -w @goerp/sdk && npm run build:types -w @goerp/shell-app",
@@ -9,6 +10,8 @@
     "storybook": "storybook dev -p 6006",
     "prebuild-storybook": "npm run build-deps",
     "build-storybook": "storybook build",
+    "pretest-storybook": "npm run build-deps",
+    "test-storybook": "vitest run",
     "pretypecheck": "npm run build-deps",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -16,6 +19,7 @@
     "@goerp/sdk": "*",
     "@goerp/shell-app": "*",
     "@radix-ui/react-dialog": "^1.1.23",
+    "@storybook/addon-vitest": "^10.6.0",
     "@storybook/react-vite": "^10.6.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.4",
@@ -23,12 +27,16 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
+    "@vitest/browser": "^4.1.11",
+    "@vitest/browser-playwright": "^4.1.11",
     "maplibre-gl": "^6.10.0",
+    "playwright": "^1.63.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "storybook": "^10.6.0",
     "tailwindcss": "^4.3.3",
     "typescript": "7.0.2",
-    "vite": "^8.2.1"
+    "vite": "^8.2.1",
+    "vitest": "^4.1.11"
   }
 }
