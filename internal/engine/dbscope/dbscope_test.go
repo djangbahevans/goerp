@@ -183,7 +183,7 @@ func TestValidateTableRefs_AllowsOrdinaryFunctions(t *testing.T) {
 }
 
 func TestValidateTableRefs_RejectsPlannedEngineTables(t *testing.T) {
-	for _, name := range []string{"notifications", "notification_preferences", "scheduled_activities", "view_overrides"} {
+	for _, name := range []string{"activity_types", "notifications", "notification_preferences", "record_followers", "view_overrides"} {
 		if err := ValidateTableRefs("SELECT * FROM " + name); !errors.Is(err, ErrEngineOwnedTable) {
 			t.Errorf("%s: err = %v, want ErrEngineOwnedTable", name, err)
 		}

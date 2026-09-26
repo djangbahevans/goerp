@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"time"
@@ -163,34 +164,90 @@ func shareToResponse(sh *recordshares.Share, recipientEmail string) shareRespons
 // go-sdk-reference.md §22 "Document sharing" uses to cap POST
 // /_meta/shares, reused by GET/DELETE so viewing or revoking a record's
 // shares requires the same access a fresh share request against that
-// record would, and by every /_meta/activity route (record-activity.md
-// §7). Fails closed (false) on an unresolvable model or any host error.
+// record would, and by every /_meta/activity and
+// /_meta/scheduled-activities route (record-activity.md §7). Fails closed
+// (false) on an unresolvable model or any host error.
 func (e *Engine) callerCanReadRecord(ctx context.Context, authCtx *authcheck.AuthContext, tenantCtx *tenantresolve.TenantContext, modelName, recordID string) bool {
+	records, ok := e.readRecordsAs(ctx, tenantCtx, authCtx.UserID, authCtx.PermissionSet, modelName, []string{recordID}, nil)
+	return ok && len(records) > 0
+}
+
+// userCanReadRecord reports whether userID, someone other than the caller,
+// can read recordID: they must be an active user holding an unexpired role
+// in the tenant, and host.orm.read with their permissions must return the
+// record (record-activity.md §7 "Reading as another user").
+func (e *Engine) userCanReadRecord(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID, modelName, recordID string) (bool, error) {
+	permSet, member, err := e.memberPermissionSet(ctx, tenantCtx.Slug, userID)
+	if err != nil || !member {
+		return false, err
+	}
+	records, ok := e.readRecordsAs(ctx, tenantCtx, userID, permSet, modelName, []string{recordID}, nil)
+	return ok && len(records) > 0, nil
+}
+
+// memberPermissionSet returns userID's permission set in the tenant, from
+// their live roles. member is false for a missing or inactive user, or one
+// with no unexpired role in the tenant.
+func (e *Engine) memberPermissionSet(ctx context.Context, tenantSlug, userID string) (permSet permission.PermissionBitfield, member bool, err error) {
+	u, err := e.userStore.GetByID(ctx, userID)
+	if errors.Is(err, user.ErrUserNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("load user: %w", err)
+	}
+	if u.Status != user.StatusActive {
+		return nil, false, nil
+	}
+	roleIDs, err := e.roleStore.RoleIDsForUser(ctx, tenantSlug, userID)
+	if err != nil {
+		return nil, false, fmt.Errorf("load role ids: %w", err)
+	}
+	if len(roleIDs) == 0 {
+		return nil, false, nil
+	}
+	for _, roleID := range roleIDs {
+		if bits, ok := e.rolePermissionMap.Lookup(roleID); ok {
+			permSet.Or(bits)
+		}
+	}
+	return permSet, true, nil
+}
+
+// readRecordsAs reads ids of modelName through host.orm.read as userID
+// holding permSet, so role permissions, the model's ABAC condition and
+// record shares decide which come back. fields nil reads every field. ok
+// is false on an unresolvable model or any host error.
+func (e *Engine) readRecordsAs(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID string, permSet permission.PermissionBitfield, modelName string, ids, fields []string) (records []map[string]any, ok bool) {
 	snap := e.moduleRegistry.Snapshot()
 	if snap == nil {
-		return false
+		return nil, false
 	}
-	_, mod, _, ok := snap.ModelByName(modelName)
-	if !ok {
-		return false
+	_, mod, _, found := snap.ModelByName(modelName)
+	if !found {
+		return nil, false
 	}
 
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
 	modCtx := e.newModuleContext(ctx, EngineRequest{
 		ID:            requestIDFromContext(ctx),
-		UserID:        authCtx.UserID,
+		UserID:        userID,
 		TenantID:      tenantCtx.TenantID,
 		TenantSlug:    tenantCtx.Slug,
 		TraceID:       traceID,
-		PermissionSet: authCtx.PermissionSet,
+		PermissionSet: permSet,
 	}, mod)
 	defer modCtx.RollbackAll()
 
 	readOut, hostErr := wasm.ORMRead(ctx, e.primaryDB, e.cacheClient, modCtx, abiv1.ORMReadInput{
-		Model: modelName,
-		IDs:   []string{recordID},
+		Model:  modelName,
+		IDs:    ids,
+		Fields: fields,
 	})
-	return hostErr == nil && len(readOut.Records) > 0
+	if hostErr != nil {
+		return nil, false
+	}
+	return readOut.Records, true
 }
 
 // dispatchSharesCreateRoute is POST /_meta/shares' handler (goerp#475) —
