@@ -59,6 +59,7 @@ func newActivityFixture(t *testing.T, userID string) *activityFixture {
 	if _, err := primaryDB.ExecContext(ctx, `CREATE TABLE tenant_`+slug+`.gadget (id UUID PRIMARY KEY, name TEXT)`); err != nil {
 		t.Fatalf("create gadget table: %v", err)
 	}
+	grantFixtureTables(t, primaryDB, slug, "ticket", "gadget")
 	if err := recordactivity.NewStore(primaryDB).Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("record_activity Bootstrap: %v", err)
 	}
@@ -345,6 +346,7 @@ func TestWriteChangeActivity_TrackedComputedField_ComparesAgainstTheStoredRow(t 
 	if _, err := f.db.ExecContext(ctx, `CREATE TABLE tenant_`+f.slug+`.invoice (id UUID PRIMARY KEY, total NUMERIC(12,2))`); err != nil {
 		t.Fatalf("create invoice table: %v", err)
 	}
+	grantFixtureTables(t, f.db, f.slug, "invoice")
 	if _, err := f.db.ExecContext(ctx, `INSERT INTO tenant_`+f.slug+`.invoice VALUES ($1, 10)`, ticketA); err != nil {
 		t.Fatalf("insert invoice: %v", err)
 	}
@@ -388,6 +390,7 @@ func TestDBExec_TrackedUpdateFrom_CapturesOnlyTheTargetTableOncePerRow(t *testin
 	if _, err := f.db.ExecContext(ctx, `CREATE TABLE tenant_`+f.slug+`.staging (id UUID, ticket_id UUID, new_state TEXT)`); err != nil {
 		t.Fatalf("create staging table: %v", err)
 	}
+	grantFixtureTables(t, f.db, f.slug, "staging")
 	if _, err := f.db.ExecContext(ctx, `INSERT INTO tenant_`+f.slug+`.staging VALUES (gen_random_uuid(), $1, 'closed'), (gen_random_uuid(), $1, 'closed')`, ticketA); err != nil {
 		t.Fatalf("seed staging: %v", err)
 	}

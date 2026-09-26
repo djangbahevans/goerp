@@ -47,6 +47,7 @@ func newFixtureWidgetsTable(t *testing.T, conn *sql.DB, slug string, values ...s
 	if _, err := conn.ExecContext(ctx, "CREATE TABLE "+schema+".widgets (name text)"); err != nil {
 		t.Fatalf("create fixture table: %v", err)
 	}
+	grantFixtureTables(t, conn, slug, "widgets")
 	for _, v := range values {
 		if _, err := conn.ExecContext(ctx, "INSERT INTO "+schema+".widgets (name) VALUES ($1)", v); err != nil {
 			t.Fatalf("insert fixture row: %v", err)

@@ -349,7 +349,8 @@ type execRowResult struct {
 // per parameter set within a single shared transaction) run — the reuse
 // goerp#461's own scope calls for, rather than either one reimplementing
 // RETURNING construction, constraint-violation translation, or the
-// etag/audit mechanisms itself.
+// etag/audit mechanisms itself. Only the capture and statement, which carry
+// module SQL, run as the tenant role.
 //
 // ctx must already carry whatever deadline this row's execution should
 // run under — execRow doesn't derive one itself. DBExec bounds its one
@@ -358,26 +359,41 @@ type execRowResult struct {
 // its own fresh per-row timeout window, independent of the batch
 // transaction's own lifetime.
 func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedExec, params []any) (execRowResult, *abiv1.HostError) {
-	var oldRows []map[string]any
-	if (p.audited && p.stmt.Operation != "INSERT") || p.tracked {
-		var err error
-		oldRows, err = captureRowsBeforeExec(ctx, tx, auditableExecStmt{
-			Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause, FromClause: p.stmt.FromClause,
-		}, params)
-		if err != nil {
-			return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
-		}
-	}
-
-	start := time.Now()
 	var (
+		oldRows      []map[string]any
 		newRows      []map[string]any
 		rowsAffected int64
+		duration     time.Duration
 	)
-	if p.needReturning {
+	hostErr := withTenantRole(ctx, tx, modCtx, func() *abiv1.HostError {
+		if (p.audited && p.stmt.Operation != "INSERT") || p.tracked {
+			var err error
+			oldRows, err = captureRowsBeforeExec(ctx, tx, auditableExecStmt{
+				Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause, FromClause: p.stmt.FromClause,
+			}, params)
+			if err != nil {
+				return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
+			}
+		}
+
+		start := time.Now()
+		defer func() { duration = time.Since(start) }()
+		if !p.needReturning {
+			result, execErr := tx.ExecContext(ctx, p.finalSQL, params...)
+			if execErr != nil {
+				return translateExecError(execErr)
+			}
+			var err error
+			rowsAffected, err = result.RowsAffected()
+			if err != nil {
+				return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
+			}
+			return nil
+		}
+
 		rows, execErr := tx.QueryContext(ctx, p.finalSQL, params...)
 		if execErr != nil {
-			return execRowResult{}, translateExecError(execErr)
+			return translateExecError(execErr)
 		}
 		// The internally-executed RETURNING * always includes every
 		// column, so its own result set defines the table's real column
@@ -390,31 +406,24 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 			available, err := rows.Columns()
 			if err != nil {
 				_ = rows.Close()
-				return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
+				return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 			}
 			if err := validateRequestedColumns(p.requestedCols, available); err != nil {
 				_ = rows.Close()
-				return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
+				return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 			}
 		}
 		var err error
 		newRows, err = scanRowsToMaps(rows)
 		if err != nil {
-			return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
+			return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
 		}
 		rowsAffected = int64(len(newRows))
-	} else {
-		result, execErr := tx.ExecContext(ctx, p.finalSQL, params...)
-		if execErr != nil {
-			return execRowResult{}, translateExecError(execErr)
-		}
-		var err error
-		rowsAffected, err = result.RowsAffected()
-		if err != nil {
-			return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
-		}
+		return nil
+	})
+	if hostErr != nil {
+		return execRowResult{}, hostErr
 	}
-	duration := time.Since(start)
 
 	if p.hasEtagCol && isEtagMismatch(p.hadEtagCheck, rowsAffected) {
 		return execRowResult{}, &abiv1.HostError{Code: abiv1.ErrCodeDBEtagMismatch, Message: "record has been modified since it was last read"}

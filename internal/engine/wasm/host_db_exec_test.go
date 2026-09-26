@@ -82,6 +82,7 @@ func createFixtureExecTables(t *testing.T, conn *sql.DB, slug string) {
 	)`); err != nil {
 		t.Fatalf("create audit_log table: %v", err)
 	}
+	grantFixtureTables(t, conn, slug, "gadget", "widget")
 }
 
 func newExecTestDataAuditRegistry() *dataaudit.Registry {

@@ -45,6 +45,7 @@ func setupEngineTablesTest(t *testing.T) (*sql.DB, string, []string) {
 			t.Fatalf("create module table: %v", err)
 		}
 	}
+	grantFixtureTables(t, primaryDB, slug, "gadget", "widget")
 
 	var names []string
 	partitioned := 0

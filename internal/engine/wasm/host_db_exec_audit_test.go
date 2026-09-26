@@ -432,6 +432,7 @@ func TestDBExec_AuditedDeleteUsing_RecordsTheDeletedRows(t *testing.T) {
 	if _, err := primaryDB.ExecContext(ctx, `CREATE TABLE tenant_`+slug+`.purge (id UUID, widget_id UUID)`); err != nil {
 		t.Fatalf("create purge table: %v", err)
 	}
+	grantFixtureTables(t, primaryDB, slug, "purge")
 	keep, drop := "30000000-0000-0000-0000-000000000001", "30000000-0000-0000-0000-000000000002"
 	for _, id := range []string{keep, drop} {
 		if _, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: "INSERT INTO widget (id, tenant_id, name) VALUES ($1, gen_random_uuid(), $2)", Params: []any{id, "w-" + id}}); hostErr != nil {

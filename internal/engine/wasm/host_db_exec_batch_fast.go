@@ -302,17 +302,10 @@ func insertPrimaryKeyColumn(modCtx *ModuleContext, table string) (string, bool) 
 	return "", false
 }
 
-// wrapCopyBatchFailure wraps hostErr as host.db.exec_batch's own
-// documented db.batch_error envelope ({index, code, message, details} —
-// host-abi-reference.md §5), for any failure execBatchCopy can produce —
-// the COPY step itself, its post-copy read-back, or the audit-log write
-// that read-back feeds — not just the COPY step's own, so a caller
-// branching on Code == "db.batch_error" or reading Details["index"]
-// doesn't have to special-case which internal step actually failed.
-// index is -1 for the same reason the COPY step's own failure uses it:
-// none of these failures are attributable to one specific param_sets
-// entry the way a sequential row failure is.
-func wrapCopyBatchFailure(hostErr *abiv1.HostError) *abiv1.HostError {
+// wrapBatchFailure wraps a fast-path failure no single param_sets entry
+// caused in host.db.exec_batch's db.batch_error envelope, with index -1
+// (host-abi-reference.md §5).
+func wrapBatchFailure(hostErr *abiv1.HostError) *abiv1.HostError {
 	if hostErr.Code == abiv1.ErrCodeDBBatchError {
 		return hostErr
 	}
@@ -332,29 +325,38 @@ func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, 
 	}
 
 	start := time.Now()
-	var rowsCopied int64
-	copyErr := conn.Raw(func(driverConn any) error {
-		pgxConn := driverConn.(*stdlib.Conn).Conn()
-		n, err := pgxConn.CopyFrom(ctx, pgx.Identifier{p.table}, plan.Columns, pgx.CopyFromRows(input.ParamSets))
-		rowsCopied = n
-		return err
+	var (
+		rowsCopied int64
+		newRows    []map[string]any
+	)
+	hostErr = withTenantRole(ctx, tx, modCtx, func() *abiv1.HostError {
+		copyErr := conn.Raw(func(driverConn any) error {
+			pgxConn := driverConn.(*stdlib.Conn).Conn()
+			n, err := pgxConn.CopyFrom(ctx, pgx.Identifier{p.table}, plan.Columns, pgx.CopyFromRows(input.ParamSets))
+			rowsCopied = n
+			return err
+		})
+		if copyErr != nil {
+			return translateExecError(copyErr)
+		}
+		if plan.Readback {
+			var readbackErr *abiv1.HostError
+			newRows, readbackErr = copyReadback(ctx, tx, p, plan, input.ParamSets)
+			return readbackErr
+		}
+		return nil
 	})
-	if copyErr != nil {
-		_ = finish(copyErr)
-		return abiv1.DBExecBatchOutput{}, wrapCopyBatchFailure(translateExecError(copyErr))
+	if hostErr != nil {
+		_ = finish(errors.New(hostErr.Message))
+		return abiv1.DBExecBatchOutput{}, wrapBatchFailure(hostErr)
 	}
 
 	var returning [][]any
 	if plan.Readback {
-		newRows, hostErr := copyReadback(ctx, tx, p, plan, input.ParamSets)
-		if hostErr != nil {
-			_ = finish(errors.New(hostErr.Message))
-			return abiv1.DBExecBatchOutput{}, wrapCopyBatchFailure(hostErr)
-		}
 		if p.audited {
 			if err := writeAuditForExec(ctx, tx, modCtx, p.table, p.stmt, p.pkCol, p.excludeCols, nil, newRows); err != nil {
 				_ = finish(err)
-				return abiv1.DBExecBatchOutput{}, wrapCopyBatchFailure(&abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()})
+				return abiv1.DBExecBatchOutput{}, wrapBatchFailure(&abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()})
 			}
 		}
 		if p.requestedCols != nil {
@@ -549,36 +551,88 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 
 	start := time.Now()
 
-	var oldRowsPerIndex [][]map[string]any
-	if p.audited {
-		rows, err := captureRowsBeforeExecBatch(ctx, tx, auditableExecStmt{
-			Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause,
-		}, input.ParamSets)
-		if err != nil {
-			_ = finish(err)
-			return abiv1.DBExecBatchOutput{}, batchErrorForRowErr(-1, abiv1.ErrCodeExecError, "", err)
+	var (
+		oldRowsPerIndex [][]map[string]any
+		results         = make([]pipelineRowResult, len(input.ParamSets))
+	)
+	hostErr = withTenantRole(ctx, tx, modCtx, func() *abiv1.HostError {
+		if p.audited {
+			rows, err := captureRowsBeforeExecBatch(ctx, tx, auditableExecStmt{
+				Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause,
+			}, input.ParamSets)
+			if err != nil {
+				return batchErrorForRowErr(-1, abiv1.ErrCodeExecError, "", err)
+			}
+			oldRowsPerIndex = rows
 		}
-		oldRowsPerIndex = rows
+		return sendPipelineBatch(ctx, conn, p, input.ParamSets, results)
+	})
+	if hostErr != nil {
+		_ = finish(errors.New(hostErr.Message))
+		return abiv1.DBExecBatchOutput{}, wrapBatchFailure(hostErr)
 	}
 
+	if p.audited {
+		// Each statement's own old/new rows are paired in isolation, one
+		// statement at a time — never merging two different statements'
+		// own rows into one pairing pass, since primary-key pairing
+		// across statements is unsafe whenever their WHERE clauses can
+		// target overlapping rows without binding identical parameter
+		// values (see captureRowsBeforeExecBatch's own doc comment).
+		// Only the resulting entries are accumulated for one batched
+		// write — pairing itself stays per-row.
+		entries := make([]auditLogEntry, 0, len(results))
+		for i, res := range results {
+			newRows := res.newRows
+			if p.stmt.Operation == "DELETE" {
+				// new_data must stay NULL for a DELETE regardless of
+				// whether opts.returning requested rows back for the
+				// module's own purposes — matches writeAuditForExec's
+				// own DELETE handling (host_db_exec.go).
+				newRows = nil
+			}
+			entries = append(entries, pairAuditEntries(p.pkCol, oldRowsPerIndex[i], newRows)...)
+		}
+		if err := insertAuditLogRows(ctx, tx, modCtx, p.table, p.stmt.Operation, p.excludeCols, entries); err != nil {
+			_ = finish(err)
+			return abiv1.DBExecBatchOutput{}, batchErrorForRowErr(-1, abiv1.ErrCodeUnavailable, "audit write failed: ", err)
+		}
+	}
+
+	var totalRowsAffected int
+	var returning [][]any
+	for _, res := range results {
+		totalRowsAffected += int(res.rowsAffected)
+		if p.requestedCols != nil {
+			returning = append(returning, projectReturning(res.newRows, p.requestedCols)...)
+		}
+	}
+
+	duration, hostErr := finishBatchTx(finish, start, modCtx, input.SQL, len(input.ParamSets), "host.db.exec_batch: slow pipelined batch")
+	if hostErr != nil {
+		return abiv1.DBExecBatchOutput{}, hostErr
+	}
+	return batchOutput(totalRowsAffected, duration, returning, p.requestedCols), nil
+}
+
+// sendPipelineBatch sends one p.finalSQL per parameter set via pgx's
+// SendBatch and records each one's raw result in results.
+func sendPipelineBatch(ctx context.Context, conn *sql.Conn, p preparedExec, paramSets [][]any, results []pipelineRowResult) *abiv1.HostError {
 	batch := &pgx.Batch{}
-	for _, params := range input.ParamSets {
+	for _, params := range paramSets {
 		batch.Queue(p.finalSQL, params...)
 	}
 
 	// conn.Raw holds the underlying connection's own mutex for its whole
 	// callback (database/sql's Conn.Raw) — the same mutex tx.ExecContext
-	// needs, so writeAuditForExec (which runs one below, per row) must
-	// happen strictly after this call returns, never inside it. This
-	// closure only sends the batch and collects each row's own raw
-	// result; audit writes happen in a second pass below.
-	results := make([]pipelineRowResult, len(input.ParamSets))
+	// needs, so the caller's audit writes happen strictly after this call
+	// returns, never inside it.
 	pipelineErr := conn.Raw(func(driverConn any) error {
 		pgxConn := driverConn.(*stdlib.Conn).Conn()
 		br := pgxConn.SendBatch(ctx, batch)
 		defer func() { _ = br.Close() }()
 
-		for i := range input.ParamSets {
+		for i := range paramSets {
 			var newRows []map[string]any
 			var rowsAffected int64
 
@@ -632,52 +686,10 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 	})
 
 	if pipelineErr != nil {
-		_ = finish(pipelineErr)
 		if rowErr, ok := errors.AsType[*pipelineRowError](pipelineErr); ok {
-			return abiv1.DBExecBatchOutput{}, batchErrorForHostErr(rowErr.index, rowErr.host)
+			return batchErrorForHostErr(rowErr.index, rowErr.host)
 		}
-		return abiv1.DBExecBatchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: pipelineErr.Error(), Retry: true}
+		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: pipelineErr.Error(), Retry: true}
 	}
-
-	if p.audited {
-		// Each statement's own old/new rows are paired in isolation, one
-		// statement at a time — never merging two different statements'
-		// own rows into one pairing pass, since primary-key pairing
-		// across statements is unsafe whenever their WHERE clauses can
-		// target overlapping rows without binding identical parameter
-		// values (see captureRowsBeforeExecBatch's own doc comment).
-		// Only the resulting entries are accumulated for one batched
-		// write — pairing itself stays per-row.
-		entries := make([]auditLogEntry, 0, len(results))
-		for i, res := range results {
-			newRows := res.newRows
-			if p.stmt.Operation == "DELETE" {
-				// new_data must stay NULL for a DELETE regardless of
-				// whether opts.returning requested rows back for the
-				// module's own purposes — matches writeAuditForExec's
-				// own DELETE handling (host_db_exec.go).
-				newRows = nil
-			}
-			entries = append(entries, pairAuditEntries(p.pkCol, oldRowsPerIndex[i], newRows)...)
-		}
-		if err := insertAuditLogRows(ctx, tx, modCtx, p.table, p.stmt.Operation, p.excludeCols, entries); err != nil {
-			_ = finish(err)
-			return abiv1.DBExecBatchOutput{}, batchErrorForRowErr(-1, abiv1.ErrCodeUnavailable, "audit write failed: ", err)
-		}
-	}
-
-	var totalRowsAffected int
-	var returning [][]any
-	for _, res := range results {
-		totalRowsAffected += int(res.rowsAffected)
-		if p.requestedCols != nil {
-			returning = append(returning, projectReturning(res.newRows, p.requestedCols)...)
-		}
-	}
-
-	duration, hostErr := finishBatchTx(finish, start, modCtx, input.SQL, len(input.ParamSets), "host.db.exec_batch: slow pipelined batch")
-	if hostErr != nil {
-		return abiv1.DBExecBatchOutput{}, hostErr
-	}
-	return batchOutput(totalRowsAffected, duration, returning, p.requestedCols), nil
+	return nil
 }

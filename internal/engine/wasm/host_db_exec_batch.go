@@ -57,7 +57,7 @@ func makeDBExecBatch(r *Runtime, primary *sql.DB) func(ctx context.Context, m ap
 // param_sets[index], from a HostError a lower call already produced —
 // shared by every dispatch path (sequential and pipeline) that wraps one
 // row's own structured failure this way. index is -1 for a failure no
-// single param_sets entry can be blamed for (wrapCopyBatchFailure, and
+// single param_sets entry can be blamed for (wrapBatchFailure, and
 // captureRowsBeforeExecBatch's own batched pre-read, use the same
 // convention).
 func batchErrorForHostErr(index int, err *abiv1.HostError) *abiv1.HostError {
