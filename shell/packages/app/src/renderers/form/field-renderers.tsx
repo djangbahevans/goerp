@@ -27,6 +27,8 @@ import {
   TimezoneSelect,
   ToggleField,
 } from "@goerp/sdk/components";
+import { isAppError } from "@goerp/sdk/error";
+import { toast } from "@goerp/sdk/notifications";
 import { createInfiniteListQueryOptions, createRelationLabelsQueryOptions, useAction } from "@goerp/sdk/react";
 import { componentRegistry, resourceMetadataRegistry, resourceRegistry } from "@goerp/sdk/schema";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
@@ -375,7 +377,7 @@ function barcodeStringValue(value: unknown): string {
 }
 
 // on_scan_route orchestration lives here (TagsInput/FileInput's own split) — writes the scan immediately,
-// then merges the lookup's resolved fields; useAction's own onError handles a failed lookup.
+// then merges the lookup's resolved fields. A 4xx answer is left to useAction's own error handling.
 function BarcodeInput({
   field,
   id,
@@ -402,8 +404,8 @@ function BarcodeInput({
     try {
       const result = await lookup.mutateAsync(code);
       if (mountedRef.current && result.data) onChange(result.data);
-    } catch {
-      // Already surfaced via useAction's own onError.
+    } catch (err) {
+      if (!isAppError(err) || err.isServerError()) toast.error("Couldn't look up that code.");
     }
   }
 

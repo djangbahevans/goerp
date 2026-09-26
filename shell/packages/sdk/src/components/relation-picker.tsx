@@ -21,9 +21,7 @@ import { TextInput } from "./text-input.js";
 export type { RelationValue } from "./relation-field.js";
 
 const PAGE_SIZE = 100;
-// relation-picker.md's own Open Question #1: no debounce timing is
-// specified anywhere — this is a standard short debounce, not a
-// documented value.
+// relation-picker.md: the search query is debounced by 300ms.
 const DEBOUNCE_MS = 300;
 
 interface Row {

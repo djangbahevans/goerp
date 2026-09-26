@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useState } from "react";
 
 export type UserAvatarSize = "xs" | "sm" | "md" | "lg";
 
@@ -55,14 +56,17 @@ function avatarBgClassFor(key: string): string {
 export function UserAvatar({ userId, name, avatarUrl, size = "md", showTooltip = false }: UserAvatarProps): ReactNode {
   const sizeClass = SIZE_CLASSES[size];
   const title = showTooltip ? name : undefined;
+  // Keyed by URL so a refreshed signed URL gets a fresh load attempt.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
-  if (avatarUrl) {
+  if (avatarUrl && avatarUrl !== failedUrl) {
     return (
       <img
         src={avatarUrl}
         alt={name}
         title={title}
         data-user-id={userId}
+        onError={() => setFailedUrl(avatarUrl)}
         className={`rounded-full object-cover ${sizeClass}`}
       />
     );
