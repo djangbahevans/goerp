@@ -162,6 +162,7 @@ export const Default: Story = {
     await expect(body.getByText("Globex Inc")).toBeInTheDocument();
     await expect(body.getByText("confirmed")).toBeInTheDocument();
     await expect(canvas.getByRole("button", { name: "Download" })).toBeInTheDocument();
+    await expect(canvas.getByRole("heading", { level: 1, name: "Sales Analysis" })).toBeInTheDocument();
   },
 };
 
@@ -232,5 +233,6 @@ export const Embedded: Story = {
     const canvas = within(canvasElement);
     const table = await waitFor(() => canvas.getByRole("table"));
     await expect(within(table).getByText("Acme Corp")).toBeInTheDocument();
+    await expect(canvas.queryByRole("heading", { name: "Sales Analysis" })).not.toBeInTheDocument();
   },
 };

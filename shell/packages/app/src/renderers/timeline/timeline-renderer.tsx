@@ -1,10 +1,12 @@
 import { ActionButton, Icon, Skeleton } from "@goerp/sdk/components";
 import { createInfiniteListQueryOptions, saveRecord, useInfiniteList } from "@goerp/sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { ListFilters } from "../list/list-filters.js";
 import type { Row } from "../list/list-view-types.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
+import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { TimelineChart } from "./timeline-chart.js";
 import { dateKey, initialRangeMode, navigateRange, startOfDay, visibleRange } from "./timeline-date-utils.js";
 import { buildTimelineRows } from "./timeline-layout.js";
@@ -61,12 +63,18 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
   const rows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);
   const timelineRows = useMemo(() => buildTimelineRows(rows, view), [rows, view]);
 
+  const page = (children: ReactNode) => (
+    <ViewPage embedded={embedded} title={view.label}>
+      {children}
+    </ViewPage>
+  );
+
   if (isLoading) {
-    return <Skeleton type="card" />;
+    return page(<Skeleton type="card" />);
   }
 
   if (isError) {
-    return (
+    return page(
       <div role="alert" className="flex flex-col items-center gap-2 py-6 text-center">
         <Icon name="circle-alert" size={20} className="text-danger" aria-hidden="true" />
         <p className="text-text">Couldn't load {view.label}.</p>
@@ -79,7 +87,7 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
         >
           Retry
         </ActionButton>
-      </div>
+      </div>,
     );
   }
 
@@ -95,25 +103,31 @@ export function TimelineRenderer({ view, recordId, embedded, baseFilter, initial
     void queryClient.invalidateQueries({ queryKey });
   }
 
-  return (
-    <>
-      <ListFilters
-        filters={view.filters ?? []}
-        values={listState.filter}
-        onChange={listState.setFilter}
-        viewName={view.name}
+  return page(
+    <ViewSurface>
+      <ViewToolbar
+        filters={
+          <ListFilters
+            filters={view.filters ?? []}
+            values={listState.filter}
+            onChange={listState.setFilter}
+            viewName={view.name}
+          />
+        }
       />
-      <TimelineChart
-        rows={timelineRows}
-        range={range}
-        rangeMode={rangeMode}
-        onRangeModeChange={setRangeMode}
-        onNavigate={handleNavigate}
-        allowDrag={view.allow_drag ?? true}
-        allowResize={view.allow_resize ?? true}
-        onBarChange={handleBarChange}
-        label={view.label}
-      />
-    </>
+      <div className="p-3">
+        <TimelineChart
+          rows={timelineRows}
+          range={range}
+          rangeMode={rangeMode}
+          onRangeModeChange={setRangeMode}
+          onNavigate={handleNavigate}
+          allowDrag={view.allow_drag ?? true}
+          allowResize={view.allow_resize ?? true}
+          onBarChange={handleBarChange}
+          label={view.label}
+        />
+      </div>
+    </ViewSurface>,
   );
 }

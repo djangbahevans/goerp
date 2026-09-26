@@ -6,13 +6,14 @@ import { useInfiniteList, useRelationLabels } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
-import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
+import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { BulkActions } from "./bulk-actions.js";
 import { columnStyle, renderCell, shouldTruncate } from "./column-renderers.js";
 import { ListActions } from "./list-actions.js";
-import { ListFilters } from "./list-filters.js";
+import { FilterFieldLabel, ListFilters } from "./list-filters.js";
 import type { ListColumn, ListFilter, ListViewDeclaration, Row } from "./list-view-types.js";
 import { SavedFiltersChip } from "./saved-filters-chip.js";
 import { extensionsOrEmpty, useExtensionColumnRowData, useListExtensions } from "./use-list-extensions.js";
@@ -24,6 +25,9 @@ import { useVisibleColumns } from "./use-visible-columns.js";
 
 // shell-architecture.md §20's ListRenderer — mode switching, URL/local
 // state, field security, and (goerp#575) column/filter/action rendering.
+// Radix Select disallows an empty-string option value.
+const NO_GROUPING = "__none__";
+
 export interface ListRendererProps {
   view: ListViewDeclaration;
   module: string;
@@ -395,12 +399,27 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
           return extra ? { ...treeRow, row: { ...treeRow.row, ...extra } } : treeRow;
         });
 
+  const listActions = (
+    <ListActions
+      actions={view.actions ?? []}
+      module={module}
+      viewName={view.name}
+      {...(embedded !== undefined ? { embedded } : {})}
+      {...(showCreateAction !== undefined ? { showCreateAction } : {})}
+    />
+  );
+  const page = (children: ReactNode) => (
+    <ViewPage embedded={embedded} title={view.label} {...(embedded ? {} : { actions: listActions })}>
+      {children}
+    </ViewPage>
+  );
+
   if (isLoading) {
-    return <Skeleton type="table" columns={columns.length} />;
+    return page(<Skeleton type="table" columns={columns.length} />);
   }
 
   if (isError) {
-    return (
+    return page(
       <div role="alert" className="flex flex-col items-center gap-2 py-6 text-center">
         <Icon name="circle-alert" size={20} className="text-danger" aria-hidden="true" />
         <p className="text-text">Couldn't load {view.label}.</p>
@@ -413,14 +432,17 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
         >
           Retry
         </ActionButton>
-      </div>
+      </div>,
     );
   }
 
   const groupByOptions = view.group_by_options ?? [];
   const groupBySelectOptions = [
-    { value: "", label: "None" },
-    ...groupByOptions.map((field) => ({ value: field, label: field })),
+    { value: NO_GROUPING, label: "None" },
+    ...groupByOptions.map((field) => ({
+      value: field,
+      label: view.columns?.find((column) => column.field === field)?.label ?? field,
+    })),
   ];
 
   const stickyCheckboxClassName = "sticky left-0 z-10";
@@ -446,46 +468,51 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
     if (href) void navigate({ to: href });
   }
 
-  return (
-    <>
-      <ListFilters filters={filters} values={listState.filter} onChange={listState.setFilter} viewName={view.name} />
-      <div className="flex items-center justify-between gap-2">
-        <ListActions
-          actions={view.actions ?? []}
-          module={module}
-          viewName={view.name}
-          {...(embedded !== undefined ? { embedded } : {})}
-          {...(showCreateAction !== undefined ? { showCreateAction } : {})}
-        />
-        <div className="flex items-center gap-2">
-          {!embedded && <SavedFiltersChip viewName={view.name} listState={listState} />}
-          {hiddenColumns.length > 0 && (
-            <ActionMenu
-              label="Columns"
-              items={hiddenColumns.map((column) => ({
-                label: column.label ?? column.field,
-                checked: revealedFields.has(column.field),
-                onClick: () => toggleColumn(column.field),
-              }))}
-            />
-          )}
-        </div>
-      </div>
-      {showSelection && <BulkActions actions={bulkActions} selectedIds={selectedIds} clearSelection={clearSelection} />}
-      {!isTree && groupByOptions.length > 0 && (
-        <label htmlFor={groupBySelectId} className="flex items-center gap-2 text-sm text-text-secondary">
-          Group by
-          <Select
-            id={groupBySelectId}
-            options={groupBySelectOptions}
-            value={listState.groupBy ?? ""}
-            onChange={(value) => {
-              const next = Array.isArray(value) ? value[0] : value;
-              listState.setGroupBy(next !== undefined && next !== "" ? next : undefined);
-            }}
+  return page(
+    <ViewSurface>
+      <ViewToolbar
+        filters={
+          <ListFilters
+            filters={filters}
+            values={listState.filter}
+            onChange={listState.setFilter}
+            viewName={view.name}
           />
-        </label>
-      )}
+        }
+        controls={
+          <>
+            {!isTree && groupByOptions.length > 0 && (
+              <FilterFieldLabel id={groupBySelectId} label="Group by">
+                <span className="block min-w-[160px]">
+                  <Select
+                    id={groupBySelectId}
+                    options={groupBySelectOptions}
+                    value={listState.groupBy ?? NO_GROUPING}
+                    emptyValue={NO_GROUPING}
+                    onChange={(value) => {
+                      const next = Array.isArray(value) ? value[0] : value;
+                      listState.setGroupBy(next !== undefined && next !== NO_GROUPING ? next : undefined);
+                    }}
+                  />
+                </span>
+              </FilterFieldLabel>
+            )}
+            {!embedded && <SavedFiltersChip viewName={view.name} listState={listState} />}
+            {hiddenColumns.length > 0 && (
+              <ActionMenu
+                label="Columns"
+                items={hiddenColumns.map((column) => ({
+                  label: column.label ?? column.field,
+                  checked: revealedFields.has(column.field),
+                  onClick: () => toggleColumn(column.field),
+                }))}
+              />
+            )}
+            {embedded && listActions}
+          </>
+        }
+      />
+      {showSelection && <BulkActions actions={bulkActions} selectedIds={selectedIds} clearSelection={clearSelection} />}
       {visibleRows.length === 0 ? (
         <EmptyState
           title={view.empty_state?.title ?? `No ${view.label.toLowerCase()} found.`}
@@ -601,7 +628,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                     return (
                       <Fragment key={rowKey}>
                         <tr
-                          className={`border-b border-border ${selected ? "bg-primary-subtle" : "bg-surface"} ${
+                          className={`border-b border-border last:border-b-0 ${selected ? "bg-primary-subtle" : "bg-surface"} ${
                             rowHandleActivate
                               ? "cursor-pointer hover:bg-surface-hover focus-visible:[outline:2px_solid_var(--color-primary)] focus-visible:-outline-offset-2"
                               : ""
@@ -729,7 +756,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
         </div>
       )}
       {hasNextPage && (
-        <div className="flex justify-center p-3">
+        <div className="flex justify-center border-border border-t p-3">
           <ActionButton
             variant="secondary"
             loading={isFetchingNextPage}
@@ -741,6 +768,6 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
           </ActionButton>
         </div>
       )}
-    </>
+    </ViewSurface>,
   );
 }

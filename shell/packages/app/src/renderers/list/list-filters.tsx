@@ -21,7 +21,7 @@ interface FilterInputProps {
 // ones) shares this label shape — matches FieldWrapper's own label
 // treatment (docs/components/list-filters.md "Content and Edge Cases") so a
 // filter's label and a form field's label read as the same kind of text.
-function FilterFieldLabel({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+export function FilterFieldLabel({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   return (
     <label htmlFor={id} className="flex flex-col gap-1 text-sm text-text font-medium">
       <span>{label}</span>
@@ -336,7 +336,7 @@ export function ListFilters({ filters: declaredFilters, values, onChange, viewNa
   if (filters.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-start gap-4 border-border border-b bg-surface p-4">
+    <div className="flex flex-wrap items-end gap-4">
       {filters.map((filter) => {
         const props: FilterInputProps = {
           filter,

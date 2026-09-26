@@ -2,7 +2,7 @@ import writeXlsxFile from "write-excel-file/browser";
 import { leafAccessiblePaths, visibleLeaves } from "./pivot-grid-layout.js";
 import type { PivotCell, PivotHeaderNode, PivotValueColumn } from "./pivot-view-types.js";
 
-// PivotView's onDownload has no access to PivotGrid's own collapse state
+// The Download button has no access to PivotGrid's own collapse state
 // (local useState inside that component, never lifted to props) — the
 // export always covers the full underlying data at leaf granularity,
 // regardless of what's currently collapsed on screen. Every leaf sits at

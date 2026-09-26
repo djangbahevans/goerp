@@ -14,7 +14,7 @@ export const PivotValueSchema = v.looseObject({
 export type PivotValue = v.InferOutput<typeof PivotValueSchema>;
 
 // manifest-spec.md §9.5's Pivot View wire schema, resolved by
-// pivot-renderer.tsx into PivotViewProps (pivot-view-types.ts).
+// pivot-renderer.tsx into PivotGridProps (pivot-view-types.ts).
 export const PivotViewDeclarationSchema = v.looseObject({
   name: v.string(),
   type: v.literal("pivot"),

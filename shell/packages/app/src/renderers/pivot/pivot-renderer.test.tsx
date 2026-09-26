@@ -90,6 +90,39 @@ async function renderPivotRenderer(
 }
 
 describe("PivotRenderer", () => {
+  const loaded = {
+    data: { cells: [{ row: ["east"], column: ["confirmed"], values: { amount_total_sum: 150 } }] },
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+  };
+
+  it("titles a full-page render with the view label as the page's h1 and a toolbar Download button", async () => {
+    usePivotDataMock.mockReturnValue(loaded);
+
+    await renderPivotRenderer();
+
+    expect(screen.getByRole("heading", { level: 1, name: "Sales Analysis" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { name: "Sales Analysis" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+  });
+
+  it("renders no page heading when embedded", async () => {
+    usePivotDataMock.mockReturnValue(loaded);
+
+    await renderPivotRenderer({ embedded: true, recordId: "r1" });
+
+    expect(screen.queryByRole("heading", { name: "Sales Analysis" })).toBeNull();
+  });
+
+  it("hides the Download button when allow_download is false", async () => {
+    usePivotDataMock.mockReturnValue(loaded);
+
+    await renderPivotRenderer({}, { ...view, allow_download: false });
+
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+  });
+
   it("shows a loading state while the pivot data is in flight", async () => {
     usePivotDataMock.mockReturnValue({ data: undefined, isLoading: true, isFetching: true, isError: false });
 

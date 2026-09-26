@@ -116,9 +116,9 @@ export function PivotGrid({
   }
 
   return (
-    <div className="rounded-structural border border-border">
+    <div>
       <div className="relative overflow-x-auto" onScroll={(event) => setIsScrolled(event.currentTarget.scrollLeft > 0)}>
-        <table className="w-full border-collapse">
+        <table className="w-full border-collapse [&_tbody_tr:last-child>*]:border-b-0">
           <colgroup>
             {Array.from({ length: rowDepth }, (_, depthIndex) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: depth is a stable structural position.

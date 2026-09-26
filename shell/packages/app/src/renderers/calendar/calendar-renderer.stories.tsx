@@ -135,6 +135,7 @@ export const Default: Story = {
     await waitFor(() => expect(canvas.getByText("Call Acme Corp")).toBeInTheDocument());
     await expect(canvas.getByText("Demo with Globex")).toBeInTheDocument();
     await expect(canvas.getByRole("tab", { name: "Month" })).toBeInTheDocument();
+    await expect(canvas.getByRole("heading", { level: 1, name: "Activity Calendar" })).toBeInTheDocument();
   },
 };
 
@@ -209,5 +210,6 @@ export const Embedded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByText("Call Acme Corp")).toBeInTheDocument());
+    await expect(canvas.queryByRole("heading", { name: "Activity Calendar" })).not.toBeInTheDocument();
   },
 };

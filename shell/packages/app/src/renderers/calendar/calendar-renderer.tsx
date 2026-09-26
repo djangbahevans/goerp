@@ -4,10 +4,12 @@ import { toast } from "@goerp/sdk/notifications";
 import { useInfiniteList } from "@goerp/sdk/react";
 import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useNavigate } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { ListFilters } from "../list/list-filters.js";
 import type { Row } from "../list/list-view-types.js";
 import { useDefaultFilterApplication, useListState } from "../list/use-list-state.js";
+import { ViewPage, ViewSurface, ViewToolbar } from "../view-chrome.js";
 import { dateKey, visibleRange } from "./calendar-date-utils.js";
 import { buildCalendarEvents, initialViewMode } from "./calendar-events.js";
 import type { CalendarViewDeclaration } from "./calendar-manifest-types.js";
@@ -89,12 +91,18 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
   const rows = useMemo(() => (data?.pages.map((page) => page.data) ?? []).flat(), [data]);
   const events = useMemo(() => buildCalendarEvents(rows, view), [rows, view]);
 
+  const page = (children: ReactNode) => (
+    <ViewPage embedded={embedded} title={view.label}>
+      {children}
+    </ViewPage>
+  );
+
   if (isLoading) {
-    return <Skeleton type="card" />;
+    return page(<Skeleton type="card" />);
   }
 
   if (isError) {
-    return (
+    return page(
       <div role="alert" className="flex flex-col items-center gap-2 py-6 text-center">
         <Icon name="circle-alert" size={20} className="text-danger" aria-hidden="true" />
         <p className="text-text">Couldn't load {view.label}.</p>
@@ -107,7 +115,7 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
         >
           Retry
         </ActionButton>
-      </div>
+      </div>,
     );
   }
 
@@ -126,24 +134,30 @@ export function CalendarRenderer({ view, module, recordId, embedded, baseFilter,
     void navigate({ to: moduleLink(`${onDateClickPath}?${view.date_field}=${dateKey(date)}`) });
   }
 
-  return (
-    <>
-      <ListFilters
-        filters={view.filters ?? []}
-        values={listState.filter}
-        onChange={listState.setFilter}
-        viewName={view.name}
+  return page(
+    <ViewSurface>
+      <ViewToolbar
+        filters={
+          <ListFilters
+            filters={view.filters ?? []}
+            values={listState.filter}
+            onChange={listState.setFilter}
+            viewName={view.name}
+          />
+        }
       />
-      <CalendarView
-        events={events}
-        {...(view.allowed_views ? { allowedViews: view.allowed_views } : {})}
-        {...(view.default_view ? { defaultView: view.default_view } : {})}
-        initialDate={today}
-        quickCreate={Boolean(view.quick_create) && view.on_date_click !== undefined}
-        onEventClick={handleEventClick}
-        onQuickCreate={handleQuickCreate}
-        onVisibleRangeChange={setRange}
-      />
-    </>
+      <div className="p-3">
+        <CalendarView
+          events={events}
+          {...(view.allowed_views ? { allowedViews: view.allowed_views } : {})}
+          {...(view.default_view ? { defaultView: view.default_view } : {})}
+          initialDate={today}
+          quickCreate={Boolean(view.quick_create) && view.on_date_click !== undefined}
+          onEventClick={handleEventClick}
+          onQuickCreate={handleQuickCreate}
+          onVisibleRangeChange={setRange}
+        />
+      </div>
+    </ViewSurface>,
   );
 }

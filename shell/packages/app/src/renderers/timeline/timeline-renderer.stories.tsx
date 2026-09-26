@@ -165,6 +165,7 @@ export const Default: Story = {
     await expect(canvas.getByText("Alice")).toBeInTheDocument();
     await expect(canvas.getByText("Bob")).toBeInTheDocument();
     await expect(canvas.getByRole("tab", { name: "Month" })).toBeInTheDocument();
+    await expect(canvas.getByRole("heading", { level: 1, name: "Project Timeline" })).toBeInTheDocument();
   },
 };
 
@@ -231,5 +232,6 @@ export const Embedded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByRole("group", { name: /Design review/ })).toBeInTheDocument());
+    await expect(canvas.queryByRole("heading", { name: "Project Timeline" })).not.toBeInTheDocument();
   },
 };
