@@ -14,10 +14,16 @@ const permissionValue = createPermissionContextValue({
   modulesEnabled: new Set(),
 });
 
-const { useFormRecordMock, resolveModelMock } = vi.hoisted(() => ({
+const { useFormRecordMock, resolveModelMock, resolveRecordMock, navigateMock } = vi.hoisted(() => ({
   useFormRecordMock: vi.fn(),
   resolveModelMock: vi.fn(async () => ({ shareable: false })),
+  resolveRecordMock: vi.fn(async () => "/contacts/{id}" as string | null),
+  navigateMock: vi.fn(),
 }));
+vi.mock("@tanstack/react-router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-router")>();
+  return { ...actual, useNavigate: () => navigateMock };
+});
 vi.mock("./use-form-record.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./use-form-record.js")>();
   return { ...actual, useFormRecord: useFormRecordMock };
@@ -29,13 +35,19 @@ vi.mock("./form-chatter.js", () => ({
 }));
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
-  return { ...actual, modelRegistry: { resolve: resolveModelMock } };
+  return {
+    ...actual,
+    modelRegistry: { resolve: resolveModelMock },
+    viewPathRegistry: { resolveRecord: resolveRecordMock },
+  };
 });
 
 afterEach(() => {
   cleanup();
   useFormRecordMock.mockReset();
   resolveModelMock.mockClear();
+  resolveRecordMock.mockClear();
+  navigateMock.mockReset();
 });
 
 const view: FormViewDeclaration = {
@@ -267,5 +279,43 @@ describe("FormRenderer chatter", () => {
     options.onSaved?.({ id: "01j" });
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["record-activity", "contacts.contact", "01j"] });
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  function renderCreateForm(client = new QueryClient()) {
+    useFormRecordMock.mockReturnValue(handle());
+    const result = render(
+      <QueryClientProvider client={client}>
+        <PermissionContext.Provider value={permissionValue}>
+          <FormRenderer view={view} module="contacts" />
+        </PermissionContext.Provider>
+      </QueryClientProvider>,
+    );
+    const options = useFormRecordMock.mock.calls[0]?.[2] as { onSaved?: (record: Record<string, unknown>) => void };
+    return { ...result, onSaved: options.onSaved };
+  }
+
+  it("moves a create form to the new record's URL once the record is saved", async () => {
+    const client = new QueryClient();
+    const removeSpy = vi.spyOn(client, "removeQueries");
+    const { onSaved } = renderCreateForm(client);
+    onSaved?.({ id: "01new" });
+
+    await vi.waitFor(() => expect(navigateMock).toHaveBeenCalledWith({ to: "/_m/contacts/01new", replace: true }));
+    expect(resolveRecordMock).toHaveBeenCalledWith("contacts_form", "contacts");
+    // The next "New" form must not open prefilled with the record just created.
+    await vi.waitFor(() =>
+      expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["form-record", "contacts.contact", null] }),
+    );
+  });
+
+  it("stays put when the form unmounts before the record's path resolves", async () => {
+    const { onSaved, unmount } = renderCreateForm();
+    onSaved?.({ id: "01new" });
+    unmount();
+
+    await vi.waitFor(() => expect(resolveRecordMock).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 });

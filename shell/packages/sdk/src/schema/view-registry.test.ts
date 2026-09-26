@@ -103,6 +103,45 @@ describe("buildViewRegistry — resolveRoute", () => {
     expect(exact?.recordId).toBeUndefined();
   });
 
+  describe("the routes EnableOps(List, Get, Create, Update) + EnableViews generate", () => {
+    const generated: MetaSchema = {
+      ...schema,
+      modules: {
+        crm: moduleSchema({
+          name: "crm",
+          routes: [
+            route({ method: "GET", path: "/crm/contacts", view: "crm_contact_list", crud_action: "list" }),
+            route({ method: "POST", path: "/crm/contacts", view: "crm_contact_form", crud_action: "create" }),
+            route({ method: "GET", path: "/crm/contacts/{id}", view: "crm_contact_form", crud_action: "get" }),
+            route({ method: "PUT", path: "/crm/contacts/{id}", view: "crm_contact_form", crud_action: "update" }),
+          ],
+          views: [
+            { name: "crm_contact_list", type: "list", resource: "crm.contact", label: "Contacts" },
+            { name: "crm_contact_form", type: "form", resource: "crm.contact", label: "Contact" },
+          ],
+        }),
+      },
+    };
+    const registry = buildViewRegistry(generated);
+
+    it("resolves the collection path to the list, not the create route's form", () => {
+      expect(registry.resolveRoute("/crm/contacts")?.viewName).toBe("crm_contact_list");
+    });
+
+    it("opens the create form, with no record, at the collection path plus /new", () => {
+      const resolved = registry.resolveRoute("/crm/contacts/new");
+      expect(resolved?.viewName).toBe("crm_contact_form");
+      expect(resolved?.recordId).toBeUndefined();
+    });
+
+    it("still opens a record's form at /{id}", () => {
+      expect(registry.resolveRoute("/crm/contacts/01j8x000000000000000000000")).toMatchObject({
+        viewName: "crm_contact_form",
+        recordId: "01j8x000000000000000000000",
+      });
+    });
+  });
+
   it("returns null when a concrete path's prefix doesn't match any declared {id}-templated route", () => {
     const registry = buildViewRegistry(schema);
     expect(registry.resolveRoute("/contacts/01j8x000000000000000000000")).toBeNull();

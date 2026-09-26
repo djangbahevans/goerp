@@ -71,7 +71,14 @@ describe("resolveRecordViewPath", () => {
       display_name: "CRM",
       routes: [
         { method: "GET", path: "/crm/contacts", permissions: [], response_is_list: true, view: "crm_contact_list" },
-        { method: "POST", path: "/crm/contacts", permissions: [], response_is_list: false, view: "crm_contact_form" },
+        {
+          method: "POST",
+          path: "/crm/contacts",
+          permissions: [],
+          response_is_list: false,
+          view: "crm_contact_form",
+          crud_action: "create",
+        },
         {
           method: "PUT",
           path: "/crm/contacts/{id}",
@@ -99,8 +106,12 @@ describe("resolveRecordViewPath", () => {
     },
   });
 
+  it("opens a create route's form view at its collection path plus /new", () => {
+    expect(resolveViewPath(generated, "crm_contact_form", "crm")).toBe("/crm/contacts/new");
+    expect(resolveViewPath(generated, "crm_contact_list", "crm")).toBe("/crm/contacts");
+  });
+
   it("picks the view's GET route with an {id}, not its create route", () => {
-    expect(resolveViewPath(generated, "crm_contact_form", "crm")).toBe("/crm/contacts");
     expect(resolveRecordViewPath(generated, "crm_contact_form", "crm")).toBe("/crm/contacts/{id}");
     expect(resolveRecordViewPath(generated, "crm.crm_contact_form", "other")).toBe("/crm/contacts/{id}");
   });
