@@ -45,7 +45,7 @@ func TestLoadModule_EnableViewsAndNav_MergesIntoManifest(t *testing.T) {
 		t.Fatalf("Manifest.Navigation = %v, want one Sales group", m.Manifest.Navigation)
 	}
 	children := m.Manifest.Navigation[0].Children
-	if len(children) != 1 || children[0].Label != "Widgets" || children[0].View != "widgets_widget_list" || children[0].Route != "/widgets/widgets" {
+	if len(children) != 1 || children[0].Label != "Widgets" || children[0].View != "widgets_widget_list" || children[0].Route != "/widgets" {
 		t.Fatalf("Navigation[0].Children = %v, unexpected", children)
 	}
 }

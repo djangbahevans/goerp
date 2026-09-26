@@ -160,11 +160,12 @@ func SynthesizeViews(moduleName, moduleType string, models []model.ModelDeclarat
 		}
 
 		if md.NavDecl != nil {
-			navRoute := ModulePathPrefix(moduleName, moduleType) + "/" + pluralPathSegment(md)
+			// Module-relative, like a manifest-declared nav item's route
+			// (manifest-spec.md §12): the shell adds the module segment.
 			mergedNav = mergeNavItem(mergedNav, md.NavDecl, manifest.NavItem{
 				Label: md.NavDecl.Label,
 				View:  effectiveListName,
-				Route: navRoute,
+				Route: "/" + pluralPathSegment(md),
 			})
 		}
 	}

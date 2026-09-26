@@ -268,10 +268,10 @@ func TestSynthesizeViews_NavMergesIntoExistingGroup(t *testing.T) {
 	if len(group.Children) != 2 {
 		t.Fatalf("Children = %v, want both models' nav items", group.Children)
 	}
-	if group.Children[0].Label != "Widgets" || group.Children[0].View != "testmodule_widget_list" || group.Children[0].Route != "/testmodule/widgets" {
+	if group.Children[0].Label != "Widgets" || group.Children[0].View != "testmodule_widget_list" || group.Children[0].Route != "/widgets" {
 		t.Errorf("first child = %+v, unexpected", group.Children[0])
 	}
-	if group.Children[1].Label != "Gadgets" || group.Children[1].View != "testmodule_gadget_list" || group.Children[1].Route != "/testmodule/gadgets" {
+	if group.Children[1].Label != "Gadgets" || group.Children[1].View != "testmodule_gadget_list" || group.Children[1].Route != "/gadgets" {
 		t.Errorf("second child = %+v, unexpected", group.Children[1])
 	}
 }

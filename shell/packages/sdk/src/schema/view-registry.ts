@@ -204,6 +204,10 @@ export function filterViewByCapability(view: ViewDeclaration, resource: Resource
 // template isn't needed to unblock anything that exists yet.
 const TRAILING_ID_SEGMENT = "/{id}";
 
+// A create route's form view opens at its collection path plus "/new"; the
+// collection path itself belongs to the list view served by GET.
+export const CREATE_PATH_SUFFIX = "/new";
+
 export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
   const resources = buildResourceRegistry(schema);
   const models = buildModelRegistry(schema);
@@ -218,7 +222,10 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
 
   for (const [moduleName, moduleSchema] of Object.entries(schema.modules)) {
     for (const route of moduleSchema.routes) {
-      if (!route.view) continue;
+      // Only GET routes and create routes open a view in the browser; a
+      // POST/PUT sharing a GET route's path must not replace its view.
+      const opensCreateForm = route.crud_action === "create";
+      if (!route.view || (route.method !== "GET" && !opensCreateForm)) continue;
 
       const declaration = resolveViewDeclaration(schema, route.view, moduleName);
       if (!declaration) continue;
@@ -234,6 +241,10 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
         permissions,
         bundleUrl: moduleSchema.frontend?.bundle_url ?? null,
       };
+      if (opensCreateForm) {
+        routeMap.set(route.path + CREATE_PATH_SUFFIX, resolved);
+        continue;
+      }
       routeMap.set(route.path, resolved);
       if (route.path.endsWith(TRAILING_ID_SEGMENT)) {
         templatedRouteMap.set(route.path.slice(0, -TRAILING_ID_SEGMENT.length), resolved);

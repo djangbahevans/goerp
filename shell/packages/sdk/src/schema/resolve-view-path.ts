@@ -1,15 +1,16 @@
 import type { SchemaRegistry } from "./schema-registry.js";
 import type { MetaSchema } from "./types.js";
+import { CREATE_PATH_SUFFIX } from "./view-registry.js";
 
 // Resolves a manifest Action's `view` reference ({view_name} same-module,
-// or {module}.{view_name}) to the API path the route serving that view
-// declares — a route-scan lookup on RouteSchema.view, the same pattern
-// buildResourceRegistry uses for model/crud_action. Not the full
-// ViewRegistry (nav tree/model registry/capability filtering) goerp#636
-// deferred to backlog #674 — just enough to make a "create" action navigate.
+// or {module}.{view_name}) to the API path that opens it, as the view
+// registry resolves it: a view served by a create route opens empty at that
+// route's path plus "/new"; any other view at its GET route's path.
 export function resolveViewPath(schema: MetaSchema, viewRef: string, currentModule: string): string | null {
-  const route = viewRoutes(schema, viewRef, currentModule)[0];
-  return route?.path ?? null;
+  const routes = viewRoutes(schema, viewRef, currentModule);
+  const create = routes.find((r) => r.crud_action === "create");
+  if (create) return create.path + CREATE_PATH_SUFFIX;
+  return routes.find((r) => r.method === "GET")?.path ?? null;
 }
 
 // The path that opens one record in viewRef, e.g. "/contacts/{id}": the

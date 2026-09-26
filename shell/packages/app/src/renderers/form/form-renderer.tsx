@@ -1,6 +1,10 @@
 import { ActionButton, Icon, PageHeader, PageLayout, Skeleton } from "@goerp/sdk/components";
+import { moduleLink } from "@goerp/sdk/nav";
 import { recordActivityQueryKey } from "@goerp/sdk/react";
+import { viewPathRegistry } from "@goerp/sdk/schema";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.js";
 import { ListActions } from "../list/list-actions.js";
 import { FormChatter } from "./form-chatter.js";
@@ -11,7 +15,7 @@ import { FormTabsRenderer } from "./form-tabs.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
 import { WorkflowActions } from "./form-workflow-actions.js";
 import type { UseFormRecordOptions } from "./use-form-record.js";
-import { useFormRecord } from "./use-form-record.js";
+import { recordQueryKey, useFormRecord } from "./use-form-record.js";
 
 // shell-architecture.md §20's FormRenderer.
 export interface FormRendererProps {
@@ -27,6 +31,14 @@ export interface FormRendererProps {
 
 export function FormRenderer({ view, module, recordId, testFormRecordOptions }: FormRendererProps) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const { record, isLoading, isError, error, refetch, isDirty, setField, save, isSaving, saveError } = useFormRecord(
     view.resource,
     recordId,
@@ -34,10 +46,24 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
       autoSave: view.autosave ?? false,
       // A save may write a change entry to the chatter's feed, which
       // otherwise only refetches after the viewer's own comment or delete.
-      onSaved: () => {
+      onSaved: (saved) => {
         if (recordId !== undefined) {
           void queryClient.invalidateQueries({ queryKey: recordActivityQueryKey(view.resource, recordId) });
+          return;
         }
+        // A create form has no record in its URL; move to the new record's,
+        // so a second save updates it instead of creating another.
+        const createdId = saved.id;
+        if (typeof createdId !== "string") return;
+        viewPathRegistry
+          .resolveRecord(view.name, module)
+          .then(async (path) => {
+            if (!path || !mounted.current) return;
+            await navigate({ to: moduleLink(path.replace("{id}", createdId)), replace: true });
+            // Otherwise the next "New" form would open prefilled with this record.
+            queryClient.removeQueries({ queryKey: recordQueryKey(view.resource, undefined) });
+          })
+          .catch(() => {});
       },
       ...testFormRecordOptions,
     },
