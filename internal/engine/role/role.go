@@ -15,6 +15,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -293,6 +295,85 @@ func (s *Store) IsMember(ctx context.Context, tenantSlug, userID string) (bool, 
 	}
 
 	return isMember, nil
+}
+
+// memberOfBatchSize bounds how many tenant schemas one MemberOf query reads.
+// Each one locks that tenant's user_roles and its indexes for the query,
+// so an unbounded UNION over thousands of tenants would outgrow Postgres's
+// shared lock table (max_locks_per_transaction × max_connections).
+const memberOfBatchSize = 100
+
+// MemberOf returns the slugs, in tenantSlugs order, of the tenants where
+// userID holds any unexpired role grant — IsMember across many tenants,
+// memberOfBatchSize tenants per query. tenantSlugs must come from real
+// system.tenants rows, since each is interpolated into a schema name. A
+// tenant whose schema has no user_roles table yet (mid-provisioning)
+// counts as no membership.
+func (s *Store) MemberOf(ctx context.Context, tenantSlugs []string, userID string) ([]string, error) {
+	var slugs []string
+	for batch := range slices.Chunk(tenantSlugs, memberOfBatchSize) {
+		found, err := s.memberOfBatch(ctx, batch, userID)
+		if err != nil {
+			return nil, err
+		}
+		slugs = append(slugs, found...)
+	}
+	return slugs, nil
+}
+
+func (s *Store) memberOfBatch(ctx context.Context, tenantSlugs []string, userID string) ([]string, error) {
+	var query strings.Builder
+	args := make([]any, 0, len(tenantSlugs)+1)
+	args = append(args, userID)
+	for i, slug := range tenantSlugs {
+		if i > 0 {
+			query.WriteString(" UNION ALL ")
+		}
+		args = append(args, slug)
+		fmt.Fprintf(&query, `SELECT $%d::text WHERE EXISTS (
+			SELECT 1 FROM %s.user_roles
+			WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
+		)`, len(args), tenantschema.Name(slug))
+	}
+
+	rows, err := s.db.QueryContext(ctx, query.String(), args...)
+	if isUndefinedTable(err) {
+		return s.memberOfOneByOne(ctx, tenantSlugs, userID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list tenant memberships: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	member := make(map[string]bool)
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, fmt.Errorf("scan tenant membership: %w", err)
+		}
+		member[slug] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tenant memberships: %w", err)
+	}
+	return slices.DeleteFunc(slices.Clone(tenantSlugs), func(slug string) bool { return !member[slug] }), nil
+}
+
+// memberOfOneByOne is memberOfBatch's fallback when one tenant's
+// user_roles table is missing, which fails the whole UNION; IsMember
+// treats that tenant alone as no membership.
+func (s *Store) memberOfOneByOne(ctx context.Context, tenantSlugs []string, userID string) ([]string, error) {
+	var slugs []string
+	for _, slug := range tenantSlugs {
+		ok, err := s.IsMember(ctx, slug, userID)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			slugs = append(slugs, slug)
+		}
+	}
+	return slugs, nil
 }
 
 // PermissionNamesForUser returns the distinct permission names granted by

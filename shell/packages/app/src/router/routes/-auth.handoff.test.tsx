@@ -46,6 +46,7 @@ function FakeAuthProvider({ handoffImpl, children }: { handoffImpl: HandoffImpl;
     tenant: isAuthenticated ? state.tenant : null,
     login: async () => null,
     completeHandoff: (code) => handoffImpl(code, setState),
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},

@@ -13,6 +13,7 @@ const pendingExchange: AuthContextValue = {
   tenant: null,
   login: async () => null,
   completeHandoff: () => new Promise(() => {}),
+  selectTenant: async () => null,
   logout: async () => {},
   submitMFA: async () => {},
   updateProfile: async () => {},

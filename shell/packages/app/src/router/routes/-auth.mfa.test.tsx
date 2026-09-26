@@ -61,6 +61,7 @@ function FakeAuthProvider({
     tenant: isAuthenticated ? state.tenant : null,
     login: async () => null,
     completeHandoff: async () => {},
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA: (code, method = "totp") => submitImpl(code, method, setState),
     updateProfile: async () => {},

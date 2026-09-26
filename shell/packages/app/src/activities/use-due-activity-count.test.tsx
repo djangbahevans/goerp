@@ -47,6 +47,7 @@ function auth(timezone: string | null, defaultTimezone = "UTC"): AuthContextValu
     tenant,
     login: vi.fn(),
     completeHandoff: vi.fn(),
+    selectTenant: vi.fn(),
     logout: vi.fn(),
     submitMFA: vi.fn(),
     updateProfile: vi.fn(),

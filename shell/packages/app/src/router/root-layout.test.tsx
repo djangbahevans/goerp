@@ -50,6 +50,7 @@ const SIGNED_IN: AuthContextValue = {
   tenant,
   login: async () => null,
   completeHandoff: async () => {},
+  selectTenant: async () => null,
   logout: async () => {},
   submitMFA: async () => {},
   updateProfile: async () => {},

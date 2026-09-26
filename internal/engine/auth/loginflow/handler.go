@@ -7,6 +7,12 @@
 // a session, and POST /auth/handoff (ServeHandoff) on the tenant's own
 // host exchanges it (auth-internals.md §3 "Shared-domain handoff").
 //
+// A login that names no tenant finds the account's tenants itself: one is
+// signed in to directly, several answer tenant_required with a
+// selection_token that POST /auth/select-tenant (ServeSelectTenant)
+// exchanges for the chosen tenant (auth-internals.md §3 "Cross-tenant
+// user membership").
+//
 // Before the user lookup, three Redis sliding-window limiters (auth-
 // internals.md §15 "Login rate limiting") delay the attempt, reject it, or
 // record a per-tenant flood in the auth audit log.
@@ -38,8 +44,10 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/auth/tenantselect"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
@@ -77,22 +85,23 @@ const (
 )
 
 type Handler struct {
-	users     *user.Store
-	tenants   *tenant.Store
-	roles     *role.Store
-	mfa       *mfa.Store
-	issuer    *authtoken.Issuer
-	mfaTokens *mfatoken.Codec
-	policies  *password.PolicyStore
-	hasher    *password.Hasher
-	cache     *cache.Client
-	audit     *authaudit.Store
-	resolver  *tenantresolve.Resolver
-	handoffs  *handoff.Store
+	users      *user.Store
+	tenants    *tenant.Store
+	roles      *role.Store
+	mfa        *mfa.Store
+	issuer     *authtoken.Issuer
+	mfaTokens  *mfatoken.Codec
+	policies   *password.PolicyStore
+	hasher     *password.Hasher
+	cache      *cache.Client
+	audit      *authaudit.Store
+	resolver   *tenantresolve.Resolver
+	handoffs   *handoff.Store
+	selections *tenantselect.Store
 }
 
-func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client, audit *authaudit.Store, resolver *tenantresolve.Resolver, handoffs *handoff.Store) *Handler {
-	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient, audit: audit, resolver: resolver, handoffs: handoffs}
+func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client, audit *authaudit.Store, resolver *tenantresolve.Resolver, handoffs *handoff.Store, selections *tenantselect.Store) *Handler {
+	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient, audit: audit, resolver: resolver, handoffs: handoffs, selections: selections}
 }
 
 type loginRequest struct {
@@ -153,9 +162,8 @@ func (h *Handler) allow(ctx context.Context, limiter, key string, limit int, win
 	return allowed, retryAfter
 }
 
-// checkClientLimits applies the per-IP limiter, which only delays, then
-// the per-email limiter, reporting false once it has written a 429.
-func (h *Handler) checkClientLimits(w http.ResponseWriter, r *http.Request, email string) bool {
+// delayOverIPLimit applies the per-IP limiter, which only delays.
+func (h *Handler) delayOverIPLimit(r *http.Request) {
 	ctx := r.Context()
 	if ok, _ := h.allow(ctx, "ip", "ratelimit:login:ip:"+loginsession.ClientIP(r), ipLimit, ipWindow); !ok {
 		select {
@@ -163,6 +171,13 @@ func (h *Handler) checkClientLimits(w http.ResponseWriter, r *http.Request, emai
 		case <-ctx.Done():
 		}
 	}
+}
+
+// checkClientLimits applies the per-IP limiter, then the per-email
+// limiter, reporting false once it has written a 429.
+func (h *Handler) checkClientLimits(w http.ResponseWriter, r *http.Request, email string) bool {
+	ctx := r.Context()
+	h.delayOverIPLimit(r)
 	if ok, retryAfter := h.allow(ctx, "email", emailKey(email), emailLimit, emailWindow); !ok {
 		writeRateLimited(w, retryAfter)
 		return false
@@ -237,14 +252,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Looked up here for the per-tenant limiter's key. An unknown tenant
 	// skips that limiter, which never changes the response, and is
-	// rejected at step 4, after the user lookup.
-	t, tenantErr := h.tenants.GetBySlug(ctx, req.Tenant)
-	if tenantErr != nil && !errors.Is(tenantErr, tenant.ErrTenantNotFound) {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
-		return
-	}
-	if tenantErr == nil {
-		h.detectTenantFlood(ctx, t.ID)
+	// rejected at step 4, after the user lookup. With no tenant named,
+	// step 4 runs after the password check instead.
+	tenantless := req.Tenant == ""
+	var t *tenant.Tenant
+	var tenantErr error
+	if !tenantless {
+		t, tenantErr = h.tenants.GetBySlug(ctx, req.Tenant)
+		if tenantErr != nil && !errors.Is(tenantErr, tenant.ErrTenantNotFound) {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+			return
+		}
+		if tenantErr == nil {
+			h.detectTenantFlood(ctx, t.ID)
+		}
 	}
 
 	// Taken before the user lookup, so an overloaded 503 looks the same
@@ -296,18 +317,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// format — a guarantee that holds for req.Tenant only once it's
 	// round-tripped through a real tenant row lookup, not for the raw,
 	// unvalidated request field.
-	if tenantErr != nil {
-		writeInvalidCredentials(w)
-		return
-	}
-	isMember, err := h.roles.IsMember(ctx, req.Tenant, u.ID)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
-		return
-	}
-	if !isMember {
-		writeInvalidCredentials(w)
-		return
+	if !tenantless {
+		if tenantErr != nil {
+			writeInvalidCredentials(w)
+			return
+		}
+		isMember, err := h.roles.IsMember(ctx, req.Tenant, u.ID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+			return
+		}
+		if !isMember {
+			writeInvalidCredentials(w)
+			return
+		}
 	}
 
 	// Step 5: brute-force check — rejected exactly like a wrong password,
@@ -347,6 +370,64 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = h.users.UpdatePasswordHash(ctx, u.ID, newHash)
 	}
 
+	// Step 4 for a tenantless login (auth-internals.md §3 "Cross-tenant
+	// user membership"): one tenant is inferred, several need a pick.
+	if tenantless {
+		memberships, err := membership.TenantsOf(ctx, h.tenants, h.roles, u.ID)
+		if err != nil {
+			log.Error().Err(err).Str("user_id", u.ID).Msg("loginflow: list tenant memberships")
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+			return
+		}
+		switch len(memberships) {
+		case 0:
+			writeInvalidCredentials(w)
+			return
+		case 1:
+			t = &memberships[0]
+		default:
+			h.writeTenantRequired(w, r, u.ID, memberships, req)
+			return
+		}
+	}
+
+	h.signIn(w, r, u, t, req.DeviceID, req.Remember)
+}
+
+type tenantChoice struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// writeTenantRequired answers a tenantless login whose account belongs to
+// several tenants with a selection_token for POST /auth/select-tenant.
+func (h *Handler) writeTenantRequired(w http.ResponseWriter, r *http.Request, userID string, memberships []tenant.Tenant, req loginRequest) {
+	token, err := h.selections.Issue(r.Context(), tenantselect.Grant{UserID: userID, Remember: req.Remember, DeviceID: req.DeviceID})
+	if err != nil {
+		log.Error().Err(err).Str("user_id", userID).Msg("loginflow: issue selection token")
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+	choices := make([]tenantChoice, len(memberships))
+	for i, t := range memberships {
+		choices[i] = tenantChoice{Slug: t.Slug, Name: t.Name}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	writeJSON(w, map[string]any{
+		"error": map[string]any{
+			"code":    "tenant_required",
+			"message": "choose a tenant to sign in to",
+			"details": map[string]any{"tenants": choices, "selection_token": token},
+		},
+	})
+}
+
+// signIn is login step 10 onward for a verified user signing in to t: a
+// handoff on another host, otherwise completeLogin.
+func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, u *user.User, t *tenant.Tenant, deviceID string, remember bool) {
+	ctx := r.Context()
+
 	// auth-internals.md §3 "Password policy versioning": a nudge only,
 	// never a reason to refuse the login.
 	var updateRecommended bool
@@ -362,7 +443,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp, err := h.handoffs.Issue(ctx, handoff.Grant{
 			UserID:                    u.ID,
 			TenantID:                  t.ID,
-			Remember:                  req.Remember,
+			Remember:                  remember,
 			PasswordUpdateRecommended: updateRecommended,
 		}, t.Slug)
 		if err != nil {
@@ -375,7 +456,89 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.completeLogin(w, r, u.ID, t.ID, t.Slug, req.DeviceID, req.Remember, updateRecommended)
+	h.completeLogin(w, r, u.ID, t.ID, t.Slug, deviceID, remember, updateRecommended)
+}
+
+type selectTenantRequest struct {
+	SelectionToken string `json:"selection_token"`
+	Tenant         string `json:"tenant"`
+}
+
+func writeSelectionTokenInvalid(w http.ResponseWriter) {
+	writeJSONError(w, http.StatusUnauthorized, "auth.selection_token_invalid", "tenant selection expired or already used")
+}
+
+// ServeSelectTenant is POST /auth/select-tenant: it finishes a tenantless
+// login for the tenant the user picked, against the selection_token that
+// login answered with (auth-internals.md §3 "Cross-tenant user
+// membership").
+func (h *Handler) ServeSelectTenant(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		if elapsed := time.Since(start); elapsed < minResponseTime {
+			time.Sleep(minResponseTime - elapsed)
+		}
+	}()
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var req selectTenantRequest
+	if err := json.UnmarshalRead(r.Body, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		return
+	}
+
+	ctx := r.Context()
+	h.delayOverIPLimit(r)
+
+	grant, err := h.selections.Consume(ctx, req.SelectionToken)
+	if errors.Is(err, tenantselect.ErrInvalidToken) {
+		writeSelectionTokenInvalid(w)
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("loginflow: consume selection token")
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+
+	// The grant is a snapshot of a login moments ago; the account and its
+	// memberships may have changed since.
+	u, err := h.users.GetByID(ctx, grant.UserID)
+	if errors.Is(err, user.ErrUserNotFound) {
+		writeSelectionTokenInvalid(w)
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+	if u.Status != user.StatusActive {
+		writeSelectionTokenInvalid(w)
+		return
+	}
+
+	// GetBySlug before IsMember: IsMember interpolates the slug into a
+	// schema name, safe only for a slug read back from a real row.
+	t, err := h.tenants.GetBySlug(ctx, req.Tenant)
+	if errors.Is(err, tenant.ErrTenantNotFound) {
+		writeJSONError(w, http.StatusForbidden, "tenant_membership_required", "not a member of this tenant")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+	isMember, err := h.roles.IsMember(ctx, t.Slug, u.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return
+	}
+	if !isMember {
+		writeJSONError(w, http.StatusForbidden, "tenant_membership_required", "not a member of this tenant")
+		return
+	}
+
+	h.signIn(w, r, u, t, grant.DeviceID, grant.Remember)
 }
 
 // completeLogin is login steps 10-11: an mfa_required challenge when the

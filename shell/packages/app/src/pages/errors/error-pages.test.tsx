@@ -54,6 +54,7 @@ function authWithRoles(roles: string[], overrides: Partial<AuthContextValue> = {
     tenant,
     login: async () => null,
     completeHandoff: async () => {},
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},

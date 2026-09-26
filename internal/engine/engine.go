@@ -73,6 +73,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/tenantcontext"
+	"github.com/djangbahevans/goerp/internal/engine/auth/tenantselect"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
@@ -648,7 +649,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		passwordHasher, tokenIssuer, inviteMailer, handoffStore,
 	)
 	acceptInviteHandlers := acceptinvite.NewHandlers(tenantStore, inviteStore, userStore, passwordPolicies, passwordHasher, tokenIssuer)
-	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore)
+	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore, tenantselect.NewStore(cacheClient))
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
 	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
@@ -690,6 +691,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/accept-invite":           http.HandlerFunc(acceptInviteHandlers.Accept),
 		"POST /auth/login":                   loginHandler,
 		"POST /auth/handoff":                 http.HandlerFunc(loginHandler.ServeHandoff),
+		"POST /auth/select-tenant":           http.HandlerFunc(loginHandler.ServeSelectTenant),
 		"POST /auth/password-reset/request":  passwordResetRequestHandler,
 		"POST /auth/password-reset/confirm":  passwordResetConfirmHandler,
 		"POST /auth/verify-email":            verifyEmailConfirmHandler,

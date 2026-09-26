@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -792,5 +793,84 @@ func TestRevokeRole_UngrantedIsANoOpNotAnError(t *testing.T) {
 
 	if err := store.RevokeRole(ctx, slug, "00000000-0000-0000-0000-000000000014", roleID); err != nil {
 		t.Errorf("RevokeRole() on an ungranted role error: %v, want nil", err)
+	}
+}
+
+// grantRole gives userID the "user" role in slug's schema, expired when
+// expired is set.
+func grantRole(t *testing.T, store *Store, conn *sql.DB, slug, userID string, expired bool) {
+	t.Helper()
+	ctx := context.Background()
+	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
+		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	roleID, err := store.GetRoleByName(ctx, slug, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	expiresAt := "NULL"
+	if expired {
+		expiresAt = "NOW() - interval '1 hour'"
+	}
+	if _, err := conn.ExecContext(ctx,
+		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id, expires_at) VALUES ($1, $2, %s)", tenantschema.Name(slug), expiresAt), userID, roleID,
+	); err != nil {
+		t.Fatalf("insert user_roles row: %v", err)
+	}
+}
+
+func TestMemberOf_ReturnsLiveMembershipsInOrder(t *testing.T) {
+	store, conn, first := openTestStore(t)
+	_, _, second := openTestStore(t)
+	_, _, expired := openTestStore(t)
+	_, _, none := openTestStore(t)
+	userID := "00000000-0000-0000-0000-000000000011"
+	grantRole(t, store, conn, first, userID, false)
+	grantRole(t, store, conn, second, userID, false)
+	grantRole(t, store, conn, expired, userID, true)
+
+	got, err := store.MemberOf(context.Background(), []string{second, none, expired, first}, userID)
+	if err != nil {
+		t.Fatalf("MemberOf() error: %v", err)
+	}
+	if want := []string{second, first}; !slices.Equal(got, want) {
+		t.Errorf("MemberOf() = %v, want %v", got, want)
+	}
+}
+
+func TestMemberOf_TenantWithoutUserRolesTableCountsAsNoMembership(t *testing.T) {
+	store, conn, member := openTestStore(t)
+	userID := "00000000-0000-0000-0000-000000000012"
+	grantRole(t, store, conn, member, userID, false)
+	unprovisioned := fmt.Sprintf("roletest-unprovisioned-%d", time.Now().UnixNano())
+
+	got, err := store.MemberOf(context.Background(), []string{unprovisioned, member}, userID)
+	if err != nil {
+		t.Fatalf("MemberOf() error: %v", err)
+	}
+	if want := []string{member}; !slices.Equal(got, want) {
+		t.Errorf("MemberOf() = %v, want %v", got, want)
+	}
+}
+
+func TestMemberOf_KeepsOrderAcrossBatches(t *testing.T) {
+	store, conn, first := openTestStore(t)
+	_, _, last := openTestStore(t)
+	userID := "00000000-0000-0000-0000-000000000013"
+	grantRole(t, store, conn, first, userID, false)
+	grantRole(t, store, conn, last, userID, false)
+
+	slugs := []string{first}
+	for i := range memberOfBatchSize + 5 {
+		slugs = append(slugs, fmt.Sprintf("roletest-unprovisioned-%d-%d", time.Now().UnixNano(), i))
+	}
+	slugs = append(slugs, last)
+
+	got, err := store.MemberOf(context.Background(), slugs, userID)
+	if err != nil {
+		t.Fatalf("MemberOf() error: %v", err)
+	}
+	if want := []string{first, last}; !slices.Equal(got, want) {
+		t.Errorf("MemberOf() = %v, want %v", got, want)
 	}
 }

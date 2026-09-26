@@ -39,7 +39,9 @@ export interface CurrentTenant {
 export interface LoginCredentials {
   email: string;
   password: string;
-  tenant: string;
+  // Omitted on the shared-domain host: the engine finds the account's
+  // tenants itself (auth-internals.md §3 "Cross-tenant user membership").
+  tenant?: string | undefined;
   // "Remember this device" — a 30-day session instead of one that ends with
   // the browser session.
   remember?: boolean | undefined;
@@ -87,6 +89,13 @@ export interface Registration {
 // A sign-in on the shared-domain login host, handed to the tenant's own
 // host, where /auth/handoff exchanges the code for the session
 // (auth-internals.md §3 "Shared-domain handoff").
+// A tenantless sign-in's 409 tenant_required: the account's tenants, and
+// the single-use token that picks one of them.
+export interface TenantSelection {
+  tenants: { slug: string; name: string }[];
+  selectionToken: string;
+}
+
 export interface SignInHandoff {
   host: string;
   code: string;
@@ -98,7 +107,8 @@ export type RegisterOutcome =
 
 export interface VerificationEmailRequest {
   email: string;
-  tenant: string;
+  // Omitted on the shared-domain host: the account's only tenant.
+  tenant?: string | undefined;
 }
 
 export interface InviteLink {
@@ -199,6 +209,9 @@ export interface AuthContextValue {
   // Exchanges a handoff code on the tenant's host, then continues as login
   // does: signed in, or at the MFA challenge.
   completeHandoff: (code: string) => Promise<void>;
+  // Finishes a tenantless sign-in for the chosen tenant (POST
+  // /auth/select-tenant); resolves like login.
+  selectTenant: (selectionToken: string, tenant: string) => Promise<SignInHandoff | null>;
   logout: () => Promise<void>;
   submitMFA: (code: string, method?: MFAMethod) => Promise<void>;
   updateProfile: (input: UpdateProfileInput) => Promise<void>;

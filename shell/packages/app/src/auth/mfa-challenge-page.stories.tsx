@@ -13,6 +13,7 @@ function authWith(methods: MFAMethod[], submitMFA: AuthContextValue["submitMFA"]
     tenant: null,
     login: async () => null,
     completeHandoff: async () => {},
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA,
     updateProfile: async () => {},

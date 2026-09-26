@@ -6,6 +6,7 @@ import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { pendingTenantSelection } from "../../auth/tenant-selection.js";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
@@ -58,6 +59,7 @@ function FakeAuthProvider({
     tenant: isAuthenticated ? state.tenant : null,
     login: async (credentials) => ((await loginImpl(credentials, setState)) as SignInHandoff | undefined) ?? null,
     completeHandoff: async () => {},
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
@@ -126,7 +128,6 @@ describe("/auth/login", () => {
     const { router, submit } = await renderLogin({ url: "/auth/login?redirect=%2Fsettings%2Fprofile", loginImpl });
 
     fillCredentials();
-    fireEvent.change(await screen.findByLabelText("Company"), { target: { value: "acme" } });
     fireEvent.click(submit);
 
     await waitFor(() =>
@@ -238,22 +239,42 @@ describe("/auth/login", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("shows the Company field on a shared domain and sends its slug", async () => {
+  it("asks only for email and password on a shared domain and sends no tenant", async () => {
     stubTenantContext({ tenant: null, registration_enabled: false });
     const loginImpl = vi.fn<LoginImpl>(async () => {});
     const { submit } = await renderLogin({ loginImpl });
 
+    expect(screen.queryByLabelText("Company")).toBeNull();
     fillCredentials();
     fireEvent.click(submit);
-    expect(await screen.findByText("Enter your company.")).toBeTruthy();
-    expect(loginImpl).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText("Company"), { target: { value: " globex " } });
+    await waitFor(() => expect(loginImpl).toHaveBeenCalled());
+    expect(loginImpl.mock.calls[0]?.[0].tenant).toBeUndefined();
+  });
+
+  it("takes a several-tenant account to the tenant selector with its choices", async () => {
+    stubTenantContext({ tenant: null, registration_enabled: false });
+    const tenants = [
+      { slug: "acme", name: "Acme Corp" },
+      { slug: "globex", name: "Globex" },
+    ];
+    const loginImpl = vi.fn<LoginImpl>(async () => {
+      throw new AppError({
+        code: "tenant_required",
+        message: "choose a tenant",
+        httpStatus: 409,
+        details: { tenants, selection_token: "tok" },
+      });
+    });
+    const { router, submit } = await renderLogin({ url: "/auth/login?redirect=%2Fsettings%2Fprofile", loginImpl });
+
+    fillCredentials();
     fireEvent.click(submit);
 
-    await waitFor(() =>
-      expect(loginImpl).toHaveBeenCalledWith(expect.objectContaining({ tenant: "globex" }), expect.any(Function)),
-    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/auth/select-tenant"));
+    expect(router.state.location.search).toEqual({ redirect: "/settings/profile" });
+    expect(pendingTenantSelection.get()).toEqual({ tenants, selectionToken: "tok" });
+    pendingTenantSelection.set(null);
   });
 
   it("validates empty fields without calling the API", async () => {

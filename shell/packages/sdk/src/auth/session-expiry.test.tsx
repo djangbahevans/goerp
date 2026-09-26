@@ -76,6 +76,7 @@ function authFor(state: AuthState): AuthContextValue {
     tenant: sessionIdentity(state)?.tenant ?? null,
     login: async () => null,
     completeHandoff: async () => {},
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},

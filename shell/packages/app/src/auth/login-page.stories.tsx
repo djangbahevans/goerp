@@ -15,6 +15,7 @@ function authWith(login: AuthContextValue["login"]): AuthContextValue {
     tenant: null,
     login,
     completeHandoff: async () => {},
+    selectTenant: async () => null,
     logout: async () => {},
     submitMFA: async () => {},
     updateProfile: async () => {},
