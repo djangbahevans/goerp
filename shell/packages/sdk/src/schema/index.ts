@@ -18,7 +18,7 @@ export type { ParseManifestResult } from "./parse-manifest-value.js";
 export { parseManifestValue } from "./parse-manifest-value.js";
 export type { ViewDeclaration } from "./resolve-view-declaration.js";
 export { resolveViewDeclaration, ViewDeclarationRegistry } from "./resolve-view-declaration.js";
-export { resolveViewPath, ViewPathRegistry } from "./resolve-view-path.js";
+export { resolveRecordViewPath, resolveViewPath, ViewPathRegistry } from "./resolve-view-path.js";
 export type { ResourceMetadataEntry } from "./resource-metadata-registry.js";
 export {
   buildResourceMetadataRegistry,

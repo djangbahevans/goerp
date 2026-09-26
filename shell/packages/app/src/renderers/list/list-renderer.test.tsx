@@ -76,7 +76,7 @@ vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
   return {
     ...actual,
-    viewPathRegistry: { resolve: resolveViewPathMock },
+    viewPathRegistry: { resolve: resolveViewPathMock, resolveRecord: resolveViewPathMock },
     resourceRegistry: { ...actual.resourceRegistry, resolve: resolveResourceMock },
     viewExtensionRegistry: { forTarget: forTargetMock },
   };

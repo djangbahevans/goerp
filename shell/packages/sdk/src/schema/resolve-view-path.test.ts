@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveViewPath, ViewPathRegistry } from "./resolve-view-path.js";
+import { resolveRecordViewPath, resolveViewPath, ViewPathRegistry } from "./resolve-view-path.js";
 import type { MetaSchema } from "./types.js";
 
 function schemaWith(modules: MetaSchema["modules"]): MetaSchema {
@@ -58,6 +58,62 @@ describe("resolveViewPath", () => {
     const schema = schemaWith({});
     expect(resolveViewPath(schema, "contacts_form", "contacts")).toBe(null);
     expect(resolveViewPath(schema, "missing.form", "contacts")).toBe(null);
+  });
+});
+
+describe("resolveRecordViewPath", () => {
+  // The routes EnableOps(List, Get, Create, Update) + EnableViews(ListView,
+  // FormView) generate: the form view serves both create and one record.
+  const generated = schemaWith({
+    crm: {
+      name: "crm",
+      version: "1",
+      display_name: "CRM",
+      routes: [
+        { method: "GET", path: "/crm/contacts", permissions: [], response_is_list: true, view: "crm_contact_list" },
+        { method: "POST", path: "/crm/contacts", permissions: [], response_is_list: false, view: "crm_contact_form" },
+        {
+          method: "PUT",
+          path: "/crm/contacts/{id}",
+          permissions: [],
+          response_is_list: false,
+          view: "crm_contact_form",
+        },
+        {
+          method: "GET",
+          path: "/crm/contacts/{id}",
+          permissions: [],
+          response_is_list: false,
+          view: "crm_contact_form",
+        },
+      ],
+      views: [],
+      navigation: [],
+      models: {},
+      permissions: [],
+      frontend: null,
+      view_extensions: [],
+      view_extension_definitions: [],
+      load_order: 0,
+      public_config: {},
+    },
+  });
+
+  it("picks the view's GET route with an {id}, not its create route", () => {
+    expect(resolveViewPath(generated, "crm_contact_form", "crm")).toBe("/crm/contacts");
+    expect(resolveRecordViewPath(generated, "crm_contact_form", "crm")).toBe("/crm/contacts/{id}");
+    expect(resolveRecordViewPath(generated, "crm.crm_contact_form", "other")).toBe("/crm/contacts/{id}");
+  });
+
+  it("returns null when no route of the view names a record", () => {
+    expect(resolveRecordViewPath(generated, "crm_contact_list", "crm")).toBe(null);
+    expect(resolveRecordViewPath(generated, "missing", "crm")).toBe(null);
+    expect(resolveRecordViewPath(schemaWith({}), "crm_contact_form", "crm")).toBe(null);
+  });
+
+  it("resolves through ViewPathRegistry.resolveRecord", async () => {
+    const registry = new ViewPathRegistry({ getSchema: vi.fn(async () => generated) });
+    expect(await registry.resolveRecord("crm_contact_form", "crm")).toBe("/crm/contacts/{id}");
   });
 });
 

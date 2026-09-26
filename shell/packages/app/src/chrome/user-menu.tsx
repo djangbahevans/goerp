@@ -5,6 +5,7 @@ import { useTheme } from "@goerp/sdk/react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
 import { type ReactNode, useRef } from "react";
+import { useDueActivityCount } from "../activities/use-due-activity-count.js";
 import { isTenantAdmin } from "../admin/is-tenant-admin.js";
 import { openKeyboardShortcuts } from "../shortcuts/keyboard-shortcuts-control.js";
 import { titleCaseWords } from "./title-case-words.js";
@@ -26,6 +27,7 @@ export function UserMenu(): ReactNode {
   const { user, logout, updatePreferences } = useAuth();
   const { theme, preference, setPreference } = useTheme();
   const navigate = useNavigate();
+  const dueActivities = useDueActivityCount();
 
   // Only the latest toggle's failure reverts, so an earlier save settling
   // late can't undo a later toggle.
@@ -51,6 +53,7 @@ export function UserMenu(): ReactNode {
     <ActionMenu
       label={displayName}
       items={[
+        { label: "My activities", badge: dueActivities, onClick: () => void navigate({ to: "/activities" }) },
         { label: "Profile", onClick: () => void navigate({ to: "/settings/profile" }) },
         { label: "Settings", onClick: () => void navigate({ to: "/settings" }) },
         ...(isTenantAdmin(user) ? [{ label: "Admin", onClick: () => void navigate({ to: "/admin" }) }] : []),

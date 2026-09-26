@@ -1,6 +1,8 @@
+import { apiClient } from "@goerp/sdk";
 import type { AuthContextValue } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { themeStore } from "@goerp/sdk/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -10,6 +12,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { addDays, todayIn } from "../activities/activity-dates.js";
 import { onKeyboardShortcutsOpenRequest } from "../shortcuts/keyboard-shortcuts-control.js";
 import { UserMenu } from "./user-menu.js";
 
@@ -76,15 +79,46 @@ async function renderUserMenu(auth: AuthContextValue = fakeAuth()) {
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
-  render(<RouterProvider router={router} />);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
   return router;
+}
+
+// GET /_meta/scheduled-activities/mine answering with one page of
+// activities due on the given dates.
+function mockMyActivities(dueDates: string[]) {
+  const data = dueDates.map((due_date, i) => ({
+    id: `s${i}`,
+    model: "sales.order",
+    record_id: "o1",
+    type: "call",
+    summary: `activity ${i}`,
+    note: null,
+    due_date,
+    assignee: { id: "u1", name: null, avatar_url: null },
+    created_by: { id: "u1", name: null, avatar_url: null },
+    created_at: "2026-09-24T10:00:00Z",
+    done_at: null,
+    done_by: null,
+    feedback: null,
+    record_name: "SO-0001",
+  }));
+  return vi.spyOn(apiClient, "get").mockResolvedValue({ data, meta: { cursor: null, has_more: false } } as never);
 }
 
 beforeEach(() => {
   window.localStorage.clear();
+  mockMyActivities([]);
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("UserMenu", () => {
   it("derives a display name from the user's email for the avatar and trigger label", async () => {
@@ -92,15 +126,29 @@ describe("UserMenu", () => {
     expect(screen.getByRole("button", { name: "Jane Doe's account menu" })).toBeTruthy();
   });
 
-  it("lists Profile, Settings, Dark mode, Keyboard shortcuts, and Sign out", async () => {
+  it("lists My activities, Profile, Settings, Dark mode, Keyboard shortcuts, and Sign out", async () => {
     await renderUserMenu();
     fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
 
+    expect(screen.getByRole("menuitem", { name: "My activities" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Profile" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy();
     expect(screen.getByRole("menuitemcheckbox", { name: "Dark mode" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
+  });
+
+  it("badges My activities with the overdue plus due-today count, and it navigates to /activities", async () => {
+    const today = todayIn("UTC");
+    mockMyActivities([addDays(today, -3), addDays(today, -1), today, addDays(today, 1), addDays(today, 7)]);
+    const router = await renderUserMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: /My activities/ }).textContent).toBe("My activities3"),
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: /My activities/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/activities"));
   });
 
   it("shows Admin only to a tenant admin, and it navigates to /admin", async () => {

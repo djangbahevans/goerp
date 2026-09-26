@@ -67,11 +67,12 @@ The engine logs in as two Postgres roles (data-layer.md §2.2): `engine_user` fo
 
 ### Running the engine
 
-With the stack up, the only environment variables actually required are `GOERP_DB_PRIMARY_DSN` and `GOERP_DB_SCHEMA_SYNC_DSN` — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` isn't required either, but without it the local storage backend fails to construct (a startup warning, not a fatal error — object storage checks then read back as unconfigured rather than actually working).
+With the stack up, the only environment variables actually required are `GOERP_DB_PRIMARY_DSN`, `GOERP_DB_SCHEMA_SYNC_DSN` and `GOERP_ADMIN_TOKEN`, the superadmin bearer token the admin API on `127.0.0.1:8081` checks, which the engine refuses to start without — everything else defaults to matching the services above (`GOERP_REDIS_ADDR` already defaults to `localhost:6379`, `GOERP_LISTEN_ADDR` to `:8080`). `GOERP_STORAGE_LOCAL_DIR` isn't required either, but without it the local storage backend fails to construct (a startup warning, not a fatal error — object storage checks then read back as unconfigured rather than actually working).
 
 ```bash
 export GOERP_DB_PRIMARY_DSN="postgres://engine_user:dev@localhost:6432/goerp_dev"
 export GOERP_DB_SCHEMA_SYNC_DSN="postgres://schema_sync_user:dev@localhost:55432/goerp_dev"
+export GOERP_ADMIN_TOKEN="dev-admin-token"
 export GOERP_STORAGE_LOCAL_DIR="./storage"
 
 go run ./cmd/engine
