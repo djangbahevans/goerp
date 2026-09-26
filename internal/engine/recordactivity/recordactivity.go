@@ -110,6 +110,22 @@ func (s *Store) CreateComment(ctx context.Context, tenantSlug, model, recordID, 
 	return e, nil
 }
 
+// InsertActivityDone writes an activity_done entry authored by authorID
+// inside tx, the transaction that marks the scheduled activity done.
+// activity is the entry's {activity_id, type, summary, due_date, feedback}
+// snapshot.
+func InsertActivityDone(ctx context.Context, tx *sql.Tx, tenantSlug, model, recordID, authorID string, activity jsontext.Value, requestID, traceID string) error {
+	query := fmt.Sprintf(`
+		INSERT INTO %s.record_activity (model, record_id, kind, activity, author_id, request_id, trace_id)
+		VALUES ($1, $2, 'activity_done', $3, $4, NULLIF($5, ''), NULLIF($6, ''))
+	`, tenantschema.Name(tenantSlug))
+
+	if _, err := tx.ExecContext(ctx, query, model, recordID, []byte(activity), authorID, requestID, traceID); err != nil {
+		return fmt.Errorf("insert activity_done entry: %w", err)
+	}
+	return nil
+}
+
 // Get returns the entry with the given id, or ErrNotFound.
 func (s *Store) Get(ctx context.Context, tenantSlug, id string) (*Entry, error) {
 	query := fmt.Sprintf(`SELECT %s FROM %s.record_activity WHERE id = $1`, entryColumns, tenantschema.Name(tenantSlug))

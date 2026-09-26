@@ -593,6 +593,45 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/activity/{id}",
 	})
 
+	// /_meta/scheduled-activities (scheduled-activities.md §5) — same
+	// posture as /_meta/activity above.
+	table.Register("GET", "/_meta/scheduled-activities", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/scheduled-activities",
+	})
+	table.Register("GET", "/_meta/scheduled-activities/mine", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/scheduled-activities/mine",
+	})
+	table.Register("POST", "/_meta/scheduled-activities", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/scheduled-activities",
+	})
+	table.Register("PATCH", "/_meta/scheduled-activities/{id}", &route.RouteEntry{
+		Manifest: route.RouteManifest{
+			EngineNative: true,
+			Auth:         "required",
+			PathParams:   map[string]string{"id": "uuid"},
+		},
+		PathTemplate: "/_meta/scheduled-activities/{id}",
+	})
+	table.Register("POST", "/_meta/scheduled-activities/{id}/done", &route.RouteEntry{
+		Manifest: route.RouteManifest{
+			EngineNative: true,
+			Auth:         "required",
+			PathParams:   map[string]string{"id": "uuid"},
+		},
+		PathTemplate: "/_meta/scheduled-activities/{id}/done",
+	})
+	table.Register("DELETE", "/_meta/scheduled-activities/{id}", &route.RouteEntry{
+		Manifest: route.RouteManifest{
+			EngineNative: true,
+			Auth:         "required",
+			PathParams:   map[string]string{"id": "uuid"},
+		},
+		PathTemplate: "/_meta/scheduled-activities/{id}",
+	})
+
 	// /storage/upload (goerp#818) — same EngineBuiltin posture as
 	// /auth/login above: storageupload.Handler resolves tenant/auth itself
 	// (same manual ResolveByHost/Authenticate pattern authme.Handler

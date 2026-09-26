@@ -23,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/savedfilters"
+	"github.com/djangbahevans/goerp/internal/engine/scheduledactivity"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
@@ -84,6 +85,12 @@ var Groups = []Group{
 		},
 	},
 	{
+		Tables: []Table{{Name: scheduledactivity.TableName}},
+		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
+			return scheduledactivity.NewStore(pool).Bootstrap(ctx, slug)
+		},
+	},
+	{
 		Tables: []Table{{Name: "files"}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return files.NewStore(pool).Bootstrap(ctx, slug)
@@ -112,9 +119,10 @@ var Groups = []Group{
 // are reserved now so no module can claim one first; each moves into
 // Groups once the engine creates it.
 var plannedTables = []string{
+	"activity_types",
 	"notifications",
 	"notification_preferences",
-	"scheduled_activities",
+	"record_followers",
 	"view_overrides",
 }
 

@@ -289,7 +289,7 @@ func TestSchemaSync_GrantsTenantRoleDMLOnModuleTablesOnly(t *testing.T) {
 			t.Errorf("tenant role %q: %v", stmt, err)
 		}
 	}
-	for _, table := range []string{"roles", "user_roles", "audit_log", "module_config", "sequences", "files", "record_activity", "saved_filters", "tenant_invitations", "event_log"} {
+	for _, table := range []string{"roles", "user_roles", "audit_log", "module_config", "sequences", "files", "record_activity", "scheduled_activities", "saved_filters", "tenant_invitations", "event_log"} {
 		requirePermissionDenied(t, asTenant(`SELECT 1 FROM `+name+`.`+table), "tenant role SELECT "+table)
 	}
 	requirePermissionDenied(t, asTenant(`INSERT INTO `+name+`.record_shares (model, record_id, shared_with_user_id, permission, shared_by) VALUES ('m', uuidv7(), uuidv7(), 'read', uuidv7())`), "tenant role INSERT record_shares")
