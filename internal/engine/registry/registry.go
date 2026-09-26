@@ -480,6 +480,19 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/admin/users/{id}/roles/{role}",
 	})
+	// A user's own session list and revoke (auth-internals.md §4 "Session
+	// management endpoints"), the same tenant-facing EngineBuiltin posture
+	// as /auth/logout.
+	for _, r := range [][2]string{
+		{"GET", "/auth/sessions"},
+		{"DELETE", "/auth/sessions"},
+		{"DELETE", "/auth/sessions/{family_id}"},
+	} {
+		table.Register(r[0], r[1], &route.RouteEntry{
+			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+			PathTemplate: r[1],
+		})
+	}
 	// Tenant admin user, invite and role endpoints (goerp#1097, goerp#1098,
 	// goerp#1099), the same tenant-facing, EngineBuiltin posture as
 	// /admin/users/{id}/mfa/reset.

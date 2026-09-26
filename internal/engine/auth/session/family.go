@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -92,26 +94,106 @@ func (s *Store) FamilyIDForSession(ctx context.Context, sessionID string) (strin
 // lands between reading the live row and revoking it from leaving its
 // successor live.
 func (s *Store) RevokeFamily(ctx context.Context, familyID, reason string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.revokeUntilSettled(ctx, `
 		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $2
 		WHERE family_id = $1 AND revoked_at IS NULL
-		RETURNING id
-	`, familyID, reason)
+		RETURNING `+revokedColumns, familyID, reason)
 	if err != nil {
 		return nil, fmt.Errorf("revoke session family: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	return rowIDs(rows), nil
+}
 
-	ids := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan revoked session id: %w", err)
+// RevokedFamily is a live session family ended by
+// RevokeOtherFamiliesForUserInTenant, and every row of it that was revoked.
+type RevokedFamily struct {
+	ID        string
+	LiveRowID string
+	RowIDs    []string
+}
+
+// RevokeOtherFamiliesForUserInTenant revokes every unrevoked row of
+// userID's session families in tenantID except keepSessionID's family, so
+// the caller's own rotation chain survives. It returns every family it
+// revoked rows of, in family-id order; LiveRowID is empty for a family
+// that had already expired.
+func (s *Store) RevokeOtherFamiliesForUserInTenant(ctx context.Context, userID, tenantID, keepSessionID, reason string) ([]RevokedFamily, error) {
+	rows, err := s.revokeUntilSettled(ctx, `
+		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $4
+		WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+		  AND family_id IS DISTINCT FROM (SELECT family_id FROM system.sessions WHERE id = $3)
+		RETURNING `+revokedColumns, userID, tenantID, keepSessionID, reason)
+	if err != nil {
+		return nil, fmt.Errorf("revoke other session families: %w", err)
+	}
+
+	byFamily := map[string]*RevokedFamily{}
+	for _, row := range rows {
+		f := byFamily[row.familyID]
+		if f == nil {
+			f = &RevokedFamily{ID: row.familyID}
+			byFamily[row.familyID] = f
 		}
-		ids = append(ids, id)
+		f.RowIDs = append(f.RowIDs, row.id)
+		if row.live {
+			f.LiveRowID = row.id
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate revoked session ids: %w", err)
+	all := make([]RevokedFamily, 0, len(byFamily))
+	for _, f := range byFamily {
+		all = append(all, *f)
 	}
-	return ids, nil
+	slices.SortFunc(all, func(a, b RevokedFamily) int { return strings.Compare(a.ID, b.ID) })
+	return all, nil
+}
+
+// revokedColumns is the RETURNING list revokeUntilSettled scans: whether
+// a row was live is read from rotated_at and expires_at, which revoking
+// leaves unchanged.
+const revokedColumns = `id, family_id, rotated_at IS NULL AND expires_at > NOW()`
+
+type revokedRow struct {
+	id       string
+	familyID string
+	live     bool
+}
+
+// revokeUntilSettled runs a revoking UPDATE ... RETURNING revokedColumns
+// until it matches no row. A refresh that commits while the UPDATE waits
+// on the row being rotated inserts a successor the UPDATE's snapshot
+// can't see; the next pass revokes it, so a concurrent refresh can't keep
+// a session alive.
+func (s *Store) revokeUntilSettled(ctx context.Context, query string, args ...any) ([]revokedRow, error) {
+	var all []revokedRow
+	for {
+		n := len(all)
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var r revokedRow
+			if err := rows.Scan(&r.id, &r.familyID, &r.live); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			all = append(all, r)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		_ = rows.Close()
+		if len(all) == n {
+			return all, nil
+		}
+	}
+}
+
+func rowIDs(rows []revokedRow) []string {
+	ids := make([]string, len(rows))
+	for i, r := range rows {
+		ids[i] = r.id
+	}
+	return ids
 }
