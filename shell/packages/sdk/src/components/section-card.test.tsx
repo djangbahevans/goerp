@@ -84,4 +84,17 @@ describe("SectionCard", () => {
     expect(wrapper?.className).toContain("p-1");
     expect(wrapper?.className).toContain("overflow-hidden");
   });
+
+  it("animates the content region's entry only after the first toggle, not on mount", () => {
+    render(
+      <SectionCard title="Contact Information" collapsible>
+        <p>Fields go here</p>
+      </SectionCard>,
+    );
+    const toggle = screen.getByRole("button");
+    const region = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(region?.className).not.toContain("starting:");
+    fireEvent.click(toggle);
+    expect(region?.className).toContain("starting:grid-rows-[0fr]");
+  });
 });

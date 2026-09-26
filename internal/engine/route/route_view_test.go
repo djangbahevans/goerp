@@ -314,3 +314,66 @@ func findView(t *testing.T, views []manifest.View, name string) manifest.View {
 	t.Fatalf("no view named %q in %v", name, views)
 	return manifest.View{}
 }
+
+func TestSynthesizeViews_FormView_EngineSetFieldsShownOnlyOnceSaved(t *testing.T) {
+	md := model.Define("widget").
+		EnableOps(model.List, model.Get, model.Create, model.Update, model.Delete).
+		WithStandardFields().
+		Field("name", model.Char().Required()).
+		Field("notes", model.Text().Computed("_compute_notes")).
+		EnableViews(model.FormView)
+	views, _, _, err := SynthesizeViews("testmodule", "domain", []model.ModelDeclaration{*md}, nil, nil)
+	if err != nil {
+		t.Fatalf("SynthesizeViews: %v", err)
+	}
+	byField := make(map[string]manifest.FormField)
+	for _, f := range views[0].Sections[0].Fields {
+		byField[f.Field] = f
+	}
+
+	for _, name := range []string{"created_at", "updated_at"} {
+		got, ok := byField[name]
+		if !ok {
+			t.Fatalf("%s missing from the form", name)
+		}
+		if got.Required || !got.Readonly || got.Condition != "record.id IS NOT NULL" {
+			t.Errorf("%s: Required=%v Readonly=%v Condition=%q, want false/true/%q", name, got.Required, got.Readonly, got.Condition, "record.id IS NOT NULL")
+		}
+	}
+	if got := byField["notes"]; got.Condition != "" {
+		t.Errorf("notes: Condition = %q, want none (a Computed field shows on a new record)", got.Condition)
+	}
+	if got := byField["name"]; !got.Required || got.Condition != "" {
+		t.Errorf("name: Required=%v Condition=%q, want true/none", got.Required, got.Condition)
+	}
+}
+
+func TestSynthesizeViews_Labels(t *testing.T) {
+	md := model.Define("widget").
+		EnableOps(model.List, model.Get, model.Create, model.Update, model.Delete).
+		Field("name", model.Char().Required()).
+		Field("created_at", model.TimestampTZ()).
+		Field("customer_id", model.Many2One("customer").Label("Customer")).
+		EnableViews(model.ListView, model.FormView)
+	views, _, _, err := SynthesizeViews("testmodule", "domain", []model.ModelDeclaration{*md}, nil, nil)
+	if err != nil {
+		t.Fatalf("SynthesizeViews: %v", err)
+	}
+	want := map[string]string{"name": "Name", "created_at": "Created at", "customer_id": "Customer"}
+	for _, v := range views {
+		switch v.Type {
+		case "list":
+			for _, c := range v.Columns {
+				if c.Label != want[c.Field] {
+					t.Errorf("list column %q: Label = %q, want %q", c.Field, c.Label, want[c.Field])
+				}
+			}
+		case "form":
+			for _, f := range v.Sections[0].Fields {
+				if f.Label != want[f.Field] {
+					t.Errorf("form field %q: Label = %q, want %q", f.Field, f.Label, want[f.Field])
+				}
+			}
+		}
+	}
+}
