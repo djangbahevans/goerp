@@ -38,12 +38,19 @@ describe("createPermissionContextValue", () => {
       expect(value.checkField("contacts.contact", "credit_limit", "read")).toBe(false);
     });
 
-    it("returns false for a model/field pair with no security rule", () => {
-      expect(value.checkField("contacts.contact", "name", "read")).toBe(false);
+    it("allows a field with no security rule, since field_access lists only declared rules", () => {
+      expect(value.checkField("contacts.contact", "name", "read")).toBe(true);
+      expect(value.checkField("contacts.contact", "name", "write")).toBe(true);
     });
 
-    it("returns false for an unknown model", () => {
-      expect(value.checkField("hr.employee", "salary_amount", "read")).toBe(false);
+    it("allows the fields of a model with no security rules", () => {
+      expect(value.checkField("hr.employee", "salary_amount", "read")).toBe(true);
+    });
+
+    it("denies fields with no security rule while the data is pending", () => {
+      const pending = createPermissionContextValue({ ...data, pending: true });
+      expect(pending.checkField("contacts.contact", "name", "read")).toBe(false);
+      expect(pending.checkField("contacts.contact", "tax_id", "read")).toBe(true);
     });
   });
 
