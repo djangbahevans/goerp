@@ -48,6 +48,7 @@ jobs:
               - "Dockerfile"
               - "compose.dev.yml"
               - ".github/workflows/go.yml"
+              - "Makefile"
             cli:
               - "internal/cli/**"
               - "internal/module/**"
@@ -57,6 +58,7 @@ jobs:
               - "go.mod"
               - "go.sum"
               - ".github/workflows/go.yml"
+              - "Makefile"
 
   # Lint, a full-repo build check, and govulncheck are all cheap and need
   # no dev stack — run once whenever either lane would run, rather than
@@ -183,7 +185,7 @@ jobs:
             ${{ runner.os }}-npm-
 
       - name: Run Engine Tests
-        run: go test -v -race -timeout 30m -coverprofile=coverage-engine.txt -covermode=atomic ./internal/engine/... ./internal/module/... ./sdk/... ./contract/... ./cmd/engine/...
+        run: make test-engine GO_TEST_FLAGS="-v -race -timeout 30m -coverprofile=coverage-engine.txt -covermode=atomic"
 
       # Catches module-level regressions the engine tests above don't exercise.
       - name: Run WASM Module Test Suite
@@ -241,7 +243,7 @@ jobs:
             ${{ runner.os }}-npm-
 
       - name: Run CLI Tests
-        run: go test -v -race -timeout 30m -coverprofile=coverage-cli.txt -covermode=atomic ./internal/cli/... ./internal/gateway/... ./internal/module/... ./cmd/goerp/... ./cmd/admin-gateway/...
+        run: make test-cli GO_TEST_FLAGS="-v -race -timeout 30m -coverprofile=coverage-cli.txt -covermode=atomic"
 
   ci-gate:
     needs: [changes, lint-and-vulncheck, engine-build-test, cli-build-test]

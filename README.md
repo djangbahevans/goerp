@@ -27,6 +27,8 @@ goerp/
 
 The full dependency stack for local development runs via Docker Compose. The `goerp` engine binary itself is **not** containerized — run it locally on the host and it connects to the services below over `localhost`.
 
+The root `Makefile` wraps the commands in this section; `make` lists its targets. The usual loop is `make infra`, then `make engine`, plus `make module M=<module dir>` and an engine restart to load a module. `make test-cli` and `make test-engine` are the exact test commands the CI jobs run.
+
 ### Start the stack
 
 ```bash
