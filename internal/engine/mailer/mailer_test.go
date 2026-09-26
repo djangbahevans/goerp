@@ -243,6 +243,20 @@ func TestSMTPMailer_SendPasswordReset_ContainsResetLink(t *testing.T) {
 	}
 }
 
+func TestSMTPMailer_SendPasswordReset_NoTenantLinksTheSharedHost(t *testing.T) {
+	srv := startFakeSMTP(t)
+	m := newTestMailer(t, srv, "", "")
+
+	if err := m.SendPasswordReset(context.Background(), "kwame@example.com", "", "raw-token-123"); err != nil {
+		t.Fatalf("SendPasswordReset() error: %v", err)
+	}
+
+	msg := waitForMessage(t, srv)
+	if !strings.Contains(msg.data, "http://localhost:5173/auth/reset-password?token=raw-token-123") || strings.Contains(msg.data, "tenant=") {
+		t.Errorf("email should link the shared host with no tenant, got: %s", msg.data)
+	}
+}
+
 func TestSMTPMailer_SendPasswordResetConfirmed(t *testing.T) {
 	srv := startFakeSMTP(t)
 	m := newTestMailer(t, srv, "", "")

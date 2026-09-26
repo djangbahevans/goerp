@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -110,9 +111,15 @@ func (h *RequestHandler) issue(r *http.Request, req resetRequest) error {
 		return err
 	}
 
+	// t is nil for an account in several tenants that named none; its
+	// link lands on the shared-domain host instead.
+	var tenantID, tenantSlug string
+	if t != nil {
+		tenantID, tenantSlug = t.ID, t.Slug
+	}
 	recordAudit(ctx, h.audit, authaudit.Row{
 		EventType: "password.reset_requested",
-		TenantID:  t.ID,
+		TenantID:  tenantID,
 		UserID:    u.ID,
 		IPAddress: loginsession.ClientIP(r),
 		UserAgent: r.UserAgent(),
@@ -124,7 +131,7 @@ func (h *RequestHandler) issue(r *http.Request, req resetRequest) error {
 		return nil
 	}
 	sendDetached(ctx, "reset", func(ctx context.Context) error {
-		return h.mailer.SendPasswordReset(ctx, u.Email, t.Slug, raw)
+		return h.mailer.SendPasswordReset(ctx, u.Email, tenantSlug, raw)
 	})
 	return nil
 }
@@ -134,6 +141,10 @@ func (h *RequestHandler) issue(r *http.Request, req resetRequest) error {
 // token is never issued for a tenant the caller merely typed. GetBySlug
 // runs before IsMember because IsMember interpolates the slug into a
 // schema name, which is safe only for a slug read back from a real row.
+//
+// With no tenant named, the account's only active tenant stands in for
+// it; an account in several resolves to a nil tenant, and one in none is
+// skipped.
 func (h *RequestHandler) resolve(ctx context.Context, email, tenantSlug string) (*user.User, *tenant.Tenant, error) {
 	u, err := h.users.GetByEmail(ctx, email)
 	if err != nil {
@@ -141,6 +152,21 @@ func (h *RequestHandler) resolve(ctx context.Context, email, tenantSlug string) 
 			return nil, nil, errSkipped
 		}
 		return nil, nil, err
+	}
+
+	if tenantSlug == "" {
+		memberships, err := membership.TenantsOf(ctx, h.tenants, h.roles, u.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch len(memberships) {
+		case 0:
+			return nil, nil, errSkipped
+		case 1:
+			return u, &memberships[0], nil
+		default:
+			return u, nil, nil
+		}
 	}
 
 	t, err := h.tenants.GetBySlug(ctx, tenantSlug)

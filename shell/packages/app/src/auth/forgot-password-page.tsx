@@ -15,7 +15,6 @@ type Phase =
 
 interface FieldErrors {
   email?: string;
-  company?: string;
 }
 
 // Used when a 429 arrives without a parseable Retry-After header.
@@ -40,7 +39,6 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
   const sentHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const [email, setEmail] = useState("");
-  const [company, setCompany] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -51,7 +49,6 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
   }, [phase.kind]);
 
   const resolvedTenant = tenantContext.data?.tenant ?? null;
-  const showCompanyField = tenantContext.isFetched && resolvedTenant === null;
   const submitting = phase.kind === "submitting";
   const locked = phase.kind === "locked";
   const inputsDisabled = submitting || locked;
@@ -60,10 +57,11 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
     event.preventDefault();
     if (inputsDisabled || !tenantContext.isFetched) return;
 
-    const tenant = resolvedTenant?.slug ?? company.trim();
+    // On the shared-domain host there is no tenant to send; the engine
+    // uses the account's own.
+    const tenant = resolvedTenant?.slug;
     const errors: FieldErrors = {};
     if (!email.trim()) errors.email = "Enter your email address.";
-    if (showCompanyField && !tenant) errors.company = "Enter your company.";
     setFieldErrors(errors);
     setFormError(null);
     if (Object.keys(errors).length > 0) return;
@@ -116,20 +114,6 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
       </div>
 
       <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-        {showCompanyField && (
-          <FieldWrapper label="Company" error={fieldErrors.company}>
-            <TextInput
-              autoComplete="organization"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              value={company}
-              disabled={inputsDisabled}
-              onChange={setCompany}
-            />
-          </FieldWrapper>
-        )}
-
         <FieldWrapper label="Email" error={fieldErrors.email}>
           <TextInput
             type="email"
