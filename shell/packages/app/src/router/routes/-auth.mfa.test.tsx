@@ -33,6 +33,7 @@ const FAKE_TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 type SubmitImpl = (code: string, method: MFAMethod, setState: (state: AuthState) => void) => Promise<void>;

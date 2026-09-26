@@ -42,6 +42,7 @@ const tenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 const SIGNED_IN: AuthContextValue = {
   state: { status: "authenticated", user, tenant },

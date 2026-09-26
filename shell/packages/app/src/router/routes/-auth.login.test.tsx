@@ -33,6 +33,7 @@ const FAKE_TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 // Resolves to a SignInHandoff for a shared-domain sign-in; anything else

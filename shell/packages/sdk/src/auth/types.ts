@@ -34,6 +34,9 @@ export interface CurrentTenant {
   defaultTimezone: string;
   // The locales the Appearance page offers.
   availableLocales: string[];
+  // The effective minimum password length (auth-internals.md §3
+  // "Password strength validation").
+  passwordMinLength: number;
 }
 
 export interface LoginCredentials {
@@ -124,6 +127,7 @@ export interface InviteInfo {
   // False when the invitee already has an account on another tenant: they
   // keep their existing password and just gain access.
   passwordRequired: boolean;
+  passwordMinLength: number;
 }
 
 export interface InviteAcceptance extends InviteLink {
@@ -147,6 +151,9 @@ export interface TenantContext {
   // The app's URL on the shared-domain host.
   appUrl: string | null;
   workspaceNotFound: boolean;
+  // The effective minimum password length: the tenant's, or the global one
+  // on the shared-domain host.
+  passwordMinLength: number;
 }
 
 export type MFAMethod = "totp" | "webauthn" | "recovery_code";

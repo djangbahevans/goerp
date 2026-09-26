@@ -203,13 +203,18 @@ describe("/auth/accept-invite", () => {
 });
 
 describe("AcceptInvitePage", () => {
-  async function renderPage(accept: () => Promise<"signed_in" | "login_required">, passwordRequired = true) {
+  async function renderPage(
+    accept: () => Promise<"signed_in" | "login_required">,
+    passwordRequired = true,
+    passwordMinLength = 12,
+  ) {
     const redirect = vi.fn();
     const loadInfo = vi.fn(async () => ({
       tenantName: "Acme Corp",
       email: "kwame@acme.com",
       name: null,
       passwordRequired,
+      passwordMinLength,
     }));
     const rootRoute = createRootRoute({});
     const page = createRoute({
@@ -239,6 +244,17 @@ describe("AcceptInvitePage", () => {
     submit();
 
     await waitFor(() => expect(redirect).toHaveBeenCalledWith("/"));
+  });
+
+  it("shows and enforces the tenant's minimum length", async () => {
+    const { redirect } = await renderPage(async () => "signed_in", true, 30);
+
+    expect(await screen.findByText(/At least 30 characters/)).toBeTruthy();
+    await fillPasswords(STRONG);
+    submit();
+
+    expect(await screen.findByText(/at least 30 characters, rated Fair or better/)).toBeTruthy();
+    expect(redirect).not.toHaveBeenCalled();
   });
 
   it("reloads into sign in when no session was issued", async () => {

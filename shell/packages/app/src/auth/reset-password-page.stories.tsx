@@ -1,17 +1,37 @@
+import type { TenantContext } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { expect, userEvent, within } from "storybook/test";
 import { ResetPasswordPage } from "./reset-password-page.js";
 
-const withRouter: Decorator = (Story) => {
-  const rootRoute = createRootRoute({ component: () => <Story /> });
-  const router = createRouter({
-    routeTree: rootRoute,
-    history: createMemoryHistory({ initialEntries: ["/auth/reset-password"] }),
-  });
-  return <RouterProvider router={router} />;
-};
+// The tenant-context query is pre-seeded so no story hits the network.
+function withProviders(passwordMinLength = 12): Decorator {
+  return (Story) => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["auth", "tenant-context"], {
+      tenant: { slug: "acme", name: "Acme Corp" },
+      registrationEnabled: false,
+      termsUrl: null,
+      appUrl: "https://app.goerp.io",
+      workspaceNotFound: false,
+      passwordMinLength,
+    } satisfies TenantContext);
+    const rootRoute = createRootRoute({
+      component: () => (
+        <QueryClientProvider client={queryClient}>
+          <Story />
+        </QueryClientProvider>
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/auth/reset-password"] }),
+    });
+    return <RouterProvider router={router} />;
+  };
+}
 
 const meta = {
   title: "Shell/Auth/ResetPasswordPage",
@@ -23,7 +43,7 @@ const meta = {
     redirect: () => {},
   },
   parameters: { layout: "fullscreen" },
-  decorators: [withRouter],
+  decorators: [withProviders()],
 } satisfies Meta<typeof ResetPasswordPage>;
 
 export default meta;
@@ -63,5 +83,13 @@ export const RejectedByPolicy: Story = {
   play: async ({ canvasElement }) => {
     const canvas = await submitStrongPassword(canvasElement);
     await expect(await canvas.findByText("Password is too common.")).toBeVisible();
+  },
+};
+
+export const StricterTenantPolicy: Story = {
+  decorators: [withProviders(16)],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByText(/At least 16 characters/)).toBeInTheDocument();
   },
 };

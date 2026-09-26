@@ -46,6 +46,7 @@ const tenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 const SCHEMA = {
   modules: {

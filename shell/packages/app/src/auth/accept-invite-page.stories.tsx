@@ -21,7 +21,13 @@ const withProviders: Decorator = (Story) => {
   return <RouterProvider router={router} />;
 };
 
-const NEW_USER: InviteInfo = { tenantName: "Acme Corp", email: "kwame@acme.com", name: null, passwordRequired: true };
+const NEW_USER: InviteInfo = {
+  tenantName: "Acme Corp",
+  email: "kwame@acme.com",
+  name: null,
+  passwordRequired: true,
+  passwordMinLength: 12,
+};
 
 const meta = {
   title: "Shell/Auth/AcceptInvitePage",

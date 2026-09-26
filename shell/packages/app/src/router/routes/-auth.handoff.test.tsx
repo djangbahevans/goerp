@@ -32,6 +32,7 @@ const FAKE_TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 type HandoffImpl = (code: string, setState: (state: AuthState) => void) => Promise<void>;

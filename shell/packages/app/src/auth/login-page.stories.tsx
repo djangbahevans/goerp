@@ -53,6 +53,7 @@ const SUBDOMAIN: TenantContext = {
   termsUrl: null,
   appUrl: "https://app.goerp.io",
   workspaceNotFound: false,
+  passwordMinLength: 12,
 };
 const SHARED_DOMAIN: TenantContext = {
   tenant: null,
@@ -60,6 +61,7 @@ const SHARED_DOMAIN: TenantContext = {
   termsUrl: null,
   appUrl: "https://app.goerp.io",
   workspaceNotFound: false,
+  passwordMinLength: 12,
 };
 
 const meta = {

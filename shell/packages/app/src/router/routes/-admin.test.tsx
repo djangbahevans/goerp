@@ -15,6 +15,7 @@ const FAKE_TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 function fakeAuth(roles: string[]): AuthContextValue {

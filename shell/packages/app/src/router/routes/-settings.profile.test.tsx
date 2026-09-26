@@ -17,6 +17,7 @@ const FAKE_TENANT = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 // Same __root.tsx-renders-CommandPalette-regardless reasoning
@@ -367,6 +368,27 @@ describe("/settings/profile change password", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change password" }));
 
     expect(await screen.findByText("Password is too common.")).toBeTruthy();
+  });
+
+  it("shows the tenant's minimum length, and the one a length rejection reports", async () => {
+    const changePassword = vi.fn(async () => {
+      throw new AppError({
+        code: "auth.password_too_weak",
+        message: "password is too short",
+        httpStatus: 422,
+        details: { min_length: 20 },
+      });
+    });
+    const auth = fakeAuth(ADA, undefined, changePassword);
+    const tenant = { ...FAKE_TENANT, passwordMinLength: 16 };
+    await renderProfilePage({ ...auth, tenant, state: { status: "authenticated", user: ADA, tenant } });
+
+    fillPasswords("old passphrase here", "schmetterling", "schmetterling");
+    expect(screen.getByText(/At least 16 characters/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    expect(await screen.findByText("Password is too short.")).toBeTruthy();
+    expect(screen.getByText(/At least 20 characters/)).toBeTruthy();
   });
 
   it("focuses the current password field when opened at #change-password", async () => {

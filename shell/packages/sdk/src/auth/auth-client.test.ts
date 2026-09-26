@@ -13,6 +13,7 @@ import {
   fetchTenantContext,
   login,
   logout,
+  passwordMinLengthFrom,
   register,
   requestPasswordReset,
   resendVerificationEmail,
@@ -97,6 +98,7 @@ describe("fetchCurrentSession", () => {
         defaultLocale: "en",
         defaultTimezone: "UTC",
         availableLocales: ["en", "fr"],
+        passwordMinLength: 12,
       },
     });
     expect(fetchMock).toHaveBeenCalledWith("/auth/me", { credentials: "include" });
@@ -178,6 +180,7 @@ describe("TOTP enrollment", () => {
             defaultLocale: "en",
             defaultTimezone: "UTC",
             availableLocales: ["en"],
+            passwordMinLength: 12,
           },
         }),
       ),
@@ -339,6 +342,7 @@ describe("fetchTenantContext", () => {
           registration_enabled: true,
           terms_url: "https://example.com/terms",
           app_url: "https://app.goerp.io",
+          password_min_length: 14,
         }),
       ),
     );
@@ -349,6 +353,7 @@ describe("fetchTenantContext", () => {
       termsUrl: "https://example.com/terms",
       appUrl: "https://app.goerp.io",
       workspaceNotFound: false,
+      passwordMinLength: 14,
     });
   });
 
@@ -364,6 +369,7 @@ describe("fetchTenantContext", () => {
       termsUrl: null,
       appUrl: null,
       workspaceNotFound: false,
+      passwordMinLength: 12,
     });
   });
 
@@ -383,6 +389,7 @@ describe("fetchTenantContext", () => {
       termsUrl: null,
       appUrl: "https://app.goerp.io",
       workspaceNotFound: true,
+      passwordMinLength: 12,
     });
   });
 
@@ -751,6 +758,22 @@ describe("exchangeHandoff", () => {
   });
 });
 
+describe("passwordMinLengthFrom", () => {
+  it("reads details.min_length off a password_too_weak rejection only", () => {
+    const tooWeak = new AppError({
+      code: "auth.password_too_weak",
+      message: "password is too short",
+      httpStatus: 422,
+      details: { min_length: 16 },
+    });
+    expect(passwordMinLengthFrom(tooWeak)).toBe(16);
+    expect(
+      passwordMinLengthFrom(new AppError({ code: "validation_failed", message: "x", httpStatus: 422 })),
+    ).toBeNull();
+    expect(passwordMinLengthFrom(new TypeError("network"))).toBeNull();
+  });
+});
+
 describe("tenant selection", () => {
   it("reads a login's 409 tenant_required into the tenants and token", async () => {
     const tenants = [
@@ -913,7 +936,13 @@ describe("checkSlug", () => {
 describe("fetchInviteInfo", () => {
   it("GETs the info endpoint with token and tenant and maps the response", async () => {
     const fetchMock = vi.fn(async () =>
-      jsonResponse(200, { tenant_name: "Acme Corp", email: "kwame@acme.com", name: null, password_required: true }),
+      jsonResponse(200, {
+        tenant_name: "Acme Corp",
+        email: "kwame@acme.com",
+        name: null,
+        password_required: true,
+        password_min_length: 16,
+      }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -922,6 +951,7 @@ describe("fetchInviteInfo", () => {
       email: "kwame@acme.com",
       name: null,
       passwordRequired: true,
+      passwordMinLength: 16,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/auth/accept-invite/info?token=a%2Bb&tenant=acme",

@@ -290,6 +290,9 @@ func (f *fixture) sessionStates(t *testing.T) map[string]string {
 		}
 		states[id] = reason
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate sessions: %v", err)
+	}
 	return states
 }
 
@@ -346,6 +349,9 @@ func (f *fixture) familyRevokeReasons(t *testing.T, familyOfRefreshHash string) 
 			t.Fatalf("scan: %v", err)
 		}
 		reasons = append(reasons, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate family: %v", err)
 	}
 	return reasons
 }
@@ -415,6 +421,9 @@ func TestServeHTTP_WeakPasswordReturns422(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "auth.password_too_weak" {
 		t.Fatalf("status = %d, body = %s, want 422 auth.password_too_weak", rec.Code, rec.Body.String())
 	}
+	if got := minLengthDetail(t, rec); got != float64(password.Global.MinLength) {
+		t.Errorf("details.min_length = %v, want %d", got, password.Global.MinLength)
+	}
 	if !f.passwordMatches(t, oldPassword) {
 		t.Error("password changed despite failing the tenant policy")
 	}
@@ -461,4 +470,17 @@ func TestServeHTTP_OverloadedReturns503AndChangesNothing(t *testing.T) {
 	if !f.passwordMatches(t, oldPassword) {
 		t.Error("password changed despite an overloaded hasher")
 	}
+}
+
+func minLengthDetail(t *testing.T, rec *httptest.ResponseRecorder) any {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %q: %v", rec.Body.String(), err)
+	}
+	return body.Error.Details["min_length"]
 }

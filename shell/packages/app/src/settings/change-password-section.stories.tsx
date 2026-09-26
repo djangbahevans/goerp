@@ -29,6 +29,7 @@ const fakeTenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 
 function authWith(changePassword: AuthContextValue["changePassword"]): AuthContextValue {

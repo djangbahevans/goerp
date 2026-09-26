@@ -10,11 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 )
 
 const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
@@ -28,6 +30,9 @@ type fixture struct {
 	resolver    *tenantresolve.Resolver
 	sharedHost  string
 	appBaseURL  string
+	tenantID    string
+	config      *tenantconfig.Store
+	policies    *password.PolicyStore
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -71,12 +76,18 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = cacheClient.Delete(context.Background(), tenantresolve.DomainCacheKey(domain)) })
 
 	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
+	configStore := tenantconfig.NewStore(conn)
+	if err := configStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
+	}
+	policies := password.NewPolicyStore(configStore)
 	sharedHost := "shared-" + slug + ".goerp.test"
 	appBaseURL := "https://" + sharedHost
 	return &fixture{
-		handler:  NewHandler(resolver, Config{AppBaseURL: appBaseURL}),
+		handler:  NewHandler(resolver, Config{AppBaseURL: appBaseURL, Policies: policies}),
 		resolver: resolver, tenantStore: tenantStore, cache: cacheClient,
 		slug: slug, domain: domain, sharedHost: sharedHost, appBaseURL: appBaseURL,
+		tenantID: tt.ID, config: configStore, policies: policies,
 	}
 }
 
@@ -171,7 +182,7 @@ func TestServeHTTP_SuspendedTenantReturns403(t *testing.T) {
 
 func TestServeHTTP_ReportsPlatformRegistrationSetting(t *testing.T) {
 	f := newFixture(t)
-	f.handler = NewHandler(f.resolver, Config{RegistrationEnabled: true, AppBaseURL: f.appBaseURL})
+	f.handler = NewHandler(f.resolver, Config{RegistrationEnabled: true, AppBaseURL: f.appBaseURL, Policies: f.policies})
 
 	_, resolved := f.get(t, f.domain)
 	_, shared := f.get(t, f.sharedHost)
@@ -184,12 +195,29 @@ func TestServeHTTP_ReportsPlatformRegistrationSetting(t *testing.T) {
 func TestServeHTTP_ReportsConfiguredTermsURL(t *testing.T) {
 	f := newFixture(t)
 	const termsURL = "https://example.com/terms"
-	f.handler = NewHandler(f.resolver, Config{RegistrationEnabled: true, TermsURL: termsURL, AppBaseURL: f.appBaseURL})
+	f.handler = NewHandler(f.resolver, Config{RegistrationEnabled: true, TermsURL: termsURL, AppBaseURL: f.appBaseURL, Policies: f.policies})
 
 	_, resolved := f.get(t, f.domain)
 	_, shared := f.get(t, f.sharedHost)
 
 	if resolved["terms_url"] != termsURL || shared["terms_url"] != termsURL {
 		t.Errorf("terms_url = %v (resolved), %v (shared), want %q for both", resolved["terms_url"], shared["terms_url"], termsURL)
+	}
+}
+
+func TestServeHTTP_ReportsTheEffectivePasswordMinLength(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "14"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+
+	_, resolved := f.get(t, f.domain)
+	_, shared := f.get(t, f.sharedHost)
+
+	if resolved["password_min_length"] != float64(14) {
+		t.Errorf("resolved password_min_length = %v, want the tenant's 14", resolved["password_min_length"])
+	}
+	if shared["password_min_length"] != float64(password.Global.MinLength) {
+		t.Errorf("shared password_min_length = %v, want the global %d", shared["password_min_length"], password.Global.MinLength)
 	}
 }

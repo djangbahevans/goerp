@@ -36,6 +36,7 @@ const tenant: CurrentTenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en"],
+  passwordMinLength: 12,
 };
 const auth: AuthContextValue = {
   state: { status: "authenticated", user, tenant },

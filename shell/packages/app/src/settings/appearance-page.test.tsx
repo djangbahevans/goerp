@@ -41,6 +41,7 @@ const TENANT: CurrentTenant = {
   defaultLocale: "en",
   defaultTimezone: "UTC",
   availableLocales: ["en", "fr"],
+  passwordMinLength: 12,
 };
 
 const permissionValue = createPermissionContextValue({

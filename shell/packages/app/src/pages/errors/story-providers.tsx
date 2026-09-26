@@ -28,6 +28,7 @@ export function storyAuth(roles: string[]): AuthContextValue {
     defaultLocale: "en",
     defaultTimezone: "UTC",
     availableLocales: ["en"],
+    passwordMinLength: 12,
   };
   return {
     state: { status: "authenticated", user, tenant },

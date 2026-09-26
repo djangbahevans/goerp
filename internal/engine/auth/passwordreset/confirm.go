@@ -86,7 +86,9 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := policy.Validate(req.NewPassword, u.Email); err != nil {
-		writeJSONError(w, http.StatusUnprocessableEntity, "auth.password_too_weak", err.Error())
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		writeJSON(w, password.TooWeakBody(err, policy))
 		return
 	}
 
