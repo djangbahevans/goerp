@@ -55,8 +55,8 @@ login admin@demo.test Demo-Pass-2026!
 h1
 ss contacts-list
 click text=New Contact
-fill role=textbox[name="name"] Kofi Mensah
-fill role=textbox[name="email"] kofi@example.test
+fill role=textbox[name="Name"] Kofi Mensah
+fill role=textbox[name="Email"] kofi@example.test
 click role=button[name="Save"]
 eval new Promise(r => setTimeout(() => r(location.pathname), 1500))
 click role=button[name="CRM"]
@@ -116,7 +116,7 @@ make check-shell
 - **`goerp tenant create --wait` exits `not_found` after a successful create** (goerp#1216). The bootstrap script creates with `--wait=false` and polls `system.tenants` instead.
 - **Enabling a module needs no engine restart** (the script drops the Redis entitlement cache), but loading a newly built `.erp` does: restart `make engine` after `make module`.
 - **Sidebar groups start collapsed.** Click the group (`role=button[name="CRM"]`) before its item link.
-- **Synthesized forms label fields with raw names** (goerp#1240), so select inputs by field name: `role=textbox[name="name"]`. `wait text=…` doesn't match an input's value; read values with `eval`.
+- **`wait text=…` doesn't match an input's value**; read values with `eval`.
 - **A cold load of a module URL shows "Page not found" for up to a few seconds** (goerp#1230). `nav` and `h1` wait it out; a heading still reading "Page not found" after that is real.
 - **Full page loads clear the client cache.** To reproduce in-app state bugs, navigate with `click`, not `nav`.
 - **`/_notif/*` 404s are expected** (no backend yet, goerp#1112); `errors` filters them.

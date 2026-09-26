@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useId, useState } from "react";
+import { cn } from "./cn.js";
 
 export interface SectionCardProps {
   title?: string | undefined;
@@ -18,6 +19,7 @@ export function SectionCard({
 }: SectionCardProps): ReactNode {
   const contentId = useId();
   const [collapsed, setCollapsed] = useState(collapsible && defaultCollapsed);
+  const [toggled, setToggled] = useState(false);
 
   return (
     <section className="rounded-structural border border-border bg-surface p-4">
@@ -27,7 +29,10 @@ export function SectionCard({
           {collapsible && (
             <button
               type="button"
-              onClick={() => setCollapsed((v) => !v)}
+              onClick={() => {
+                setToggled(true);
+                setCollapsed((v) => !v);
+              }}
               aria-expanded={!collapsed}
               aria-controls={contentId}
               className="rounded-control p-1 text-text-secondary transition-colors duration-(--duration-fast) ease-out hover:text-text focus-visible:outline-none focus-visible:shadow-focus motion-reduce:transition-none"
@@ -42,11 +47,16 @@ export function SectionCard({
           preserves. The grid-rows/display transition (with @starting-style
           via `starting:`) animates in/out of `hidden`'s display:none instead
           of snapping, while staying genuinely hidden — not just visually
-          collapsed — at rest. */}
+          collapsed — at rest. The starting style waits for the first toggle:
+          @starting-style also applies on mount, which would grow every
+          section in from zero height on page load. */}
       <div
         id={contentId}
         hidden={collapsed}
-        className="mt-3 grid grid-rows-[1fr] transition-[grid-template-rows,display] transition-discrete duration-(--duration-base) ease-out starting:grid-rows-[0fr] [[hidden]]:grid-rows-[0fr] [[hidden]]:ease-in motion-reduce:transition-none"
+        className={cn(
+          "mt-3 grid grid-rows-[1fr] transition-[grid-template-rows,display] transition-discrete duration-(--duration-base) ease-out [[hidden]]:grid-rows-[0fr] [[hidden]]:ease-in motion-reduce:transition-none",
+          toggled && "starting:grid-rows-[0fr]",
+        )}
       >
         {/* -m-1 p-1 (canceling out, so children land at the same visual
             position) pushes the actual clip boundary 4px past the content

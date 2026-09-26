@@ -283,6 +283,7 @@ func synthesizeColumns(md model.ModelDeclaration) []manifest.ListColumn {
 		}
 		columns = append(columns, manifest.ListColumn{
 			Field:   f.Name,
+			Label:   fieldLabel(f),
 			Type:    t,
 			Primary: f.Def.IsPrimary,
 		})
@@ -290,7 +291,19 @@ func synthesizeColumns(md model.ModelDeclaration) []manifest.ListColumn {
 	return columns
 }
 
+// synthesizeFormFields marks a read-only field never required, since the
+// user can't supply it, and shows a stored engine-set field (Readonly, not
+// Computed, e.g. created_at) only once the record exists: a new record has
+// no value for it yet.
 func synthesizeFormFields(md model.ModelDeclaration) []manifest.FormField {
+	savedCondition := ""
+	for _, f := range md.Fields {
+		if f.Def.IsPrimaryKey {
+			savedCondition = "record." + f.Name + " IS NOT NULL"
+			break
+		}
+	}
+
 	var fields []manifest.FormField
 	for _, f := range md.Fields {
 		if isStandardField(f.Name) {
@@ -300,12 +313,31 @@ func synthesizeFormFields(md model.ModelDeclaration) []manifest.FormField {
 		if !ok {
 			continue
 		}
-		fields = append(fields, manifest.FormField{
+		readonly := f.Def.IsComputed || f.Def.IsReadonly
+		field := manifest.FormField{
 			Field:    f.Name,
+			Label:    fieldLabel(f),
 			Type:     t,
-			Required: f.Def.IsRequired,
-			Readonly: f.Def.IsComputed || f.Def.IsReadonly,
-		})
+			Required: f.Def.IsRequired && !readonly,
+			Readonly: readonly,
+		}
+		if f.Def.IsReadonly && !f.Def.IsComputed {
+			field.Condition = savedCondition
+		}
+		fields = append(fields, field)
 	}
 	return fields
+}
+
+// fieldLabel is the field's declared .Label(), else its name humanized:
+// "created_at" → "Created at".
+func fieldLabel(f model.NamedField) string {
+	if f.Def.RelationLabel != "" {
+		return f.Def.RelationLabel
+	}
+	words := strings.ReplaceAll(f.Name, "_", " ")
+	if words == "" {
+		return ""
+	}
+	return strings.ToUpper(words[:1]) + words[1:]
 }
