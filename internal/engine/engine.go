@@ -182,6 +182,7 @@ type Engine struct {
 	server          *httpx.Server
 	adminServer     *adminapi.Server
 	readiness       atomic.Bool
+	serveErrs       chan error
 	wsHub           *ws.Hub
 
 	// instanceID identifies this process for hot reload's leader-election
@@ -1107,17 +1108,33 @@ func (e *Engine) Tracer() trace.Tracer {
 	return e.tracer
 }
 
-func (e *Engine) Start(ctx context.Context) error {
+// ServeErrors delivers an HTTP or admin server failure after Start
+// returned; the caller stops the engine and exits non-zero on one.
+func (e *Engine) ServeErrors() <-chan error {
+	return e.serveErrs
+}
 
+// Start binds both listeners before starting anything else, so a taken
+// port fails startup (engine-internals.md §2) instead of leaving an
+// engine that reports ready while serving nothing.
+func (e *Engine) Start(ctx context.Context) error {
+	if err := e.server.Listen(); err != nil {
+		return err
+	}
+	if err := e.adminServer.Listen(); err != nil {
+		_ = e.server.Close()
+		return err
+	}
+
+	e.serveErrs = make(chan error, 2)
 	go func() {
-		if err := e.server.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error().Err(err).Msg("http server error")
+		if err := e.server.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			e.serveErrs <- fmt.Errorf("http server: %w", err)
 		}
 	}()
-
 	go func() {
-		if err := e.adminServer.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error().Err(err).Msg("admin http server error")
+		if err := e.adminServer.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			e.serveErrs <- fmt.Errorf("admin http server: %w", err)
 		}
 	}()
 

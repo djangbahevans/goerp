@@ -9,8 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
 
 // FrontendBuildResult describes a successful BuildFrontend call.
@@ -20,8 +18,8 @@ type FrontendBuildResult struct {
 }
 
 // BuildFrontend runs a module's frontend/ Vite project (if the module's
-// manifest declares frontend.bundle: true) and writes the resulting
-// bundle's sha256 into the manifest's frontend.bundle_sha256 field. It
+// manifest declares frontend.bundle: true) and reports the resulting
+// bundle's sha256; Package writes it into the packaged manifest. It
 // returns (nil, nil) when the module declares no frontend bundle, so
 // callers can distinguish "nothing to build" from a build failure. When
 // debug is true, the build includes source maps (cli-reference.md's
@@ -99,19 +97,6 @@ func BuildFrontend(ctx context.Context, dir string, debug bool) (*FrontendBuildR
 	newPath := filepath.Join(distDir, fmt.Sprintf("bundle.%s.js", fullHex[:12]))
 	if err := os.Rename(outputPath, newPath); err != nil {
 		return nil, fmt.Errorf("rename bundle output: %w", err)
-	}
-
-	frontend["bundle_sha256"] = bundleSHA256
-
-	patched, err := encodeManifest(decoded)
-	if err != nil {
-		return nil, fmt.Errorf("encode manifest: %w", err)
-	}
-	if _, err := manifest.Load(patched); err != nil {
-		return nil, fmt.Errorf("build produced an invalid manifest: %w", err)
-	}
-	if err := writeFile(manifestPath, patched); err != nil {
-		return nil, err
 	}
 
 	return &FrontendBuildResult{

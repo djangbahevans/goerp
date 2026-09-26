@@ -8,6 +8,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/djangbahevans/goerp/internal/cli/adminclient"
 )
 
 func TestTenantCreate_NoWaitSuccess(t *testing.T) {
@@ -224,14 +227,63 @@ func TestTenantCreate_MissingAdminTokenIsUsageError(t *testing.T) {
 	}
 }
 
-func TestTenantCreate_NotFoundDuringPollIsExitCode4(t *testing.T) {
+func TestTenantCreate_WaitPollsThroughNotFound(t *testing.T) {
+	original := adminclient.PollInterval
+	adminclient.PollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { adminclient.PollInterval = original })
+
+	var statusCalls atomic.Int32
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /admin/tenants", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
-		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"slug":"acmecorp","workflow_id":"provision-tenant-acmecorp"},"error":null}`))
 	})
 	mux.HandleFunc("GET /admin/tenants/acmecorp", func(w http.ResponseWriter, r *http.Request) {
+		n := statusCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n <= 2 {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"data":null,"error":{"code":"not_found","message":"tenant not found"}}`))
+			return
+		}
+		status := "provisioning"
+		if n >= 4 {
+			status = "active"
+		}
+		_, _ = fmt.Fprintf(w, `{"data":{"slug":"acmecorp","name":"acmecorp","plan":"starter","status":%q,"region":"default","created_at":"2026-01-01T00:00:00Z","modules_synced":0,"modules_total":0},"error":null}`, status)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	code, stdout, stderr := runCLI(t, "tenant", "create", "acmecorp",
+		"--admin-email", "admin@acmecorp.com",
+		"--admin-url", srv.URL,
+		"--admin-token", "testtoken",
+	)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if got := statusCalls.Load(); got != 4 {
+		t.Errorf("status endpoint called %d times, want 4 (two 404s, provisioning, active)", got)
+	}
+	if !strings.Contains(stdout, "is active") {
+		t.Errorf("stdout = %q, want it to report the tenant is active", stdout)
+	}
+}
+
+func TestTenantCreate_WaitTimesOutWhenTenantNeverAppears(t *testing.T) {
+	original := adminclient.PollInterval
+	adminclient.PollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { adminclient.PollInterval = original })
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /admin/tenants", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"data":{"slug":"acmecorp","workflow_id":"provision-tenant-acmecorp"},"error":null}`))
+	})
+	mux.HandleFunc("GET /admin/tenants/acmecorp", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"data":null,"error":{"code":"not_found","message":"tenant not found"}}`))
 	})
@@ -240,14 +292,12 @@ func TestTenantCreate_NotFoundDuringPollIsExitCode4(t *testing.T) {
 
 	code, _, stderr := runCLI(t, "tenant", "create", "acmecorp",
 		"--admin-email", "admin@acmecorp.com",
+		"--wait-timeout", "100ms",
 		"--admin-url", srv.URL,
 		"--admin-token", "testtoken",
 	)
 
-	if code != 4 {
-		t.Fatalf("exit code = %d, want 4 (not found, cli-reference.md §2b)", code)
-	}
-	if !strings.Contains(stderr, "not_found") {
-		t.Errorf("stderr = %q, want it to mention the not_found API error code", stderr)
+	if code != 124 {
+		t.Fatalf("exit code = %d, want 124, the timeout exit, not a not_found failure (stderr: %s)", code, stderr)
 	}
 }

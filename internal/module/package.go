@@ -43,33 +43,20 @@ func Package(ctx context.Context, dir string, opts PackageOptions) (*PackageResu
 		return nil, err
 	}
 
-	// Frontend runs first: it only ever touches frontend.bundle_sha256, so
-	// its own intermediate manifest.Load re-validation never depends on
-	// anything the wasm step below is about to add. Running wasm's
-	// checksum patch first would instead re-validate a manifest that
-	// still has bundle_sha256 unset if frontend.bundle is true, failing
-	// spuriously on a field this step hasn't reached yet.
 	if !opts.SkipFrontend {
 		if _, err := BuildFrontend(ctx, dir, opts.Debug); err != nil {
 			return nil, err
 		}
 	}
-
 	if !opts.SkipWasm {
-		wasmResult, err := BuildWasm(ctx, dir, opts.Debug)
-		if err != nil {
+		if _, err := BuildWasm(ctx, dir, opts.Debug); err != nil {
 			return nil, err
-		}
-		if wasmResult != nil {
-			if err := patchManifestField(manifestPath, "checksum", wasmResult.WasmSHA256); err != nil {
-				return nil, err
-			}
 		}
 	}
 
-	manifestBytes, err := os.ReadFile(manifestPath)
+	manifestBytes, err := packagedManifest(dir, manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("read manifest: %w", err)
+		return nil, err
 	}
 
 	outputPath := opts.Output
@@ -119,23 +106,57 @@ func readNameVersion(manifestPath string) (name, version string, err error) {
 	return name, version, nil
 }
 
-func patchManifestField(manifestPath, field, value string) error {
+// packagedManifest is the source manifest with checksum and
+// frontend.bundle_sha256 set from the module.wasm and bundle that
+// writeArchive packages, so the .erp's manifest always matches its own
+// contents. The source manifest.json is never written: the hashes are
+// build outputs.
+func packagedManifest(dir, manifestPath string) ([]byte, error) {
 	decoded, err := readManifestJSON(manifestPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	decoded[field] = value
+	hashed := false
+	wasmData, err := os.ReadFile(filepath.Join(dir, "module.wasm"))
+	switch {
+	case err == nil:
+		decoded["checksum"] = "sha256:" + computeSHA256(wasmData)
+		hashed = true
+	case !os.IsNotExist(err):
+		return nil, fmt.Errorf("read module.wasm: %w", err)
+	}
 
-	patched, err := encodeManifest(decoded)
+	frontend, _ := decoded["frontend"].(map[string]any)
+	if bundle, _ := frontend["bundle"].(bool); bundle {
+		matches, err := filepath.Glob(filepath.Join(dir, "frontend", "dist", "bundle.*.js"))
+		if err != nil {
+			return nil, err
+		}
+		switch len(matches) {
+		case 0:
+		case 1:
+			data, err := os.ReadFile(matches[0])
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", matches[0], err)
+			}
+			frontend["bundle_sha256"] = "sha256:" + computeSHA256(data)
+			hashed = true
+		default:
+			return nil, fmt.Errorf("frontend/dist has %d bundle.*.js files; rebuild the frontend so exactly one remains", len(matches))
+		}
+	}
+
+	packaged, err := encodeManifest(decoded)
 	if err != nil {
-		return fmt.Errorf("encode manifest: %w", err)
+		return nil, fmt.Errorf("encode manifest: %w", err)
 	}
-	if _, err := manifest.Load(patched); err != nil {
-		return fmt.Errorf("build produced an invalid manifest: %w", err)
+	if hashed {
+		if _, err := manifest.Load(packaged); err != nil {
+			return nil, fmt.Errorf("build produced an invalid manifest: %w", err)
+		}
 	}
-
-	return writeFile(manifestPath, patched)
+	return packaged, nil
 }
 
 func writeArchive(outputPath, dir string, manifestBytes []byte) error {

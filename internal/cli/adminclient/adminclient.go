@@ -259,7 +259,7 @@ func WithJSONErrorEnvelope(cmd *cobra.Command, err error, jsonOut bool) error {
 
 // PollInterval is how often WaitForJob re-polls GET /admin/jobs/{id}
 // while a job is still running.
-const PollInterval = 2 * time.Second
+var PollInterval = 2 * time.Second
 
 // jobDetail is GET /admin/jobs/{id}'s response body, the slice every
 // WaitForJob caller needs: State to know when to stop polling, Output to

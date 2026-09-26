@@ -32,9 +32,7 @@ if [ -n "$(psql "select 1 from system.users where email = '$email' and password_
 fi
 
 if [ -z "$(psql "select 1 from system.tenants where slug = '$slug'")" ]; then
-  # `tenant create --wait` exits with not_found even when provisioning
-  # succeeds (goerp#1216), so poll the tenant row instead.
-  "${admin[@]}" tenant create "$slug" --admin-email "$email" --wait=false
+  "${admin[@]}" tenant create "$slug" --admin-email "$email"
 fi
 echo "waiting for tenant $slug to become active..."
 for _ in $(seq 1 150); do

@@ -482,6 +482,8 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 			if upstream, blocked := failedDependency(mf.DependsOn, modules); blocked {
 				m := &module.LoadedModule{Manifest: *mf, PackagePath: src.PackagePath, LoadOrder: i}
 				m.FailDependency(upstream)
+				log.Warn().Str("module", src.Name).Str("upstream", upstream).Str("reason", m.FailureReason).
+					Msg("module skipped: a dependency failed to load")
 				modules[src.Name] = m
 				continue
 			}
@@ -520,6 +522,8 @@ func LoadCascading(ctx context.Context, rt *wasm.Runtime, poolCfg wasm.PoolConfi
 		if m.Status != module.StatusFailed {
 			publishBundle(ctx, storageBackend, src.Name, &m.Manifest, src.BundleBytes)
 			publishFrontendTranslations(ctx, storageBackend, src.Name, m.Manifest.Version, src.FrontendTranslations)
+		} else {
+			log.Warn().Str("module", src.Name).Str("reason", m.FailureReason).Msg("module failed to load")
 		}
 		modules[src.Name] = m
 	}

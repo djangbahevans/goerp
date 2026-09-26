@@ -241,8 +241,7 @@ func loadGenContext(dir string, sch model.Schema) (genContext, error) {
 // stringSlice converts a decoded JSON array value (as readManifestJSON's
 // map[string]any yields it) into a []string, skipping any non-string
 // element rather than erroring — the same lenient decoding
-// patchManifestField/readNameVersion already apply to other manifest
-// fields.
+// readNameVersion already applies to other manifest fields.
 func stringSlice(v any) []string {
 	arr, ok := v.([]any)
 	if !ok {

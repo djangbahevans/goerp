@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,6 +45,36 @@ func zipEntryNames(t *testing.T, path string) []string {
 	return names
 }
 
+func zipMembers(t *testing.T, path string) map[string][]byte {
+	t.Helper()
+
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatalf("open archive: %v", err)
+	}
+	defer r.Close()
+
+	members := make(map[string][]byte, len(r.File))
+	for _, f := range r.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", f.Name, err)
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatalf("read %s: %v", f.Name, err)
+		}
+		members[f.Name] = data
+	}
+	return members
+}
+
+func sha256Ref(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 func TestPackageAssemblesArchive(t *testing.T) {
 	requireNpm(t)
 
@@ -58,9 +89,22 @@ func TestPackageAssemblesArchive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	sourceManifest, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest.json: %v", err)
+	}
+
 	result, err := Package(ctx, dir, PackageOptions{})
 	if err != nil {
 		t.Fatalf("Package: %v", err)
+	}
+
+	after, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest.json: %v", err)
+	}
+	if string(after) != string(sourceManifest) {
+		t.Errorf("Package modified the source manifest.json:\n%s", after)
 	}
 
 	if _, err := os.Stat(result.ArchivePath); err != nil {
@@ -86,24 +130,30 @@ func TestPackageAssemblesArchive(t *testing.T) {
 		}
 	}
 
-	manifestData, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
-	if err != nil {
-		t.Fatalf("read manifest.json: %v", err)
-	}
-	var decoded struct {
+	// The packaged manifest's hashes must match the packaged members,
+	// the same checks the engine's loader applies (verifyChecksum,
+	// verifyBundle).
+	members := zipMembers(t, result.ArchivePath)
+	var packaged struct {
 		Checksum string `json:"checksum"`
+		Frontend struct {
+			BundleSHA256 string `json:"bundle_sha256"`
+		} `json:"frontend"`
 	}
-	if err := json.Unmarshal(manifestData, &decoded); err != nil {
-		t.Fatalf("unmarshal manifest.json: %v", err)
+	if err := json.Unmarshal(members["manifest.json"], &packaged); err != nil {
+		t.Fatalf("unmarshal packaged manifest.json: %v", err)
 	}
-	wasmData, err := os.ReadFile(filepath.Join(dir, "module.wasm"))
-	if err != nil {
-		t.Fatalf("read module.wasm: %v", err)
+	if want := sha256Ref(members["module.wasm"]); packaged.Checksum != want {
+		t.Errorf("packaged checksum = %q, want %q", packaged.Checksum, want)
 	}
-	sum := sha256.Sum256(wasmData)
-	wantChecksum := "sha256:" + hex.EncodeToString(sum[:])
-	if decoded.Checksum != wantChecksum {
-		t.Errorf("manifest checksum = %q, want %q", decoded.Checksum, wantChecksum)
+	var bundle []byte
+	for name, data := range members {
+		if strings.HasPrefix(name, "frontend/dist/bundle.") {
+			bundle = data
+		}
+	}
+	if want := sha256Ref(bundle); packaged.Frontend.BundleSHA256 != want {
+		t.Errorf("packaged frontend.bundle_sha256 = %q, want %q", packaged.Frontend.BundleSHA256, want)
 	}
 
 	archiveData, err := os.ReadFile(result.ArchivePath)

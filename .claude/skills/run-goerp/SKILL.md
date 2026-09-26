@@ -24,10 +24,9 @@ npm install --prefix ~/.cache/goerp-run-driver --no-audit --no-fund playwright-c
 (cd shell && npm install && npm run build -w @goerp/sdk)
 make infra
 make module M=.claude/skills/run-goerp/sample-crm
-git checkout -- .claude/skills/run-goerp/sample-crm/manifest.json
 ```
 
-The app imports `@goerp/sdk` from its `dist/`, so rebuild it (`npm run build -w @goerp/sdk` in `shell/`) after any SDK change. `make module` builds into `.dev/modules/`, where `make engine` loads it from. It also writes the build checksum into the module's own `manifest.json` (goerp#1231), which is what the `git checkout` undoes.
+The app imports `@goerp/sdk` from its `dist/`, so rebuild it (`npm run build -w @goerp/sdk` in `shell/`) after any SDK change. `make module` builds into `.dev/modules/`, where `make engine` loads it from.
 
 ## Run (agent path)
 
@@ -113,7 +112,6 @@ make check-shell
 
 - **Poll the shell with `Accept: text/html`.** The dev server proxies every non-Vite path to the engine, so a plain `curl localhost:5173/` gets the engine's 404 even when Vite is up.
 - **Use `<tenant>.localhost`, not `localhost`.** The engine resolves the tenant from the host, and the `__Host-`/`Secure` auth cookies only work on `localhost` hosts. `make engine` sets `GOERP_PLATFORM_DOMAIN=localhost`, so provisioning registers `<slug>.localhost` itself.
-- **`goerp tenant create --wait` exits `not_found` after a successful create** (goerp#1216). The bootstrap script creates with `--wait=false` and polls `system.tenants` instead.
 - **Enabling a module needs no engine restart** (the script drops the Redis entitlement cache), but loading a newly built `.erp` does: restart `make engine` after `make module`.
 - **Sidebar groups start collapsed.** Click the group (`role=button[name="CRM"]`) before its item link.
 - **`wait text=…` doesn't match an input's value**; read values with `eval`.
@@ -122,11 +120,10 @@ make check-shell
 - **`/_notif/*` 404s are expected** (no backend yet, goerp#1112); `errors` filters them.
 - **Repeated logins hit the rate limiter.** Clear it with `docker compose -f compose.dev.yml exec -T redis sh -c 'redis-cli --scan --pattern "ratelimit:*" | xargs -r redis-cli del'`.
 - **The dev database is shared** with every other session and test run on this machine. Check `system.tenants` before assuming a tenant exists, and never reuse another session's tenant. Users are global across tenants, so give each new tenant its own admin email.
-- **An engine that can't bind its ports keeps running** (goerp#1220), serving nothing. Check `ss -ltnp | grep -E ':(8080|8081|5173) '` before `make engine`.
 
 ## Troubleshooting
 
-- **`listen tcp :8080: bind: address already in use` in the engine log, but the process stays up**: another engine holds the port. Kill it (the stop command above) and restart.
+- **`make engine` exits with `bind http listener on :8080: … address already in use`**: another engine holds the port. Kill it (the stop command above) and restart.
 - **`relation "system.river_job" does not exist` / `column "unique_key" does not exist` from a running engine**: the database was reset under it (e.g. `make infra-down` with `-v`, or another session). Restart the engine; it re-bootstraps the schema.
 - **`Cannot find module '@storybook/addon-vitest/vitest-plugin'` from `make check-shell`**: `shell/node_modules` predates a dependency change. Run `npm install` in `shell/`.
 - **`you are using a configuration file for golangci-lint v2 with golangci-lint v1`**: install v2 with `GOTOOLCHAIN=go1.27.1 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
