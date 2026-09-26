@@ -438,18 +438,12 @@ export const SortedHeader: Story = {
 
 // A column the fixture user lacks field-level read access to is omitted
 // from the DOM entirely, not rendered blank — use-visible-columns.ts's own
-// AC. checkField denies by default for any field absent from fieldAccess
-// (permission-provider.tsx), so every other rendered field needs an
-// explicit read:true grant here — the global Storybook decorator's
-// always-allow context (preview.tsx) is overridden for this one story.
+// AC. Only the denied field needs a fieldAccess entry: a field with no entry
+// has no security rule and stays visible.
 function fieldAccessDenying(deniedField: string) {
-  const access: Record<string, { read: boolean; write: boolean }> = {};
-  for (const column of COLUMNS) {
-    access[column.field] = { read: column.field !== deniedField, write: false };
-  }
   return createPermissionContextValue({
     permissions: new Set(),
-    fieldAccess: { "sales.order": access },
+    fieldAccess: { "sales.order": { [deniedField]: { read: false, write: false } } },
     modulesEnabled: new Set(),
   });
 }

@@ -54,13 +54,23 @@ const field: FormField = { field: "email", label: "Email", type: "email" };
 
 describe("FormFieldRow", () => {
   it("renders nothing for a field the user lacks read access to", () => {
-    const Wrapper = withFieldAccess({});
+    const Wrapper = withFieldAccess({ email: { read: false, write: false } });
     const { container } = render(
       <Wrapper>
         <FormFieldRow field={field} resource="contacts.contact" record={{}} onChange={vi.fn()} formReadonly={false} />
       </Wrapper>,
     );
     expect(container.textContent).toBe("");
+  });
+
+  it("renders an editable field that has no security rule", () => {
+    const Wrapper = withFieldAccess({});
+    render(
+      <Wrapper>
+        <FormFieldRow field={field} resource="contacts.contact" record={{}} onChange={vi.fn()} formReadonly={false} />
+      </Wrapper>,
+    );
+    expect((screen.getByLabelText("Email") as HTMLInputElement).disabled).toBe(false);
   });
 
   it("renders nothing for a field marked hidden, even with read access", () => {

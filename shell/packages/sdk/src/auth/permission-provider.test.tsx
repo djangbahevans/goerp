@@ -415,3 +415,36 @@ describe("usePermissionsStatus", () => {
     expect(getByTestId("loaded").textContent).toBe("ready");
   });
 });
+
+describe("PermissionProviderForUser field access", () => {
+  function FieldProbe() {
+    const value = useContext(PermissionContext);
+    return <div data-testid="name">{String(value?.checkField("contacts.contact", "name", "read"))}</div>;
+  }
+
+  function renderProbe() {
+    return render(
+      <PermissionProviderForUser isAuthenticated tenantId="t1" userId={null}>
+        <FieldProbe />
+      </PermissionProviderForUser>,
+    );
+  }
+
+  it("denies a field with no security rule until the first fetch settles, then allows it", async () => {
+    const fetch = deferred<PermissionData>();
+    fetchPermissionsMock.mockReturnValueOnce(fetch.promise);
+    const { getByTestId } = renderProbe();
+    expect(getByTestId("name").textContent).toBe("false");
+
+    await act(async () => fetch.resolve(dataOf([])));
+    expect(getByTestId("name").textContent).toBe("true");
+  });
+
+  it("keeps denying a field with no security rule when the first fetch fails", async () => {
+    fetchPermissionsMock.mockRejectedValueOnce(new Error("network error"));
+    const { getByTestId } = renderProbe();
+    await waitFor(() => expect(fetchPermissionsMock).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    expect(getByTestId("name").textContent).toBe("false");
+  });
+});

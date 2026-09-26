@@ -9,8 +9,12 @@ export type FieldAccessMap = Record<string, Record<string, FieldAccess>>;
 
 export interface PermissionData {
   permissions: Set<string>;
+  // Only fields with a declared .Access() rule have an entry; any other field is unrestricted.
   fieldAccess: FieldAccessMap;
   modulesEnabled: Set<string>;
+  // True when no /_meta/permissions response backs this data (still loading, or the fetch
+  // failed), so every field is denied rather than unrestricted.
+  pending?: boolean;
 }
 
 export interface PermissionContextValue extends PermissionData {

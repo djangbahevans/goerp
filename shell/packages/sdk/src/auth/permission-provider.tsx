@@ -9,8 +9,8 @@ export const PermissionContext = createContext<PermissionContextValue | null>(nu
 
 // Whether the current session's first /_meta/permissions fetch is still in
 // flight, succeeded, or failed. Before it settles — and after a failure —
-// PermissionContext holds the same empty, deny-everything data a user with no
-// grants gets. "ready" outside a provider, where there's nothing to wait for.
+// PermissionContext holds empty, pending data that denies every permission and
+// every field. "ready" outside a provider, where there's nothing to wait for.
 export type PermissionsStatus = "loading" | "ready" | "error";
 
 export const PermissionsStatusContext = createContext<PermissionsStatus>("ready");
@@ -19,7 +19,12 @@ export function usePermissionsStatus(): PermissionsStatus {
   return useContext(PermissionsStatusContext);
 }
 
-const EMPTY_DATA: PermissionData = { permissions: new Set(), fieldAccess: {}, modulesEnabled: new Set() };
+const EMPTY_DATA: PermissionData = {
+  permissions: new Set(),
+  fieldAccess: {},
+  modulesEnabled: new Set(),
+  pending: true,
+};
 
 // Mirrors `data`/`value` below for the one consumer that can't use
 // `useContext` — TanStack Router's `beforeLoad`/`loader` run outside the
@@ -38,7 +43,7 @@ export function createPermissionContextValue(data: PermissionData): PermissionCo
     check: (permission) => data.permissions.has(permission),
     checkField: (model, field, mode) => {
       const access = data.fieldAccess[model]?.[field];
-      if (!access) return false;
+      if (!access) return !data.pending;
       return mode === "read" ? access.read : access.write;
     },
     moduleEnabled: (moduleName) => data.modulesEnabled.has(moduleName),
