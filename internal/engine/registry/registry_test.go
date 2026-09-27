@@ -719,6 +719,15 @@ func TestBuildRouteTable_IncludesNotifRoutes(t *testing.T) {
 			t.Errorf("Lookup(%s, %s).Manifest = %+v, want EngineNative, not EngineBuiltin, Auth required", c.method, c.path, entry.Manifest)
 		}
 	}
+
+	// The unsubscribe link has no session: it resolves its own identity.
+	entry, _, result, _ := table.Lookup("GET", "/_notif/unsubscribe")
+	if result != route.RouteFound {
+		t.Fatalf("Lookup(GET, /_notif/unsubscribe) result = %v, want RouteFound", result)
+	}
+	if !entry.Manifest.EngineNative || !entry.Manifest.EngineBuiltin {
+		t.Errorf("Lookup(GET, /_notif/unsubscribe).Manifest = %+v, want EngineNative and EngineBuiltin", entry.Manifest)
+	}
 }
 
 func TestBuildEventRegistry_FromModules(t *testing.T) {

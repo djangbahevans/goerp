@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
+	"html/template"
 	"net/http"
 	"slices"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/rs/zerolog/log"
 )
 
 // /_notif/* (notification-system.md §9): the caller's own in-app feed.
@@ -347,4 +349,56 @@ func (e *Engine) notifPreferences(ctx context.Context, tenantCtx *tenantresolve.
 		}
 	}
 	return &notifPreferencesResponse{AvailableChannels: available, Global: prefs.Global, Types: types}, nil
+}
+
+// notifUnsubscribePage is the whole page GET /_notif/unsubscribe answers
+// with; Heading and Message are escaped.
+var notifUnsubscribePage = template.Must(template.New("unsubscribe").Parse(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Heading}}</title>
+<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;color:#1f2328}h1{font-size:1.25rem}</style>
+</head>
+<body>
+<h1>{{.Heading}}</h1>
+<p>{{.Message}}</p>
+</body>
+</html>
+`))
+
+func writeNotifUnsubscribePage(w http.ResponseWriter, status int, heading, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	// The token is in this page's URL; keep it out of any Referer.
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.WriteHeader(status)
+	_ = notifUnsubscribePage.Execute(w, struct{ Heading, Message string }{heading, message})
+}
+
+// dispatchNotifUnsubscribeRoute is GET /_notif/unsubscribe's handler
+// (notification-system.md §10): the one-click link in notification
+// emails. EngineBuiltin, with no session: the tenant comes from Host and
+// the user and notification type from the signed token, whose tenant must
+// match Host's. Turns off email for that type, and repeating it is fine.
+func (e *Engine) dispatchNotifUnsubscribeRoute(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantCtx, err := e.tenantResolver.ResolveByHost(ctx, r.Host)
+	if err != nil {
+		writeNotifUnsubscribePage(w, http.StatusNotFound, "Workspace not found", "This unsubscribe link doesn't belong to a workspace at this address.")
+		return
+	}
+	claims, err := e.unsubscribeCodec.Verify(r.URL.Query().Get("token"))
+	if err != nil || claims.TenantID != tenantCtx.TenantID {
+		writeNotifUnsubscribePage(w, http.StatusBadRequest, "Invalid unsubscribe link", "This unsubscribe link is invalid or has expired. You can change which emails you get in your notification settings.")
+		return
+	}
+
+	if err := e.notificationStore.Unsubscribe(ctx, tenantCtx.Slug, tenantCtx.TenantID, claims.Subject, claims.NotificationType); err != nil {
+		log.Error().Err(err).Str("tenant", tenantCtx.Slug).Str("user_id", claims.Subject).Msg("notification unsubscribe failed")
+		writeNotifUnsubscribePage(w, http.StatusInternalServerError, "Something went wrong", "We couldn't unsubscribe you just now. Please try the link again later.")
+		return
+	}
+	writeNotifUnsubscribePage(w, http.StatusOK, "You're unsubscribed", "You won't get these emails any more. You'll still see these notifications in the app, and you can turn the emails back on in your notification settings.")
 }
