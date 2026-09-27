@@ -16,6 +16,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
@@ -30,7 +31,8 @@ var (
 )
 
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	cache *cache.Client
 }
 
 func NewStore(db *sql.DB) *Store {

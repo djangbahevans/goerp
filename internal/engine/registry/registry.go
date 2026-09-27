@@ -628,6 +628,8 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"POST", "/_notif/read-all"},
 		{"DELETE", "/_notif/all"},
 		{"POST", "/_notif/device-token"},
+		{"GET", "/_notif/preferences"},
+		{"PATCH", "/_notif/preferences"},
 	} {
 		table.Register(r[0], r[1], &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},

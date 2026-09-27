@@ -13,8 +13,10 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
@@ -47,6 +49,9 @@ func newDispatchNotifFixture(t *testing.T) *dispatchNotifFixture {
 	}
 	if err := store.BootstrapDeviceTokens(t.Context(), slug); err != nil {
 		t.Fatalf("BootstrapDeviceTokens() error: %v", err)
+	}
+	if err := store.BootstrapPreferences(t.Context(), slug); err != nil {
+		t.Fatalf("BootstrapPreferences() error: %v", err)
 	}
 	return &dispatchNotifFixture{
 		e:        &Engine{primaryDB: conn, notificationStore: store},
@@ -419,5 +424,196 @@ func TestDispatchNotifDeviceTokenRoute_RejectsAnInvalidPlatformOrToken(t *testin
 	}
 	if got := f.deviceTokens(t); len(got) != 0 {
 		t.Errorf("tokens = %+v, want none", got)
+	}
+}
+
+// withRealTenant replaces the fixture's random tenant id with a real
+// system.tenants row, which tenant_module_settings rows need.
+func (f *dispatchNotifFixture) withRealTenant(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	tenantStore := tenant.NewStore(f.e.primaryDB)
+	if err := tenantStore.Bootstrap(ctx); err != nil {
+		t.Fatalf("tenant Bootstrap() error: %v", err)
+	}
+	if err := billing.NewStore(f.e.primaryDB).Bootstrap(ctx); err != nil {
+		t.Fatalf("billing Bootstrap() error: %v", err)
+	}
+	tt, err := tenantStore.CreateTenant(ctx, f.slug, "Notification Preferences Test")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.e.primaryDB.Exec("DELETE FROM system.tenants WHERE id = $1", tt.ID) })
+	f.tenantID = tt.ID
+}
+
+func (f *dispatchNotifFixture) setModule(t *testing.T, name, providerCategory string, enabled bool) {
+	t.Helper()
+	_, err := f.e.primaryDB.ExecContext(t.Context(), `
+		INSERT INTO system.tenant_module_settings (tenant_id, module_name, enabled, provider_category)
+		VALUES ($1, $2, $3, NULLIF($4, ''))
+		ON CONFLICT (tenant_id, module_name) DO UPDATE SET enabled = EXCLUDED.enabled, provider_category = EXCLUDED.provider_category
+	`, f.tenantID, name, enabled, providerCategory)
+	if err != nil {
+		t.Fatalf("set tenant_module_settings row: %v", err)
+	}
+}
+
+func (f *dispatchNotifFixture) getPreferences(t *testing.T) notifPreferencesResponse {
+	t.Helper()
+	w := f.serve(f.e.dispatchNotifPreferencesRoute, f.callerID, http.MethodGet, "/_notif/preferences", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /_notif/preferences status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp notifPreferencesResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode preferences: %v", err)
+	}
+	return resp
+}
+
+func (f *dispatchNotifFixture) patchPreferences(t *testing.T, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return f.serveBody(f.e.dispatchNotifPreferencesUpdateRoute, f.callerID, http.MethodPatch, "/_notif/preferences", []byte(body), nil)
+}
+
+func TestDispatchNotifPreferencesRoute_DefaultsForAUserWithNoRows(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+
+	got := f.getPreferences(t)
+	if fmt.Sprint(got.AvailableChannels) != "[in_app email]" {
+		t.Errorf("available_channels = %v, want [in_app email]", got.AvailableChannels)
+	}
+	if got.Global != (notifications.Channels{Email: true, SMS: false, Push: true}) {
+		t.Errorf("global = %+v, want email and push on, sms off", got.Global)
+	}
+	if got.Types == nil || len(got.Types) != 0 {
+		t.Errorf("types = %#v, want an empty object", got.Types)
+	}
+}
+
+func TestDispatchNotifPreferencesRoute_PatchThenGetReturnsTheSavedValues(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+	f.setModule(t, "sms_connector", "sms_provider", true)
+	f.setModule(t, "push_connector", "push_provider", true)
+
+	w := f.patchPreferences(t, `{
+		"global": {"email": false, "sms": true},
+		"types": {
+			"sales.order_confirmed": {"push": false},
+			"accounting.invoice_overdue": {"email": false, "sms": true, "push": true}
+		}
+	}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	got := f.getPreferences(t)
+	wantGlobal := notifications.Channels{Email: false, SMS: true, Push: true}
+	if got.Global != wantGlobal {
+		t.Errorf("global = %+v, want %+v", got.Global, wantGlobal)
+	}
+	// A new type row takes unset channels from global; one equal to global
+	// isn't listed.
+	wantTypes := map[string]notifications.Channels{"sales.order_confirmed": {Email: false, SMS: true, Push: false}}
+	if fmt.Sprint(got.Types) != fmt.Sprint(wantTypes) {
+		t.Errorf("types = %+v, want %+v", got.Types, wantTypes)
+	}
+	var patched notifPreferencesResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &patched); err != nil || patched.Global != wantGlobal {
+		t.Errorf("PATCH response = %s, want the updated preferences", w.Body.String())
+	}
+
+	// A later partial patch changes only what it names.
+	if w := f.patchPreferences(t, `{"types": {"sales.order_confirmed": {"email": true}}}`); w.Code != http.StatusOK {
+		t.Fatalf("second PATCH status = %d; body: %s", w.Code, w.Body.String())
+	}
+	got = f.getPreferences(t)
+	if c := got.Types["sales.order_confirmed"]; c != (notifications.Channels{Email: true, SMS: true, Push: false}) {
+		t.Errorf("sales.order_confirmed = %+v, want email and sms on, push off", c)
+	}
+	if got.Global != wantGlobal {
+		t.Errorf("global = %+v after a types-only patch, want %+v", got.Global, wantGlobal)
+	}
+}
+
+func TestDispatchNotifPreferencesRoute_IgnoresUnavailableChannels(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+
+	w := f.patchPreferences(t, `{"global": {"email": false, "sms": true, "push": false, "in_app": false}, "types": {"hr.leave_approved": {"sms": true}}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	got := f.getPreferences(t)
+	if got.Global != (notifications.Channels{Email: false, SMS: false, Push: true}) {
+		t.Errorf("global = %+v, want only email changed", got.Global)
+	}
+	if len(got.Types) != 0 {
+		t.Errorf("types = %+v, want none: the only change was to an unavailable channel", got.Types)
+	}
+}
+
+func TestDispatchNotifPreferencesRoute_AvailableChannelsFollowEnabledProviderModules(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+
+	f.setModule(t, "crm", "", true)
+	f.setModule(t, "sms_connector", "sms_provider", false)
+	if got := f.getPreferences(t).AvailableChannels; fmt.Sprint(got) != "[in_app email]" {
+		t.Errorf("with a disabled SMS provider: available_channels = %v, want [in_app email]", got)
+	}
+
+	f.setModule(t, "sms_connector", "sms_provider", true)
+	if got := f.getPreferences(t).AvailableChannels; fmt.Sprint(got) != "[in_app email sms]" {
+		t.Errorf("with an enabled SMS provider: available_channels = %v, want [in_app email sms]", got)
+	}
+
+	f.setModule(t, "push_connector", "push_provider", true)
+	f.setModule(t, "sms_connector", "sms_provider", false)
+	if got := f.getPreferences(t).AvailableChannels; fmt.Sprint(got) != "[in_app email push]" {
+		t.Errorf("with only a push provider enabled: available_channels = %v, want [in_app email push]", got)
+	}
+}
+
+func TestDispatchNotifPreferencesRoute_PatchInvalidatesTheCache(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+	f.e.notificationStore.WithCache(newRateLimitTestCacheClient(t))
+
+	if got := f.getPreferences(t).Global; !got.Email {
+		t.Fatalf("global = %+v, want the email default on", got)
+	}
+
+	// The cache now holds the defaults: a direct write isn't seen...
+	_, err := f.e.primaryDB.ExecContext(t.Context(), fmt.Sprintf(
+		`INSERT INTO %s.notification_preferences (tenant_id, user_id, push_enabled) VALUES ($1, $2, false)`,
+		tenantschema.Name(f.slug)), f.tenantID, f.callerID)
+	if err != nil {
+		t.Fatalf("insert preference row: %v", err)
+	}
+	if got := f.getPreferences(t).Global; !got.Push {
+		t.Fatalf("global = %+v, want the cached push default still served", got)
+	}
+
+	// ...but a PATCH drops the cached entry, so the next GET reads both it
+	// and the direct write.
+	if w := f.patchPreferences(t, `{"global": {"email": false}}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d; body: %s", w.Code, w.Body.String())
+	}
+	if got := f.getPreferences(t).Global; got != (notifications.Channels{Email: false, SMS: false, Push: false}) {
+		t.Errorf("global after PATCH = %+v, want email and push off", got)
+	}
+}
+
+func TestDispatchNotifPreferencesUpdateRoute_RejectsABadBody(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+	for _, body := range []string{`nope`, `[]`, `{"global": {"email": "yes"}}`, `{"types": {"": {"email": true}}}`, `{"types": {"` + strings.Repeat("x", 201) + `": {}}}`} {
+		if w := f.patchPreferences(t, body); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", body, w.Code)
+		}
 	}
 }
