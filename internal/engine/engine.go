@@ -266,7 +266,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	recordSharesStore := recordshares.NewStore(primaryPool)
 	savedFiltersStore := savedfilters.NewStore(primaryPool)
 	recordActivityStore := recordactivity.NewStore(primaryPool)
-	notificationStore := notifications.NewStore(primaryPool)
 	scheduledActivityStore := scheduledactivity.NewStore(primaryPool)
 
 	// apiKeyStore isn't stored as an Engine field — authChecker below is
@@ -378,6 +377,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeDBs()
 		return nil, fmt.Errorf("connect to redis: %w", err)
 	}
+	notificationStore := notifications.NewStore(primaryPool).WithCache(cacheClient)
 
 	temporalClient, err := temporal.New(ctx)
 	if err != nil {
@@ -1082,6 +1082,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["DELETE /_notif/{id}"] = http.HandlerFunc(e.dispatchNotifDismissRoute)
 	builtinRoutes["DELETE /_notif/all"] = http.HandlerFunc(e.dispatchNotifDismissAllRoute)
 	builtinRoutes["POST /_notif/device-token"] = http.HandlerFunc(e.dispatchNotifDeviceTokenRoute)
+	builtinRoutes["GET /_notif/preferences"] = http.HandlerFunc(e.dispatchNotifPreferencesRoute)
+	builtinRoutes["PATCH /_notif/preferences"] = http.HandlerFunc(e.dispatchNotifPreferencesUpdateRoute)
 
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.

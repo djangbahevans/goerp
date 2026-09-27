@@ -98,6 +98,12 @@ var Groups = []Group{
 		},
 	},
 	{
+		Tables: []Table{{Name: notifications.PreferencesTable}},
+		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
+			return notifications.NewStore(pool).BootstrapPreferences(ctx, slug)
+		},
+	},
+	{
 		Tables: []Table{{Name: scheduledactivity.TableName}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return scheduledactivity.NewStore(pool).Bootstrap(ctx, slug)
@@ -133,7 +139,6 @@ var Groups = []Group{
 // Groups once the engine creates it.
 var plannedTables = []string{
 	"activity_types",
-	"notification_preferences",
 	"record_followers",
 	"view_overrides",
 }

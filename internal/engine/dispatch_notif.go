@@ -242,3 +242,109 @@ func (e *Engine) dispatchNotifDeviceTokenRoute(w http.ResponseWriter, r *http.Re
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// notifTypeMaxLength bounds a notification type name in a preferences
+// PATCH; real ones are "<module>.<name>".
+const notifTypeMaxLength = 200
+
+type notifPreferencesResponse struct {
+	AvailableChannels []string                          `json:"available_channels"`
+	Global            notifications.Channels            `json:"global"`
+	Types             map[string]notifications.Channels `json:"types"`
+}
+
+type notifPreferencesPatch struct {
+	Global *notifications.ChannelsPatch           `json:"global"`
+	Types  map[string]notifications.ChannelsPatch `json:"types"`
+}
+
+// dispatchNotifPreferencesRoute is GET /_notif/preferences's handler
+// (notification-system.md §8): the tenant's available channels, the
+// caller's global preferences, and the per-type ones that differ from
+// global.
+func (e *Engine) dispatchNotifPreferencesRoute(w http.ResponseWriter, r *http.Request) {
+	authCtx, tenantCtx, ok := notifCaller(w, r)
+	if !ok {
+		return
+	}
+	resp, err := e.notifPreferences(r.Context(), tenantCtx, authCtx.UserID)
+	if err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "load notification preferences failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// dispatchNotifPreferencesUpdateRoute is PATCH /_notif/preferences's
+// handler (shell-ux.md "API calls"): { global?, types? } upserts the
+// caller's rows. Channels the tenant doesn't have available are accepted
+// and ignored. Responds with the updated preferences.
+func (e *Engine) dispatchNotifPreferencesUpdateRoute(w http.ResponseWriter, r *http.Request) {
+	authCtx, tenantCtx, ok := notifCaller(w, r)
+	if !ok {
+		return
+	}
+
+	var body notifPreferencesPatch
+	if err := json.UnmarshalRead(r.Body, &body); err != nil {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object of { global?, types? }")
+		return
+	}
+	for typ := range body.Types {
+		if typ == "" || len(typ) > notifTypeMaxLength {
+			writeRouteError(w, http.StatusBadRequest, "invalid_request", "notification type names must be 1 to 200 bytes")
+			return
+		}
+	}
+
+	ctx := r.Context()
+	available, err := e.notificationStore.AvailableChannels(ctx, tenantCtx.TenantID)
+	if err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "update notification preferences failed")
+		return
+	}
+	keepAvailable := func(p notifications.ChannelsPatch) notifications.ChannelsPatch {
+		if !slices.Contains(available, notifications.ChannelSMS) {
+			p.SMS = nil
+		}
+		if !slices.Contains(available, notifications.ChannelPush) {
+			p.Push = nil
+		}
+		return p
+	}
+	if body.Global != nil {
+		body.Global = new(keepAvailable(*body.Global))
+	}
+	for typ, p := range body.Types {
+		body.Types[typ] = keepAvailable(p)
+	}
+
+	if err := e.notificationStore.UpdatePreferences(ctx, tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID, body.Global, body.Types); err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "update notification preferences failed")
+		return
+	}
+	resp, err := e.notifPreferences(ctx, tenantCtx, authCtx.UserID)
+	if err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "load notification preferences failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (e *Engine) notifPreferences(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID string) (*notifPreferencesResponse, error) {
+	available, err := e.notificationStore.AvailableChannels(ctx, tenantCtx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	prefs, err := e.notificationStore.Preferences(ctx, tenantCtx.Slug, tenantCtx.TenantID, userID)
+	if err != nil {
+		return nil, err
+	}
+	types := map[string]notifications.Channels{}
+	for typ, c := range prefs.Types {
+		if c != prefs.Global {
+			types[typ] = c
+		}
+	}
+	return &notifPreferencesResponse{AvailableChannels: available, Global: prefs.Global, Types: types}, nil
+}
