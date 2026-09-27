@@ -102,6 +102,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/moduleinstall"
 	"github.com/djangbahevans/goerp/internal/engine/modulereload"
+	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -171,6 +172,8 @@ type Engine struct {
 	recordSharesStore   *recordshares.Store
 	savedFiltersStore   *savedfilters.Store
 	recordActivityStore *recordactivity.Store
+	// notificationStore backs /_notif/*.
+	notificationStore *notifications.Store
 	// scheduledActivityStore backs /_meta/scheduled-activities.
 	scheduledActivityStore *scheduledactivity.Store
 	// roleStore resolves another user's tenant roles when a route reads a
@@ -263,6 +266,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	recordSharesStore := recordshares.NewStore(primaryPool)
 	savedFiltersStore := savedfilters.NewStore(primaryPool)
 	recordActivityStore := recordactivity.NewStore(primaryPool)
+	notificationStore := notifications.NewStore(primaryPool)
 	scheduledActivityStore := scheduledactivity.NewStore(primaryPool)
 
 	// apiKeyStore isn't stored as an Engine field — authChecker below is
@@ -1011,6 +1015,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		recordSharesStore:      recordSharesStore,
 		savedFiltersStore:      savedFiltersStore,
 		recordActivityStore:    recordActivityStore,
+		notificationStore:      notificationStore,
 		scheduledActivityStore: scheduledActivityStore,
 		roleStore:              roleStore,
 		filesStore:             filesStore,
@@ -1067,6 +1072,14 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["PATCH /_meta/scheduled-activities/{id}"] = http.HandlerFunc(e.dispatchScheduledActivityUpdateRoute)
 	builtinRoutes["POST /_meta/scheduled-activities/{id}/done"] = http.HandlerFunc(e.dispatchScheduledActivityDoneRoute)
 	builtinRoutes["DELETE /_meta/scheduled-activities/{id}"] = http.HandlerFunc(e.dispatchScheduledActivityCancelRoute)
+
+	// /_notif/* (notification-system.md §9) follows the same pattern.
+	builtinRoutes["GET /_notif/feed"] = http.HandlerFunc(e.dispatchNotifFeedRoute)
+	builtinRoutes["GET /_notif/count"] = http.HandlerFunc(e.dispatchNotifCountRoute)
+	builtinRoutes["POST /_notif/{id}/read"] = http.HandlerFunc(e.dispatchNotifReadRoute)
+	builtinRoutes["POST /_notif/read-all"] = http.HandlerFunc(e.dispatchNotifReadAllRoute)
+	builtinRoutes["DELETE /_notif/{id}"] = http.HandlerFunc(e.dispatchNotifDismissRoute)
+	builtinRoutes["DELETE /_notif/all"] = http.HandlerFunc(e.dispatchNotifDismissAllRoute)
 
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.
