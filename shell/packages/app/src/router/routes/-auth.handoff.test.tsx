@@ -54,6 +54,7 @@ function FakeAuthProvider({ handoffImpl, children }: { handoffImpl: HandoffImpl;
     updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
+    expireSession: () => {},
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

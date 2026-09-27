@@ -48,6 +48,7 @@ function withAuth(user: CurrentUser, updatePreferences: AuthContextValue["update
     updatePreferences,
     changePassword: async () => {},
     reloadSession: async () => {},
+    expireSession: () => {},
   };
   return (Story) => (
     <AuthContext.Provider value={auth}>

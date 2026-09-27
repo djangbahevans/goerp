@@ -55,6 +55,7 @@ const AUTH: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 const IN_A_WEEK = new Date(Date.now() + 6 * 24 * 3600 * 1000).toISOString();

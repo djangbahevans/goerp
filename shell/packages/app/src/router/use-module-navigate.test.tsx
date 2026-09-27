@@ -54,6 +54,7 @@ const AUTH: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 // A module view, as a module author would write it.

@@ -50,6 +50,7 @@ const auth: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 const ago = (hours: number) => new Date(Date.now() - hours * 3600 * 1000).toISOString();

@@ -228,6 +228,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authMachine.transition({ type: "session_reloaded", user: session.user, tenant: session.tenant });
   }, []);
 
+  const expireSession = useCallback((): void => {
+    authMachine.transition({ type: "session_expired" });
+  }, []);
+
   const logout = useCallback(async (): Promise<void> => {
     authMachine.transition({ type: "logout_started" });
     await logoutRequest();
@@ -253,6 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updatePreferences,
       changePassword,
       reloadSession,
+      expireSession,
     };
   }, [
     state,
@@ -265,6 +270,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     updatePreferences,
     changePassword,
     reloadSession,
+    expireSession,
   ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

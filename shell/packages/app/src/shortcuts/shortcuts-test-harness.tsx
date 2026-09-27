@@ -56,6 +56,7 @@ function fakeAuth(roles: string[]): AuthContextValue {
     updatePreferences: vi.fn(),
     changePassword: vi.fn(),
     reloadSession: vi.fn(),
+    expireSession: () => {},
   };
 }
 

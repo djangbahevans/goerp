@@ -58,6 +58,7 @@ const SIGNED_IN: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 function deferred() {

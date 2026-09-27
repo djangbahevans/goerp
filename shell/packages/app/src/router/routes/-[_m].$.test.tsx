@@ -52,6 +52,7 @@ const FAKE_AUTH: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 // Exercises the real generated route tree (not a hand-built stand-in) so

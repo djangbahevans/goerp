@@ -47,6 +47,7 @@ const auth: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 const permissions = createPermissionContextValue({
   permissions: new Set<string>(),

@@ -20,6 +20,7 @@ const pendingExchange: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 const withProviders: Decorator = (Story) => {

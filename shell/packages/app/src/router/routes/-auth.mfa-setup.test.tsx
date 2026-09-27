@@ -5,7 +5,7 @@ import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatManualKey } from "../../auth/mfa-setup-page.js";
+import { formatManualKey } from "../../auth/totp-enrollment-parts.js";
 import { AuthRouterProvider } from "../auth-router-provider.js";
 import { routeTree } from "../routeTree.gen.js";
 
@@ -70,6 +70,7 @@ function FakeAuthProvider({
         setState({ ...state, user: { ...state.user, mfaSetupRequired: false } });
       }
     },
+    expireSession: () => {},
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

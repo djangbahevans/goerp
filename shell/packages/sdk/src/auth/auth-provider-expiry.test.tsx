@@ -74,6 +74,17 @@ afterEach(() => {
 });
 
 describe("AuthProvider on session expiry", () => {
+  it("expireSession moves a signed-in session to expired, keeping its user and tenant", async () => {
+    const { machine, auth } = await mountSignedIn();
+
+    act(() => auth().expireSession());
+
+    await waitFor(() => expect(auth().isAuthenticated).toBe(false));
+    expect(machine.getState()).toMatchObject({ status: "unauthenticated", sessionExpired: true });
+    expect(auth().user?.id).toBe("u1");
+    expect(auth().tenant?.slug).toBe("acme");
+  });
+
   it("keeps the user and tenant it expired for, while not authenticated", async () => {
     const { machine, auth } = await mountSignedIn();
 

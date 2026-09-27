@@ -10,14 +10,18 @@ import {
   exchangeHandoff,
   fetchCurrentSession,
   fetchInviteInfo,
+  fetchMFAFactors,
   fetchSessions,
   fetchTenantContext,
   login,
   logout,
   passwordMinLengthFrom,
+  regenerateRecoveryCodes,
   register,
+  removeMFAFactor,
   requestPasswordReset,
   resendVerificationEmail,
+  reverifyMFA,
   revokeOtherSessions,
   revokeSession,
   selectTenant,
@@ -222,6 +226,71 @@ describe("TOTP enrollment", () => {
       code: "invalid_mfa_code",
       httpStatus: 400,
     });
+  });
+});
+
+describe("MFA factor management", () => {
+  it("fetchMFAFactors maps the wire shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          factors: [
+            { id: "f1", type: "totp", label: "iPhone", created_at: "2026-08-01T10:00:00Z", last_used_at: null },
+          ],
+          recovery_codes_remaining: 7,
+          required_by_policy: true,
+        }),
+      ),
+    );
+
+    expect(await fetchMFAFactors()).toEqual({
+      factors: [{ id: "f1", type: "totp", label: "iPhone", createdAt: "2026-08-01T10:00:00Z", lastUsedAt: null }],
+      recoveryCodesRemaining: 7,
+      requiredByPolicy: true,
+    });
+  });
+
+  it("removeMFAFactor posts the code to the factor's remove route", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await removeMFAFactor("f/1", { type: "recovery_code", code: "ABCDE-FGHIJ" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/mfa/factors/f%2F1/remove",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ type: "recovery_code", code: "ABCDE-FGHIJ" }) }),
+    );
+  });
+
+  it("removeMFAFactor rejects with the server's error code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(409, { error: { code: "mfa_required_by_policy", message: "required" } })),
+    );
+    await expect(removeMFAFactor("f1", { type: "totp", code: "123456" })).rejects.toMatchObject({
+      code: "mfa_required_by_policy",
+      httpStatus: 409,
+    });
+  });
+
+  it("regenerateRecoveryCodes resolves to the new codes", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { recovery_codes: ["ABCDE-FGHIJ"] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await regenerateRecoveryCodes({ type: "totp", code: "123456" })).toEqual(["ABCDE-FGHIJ"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/auth/mfa/recovery-codes/regenerate",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("reverifyMFA rejects an incorrect code with invalid_mfa_code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(401, { error: { code: "invalid_mfa_code", message: "invalid MFA code" } })),
+    );
+    await expect(reverifyMFA({ type: "totp", code: "000000" })).rejects.toMatchObject({ code: "invalid_mfa_code" });
   });
 });
 

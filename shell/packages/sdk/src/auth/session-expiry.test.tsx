@@ -84,6 +84,7 @@ function authFor(state: AuthState): AuthContextValue {
     updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
+    expireSession: () => {},
   };
 }
 

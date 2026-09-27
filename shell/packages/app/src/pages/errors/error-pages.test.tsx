@@ -62,6 +62,7 @@ function authWithRoles(roles: string[], overrides: Partial<AuthContextValue> = {
     updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
+    expireSession: () => {},
     ...overrides,
   };
 }

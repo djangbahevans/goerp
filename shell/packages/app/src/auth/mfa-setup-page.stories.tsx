@@ -46,6 +46,7 @@ const AUTH: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 // A stand-in QR code: a 21×21 module grid, finder patterns plus a fixed
