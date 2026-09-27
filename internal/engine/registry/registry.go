@@ -619,6 +619,34 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/activity/{id}",
 	})
 
+	// /_notif/* (notification-system.md §9) — same posture as
+	// /_meta/activity above. The static segments (read-all, all) win over
+	// {id} in the route tree.
+	for _, r := range [][2]string{
+		{"GET", "/_notif/feed"},
+		{"GET", "/_notif/count"},
+		{"POST", "/_notif/read-all"},
+		{"DELETE", "/_notif/all"},
+	} {
+		table.Register(r[0], r[1], &route.RouteEntry{
+			Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+			PathTemplate: r[1],
+		})
+	}
+	for _, r := range [][2]string{
+		{"POST", "/_notif/{id}/read"},
+		{"DELETE", "/_notif/{id}"},
+	} {
+		table.Register(r[0], r[1], &route.RouteEntry{
+			Manifest: route.RouteManifest{
+				EngineNative: true,
+				Auth:         "required",
+				PathParams:   map[string]string{"id": "uuid"},
+			},
+			PathTemplate: r[1],
+		})
+	}
+
 	// /_meta/scheduled-activities (scheduled-activities.md §5) — same
 	// posture as /_meta/activity above.
 	table.Register("GET", "/_meta/scheduled-activities", &route.RouteEntry{

@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
+	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -85,6 +86,12 @@ var Groups = []Group{
 		},
 	},
 	{
+		Tables: []Table{{Name: notifications.FeedTable}},
+		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
+			return notifications.NewStore(pool).BootstrapFeed(ctx, slug)
+		},
+	},
+	{
 		Tables: []Table{{Name: scheduledactivity.TableName}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return scheduledactivity.NewStore(pool).Bootstrap(ctx, slug)
@@ -120,7 +127,6 @@ var Groups = []Group{
 // Groups once the engine creates it.
 var plannedTables = []string{
 	"activity_types",
-	"notifications",
 	"notification_preferences",
 	"record_followers",
 	"view_overrides",

@@ -687,6 +687,37 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	}
 }
 
+// TestBuildRouteTable_IncludesNotifRoutes checks every /_notif route
+// resolves as an engine-native, session-authenticated route, and that the
+// static all/read-all segments resolve to their own entries, not {id}'s.
+func TestBuildRouteTable_IncludesNotifRoutes(t *testing.T) {
+	table, err := buildRouteTable(map[string]*module.LoadedModule{})
+	if err != nil {
+		t.Fatalf("buildRouteTable() error = %v", err)
+	}
+
+	const id = "0197a4f2-0000-7000-8000-000000000000"
+	for _, c := range []struct{ method, path, template string }{
+		{"GET", "/_notif/feed", "/_notif/feed"},
+		{"GET", "/_notif/count", "/_notif/count"},
+		{"POST", "/_notif/" + id + "/read", "/_notif/{id}/read"},
+		{"POST", "/_notif/read-all", "/_notif/read-all"},
+		{"DELETE", "/_notif/" + id, "/_notif/{id}"},
+		{"DELETE", "/_notif/all", "/_notif/all"},
+	} {
+		entry, _, result, _ := table.Lookup(c.method, c.path)
+		if result != route.RouteFound {
+			t.Fatalf("Lookup(%s, %s) result = %v, want RouteFound", c.method, c.path, result)
+		}
+		if entry.PathTemplate != c.template {
+			t.Errorf("Lookup(%s, %s).PathTemplate = %q, want %q", c.method, c.path, entry.PathTemplate, c.template)
+		}
+		if !entry.Manifest.EngineNative || entry.Manifest.EngineBuiltin || entry.Manifest.Auth != "required" {
+			t.Errorf("Lookup(%s, %s).Manifest = %+v, want EngineNative, not EngineBuiltin, Auth required", c.method, c.path, entry.Manifest)
+		}
+	}
+}
+
 func TestBuildEventRegistry_FromModules(t *testing.T) {
 	modules := map[string]*module.LoadedModule{
 		"billing": {
