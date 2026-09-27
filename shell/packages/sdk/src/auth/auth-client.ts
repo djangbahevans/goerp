@@ -1,5 +1,5 @@
 import { AppError } from "../error/app-error.js";
-import type { ThemePreference } from "../react/use-theme.js";
+import type { ContrastPreference, ThemePreference } from "../react/use-theme.js";
 import { noteTenantSuspension } from "./tenant-suspension.js";
 import type {
   ActiveSession,
@@ -44,6 +44,7 @@ interface MeResponseBody {
     mfa_verified_at: string | null;
     mfa_setup_required?: boolean;
     theme: ThemePreference;
+    contrast: ContrastPreference;
     locale: string | null;
     timezone: string | null;
     date_format: DateFormat | null;
@@ -72,6 +73,7 @@ function mapUser(user: MeResponseBody["user"]): CurrentUser {
     mfaVerifiedAt: user.mfa_verified_at,
     mfaSetupRequired: user.mfa_setup_required === true,
     theme: user.theme,
+    contrast: user.contrast,
     locale: user.locale,
     timezone: user.timezone,
     dateFormat: user.date_format,
@@ -321,6 +323,7 @@ export async function updateProfile(input: UpdateProfileInput): Promise<void> {
 export async function updatePreferences(input: UpdatePreferencesInput): Promise<void> {
   const body: Record<string, unknown> = {};
   if (input.theme !== undefined) body.theme = input.theme;
+  if (input.contrast !== undefined) body.contrast = input.contrast;
   if (input.locale !== undefined) body.locale = input.locale;
   if (input.timezone !== undefined) body.timezone = input.timezone;
   if (input.dateFormat !== undefined) body.date_format = input.dateFormat;

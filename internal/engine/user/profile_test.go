@@ -197,6 +197,7 @@ func TestUpdateProfile_PreferencesOnlyLeaveNameAndAvatarUntouched(t *testing.T) 
 	}
 	if _, err := store.UpdateProfile(t.Context(), userID, ProfileUpdate{
 		Theme:      new("dark"),
+		Contrast:   new("high"),
 		Locale:     NullableField{Set: true, Value: new("fr")},
 		Timezone:   NullableField{Set: true, Value: new("Africa/Accra")},
 		DateFormat: NullableField{Set: true, Value: new("iso")},
@@ -213,6 +214,9 @@ func TestUpdateProfile_PreferencesOnlyLeaveNameAndAvatarUntouched(t *testing.T) 
 	}
 	if profile.Theme != "dark" || deref(profile.Locale) != "fr" || deref(profile.Timezone) != "Africa/Accra" || deref(profile.DateFormat) != "iso" {
 		t.Errorf("preferences = %q/%q/%q/%q, want dark/fr/Africa/Accra/iso", profile.Theme, deref(profile.Locale), deref(profile.Timezone), deref(profile.DateFormat))
+	}
+	if profile.Contrast != "high" {
+		t.Errorf("Contrast = %q, want high", profile.Contrast)
 	}
 }
 
@@ -245,7 +249,7 @@ func TestUpdateProfile_NullResetsAndUnsetLeavesPreferences(t *testing.T) {
 	}
 }
 
-func TestGetProfile_DefaultsThemeToSystem(t *testing.T) {
+func TestGetProfile_DefaultsThemeAndContrastToSystem(t *testing.T) {
 	store, _ := openTestStore(t)
 	userID := createFixtureUser(t, store)
 
@@ -258,6 +262,9 @@ func TestGetProfile_DefaultsThemeToSystem(t *testing.T) {
 	}
 	if profile.Theme != "system" || profile.Locale != nil || profile.Timezone != nil || profile.DateFormat != nil {
 		t.Errorf("defaults = %q/%v/%v/%v, want system and three nils", profile.Theme, profile.Locale, profile.Timezone, profile.DateFormat)
+	}
+	if profile.Contrast != "system" {
+		t.Errorf("Contrast = %q, want system", profile.Contrast)
 	}
 }
 

@@ -112,6 +112,13 @@ func (h *Handler) parseUpdate(body map[string]jsontext.Value) (user.ProfileUpdat
 		}
 		update.Theme = &theme
 	}
+	if raw, ok := body["contrast"]; ok {
+		var contrast string
+		if err := json.Unmarshal(raw, &contrast); err != nil || !slices.Contains(user.Contrasts, contrast) {
+			return update, &requestError{field: "contrast", message: fmt.Sprintf("contrast must be one of %s", strings.Join(user.Contrasts, ", "))}
+		}
+		update.Contrast = &contrast
+	}
 
 	var err error
 	if update.Locale, err = nullablePreference(body, "locale", func(locale string) string {

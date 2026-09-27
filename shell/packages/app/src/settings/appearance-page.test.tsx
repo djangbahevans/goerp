@@ -10,7 +10,7 @@ import { AppError } from "@goerp/sdk/error";
 import { localeStore } from "@goerp/sdk/i18n";
 import { toast } from "@goerp/sdk/notifications";
 import { themeStore } from "@goerp/sdk/react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppearancePage } from "./appearance-page.js";
 
@@ -28,6 +28,7 @@ const USER: CurrentUser = {
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
   theme: "system",
+  contrast: "system",
   locale: null,
   timezone: null,
   dateFormat: null,
@@ -84,6 +85,7 @@ function field(label: string): HTMLElement {
 
 beforeEach(() => {
   themeStore.setPreference("light");
+  themeStore.setContrastPreference("standard");
   localeStore.setLocale("en");
 });
 afterEach(() => {
@@ -137,6 +139,26 @@ describe("AppearancePage", () => {
 
     await waitFor(() => expect(themeStore.getPreference()).toBe("light"));
     expect(error).toHaveBeenCalledWith("Couldn't save your theme. Try again.");
+  });
+
+  it("applies a contrast level immediately and saves it", async () => {
+    const { updatePreferences } = renderPage();
+
+    fireEvent.click(within(field("Contrast")).getByRole("radio", { name: "High" }));
+
+    expect(themeStore.getContrastPreference()).toBe("high");
+    expect(document.documentElement.getAttribute("data-contrast")).toBe("high");
+    await waitFor(() => expect(updatePreferences).toHaveBeenCalledWith({ contrast: "high" }));
+  });
+
+  it("reverts the contrast level and shows a toast when the save fails", async () => {
+    const error = vi.spyOn(toast, "error");
+    renderPage({ updatePreferences: vi.fn(async () => Promise.reject(new Error("offline"))) });
+
+    fireEvent.click(within(field("Contrast")).getByRole("radio", { name: "High" }));
+
+    await waitFor(() => expect(themeStore.getContrastPreference()).toBe("standard"));
+    expect(error).toHaveBeenCalledWith("Couldn't save your contrast. Try again.");
   });
 
   it("saves a language, applies it to the document and reloads", async () => {
@@ -215,7 +237,7 @@ describe("AppearancePage", () => {
     renderPage({ updatePreferences });
 
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
-    fireEvent.click(screen.getByRole("radio", { name: "System" }));
+    fireEvent.click(within(field("Theme")).getByRole("radio", { name: "System" }));
     await waitFor(() => expect(updatePreferences).toHaveBeenCalledTimes(2));
     failFirst(new Error("offline"));
     await new Promise((resolve) => setTimeout(resolve, 0));

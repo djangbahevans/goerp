@@ -14,6 +14,7 @@ const ME_BODY = {
     amr: ["pwd"],
     mfa_verified_at: null,
     theme: "system",
+    contrast: "system",
     locale: null,
     timezone: null,
     date_format: null,
@@ -112,12 +113,15 @@ describe("AuthProvider on session expiry", () => {
 });
 
 describe("AuthProvider session preferences", () => {
-  it("applies the profile's theme and locale when the session loads", async () => {
+  it("applies the profile's theme, contrast and locale when the session loads", async () => {
     window.localStorage.setItem("goerp-theme", "light");
-    await mountSignedIn({ ...ME_BODY, user: { ...ME_BODY.user, theme: "dark", locale: "fr" } });
+    window.localStorage.setItem("goerp-contrast", "standard");
+    await mountSignedIn({ ...ME_BODY, user: { ...ME_BODY.user, theme: "dark", contrast: "high", locale: "fr" } });
 
     expect(window.localStorage.getItem("goerp-theme")).toBe("dark");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(window.localStorage.getItem("goerp-contrast")).toBe("high");
+    expect(document.documentElement.getAttribute("data-contrast")).toBe("high");
     expect(document.documentElement.getAttribute("lang")).toBe("fr");
   });
 

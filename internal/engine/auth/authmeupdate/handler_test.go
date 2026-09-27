@@ -467,6 +467,24 @@ func TestServeHTTP_ThemeOnlyLeavesNameAndAvatarUntouched(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_ContrastOnlyLeavesThemeUntouched(t *testing.T) {
+	f := newFixture(t)
+	accessToken := f.issueAccessToken(t)
+	if rec := f.doPatch(t, f.domain, accessToken, `{"theme": "dark"}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("first PATCH status = %d, want 204; body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec := f.doPatch(t, f.domain, accessToken, `{"contrast": "high"}`)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
+	}
+	profile := f.profile(t)
+	if profile.Contrast != "high" || profile.Theme != "dark" {
+		t.Errorf("contrast/theme = %q/%q, want high/dark", profile.Contrast, profile.Theme)
+	}
+}
+
 func TestServeHTTP_SetsAndResetsPreferences(t *testing.T) {
 	f := newFixture(t)
 	accessToken := f.issueAccessToken(t)
@@ -504,6 +522,8 @@ func TestServeHTTP_InvalidPreferenceRejected(t *testing.T) {
 		{`{"timezone": "Local"}`, "timezone"},
 		{`{"theme": "sepia"}`, "theme"},
 		{`{"theme": null}`, "theme"},
+		{`{"contrast": "extreme"}`, "contrast"},
+		{`{"contrast": null}`, "contrast"},
 		{`{"date_format": "yyyy"}`, "date_format"},
 		{`{"locale": 5}`, "locale"},
 	}

@@ -17,6 +17,7 @@ const USER: CurrentUser = {
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
   theme: "system",
+  contrast: "system",
   locale: null,
   timezone: null,
   dateFormat: null,

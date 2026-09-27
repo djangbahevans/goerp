@@ -28,6 +28,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
     theme: "system" as const,
+    contrast: "system" as const,
     locale: null,
     timezone: null,
     dateFormat: null,
@@ -130,7 +131,7 @@ describe("UserMenu", () => {
     expect(screen.getByRole("button", { name: "Jane Doe's account menu" })).toBeTruthy();
   });
 
-  it("lists My activities, Profile, Settings, Dark mode, Keyboard shortcuts, and Sign out", async () => {
+  it("lists My activities, Profile, Settings, Dark mode, High contrast, Keyboard shortcuts, and Sign out", async () => {
     await renderUserMenu();
     fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
 
@@ -138,6 +139,7 @@ describe("UserMenu", () => {
     expect(screen.getByRole("menuitem", { name: "Profile" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy();
     expect(screen.getByRole("menuitemcheckbox", { name: "Dark mode" })).toBeTruthy();
+    expect(screen.getByRole("menuitemcheckbox", { name: "High contrast" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
   });
@@ -211,6 +213,32 @@ describe("UserMenu", () => {
     await waitFor(() => expect(themeStore.getPreference()).toBe("light"));
   });
 
+  it("toggling High contrast saves it to the profile and leaves the theme alone", async () => {
+    themeStore.setPreference("dark");
+    themeStore.setContrastPreference("standard");
+    const updatePreferences = vi.fn(async () => {});
+    await renderUserMenu(fakeAuth({ updatePreferences }));
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "High contrast" }));
+
+    expect(screen.getByRole("menuitemcheckbox", { name: "High contrast" }).getAttribute("aria-checked")).toBe("true");
+    expect(updatePreferences).toHaveBeenCalledWith({ contrast: "high" });
+    expect(themeStore.getContrast()).toBe("high");
+    expect(themeStore.getTheme()).toBe("dark");
+  });
+
+  it("reverts the contrast when saving it fails", async () => {
+    themeStore.setContrastPreference("standard");
+    const updatePreferences = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    await renderUserMenu(fakeAuth({ updatePreferences }));
+    fireEvent.click(screen.getByRole("button", { name: "Jane Doe's account menu" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "High contrast" }));
+
+    await waitFor(() => expect(themeStore.getContrastPreference()).toBe("standard"));
+  });
+
   it("Sign out calls logout()", async () => {
     const logout = vi.fn(async () => {});
     await renderUserMenu(fakeAuth({ logout }));
@@ -237,6 +265,7 @@ describe("UserMenu", () => {
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
       theme: "system" as const,
+      contrast: "system" as const,
       locale: null,
       timezone: null,
       dateFormat: null,
@@ -257,6 +286,7 @@ describe("UserMenu", () => {
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
       theme: "system" as const,
+      contrast: "system" as const,
       locale: null,
       timezone: null,
       dateFormat: null,
@@ -277,6 +307,7 @@ describe("UserMenu", () => {
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
       theme: "system" as const,
+      contrast: "system" as const,
       locale: null,
       timezone: null,
       dateFormat: null,

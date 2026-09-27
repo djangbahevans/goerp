@@ -689,6 +689,9 @@ func TestServeHTTP_ReportsDefaultPreferencesAndPlatformLocaleDefaults(t *testing
 	if resp.User.Theme != "system" || resp.User.Locale != nil || resp.User.Timezone != nil || resp.User.DateFormat != nil {
 		t.Errorf("preferences = %q/%v/%v/%v, want system and three nulls", resp.User.Theme, resp.User.Locale, resp.User.Timezone, resp.User.DateFormat)
 	}
+	if resp.User.Contrast != "system" {
+		t.Errorf("contrast = %q, want system", resp.User.Contrast)
+	}
 	if resp.Tenant.DefaultLocale != "en" || resp.Tenant.DefaultTimezone != "UTC" {
 		t.Errorf("tenant defaults = %q/%q, want en/UTC", resp.Tenant.DefaultLocale, resp.Tenant.DefaultTimezone)
 	}
@@ -702,6 +705,7 @@ func TestServeHTTP_ReportsStoredPreferences(t *testing.T) {
 	users := user.NewStore(f.conn)
 	if _, err := users.UpdateProfile(t.Context(), f.userID, user.ProfileUpdate{
 		Theme:      new("dark"),
+		Contrast:   new("high"),
 		Locale:     user.NullableField{Set: true, Value: new("pt-BR")},
 		Timezone:   user.NullableField{Set: true, Value: new("Africa/Accra")},
 		DateFormat: user.NullableField{Set: true, Value: new("iso")},
@@ -713,6 +717,9 @@ func TestServeHTTP_ReportsStoredPreferences(t *testing.T) {
 
 	if resp.User.Theme != "dark" || deref(resp.User.Locale) != "pt-BR" || deref(resp.User.Timezone) != "Africa/Accra" || deref(resp.User.DateFormat) != "iso" {
 		t.Errorf("preferences = %q/%v/%v/%v, want dark/pt-BR/Africa/Accra/iso", resp.User.Theme, resp.User.Locale, resp.User.Timezone, resp.User.DateFormat)
+	}
+	if resp.User.Contrast != "high" {
+		t.Errorf("contrast = %q, want high", resp.User.Contrast)
 	}
 	// UpdateProfile created the row without a name, so its "" placeholder
 	// reads as no name.

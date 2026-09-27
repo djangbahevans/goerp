@@ -10,10 +10,11 @@ import (
 
 var ErrProfileNotFound = errors.New("user profile not found")
 
-// Theme and DateFormat values system.user_profiles accepts
+// Theme, Contrast and DateFormat values system.user_profiles accepts
 // (auth-internals.md §2).
 var (
 	Themes      = []string{"light", "dark", "system"}
+	Contrasts   = []string{"standard", "high", "system"}
 	DateFormats = []string{"day_first", "month_first", "iso"}
 )
 
@@ -22,6 +23,7 @@ type Profile struct {
 	Name         string
 	AvatarFileID *string
 	Theme        string
+	Contrast     string
 	// Nil inherits the tenant default.
 	Locale     *string
 	Timezone   *string
@@ -55,6 +57,7 @@ type ProfileUpdate struct {
 	Name         *string
 	AvatarFileID *string
 	Theme        *string
+	Contrast     *string
 	Locale       NullableField
 	Timezone     NullableField
 	DateFormat   NullableField
@@ -112,8 +115,8 @@ func (s *Store) UpdateProfile(ctx context.Context, userID string, update Profile
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO system.user_profiles (user_id, name, avatar_file_id, theme, locale, timezone, date_format)
-		VALUES ($1, COALESCE($2, ''), $3, COALESCE($4, 'system'), $5, $6, $7)
+		INSERT INTO system.user_profiles (user_id, name, avatar_file_id, theme, locale, timezone, date_format, contrast)
+		VALUES ($1, COALESCE($2, ''), $3, COALESCE($4, 'system'), $5, $6, $7, COALESCE($12, 'system'))
 		ON CONFLICT (user_id) DO UPDATE SET
 			name = CASE WHEN $2::text IS NULL THEN system.user_profiles.name ELSE EXCLUDED.name END,
 			avatar_file_id = CASE WHEN $8 THEN EXCLUDED.avatar_file_id ELSE system.user_profiles.avatar_file_id END,
@@ -121,10 +124,12 @@ func (s *Store) UpdateProfile(ctx context.Context, userID string, update Profile
 			locale = CASE WHEN $9 THEN EXCLUDED.locale ELSE system.user_profiles.locale END,
 			timezone = CASE WHEN $10 THEN EXCLUDED.timezone ELSE system.user_profiles.timezone END,
 			date_format = CASE WHEN $11 THEN EXCLUDED.date_format ELSE system.user_profiles.date_format END,
+			contrast = CASE WHEN $12::text IS NULL THEN system.user_profiles.contrast ELSE EXCLUDED.contrast END,
 			updated_at = NOW()
 	`, userID, update.Name, newAvatarValue, update.Theme,
 		update.Locale.Value, update.Timezone.Value, update.DateFormat.Value,
-		update.AvatarFileID != nil, update.Locale.Set, update.Timezone.Set, update.DateFormat.Set); err != nil {
+		update.AvatarFileID != nil, update.Locale.Set, update.Timezone.Set, update.DateFormat.Set,
+		update.Contrast); err != nil {
 		return nil, fmt.Errorf("upsert profile: %w", err)
 	}
 
@@ -144,13 +149,13 @@ func (s *Store) UpdateProfile(ctx context.Context, userID string, update Profile
 // rather than an error condition of their own.
 func (s *Store) GetProfile(ctx context.Context, userID string) (*Profile, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT user_id, name, avatar_file_id, theme, locale, timezone, date_format, updated_at
+		SELECT user_id, name, avatar_file_id, theme, contrast, locale, timezone, date_format, updated_at
 		FROM system.user_profiles
 		WHERE user_id = $1
 	`, userID)
 
 	var p Profile
-	if err := row.Scan(&p.UserID, &p.Name, &p.AvatarFileID, &p.Theme, &p.Locale, &p.Timezone, &p.DateFormat, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.UserID, &p.Name, &p.AvatarFileID, &p.Theme, &p.Contrast, &p.Locale, &p.Timezone, &p.DateFormat, &p.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrProfileNotFound
 		}

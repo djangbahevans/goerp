@@ -2,7 +2,7 @@ import { type DateFormat, type UpdatePreferencesInput, useAuth, useTenant, useUs
 import { FieldWrapper, PageHeader, PageLayout, SegmentedField, Select, TimezoneSelect } from "@goerp/sdk/components";
 import { localeStore, useLocale } from "@goerp/sdk/i18n";
 import { toast } from "@goerp/sdk/notifications";
-import { type ThemePreference, useTheme } from "@goerp/sdk/react";
+import { type ContrastPreference, type ThemePreference, useTheme } from "@goerp/sdk/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { formatDateAs, nativeLocaleName, timezonePreview } from "./appearance-format.js";
 
@@ -12,6 +12,12 @@ const INHERIT = "inherit";
 const THEME_OPTIONS = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
+
+const CONTRAST_OPTIONS = [
+  { value: "standard", label: "Standard" },
+  { value: "high", label: "High" },
   { value: "system", label: "System" },
 ];
 
@@ -29,7 +35,7 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
   const user = useUser();
   const tenant = useTenant();
   const { updatePreferences } = useAuth();
-  const { preference, setPreference } = useTheme();
+  const { preference, setPreference, contrastPreference, setContrastPreference } = useTheme();
   const { locale: uiLocale } = useLocale();
 
   const [locale, setLocale] = useState(user.locale ?? INHERIT);
@@ -60,6 +66,12 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
     const previous = preference;
     setPreference(next);
     void save({ theme: next }, "theme", () => setPreference(previous));
+  }
+
+  function changeContrast(next: ContrastPreference) {
+    const previous = contrastPreference;
+    setContrastPreference(next);
+    void save({ contrast: next }, "contrast", () => setContrastPreference(previous));
   }
 
   async function changeLocale(next: string) {
@@ -98,13 +110,20 @@ export function AppearancePage({ reload = () => window.location.reload() }: Appe
 
   return (
     <PageLayout>
-      <PageHeader title="Appearance" subtitle="Choose your theme, language, timezone, and date format." />
+      <PageHeader title="Appearance" subtitle="Choose your theme, contrast, language, timezone, and date format." />
       <div className="flex max-w-md flex-col gap-6">
         <FieldWrapper label="Theme">
           <SegmentedField
             options={THEME_OPTIONS}
             value={preference}
             onChange={(next) => changeTheme(next as ThemePreference)}
+          />
+        </FieldWrapper>
+        <FieldWrapper label="Contrast">
+          <SegmentedField
+            options={CONTRAST_OPTIONS}
+            value={contrastPreference}
+            onChange={(next) => changeContrast(next as ContrastPreference)}
           />
         </FieldWrapper>
         <FieldWrapper label="Language">

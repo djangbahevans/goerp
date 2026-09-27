@@ -11,12 +11,16 @@
          bundle runs, preventing a flash of the wrong theme. Also checks
          prefers-color-scheme (not in the doc's own simpler example) to
          match ThemeStore's real fallback (use-theme.ts) when nothing's
-         stored yet. -->
+         stored yet. data-contrast resolves the same way through
+         prefers-contrast. -->
     <script>
       (() => {
         var stored = localStorage.getItem("goerp-theme");
         var theme = stored === "light" || stored === "dark" ? stored : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
         document.documentElement.setAttribute("data-theme", theme);
+        var storedContrast = localStorage.getItem("goerp-contrast");
+        var contrast = storedContrast === "standard" || storedContrast === "high" ? storedContrast : (matchMedia("(prefers-contrast: more)").matches ? "high" : "standard");
+        document.documentElement.setAttribute("data-contrast", contrast);
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>

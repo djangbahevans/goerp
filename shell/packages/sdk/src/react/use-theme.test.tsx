@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type ThemePreference, ThemeStore, themeStore, useTheme } from "./use-theme.js";
+import { type ContrastPreference, type ThemePreference, ThemeStore, themeStore, useTheme } from "./use-theme.js";
 
 // A fresh fake store per test — the real module-level themeStore is a
 // singleton, so testing against it directly would leak state (and the
@@ -8,17 +8,27 @@ import { type ThemePreference, ThemeStore, themeStore, useTheme } from "./use-th
 function fakeStore(initial: "light" | "dark" = "light") {
   let theme = initial;
   let preference: ThemePreference = initial;
+  let contrastPreference: ContrastPreference = "standard";
   const listeners = new Set<(t: "light" | "dark") => void>();
+  const notify = () => {
+    for (const l of listeners) l(theme);
+  };
   const set = (next: ThemePreference) => {
     preference = next;
     theme = next === "system" ? "light" : next;
-    for (const l of listeners) l(theme);
+    notify();
   };
   return {
     getTheme: () => theme,
     getPreference: () => preference,
     setPreference: set,
     toggleTheme: () => set(theme === "dark" ? "light" : "dark"),
+    getContrast: () => (contrastPreference === "high" ? ("high" as const) : ("standard" as const)),
+    getContrastPreference: () => contrastPreference,
+    setContrastPreference: (next: ContrastPreference) => {
+      contrastPreference = next;
+      notify();
+    },
     subscribe: (listener: (t: "light" | "dark") => void) => {
       listeners.add(listener);
       return () => {
@@ -47,6 +57,17 @@ describe("useTheme", () => {
     expect(a.result.current.theme).toBe("dark");
     expect(b.result.current.theme).toBe("dark");
   });
+
+  it("setting the contrast preference updates contrast without touching the theme", () => {
+    const store = fakeStore("dark");
+    const { result } = renderHook(() => useTheme(store));
+
+    act(() => result.current.setContrastPreference("high"));
+
+    expect(result.current.contrastPreference).toBe("high");
+    expect(result.current.contrast).toBe("high");
+    expect(result.current.theme).toBe("dark");
+  });
 });
 
 describe("themeStore (real singleton)", () => {
@@ -65,25 +86,43 @@ describe("themeStore (real singleton)", () => {
     themeStore.setTheme("dark");
     expect(window.localStorage.getItem("goerp-theme")).toBe("dark");
   });
+
+  it("setting the contrast updates data-contrast and persists it, independent of data-theme", () => {
+    themeStore.setTheme("dark");
+    themeStore.setContrastPreference("high");
+    expect(document.documentElement.getAttribute("data-contrast")).toBe("high");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(window.localStorage.getItem("goerp-contrast")).toBe("high");
+    themeStore.setContrastPreference("standard");
+    expect(document.documentElement.getAttribute("data-contrast")).toBe("standard");
+  });
 });
 
 describe("ThemeStore system preference", () => {
   let dark = false;
+  let moreContrast = false;
   let changeListener: (() => void) | null = null;
+  let contrastChangeListener: (() => void) | null = null;
   const originalMatchMedia = window.matchMedia;
 
   beforeEach(() => {
     window.localStorage.clear();
     dark = false;
+    moreContrast = false;
     changeListener = null;
-    window.matchMedia = ((query: string) => ({
-      get matches() {
-        return query.includes("dark") && dark;
-      },
-      addEventListener: (_type: string, listener: () => void) => {
-        changeListener = listener;
-      },
-    })) as unknown as typeof window.matchMedia;
+    contrastChangeListener = null;
+    window.matchMedia = ((query: string) => {
+      const isContrast = query.includes("prefers-contrast");
+      return {
+        get matches() {
+          return isContrast ? moreContrast : query.includes("dark") && dark;
+        },
+        addEventListener: (_type: string, listener: () => void) => {
+          if (isContrast) contrastChangeListener = listener;
+          else changeListener = listener;
+        },
+      };
+    }) as unknown as typeof window.matchMedia;
   });
   afterEach(() => {
     window.matchMedia = originalMatchMedia;
@@ -124,5 +163,36 @@ describe("ThemeStore system preference", () => {
     const store = new ThemeStore();
     store.toggleTheme();
     expect(store.getPreference()).toBe("light");
+  });
+
+  it("defaults contrast to system when nothing is stored, resolving through prefers-contrast", () => {
+    moreContrast = true;
+    const store = new ThemeStore();
+    expect(store.getContrastPreference()).toBe("system");
+    expect(store.getContrast()).toBe("high");
+    expect(document.documentElement.getAttribute("data-contrast")).toBe("high");
+  });
+
+  it("follows an OS contrast change live while the contrast preference is system", () => {
+    const store = new ThemeStore();
+    store.setContrastPreference("system");
+    expect(window.localStorage.getItem("goerp-contrast")).toBe("system");
+    expect(store.getContrast()).toBe("standard");
+
+    moreContrast = true;
+    contrastChangeListener?.();
+
+    expect(store.getContrast()).toBe("high");
+    expect(document.documentElement.getAttribute("data-contrast")).toBe("high");
+  });
+
+  it("ignores OS contrast changes while an explicit level is chosen", () => {
+    const store = new ThemeStore();
+    store.setContrastPreference("standard");
+
+    moreContrast = true;
+    contrastChangeListener?.();
+
+    expect(store.getContrast()).toBe("standard");
   });
 });

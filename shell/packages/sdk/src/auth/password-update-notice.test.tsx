@@ -16,6 +16,7 @@ const ME_BODY = {
     amr: ["pwd"],
     mfa_verified_at: null,
     theme: "system",
+    contrast: "system",
     locale: null,
     timezone: null,
     date_format: null,

@@ -62,6 +62,7 @@ describe("fetchCurrentSession", () => {
           amr: ["pwd"],
           mfa_verified_at: null,
           theme: "dark",
+          contrast: "high",
           locale: "fr",
           timezone: null,
           date_format: "iso",
@@ -93,6 +94,7 @@ describe("fetchCurrentSession", () => {
         mfaVerifiedAt: null,
         mfaSetupRequired: false,
         theme: "dark",
+        contrast: "high",
         locale: "fr",
         timezone: null,
         dateFormat: "iso",
@@ -557,14 +559,14 @@ describe("updatePreferences", () => {
     const fetchMock = vi.fn(async () => jsonResponse(204, undefined));
     vi.stubGlobal("fetch", fetchMock);
 
-    await updatePreferences({ theme: "dark", locale: null, dateFormat: "iso" });
+    await updatePreferences({ theme: "dark", contrast: "high", locale: null, dateFormat: "iso" });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/auth/me",
       expect.objectContaining({
         method: "PATCH",
         credentials: "include",
-        body: JSON.stringify({ theme: "dark", locale: null, date_format: "iso" }),
+        body: JSON.stringify({ theme: "dark", contrast: "high", locale: null, date_format: "iso" }),
       }),
     );
   });

@@ -30,11 +30,12 @@ import type {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
-// shell-ux.md §4.4: the profile's theme replaces the local one when a
+// shell-ux.md §4.4: the profile's theme and contrast replace the local ones when a
 // session starts, and the locale follows user → tenant default
 // (l10n-guide.md §2), so both carry across devices.
 function applySessionPreferences(session: { user: CurrentUser; tenant: CurrentTenant }): void {
   themeStore.setPreference(session.user.theme);
+  themeStore.setContrastPreference(session.user.contrast);
   try {
     localeStore.setLocale(session.user.locale ?? session.tenant.defaultLocale);
   } catch {
