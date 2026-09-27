@@ -22,6 +22,7 @@ function authWith(login: AuthContextValue["login"]): AuthContextValue {
     updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
+    expireSession: () => {},
   };
 }
 

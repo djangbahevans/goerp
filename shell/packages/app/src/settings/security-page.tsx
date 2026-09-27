@@ -19,6 +19,8 @@ import { type ReactNode, useState } from "react";
 import { describeUserAgent } from "../auth/describe-user-agent.js";
 import { RouterTextLink } from "../router/text-link.js";
 import { CHANGE_PASSWORD_ANCHOR } from "./change-password-section.js";
+import { sessionsQueryKey } from "./query-keys.js";
+import { type TwoFactorClient, TwoFactorSection } from "./two-factor-section.js";
 
 // Injectable for stories; the route uses the real auth client.
 export interface SessionsClient {
@@ -33,19 +35,21 @@ const defaultClient: SessionsClient = {
   revokeOthers: revokeOtherSessions,
 };
 
-export const sessionsQueryKey = ["auth", "sessions"] as const;
-
 export interface SecurityPageProps {
   client?: SessionsClient | undefined;
+  twoFactorClient?: TwoFactorClient | undefined;
 }
 
-// shell-ux.md §4.3. The two-factor section is goerp#1074; API keys stay out
-// while GOERP_ENABLE_API_KEYS is off.
-export function SecurityPage({ client = defaultClient }: SecurityPageProps): ReactNode {
+// shell-ux.md §4.3. API keys stay out while GOERP_ENABLE_API_KEYS is off.
+export function SecurityPage({ client = defaultClient, twoFactorClient }: SecurityPageProps): ReactNode {
   return (
     <PageLayout>
-      <PageHeader title="Security" subtitle="See where you're signed in and manage your password." />
+      <PageHeader
+        title="Security"
+        subtitle="Manage two-factor authentication, see where you're signed in, and change your password."
+      />
       <div className="flex flex-col gap-6">
+        <TwoFactorSection {...(twoFactorClient ? { client: twoFactorClient } : {})} />
         <ActiveSessionsSection client={client} />
         <SectionCard title="Password">
           <RouterTextLink to="/settings/profile" hash={CHANGE_PASSWORD_ANCHOR}>

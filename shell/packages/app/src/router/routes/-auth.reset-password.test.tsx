@@ -35,6 +35,7 @@ const SIGNED_OUT: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 const STRONG = "Plinth-Quartz-Meadow-47";

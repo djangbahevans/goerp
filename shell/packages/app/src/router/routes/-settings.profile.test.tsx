@@ -41,6 +41,7 @@ function fakeAuth(
     updatePreferences: vi.fn(async () => {}),
     changePassword,
     reloadSession: async () => {},
+    expireSession: () => {},
   };
 }
 

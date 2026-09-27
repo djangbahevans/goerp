@@ -47,6 +47,7 @@ function authWith(changePassword: AuthContextValue["changePassword"]): AuthConte
     updatePreferences: async () => {},
     changePassword,
     reloadSession: async () => {},
+    expireSession: () => {},
   };
 }
 

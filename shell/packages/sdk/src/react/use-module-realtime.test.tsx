@@ -84,6 +84,7 @@ const auth: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 beforeEach(() => {

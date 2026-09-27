@@ -60,6 +60,7 @@ const FAKE_AUTH: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 function group(module: string, children: NavigationGroup["children"], permission?: string): NavigationGroup {

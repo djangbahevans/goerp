@@ -49,6 +49,7 @@ function fakeAuth(roles: string[]): AuthContextValue {
     updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
+    expireSession: () => {},
   };
 }
 

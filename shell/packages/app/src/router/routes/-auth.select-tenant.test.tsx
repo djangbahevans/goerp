@@ -59,6 +59,7 @@ function FakeAuthProvider({ selectImpl, children }: { selectImpl: SelectImpl; ch
     updatePreferences: async () => {},
     changePassword: async () => {},
     reloadSession: async () => {},
+    expireSession: () => {},
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

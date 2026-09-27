@@ -47,6 +47,7 @@ const SIGNED_IN: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 const SIGNED_OUT: AuthContextValue = {
   ...SIGNED_IN,

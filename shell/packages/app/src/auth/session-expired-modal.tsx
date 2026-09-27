@@ -53,7 +53,11 @@ export function SessionExpiredGate(): ReactNode {
   const tenantSuspended = useTenantSuspended();
   const navigate = useNavigate();
   const location = useRouterState({ select: (s) => s.resolvedLocation ?? s.location });
-  const showing = isSessionExpired(state) && !isAuthPath(location.pathname) && !tenantSuspended;
+  // A navigation already heading to an auth page (e.g. to /auth/login right
+  // after an action that revoked this session) does the modal's job.
+  const pendingPath = useRouterState({ select: (s) => s.location.pathname });
+  const showing =
+    isSessionExpired(state) && !isAuthPath(location.pathname) && !isAuthPath(pendingPath) && !tenantSuspended;
 
   // Refetch-on-focus and interval polling would keep the page firing
   // requests into 401s behind the modal; an unfocused window pauses both.

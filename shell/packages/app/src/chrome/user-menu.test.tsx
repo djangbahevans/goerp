@@ -56,6 +56,7 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     updatePreferences: vi.fn(async () => {}),
     changePassword: vi.fn(),
     reloadSession: vi.fn(),
+    expireSession: () => {},
     ...overrides,
   };
 }

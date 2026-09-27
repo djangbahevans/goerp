@@ -14,6 +14,8 @@ import type {
   InviteInfo,
   InviteLink,
   LoginCredentials,
+  MFACodeConfirmation,
+  MFAFactors,
   MFAMethod,
   PasswordResetConfirmation,
   PasswordResetOutcome,
@@ -419,6 +421,81 @@ export async function confirmTOTPEnrollment(input: TOTPEnrollmentConfirmation): 
   if (!response.ok) throw await readError(response);
   const body = (await response.json()) as { recovery_codes: string[] | null };
   return body.recovery_codes ?? null;
+}
+
+// reverifyMFA backs POST /auth/mfa/reverify (auth-internals.md §8
+// "Step-up re-verification"): refreshes the session's MFA assurance after a
+// 403 mfa_reverify_required or mfa_required. Rejects with invalid_mfa_code
+// (401) or mfa_locked (423). The access token is reissued by cookie.
+export async function reverifyMFA(input: MFACodeConfirmation): Promise<void> {
+  const response = await fetch("/auth/mfa/reverify", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: input.type, code: input.code }),
+  });
+  if (!response.ok) throw await readError(response);
+}
+
+interface MFAFactorsWire {
+  factors: {
+    id: string;
+    type: "totp" | "webauthn";
+    label: string | null;
+    created_at: string;
+    last_used_at: string | null;
+  }[];
+  recovery_codes_remaining: number;
+  required_by_policy: boolean;
+}
+
+// fetchMFAFactors backs GET /auth/mfa/factors (auth-internals.md §8
+// "Managing factors").
+export async function fetchMFAFactors(signal?: AbortSignal): Promise<MFAFactors> {
+  const response = await fetch("/auth/mfa/factors", { credentials: "include", ...(signal ? { signal } : {}) });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as MFAFactorsWire;
+  return {
+    factors: body.factors.map((f) => ({
+      id: f.id,
+      type: f.type,
+      label: f.label,
+      createdAt: f.created_at,
+      lastUsedAt: f.last_used_at,
+    })),
+    recoveryCodesRemaining: body.recovery_codes_remaining,
+    requiredByPolicy: body.required_by_policy,
+  };
+}
+
+// removeMFAFactor backs POST /auth/mfa/factors/{id}/remove. Success revokes
+// every one of the user's sessions, this one included. Rejects with
+// mfa_factor_not_found (404), invalid_mfa_code (401),
+// mfa_required_by_policy (409), or mfa_locked (423).
+export async function removeMFAFactor(id: string, confirmation: MFACodeConfirmation): Promise<void> {
+  const response = await fetch(`/auth/mfa/factors/${encodeURIComponent(id)}/remove`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: confirmation.type, code: confirmation.code }),
+  });
+  if (!response.ok) throw await readError(response);
+}
+
+// regenerateRecoveryCodes backs POST /auth/mfa/recovery-codes/regenerate:
+// resolves to the new set, shown once. The user's other sessions in this
+// tenant are signed out. Rejects with mfa_not_enrolled (409),
+// invalid_mfa_code (401), or mfa_locked (423).
+export async function regenerateRecoveryCodes(confirmation: MFACodeConfirmation): Promise<string[]> {
+  const response = await fetch("/auth/mfa/recovery-codes/regenerate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: confirmation.type, code: confirmation.code }),
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { recovery_codes: string[] };
+  return body.recovery_codes;
 }
 
 interface SessionWire {

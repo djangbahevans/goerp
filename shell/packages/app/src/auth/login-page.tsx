@@ -11,13 +11,15 @@ import { ResendStatus, type ResendVerification, useVerificationResend } from "./
 import { WorkspaceNotFound } from "./workspace-not-found.js";
 
 // Why the user was sent here — set by the MFA challenge page when a
-// rejected attempt has spent its single-use mfa_token, or by the
-// verify-email page once the email is verified.
+// rejected attempt has spent its single-use mfa_token, by the verify-email
+// page once the email is verified, or by the Security page after removing
+// a 2FA method signed out every session.
 const LOGIN_NOTICES = {
   mfa_failed: "Incorrect or expired code. Sign in again.",
   mfa_locked: "Too many failed verification attempts. Try again later.",
   session_failed: "Couldn't finish signing you in. Sign in again.",
   email_verified: "Email verified. Sign in to continue.",
+  mfa_factor_removed: "Two-factor method removed, and you've been signed out everywhere. Sign in again.",
 } as const;
 
 export type LoginNotice = keyof typeof LOGIN_NOTICES;
@@ -189,7 +191,7 @@ export function LoginPage({
 
       {notice &&
         !noticeDismissed &&
-        (notice === "email_verified" ? (
+        (notice === "email_verified" || notice === "mfa_factor_removed" ? (
           <p role="status" className="mb-4 text-sm text-success">
             {LOGIN_NOTICES[notice]}
           </p>

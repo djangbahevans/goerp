@@ -55,6 +55,7 @@ const fakeAuth = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 const TREE: NavigationGroup[] = [

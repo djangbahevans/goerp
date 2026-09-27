@@ -46,6 +46,7 @@ function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue 
     updatePreferences: vi.fn(),
     changePassword: vi.fn(),
     reloadSession: vi.fn(),
+    expireSession: () => {},
     ...overrides,
   };
 }

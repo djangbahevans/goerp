@@ -33,6 +33,7 @@ const SIGNED_OUT: AuthContextValue = {
   updatePreferences: async () => {},
   changePassword: async () => {},
   reloadSession: async () => {},
+  expireSession: () => {},
 };
 
 const SENT_TEXT = "If your account still needs verifying, a new link is on its way.";

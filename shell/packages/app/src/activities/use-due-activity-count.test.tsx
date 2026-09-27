@@ -55,6 +55,7 @@ function auth(timezone: string | null, defaultTimezone = "UTC"): AuthContextValu
     updatePreferences: vi.fn(),
     changePassword: vi.fn(),
     reloadSession: vi.fn(),
+    expireSession: () => {},
   };
 }
 

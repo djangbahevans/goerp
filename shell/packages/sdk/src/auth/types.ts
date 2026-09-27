@@ -230,6 +230,9 @@ export interface AuthContextValue {
   changePassword: (input: ChangePasswordInput) => Promise<void>;
   // Re-reads GET /auth/me into the signed-in state, e.g. once MFA setup finishes.
   reloadSession: () => Promise<void>;
+  // Moves a signed-in session to the expired state, keeping its user and
+  // tenant, for an action that just revoked the caller's own session.
+  expireSession: () => void;
 }
 
 // One entry of GET /auth/sessions (auth-internals.md §4 "Session management
@@ -259,4 +262,28 @@ export interface TOTPEnrollmentConfirmation {
   enrollmentId: string;
   code: string;
   label?: string | undefined;
+}
+
+// One enrolled sign-in factor from GET /auth/mfa/factors (auth-internals.md
+// §8 "Managing factors"). Recovery codes are counted, not listed.
+export interface MFAFactor {
+  id: string;
+  type: "totp" | "webauthn";
+  label: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface MFAFactors {
+  factors: MFAFactor[];
+  recoveryCodesRemaining: number;
+  // Whether the tenant's MFA policy applies to this user, so their last
+  // factor can't be removed.
+  requiredByPolicy: boolean;
+}
+
+// A current MFA code confirming a factor change or re-verification.
+export interface MFACodeConfirmation {
+  type: Extract<MFAMethod, "totp" | "recovery_code">;
+  code: string;
 }
