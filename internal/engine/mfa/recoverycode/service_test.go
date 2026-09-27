@@ -3,6 +3,7 @@ package recoverycode
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -225,4 +226,62 @@ func TestVerify_NoEnrolledCodesReturnsFalse(t *testing.T) {
 	if ok {
 		t.Error("Verify() = true for a user with no enrolled codes, want false")
 	}
+}
+
+func (e *testEnv) activeCodeCount(t *testing.T, userID string) int {
+	t.Helper()
+	var n int
+	if err := e.conn.QueryRow(`
+		SELECT COUNT(*) FROM system.user_mfa
+		WHERE user_id = $1 AND type = 'recovery_code' AND revoked_at IS NULL
+	`, userID).Scan(&n); err != nil {
+		t.Fatalf("count recovery codes: %v", err)
+	}
+	return n
+}
+
+func TestRegenerate_ReplacesEveryActiveCode(t *testing.T) {
+	env := openTestEnv(t)
+	ctx := t.Context()
+	userID := env.createUser(t)
+	if _, err := env.service.store.Insert(ctx, userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	old := env.insertCode(t, userID, "AAAAA-BBBBB")
+
+	set := Set{Codes: []string{"CCCCC-DDDDD"}, Hashes: [][]byte{mustHash(t, "CCCCC-DDDDD")}}
+	if err := env.service.store.WithTx(ctx, func(tx *sql.Tx) error { return env.service.RegenerateTx(ctx, tx, userID, set) }); err != nil {
+		t.Fatalf("RegenerateTx() error: %v", err)
+	}
+
+	if ok, _, _ := env.service.Verify(ctx, userID, "AAAAA-BBBBB"); ok {
+		t.Errorf("old code %s still verifies after RegenerateTx(), want rejected", old.ID)
+	}
+	if ok, _, err := env.service.Verify(ctx, userID, "CCCCC-DDDDD"); err != nil || !ok {
+		t.Errorf("new code Verify() = %v, %v, want true, nil", ok, err)
+	}
+}
+
+func TestRegenerate_WithoutFactorReturnsErrNotEnrolled(t *testing.T) {
+	env := openTestEnv(t)
+	ctx := t.Context()
+	userID := env.createUser(t)
+	env.insertCode(t, userID, "AAAAA-BBBBB")
+
+	set := Set{Codes: []string{"CCCCC-DDDDD"}, Hashes: [][]byte{mustHash(t, "CCCCC-DDDDD")}}
+	if err := env.service.store.WithTx(ctx, func(tx *sql.Tx) error { return env.service.RegenerateTx(ctx, tx, userID, set) }); !errors.Is(err, ErrNotEnrolled) {
+		t.Fatalf("RegenerateTx() error = %v, want ErrNotEnrolled", err)
+	}
+	if n := env.activeCodeCount(t, userID); n != 1 {
+		t.Errorf("active recovery codes = %d, want the original 1 untouched", n)
+	}
+}
+
+func mustHash(t *testing.T, code string) []byte {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hash code: %v", err)
+	}
+	return hash
 }

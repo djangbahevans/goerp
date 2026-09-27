@@ -9,6 +9,7 @@ package sessionrevoke
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -93,6 +94,24 @@ func (r *Revoker) RevokeAllForUser(ctx context.Context, userID, reason string) e
 	return nil
 }
 
+// RevokeAllForUserTx revokes every non-revoked session row for userID
+// inside the caller's transaction and returns their ids, which the caller
+// passes to Blocklist once the transaction commits.
+func (r *Revoker) RevokeAllForUserTx(ctx context.Context, tx *sql.Tx, userID, reason string) ([]string, error) {
+	return r.sessions.RevokeAllForUserTx(ctx, tx, userID, reason)
+}
+
+// Blocklist blocklists already-revoked session ids, so their outstanding
+// access tokens stop authenticating before they expire.
+func (r *Revoker) Blocklist(ctx context.Context, ids []string) error {
+	for _, id := range ids {
+		if err := r.cache.SetWithTTL(ctx, blocklistKey(id), "1", blocklistTTL); err != nil {
+			return fmt.Errorf("blocklist session %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
 // RevokeOthersForUser revokes and blocklists every session for userID
 // except keepSessionID's family — a password change signing out every
 // other device while the caller stays signed in.
@@ -127,6 +146,13 @@ func (r *Revoker) RevokeOtherFamiliesForUserInTenant(ctx context.Context, userID
 		}
 	}
 	return families, nil
+}
+
+// RevokeOtherFamiliesForUserInTenantTx is the database half of
+// RevokeOtherFamiliesForUserInTenant inside the caller's transaction; the
+// caller passes the revoked rows to Blocklist once it commits.
+func (r *Revoker) RevokeOtherFamiliesForUserInTenantTx(ctx context.Context, tx *sql.Tx, userID, tenantID, keepSessionID, reason string) ([]session.RevokedFamily, error) {
+	return r.sessions.RevokeOtherFamiliesForUserInTenantTx(ctx, tx, userID, tenantID, keepSessionID, reason)
 }
 
 // RevokeAllForUserInTenant revokes every non-revoked session for userID

@@ -165,7 +165,20 @@ func (s *Store) HasActiveOfTypeTx(ctx context.Context, tx *sql.Tx, userID string
 
 // ListActiveByUser returns userID's non-revoked MFA factors.
 func (s *Store) ListActiveByUser(ctx context.Context, userID string) ([]*Credential, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	return listActiveByUser(ctx, s.db, userID)
+}
+
+// ListActiveByUserTx is ListActiveByUser inside the caller's transaction.
+func (s *Store) ListActiveByUserTx(ctx context.Context, tx *sql.Tx, userID string) ([]*Credential, error) {
+	return listActiveByUser(ctx, tx, userID)
+}
+
+type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func listActiveByUser(ctx context.Context, q querier, userID string) ([]*Credential, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT `+userMFAColumns+`
 		FROM system.user_mfa
 		WHERE user_id = $1 AND revoked_at IS NULL
@@ -211,6 +224,47 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 	}
 	if n == 0 {
 		return ErrCredentialNotFound
+	}
+	return nil
+}
+
+// RevokeTx revokes id inside the caller's transaction, returning
+// ErrCredentialNotFound unless id is one of userID's non-revoked factors.
+func (s *Store) RevokeTx(ctx context.Context, tx *sql.Tx, userID, id string) error {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE system.user_mfa SET revoked_at = NOW()
+		WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+	`, id, userID)
+	if err != nil {
+		return fmt.Errorf("revoke mfa credential: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke mfa credential: %w", err)
+	}
+	if n == 0 {
+		return ErrCredentialNotFound
+	}
+	return nil
+}
+
+// RevokeAllOfTypeTx revokes every one of userID's non-revoked factors of
+// credType inside the caller's transaction.
+func (s *Store) RevokeAllOfTypeTx(ctx context.Context, tx *sql.Tx, userID string, credType CredentialType) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE system.user_mfa SET revoked_at = NOW()
+		WHERE user_id = $1 AND type = $2 AND revoked_at IS NULL
+	`, userID, credType)
+	if err != nil {
+		return fmt.Errorf("revoke mfa credentials of type %s: %w", credType, err)
+	}
+	return nil
+}
+
+// TouchLastUsed sets id's last_used_at to NOW().
+func (s *Store) TouchLastUsed(ctx context.Context, id string) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE system.user_mfa SET last_used_at = NOW() WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("touch mfa credential: %w", err)
 	}
 	return nil
 }

@@ -313,6 +313,29 @@ func TestVerify_AcceptsCurrentValidCode(t *testing.T) {
 	}
 }
 
+func TestVerify_RecordsLastUsedAt(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+
+	_, secret := seedFactor(t, env, userID)
+	code, err := pquernatotp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error: %v", err)
+	}
+
+	ok, credID, err := env.service.Verify(t.Context(), userID, code)
+	if err != nil || !ok {
+		t.Fatalf("Verify() = %v, %v, want true, nil", ok, err)
+	}
+	var lastUsedAt sql.NullTime
+	if err := env.conn.QueryRow(`SELECT last_used_at FROM system.user_mfa WHERE id = $1`, credID).Scan(&lastUsedAt); err != nil {
+		t.Fatalf("query last_used_at: %v", err)
+	}
+	if !lastUsedAt.Valid {
+		t.Error("last_used_at is NULL after a successful Verify(), want set")
+	}
+}
+
 func TestVerify_RejectsWrongCode(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)

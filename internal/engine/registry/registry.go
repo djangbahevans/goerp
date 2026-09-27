@@ -493,6 +493,19 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: r[1],
 		})
 	}
+	// A user's own MFA factor management (auth-internals.md §8 "Managing
+	// factors"), the same tenant-facing EngineBuiltin posture as
+	// /auth/mfa/reverify.
+	for _, r := range [][2]string{
+		{"GET", "/auth/mfa/factors"},
+		{"POST", "/auth/mfa/factors/{id}/remove"},
+		{"POST", "/auth/mfa/recovery-codes/regenerate"},
+	} {
+		table.Register(r[0], r[1], &route.RouteEntry{
+			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+			PathTemplate: r[1],
+		})
+	}
 	// Tenant admin user, invite and role endpoints (goerp#1097, goerp#1098,
 	// goerp#1099), the same tenant-facing, EngineBuiltin posture as
 	// /admin/users/{id}/mfa/reset.

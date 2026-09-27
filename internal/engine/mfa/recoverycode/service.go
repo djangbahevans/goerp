@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -78,6 +79,32 @@ func (s *Service) InsertTx(ctx context.Context, tx *sql.Tx, userID string, set S
 		}
 	}
 	return nil
+}
+
+// ErrNotEnrolled is returned by Regenerate for a user without an active
+// TOTP or WebAuthn factor.
+var ErrNotEnrolled = errors.New("mfa not enrolled")
+
+// RegenerateTx replaces userID's recovery codes with set inside the
+// caller's transaction (auth-internals.md §8 "Managing factors"). It
+// returns ErrNotEnrolled, changing nothing, unless the user still holds a
+// TOTP or WebAuthn factor once their row is locked, so a concurrent
+// removal of their last factor can't leave them with recovery codes alone.
+func (s *Service) RegenerateTx(ctx context.Context, tx *sql.Tx, userID string, set Set) error {
+	if err := s.store.LockUserTx(ctx, tx, userID); err != nil {
+		return err
+	}
+	creds, err := s.store.ListActiveByUserTx(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(creds, func(c *mfa.Credential) bool { return c.Type.IsFactor() }) {
+		return ErrNotEnrolled
+	}
+	if err := s.store.RevokeAllOfTypeTx(ctx, tx, userID, mfa.CredentialRecoveryCode); err != nil {
+		return err
+	}
+	return s.InsertTx(ctx, tx, userID, set)
 }
 
 // Verify checks code against userID's enrolled, non-revoked recovery
