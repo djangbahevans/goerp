@@ -153,6 +153,15 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),
+			// Platform-wide, fanning out across active tenants like
+			// InviteExpiryArgs above.
+			river.NewPeriodicJob(
+				river.PeriodicInterval(24*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return DeviceTokenCleanupArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: false},
+			),
 		},
 	})
 	if err != nil {

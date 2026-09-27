@@ -866,6 +866,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
+	river.AddWorker(jobWorkers, &jobqueue.DeviceTokenCleanupWorker{TenantStore: tenantStore, NotificationStore: notificationStore})
 	river.AddWorker(jobWorkers, &jobdispatch.Worker{ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool, Runtime: runtime, TenantStore: tenantStore})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
@@ -1080,6 +1081,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["POST /_notif/read-all"] = http.HandlerFunc(e.dispatchNotifReadAllRoute)
 	builtinRoutes["DELETE /_notif/{id}"] = http.HandlerFunc(e.dispatchNotifDismissRoute)
 	builtinRoutes["DELETE /_notif/all"] = http.HandlerFunc(e.dispatchNotifDismissAllRoute)
+	builtinRoutes["POST /_notif/device-token"] = http.HandlerFunc(e.dispatchNotifDeviceTokenRoute)
 
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.

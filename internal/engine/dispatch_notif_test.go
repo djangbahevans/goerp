@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"bytes"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -43,6 +45,9 @@ func newDispatchNotifFixture(t *testing.T) *dispatchNotifFixture {
 	if err := store.BootstrapFeed(t.Context(), slug); err != nil {
 		t.Fatalf("BootstrapFeed() error: %v", err)
 	}
+	if err := store.BootstrapDeviceTokens(t.Context(), slug); err != nil {
+		t.Fatalf("BootstrapDeviceTokens() error: %v", err)
+	}
 	return &dispatchNotifFixture{
 		e:        &Engine{primaryDB: conn, notificationStore: store},
 		slug:     slug,
@@ -69,7 +74,11 @@ func (f *dispatchNotifFixture) insert(t *testing.T, userID, title string, read b
 }
 
 func (f *dispatchNotifFixture) serve(handler http.HandlerFunc, callerID, method, target string, pathParams map[string]string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, target, nil)
+	return f.serveBody(handler, callerID, method, target, nil, pathParams)
+}
+
+func (f *dispatchNotifFixture) serveBody(handler http.HandlerFunc, callerID, method, target string, body []byte, pathParams map[string]string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, target, bytes.NewReader(body))
 	ctx := withTenantContext(r.Context(), &tenantresolve.TenantContext{TenantID: f.tenantID, Slug: f.slug})
 	ctx = withAuthContext(ctx, &authcheck.AuthContext{IsAuthenticated: true, UserID: callerID})
 	if pathParams != nil {
@@ -285,5 +294,106 @@ func TestDispatchNotifRoutes_AnotherUsersNotificationIsNotFound(t *testing.T) {
 	other := f.feed(t, f.otherID, nil)
 	if len(other.Data) != 1 || other.Data[0].ReadAt != nil {
 		t.Errorf("other user's notification changed: %+v", other.Data)
+	}
+}
+
+func (f *dispatchNotifFixture) registerToken(t *testing.T, callerID string, fields map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(fields)
+	return f.serveBody(f.e.dispatchNotifDeviceTokenRoute, callerID, http.MethodPost, "/_notif/device-token", body, nil)
+}
+
+type deviceTokenRow struct {
+	userID, platform, token string
+	appVersion              *string
+	registeredAt, lastSeen  time.Time
+}
+
+func (f *dispatchNotifFixture) deviceTokens(t *testing.T) []deviceTokenRow {
+	t.Helper()
+	rows, err := f.e.primaryDB.QueryContext(t.Context(), fmt.Sprintf(
+		`SELECT user_id, platform, token, app_version, registered_at, last_seen_at FROM %s.user_device_tokens WHERE tenant_id = $1 ORDER BY id`,
+		tenantschema.Name(f.slug)), f.tenantID)
+	if err != nil {
+		t.Fatalf("select device tokens: %v", err)
+	}
+	defer rows.Close()
+	var out []deviceTokenRow
+	for rows.Next() {
+		var r deviceTokenRow
+		if err := rows.Scan(&r.userID, &r.platform, &r.token, &r.appVersion, &r.registeredAt, &r.lastSeen); err != nil {
+			t.Fatalf("scan device token: %v", err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func TestDispatchNotifDeviceTokenRoute_UpsertsTheCallersToken(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+
+	w := f.registerToken(t, f.callerID, map[string]any{"platform": "android", "token": "fcm-token", "app_version": "1.2.0"})
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("first register status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+	first := f.deviceTokens(t)
+	if len(first) != 1 || first[0].userID != f.callerID || first[0].platform != "android" || first[0].token != "fcm-token" ||
+		first[0].appVersion == nil || *first[0].appVersion != "1.2.0" {
+		t.Fatalf("tokens after first register = %+v", first)
+	}
+
+	w = f.registerToken(t, f.callerID, map[string]any{"platform": "android", "token": "fcm-token", "app_version": "1.3.0"})
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("repeat register status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+	again := f.deviceTokens(t)
+	if len(again) != 1 {
+		t.Fatalf("tokens after repeat register = %+v, want one row", again)
+	}
+	if !again[0].lastSeen.After(first[0].lastSeen) {
+		t.Errorf("last_seen_at = %v, want later than %v", again[0].lastSeen, first[0].lastSeen)
+	}
+	if !again[0].registeredAt.Equal(first[0].registeredAt) {
+		t.Errorf("registered_at changed from %v to %v", first[0].registeredAt, again[0].registeredAt)
+	}
+	if again[0].appVersion == nil || *again[0].appVersion != "1.3.0" {
+		t.Errorf("app_version = %v, want 1.3.0", again[0].appVersion)
+	}
+
+	// The same token for another user, or with no app_version, is its own row.
+	if w := f.registerToken(t, f.otherID, map[string]any{"platform": "web", "token": "fcm-token"}); w.Code != http.StatusNoContent {
+		t.Fatalf("other user's register status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+	if all := f.deviceTokens(t); len(all) != 2 || all[1].userID != f.otherID || all[1].appVersion != nil {
+		t.Errorf("tokens = %+v, want a second row for the other user with no app_version", all)
+	}
+}
+
+func TestDispatchNotifDeviceTokenRoute_RejectsAnInvalidPlatformOrToken(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	for _, fields := range []map[string]any{
+		{"platform": "blackberry", "token": "t"},
+		{"platform": "", "token": "t"},
+		{"token": "t"},
+		{"platform": "ios", "token": ""},
+		{"platform": "ios"},
+		{"platform": "ios", "token": strings.Repeat("x", 4097)},
+	} {
+		w := f.registerToken(t, f.callerID, fields)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%v: status = %d, want 400", fields, w.Code)
+			continue
+		}
+		var body struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.Error.Code != "invalid_request" {
+			t.Errorf("%v: body = %s, want error code invalid_request", fields, w.Body.String())
+		}
+	}
+	if got := f.deviceTokens(t); len(got) != 0 {
+		t.Errorf("tokens = %+v, want none", got)
 	}
 }

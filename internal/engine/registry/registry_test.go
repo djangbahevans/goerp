@@ -704,6 +704,7 @@ func TestBuildRouteTable_IncludesNotifRoutes(t *testing.T) {
 		{"POST", "/_notif/read-all", "/_notif/read-all"},
 		{"DELETE", "/_notif/" + id, "/_notif/{id}"},
 		{"DELETE", "/_notif/all", "/_notif/all"},
+		{"POST", "/_notif/device-token", "/_notif/device-token"},
 	} {
 		entry, _, result, _ := table.Lookup(c.method, c.path)
 		if result != route.RouteFound {

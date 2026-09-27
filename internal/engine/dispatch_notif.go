@@ -2,8 +2,10 @@ package engine
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 	"uuid"
@@ -196,6 +198,46 @@ func (e *Engine) notifUpdateAll(w http.ResponseWriter, r *http.Request, update f
 	}
 	if err := update(r.Context(), tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID); err != nil {
 		writeRouteError(w, http.StatusInternalServerError, "internal_error", failMsg)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// notifDeviceTokenMaxLength bounds a registered token; FCM and APNs tokens
+// are a few hundred bytes at most.
+const notifDeviceTokenMaxLength = 4096
+
+type notifDeviceTokenRequest struct {
+	Platform   string `json:"platform"`
+	Token      string `json:"token"`
+	AppVersion string `json:"app_version"`
+}
+
+// dispatchNotifDeviceTokenRoute is POST /_notif/device-token's handler
+// (notification-system.md §12) — registers the caller's push device
+// token, or refreshes last_seen_at and app_version on a repeat.
+func (e *Engine) dispatchNotifDeviceTokenRoute(w http.ResponseWriter, r *http.Request) {
+	authCtx, tenantCtx, ok := notifCaller(w, r)
+	if !ok {
+		return
+	}
+
+	var body notifDeviceTokenRequest
+	if err := json.UnmarshalRead(r.Body, &body); err != nil {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		return
+	}
+	if !slices.Contains(notifications.DeviceTokenPlatforms, body.Platform) {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "platform must be ios, android or web")
+		return
+	}
+	if body.Token == "" || len(body.Token) > notifDeviceTokenMaxLength {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "token must be 1 to 4096 bytes")
+		return
+	}
+
+	if err := e.notificationStore.RegisterDeviceToken(r.Context(), tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID, body.Platform, body.Token, body.AppVersion); err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "register device token failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
