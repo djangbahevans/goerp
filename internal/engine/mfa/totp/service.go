@@ -16,6 +16,7 @@ import (
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
+	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
@@ -273,6 +274,11 @@ func (s *Service) Verify(ctx context.Context, userID, code string) (valid bool, 
 		}
 		if !claimed {
 			return false, "", nil
+		}
+		// Bookkeeping only: the code is already claimed, so failing here
+		// would burn a valid code.
+		if err := s.store.TouchLastUsed(ctx, c.ID); err != nil {
+			log.Warn().Err(err).Str("credential_id", c.ID).Msg("totp: record last use failed")
 		}
 		return true, c.ID, nil
 	}

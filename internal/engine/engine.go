@@ -60,6 +60,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaenroll"
+	"github.com/djangbahevans/goerp/internal/engine/auth/mfafactors"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareset"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfareverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
@@ -95,6 +96,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/revoke"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
@@ -656,6 +658,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	mfaLockout := lockout.NewCounter(cacheClient)
 	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
 	mfaEnrollHandlers := mfaenroll.NewHandlers(tenantResolver, authChecker, userStore, mfaStore, sessionStore, tokenIssuer, totpService, recoveryCodeService, authAuditStore)
+	mfaFactorHandlers := mfafactors.NewHandlers(tenantResolver, authChecker, mfaStore, mfaPolicyStore, totpService, recoveryCodeService, mfaLockout, revoke.NewService(mfaStore, sessionRevoker), sessionRevoker, authAuditStore)
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil, passwordHasher)
 	passwordResetRequestHandler := passwordreset.NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer, authAuditStore)
 	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, passwordPolicies, inviteMailer, authAuditStore, passwordHasher)
@@ -679,34 +682,37 @@ func New(cfg *config.Config) (*Engine, error) {
 		BlockedTypes: cfg.StorageBlockedTypes,
 	})
 	builtinRoutes := map[string]http.Handler{
-		"GET /_health":                       server.HealthHandler(),
-		"GET /_ready":                        server.ReadyHandler(),
-		"GET /auth/me":                       authMeHandler,
-		"POST /auth/me/change-password":      authMePasswordHandler,
-		"PATCH /auth/me":                     authMeUpdateHandler,
-		"POST /auth/refresh":                 authRefreshHandler,
-		"POST /auth/register":                http.HandlerFunc(registerHandlers.Register),
-		"GET /auth/check-slug":               http.HandlerFunc(registerHandlers.CheckSlug),
-		"GET /auth/accept-invite/info":       http.HandlerFunc(acceptInviteHandlers.Info),
-		"POST /auth/accept-invite":           http.HandlerFunc(acceptInviteHandlers.Accept),
-		"POST /auth/login":                   loginHandler,
-		"POST /auth/handoff":                 http.HandlerFunc(loginHandler.ServeHandoff),
-		"POST /auth/select-tenant":           http.HandlerFunc(loginHandler.ServeSelectTenant),
-		"POST /auth/password-reset/request":  passwordResetRequestHandler,
-		"POST /auth/password-reset/confirm":  passwordResetConfirmHandler,
-		"POST /auth/verify-email":            verifyEmailConfirmHandler,
-		"POST /auth/verify-email/resend":     verifyEmailResendHandler,
-		"GET /auth/tenant-context":           tenantContextHandler,
-		"POST /auth/logout":                  authLogoutHandler,
-		"GET /auth/sessions":                 http.HandlerFunc(authSessionsHandler.ServeList),
-		"DELETE /auth/sessions":              http.HandlerFunc(authSessionsHandler.ServeRevokeOthers),
-		"DELETE /auth/sessions/{family_id}":  http.HandlerFunc(authSessionsHandler.ServeRevoke),
-		"POST /auth/mfa/verify":              mfaVerifyHandler,
-		"POST /auth/mfa/reverify":            mfaReverifyHandler,
-		"POST /auth/mfa/enroll/totp":         http.HandlerFunc(mfaEnrollHandlers.Begin),
-		"POST /auth/mfa/enroll/totp/confirm": http.HandlerFunc(mfaEnrollHandlers.Confirm),
-		"POST /admin/users/{id}/mfa/reset":   mfaResetHandler,
-		"POST /storage/upload":               storageUploadHandler,
+		"GET /_health":                             server.HealthHandler(),
+		"GET /_ready":                              server.ReadyHandler(),
+		"GET /auth/me":                             authMeHandler,
+		"POST /auth/me/change-password":            authMePasswordHandler,
+		"PATCH /auth/me":                           authMeUpdateHandler,
+		"POST /auth/refresh":                       authRefreshHandler,
+		"POST /auth/register":                      http.HandlerFunc(registerHandlers.Register),
+		"GET /auth/check-slug":                     http.HandlerFunc(registerHandlers.CheckSlug),
+		"GET /auth/accept-invite/info":             http.HandlerFunc(acceptInviteHandlers.Info),
+		"POST /auth/accept-invite":                 http.HandlerFunc(acceptInviteHandlers.Accept),
+		"POST /auth/login":                         loginHandler,
+		"POST /auth/handoff":                       http.HandlerFunc(loginHandler.ServeHandoff),
+		"POST /auth/select-tenant":                 http.HandlerFunc(loginHandler.ServeSelectTenant),
+		"POST /auth/password-reset/request":        passwordResetRequestHandler,
+		"POST /auth/password-reset/confirm":        passwordResetConfirmHandler,
+		"POST /auth/verify-email":                  verifyEmailConfirmHandler,
+		"POST /auth/verify-email/resend":           verifyEmailResendHandler,
+		"GET /auth/tenant-context":                 tenantContextHandler,
+		"POST /auth/logout":                        authLogoutHandler,
+		"GET /auth/sessions":                       http.HandlerFunc(authSessionsHandler.ServeList),
+		"DELETE /auth/sessions":                    http.HandlerFunc(authSessionsHandler.ServeRevokeOthers),
+		"DELETE /auth/sessions/{family_id}":        http.HandlerFunc(authSessionsHandler.ServeRevoke),
+		"POST /auth/mfa/verify":                    mfaVerifyHandler,
+		"POST /auth/mfa/reverify":                  mfaReverifyHandler,
+		"POST /auth/mfa/enroll/totp":               http.HandlerFunc(mfaEnrollHandlers.Begin),
+		"POST /auth/mfa/enroll/totp/confirm":       http.HandlerFunc(mfaEnrollHandlers.Confirm),
+		"GET /auth/mfa/factors":                    http.HandlerFunc(mfaFactorHandlers.List),
+		"POST /auth/mfa/factors/{id}/remove":       http.HandlerFunc(mfaFactorHandlers.Remove),
+		"POST /auth/mfa/recovery-codes/regenerate": http.HandlerFunc(mfaFactorHandlers.RegenerateRecoveryCodes),
+		"POST /admin/users/{id}/mfa/reset":         mfaResetHandler,
+		"POST /storage/upload":                     storageUploadHandler,
 	}
 	defaultRateLimit := route.RateLimitConfig{Requests: cfg.RateLimitMax, WindowSeconds: int(cfg.RateLimitWindow.Seconds()), Scope: "ip"}
 

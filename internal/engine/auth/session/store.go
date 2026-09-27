@@ -238,6 +238,19 @@ func (s *Store) RevokeAllForUser(ctx context.Context, userID, reason string) err
 	return nil
 }
 
+// RevokeAllForUserTx revokes every non-revoked session row for userID
+// inside the caller's transaction and returns the revoked ids.
+func (s *Store) RevokeAllForUserTx(ctx context.Context, tx *sql.Tx, userID, reason string) ([]string, error) {
+	rows, err := revokeUntilSettled(ctx, tx, `
+		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $2
+		WHERE user_id = $1 AND revoked_at IS NULL
+		RETURNING `+revokedColumns, userID, reason)
+	if err != nil {
+		return nil, fmt.Errorf("revoke all sessions for user: %w", err)
+	}
+	return rowIDs(rows), nil
+}
+
 // RevokeOthersForUser revokes every non-revoked session row for userID
 // outside keepSessionID's family (so the caller's own rotation chain
 // survives) and returns the revoked ids.

@@ -118,7 +118,17 @@ type RevokedFamily struct {
 // revoked rows of, in family-id order; LiveRowID is empty for a family
 // that had already expired.
 func (s *Store) RevokeOtherFamiliesForUserInTenant(ctx context.Context, userID, tenantID, keepSessionID, reason string) ([]RevokedFamily, error) {
-	rows, err := s.revokeUntilSettled(ctx, `
+	return revokeOtherFamiliesForUserInTenant(ctx, s.db, userID, tenantID, keepSessionID, reason)
+}
+
+// RevokeOtherFamiliesForUserInTenantTx is RevokeOtherFamiliesForUserInTenant
+// inside the caller's transaction.
+func (s *Store) RevokeOtherFamiliesForUserInTenantTx(ctx context.Context, tx *sql.Tx, userID, tenantID, keepSessionID, reason string) ([]RevokedFamily, error) {
+	return revokeOtherFamiliesForUserInTenant(ctx, tx, userID, tenantID, keepSessionID, reason)
+}
+
+func revokeOtherFamiliesForUserInTenant(ctx context.Context, q querier, userID, tenantID, keepSessionID, reason string) ([]RevokedFamily, error) {
+	rows, err := revokeUntilSettled(ctx, q, `
 		UPDATE system.sessions SET revoked_at = NOW(), revoke_reason = $4
 		WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL
 		  AND family_id IS DISTINCT FROM (SELECT family_id FROM system.sessions WHERE id = $3)
@@ -164,10 +174,18 @@ type revokedRow struct {
 // can't see; the next pass revokes it, so a concurrent refresh can't keep
 // a session alive.
 func (s *Store) revokeUntilSettled(ctx context.Context, query string, args ...any) ([]revokedRow, error) {
+	return revokeUntilSettled(ctx, s.db, query, args...)
+}
+
+type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func revokeUntilSettled(ctx context.Context, q querier, query string, args ...any) ([]revokedRow, error) {
 	var all []revokedRow
 	for {
 		n := len(all)
-		rows, err := s.db.QueryContext(ctx, query, args...)
+		rows, err := q.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, err
 		}

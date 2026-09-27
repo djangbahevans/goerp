@@ -37,3 +37,9 @@ type Credential struct {
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
 }
+
+// IsFactor reports whether t is a sign-in factor (TOTP or WebAuthn), as
+// opposed to a recovery code.
+func (t CredentialType) IsFactor() bool {
+	return t == CredentialTOTP || t == CredentialWebAuthn
+}

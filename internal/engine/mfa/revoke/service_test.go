@@ -110,36 +110,104 @@ func (f *fixture) sessionIsRevoked(t *testing.T) bool {
 	return revokedAt.Valid
 }
 
-func TestRevokeFactor_RevokesFactorAndAllUserSessions(t *testing.T) {
-	f := newFixture(t)
-	cred, err := f.mfaStore.Insert(context.Background(), f.userID, mfa.CredentialTOTP, []byte("x"), nil)
-	if err != nil {
-		t.Fatalf("Insert() error: %v", err)
-	}
-
-	if err := f.service.RevokeFactor(context.Background(), f.userID, cred.ID); err != nil {
-		t.Fatalf("RevokeFactor() error: %v", err)
-	}
-
+func (f *fixture) isRevoked(t *testing.T, credID string) bool {
+	t.Helper()
 	var revokedAt sql.NullTime
-	if err := f.conn.QueryRowContext(context.Background(),
-		"SELECT revoked_at FROM system.user_mfa WHERE id = $1", cred.ID,
+	if err := f.conn.QueryRowContext(t.Context(),
+		"SELECT revoked_at FROM system.user_mfa WHERE id = $1", credID,
 	).Scan(&revokedAt); err != nil {
 		t.Fatalf("query mfa credential: %v", err)
 	}
-	if !revokedAt.Valid {
-		t.Error("user_mfa.revoked_at is NULL, want set")
+	return revokedAt.Valid
+}
+
+func (f *fixture) insert(t *testing.T, credType mfa.CredentialType) *mfa.Credential {
+	t.Helper()
+	cred, err := f.mfaStore.Insert(t.Context(), f.userID, credType, []byte("x"), nil)
+	if err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+	return cred
+}
+
+func TestRevokeFactor_RevokesFactorAndAllUserSessions(t *testing.T) {
+	f := newFixture(t)
+	cred := f.insert(t, mfa.CredentialTOTP)
+
+	if err := f.service.RevokeFactor(t.Context(), f.userID, cred.ID, false); err != nil {
+		t.Fatalf("RevokeFactor() error: %v", err)
 	}
 
+	if !f.isRevoked(t, cred.ID) {
+		t.Error("user_mfa.revoked_at is NULL, want set")
+	}
 	if !f.sessionIsRevoked(t) {
 		t.Error("session was not revoked after RevokeFactor(), want revoked")
+	}
+}
+
+func TestRevokeFactor_LastFactorAlsoRevokesRecoveryCodes(t *testing.T) {
+	f := newFixture(t)
+	cred := f.insert(t, mfa.CredentialTOTP)
+	code := f.insert(t, mfa.CredentialRecoveryCode)
+
+	if err := f.service.RevokeFactor(t.Context(), f.userID, cred.ID, false); err != nil {
+		t.Fatalf("RevokeFactor() error: %v", err)
+	}
+	if !f.isRevoked(t, code.ID) {
+		t.Error("recovery code still active after removing the last factor, want revoked")
+	}
+}
+
+func TestRevokeFactor_OtherFactorRemainingKeepsRecoveryCodes(t *testing.T) {
+	f := newFixture(t)
+	cred := f.insert(t, mfa.CredentialTOTP)
+	f.insert(t, mfa.CredentialWebAuthn)
+	code := f.insert(t, mfa.CredentialRecoveryCode)
+
+	if err := f.service.RevokeFactor(t.Context(), f.userID, cred.ID, true); err != nil {
+		t.Fatalf("RevokeFactor() error: %v", err)
+	}
+	if f.isRevoked(t, code.ID) {
+		t.Error("recovery code revoked while another factor remains, want active")
+	}
+}
+
+func TestRevokeFactor_LastFactorUnderPolicyChangesNothing(t *testing.T) {
+	f := newFixture(t)
+	cred := f.insert(t, mfa.CredentialTOTP)
+	code := f.insert(t, mfa.CredentialRecoveryCode)
+
+	err := f.service.RevokeFactor(t.Context(), f.userID, cred.ID, true)
+	if !errors.Is(err, ErrRequiredByPolicy) {
+		t.Fatalf("RevokeFactor() error = %v, want ErrRequiredByPolicy", err)
+	}
+	if f.isRevoked(t, cred.ID) || f.isRevoked(t, code.ID) {
+		t.Error("a credential was revoked despite ErrRequiredByPolicy, want untouched")
+	}
+	if f.sessionIsRevoked(t) {
+		t.Error("session was revoked despite ErrRequiredByPolicy, want untouched")
+	}
+}
+
+func TestRevokeFactor_RecoveryCodeIDReturnsErrCredentialNotFound(t *testing.T) {
+	f := newFixture(t)
+	f.insert(t, mfa.CredentialTOTP)
+	code := f.insert(t, mfa.CredentialRecoveryCode)
+
+	err := f.service.RevokeFactor(t.Context(), f.userID, code.ID, false)
+	if !errors.Is(err, mfa.ErrCredentialNotFound) {
+		t.Errorf("RevokeFactor() error = %v, want ErrCredentialNotFound", err)
+	}
+	if f.isRevoked(t, code.ID) {
+		t.Error("recovery code revoked through RevokeFactor(), want untouched")
 	}
 }
 
 func TestRevokeFactor_UnknownCredentialIDReturnsErrCredentialNotFoundAndDoesNotTouchSessions(t *testing.T) {
 	f := newFixture(t)
 
-	err := f.service.RevokeFactor(context.Background(), f.userID, "00000000-0000-0000-0000-000000000000")
+	err := f.service.RevokeFactor(context.Background(), f.userID, "00000000-0000-0000-0000-000000000000", false)
 	if !errors.Is(err, mfa.ErrCredentialNotFound) {
 		t.Errorf("RevokeFactor() error = %v, want ErrCredentialNotFound", err)
 	}
@@ -165,7 +233,7 @@ func TestRevokeFactor_CredentialBelongingToAnotherUserReturnsErrCredentialNotFou
 
 	// f.userID (the fixture's session owner) tries to revoke a credential
 	// that actually belongs to otherUserID.
-	err = f.service.RevokeFactor(context.Background(), f.userID, otherCred.ID)
+	err = f.service.RevokeFactor(context.Background(), f.userID, otherCred.ID, false)
 	if !errors.Is(err, mfa.ErrCredentialNotFound) {
 		t.Errorf("RevokeFactor() error = %v, want ErrCredentialNotFound", err)
 	}
