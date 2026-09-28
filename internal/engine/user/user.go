@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS system.user_profiles (
     timezone        TEXT,
     theme           TEXT NOT NULL DEFAULT 'system'
                         CHECK (theme IN ('light', 'dark', 'system')),
+    contrast        TEXT NOT NULL DEFAULT 'system'
+                        CHECK (contrast IN ('standard', 'high', 'system')),
     date_format     TEXT
                         CHECK (date_format IN ('day_first', 'month_first', 'iso')),
     phone           TEXT,
@@ -95,6 +97,18 @@ BEGIN
         );
     END IF;
 END $$;
+`
+
+// addContrastColumn brings a pre-existing system.user_profiles up to
+// createUserProfilesTable's contrast column (shell-visual-design.md §4
+// "High-contrast mode") — CREATE TABLE IF NOT EXISTS above is a no-op
+// against an already-bootstrapped table, same reason as
+// migrateAvatarURLColumn. Existing rows take the 'system' default, so a
+// user whose OS asks for more contrast gets it without opting in.
+const addContrastColumn = `
+ALTER TABLE system.user_profiles
+    ADD COLUMN IF NOT EXISTS contrast TEXT NOT NULL DEFAULT 'system'
+        CHECK (contrast IN ('standard', 'high', 'system'));
 `
 
 // failedLoginLockThreshold/lockDuration are the minimal single-tier
@@ -171,6 +185,9 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, migrateAvatarURLColumn); err != nil {
 			return fmt.Errorf("migrate user_profiles avatar column: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, addContrastColumn); err != nil {
+			return fmt.Errorf("add user_profiles contrast column: %w", err)
 		}
 
 		return nil

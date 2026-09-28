@@ -68,9 +68,14 @@ export function CalendarAgendaList({ today, events, onEventClick }: CalendarAgen
                     className={ROW_CLASSES}
                   >
                     {event.color && (
+                      // The swatch's own outline always renders, regardless
+                      // of the value's fill — an arbitrary tenant color
+                      // could otherwise exactly match the row background
+                      // and disappear (field.tsx's "color" field type
+                      // takes the same approach).
                       <span
                         aria-hidden
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        className="h-2.5 w-2.5 shrink-0 rounded-full border border-border"
                         style={{ backgroundColor: event.color }}
                       />
                     )}

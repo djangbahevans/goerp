@@ -24,6 +24,7 @@ const FAKE_USER = {
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
   theme: "system" as const,
+  contrast: "system" as const,
   locale: null,
   timezone: null,
   dateFormat: null,

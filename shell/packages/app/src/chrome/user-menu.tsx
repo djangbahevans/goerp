@@ -25,25 +25,37 @@ function displayNameFromEmail(email: string): string {
 // `trigger` slot instead of the default labeled button.
 export function UserMenu(): ReactNode {
   const { user, logout, updatePreferences } = useAuth();
-  const { theme, preference, setPreference } = useTheme();
+  const { theme, preference, setPreference, contrast, contrastPreference, setContrastPreference } = useTheme();
   const navigate = useNavigate();
   const dueActivities = useDueActivityCount();
 
-  // Only the latest toggle's failure reverts, so an earlier save settling
-  // late can't undo a later toggle.
-  const latestToggle = useRef(0);
+  // Per toggle, only the latest one's failure reverts, so an earlier save
+  // settling late can't undo a later toggle.
+  const latestToggle = useRef({ theme: 0, contrast: 0 });
 
-  // Saved to the profile like the Appearance page's theme control
-  // (shell-ux.md §4.4), so the next sign-in doesn't undo it.
+  // Saved to the profile like the Appearance page's theme and contrast
+  // controls (shell-ux.md §4.4), so the next sign-in doesn't undo them.
   function toggleDarkMode() {
     const previous = preference;
     const next = theme === "dark" ? "light" : "dark";
-    const token = ++latestToggle.current;
+    const token = ++latestToggle.current.theme;
     setPreference(next);
     updatePreferences({ theme: next }).catch(() => {
-      if (latestToggle.current !== token) return;
+      if (latestToggle.current.theme !== token) return;
       setPreference(previous);
       toast.error("Couldn't save your theme. Try again.");
+    });
+  }
+
+  function toggleHighContrast() {
+    const previous = contrastPreference;
+    const next = contrast === "high" ? "standard" : "high";
+    const token = ++latestToggle.current.contrast;
+    setContrastPreference(next);
+    updatePreferences({ contrast: next }).catch(() => {
+      if (latestToggle.current.contrast !== token) return;
+      setContrastPreference(previous);
+      toast.error("Couldn't save your contrast. Try again.");
     });
   }
 
@@ -58,6 +70,7 @@ export function UserMenu(): ReactNode {
         { label: "Settings", onClick: () => void navigate({ to: "/settings" }) },
         ...(isTenantAdmin(user) ? [{ label: "Admin", onClick: () => void navigate({ to: "/admin" }) }] : []),
         { label: "Dark mode", checked: theme === "dark", onClick: toggleDarkMode },
+        { label: "High contrast", checked: contrast === "high", onClick: toggleHighContrast },
         { label: "Keyboard shortcuts", onClick: openKeyboardShortcuts },
         { type: "separator" },
         { label: "Sign out", onClick: () => void logout() },

@@ -31,6 +31,7 @@ function fakeAuth(): AuthContextValue {
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
     theme: "system" as const,
+    contrast: "system" as const,
     locale: null,
     timezone: "UTC",
     dateFormat: null,

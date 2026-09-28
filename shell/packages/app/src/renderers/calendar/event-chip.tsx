@@ -18,8 +18,8 @@ export interface EventChipProps {
 }
 
 export function EventChip({ event, onClick, tabIndex = 0, onKeyDown, ref }: EventChipProps): ReactNode {
-  const { theme } = useTheme();
-  const contrast = event.color ? contrastFor(event.color, theme) : null;
+  const { theme, contrast: contrastLevel } = useTheme();
+  const contrast = event.color ? contrastFor(event.color, theme, contrastLevel) : null;
 
   const style: CSSProperties = {
     ...(event.color ? { backgroundColor: event.color } : {}),

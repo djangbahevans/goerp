@@ -34,6 +34,7 @@ function authWithRoles(roles: string[], overrides: Partial<AuthContextValue> = {
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
     theme: "system" as const,
+    contrast: "system" as const,
     locale: null,
     timezone: null,
     dateFormat: null,

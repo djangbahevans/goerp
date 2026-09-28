@@ -1,7 +1,192 @@
-[data-theme="high-contrast"] {
+/* High-contrast mode (shell-visual-design.md §4 "High-contrast mode") is an
+   accessibility setting orthogonal to light/dark, not a third theme:
+   `data-contrast="high"` on <html> sits alongside `data-theme`, so both
+   light and dark get a high-contrast variant with the same hue
+   relationships as their standard palette. Pushes text/background to pure
+   black/white and makes borders carry the structure the tinted surfaces
+   carry in standard contrast. Every text pair, including the badge, syntax
+   and avatar-initials pairs, clears WCAG AAA (>=7:1); every border clears
+   >=3:1.
+
+   Specificity: the light block ([data-contrast]) matches default.css's
+   :root and wins by source order; the dark block
+   ([data-theme][data-contrast]) outranks both, so each block defines the
+   full set rather than layering over the other. */
+
+[data-contrast="high"] {
+  --goerp-color-bg: #ffffff;
+  --goerp-color-bg-subtle: #f2f2f2;
+  --goerp-color-bg-muted: #e3e3e3;
+
+  --goerp-color-surface: #ffffff;
+  --goerp-color-surface-hover: #ebebeb;
+  --goerp-color-surface-active: #d9d9d9;
+
+  --goerp-color-border: #595959;
+  --goerp-color-border-strong: #000000;
+  --goerp-color-border-control: #000000;
+
+  --goerp-color-text: #000000;
+  --goerp-color-text-secondary: #333333;
+  /* Disabled text is exempt from 1.4.3, but still kept readable (>=4.5:1). */
+  --goerp-color-text-disabled: #6b6b6b;
+  --goerp-color-text-inverse: #ffffff;
+
+  /* "Ledger" navy pushed darker; hover/active keep darkening as in light. */
+  --goerp-color-primary: #0b2545;
+  --goerp-color-primary-hover: #061a33;
+  --goerp-color-primary-active: #020d1c;
+  --goerp-color-primary-subtle: #dbe5f0;
+
+  --goerp-color-danger: #8f0000;
+  --goerp-color-danger-hover: #700000;
+  --goerp-color-danger-active: #520000;
+  --goerp-color-danger-subtle: #fbe3e3;
+
+  --goerp-color-warning: #6b3a00;
+  --goerp-color-warning-subtle: #fbeeda;
+
+  --goerp-color-success: #00552b;
+  --goerp-color-success-subtle: #dff3e7;
+
+  --goerp-color-info: #003a70;
+  --goerp-color-info-subtle: #dfeaf6;
+
+  /* Badge's 10-color decorative palette (docs/components/badge.md) — gray
+     reuses --goerp-color-bg-subtle/-text-secondary above, no dedicated pair.
+     Every bg/text pair verified at >=7:1 in this mode. */
+  --goerp-color-badge-red: #fbe3e3;
+  --goerp-color-badge-red-text: #7a0000;
+  --goerp-color-badge-orange: #fcebd9;
+  --goerp-color-badge-orange-text: #6b3300;
+  --goerp-color-badge-yellow: #fbf3cf;
+  --goerp-color-badge-yellow-text: #4d4000;
+  --goerp-color-badge-green: #def2e3;
+  --goerp-color-badge-green-text: #00501f;
+  --goerp-color-badge-teal: #dbf2ef;
+  --goerp-color-badge-teal-text: #004a42;
+  --goerp-color-badge-blue: #deeaf5;
+  --goerp-color-badge-blue-text: #003a70;
+  --goerp-color-badge-indigo: #e6e6f7;
+  --goerp-color-badge-indigo-text: #2e2e80;
+  --goerp-color-badge-purple: #f0e2f7;
+  --goerp-color-badge-purple-text: #52207a;
+  --goerp-color-badge-pink: #f9e1ee;
+  --goerp-color-badge-pink-text: #7a1a52;
+
+  /* CodeField's syntax-highlighting palette (docs/components/code-field.md)
+     — every color verified at >=7:1 against --goerp-color-surface. */
+  --goerp-color-syntax-keyword: #5a1fad;
+  --goerp-color-syntax-string: #0a4d1c;
+  --goerp-color-syntax-comment: #404040;
+  --goerp-color-syntax-number: #003d8f;
+  --goerp-color-syntax-function: #6b2800;
+  --goerp-color-syntax-type: #00474d;
+
+  /* UserAvatar's 8-color palette (docs/components/user-avatar.md), darkened
+     from the standard hues so white --goerp-color-avatar-text clears >=7:1. */
+  --goerp-color-avatar-0: #46536c;
+  --goerp-color-avatar-1: #5a4c75;
+  --goerp-color-avatar-2: #6f4855;
+  --goerp-color-avatar-3: #3a5a46;
+  --goerp-color-avatar-4: #605034;
+  --goerp-color-avatar-5: #375757;
+  --goerp-color-avatar-6: #6f4848;
+  --goerp-color-avatar-7: #52526b;
+  --goerp-color-avatar-text: #ffffff;
+
+  /* Soft shadows don't separate a floating layer (menu, popover, dialog)
+     strongly enough here, so each gets a hairline ring instead. */
+  --shadow-sm: 0 0 0 1px var(--goerp-color-border);
+  --shadow-md: 0 0 0 1px var(--goerp-color-border-strong);
+  --shadow-lg: 0 0 0 2px var(--goerp-color-border-strong);
+}
+
+[data-theme="dark"][data-contrast="high"] {
   --goerp-color-bg: #000000;
-  --goerp-color-text: #ffffff;
-  --goerp-color-primary: #ffff00;
-  --goerp-color-border: #ffffff;
+  --goerp-color-bg-subtle: #0f0f0f;
+  --goerp-color-bg-muted: #1f1f1f;
+
+  --goerp-color-surface: #000000;
+  --goerp-color-surface-hover: #242424;
+  --goerp-color-surface-active: #333333;
+
+  --goerp-color-border: #bfbfbf;
+  --goerp-color-border-strong: #ffffff;
   --goerp-color-border-control: #ffffff;
+
+  --goerp-color-text: #ffffff;
+  --goerp-color-text-secondary: #e0e0e0;
+  --goerp-color-text-disabled: #8f8f8f;
+  --goerp-color-text-inverse: #000000;
+
+  /* Dark mode's steel blue pushed lighter; hover/active keep lightening. */
+  --goerp-color-primary: #a8cbf0;
+  --goerp-color-primary-hover: #c4ddf7;
+  --goerp-color-primary-active: #e0eefc;
+  --goerp-color-primary-subtle: #0d2440;
+
+  --goerp-color-danger: #ff9494;
+  --goerp-color-danger-hover: #ffb3b3;
+  --goerp-color-danger-active: #ffd1d1;
+  --goerp-color-danger-subtle: #330000;
+
+  --goerp-color-warning: #ffc266;
+  --goerp-color-warning-subtle: #332000;
+
+  --goerp-color-success: #66e69c;
+  --goerp-color-success-subtle: #002914;
+
+  --goerp-color-info: #94ccff;
+  --goerp-color-info-subtle: #001f3d;
+
+  /* Badge's 10-color decorative palette (docs/components/badge.md) — gray
+     reuses --goerp-color-bg-subtle/-text-secondary above, no dedicated pair.
+     Every bg/text pair verified at >=7:1 in this mode. */
+  --goerp-color-badge-red: #330000;
+  --goerp-color-badge-red-text: #ffb3b3;
+  --goerp-color-badge-orange: #331a00;
+  --goerp-color-badge-orange-text: #ffcc99;
+  --goerp-color-badge-yellow: #2e2900;
+  --goerp-color-badge-yellow-text: #fff099;
+  --goerp-color-badge-green: #00290f;
+  --goerp-color-badge-green-text: #a3f5bf;
+  --goerp-color-badge-teal: #002926;
+  --goerp-color-badge-teal-text: #99f0e6;
+  --goerp-color-badge-blue: #001a33;
+  --goerp-color-badge-blue-text: #b3d9ff;
+  --goerp-color-badge-indigo: #14143d;
+  --goerp-color-badge-indigo-text: #ccccff;
+  --goerp-color-badge-purple: #26003d;
+  --goerp-color-badge-purple-text: #e6b3ff;
+  --goerp-color-badge-pink: #33001a;
+  --goerp-color-badge-pink-text: #ffb3d9;
+
+  /* CodeField's syntax-highlighting palette (docs/components/code-field.md)
+     — every color verified at >=7:1 against --goerp-color-surface. */
+  --goerp-color-syntax-keyword: #e0b3ff;
+  --goerp-color-syntax-string: #8cff8c;
+  --goerp-color-syntax-comment: #c2c2c2;
+  --goerp-color-syntax-number: #8cd1ff;
+  --goerp-color-syntax-function: #ffc285;
+  --goerp-color-syntax-type: #66f0f0;
+
+  /* UserAvatar's 8-color palette, lightened (not the light block's hues
+     dimmed) with black --goerp-color-avatar-text so each still clears
+     >=7:1 against a white-on-black text pairing, and also against the
+     black page background the light block's darker hues would wash into. */
+  --goerp-color-avatar-0: #909cb7;
+  --goerp-color-avatar-1: #a296bb;
+  --goerp-color-avatar-2: #b9939f;
+  --goerp-color-avatar-3: #76a788;
+  --goerp-color-avatar-4: #b19a71;
+  --goerp-color-avatar-5: #73a6a6;
+  --goerp-color-avatar-6: #b99393;
+  --goerp-color-avatar-7: #9a9ab2;
+  --goerp-color-avatar-text: #000000;
+
+  /* Drop shadows vanish on a black ground — same hairline-ring swap. */
+  --shadow-sm: 0 0 0 1px var(--goerp-color-border);
+  --shadow-md: 0 0 0 1px var(--goerp-color-border-strong);
+  --shadow-lg: 0 0 0 2px var(--goerp-color-border-strong);
 }

@@ -49,4 +49,21 @@ describe("contrastFor", () => {
   it("falls back to literal black/white when neither themed text token clears 4.5:1 (dark theme)", () => {
     expect(contrastFor("#E7002D", "dark").text).toEqual({ kind: "literal", hex: "#FFFFFF" });
   });
+
+  it("defaults to standard contrast (4.5:1) when no contrast level is passed", () => {
+    expect(contrastFor("#3B82F6", "light")).toEqual(contrastFor("#3B82F6", "light", "standard"));
+  });
+
+  it("holds a fill to 7:1 in high contrast even though it clears 4.5:1 in standard", () => {
+    // #5A5A5A's best themed-token contrast is ~6.9:1 — clears standard's
+    // 4.5:1 bar but falls just short of high contrast's 7:1 AAA bar.
+    const standard = contrastFor("#5A5A5A", "light", "standard");
+    const high = contrastFor("#5A5A5A", "light", "high");
+    expect(standard.text.kind).toBe("token");
+    expect(high.text.kind).toBe("literal");
+  });
+
+  it("picks literal black text in high-contrast dark mode when neither pure black nor white clears 7:1", () => {
+    expect(contrastFor("#7A7A7A", "dark", "high").text.kind).toBe("literal");
+  });
 });

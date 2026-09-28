@@ -1,4 +1,4 @@
-import type { ThemePreference } from "../react/use-theme.js";
+import type { ContrastPreference, ThemePreference } from "../react/use-theme.js";
 
 // auth-internals.md §2's user_profiles.date_format.
 export type DateFormat = "day_first" | "month_first" | "iso";
@@ -16,6 +16,7 @@ export interface CurrentUser {
   // user has no factor yet, so the shell holds them on /auth/mfa-setup.
   mfaSetupRequired: boolean;
   theme: ThemePreference;
+  contrast: ContrastPreference;
   // BCP 47; null = the tenant's defaultLocale.
   locale: string | null;
   // IANA; null = the tenant's defaultTimezone.
@@ -204,7 +205,9 @@ export interface UpdateProfileInput {
 
 // updatePreferences' input: only the fields given are sent, and null resets
 // locale, timezone or dateFormat to inherit.
-export type UpdatePreferencesInput = Partial<Pick<CurrentUser, "theme" | "locale" | "timezone" | "dateFormat">>;
+export type UpdatePreferencesInput = Partial<
+  Pick<CurrentUser, "theme" | "contrast" | "locale" | "timezone" | "dateFormat">
+>;
 
 export interface AuthContextValue {
   state: AuthState;

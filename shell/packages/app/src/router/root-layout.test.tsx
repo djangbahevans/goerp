@@ -30,6 +30,7 @@ const user = {
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
   theme: "system" as const,
+  contrast: "system" as const,
   locale: null,
   timezone: null,
   dateFormat: null,

@@ -27,6 +27,7 @@ function auth(timezone: string | null, defaultTimezone = "UTC"): AuthContextValu
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
     theme: "system" as const,
+    contrast: "system" as const,
     locale: null,
     timezone,
     dateFormat: null,

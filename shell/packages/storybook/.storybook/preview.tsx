@@ -30,9 +30,13 @@ const withPermissions: Decorator = (Story) => (
 // reflect the story's theme toggle, not just the resulting CSS.
 const withTheme: Decorator = (Story, context) => {
   const theme = context.globals.theme === "dark" ? "dark" : "light";
+  const contrast = context.globals.contrast === "high" ? "high" : "standard";
   useEffect(() => {
     themeStore.setTheme(theme);
   }, [theme]);
+  useEffect(() => {
+    themeStore.setContrastPreference(contrast);
+  }, [contrast]);
   return (
     <div
       style={{
@@ -60,9 +64,22 @@ const preview: Preview = {
         dynamicTitle: true,
       },
     },
+    contrast: {
+      description: "Standard/high contrast, applied on top of the theme",
+      toolbar: {
+        title: "Contrast",
+        icon: "contrast",
+        items: [
+          { value: "standard", icon: "circlehollow", title: "Standard contrast" },
+          { value: "high", icon: "contrast", title: "High contrast" },
+        ],
+        dynamicTitle: true,
+      },
+    },
   },
   initialGlobals: {
     theme: "light",
+    contrast: "standard",
   },
   decorators: [withTheme, withPermissions],
 };

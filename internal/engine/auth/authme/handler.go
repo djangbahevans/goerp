@@ -99,6 +99,7 @@ type meUser struct {
 	// (auth-internals.md §8 "MFA enrollment").
 	MFASetupRequired bool    `json:"mfa_setup_required"`
 	Theme            string  `json:"theme"`
+	Contrast         string  `json:"contrast"`
 	Locale           *string `json:"locale"`
 	Timezone         *string `json:"timezone"`
 	DateFormat       *string `json:"date_format"`
@@ -165,7 +166,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// above already resolved successfully, and these fields are cosmetic,
 	// not a session validity signal.
 	var name, avatarURL *string
-	prefs := user.Profile{Theme: "system"}
+	prefs := user.Profile{Theme: "system", Contrast: "system"}
 	profile, err := h.users.GetProfile(ctx, authCtx.UserID)
 	switch {
 	case err == nil:
@@ -200,6 +201,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			MFAVerifiedAt:    authCtx.MFAVerifiedAt,
 			MFASetupRequired: setupRequired,
 			Theme:            prefs.Theme,
+			Contrast:         prefs.Contrast,
 			Locale:           prefs.Locale,
 			Timezone:         prefs.Timezone,
 			DateFormat:       prefs.DateFormat,
