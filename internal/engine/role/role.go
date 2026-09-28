@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -295,6 +296,62 @@ func (s *Store) IsMember(ctx context.Context, tenantSlug, userID string) (bool, 
 	}
 
 	return isMember, nil
+}
+
+// Member is an active tenant member as SearchMembers returns them. Name is
+// nil when the user has no profile name.
+type Member struct {
+	ID           string
+	Email        string
+	Name         *string
+	AvatarFileID *string
+}
+
+// SearchMembers returns up to limit active members of the tenant — an
+// active, non-deleted user holding an unexpired role grant — ordered by
+// name, then email, with nameless users last. A non-empty query matches
+// the start of any word of the name or the start of the email,
+// case-insensitively; excludeUserID, when non-empty, is left out.
+func (s *Store) SearchMembers(ctx context.Context, tenantSlug, query, excludeUserID string, limit int) ([]Member, error) {
+	schema := tenantschema.Name(tenantSlug)
+	sqlQuery := fmt.Sprintf(`
+		SELECT u.id, u.email, NULLIF(p.name, ''), p.avatar_file_id
+		FROM system.users u
+		LEFT JOIN system.user_profiles p ON p.user_id = u.id
+		WHERE u.deleted_at IS NULL AND u.status = 'active'
+		  AND EXISTS (
+			SELECT 1 FROM %s.user_roles ur
+			WHERE ur.user_id = u.id AND (ur.expires_at IS NULL OR ur.expires_at > NOW()))
+		  AND ($1 = '' OR u.email LIKE $2 ESCAPE '\' OR p.name ~* $3)
+		  AND ($4 = '' OR u.id::text <> $4)
+		ORDER BY lower(NULLIF(p.name, '')) NULLS LAST, u.email
+		LIMIT $5
+	`, schema)
+	lowered := strings.ToLower(query)
+	emailPrefix := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(lowered) + "%"
+	namePattern := `(^|[^[:alnum:]])` + regexp.QuoteMeta(query)
+
+	rows, err := s.db.QueryContext(ctx, sqlQuery, query, emailPrefix, namePattern, excludeUserID, limit)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return []Member{}, nil
+		}
+		return nil, fmt.Errorf("search tenant members: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	members := []Member{}
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.ID, &m.Email, &m.Name, &m.AvatarFileID); err != nil {
+			return nil, fmt.Errorf("scan tenant member: %w", err)
+		}
+		members = append(members, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenant members: %w", err)
+	}
+	return members, nil
 }
 
 // memberOfBatchSize bounds how many tenant schemas one MemberOf query reads.

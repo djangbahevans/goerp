@@ -634,6 +634,13 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/activity/{id}",
 	})
 
+	// /_meta/record-readers (record-activity.md §6) — same posture as
+	// /_meta/activity above.
+	table.Register("GET", "/_meta/record-readers", &route.RouteEntry{
+		Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+		PathTemplate: "/_meta/record-readers",
+	})
+
 	// /_notif/* (notification-system.md §9) — same posture as
 	// /_meta/activity above. The static segments (read-all, all) win over
 	// {id} in the route tree.

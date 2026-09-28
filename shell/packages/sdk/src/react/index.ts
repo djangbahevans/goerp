@@ -40,6 +40,8 @@ export {
   recordActivityQueryKey,
   useRecordActivity,
 } from "./use-record-activity.js";
+export type { RecordReader, UseRecordReadersOptions, UseRecordReadersResult } from "./use-record-readers.js";
+export { createRecordReadersQueryOptions, recordReadersQueryKey, useRecordReaders } from "./use-record-readers.js";
 export type { RelationBatchSpec } from "./use-relation-labels.js";
 export { createRelationLabelsQueryOptions, mergeLabelsByKey, useRelationLabels } from "./use-relation-labels.js";
 export type { SavedFilter, UseSavedFiltersResult } from "./use-saved-filters.js";
