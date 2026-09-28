@@ -12,11 +12,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
+	"github.com/djangbahevans/goerp/internal/engine/auth/sessionpolicy"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -33,11 +35,11 @@ const (
 	issuerName              = "goerp"
 )
 
-func refreshExpiry(persistent bool) time.Time {
+func refreshTTL(persistent bool) time.Duration {
 	if persistent {
-		return time.Now().Add(PersistentRefreshTTL)
+		return PersistentRefreshTTL
 	}
-	return time.Now().Add(NonPersistentRefreshTTL)
+	return NonPersistentRefreshTTL
 }
 
 // Claims is the access token's JSON shape, auth-internals.md §4 "Access
@@ -55,6 +57,20 @@ type Claims struct {
 	MFAVerifiedAt *int64   `json:"mfa_verified_at"`
 }
 
+// ErrIPNotAllowed rejects an Issue whose IPAddress the tenant's login IP
+// allowlist doesn't admit.
+var ErrIPNotAllowed = errors.New("signing in to this tenant is not allowed from this address")
+
+// IPAllowlists is satisfied by ipallowlist.Store.
+type IPAllowlists interface {
+	Check(ctx context.Context, tenantID, ip string) (bool, error)
+}
+
+// SessionPolicies is satisfied by sessionpolicy.Store.
+type SessionPolicies interface {
+	Load(ctx context.Context, tenantID string) (sessionpolicy.Policy, error)
+}
+
 // Issuer mints access/refresh token pairs for an already-authenticated
 // login.
 type Issuer struct {
@@ -62,10 +78,42 @@ type Issuer struct {
 	tenants    *tenant.Store
 	roles      *role.Store
 	sessions   *session.Store
+	policies   SessionPolicies
+	allowlists IPAllowlists
+	now        func() time.Time
 }
 
 func NewIssuer(signingKey *signingkey.SigningKey, tenants *tenant.Store, roles *role.Store, sessions *session.Store) *Issuer {
-	return &Issuer{signingKey: signingKey, tenants: tenants, roles: roles, sessions: sessions}
+	return &Issuer{signingKey: signingKey, tenants: tenants, roles: roles, sessions: sessions, now: time.Now}
+}
+
+// SetSessionPolicies bounds every session this Issuer writes by its
+// tenant's idle timeout and absolute maximum. Without it, a session
+// lives out its refresh token TTL.
+func (i *Issuer) SetSessionPolicies(policies SessionPolicies) {
+	i.policies = policies
+}
+
+// SetIPAllowlists makes Issue refuse, with ErrIPNotAllowed, a login from
+// outside its tenant's IP allowlist. Every flow that signs a user in
+// issues through here, so this is where the allowlist holds for all of
+// them; refreshing an existing session isn't a sign-in and isn't checked.
+func (i *Issuer) SetIPAllowlists(allowlists IPAllowlists) {
+	i.allowlists = allowlists
+}
+
+// expiresAt is a session row's expires_at when written at now, for a
+// family in tenantID that logged in at familyStart. A policy that can't
+// be read fails the write rather than issuing an unbounded session.
+func (i *Issuer) expiresAt(ctx context.Context, tenantID string, persistent bool, now, familyStart time.Time) (time.Time, error) {
+	var policy sessionpolicy.Policy
+	if i.policies != nil {
+		var err error
+		if policy, err = i.policies.Load(ctx, tenantID); err != nil {
+			return time.Time{}, err
+		}
+	}
+	return policy.ExpiresAt(now, familyStart, refreshTTL(persistent)), nil
 }
 
 // LoginParams describes the login event Issue is minting tokens for.
@@ -123,6 +171,15 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve tenant %q: %w", p.TenantSlug, err)
 	}
+	if i.allowlists != nil {
+		ok, err := i.allowlists.Check(ctx, t.ID, p.IPAddress)
+		if err != nil {
+			return nil, fmt.Errorf("check ip allowlist: %w", err)
+		}
+		if !ok {
+			return nil, ErrIPNotAllowed
+		}
+	}
 
 	roleNames, err := i.roles.RoleNamesForUser(ctx, p.TenantSlug, p.UserID)
 	if err != nil {
@@ -139,8 +196,12 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
 
-	now := time.Now()
+	now := i.now()
 	sessionID := uuid.New().String()
+	expiresAt, err := i.expiresAt(ctx, t.ID, p.Persistent, now, now)
+	if err != nil {
+		return nil, fmt.Errorf("resolve session expiry: %w", err)
+	}
 
 	if err := i.sessions.Insert(ctx, session.Row{
 		ID:              sessionID,
@@ -151,7 +212,7 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 		UserAgent:       p.UserAgent,
 		IPAddress:       p.IPAddress,
 		CountryCode:     p.CountryCode,
-		ExpiresAt:       refreshExpiry(p.Persistent),
+		ExpiresAt:       expiresAt,
 		Persistent:      p.Persistent,
 		MFAMethod:       p.MFAMethod,
 		MFAVerifiedAt:   p.MFAVerifiedAt,
@@ -160,7 +221,7 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 		return nil, fmt.Errorf("record session: %w", err)
 	}
 
-	accessToken, err := i.signAccessToken(sessionID, t.ID, p.UserID, roleNames, p.MFAMethod, p.MFAVerifiedAt, now)
+	accessToken, expiresIn, err := i.signAccessToken(sessionID, t.ID, p.UserID, roleNames, p.MFAMethod, p.MFAVerifiedAt, now, expiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("sign access token: %w", err)
 	}
@@ -168,7 +229,7 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 	return &Tokens{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int(accessTokenTTL.Seconds()),
+		ExpiresIn:    expiresIn,
 		Persistent:   p.Persistent,
 	}, nil
 }
@@ -182,19 +243,29 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 // persisting the session row's own mfa_verified_at/mfa_method/
 // mfa_credential_id columns first (session.Store.UpdateMFAAssurance) —
 // this method only signs the token, it doesn't touch the database.
-func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time) (accessToken string, expiresIn int, err error) {
-	accessToken, err = i.signAccessToken(sessionID, tenantID, userID, roleNames, mfaMethod, mfaVerifiedAt, time.Now())
+// sessionEnd is the session row's expires_at, which the token can't
+// outlive.
+func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, sessionEnd time.Time) (accessToken string, expiresIn int, err error) {
+	accessToken, expiresIn, err = i.signAccessToken(sessionID, tenantID, userID, roleNames, mfaMethod, mfaVerifiedAt, i.now(), sessionEnd)
 	if err != nil {
 		return "", 0, fmt.Errorf("sign access token: %w", err)
 	}
-	return accessToken, int(accessTokenTTL.Seconds()), nil
+	return accessToken, expiresIn, nil
 }
 
 // signAccessToken mints and signs the access token. amr always includes
 // "pwd"; mfaMethod is appended when non-empty, per auth-internals.md §4's
 // documented "an MFA factor type is appended once this session has
-// completed MFA" shape — never a replacement for "pwd".
-func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, now time.Time) (string, error) {
+// completed MFA" shape — never a replacement for "pwd". The token expires
+// accessTokenTTL after now, or at sessionEnd if that's sooner (zero for
+// none), so it can't outlive its session; expiresIn is its lifetime in
+// seconds.
+func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, now, sessionEnd time.Time) (token string, expiresIn int, err error) {
+	exp := now.Add(accessTokenTTL)
+	if !sessionEnd.IsZero() && sessionEnd.Before(exp) {
+		exp = sessionEnd
+	}
+
 	amr := []string{"pwd"}
 	var mfaVerifiedAtClaim *int64
 	if mfaMethod != "" {
@@ -209,7 +280,7 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 		Issuer:        issuerName,
 		Subject:       userID,
 		IssuedAt:      jwt.NewNumericDate(now),
-		ExpiresAt:     jwt.NewNumericDate(now.Add(accessTokenTTL)),
+		ExpiresAt:     jwt.NewNumericDate(exp),
 		ID:            uuid.New().String(),
 		SessionID:     sessionID,
 		TenantID:      tenantID,
@@ -219,9 +290,13 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 		MFAVerifiedAt: mfaVerifiedAtClaim,
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = i.signingKey.KID
-	return token.SignedString(i.signingKey.Private)
+	unsigned := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	unsigned.Header["kid"] = i.signingKey.KID
+	token, err = unsigned.SignedString(i.signingKey.Private)
+	if err != nil {
+		return "", 0, err
+	}
+	return token, int(exp.Sub(now).Seconds()), nil
 }
 
 // newRefreshToken returns a fresh opaque token (32 CSPRNG bytes,
@@ -284,7 +359,11 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 	}
 	newSessionID := uuid.New().String()
 
-	result, err := i.sessions.Rotate(ctx, presentedHash, newSessionID, newHash, p.DeviceID, refreshExpiry, p.UserAgent, p.IPAddress, p.CountryCode)
+	now := i.now()
+	newExpiresAt := func(tenantID string, persistent bool, familyStart time.Time) (time.Time, error) {
+		return i.expiresAt(ctx, tenantID, persistent, now, familyStart)
+	}
+	result, err := i.sessions.Rotate(ctx, presentedHash, newSessionID, newHash, p.DeviceID, now, newExpiresAt, p.UserAgent, p.IPAddress, p.CountryCode)
 	if err != nil {
 		return nil, 0, fmt.Errorf("rotate session: %w", err)
 	}
@@ -301,7 +380,7 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 		return nil, 0, fmt.Errorf("look up roles for user %s: %w", result.UserID, err)
 	}
 
-	accessToken, err := i.signAccessToken(newSessionID, result.TenantID, result.UserID, roleNames, result.MFAMethod, result.MFAVerifiedAt, time.Now())
+	accessToken, expiresIn, err := i.signAccessToken(newSessionID, result.TenantID, result.UserID, roleNames, result.MFAMethod, result.MFAVerifiedAt, now, result.ExpiresAt)
 	if err != nil {
 		return nil, 0, fmt.Errorf("sign access token: %w", err)
 	}
@@ -309,7 +388,7 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 	return &Tokens{
 		AccessToken:  accessToken,
 		RefreshToken: newToken,
-		ExpiresIn:    int(accessTokenTTL.Seconds()),
+		ExpiresIn:    expiresIn,
 		Persistent:   result.Persistent,
 	}, session.RotateOK, nil
 }

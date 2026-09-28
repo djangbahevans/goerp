@@ -673,6 +673,10 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 		{"GET", "/auth/accept-invite/info"},
 		{"POST", "/auth/register"},
 		{"GET", "/auth/check-slug"},
+		{"GET", "/admin/settings"},
+		{"PATCH", "/admin/settings"},
+		{"POST", "/admin/settings/logo"},
+		{"DELETE", "/admin/settings/logo"},
 	} {
 		entry, _, result, _ := table.Lookup(c.method, c.path)
 		if result != route.RouteFound {

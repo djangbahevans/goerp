@@ -217,6 +217,7 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 	// uses null for "the user already had recovery codes".
 	var issued any
 	var persistent bool
+	var sessionEnd time.Time
 	err = h.mfa.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := h.mfa.LockUserTx(ctx, tx, authCtx.UserID); err != nil {
 			return err
@@ -238,7 +239,7 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 			issued = codes.Codes
 		}
 
-		persistent, err = h.sessions.UpdateMFAAssuranceTx(ctx, tx, authCtx.SessionID, string(mfa.CredentialTOTP), now, credentialID)
+		persistent, sessionEnd, err = h.sessions.UpdateMFAAssuranceTx(ctx, tx, authCtx.SessionID, string(mfa.CredentialTOTP), now, credentialID)
 		if err != nil {
 			return err
 		}
@@ -258,7 +259,7 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, string(mfa.CredentialTOTP), &now)
+	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, string(mfa.CredentialTOTP), &now, sessionEnd)
 	if err != nil {
 		writeInternal(w)
 		return

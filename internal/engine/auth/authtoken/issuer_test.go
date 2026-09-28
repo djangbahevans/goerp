@@ -304,7 +304,7 @@ func TestReissueAccessToken_CarriesUpdatedAMRAndMFAVerifiedAt(t *testing.T) {
 	initialClaims := parseInitial.Claims.(*Claims)
 
 	verifiedAt := time.Now()
-	reissued, expiresIn, err := f.issuer.ReissueAccessToken(initialClaims.SessionID, initialClaims.TenantID, f.userID, initialClaims.Roles, "totp", &verifiedAt)
+	reissued, expiresIn, err := f.issuer.ReissueAccessToken(initialClaims.SessionID, initialClaims.TenantID, f.userID, initialClaims.Roles, "totp", &verifiedAt, time.Time{})
 	if err != nil {
 		t.Fatalf("ReissueAccessToken() error: %v", err)
 	}

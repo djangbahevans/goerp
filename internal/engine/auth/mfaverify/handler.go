@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"time"
 
@@ -190,6 +191,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		MFAVerifiedAt:   &now,
 		MFACredentialID: credentialID,
 	})
+	if errors.Is(err, authtoken.ErrIPNotAllowed) {
+		writeJSONError(w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
+		return
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return

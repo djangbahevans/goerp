@@ -21,11 +21,13 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
@@ -44,6 +46,7 @@ type fixture struct {
 	tenantSlug  string
 	userID      string
 	conn        *sql.DB
+	config      *tenantconfig.Store
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -103,7 +106,11 @@ func newFixture(t *testing.T) *fixture {
 
 	filesStore := files.NewStore(conn)
 
-	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, testAvailableLocales)
+	tenantConfig := tenantconfig.NewStore(conn)
+	if err := tenantConfig.Bootstrap(ctx); err != nil {
+		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
+	}
+	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, tenantl10n.NewStore(tenantConfig, testAvailableLocales))
 
 	slug := fmt.Sprintf("authmeupdatetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Update Test Co")
@@ -165,6 +172,7 @@ func newFixture(t *testing.T) *fixture {
 		tenantSlug:  slug,
 		userID:      userID,
 		conn:        conn,
+		config:      tenantConfig,
 	}
 }
 
@@ -550,6 +558,23 @@ func TestServeHTTP_InvalidPreferenceRejected(t *testing.T) {
 				t.Errorf("error = %s/%v, want invalid_preference with field %q", resp.Error.Code, resp.Error.Details, tc.field)
 			}
 		})
+	}
+}
+
+func TestServeHTTP_LocaleOutsideTenantAvailableLocalesRejected(t *testing.T) {
+	f := newFixture(t)
+	accessToken := f.issueAccessToken(t)
+	if err := f.config.Set(t.Context(), f.tenantID, tenantl10n.KeyAvailableLocales, "en"); err != nil {
+		t.Fatalf("set tenant available locales: %v", err)
+	}
+
+	rec := f.doPatch(t, f.domain, accessToken, `{"locale": "fr"}`)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 for a platform locale the tenant has not made available; body = %s", rec.Code, rec.Body.String())
+	}
+	rec = f.doPatch(t, f.domain, accessToken, `{"locale": "en"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
 	}
 }
 

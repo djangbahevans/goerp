@@ -168,33 +168,33 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 // UpdateMFAAssurance sets id's mfa_verified_at/mfa_method/mfa_credential_id
 // columns — auth-internals.md §8 "Step-up re-verification" step 2,
 // refreshing a session's MFA assurance in place without creating a new
-// session row — and returns the row's persistent flag, which the caller
-// needs to scope the reissued access-token cookie. Returns
+// session row — and returns the row's persistent flag and expires_at,
+// which the caller needs to scope and cap the reissued access token. Returns
 // ErrSessionNotFound if id doesn't match any non-revoked row.
-func (s *Store) UpdateMFAAssurance(ctx context.Context, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, err error) {
+func (s *Store) UpdateMFAAssurance(ctx context.Context, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, expiresAt time.Time, err error) {
 	return updateMFAAssurance(ctx, s.db, id, mfaMethod, mfaVerifiedAt, mfaCredentialID)
 }
 
 // UpdateMFAAssuranceTx is UpdateMFAAssurance inside the caller's
 // transaction.
-func (s *Store) UpdateMFAAssuranceTx(ctx context.Context, tx *sql.Tx, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, err error) {
+func (s *Store) UpdateMFAAssuranceTx(ctx context.Context, tx *sql.Tx, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, expiresAt time.Time, err error) {
 	return updateMFAAssurance(ctx, tx, id, mfaMethod, mfaVerifiedAt, mfaCredentialID)
 }
 
-func updateMFAAssurance(ctx context.Context, q db.Execer, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, err error) {
+func updateMFAAssurance(ctx context.Context, q db.Execer, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, expiresAt time.Time, err error) {
 	err = q.QueryRowContext(ctx, `
 		UPDATE system.sessions
 		SET mfa_verified_at = $2, mfa_method = $3, mfa_credential_id = NULLIF($4, '')::uuid
 		WHERE id = $1 AND revoked_at IS NULL
-		RETURNING persistent
-	`, id, mfaVerifiedAt, mfaMethod, mfaCredentialID).Scan(&persistent)
+		RETURNING persistent, expires_at
+	`, id, mfaVerifiedAt, mfaMethod, mfaCredentialID).Scan(&persistent, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, ErrSessionNotFound
+		return false, time.Time{}, ErrSessionNotFound
 	}
 	if err != nil {
-		return false, fmt.Errorf("update session mfa assurance: %w", err)
+		return false, time.Time{}, fmt.Errorf("update session mfa assurance: %w", err)
 	}
-	return persistent, nil
+	return persistent, expiresAt, nil
 }
 
 // NonRevokedIDsForUser returns the ids of every session row for userID

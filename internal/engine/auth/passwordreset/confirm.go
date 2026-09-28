@@ -163,6 +163,10 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		IPAddress:  loginsession.ClientIP(r),
 		Persistent: nonBrowser,
 	})
+	if errors.Is(err, authtoken.ErrIPNotAllowed) {
+		writeJSONError(w, http.StatusForbidden, "ip_not_allowed", "your password was reset, but signing in to this tenant is not allowed from your network")
+		return
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "password reset failed")
 		return

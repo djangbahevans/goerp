@@ -15,7 +15,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 
@@ -190,23 +189,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "ok"})
 }
 
-// invalidateDomainCache deletes every tenantresolve domain-cache entry
-// for tenantID, mirroring internal/engine/adminapi.tenantHandlers' own
-// helper of the same name — tenantByDomain's cached entry is a full
-// tenant.Tenant (including Plan), so a plan change must invalidate it the
-// same way a status change already does, or ResolveByHost keeps
+// invalidateDomainCache is needed because tenantByDomain's cached entry
+// is a full tenant.Tenant, Plan included: without it ResolveByHost keeps
 // returning the old plan for up to domainCacheTTL.
 func (h *Handler) invalidateDomainCache(ctx context.Context, tenantID string) error {
-	domains, err := h.tenantStore.DomainsForTenant(ctx, tenantID)
-	if err != nil {
-		return fmt.Errorf("list domains: %w", err)
-	}
-	for _, d := range domains {
-		if err := h.cache.Delete(ctx, tenantresolve.DomainCacheKey(d.Domain)); err != nil {
-			return fmt.Errorf("invalidate domain cache for %q: %w", d.Domain, err)
-		}
-	}
-	return nil
+	return tenantresolve.InvalidateTenantDomains(ctx, h.tenantStore, h.cache, tenantID)
 }
 
 // invalidateAndBroadcast is ServeHTTP's shared tail — best-effort

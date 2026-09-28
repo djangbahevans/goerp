@@ -17,6 +17,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
+	"github.com/djangbahevans/goerp/internal/engine/auth/ipallowlist"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
@@ -196,7 +197,9 @@ func newFixture(t *testing.T) *fixture {
 	resolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 	handoffs := handoff.NewStore(cacheClient, resolver, testPlatformDomain)
 
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient, auditStore, resolver, handoffs, tenantselect.NewStore(cacheClient))
+	allowlists := ipallowlist.NewStore(configStore)
+	issuer.SetIPAllowlists(allowlists)
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient, auditStore, resolver, handoffs, tenantselect.NewStore(cacheClient), allowlists)
 
 	return &fixture{
 		handler:    handler,

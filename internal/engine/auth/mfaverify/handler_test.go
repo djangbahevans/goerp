@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,7 @@ const testOrigin = "https://acmecorp.goerp.io"
 
 type fixture struct {
 	handler    *Handler
+	issuer     *authtoken.Issuer
 	mfaTokens  *mfatoken.Codec
 	rowKeys    *rowcrypt.RowKeySet
 	tenantID   string
@@ -159,6 +161,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 
 	return &fixture{
+		issuer:     issuer,
 		handler:    handler,
 		mfaTokens:  mfaTokens,
 		rowKeys:    rowKeys,
@@ -463,5 +466,29 @@ func TestServeHTTP_TokenPasswordUpdateRecommendedReachesResponse(t *testing.T) {
 				t.Errorf("password_update_recommended present = %v, want %v; body = %s", got, recommended, rec.Body.String())
 			}
 		})
+	}
+}
+
+// allowlistOf admits only allowed, standing in for ipallowlist.Store.
+type allowlistOf struct{ allowed string }
+
+func (a allowlistOf) Check(_ context.Context, _, ip string) (bool, error) {
+	return ip == a.allowed, nil
+}
+
+func TestServeHTTP_IPAllowlistRejectsTheSession(t *testing.T) {
+	f := newFixture(t)
+	f.issuer.SetIPAllowlists(allowlistOf{allowed: "198.51.100.1"})
+	code := f.enrollTOTP(t)
+	token, _ := f.issueMFAToken(t, testOrigin)
+
+	rec := f.doVerify(t, map[string]any{"mfa_token": token, "type": "totp", "code": code}, map[string]string{
+		"Origin": testOrigin, "X-Client-Type": "cli", "Content-Type": "application/json",
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s, want 403", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"ip_not_allowed"`) {
+		t.Errorf("body = %s, want ip_not_allowed", rec.Body.String())
 	}
 }

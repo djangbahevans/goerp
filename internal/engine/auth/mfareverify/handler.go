@@ -157,12 +157,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// fresh access token carrying the updated amr/mfa_verified_at claims
 	// — same session, refresh token unchanged.
 	now := time.Now()
-	persistent, err := h.sessions.UpdateMFAAssurance(ctx, authCtx.SessionID, req.Type, now, credentialID)
+	persistent, sessionEnd, err := h.sessions.UpdateMFAAssurance(ctx, authCtx.SessionID, req.Type, now, credentialID)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
-	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, req.Type, &now)
+	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, req.Type, &now, sessionEnd)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return

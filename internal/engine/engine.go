@@ -46,6 +46,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
 	"github.com/djangbahevans/goerp/internal/engine/auth/acceptinvite"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminroles"
+	"github.com/djangbahevans/goerp/internal/engine/auth/adminsettings"
 	"github.com/djangbahevans/goerp/internal/engine/auth/adminusers"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authlogout"
@@ -58,6 +59,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/emailverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
+	"github.com/djangbahevans/goerp/internal/engine/auth/ipallowlist"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginflow"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaenroll"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfafactors"
@@ -71,6 +73,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/roleassign"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
+	"github.com/djangbahevans/goerp/internal/engine/auth/sessionpolicy"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/auth/tenantcontext"
@@ -91,6 +94,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/mailer"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
@@ -330,6 +334,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	tokenIssuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
+	sessionPolicies := sessionpolicy.NewStore(tenantConfigStore)
+	tokenIssuer.SetSessionPolicies(sessionPolicies)
+	ipAllowlists := ipallowlist.NewStore(tenantConfigStore)
+	tokenIssuer.SetIPAllowlists(ipAllowlists)
 
 	mfaTokenKeyStore := mfatoken.NewStore(primaryPool, secretsBackend)
 	// Loaded (or generated, on first boot) here at startup, same reasoning
@@ -672,7 +680,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		passwordHasher, tokenIssuer, inviteMailer, handoffStore,
 	)
 	acceptInviteHandlers := acceptinvite.NewHandlers(tenantStore, inviteStore, userStore, passwordPolicies, passwordHasher, tokenIssuer)
-	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore, tenantselect.NewStore(cacheClient))
+	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore, tenantselect.NewStore(cacheClient), ipAllowlists)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
 	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
@@ -690,8 +698,9 @@ func New(cfg *config.Config) (*Engine, error) {
 	// (avatar URL resolution, goerp#819) and storageUploadHandler both
 	// need it before builtinRoutes is built.
 	filesStore := files.NewStore(primaryPool)
-	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, filesStore, storageBackend, cfg.AvailableLocales, passwordPolicies)
-	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore, cfg.AvailableLocales)
+	tenantLocales := tenantl10n.NewStore(tenantConfigStore, cfg.AvailableLocales)
+	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, filesStore, storageBackend, tenantLocales, passwordPolicies)
+	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore, tenantLocales)
 	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
@@ -863,6 +872,27 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["DELETE /admin/roles/{id}"] = http.HandlerFunc(adminRolesHandler.ServeDelete)
 	planChangeHandler := planchange.NewHandler(tenantResolver, authChecker, billingStore, tenantStore, cacheClient, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/tenant/plan"] = http.HandlerFunc(planChangeHandler.ServeHTTP)
+	adminSettingsHandler := adminsettings.NewHandler(adminsettings.Deps{
+		Tenants:      tenantResolver,
+		Auth:         authChecker,
+		TenantStore:  tenantStore,
+		Cache:        cacheClient,
+		Roles:        roleStore,
+		Config:       tenantConfigStore,
+		MFA:          mfaPolicyStore,
+		Passwords:    passwordPolicies,
+		Sessions:     sessionPolicies,
+		IPAllowlists: ipAllowlists,
+		Locales:      tenantLocales,
+		Audit:        authAuditStore,
+		Storage:      storageBackend,
+		Files:        filesStore,
+		MaxLogoBytes: min(cfg.StorageMaxFileBytes, adminsettings.MaxLogoBytes),
+	})
+	builtinRoutes["GET /admin/settings"] = http.HandlerFunc(adminSettingsHandler.ServeGet)
+	builtinRoutes["PATCH /admin/settings"] = http.HandlerFunc(adminSettingsHandler.ServePatch)
+	builtinRoutes["POST /admin/settings/logo"] = http.HandlerFunc(adminSettingsHandler.ServeUploadLogo)
+	builtinRoutes["DELETE /admin/settings/logo"] = http.HandlerFunc(adminSettingsHandler.ServeDeleteLogo)
 	moduleInstallWorker := &moduleinstall.Worker{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,
