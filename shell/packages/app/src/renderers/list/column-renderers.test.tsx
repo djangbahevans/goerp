@@ -67,12 +67,14 @@ describe("renderCellContent", () => {
     );
   });
 
-  it("currency: uses currency_field to pick the currency code", () => {
+  it("currency: uses currency_field to pick the currency code, formatting minor units as major", () => {
     const html = cell(
       { field: "amount", type: "currency", currency_field: "currency" },
-      { amount: 10, currency: "GHS" },
+      { amount: 1050, currency: "GHS" },
     );
-    expect(html.textContent).toBe(new Intl.NumberFormat(undefined, { style: "currency", currency: "GHS" }).format(10));
+    expect(html.textContent).toBe(
+      new Intl.NumberFormat(undefined, { style: "currency", currency: "GHS" }).format(10.5),
+    );
   });
 
   it("currency: falls back to plain number formatting instead of throwing when currency_field holds an invalid code", () => {

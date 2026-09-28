@@ -94,7 +94,7 @@ const ROWS: Row[] = [
   {
     id: "order-1",
     reference: "SO-1042",
-    amount_total: 450.5,
+    amount_total: 45050,
     currency_code: "USD",
     quantity: 12,
     discount_pct: 0.15,
@@ -121,7 +121,7 @@ const ROWS: Row[] = [
   {
     id: "order-2",
     reference: "SO-1043",
-    amount_total: 120,
+    amount_total: 12000,
     currency_code: "USD",
     quantity: 3,
     discount_pct: 0,
@@ -272,7 +272,8 @@ export const Default: Story = {
     const body = within(table.querySelector("tbody") as HTMLElement);
 
     await expect(body.getByText("SO-1042")).toBeInTheDocument();
-    // Locale-formatted like column-renderers.tsx's own currency case,
+    // Minor units (45050) shown as major, locale-formatted like
+    // column-renderers.tsx's own currency case,
     // rather than a hardcoded "$450.50" that only matches en-US.
     await expect(
       body.getByText(new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(450.5)),
