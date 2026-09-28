@@ -1,6 +1,6 @@
 import { ActionButton, Button, FieldWrapper, Icon, Select, TextInput } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { SideSheet } from "../../chrome/side-sheet.js";
 import { type InviteUserResult, useInviteUser } from "./admin-users-api.js";
 import { DEFAULT_INVITE_ROLE, useAssignableRoles } from "./roles.js";
@@ -57,7 +57,7 @@ export function InviteUserSheet({ open, onClose }: InviteUserSheetProps): ReactN
     if (open) reset();
   }, [open]);
 
-  const submit = async (event?: FormEvent) => {
+  const submit = async (event?: SubmitEvent<HTMLFormElement>) => {
     event?.preventDefault();
     // A second Enter before isPending re-renders would send (and re-token) the invite twice.
     if (submitting.current) return;

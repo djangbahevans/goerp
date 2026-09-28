@@ -14,7 +14,7 @@ import {
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
-import { type FormEvent, type MouseEvent, type ReactNode, useMemo, useState } from "react";
+import { type MouseEvent, type ReactNode, type SubmitEvent, useMemo, useState } from "react";
 import { roleLabel } from "../users/roles.js";
 import {
   type AdminRoleDetail,
@@ -212,7 +212,7 @@ function RoleForm({ saved: role, catalog, onCreated, onDeleted, onOpenUsers }: R
     setErrors({});
   };
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (readOnly || !dirty || saving) return;
     const input: RoleInput = { name: name.trim(), description: description.trim(), permissions: [...selected].sort() };
