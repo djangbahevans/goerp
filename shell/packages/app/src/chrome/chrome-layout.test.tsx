@@ -18,6 +18,9 @@ vi.mock("./chrome-header.js", () => ({
     </header>
   ),
 }));
+vi.mock("./bottom-nav-bar.js", () => ({
+  BottomNavBar: () => <nav aria-label="Main">bottom bar</nav>,
+}));
 vi.mock("./chrome-sidebar.js", () => ({
   ChromeSidebar: () => (
     <nav aria-label="Main">
@@ -28,6 +31,7 @@ vi.mock("./chrome-sidebar.js", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   localeStore.setLocale("en");
   passwordUpdateNotice.set(false);
 });
@@ -142,5 +146,48 @@ describe("ChromeLayout", () => {
   it("renders no banner when nothing is active", async () => {
     await renderLayout();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+// A matchMedia whose (min-width: 768px) answer can change mid-test.
+function stubViewport(initiallyWide: boolean) {
+  let wide = initiallyWide;
+  const listeners = new Set<() => void>();
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    get matches() {
+      return wide;
+    },
+    media: query,
+    addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+  }));
+  return {
+    resize(nextWide: boolean) {
+      wide = nextWide;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+describe("ChromeLayout below 768px", () => {
+  it("renders the bottom bar instead of the rail, padding the content column by its height", async () => {
+    stubViewport(false);
+    await renderLayout();
+
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    expect(nav.textContent).toBe("bottom bar");
+    expect(screen.queryByRole("link", { name: "Sales" })).toBeNull();
+    expect(screen.getByRole("main").parentElement?.className).toContain("pb-[calc(var(--bottom-nav-height)");
+  });
+
+  it("swaps back to the rail when the viewport widens to 768px", async () => {
+    const viewport = stubViewport(false);
+    await renderLayout();
+
+    act(() => viewport.resize(true));
+
+    expect(screen.getByRole("navigation", { name: "Main" }).textContent).toBe("Sales");
+    expect(screen.queryByText("bottom bar")).toBeNull();
+    expect(screen.getByRole("main").parentElement?.className).not.toContain("--bottom-nav-height");
   });
 });

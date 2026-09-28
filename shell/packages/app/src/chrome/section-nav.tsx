@@ -1,7 +1,7 @@
 import { Icon } from "@goerp/sdk/components";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useEffect, useId, useRef } from "react";
-import { useMediaQuery } from "./use-media-query.js";
+import { useWideViewport } from "./use-media-query.js";
 
 export interface SectionNavItem {
   to: string;
@@ -23,9 +23,6 @@ export interface SectionNavProps {
   // Forces a layout instead of following the viewport; for stories and tests.
   layout?: SectionNavLayout | undefined;
 }
-
-// components/section-nav.md: Tailwind's default `md` breakpoint.
-const WIDE_QUERY = "(min-width: 768px)";
 
 const ITEM_CLASSES =
   "relative flex items-center gap-2 whitespace-nowrap rounded-control px-3 py-2 text-sm focus-visible:shadow-focus focus-visible:outline-none";
@@ -151,7 +148,7 @@ function NarrowRow({ groups, activeTo }: { groups: SectionNavGroup[]; activeTo: 
 // components/section-nav.md: the sub-navigation rail for multi-page shell
 // sections (/settings, /admin), rendered next to the section's content.
 export function SectionNav({ label, groups, children, layout }: SectionNavProps): ReactNode {
-  const wideViewport = useMediaQuery(WIDE_QUERY, true);
+  const wideViewport = useWideViewport();
   const resolved: SectionNavLayout = layout ?? (wideViewport ? "wide" : "narrow");
   const visibleGroups = groups.filter((group) => group.items.length > 0);
   const pathname = useRouterState({ select: (state) => state.location.pathname });

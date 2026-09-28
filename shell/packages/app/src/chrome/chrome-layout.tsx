@@ -1,13 +1,17 @@
 import { useLocale } from "@goerp/sdk/i18n";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { type MouseEvent, type ReactNode, useEffect, useRef } from "react";
+import { BottomNavBar } from "./bottom-nav-bar.js";
 import { ChromeBanners } from "./chrome-banners.js";
 import { ChromeHeader } from "./chrome-header.js";
 import { ChromeSidebar } from "./chrome-sidebar.js";
+import { useWideViewport } from "./use-media-query.js";
 
 // shell-architecture.md §15. ChromeSidebar sizes itself from the sidebar
 // store, so the content column is a flex-1 sibling rather than offset by a
-// margin. The skip link focuses <main> directly instead of navigating to
+// margin. Below 768px the rail gives way to BottomNavBar (chrome-sidebar.md),
+// and the column is padded by the bar's height so nothing ends up behind it.
+// The skip link focuses <main> directly instead of navigating to
 // #main-content, which would overwrite the URL hash that form views use for
 // the active tab (§6).
 export function ChromeLayout(): ReactNode {
@@ -15,6 +19,7 @@ export function ChromeLayout(): ReactNode {
   const mainRef = useRef<HTMLElement>(null);
   const pathname = useRouterState({ select: (s) => (s.resolvedLocation ?? s.location).pathname });
   const previousPathname = useRef(pathname);
+  const wide = useWideViewport();
 
   // Accessibility "Focus management": a route navigation moves focus to
   // <main>. Only pathname changes count — filters, sort and form tabs live in
@@ -40,14 +45,19 @@ export function ChromeLayout(): ReactNode {
       >
         Skip to content
       </a>
-      <ChromeSidebar />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      {wide && <ChromeSidebar />}
+      <div
+        className={`flex min-w-0 flex-1 flex-col overflow-hidden ${
+          wide ? "" : "pb-[calc(var(--bottom-nav-height)+env(safe-area-inset-bottom))]"
+        }`}
+      >
         <ChromeHeader />
         <ChromeBanners mainRef={mainRef} />
         <main ref={mainRef} id="main-content" tabIndex={-1} className="flex-1 overflow-auto focus:outline-none">
           <Outlet />
         </main>
       </div>
+      {!wide && <BottomNavBar />}
     </div>
   );
 }
