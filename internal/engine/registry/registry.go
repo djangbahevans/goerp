@@ -442,7 +442,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		"/auth/refresh", "/auth/logout", "/admin/tenant/plan",
 		"/auth/password-reset/request", "/auth/password-reset/confirm",
 		"/auth/verify-email", "/auth/verify-email/resend",
-		"/auth/me/change-password", "/auth/accept-invite", "/auth/register",
+		"/auth/me/change-password", "/auth/accept-invite",
 	} {
 		table.Register("POST", path, &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
@@ -450,13 +450,26 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		})
 	}
 
+	// Registration provisions a tenant per success, so both registration
+	// routes carry their own per-IP limits (auth-internals.md §15).
+	table.Register("POST", "/auth/register", &route.RouteEntry{
+		Manifest: route.RouteManifest{
+			EngineNative: true, EngineBuiltin: true,
+			RateLimit: &route.RateLimitConfig{Requests: 5, WindowSeconds: 3600, Scope: "ip"},
+		},
+		PathTemplate: "/auth/register",
+	})
+
 	table.Register("GET", "/auth/me", &route.RouteEntry{
 		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
 		PathTemplate: "/auth/me",
 	})
 	// Anonymous slug-availability check for the register page.
 	table.Register("GET", "/auth/check-slug", &route.RouteEntry{
-		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+		Manifest: route.RouteManifest{
+			EngineNative: true, EngineBuiltin: true,
+			RateLimit: &route.RateLimitConfig{Requests: 60, WindowSeconds: 60, Scope: "ip"},
+		},
 		PathTemplate: "/auth/check-slug",
 	})
 	// Anonymous accept-invite prefill (Class B: tenant from ?tenant=).
