@@ -729,6 +729,24 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		PathTemplate: "/_meta/scheduled-activities/{id}",
 	})
 
+	// /_meta/activity-types and /admin/activity-types
+	// (scheduled-activities.md §9) — same posture as /_meta/activity
+	// above. The admin routes check the admin role themselves; the static
+	// "order" segment wins over {key} in the route tree.
+	for _, r := range [][2]string{
+		{"GET", "/_meta/activity-types"},
+		{"GET", "/admin/activity-types"},
+		{"POST", "/admin/activity-types"},
+		{"PATCH", "/admin/activity-types/{key}"},
+		{"PUT", "/admin/activity-types/order"},
+		{"DELETE", "/admin/activity-types/{key}"},
+	} {
+		table.Register(r[0], r[1], &route.RouteEntry{
+			Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+			PathTemplate: r[1],
+		})
+	}
+
 	// /storage/upload (goerp#818) — same EngineBuiltin posture as
 	// /auth/login above: storageupload.Handler resolves tenant/auth itself
 	// (same manual ResolveByHost/Authenticate pattern authme.Handler

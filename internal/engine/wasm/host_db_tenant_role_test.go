@@ -26,7 +26,7 @@ func setupTenantRoleTest(t *testing.T) (primaryDB *sql.DB, slug, other string, m
 	other = slug + "other"
 	for _, s := range []string{slug, other} {
 		createFixtureTenantSchema(t, primaryDB, s)
-		if err := enginetables.CreateAll(t.Context(), primaryDB, s); err != nil {
+		if err := enginetables.CreateAll(t.Context(), primaryDB, s, nil); err != nil {
 			t.Fatalf("create engine tables: %v", err)
 		}
 		if _, err := primaryDB.Exec(`CREATE TABLE ` + tenantschema.Name(s) + `.widget (id UUID PRIMARY KEY, name TEXT)`); err != nil {

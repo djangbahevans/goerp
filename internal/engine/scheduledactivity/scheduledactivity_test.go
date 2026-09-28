@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/activitytype"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -47,6 +48,13 @@ func openTestStore(t *testing.T) (store *Store, conn *sql.DB, slug string) {
 
 	if err := recordactivity.NewStore(conn).Bootstrap(t.Context(), slug); err != nil {
 		t.Fatalf("recordactivity Bootstrap() error: %v", err)
+	}
+	types := activitytype.NewStore(conn)
+	if err := types.Bootstrap(t.Context(), slug); err != nil {
+		t.Fatalf("activitytype Bootstrap() error: %v", err)
+	}
+	if err := types.Seed(t.Context(), slug, nil); err != nil {
+		t.Fatalf("activitytype Seed() error: %v", err)
 	}
 	store = NewStore(conn)
 	if err := store.Bootstrap(t.Context(), slug); err != nil {

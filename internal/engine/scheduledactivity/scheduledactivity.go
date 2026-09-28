@@ -13,26 +13,24 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // TableName is the table's unqualified name, as module SQL would spell it.
 const TableName = "scheduled_activities"
 
-// Types are the activity types a scheduled activity can have.
-var Types = []string{"call", "meeting", "email", "todo"}
-
-func ValidType(t string) bool { return slices.Contains(Types, t) }
-
 var (
 	ErrNotFound = errors.New("scheduled activity not found")
 	// ErrDone is returned by a write to an activity that is already done.
 	ErrDone = errors.New("scheduled activity is already done")
+	// ErrUnknownType is returned by a write whose type isn't in the
+	// tenant's activity_types, e.g. one deleted after the caller checked it.
+	ErrUnknownType = errors.New("unknown activity type")
 )
 
 type Store struct {
@@ -84,6 +82,9 @@ func (s *Store) Create(ctx context.Context, tenantSlug string, in NewActivity) (
 	`, tenantschema.Name(tenantSlug), activityColumns)
 
 	a, err := scanActivity(s.db.QueryRowContext(ctx, query, in.Model, in.RecordID, in.Type, in.Summary, in.Note, in.DueDate, in.AssigneeID, in.CreatedBy))
+	if isForeignKeyViolation(err) {
+		return nil, ErrUnknownType
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create scheduled activity: %w", err)
 	}
@@ -201,6 +202,9 @@ func (s *Store) Update(ctx context.Context, tenantSlug, id string, u Update) (*A
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, s.notOpenError(ctx, tenantSlug, id)
 	}
+	if isForeignKeyViolation(err) {
+		return nil, ErrUnknownType
+	}
 	if err != nil {
 		return nil, fmt.Errorf("update scheduled activity: %w", err)
 	}
@@ -284,6 +288,11 @@ func (s *Store) notOpenError(ctx context.Context, tenantSlug, id string) error {
 	return ErrDone
 }
 
+func isForeignKeyViolation(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "23503"
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -299,21 +308,22 @@ func scanActivity(sc rowScanner) (*Activity, error) {
 
 // Bootstrap creates scheduled_activities and its partial indexes in the
 // given tenant's schema if they don't already exist. Does not create the
-// schema itself. The users.id columns are plain UUIDs with no FK —
-// system.users lives outside tenant_{slug}. Concurrent-safe against other
-// calls racing to bootstrap the same tenant's schema via
-// db.WithAdvisoryLock.
+// schema itself, or activity_types, which type references and must exist
+// first (activitytype.Store.Bootstrap). The users.id columns are plain
+// UUIDs with no FK — system.users lives outside tenant_{slug}.
+// Concurrent-safe against other calls racing to bootstrap the same
+// tenant's schema via db.WithAdvisoryLock.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	keys := []int64{db.AdvisoryLockKey("scheduledactivity.Bootstrap:" + tenantSlug)}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
 		schema := tenantschema.Name(tenantSlug)
 
 		createTable := fmt.Sprintf(`
-			CREATE TABLE IF NOT EXISTS %s.scheduled_activities (
+			CREATE TABLE IF NOT EXISTS %[1]s.scheduled_activities (
 			    id           UUID PRIMARY KEY DEFAULT uuidv7(),
 			    model        TEXT NOT NULL,
 			    record_id    UUID NOT NULL,
-			    type         TEXT NOT NULL CHECK (type IN ('call', 'meeting', 'email', 'todo')),
+			    type         TEXT NOT NULL REFERENCES %[1]s.activity_types (key) ON DELETE RESTRICT,
 			    summary      TEXT NOT NULL CHECK (char_length(summary) BETWEEN 1 AND 200),
 			    note         TEXT CHECK (char_length(note) <= 10000),
 			    due_date     DATE NOT NULL,

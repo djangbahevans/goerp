@@ -72,6 +72,11 @@ type Activities struct {
 	// cacheClient is Redis, fail-hard constructed in Engine.New; nil only
 	// in tests that never resolve the tenant by host.
 	cacheClient *cache.Client
+
+	// availableLocales (GOERP_AVAILABLE_LOCALES) are the locales seeded
+	// engine-owned rows, such as the built-in activity types, carry
+	// labels for.
+	availableLocales []string
 }
 
 func NewActivities(
@@ -84,17 +89,19 @@ func NewActivities(
 	moduleRegistry *registry.ModuleRegistry,
 	platformDomain string,
 	cacheClient *cache.Client,
+	availableLocales []string,
 ) *Activities {
 	return &Activities{
-		tenantStore:    tenantStore,
-		inviteStore:    inviteStore,
-		roleStore:      roleStore,
-		schemaSyncPool: schemaSyncPool,
-		syncPool:       syncPool,
-		diffEngine:     diffEngine,
-		registry:       moduleRegistry,
-		platformDomain: platformDomain,
-		cacheClient:    cacheClient,
+		tenantStore:      tenantStore,
+		inviteStore:      inviteStore,
+		roleStore:        roleStore,
+		schemaSyncPool:   schemaSyncPool,
+		syncPool:         syncPool,
+		diffEngine:       diffEngine,
+		registry:         moduleRegistry,
+		platformDomain:   platformDomain,
+		cacheClient:      cacheClient,
+		availableLocales: availableLocales,
 	}
 }
 
@@ -150,9 +157,9 @@ func (a *Activities) CreateTenantSchema(ctx context.Context, slug string) error 
 
 // CreateEngineTables creates every engine-owned per-tenant table
 // (enginetables.Groups) a fresh tenant needs before module schema sync
-// and config seeding can run.
+// and config seeding can run, with their seed rows.
 func (a *Activities) CreateEngineTables(ctx context.Context, slug string) error {
-	return enginetables.CreateAll(ctx, a.schemaSyncPool, slug)
+	return enginetables.CreateAll(ctx, a.schemaSyncPool, slug, a.availableLocales)
 }
 
 // ListModuleNames returns the name of every currently loaded module that

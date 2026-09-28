@@ -41,6 +41,7 @@ import (
 	"uuid"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/activitytype"
 	"github.com/djangbahevans/goerp/internal/engine/adminapi"
 	"github.com/djangbahevans/goerp/internal/engine/apikey"
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
@@ -182,6 +183,9 @@ type Engine struct {
 	unsubscribeCodec *notifications.UnsubscribeCodec
 	// scheduledActivityStore backs /_meta/scheduled-activities.
 	scheduledActivityStore *scheduledactivity.Store
+	// activityTypeStore backs /_meta/activity-types and
+	// /admin/activity-types, and the type checks scheduling makes.
+	activityTypeStore *activitytype.Store
 	// roleStore resolves another user's tenant roles when a route reads a
 	// record with their permissions (record-activity.md §7).
 	roleStore       *role.Store
@@ -273,6 +277,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	savedFiltersStore := savedfilters.NewStore(primaryPool)
 	recordActivityStore := recordactivity.NewStore(primaryPool)
 	scheduledActivityStore := scheduledactivity.NewStore(primaryPool)
+	activityTypeStore := activitytype.NewStore(primaryPool)
 
 	// apiKeyStore isn't stored as an Engine field — authChecker below is
 	// its only consumer.
@@ -750,7 +755,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	// ProvisionTenantWorkflow's activities need moduleRegistry/diffEngine,
 	// which don't exist until here — registered on systemWorker (built
 	// earlier, alongside temporalClient) now, started later in Start.
-	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, roleStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain, cacheClient)
+	provisionActivities := tenantprovision.NewActivities(tenantStore, inviteStore, roleStore, schemaPool, syncPool, diffEngine, moduleRegistry, cfg.PlatformDomain, cacheClient, cfg.AvailableLocales)
 	systemWorker.RegisterWorkflow(tenantprovision.Workflow)
 	systemWorker.RegisterActivity(provisionActivities)
 
@@ -1037,6 +1042,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		notificationConfig:     notificationConfig,
 		unsubscribeCodec:       notifications.NewUnsubscribeCodec(signingKeySet),
 		scheduledActivityStore: scheduledActivityStore,
+		activityTypeStore:      activityTypeStore,
 		roleStore:              roleStore,
 		filesStore:             filesStore,
 		cacheClient:            cacheClient,
@@ -1098,6 +1104,15 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["PATCH /_meta/scheduled-activities/{id}"] = http.HandlerFunc(e.dispatchScheduledActivityUpdateRoute)
 	builtinRoutes["POST /_meta/scheduled-activities/{id}/done"] = http.HandlerFunc(e.dispatchScheduledActivityDoneRoute)
 	builtinRoutes["DELETE /_meta/scheduled-activities/{id}"] = http.HandlerFunc(e.dispatchScheduledActivityCancelRoute)
+
+	// /_meta/activity-types and /admin/activity-types
+	// (scheduled-activities.md §9) follow the same pattern.
+	builtinRoutes["GET /_meta/activity-types"] = http.HandlerFunc(e.dispatchActivityTypeListRoute)
+	builtinRoutes["GET /admin/activity-types"] = http.HandlerFunc(e.dispatchAdminActivityTypeListRoute)
+	builtinRoutes["POST /admin/activity-types"] = http.HandlerFunc(e.dispatchAdminActivityTypeCreateRoute)
+	builtinRoutes["PATCH /admin/activity-types/{key}"] = http.HandlerFunc(e.dispatchAdminActivityTypeUpdateRoute)
+	builtinRoutes["PUT /admin/activity-types/order"] = http.HandlerFunc(e.dispatchAdminActivityTypeReorderRoute)
+	builtinRoutes["DELETE /admin/activity-types/{key}"] = http.HandlerFunc(e.dispatchAdminActivityTypeDeleteRoute)
 
 	// /_notif/* (notification-system.md §9) follows the same pattern.
 	builtinRoutes["GET /_notif/feed"] = http.HandlerFunc(e.dispatchNotifFeedRoute)
