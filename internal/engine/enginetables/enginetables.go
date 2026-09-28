@@ -80,7 +80,7 @@ var Groups = []Group{
 		},
 	},
 	{
-		Tables: []Table{{Name: recordactivity.TableName}},
+		Tables: []Table{{Name: recordactivity.TableName}, {Name: recordactivity.FollowersTable}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return recordactivity.NewStore(pool).Bootstrap(ctx, slug)
 		},
@@ -139,7 +139,6 @@ var Groups = []Group{
 // Groups once the engine creates it.
 var plannedTables = []string{
 	"activity_types",
-	"record_followers",
 	"view_overrides",
 }
 

@@ -766,6 +766,36 @@ func TestBuildRouteTable_IncludesNotifRoutes(t *testing.T) {
 	}
 }
 
+// TestBuildRouteTable_IncludesActivityFollowersRoutes checks the
+// /_meta/activity/followers routes resolve as engine-native,
+// session-authenticated routes, and that the static followers segment
+// resolves to its own entry rather than DELETE /_meta/activity/{id}'s.
+func TestBuildRouteTable_IncludesActivityFollowersRoutes(t *testing.T) {
+	table, err := buildRouteTable(map[string]*module.LoadedModule{})
+	if err != nil {
+		t.Fatalf("buildRouteTable() error = %v", err)
+	}
+
+	const id = "0197a4f2-0000-7000-8000-000000000000"
+	for _, c := range []struct{ method, path, template string }{
+		{"GET", "/_meta/activity/followers", "/_meta/activity/followers"},
+		{"PUT", "/_meta/activity/followers", "/_meta/activity/followers"},
+		{"DELETE", "/_meta/activity/followers", "/_meta/activity/followers"},
+		{"DELETE", "/_meta/activity/" + id, "/_meta/activity/{id}"},
+	} {
+		entry, _, result, _ := table.Lookup(c.method, c.path)
+		if result != route.RouteFound {
+			t.Fatalf("Lookup(%s, %s) result = %v, want RouteFound", c.method, c.path, result)
+		}
+		if entry.PathTemplate != c.template {
+			t.Errorf("Lookup(%s, %s).PathTemplate = %q, want %q", c.method, c.path, entry.PathTemplate, c.template)
+		}
+		if !entry.Manifest.EngineNative || entry.Manifest.EngineBuiltin || entry.Manifest.Auth != "required" {
+			t.Errorf("Lookup(%s, %s).Manifest = %+v, want EngineNative, not EngineBuiltin, Auth required", c.method, c.path, entry.Manifest)
+		}
+	}
+}
+
 func TestBuildEventRegistry_FromModules(t *testing.T) {
 	modules := map[string]*module.LoadedModule{
 		"billing": {

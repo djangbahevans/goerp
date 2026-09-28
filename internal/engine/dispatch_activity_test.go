@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -524,5 +525,164 @@ func TestDispatchActivityListRoute_CursorSkipsPastAFullyFilteredPage(t *testing.
 	second := f.listAs(t, false, 1, *first.Meta.Cursor)
 	if len(second.Data) != 1 || second.Data[0]["id"] != visible || second.Meta.HasMore {
 		t.Errorf("second page = %+v, want the visible entry and no more pages", second)
+	}
+}
+
+type activityFollowersListResponse struct {
+	Data []struct {
+		User      activityAuthor `json:"user"`
+		CreatedAt string         `json:"created_at"`
+	} `json:"data"`
+	Meta activityFollowersMeta `json:"meta"`
+}
+
+func (f *dispatchActivityFixture) followChange(callerID, method, recordID string) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(map[string]any{"model": activityTestModel, "record_id": recordID})
+	w := httptest.NewRecorder()
+	r := f.requestAs(callerID, method, "/_meta/activity/followers", body, nil)
+	if method == http.MethodPut {
+		f.e.dispatchActivityFollowRoute(w, r)
+	} else {
+		f.e.dispatchActivityUnfollowRoute(w, r)
+	}
+	return w
+}
+
+func (f *dispatchActivityFixture) listFollowers(callerID, recordID string) *httptest.ResponseRecorder {
+	q := url.Values{"model": {activityTestModel}, "record_id": {recordID}}
+	w := httptest.NewRecorder()
+	f.e.dispatchActivityFollowersListRoute(w, f.requestAs(callerID, http.MethodGet, "/_meta/activity/followers?"+q.Encode(), nil, nil))
+	return w
+}
+
+func (f *dispatchActivityFixture) followers(t *testing.T, callerID string) activityFollowersListResponse {
+	t.Helper()
+	w := f.listFollowers(callerID, f.recordID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET followers status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp activityFollowersListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode followers response: %v", err)
+	}
+	return resp
+}
+
+func followerUserIDs(resp activityFollowersListResponse) []string {
+	ids := make([]string, len(resp.Data))
+	for i, d := range resp.Data {
+		ids[i] = d.User.ID
+	}
+	return ids
+}
+
+func TestDispatchActivityFollowersRoutes_FollowAndUnfollowAreIdempotent(t *testing.T) {
+	f := newDispatchActivityFixture(t)
+
+	for i := range 2 {
+		if w := f.followChange(f.callerID, http.MethodPut, f.recordID); w.Code != http.StatusNoContent {
+			t.Fatalf("PUT %d status = %d, want 204; body: %s", i+1, w.Code, w.Body.String())
+		}
+	}
+	resp := f.followers(t, f.callerID)
+	if len(resp.Data) != 1 || resp.Data[0].User.ID != f.callerID || !resp.Meta.Following {
+		t.Fatalf("followers = %+v, want the caller once and following true", resp)
+	}
+	if name := resp.Data[0].User.Name; name == nil || *name != "Ama Owusu" {
+		t.Errorf("user name = %v, want the caller's profile name", name)
+	}
+	if resp.Data[0].CreatedAt == "" {
+		t.Error("created_at is empty")
+	}
+
+	for i := range 2 {
+		if w := f.followChange(f.callerID, http.MethodDelete, f.recordID); w.Code != http.StatusNoContent {
+			t.Fatalf("DELETE %d status = %d, want 204; body: %s", i+1, w.Code, w.Body.String())
+		}
+	}
+	resp = f.followers(t, f.callerID)
+	if len(resp.Data) != 0 || resp.Meta.Following {
+		t.Errorf("followers = %+v, want none and following false", resp)
+	}
+}
+
+func TestDispatchActivityFollowersRoutes_ActOnlyOnTheCaller(t *testing.T) {
+	f := newDispatchActivityFixture(t)
+	for _, userID := range []string{f.otherCallerID, f.callerID} {
+		if w := f.followChange(userID, http.MethodPut, f.recordID); w.Code != http.StatusNoContent {
+			t.Fatalf("PUT as %s status = %d, want 204; body: %s", userID, w.Code, w.Body.String())
+		}
+	}
+
+	if w := f.followChange(f.callerID, http.MethodDelete, f.recordID); w.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+
+	resp := f.followers(t, f.callerID)
+	if got := followerUserIDs(resp); len(got) != 1 || got[0] != f.otherCallerID {
+		t.Errorf("followers = %v, want only %s", got, f.otherCallerID)
+	}
+	if resp.Meta.Following {
+		t.Error("following = true for a caller who unfollowed")
+	}
+	if !f.followers(t, f.otherCallerID).Meta.Following {
+		t.Error("following = false for the other user, whose follow the caller's DELETE must not touch")
+	}
+}
+
+func TestDispatchActivityFollowersListRoute_OldestFirst(t *testing.T) {
+	f := newDispatchActivityFixture(t)
+	for _, userID := range []string{f.otherCallerID, f.callerID} {
+		if w := f.followChange(userID, http.MethodPut, f.recordID); w.Code != http.StatusNoContent {
+			t.Fatalf("PUT as %s status = %d; body: %s", userID, w.Code, w.Body.String())
+		}
+	}
+
+	if got, want := followerUserIDs(f.followers(t, f.callerID)), []string{f.otherCallerID, f.callerID}; !slices.Equal(got, want) {
+		t.Errorf("followers = %v, want %v", got, want)
+	}
+}
+
+func TestDispatchActivityCreateRoute_FollowsTheAuthor(t *testing.T) {
+	f := newDispatchActivityFixture(t)
+	f.postComment(t, f.otherCallerID, "first")
+	f.postComment(t, f.otherCallerID, "again")
+
+	resp := f.followers(t, f.callerID)
+	if got := followerUserIDs(resp); len(got) != 1 || got[0] != f.otherCallerID {
+		t.Errorf("followers = %v, want the comment's author once", got)
+	}
+	if resp.Meta.Following {
+		t.Error("following = true for a caller who neither followed nor commented")
+	}
+}
+
+func TestDispatchActivityFollowersRoutes_DenyACallerWhoCannotReadTheRecord(t *testing.T) {
+	f := newDispatchActivityFixture(t)
+	missing := "99999999-9999-9999-9999-999999999999"
+
+	if w := f.listFollowers(f.callerID, missing); w.Code != http.StatusForbidden || decodeErrorCode(t, w) != "permission_denied" {
+		t.Errorf("GET status = %d, want 403 permission_denied; body: %s", w.Code, w.Body.String())
+	}
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		if w := f.followChange(f.callerID, method, missing); w.Code != http.StatusForbidden || decodeErrorCode(t, w) != "permission_denied" {
+			t.Errorf("%s status = %d, want 403 permission_denied; body: %s", method, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestDispatchActivityFollowersRoutes_RejectInvalidRequests(t *testing.T) {
+	f := newDispatchActivityFixture(t)
+
+	if w := f.listFollowers(f.callerID, "not-a-uuid"); w.Code != http.StatusBadRequest || decodeErrorCode(t, w) != "invalid_request" {
+		t.Errorf("GET malformed record_id status = %d, want 400 invalid_request; body: %s", w.Code, w.Body.String())
+	}
+	w := httptest.NewRecorder()
+	f.e.dispatchActivityFollowRoute(w, f.requestAs(f.callerID, http.MethodPut, "/_meta/activity/followers", []byte("[]"), nil))
+	if w.Code != http.StatusBadRequest || decodeErrorCode(t, w) != "invalid_request" {
+		t.Errorf("PUT non-object body status = %d, want 400 invalid_request; body: %s", w.Code, w.Body.String())
+	}
+	if w := f.followChange(f.callerID, http.MethodPut, ""); w.Code != http.StatusBadRequest || decodeErrorCode(t, w) != "invalid_request" {
+		t.Errorf("PUT missing record_id status = %d, want 400 invalid_request; body: %s", w.Code, w.Body.String())
 	}
 }

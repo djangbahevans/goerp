@@ -22,9 +22,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// /_meta/activity (record-activity.md §6): one record's feed, and posting
-// and deleting comments on it. Every route first checks the caller can
-// read the target record (§7).
+// /_meta/activity (record-activity.md §6): one record's feed, posting and
+// deleting comments on it, and its followers. Every route first checks the
+// caller can read the target record (§7).
 
 const (
 	activityDefaultLimit  = 20
@@ -250,6 +250,100 @@ func (e *Engine) dispatchActivityDeleteRoute(w http.ResponseWriter, r *http.Requ
 			writeRouteError(w, http.StatusInternalServerError, "internal_error", "delete comment failed")
 			return
 		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type activityFollowerResponse struct {
+	User      *activityAuthor `json:"user"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+type activityFollowersMeta struct {
+	Following bool `json:"following"`
+}
+
+type activityFollowRequest struct {
+	Model    string `json:"model"`
+	RecordID string `json:"record_id"`
+}
+
+// dispatchActivityFollowersListRoute is GET /_meta/activity/followers's
+// handler — ?model=&record_id= lists the record's followers, oldest first,
+// and whether the caller is one of them. Rows are listed as stored, so a
+// follower who has lost read access shows until the notification job
+// removes them (record-activity.md §8).
+func (e *Engine) dispatchActivityFollowersListRoute(w http.ResponseWriter, r *http.Request) {
+	authCtx := authFromContext(r.Context())
+	tenantCtx := tenantFromContext(r.Context())
+	if authCtx == nil || tenantCtx == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		return
+	}
+
+	ctx := r.Context()
+	q := r.URL.Query()
+	modelName, recordID := q.Get("model"), q.Get("record_id")
+	if !e.activityTarget(ctx, w, authCtx, tenantCtx, modelName, recordID) {
+		return
+	}
+
+	followers, err := e.recordActivityStore.ListFollowers(ctx, tenantCtx.Slug, modelName, recordID)
+	if err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list followers failed")
+		return
+	}
+
+	users := e.newActivityAuthorResolver(tenantCtx.Slug)
+	out := make([]activityFollowerResponse, len(followers))
+	meta := activityFollowersMeta{}
+	for i := range followers {
+		f := &followers[i]
+		out[i] = activityFollowerResponse{User: users.resolve(ctx, &f.UserID), CreatedAt: f.CreatedAt}
+		if f.UserID == authCtx.UserID {
+			meta.Following = true
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": meta})
+}
+
+// dispatchActivityFollowRoute is PUT /_meta/activity/followers's handler —
+// makes the caller a follower of the record. Idempotent.
+func (e *Engine) dispatchActivityFollowRoute(w http.ResponseWriter, r *http.Request) {
+	e.dispatchActivityFollowChange(w, r, e.recordActivityStore.Follow, "follow failed")
+}
+
+// dispatchActivityUnfollowRoute is DELETE /_meta/activity/followers's
+// handler — removes the caller's follow of the record. Idempotent.
+func (e *Engine) dispatchActivityUnfollowRoute(w http.ResponseWriter, r *http.Request) {
+	e.dispatchActivityFollowChange(w, r, e.recordActivityStore.Unfollow, "unfollow failed")
+}
+
+// dispatchActivityFollowChange applies change to the caller's follow of
+// the record the {model, record_id} body names. Both directions act on the
+// caller only: there is no way to follow or unfollow for someone else.
+func (e *Engine) dispatchActivityFollowChange(w http.ResponseWriter, r *http.Request, change func(ctx context.Context, tenantSlug, model, recordID, userID string) error, failure string) {
+	authCtx := authFromContext(r.Context())
+	tenantCtx := tenantFromContext(r.Context())
+	if authCtx == nil || tenantCtx == nil {
+		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		return
+	}
+
+	var body activityFollowRequest
+	if err := json.UnmarshalRead(r.Body, &body); err != nil {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		return
+	}
+
+	ctx := r.Context()
+	if !e.activityTarget(ctx, w, authCtx, tenantCtx, body.Model, body.RecordID) {
+		return
+	}
+
+	if err := change(ctx, tenantCtx.Slug, body.Model, body.RecordID, authCtx.UserID); err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", failure)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

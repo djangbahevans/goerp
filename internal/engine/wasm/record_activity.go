@@ -62,7 +62,8 @@ func needsRowBeforeWrite(modCtx *ModuleContext, qualifiedModel string, md model.
 }
 
 // writeCreatedActivity writes row's `created` entry when md has tracked
-// fields; a no-op otherwise.
+// fields, and makes the request's user, if any, a follower of the new
+// record (record-activity.md §8); a no-op otherwise.
 func writeCreatedActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, row map[string]any) *abiv1.HostError {
 	if !hasTrackedFields(md) {
 		return nil
@@ -72,6 +73,12 @@ func writeCreatedActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext
 		return nil
 	}
 	if err := insertActivityEntries(ctx, tx, modCtx, qualifiedModel, []activityEntry{{RecordID: row[pkCol], Kind: recordactivity.KindCreated}}); err != nil {
+		return ormSQLError(err)
+	}
+	if modCtx.UserID == "" {
+		return nil
+	}
+	if err := recordactivity.Follow(ctx, tx, modCtx.TenantSlug, qualifiedModel, row[pkCol], modCtx.UserID); err != nil {
 		return ormSQLError(err)
 	}
 	return nil

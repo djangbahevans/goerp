@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -209,5 +210,73 @@ func TestGet_ReturnsErrNotFoundForAMissingID(t *testing.T) {
 
 	if _, err := store.Get(t.Context(), slug, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get() error = %v, want ErrNotFound", err)
+	}
+}
+
+func followerIDs(t *testing.T, store *Store, slug, recordID string) []string {
+	t.Helper()
+	followers, err := store.ListFollowers(t.Context(), slug, testModel, recordID)
+	if err != nil {
+		t.Fatalf("ListFollowers() error: %v", err)
+	}
+	ids := make([]string, len(followers))
+	for i, f := range followers {
+		ids[i] = f.UserID
+	}
+	return ids
+}
+
+func TestFollow_IsIdempotentAndListsOldestFirst(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	const second = "00000000-0000-0000-0000-0000000000bb"
+	ctx := t.Context()
+
+	for _, userID := range []string{testAuthorID, second, testAuthorID} {
+		if err := store.Follow(ctx, slug, testModel, testRecordID, userID); err != nil {
+			t.Fatalf("Follow(%s) error: %v", userID, err)
+		}
+	}
+
+	if got := followerIDs(t, store, slug, testRecordID); !slices.Equal(got, []string{testAuthorID, second}) {
+		t.Errorf("followers = %v, want [%s %s]: one row each, oldest first", got, testAuthorID, second)
+	}
+	if got := followerIDs(t, store, slug, "22222222-2222-2222-2222-222222222222"); len(got) != 0 {
+		t.Errorf("another record's followers = %v, want none", got)
+	}
+}
+
+func TestUnfollow_RemovesOnlyThatUserAndIsIdempotent(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	const second = "00000000-0000-0000-0000-0000000000bb"
+	ctx := t.Context()
+	for _, userID := range []string{testAuthorID, second} {
+		if err := store.Follow(ctx, slug, testModel, testRecordID, userID); err != nil {
+			t.Fatalf("Follow(%s) error: %v", userID, err)
+		}
+	}
+
+	for range 2 {
+		if err := store.Unfollow(ctx, slug, testModel, testRecordID, testAuthorID); err != nil {
+			t.Fatalf("Unfollow() error: %v", err)
+		}
+	}
+
+	if got := followerIDs(t, store, slug, testRecordID); !slices.Equal(got, []string{second}) {
+		t.Errorf("followers = %v, want only %s", got, second)
+	}
+}
+
+func TestCreateComment_FollowsTheAuthorOnce(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	ctx := t.Context()
+
+	for _, body := range []string{"first", "second"} {
+		if _, err := store.CreateComment(ctx, slug, testModel, testRecordID, testAuthorID, body, "", ""); err != nil {
+			t.Fatalf("CreateComment() error: %v", err)
+		}
+	}
+
+	if got := followerIDs(t, store, slug, testRecordID); !slices.Equal(got, []string{testAuthorID}) {
+		t.Errorf("followers = %v, want the author once", got)
 	}
 }

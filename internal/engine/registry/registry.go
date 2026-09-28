@@ -633,6 +633,13 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		},
 		PathTemplate: "/_meta/activity/{id}",
 	})
+	// The static followers segment wins over {id} in the route tree.
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		table.Register(method, "/_meta/activity/followers", &route.RouteEntry{
+			Manifest:     route.RouteManifest{EngineNative: true, Auth: "required"},
+			PathTemplate: "/_meta/activity/followers",
+		})
+	}
 
 	// /_meta/record-readers (record-activity.md §6) — same posture as
 	// /_meta/activity above.
