@@ -1,10 +1,12 @@
 // Package recordactivity is the per-tenant-schema record_activity table —
 // each Postgres-backed record's feed of creation, tracked-field changes,
-// comments, and completed scheduled activities (record-activity.md §3).
-// Engine-owned rather than a module model: only the engine writes it, and
-// host.db rejects module SQL that names it (record-activity.md §5). Store
-// also provides the reads and comment writes the built-in /_meta/activity
-// endpoint (internal/engine's dispatchActivity*Route handlers) goes through.
+// comments, and completed scheduled activities (record-activity.md §3) —
+// and its companion record_followers table, the users following each
+// record (§8). Engine-owned rather than module models: only the engine
+// writes them, and host.db rejects module SQL that names either
+// (record-activity.md §5). Store also provides the reads and writes the
+// built-in /_meta/activity endpoints (internal/engine's
+// dispatchActivity*Route handlers) go through.
 package recordactivity
 
 import (
@@ -21,6 +23,11 @@ import (
 
 // TableName is the table's unqualified name, as module SQL would spell it.
 const TableName = "record_activity"
+
+// FollowersTable is record_followers' unqualified name: the users following
+// each record (record-activity.md §8), created by Bootstrap alongside
+// record_activity.
+const FollowersTable = "record_followers"
 
 const (
 	KindCreated      = "created"
@@ -95,7 +102,8 @@ func (s *Store) List(ctx context.Context, tenantSlug, model, recordID, cursor st
 }
 
 // CreateComment inserts a comment on (model, recordID) authored by
-// authorID and returns the stored row.
+// authorID and returns the stored row. The author follows the record in
+// the same transaction (record-activity.md §8).
 func (s *Store) CreateComment(ctx context.Context, tenantSlug, model, recordID, authorID, body, requestID, traceID string) (*Entry, error) {
 	query := fmt.Sprintf(`
 		INSERT INTO %s.record_activity (model, record_id, kind, body, author_id, request_id, trace_id)
@@ -103,11 +111,99 @@ func (s *Store) CreateComment(ctx context.Context, tenantSlug, model, recordID, 
 		RETURNING %s
 	`, tenantschema.Name(tenantSlug), entryColumns)
 
-	e, err := scanEntry(s.db.QueryRowContext(ctx, query, model, recordID, body, authorID, requestID, traceID))
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create comment: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }()
+
+	e, err := scanEntry(tx.QueryRowContext(ctx, query, model, recordID, body, authorID, requestID, traceID))
+	if err != nil {
+		return nil, fmt.Errorf("create comment: %w", err)
+	}
+	if err := Follow(ctx, tx, tenantSlug, model, recordID, authorID); err != nil {
+		return nil, fmt.Errorf("create comment: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("create comment: %w", err)
+	}
 	return e, nil
+}
+
+// Follower is one record_followers row.
+type Follower struct {
+	UserID    string
+	CreatedAt time.Time
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// Follow makes userID a follower of (model, recordID) through ex, normally
+// the transaction of the event that triggers the follow. A user already
+// following keeps their original row. recordID is any so a scanned primary
+// key value can be passed as-is.
+func Follow(ctx context.Context, ex execer, tenantSlug, model string, recordID any, userID string) error {
+	query := fmt.Sprintf(`
+		INSERT INTO %s.record_followers (model, record_id, user_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT DO NOTHING
+	`, tenantschema.Name(tenantSlug))
+
+	if _, err := ex.ExecContext(ctx, query, model, recordID, userID); err != nil {
+		return fmt.Errorf("follow record: %w", err)
+	}
+	return nil
+}
+
+// Follow makes userID a follower of (model, recordID); a no-op when they
+// already follow it.
+func (s *Store) Follow(ctx context.Context, tenantSlug, model, recordID, userID string) error {
+	return Follow(ctx, s.db, tenantSlug, model, recordID, userID)
+}
+
+// Unfollow removes userID's follow of (model, recordID); a no-op when they
+// don't follow it.
+func (s *Store) Unfollow(ctx context.Context, tenantSlug, model, recordID, userID string) error {
+	query := fmt.Sprintf(`
+		DELETE FROM %s.record_followers
+		WHERE model = $1 AND record_id = $2 AND user_id = $3
+	`, tenantschema.Name(tenantSlug))
+
+	if _, err := s.db.ExecContext(ctx, query, model, recordID, userID); err != nil {
+		return fmt.Errorf("unfollow record: %w", err)
+	}
+	return nil
+}
+
+// ListFollowers returns every follower of (model, recordID), oldest first.
+func (s *Store) ListFollowers(ctx context.Context, tenantSlug, model, recordID string) ([]Follower, error) {
+	query := fmt.Sprintf(`
+		SELECT user_id, created_at
+		FROM %s.record_followers
+		WHERE model = $1 AND record_id = $2
+		ORDER BY created_at, user_id
+	`, tenantschema.Name(tenantSlug))
+
+	rows, err := s.db.QueryContext(ctx, query, model, recordID)
+	if err != nil {
+		return nil, fmt.Errorf("list followers: %w", err)
+	}
+	defer rows.Close()
+
+	followers := []Follower{}
+	for rows.Next() {
+		var f Follower
+		if err := rows.Scan(&f.UserID, &f.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list followers: %w", err)
+		}
+		followers = append(followers, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list followers: %w", err)
+	}
+	return followers, nil
 }
 
 // InsertActivityDone writes an activity_done entry authored by authorID
@@ -179,11 +275,12 @@ func scanEntry(sc rowScanner) (*Entry, error) {
 	return &e, nil
 }
 
-// Bootstrap creates record_activity and its feed index in the given
-// tenant's schema if they don't already exist. Does not create the schema
-// itself. author_id is a plain UUID column with no FK — system.users lives
-// outside tenant_{slug}. Concurrent-safe against other calls racing to
-// bootstrap the same tenant's schema via db.WithAdvisoryLock.
+// Bootstrap creates record_activity, its feed index, and record_followers
+// in the given tenant's schema if they don't already exist. Does not create
+// the schema itself. author_id and user_id are plain UUID columns with no
+// FK — system.users lives outside tenant_{slug}. Concurrent-safe against
+// other calls racing to bootstrap the same tenant's schema via
+// db.WithAdvisoryLock.
 func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 	keys := []int64{db.AdvisoryLockKey("recordactivity.Bootstrap:" + tenantSlug)}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
@@ -218,6 +315,21 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 		`, schema)
 		if _, err := tx.ExecContext(ctx, createIndex); err != nil {
 			return fmt.Errorf("create record_activity index: %w", err)
+		}
+
+		// The primary key serves both reads, "a record's followers" and
+		// "is this user following".
+		createFollowers := fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s.record_followers (
+			    model       TEXT NOT NULL,
+			    record_id   UUID NOT NULL,
+			    user_id     UUID NOT NULL,
+			    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			    PRIMARY KEY (model, record_id, user_id)
+			)
+		`, schema)
+		if _, err := tx.ExecContext(ctx, createFollowers); err != nil {
+			return fmt.Errorf("create record_followers table: %w", err)
 		}
 
 		return nil

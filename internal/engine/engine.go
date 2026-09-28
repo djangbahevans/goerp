@@ -1084,6 +1084,9 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["GET /_meta/activity"] = http.HandlerFunc(e.dispatchActivityListRoute)
 	builtinRoutes["POST /_meta/activity"] = http.HandlerFunc(e.dispatchActivityCreateRoute)
 	builtinRoutes["DELETE /_meta/activity/{id}"] = http.HandlerFunc(e.dispatchActivityDeleteRoute)
+	builtinRoutes["GET /_meta/activity/followers"] = http.HandlerFunc(e.dispatchActivityFollowersListRoute)
+	builtinRoutes["PUT /_meta/activity/followers"] = http.HandlerFunc(e.dispatchActivityFollowRoute)
+	builtinRoutes["DELETE /_meta/activity/followers"] = http.HandlerFunc(e.dispatchActivityUnfollowRoute)
 
 	// /_meta/record-readers (record-activity.md §6) follows the same pattern.
 	builtinRoutes["GET /_meta/record-readers"] = http.HandlerFunc(e.dispatchRecordReadersRoute)

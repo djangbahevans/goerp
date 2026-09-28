@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -418,5 +419,78 @@ func TestDBExec_TrackedUpdateFrom_CapturesOnlyTheTargetTableOncePerRow(t *testin
 	}
 	if c := changeByField(changes[0].Changes)["state"]; c.Old != "open" || c.New != "closed" {
 		t.Errorf("state change = %+v, want open → closed", c)
+	}
+}
+
+// followers returns (model, record_id, user_id) for every record_followers row.
+func (f *activityFixture) followers(t *testing.T) [][3]string {
+	t.Helper()
+	rows, err := f.db.Query(`SELECT model, record_id, user_id FROM tenant_` + f.slug + `.record_followers ORDER BY created_at, record_id`)
+	if err != nil {
+		t.Fatalf("query record_followers: %v", err)
+	}
+	defer rows.Close()
+	var out [][3]string
+	for rows.Next() {
+		var r [3]string
+		if err := rows.Scan(&r[0], &r[1], &r[2]); err != nil {
+			t.Fatalf("scan record_followers: %v", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate record_followers rows: %v", err)
+	}
+	return out
+}
+
+func TestORMCreate_TrackedModel_FollowsTheCreator(t *testing.T) {
+	f := newActivityFixture(t, trackedTestUserID)
+	f.createTicket(t, ticketA, map[string]any{"title": "Printer jam", "state": "open"})
+
+	if _, hostErr := ORMCreate(t.Context(), f.r, f.db, f.r.EventInsertClient(), nil, f.mc, abiv1.ORMCreateInput{
+		Model: "testmodule.gadget", Record: map[string]any{"id": ticketB, "name": "untracked"},
+	}); hostErr != nil {
+		t.Fatalf("ORMCreate gadget: %+v", hostErr)
+	}
+
+	got := f.followers(t)
+	want := [][3]string{{"testmodule.ticket", ticketA, trackedTestUserID}}
+	if !slices.Equal(got, want) {
+		t.Errorf("record_followers = %v, want %v: the creator follows the tracked record only", got, want)
+	}
+}
+
+func TestORMCreateBatchAndFirstOrCreate_TrackedModel_FollowTheCreator(t *testing.T) {
+	f := newActivityFixture(t, trackedTestUserID)
+	ctx := t.Context()
+
+	if _, hostErr := ORMCreateBatch(ctx, f.r, f.db, f.r.EventInsertClient(), f.mc, abiv1.ORMCreateBatchInput{
+		Model: "testmodule.ticket", Records: []map[string]any{{"id": ticketA, "state": "open"}},
+	}); hostErr != nil {
+		t.Fatalf("ORMCreateBatch: %+v", hostErr)
+	}
+	if _, hostErr := ORMFirstOrCreate(ctx, f.r, f.db, f.r.EventInsertClient(), f.mc, abiv1.ORMFirstOrCreateInput{
+		Model: "testmodule.ticket", UniqueVals: map[string]any{"code": "T-2"}, CreateVals: map[string]any{"id": ticketB, "state": "open"},
+	}); hostErr != nil {
+		t.Fatalf("ORMFirstOrCreate: %+v", hostErr)
+	}
+
+	got := f.followers(t)
+	want := [][3]string{{"testmodule.ticket", ticketA, trackedTestUserID}, {"testmodule.ticket", ticketB, trackedTestUserID}}
+	if !slices.Equal(got, want) {
+		t.Errorf("record_followers = %v, want %v", got, want)
+	}
+}
+
+func TestORMCreate_NoUserInContext_FollowsNoOne(t *testing.T) {
+	f := newActivityFixture(t, "")
+	f.createTicket(t, ticketA, map[string]any{"title": "Printer jam", "state": "open"})
+
+	if rows := f.rows(t); len(rows) != 1 {
+		t.Fatalf("record_activity rows = %+v, want the created entry", rows)
+	}
+	if got := f.followers(t); len(got) != 0 {
+		t.Errorf("record_followers = %v, want none for a create with no user in context", got)
 	}
 }

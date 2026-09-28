@@ -282,6 +282,8 @@ func TestDBExec_RejectsEngineOwnedTableReference(t *testing.T) {
 		"INSERT INTO record_activity (model, record_id, kind, body) VALUES ('x.y', gen_random_uuid(), 'comment', 'forged')",
 		"UPDATE record_activity SET body = 'rewritten'",
 		"DELETE FROM widget WHERE id IN (SELECT record_id FROM record_activity)",
+		"INSERT INTO record_followers (model, record_id, user_id) VALUES ('x.y', gen_random_uuid(), gen_random_uuid())",
+		"DELETE FROM record_followers",
 	} {
 		_, hostErr := DBExec(ctx, primaryDB, mc, abiv1.DBExecInput{SQL: sql})
 		if hostErr == nil {
