@@ -8,6 +8,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/cli/admin"
 	"github.com/djangbahevans/goerp/internal/cli/clierr"
+	"github.com/djangbahevans/goerp/internal/cli/codegen"
 	"github.com/djangbahevans/goerp/internal/cli/events"
 	"github.com/djangbahevans/goerp/internal/cli/jobs"
 	"github.com/djangbahevans/goerp/internal/cli/module"
@@ -53,6 +54,7 @@ func newRootCmd() *cobra.Command {
 	})
 
 	rootCmd.AddCommand(admin.NewCmd())
+	rootCmd.AddCommand(codegen.NewCmd())
 	rootCmd.AddCommand(events.NewCmd())
 	rootCmd.AddCommand(jobs.NewCmd())
 	rootCmd.AddCommand(module.NewCmd())

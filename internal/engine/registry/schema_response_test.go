@@ -25,7 +25,7 @@ func TestSchemaModelFrom_SharePermissions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := schemaModelFrom(tt.md)
+			got := schemaModelFrom(tt.md, nil)
 			if !slices.Equal(got.SharePermissions, tt.want) {
 				t.Errorf("SharePermissions = %v, want %v", got.SharePermissions, tt.want)
 			}
@@ -38,6 +38,41 @@ func TestSchemaModelFrom_SharePermissions(t *testing.T) {
 				t.Errorf("share_permissions key present = %v for %v, want %v; body: %s", hasKey, tt.want, len(tt.want) > 0, out)
 			}
 		})
+	}
+}
+
+func TestSchemaModelFrom_CodegenFieldAttributes(t *testing.T) {
+	md := model.Define("shop.item").WithStandardFields().
+		Field("status", model.Selection("draft", "done").Required().Default("'draft'")).
+		Field("size", model.Enum("item_size")).
+		Field("total", model.Decimal(10, 2).Computed("compute_total").Store(true)).
+		Field("note", model.Text())
+	types := []model.TypeDeclaration{model.EnumType("other", "x"), model.EnumType("item_size", "s", "m", "l")}
+
+	fields := map[string]SchemaField{}
+	for _, f := range schemaModelFrom(*md, types).Fields {
+		fields[f.Name] = f
+	}
+
+	if got := fields["status"]; !slices.Equal(got.SelectionValues, []string{"draft", "done"}) || !got.HasDefault || !got.Required || got.Readonly {
+		t.Errorf("status = %+v, want selection values, has_default, required, writable", got)
+	}
+	if got := fields["size"].SelectionValues; !slices.Equal(got, []string{"s", "m", "l"}) {
+		t.Errorf("size selection_values = %v, want the item_size enum's values", got)
+	}
+	if !fields["total"].Readonly {
+		t.Error("computed total: readonly = false, want true")
+	}
+	if got := fields["id"]; !got.PrimaryKey || !got.Readonly || !got.HasDefault {
+		t.Errorf("id = %+v, want primary_key, readonly, has_default", got)
+	}
+
+	out, err := json.Marshal(fields["note"])
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	if want := `{"name":"note","type":"text"}`; string(out) != want {
+		t.Errorf("plain field JSON = %s, want %s (new attributes omitted when unset)", out, want)
 	}
 }
 
