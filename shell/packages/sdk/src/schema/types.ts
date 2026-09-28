@@ -23,13 +23,21 @@ import { optionalNullable as opt } from "./optional-nullable.js";
 export const CRUD_ACTIONS = ["get", "list", "create", "update", "delete", "pivot"] as const;
 export type CRUDAction = (typeof CRUD_ACTIONS)[number];
 
+export function isCRUDAction(value: string): value is CRUDAction {
+  return (CRUD_ACTIONS as readonly string[]).includes(value);
+}
+
 export const RouteSchemaSchema = v.looseObject({
   method: v.string(),
   path: v.string(),
   // The engine always sends an array: a nil Go slice encodes as `[]`.
   permissions: v.array(v.string()),
   model: v.optional(v.string()),
-  crud_action: v.optional(v.picklist(CRUD_ACTIONS)),
+  // Any string: the engine also sends non-CRUD actions ("workflow_transition",
+  // one route per .Workflow() transition) and may add more. Rejecting an
+  // unknown value here would fail the whole schema, so consumers narrow
+  // with isCRUDAction instead.
+  crud_action: v.optional(v.string()),
   name: v.optional(v.string()),
   response_is_list: v.boolean(),
   view: v.optional(v.string()),

@@ -1,6 +1,6 @@
 import { cacheUntilRejected } from "./cached-promise.js";
 import type { SchemaRegistry } from "./schema-registry.js";
-import type { CRUDAction, MetaSchema, RouteSchema } from "./types.js";
+import { type CRUDAction, isCRUDAction, type MetaSchema, type RouteSchema } from "./types.js";
 
 // shell-architecture.md §9's ResourceRegistryEntry — a resource's
 // resolved CRUD paths, built from route data alone (model + crud_action),
@@ -33,7 +33,7 @@ export function buildResourceRegistry(schema: MetaSchema): Map<string, ResourceR
   for (const [moduleName, moduleSchema] of Object.entries(schema.modules)) {
     const byModel = new Map<string, Partial<Record<CRUDAction, RouteSchema>>>();
     for (const route of moduleSchema.routes) {
-      if (!route.model || !route.crud_action) continue;
+      if (!route.model || !route.crud_action || !isCRUDAction(route.crud_action)) continue;
       const crudRoutes = byModel.get(route.model) ?? {};
       crudRoutes[route.crud_action] = route;
       byModel.set(route.model, crudRoutes);
