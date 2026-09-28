@@ -49,6 +49,7 @@ export type { FieldControlProps, FieldWrapperProps } from "./field-wrapper.js";
 export { FieldControlProvider, FieldWrapper, useFieldControl } from "./field-wrapper.js";
 export type { FileFieldProps, FileValue } from "./file-field.js";
 export { FileField } from "./file-field.js";
+export { useFloatingPanelLayer } from "./floating-panel.js";
 export type { IconName, IconNameLike, IconProps } from "./icon.js";
 export { Icon, isKnownIconName } from "./icon.js";
 export type { IconButtonProps, IconButtonVariant } from "./icon-button.js";
