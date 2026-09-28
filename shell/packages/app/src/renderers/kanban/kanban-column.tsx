@@ -80,9 +80,13 @@ export function KanbanColumn({
     >
       <div className="flex items-center gap-2 px-1 py-1">
         {group.color && (
+          // The swatch's own outline always renders, regardless of the
+          // value's fill — an arbitrary tenant color could otherwise
+          // exactly match --color-bg-subtle and disappear (field.tsx's
+          // "color" field type takes the same approach).
           <span
             aria-hidden="true"
-            className="h-2 w-2 flex-none rounded-full"
+            className="h-2 w-2 flex-none rounded-full border border-border"
             style={{ backgroundColor: group.color }}
           />
         )}

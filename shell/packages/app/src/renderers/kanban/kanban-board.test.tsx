@@ -45,6 +45,12 @@ describe("KanbanBoard", () => {
     expect(screen.getByText("JD")).toBeTruthy();
   });
 
+  it("outlines a group's color swatch so an arbitrary tenant color can't exactly match the column background", () => {
+    const { container } = render(<KanbanBoard groups={makeGroups()} onMoveCard={vi.fn()} />);
+    const swatch = container.querySelector('[aria-hidden="true"].rounded-full');
+    expect(swatch?.className).toContain("border-border");
+  });
+
   it("shows an inline empty state for a column with no cards", () => {
     render(<KanbanBoard groups={makeGroups()} onMoveCard={vi.fn()} />);
     expect(screen.getByText("No cards in this column.")).toBeTruthy();

@@ -47,8 +47,8 @@ export function TimelineBar({
   onCommit,
   onCancel,
 }: TimelineBarProps): ReactNode {
-  const { theme } = useTheme();
-  const contrast = bar.color ? contrastFor(bar.color, theme) : null;
+  const { theme, contrast: contrastLevel } = useTheme();
+  const contrast = bar.color ? contrastFor(bar.color, theme, contrastLevel) : null;
   const isDragging = projected !== undefined;
   const displayStart = projected?.start ?? bar.start;
   const displayEnd = projected?.end ?? bar.end;

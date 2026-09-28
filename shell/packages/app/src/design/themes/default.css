@@ -72,4 +72,16 @@
   --goerp-color-syntax-number: #0550ae;
   --goerp-color-syntax-function: #953800;
   --goerp-color-syntax-type: #006d75;
+
+  /* UserAvatar's 8-color palette (docs/components/user-avatar.md) — the
+     same across light and dark, so dark.css doesn't override it. */
+  --goerp-color-avatar-0: #5b6b8c;
+  --goerp-color-avatar-1: #6b5b8c;
+  --goerp-color-avatar-2: #8c5b6b;
+  --goerp-color-avatar-3: #4a7359;
+  --goerp-color-avatar-4: #73603f;
+  --goerp-color-avatar-5: #497373;
+  --goerp-color-avatar-6: #8c5b5b;
+  --goerp-color-avatar-7: #6b6b8c;
+  --goerp-color-avatar-text: #ffffff;
 }

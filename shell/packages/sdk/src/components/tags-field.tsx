@@ -14,8 +14,11 @@ export interface TagValue {
 // A tag's color is an arbitrary, tenant-chosen value (not one of our
 // pre-calibrated token pairs like Badge's), so contrast against it has to
 // be computed rather than looked up — WCAG relative luminance, picking
-// whichever of black/white text reads against it. Falls back to the
-// default text color for anything that isn't a plain 6-digit hex.
+// whichever of black/white text has the higher actual contrast ratio
+// against it (comparing luminance to a flat 0.5 threshold instead would
+// pick white text for luminance as low as ~0.18, e.g. a medium blue like
+// #3182ce, where it clears only ~4:1 against black's ~5.2:1). Falls back
+// to the default text color for anything that isn't a plain 6-digit hex.
 function pillTextClassFor(color: string | undefined): string {
   const match = color ? /^#?([0-9a-f]{6})$/i.exec(color) : null;
   if (!match) return "text-text";
@@ -25,7 +28,9 @@ function pillTextClassFor(color: string | undefined): string {
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   };
   const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-  return luminance > 0.5 ? "text-black" : "text-white";
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  const blackContrast = (luminance + 0.05) / 0.05;
+  return blackContrast >= whiteContrast ? "text-black" : "text-white";
 }
 
 export interface TagsFieldProps {
@@ -185,8 +190,13 @@ export function TagsField({
             <span
               key={tag.id}
               style={tag.color ? { backgroundColor: tag.color } : undefined}
+              // The pill's own outline always renders when a color is set,
+              // regardless of the value's fill — an arbitrary tenant color
+              // could otherwise exactly match the surrounding background
+              // and disappear (field.tsx's "color" field type takes the
+              // same approach).
               className={`inline-flex items-center gap-1 rounded-full p-2 text-sm ${
-                tag.color ? pillTextClassFor(tag.color) : "bg-bg-subtle text-text-secondary"
+                tag.color ? `border border-border ${pillTextClassFor(tag.color)}` : "bg-bg-subtle text-text-secondary"
               }`}
             >
               {tag.name}

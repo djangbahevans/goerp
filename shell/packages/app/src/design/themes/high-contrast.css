@@ -4,8 +4,9 @@
    light and dark get a high-contrast variant with the same hue
    relationships as their standard palette. Pushes text/background to pure
    black/white and makes borders carry the structure the tinted surfaces
-   carry in standard contrast. Every text pair clears WCAG AAA (>=7:1)
-   against --goerp-color-bg/-surface; every border clears >=3:1.
+   carry in standard contrast. Every text pair, including the badge, syntax
+   and avatar-initials pairs, clears WCAG AAA (>=7:1); every border clears
+   >=3:1.
 
    Specificity: the light block ([data-contrast]) matches default.css's
    :root and wins by source order; the dark block
@@ -82,6 +83,18 @@
   --goerp-color-syntax-function: #6b2800;
   --goerp-color-syntax-type: #00474d;
 
+  /* UserAvatar's 8-color palette (docs/components/user-avatar.md), darkened
+     from the standard hues so white --goerp-color-avatar-text clears >=7:1. */
+  --goerp-color-avatar-0: #46536c;
+  --goerp-color-avatar-1: #5a4c75;
+  --goerp-color-avatar-2: #6f4855;
+  --goerp-color-avatar-3: #3a5a46;
+  --goerp-color-avatar-4: #605034;
+  --goerp-color-avatar-5: #375757;
+  --goerp-color-avatar-6: #6f4848;
+  --goerp-color-avatar-7: #52526b;
+  --goerp-color-avatar-text: #ffffff;
+
   /* Soft shadows don't separate a floating layer (menu, popover, dialog)
      strongly enough here, so each gets a hairline ring instead. */
   --shadow-sm: 0 0 0 1px var(--goerp-color-border);
@@ -157,6 +170,20 @@
   --goerp-color-syntax-number: #8cd1ff;
   --goerp-color-syntax-function: #ffc285;
   --goerp-color-syntax-type: #66f0f0;
+
+  /* UserAvatar's 8-color palette, lightened (not the light block's hues
+     dimmed) with black --goerp-color-avatar-text so each still clears
+     >=7:1 against a white-on-black text pairing, and also against the
+     black page background the light block's darker hues would wash into. */
+  --goerp-color-avatar-0: #909cb7;
+  --goerp-color-avatar-1: #a296bb;
+  --goerp-color-avatar-2: #b9939f;
+  --goerp-color-avatar-3: #76a788;
+  --goerp-color-avatar-4: #b19a71;
+  --goerp-color-avatar-5: #73a6a6;
+  --goerp-color-avatar-6: #b99393;
+  --goerp-color-avatar-7: #9a9ab2;
+  --goerp-color-avatar-text: #000000;
 
   /* Drop shadows vanish on a black ground — same hairline-ring swap. */
   --shadow-sm: 0 0 0 1px var(--goerp-color-border);

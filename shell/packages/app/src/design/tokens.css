@@ -88,16 +88,18 @@
   --color-syntax-type: var(--goerp-color-syntax-type);
 
   /* UserAvatar's 8-color palette (docs/components/user-avatar.md) — fixed
-     across themes by design, so it skips the --goerp-color-* indirection. */
-  --color-avatar-0: #5b6b8c;
-  --color-avatar-1: #6b5b8c;
-  --color-avatar-2: #8c5b6b;
-  --color-avatar-3: #4a7359;
-  --color-avatar-4: #73603f;
-  --color-avatar-5: #497373;
-  --color-avatar-6: #8c5b5b;
-  --color-avatar-7: #6b6b8c;
-  --color-avatar-text: #ffffff;
+     across light and dark by design (neither theme file below overrides
+     it), but routed through --goerp-color-* like every other pair so
+     high-contrast.css can still substitute AAA-safe values. */
+  --color-avatar-0: var(--goerp-color-avatar-0);
+  --color-avatar-1: var(--goerp-color-avatar-1);
+  --color-avatar-2: var(--goerp-color-avatar-2);
+  --color-avatar-3: var(--goerp-color-avatar-3);
+  --color-avatar-4: var(--goerp-color-avatar-4);
+  --color-avatar-5: var(--goerp-color-avatar-5);
+  --color-avatar-6: var(--goerp-color-avatar-6);
+  --color-avatar-7: var(--goerp-color-avatar-7);
+  --color-avatar-text: var(--goerp-color-avatar-text);
 
   /* Modal/dialog backdrop — same neutral ink as the shadow tokens below,
      single value across light/dark and both contrast levels

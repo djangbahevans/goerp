@@ -46,4 +46,10 @@ describe("CalendarAgendaList", () => {
     fireEvent.click(screen.getByText("Event"));
     expect(onEventClick).toHaveBeenCalledWith(event);
   });
+
+  it("outlines an event's color dot so an arbitrary tenant color can't exactly match the row background", () => {
+    const { container } = render(<CalendarAgendaList today={TODAY} events={[makeEvent({ color: "#3B82F6" })]} />);
+    const swatch = container.querySelector("[aria-hidden].rounded-full");
+    expect(swatch?.className).toContain("border-border");
+  });
 });

@@ -1,4 +1,4 @@
-import type { Theme } from "@goerp/sdk/react";
+import type { Contrast, Theme } from "@goerp/sdk/react";
 
 // Shared by Calendar's color_field/color_map (EventChip) and Timeline's
 // (TimelineBar) — both resolve a row's own color_field value through the
@@ -10,18 +10,26 @@ export function resolveMappedColor(
   return colorMap && typeof colorKey === "string" ? colorMap[colorKey] : undefined;
 }
 
-// shell-visual-design.md's real per-theme hex values for --color-text /
-// --color-text-inverse / --color-surface (tokens.css / themes/*.css).
-// EventChip fills are arbitrary tenant-supplied hex, not a themed CSS
-// custom property, so the WCAG math below needs concrete numbers to
-// compare against rather than a getComputedStyle read.
-const THEME_TOKENS: Record<Theme, { text: string; textInverse: string; surface: string }> = {
-  light: { text: "#10141C", textInverse: "#FFFFFF", surface: "#FFFFFF" },
-  dark: { text: "#E7E9ED", textInverse: "#10141C", surface: "#1A1E26" },
+// shell-visual-design.md's real per-theme, per-contrast-level hex values
+// for --color-text / --color-text-inverse / --color-surface
+// (tokens.css / themes/*.css). EventChip/TimelineBar fills are arbitrary
+// tenant-supplied hex, not a themed CSS custom property, so the WCAG math
+// below needs concrete numbers to compare against rather than a
+// getComputedStyle read.
+const THEME_TOKENS: Record<Theme, Record<Contrast, { text: string; textInverse: string; surface: string }>> = {
+  light: {
+    standard: { text: "#10141C", textInverse: "#FFFFFF", surface: "#FFFFFF" },
+    high: { text: "#000000", textInverse: "#FFFFFF", surface: "#FFFFFF" },
+  },
+  dark: {
+    standard: { text: "#E7E9ED", textInverse: "#10141C", surface: "#1A1E26" },
+    high: { text: "#FFFFFF", textInverse: "#000000", surface: "#000000" },
+  },
 };
 
 const MIN_FILL_CONTRAST = 3;
-const MIN_TEXT_CONTRAST = 4.5;
+// High contrast targets WCAG AAA (shell-visual-design.md §4), not just AA.
+const MIN_TEXT_CONTRAST: Record<Contrast, number> = { standard: 4.5, high: 7 };
 
 const HEX_RE = /^#?([0-9a-f]{6})$/i;
 
@@ -68,16 +76,17 @@ export interface EventChipContrast {
 
 const DEFAULT_CONTRAST: EventChipContrast = { text: { kind: "token", className: "text-text" }, needsOutline: false };
 
-// Picks --color-text or --color-text-inverse, whichever clears 4.5:1
-// against `fillHex`, falling back to literal black/white for the narrow
-// band of fills neither muted token clears on its own.
+// Picks --color-text or --color-text-inverse, whichever clears the
+// contrast level's text minimum (4.5:1 standard, 7:1 high) against
+// `fillHex`, falling back to literal black/white for the narrow band of
+// fills neither themed token clears on its own.
 // Also flags whether `fillHex` needs a --color-border outline to clear
 // the 3:1 non-text minimum against the grid surface.
-export function contrastFor(fillHex: string, theme: Theme): EventChipContrast {
+export function contrastFor(fillHex: string, theme: Theme, contrast: Contrast = "standard"): EventChipContrast {
   const fillRgb = parseHex(fillHex);
   if (!fillRgb) return DEFAULT_CONTRAST;
 
-  const tokens = THEME_TOKENS[theme];
+  const tokens = THEME_TOKENS[theme][contrast];
   const fillLuminance = relativeLuminance(fillRgb);
   const textLuminance = relativeLuminance(parseHex(tokens.text) as [number, number, number]);
   const inverseLuminance = relativeLuminance(parseHex(tokens.textInverse) as [number, number, number]);
@@ -85,7 +94,7 @@ export function contrastFor(fillHex: string, theme: Theme): EventChipContrast {
   const inverseContrast = contrastRatio(fillLuminance, inverseLuminance);
 
   const text: EventChipTextColor =
-    Math.max(textContrast, inverseContrast) >= MIN_TEXT_CONTRAST
+    Math.max(textContrast, inverseContrast) >= MIN_TEXT_CONTRAST[contrast]
       ? { kind: "token", className: inverseContrast >= textContrast ? "text-text-inverse" : "text-text" }
       : {
           kind: "literal",
