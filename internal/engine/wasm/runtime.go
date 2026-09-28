@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/files"
@@ -37,6 +38,49 @@ type Runtime struct {
 	schemaSyncDB          atomic.Pointer[sql.DB]
 	ormBulkMaxRows        int
 	ormStatementTimeout   time.Duration
+
+	// configResolver/configStore back host.config.get/set (host_config.go).
+	// Interfaces, not a direct tenantconfig dependency: tenantconfig
+	// imports registry, which imports this package, so a direct import
+	// here would cycle.
+	configResolver ConfigResolver
+	configStore    ConfigStore
+
+	// rowCryptKeys encrypts/decrypts an "encrypted": true config_schema
+	// entry's value (host-abi-reference.md §14), reusing the engine's
+	// existing row-encryption key set.
+	rowCryptKeys *rowcrypt.RowKeySet
+}
+
+// ConfigResolver resolves a fully namespaced "{module}.{key}" config
+// value for a tenant — satisfied by *tenantconfig.Resolver.
+type ConfigResolver interface {
+	Get(ctx context.Context, tenantID, key string) (value string, found bool, err error)
+
+	// Invalidate drops tenantID/key's cached entry. host.config.set calls
+	// this synchronously after a write, since Store.Set's own NOTIFY only
+	// reaches this instance asynchronously via a Listener.
+	Invalidate(tenantID, key string)
+}
+
+// ConfigStore writes a module's own declared config key into its tenant's
+// module_config table — satisfied by *tenantconfig.Store.
+type ConfigStore interface {
+	SetModuleConfig(ctx context.Context, tenantID, tenantSchema, moduleName, key string, value []byte, valueType string, encrypted bool, updatedBy string) error
+}
+
+// SetTenantConfig wires host.config.get/set's storage layer. Unset,
+// host.config.get/set return abi.unavailable.
+func (r *Runtime) SetTenantConfig(resolver ConfigResolver, store ConfigStore) {
+	r.configResolver = resolver
+	r.configStore = store
+}
+
+// SetRowCryptKeys wires host.config.get/set's encryption layer for an
+// "encrypted": true config_schema entry. Unset, a get/set touching such a
+// key returns abi.unavailable rather than silently skipping encryption.
+func (r *Runtime) SetRowCryptKeys(keys *rowcrypt.RowKeySet) {
+	r.rowCryptKeys = keys
 }
 
 // SetSyncEventDispatcher wires the resolver host.event.emit's inline
@@ -178,6 +222,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := registerHostSearch(ctx, rt, r, db); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.search: %w", err)
+	}
+
+	if err := registerHostConfig(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.config: %w", err)
 	}
 
 	stdout := log.With().Str("component", "wasm").Str("stream", "stdout").Logger()

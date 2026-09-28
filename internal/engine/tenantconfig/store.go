@@ -232,6 +232,45 @@ func (s *Store) Set(ctx context.Context, tenantID, key, value string) error {
 	return nil
 }
 
+const upsertModuleConfigValue = `
+INSERT INTO %s.module_config (module_name, key, value, value_type, encrypted, updated_by)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid)
+ON CONFLICT (module_name, key) DO UPDATE SET
+    value = $3, value_type = $4, encrypted = $5, updated_by = NULLIF($6, '')::uuid, updated_at = NOW()
+`
+
+// SetModuleConfig upserts moduleName.key's value into tenantSchema's own
+// module_config table (the tenant-admin tier, distinct from Store.Set's
+// operator-override tier) and broadcasts configChangedChannel so every
+// Resolver drops its now-stale cache entry. value is already the
+// caller's chosen on-disk encoding; this package stays ignorant of
+// config_schema types and encryption. updatedBy empty stores SQL NULL.
+func (s *Store) SetModuleConfig(ctx context.Context, tenantID, tenantSchema, moduleName, key string, value []byte, valueType string, encrypted bool, updatedBy string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin set module config value: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := fmt.Sprintf(upsertModuleConfigValue, tenantSchema)
+	if _, err := tx.ExecContext(ctx, query, moduleName, key, value, valueType, encrypted, updatedBy); err != nil {
+		return fmt.Errorf("set module config value: %w", err)
+	}
+
+	payload, err := json.Marshal(configChangedPayload{TenantID: tenantID, Key: moduleName + "." + key})
+	if err != nil {
+		return fmt.Errorf("encode config changed payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "SELECT pg_notify($1, $2)", configChangedChannel, string(payload)); err != nil {
+		return fmt.Errorf("notify config changed: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit set module config value: %w", err)
+	}
+	return nil
+}
+
 func getTx(ctx context.Context, tx *sql.Tx, tenantID, key string) (string, bool, error) {
 	var value string
 	err := tx.QueryRowContext(ctx, `

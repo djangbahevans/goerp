@@ -10,6 +10,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -88,6 +89,12 @@ type ModuleSnapshot struct {
 	// single explicit-consent statement has no use for).
 	OwnedModels   []string
 	ExtendsModels []string
+
+	// ConfigSchema is the calling module's own declared config_schema
+	// (manifest-spec.md §17) — host.config.get/set (host_config.go)
+	// resolve a "{module}.{key}" key's declared type and "encrypted" flag
+	// against this list, never against another module's config_schema.
+	ConfigSchema []manifest.ConfigEntry
 
 	// ORMBulkMaxRows caps create_batch/write_many/write_where/unlink at
 	// this many records/IDs per call. Zero defaults to
@@ -211,6 +218,17 @@ func (mc *ModuleContext) OwnedModels() []string {
 // extended-model names (dotted "{module}.{resource}" form).
 func (mc *ModuleContext) ExtendsModels() []string {
 	return mc.snapshot.ExtendsModels
+}
+
+// ConfigEntry looks up subKey (the bare config_key, no module prefix) in
+// the calling module's own declared config_schema.
+func (mc *ModuleContext) ConfigEntry(subKey string) (manifest.ConfigEntry, bool) {
+	for _, entry := range mc.snapshot.ConfigSchema {
+		if entry.Key == subKey {
+			return entry, true
+		}
+	}
+	return manifest.ConfigEntry{}, false
 }
 
 // defaultORMBulkMaxRows/defaultORMStatementTimeout mirror

@@ -33,6 +33,9 @@ func (e *testEnv) createModuleConfigSchema(t *testing.T, slug string) {
 		    key         TEXT NOT NULL,
 		    value       JSONB NOT NULL,
 		    value_type  TEXT NOT NULL,
+		    encrypted   BOOLEAN NOT NULL DEFAULT FALSE,
+		    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		    updated_by  UUID,
 		    PRIMARY KEY (module_name, key)
 		)`, schema)
 	if _, err := e.conn.ExecContext(ctx, createTable); err != nil {
