@@ -292,7 +292,7 @@ func createTenantSchema(t *testing.T, primaryDB *sql.DB, slug string) {
 	}
 	// The engine-owned tables tenant provisioning creates (sequences and
 	// the rest), which ORM writes and host functions read.
-	if err := enginetables.CreateAll(t.Context(), primaryDB, slug); err != nil {
+	if err := enginetables.CreateAll(t.Context(), primaryDB, slug, nil); err != nil {
 		t.Fatalf("modeltest: create engine-owned tenant tables: %v", err)
 	}
 }

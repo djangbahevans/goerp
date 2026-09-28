@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/activitytype"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
@@ -42,14 +43,17 @@ type Table struct {
 }
 
 // Group is a set of tables created together by one Create call, e.g.
-// role.Store.Bootstrap's roles/role_permissions/user_roles.
+// role.Store.Bootstrap's roles/role_permissions/user_roles. Seed, when
+// set, inserts the rows a new tenant starts with, labelled for locales.
 type Group struct {
 	Tables []Table
 	Create func(ctx context.Context, pool *sql.DB, tenantSlug string) error
+	Seed   func(ctx context.Context, pool *sql.DB, tenantSlug string, locales []string) error
 }
 
 // Groups is in creation order: tenant_invitations has a foreign key to
-// roles, so the roles group comes first.
+// roles, so the roles group comes first, and scheduled_activities has one
+// to activity_types.
 var Groups = []Group{
 	{
 		Tables: []Table{{Name: "roles"}, {Name: "role_permissions"}, {Name: "user_roles"}},
@@ -104,6 +108,15 @@ var Groups = []Group{
 		},
 	},
 	{
+		Tables: []Table{{Name: activitytype.TableName}},
+		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
+			return activitytype.NewStore(pool).Bootstrap(ctx, slug)
+		},
+		Seed: func(ctx context.Context, pool *sql.DB, slug string, locales []string) error {
+			return activitytype.NewStore(pool).Seed(ctx, slug, locales)
+		},
+	},
+	{
 		Tables: []Table{{Name: scheduledactivity.TableName}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return scheduledactivity.NewStore(pool).Bootstrap(ctx, slug)
@@ -138,16 +151,23 @@ var Groups = []Group{
 // are reserved now so no module can claim one first; each moves into
 // Groups once the engine creates it.
 var plannedTables = []string{
-	"activity_types",
 	"view_overrides",
 }
 
-// CreateAll creates every table in Groups in tenantSlug's schema and
-// revokes mutations on the AppendOnly ones. Idempotent, so retries are safe.
-func CreateAll(ctx context.Context, pool *sql.DB, tenantSlug string) error {
+// CreateAll creates every table in Groups in tenantSlug's schema, seeds
+// the ones with a Seed, labelling seeded rows for every locale in locales
+// (GOERP_AVAILABLE_LOCALES), and revokes mutations on the AppendOnly ones.
+// Idempotent, so retries are safe.
+func CreateAll(ctx context.Context, pool *sql.DB, tenantSlug string, locales []string) error {
 	for _, g := range Groups {
 		if err := g.Create(ctx, pool, tenantSlug); err != nil {
 			return fmt.Errorf("create %s: %w", g.Tables[0].Name, err)
+		}
+		if g.Seed == nil {
+			continue
+		}
+		if err := g.Seed(ctx, pool, tenantSlug, locales); err != nil {
+			return fmt.Errorf("seed %s: %w", g.Tables[0].Name, err)
 		}
 	}
 	return RevokeAppendOnlyMutations(ctx, pool, tenantSlug)

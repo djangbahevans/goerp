@@ -106,7 +106,7 @@ func newTestEnv(t *testing.T, mods map[string]*module.LoadedModule) *testEnv {
 	}
 	t.Cleanup(func() { _ = cacheClient.Close() })
 
-	activities := NewActivities(tenantStore, inviteStore, role.NewStore(conn), conn, syncPool, diffEngine, reg, "goerp.test", cacheClient)
+	activities := NewActivities(tenantStore, inviteStore, role.NewStore(conn), conn, syncPool, diffEngine, reg, "goerp.test", cacheClient, nil)
 
 	t.Setenv("GOERP_TEMPORAL_HOST_PORT", "127.0.0.1:7233")
 	t.Setenv("GOERP_TEMPORAL_NAMESPACE", "default")

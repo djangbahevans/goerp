@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/activitytype"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
@@ -40,6 +41,13 @@ func newScheduledActivityFixture(t *testing.T) *scheduledActivityFixture {
 	af := newDispatchActivityFixture(t)
 	ctx := t.Context()
 
+	types := activitytype.NewStore(af.e.primaryDB)
+	if err := types.Bootstrap(ctx, af.slug); err != nil {
+		t.Fatalf("activitytype Bootstrap() error: %v", err)
+	}
+	if err := types.Seed(ctx, af.slug, nil); err != nil {
+		t.Fatalf("activitytype Seed() error: %v", err)
+	}
 	store := scheduledactivity.NewStore(af.e.primaryDB)
 	if err := store.Bootstrap(ctx, af.slug); err != nil {
 		t.Fatalf("scheduledactivity Bootstrap() error: %v", err)
@@ -56,6 +64,7 @@ func newScheduledActivityFixture(t *testing.T) *scheduledActivityFixture {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
 	af.e.scheduledActivityStore = store
+	af.e.activityTypeStore = types
 	af.e.roleStore = roles
 	af.e.rolePermissionMap = permcache.NewRolePermissionMap()
 

@@ -216,12 +216,11 @@ func (e *Engine) dispatchScheduledActivityCreateRoute(w http.ResponseWriter, r *
 		}
 		assigneeID = *body.AssigneeID
 	}
-	if !scheduledactivity.ValidType(body.Type) {
-		writeRouteError(w, http.StatusBadRequest, "invalid_type", "type must be one of "+strings.Join(scheduledactivity.Types, ", "))
-		return
-	}
 
 	ctx := r.Context()
+	if !e.checkActivityType(ctx, w, tenantCtx, body.Type) {
+		return
+	}
 	if !e.activityTarget(ctx, w, authCtx, tenantCtx, body.Model, body.RecordID) {
 		return
 	}
@@ -240,7 +239,7 @@ func (e *Engine) dispatchScheduledActivityCreateRoute(w http.ResponseWriter, r *
 		CreatedBy:  authCtx.UserID,
 	})
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "create scheduled activity failed")
+		writeScheduledActivityStoreError(w, err, "create scheduled activity failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, scheduledActivityToResponse(ctx, a, e.newActivityAuthorResolver(tenantCtx.Slug)))
@@ -297,18 +296,19 @@ func (e *Engine) dispatchScheduledActivityUpdateRoute(w http.ResponseWriter, r *
 		}
 		u.AssigneeID = body.AssigneeID
 	}
-	if body.Type != nil {
-		if !scheduledactivity.ValidType(*body.Type) {
-			writeRouteError(w, http.StatusBadRequest, "invalid_type", "type must be one of "+strings.Join(scheduledactivity.Types, ", "))
-			return
-		}
-		u.Type = body.Type
-	}
+	u.Type = body.Type
 
 	ctx := r.Context()
 	a := e.openScheduledActivityForParticipant(ctx, w, authCtx, tenantCtx)
 	if a == nil {
 		return
+	}
+	// An activity keeps a type archived since it was scheduled; only a
+	// change of type needs an active one (scheduled-activities.md §9).
+	if u.Type != nil && *u.Type != a.Type {
+		if !e.checkActivityType(ctx, w, tenantCtx, *u.Type) {
+			return
+		}
 	}
 	if u.AssigneeID != nil && *u.AssigneeID != a.AssigneeID {
 		if !e.checkAssignee(ctx, w, authCtx, tenantCtx, *u.AssigneeID, a.Model, a.RecordID) {
@@ -453,8 +453,25 @@ func (e *Engine) checkAssignee(ctx context.Context, w http.ResponseWriter, authC
 	return true
 }
 
+// checkActivityType reports whether key is one of the tenant's active
+// activity types, writing 400 invalid_type when not.
+func (e *Engine) checkActivityType(ctx context.Context, w http.ResponseWriter, tenantCtx *tenantresolve.TenantContext, key string) bool {
+	active, err := e.activityTypeStore.IsActive(ctx, tenantCtx.Slug, key)
+	if err != nil {
+		writeRouteError(w, http.StatusInternalServerError, "internal_error", "check activity type failed")
+		return false
+	}
+	if !active {
+		writeRouteError(w, http.StatusBadRequest, "invalid_type", "type must be one of the tenant's active activity types")
+		return false
+	}
+	return true
+}
+
 func writeScheduledActivityStoreError(w http.ResponseWriter, err error, internalMsg string) {
 	switch {
+	case errors.Is(err, scheduledactivity.ErrUnknownType):
+		writeRouteError(w, http.StatusBadRequest, "invalid_type", "type must be one of the tenant's active activity types")
 	case errors.Is(err, scheduledactivity.ErrNotFound):
 		writeRouteError(w, http.StatusNotFound, "not_found", "scheduled activity not found")
 	case errors.Is(err, scheduledactivity.ErrDone):

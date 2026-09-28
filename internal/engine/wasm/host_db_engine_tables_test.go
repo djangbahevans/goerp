@@ -23,7 +23,7 @@ func setupEngineTablesTest(t *testing.T) (*sql.DB, string, []string) {
 	primaryDB := openTestPrimaryDB(t)
 	slug := fmt.Sprintf("dbengtables%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
-	if err := enginetables.CreateAll(ctx, primaryDB, slug); err != nil {
+	if err := enginetables.CreateAll(ctx, primaryDB, slug, nil); err != nil {
 		t.Fatalf("enginetables.CreateAll: %v", err)
 	}
 
