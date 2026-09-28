@@ -19,8 +19,9 @@ func UniqueByIdempotencyKey() river.InsertOpts {
 // preventing a duplicate insert while the original job is still in
 // flight, but not for the idempotency guarantee an event/subscriber
 // delivery job needs: a retry arriving after the original job already
-// reached a terminal state (Completed, Discarded) must still see it and
-// dedupe against it, or the retry inserts a second, duplicate job.
+// reached a terminal state (Completed, Discarded, or Cancelled by a
+// handler's permanent-failure status) must still see it and dedupe
+// against it, or the retry inserts a second, duplicate job.
 // Available/Pending/Running/Scheduled are required by river v0.43.0's own
 // UniqueOpts.validate() — omitting any of them is a hard insert-time
 // error, not just a missed dedup case.
@@ -28,5 +29,5 @@ var UniqueAcrossAllJobStates = []rivertype.JobState{
 	rivertype.JobStateAvailable, rivertype.JobStatePending,
 	rivertype.JobStateRunning, rivertype.JobStateScheduled,
 	rivertype.JobStateRetryable, rivertype.JobStateCompleted,
-	rivertype.JobStateDiscarded,
+	rivertype.JobStateDiscarded, rivertype.JobStateCancelled,
 }
