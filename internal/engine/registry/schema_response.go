@@ -91,6 +91,14 @@ type SchemaRoute struct {
 	Name           string   `json:"name,omitempty"`
 	ResponseIsList bool     `json:"response_is_list"`
 	View           string   `json:"view,omitempty"`
+	// Streaming and Websocket mark engine.SSE and engine.WS routes, which
+	// goerp codegen generates no function for.
+	Streaming bool `json:"streaming,omitzero"`
+	Websocket bool `json:"websocket,omitzero"`
+	// EngineNative marks a route the engine serves with no module code —
+	// an EnableOps CRUD route or a workflow transition — which goerp
+	// codegen covers from the model instead of the route.
+	EngineNative bool `json:"engine_native,omitzero"`
 	// engine.Body/engine.Returns declarations, read by goerp codegen.
 	RequestType  *SchemaTypeDesc `json:"request_type,omitempty"`
 	ResponseType *SchemaTypeDesc `json:"response_type,omitempty"`
@@ -153,6 +161,16 @@ type SchemaField struct {
 	InverseField string          `json:"inverse_field,omitempty"`
 	IsPrimary    bool            `json:"is_primary,omitzero"`
 	Workflow     *SchemaWorkflow `json:"workflow,omitempty"`
+	// SelectionValues are a selection field's values, or an enum field's
+	// type values.
+	SelectionValues []string `json:"selection_values,omitempty"`
+	// Readonly marks a field the ORM rejects in a create or update body:
+	// declared Readonly, or computed.
+	Readonly   bool `json:"readonly,omitzero"`
+	PrimaryKey bool `json:"primary_key,omitzero"`
+	// HasDefault marks a field with a database default, which a create
+	// may omit even when it's required.
+	HasDefault bool `json:"has_default,omitzero"`
 }
 
 // SchemaWorkflow exposes a .Workflow()-declared Selection field's
@@ -210,7 +228,7 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 
 		models := map[string]SchemaModel{}
 		for _, md := range m.ModelDecls {
-			models[md.QualifiedName(name)] = schemaModelFrom(md)
+			models[md.QualifiedName(name)] = schemaModelFrom(md, m.TypeDecls)
 		}
 
 		publicConfig := map[string]any{}
@@ -267,6 +285,9 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 			Name:           mf.Name,
 			ResponseIsList: mf.ResponseIsList,
 			View:           schemaViewFor(mod.Views, mf.Model, mf.CrudAction),
+			Streaming:      mf.Streaming,
+			Websocket:      mf.Websocket,
+			EngineNative:   mf.EngineNative,
 			RequestType:    schemaTypeDescFrom(mf.RequestType),
 			ResponseType:   schemaTypeDescFrom(mf.ResponseType),
 		})
@@ -279,18 +300,33 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 	}
 }
 
-// schemaModelFrom builds md's ModelDef entry.
-func schemaModelFrom(md model.ModelDeclaration) SchemaModel {
+// schemaModelFrom builds md's ModelDef entry, resolving an enum field's
+// values from its module's declared types.
+func schemaModelFrom(md model.ModelDeclaration, types []model.TypeDeclaration) SchemaModel {
 	fields := make([]SchemaField, 0, len(md.Fields))
 	for _, f := range md.Fields {
+		values := f.Def.SelectionValues
+		if f.Def.Kind == model.KindEnum {
+			values = nil
+			for _, t := range types {
+				if t.Name == f.Def.EnumType {
+					values = t.Values
+					break
+				}
+			}
+		}
 		fields = append(fields, SchemaField{
-			Name:         f.Name,
-			Type:         f.Def.Kind.String(),
-			Required:     f.Def.IsRequired,
-			RelatedModel: f.Def.RelatedModel,
-			InverseField: f.Def.InverseField,
-			IsPrimary:    f.Def.IsPrimary,
-			Workflow:     schemaWorkflowFrom(f.Def),
+			Name:            f.Name,
+			Type:            f.Def.Kind.String(),
+			Required:        f.Def.IsRequired,
+			RelatedModel:    f.Def.RelatedModel,
+			InverseField:    f.Def.InverseField,
+			IsPrimary:       f.Def.IsPrimary,
+			Workflow:        schemaWorkflowFrom(f.Def),
+			SelectionValues: values,
+			Readonly:        f.Def.IsReadonly || f.Def.IsComputed,
+			PrimaryKey:      f.Def.IsPrimaryKey,
+			HasDefault:      f.Def.DefaultExpr != nil,
 		})
 	}
 	ops := make([]string, 0, len(md.EnabledOps))

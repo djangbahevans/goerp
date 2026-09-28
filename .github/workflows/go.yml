@@ -38,6 +38,7 @@ jobs:
               - ".github/workflows/go.yml"
             engine:
               - "internal/engine/**"
+              - "internal/codegen/**"
               - "testdata/**"
               - "contract/**"
               - "internal/module/**"
@@ -51,6 +52,7 @@ jobs:
               - "Makefile"
             cli:
               - "internal/cli/**"
+              - "internal/codegen/**"
               - "internal/module/**"
               - "internal/gateway/**"
               - "cmd/goerp/**"
@@ -183,6 +185,12 @@ jobs:
           key: ${{ runner.os }}-npm-${{ hashFiles('internal/module/build_test.go') }}
           restore-keys: |
             ${{ runner.os }}-npm-
+
+      # internal/codegen type-checks a generated client with the shell's
+      # own tsc, and skips that test without the shell's node_modules.
+      - name: Install Shell Dependencies
+        working-directory: shell
+        run: npm ci --no-audit --no-fund
 
       - name: Run Engine Tests
         run: make test-engine GO_TEST_FLAGS="-v -race -timeout 30m -coverprofile=coverage-engine.txt -covermode=atomic"
