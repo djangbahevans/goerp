@@ -425,7 +425,7 @@ func TestDBExec_TrackedUpdateFrom_CapturesOnlyTheTargetTableOncePerRow(t *testin
 // followers returns (model, record_id, user_id) for every record_followers row.
 func (f *activityFixture) followers(t *testing.T) [][3]string {
 	t.Helper()
-	rows, err := f.db.Query(`SELECT model, record_id, user_id FROM tenant_` + f.slug + `.record_followers ORDER BY created_at, record_id`)
+	rows, err := f.db.Query(`SELECT model, record_id, user_id FROM tenant_` + f.slug + `.record_followers ORDER BY record_id, user_id`)
 	if err != nil {
 		t.Fatalf("query record_followers: %v", err)
 	}
