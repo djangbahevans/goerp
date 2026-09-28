@@ -1,4 +1,12 @@
-import { Badge, type BadgeColor, CountryFlag, formatRelativeTime, StatusDot, UserAvatar } from "@goerp/sdk/components";
+import {
+  Badge,
+  type BadgeColor,
+  CountryFlag,
+  currencyMinorUnitDigits,
+  formatRelativeTime,
+  StatusDot,
+  UserAvatar,
+} from "@goerp/sdk/components";
 import { componentRegistry } from "@goerp/sdk/schema";
 import type { CSSProperties, ReactNode } from "react";
 import type { ListColumn, Row } from "./list-view-types.js";
@@ -163,11 +171,14 @@ export function renderCellContent(column: ListColumn, row: Row, options: RenderC
     case "currency": {
       if (typeof value !== "number") return "";
       const currency = column.currency_field ? (row[column.currency_field] as string | undefined) : undefined;
+      // l10n-guide.md: amounts are integer minor units (GHS 850.00 is
+      // 85000), the same conversion Field and MoneyField apply.
       if (currency) {
         try {
+          const major = value / 10 ** currencyMinorUnitDigits(currency);
           return (
             <span className="font-mono">
-              {new Intl.NumberFormat(undefined, { style: "currency", currency }).format(value)}
+              {new Intl.NumberFormat(undefined, { style: "currency", currency }).format(major)}
             </span>
           );
         } catch {
