@@ -6,8 +6,11 @@ import (
 	"net/http"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type tenantContextKey struct{}
@@ -75,17 +78,18 @@ func tenantResolutionMiddleware(resolver *tenantresolve.Resolver) func(http.Hand
 					// tenant exists at all, same convention
 					// mfareverify's own tenant-resolution error mapping
 					// already uses.
-					writeRouteError(w, http.StatusNotFound, "not_found", "not found")
+					httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 				case errors.Is(err, tenantresolve.ErrTenantSuspended):
-					writeRouteError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+					httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 				case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-					writeRouteError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+					httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 				default:
-					writeRouteError(w, http.StatusInternalServerError, "internal_error", "tenant resolution failed")
+					httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "tenant resolution failed")
 				}
 				return
 			}
 
+			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("tenant.id", tenantCtx.TenantID))
 			next.ServeHTTP(w, r.WithContext(withTenantContext(r.Context(), tenantCtx)))
 		})
 	}
@@ -132,7 +136,7 @@ func authMiddleware(checker *authcheck.Checker) func(http.Handler) http.Handler 
 			authCtx, err := checker.Authenticate(r.Context(), rawToken, tenantCtx.TenantID, tenantCtx.Slug, r.RemoteAddr, rr.snap.PermissionRegistry(), rr.entry.Manifest.Permissions)
 			if err != nil {
 				status, code := authenticateErrorResponse(err)
-				writeRouteError(w, status, code, "authentication failed")
+				httperr.Write(r.Context(), w, status, code, "authentication failed")
 				return
 			}
 
@@ -187,11 +191,11 @@ func mfaEnforcementMiddleware(checker *authcheck.Checker) func(http.Handler) htt
 			tenantCtx := tenantFromContext(r.Context())
 			decision, err := checker.EnforceMFA(r.Context(), rr.entry.PathTemplate, tenantCtx.TenantID, authCtx)
 			if err != nil {
-				writeRouteError(w, http.StatusInternalServerError, "internal_error", "mfa enforcement check failed")
+				httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa enforcement check failed")
 				return
 			}
 			if decision != enforce.Allowed {
-				writeRouteError(w, http.StatusForbidden, string(decision), "mfa enforcement required")
+				httperr.Write(r.Context(), w, http.StatusForbidden, string(decision), "mfa enforcement required")
 				return
 			}
 
@@ -226,7 +230,7 @@ func routeAuthMiddleware() func(http.Handler) http.Handler {
 			if rr.entry.Manifest.Auth == "required" {
 				authCtx := authFromContext(r.Context())
 				if authCtx == nil || !authCtx.IsAuthenticated {
-					writeRouteError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+					httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 					return
 				}
 			}

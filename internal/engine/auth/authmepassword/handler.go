@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
@@ -63,21 +64,13 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
+func writeInternal(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "password change failed")
 }
 
-func writeInternal(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusInternalServerError, "internal_error", "password change failed")
-}
-
-func writeOverloaded(w http.ResponseWriter) {
+func writeOverloaded(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
-	writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many password changes in progress, retry shortly")
+	httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "overloaded", "too many password changes in progress, retry shortly")
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -87,81 +80,79 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeInternal(w)
+			writeInternal(w, r)
 		}
 		return
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	// An API key has no session to keep and no user password to confirm.
 	if err != nil || !authCtx.IsAuthenticated || authCtx.AuthMethod != "jwt" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req changeRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
 	u, err := h.users.GetByID(ctx, authCtx.UserID)
 	if err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	// A wrong current password doesn't touch the login lockout counter:
 	// the caller already holds a session, and a lockout here would stop
 	// them signing in again.
 	if u.PasswordHash == nil {
-		writeInvalidPassword(w)
+		writeInvalidPassword(w, r)
 		return
 	}
 	// Looked up before taking a slot, so the slot covers only hashing.
 	policy, policyVersion, err := h.policies.Effective(ctx, tenantCtx.TenantID)
 	if err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	slot, err := h.hasher.Acquire(ctx)
 	if err != nil {
-		writeOverloaded(w)
+		writeOverloaded(w, r)
 		return
 	}
 	defer slot.Release()
 	match, _, err := slot.Verify(req.CurrentPassword, *u.PasswordHash)
 	if err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	if !match {
-		writeInvalidPassword(w)
+		writeInvalidPassword(w, r)
 		return
 	}
 
 	if err := policy.Validate(req.NewPassword, u.Email); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		writeJSON(w, password.TooWeakBody(err, policy))
+		password.WriteTooWeak(r.Context(), w, err, policy)
 		return
 	}
 
 	hash, err := slot.Hash(req.NewPassword)
 	slot.Release()
 	if err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	// Revoked before the write, so a revocation failure aborts with the
@@ -169,11 +160,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// is what the user asked for anyway), and again after it to catch a
 	// login with the old password in between.
 	if err := h.sessions.RevokeOthersForUser(ctx, u.ID, authCtx.SessionID, revokeReason); err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	if err := h.users.SetPassword(ctx, u.ID, hash, tenantCtx.TenantID, policyVersion); err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	if err := h.sessions.RevokeOthersForUser(ctx, u.ID, authCtx.SessionID, revokeReason); err != nil {
@@ -195,8 +186,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "ok"})
 }
 
-func writeInvalidPassword(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusUnauthorized, "invalid_password", "current password is incorrect")
+func writeInvalidPassword(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_password", "current password is incorrect")
 }
 
 func (h *Handler) recordAudit(ctx context.Context, row authaudit.Row) {

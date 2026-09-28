@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/rs/zerolog/log"
 )
@@ -67,7 +68,7 @@ func rateLimitMiddleware(redisClient *cache.Client, defaultCfg route.RateLimitCo
 			}
 			if !allowed {
 				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
-				writeRouteError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "too many requests")
+				httperr.Write(r.Context(), w, http.StatusTooManyRequests, "rate_limit_exceeded", "too many requests")
 				return
 			}
 

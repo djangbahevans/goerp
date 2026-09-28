@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,8 +15,8 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/coder/websocket"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/route"
-	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
 // newRecordingTracer returns a real *sdktrace.TracerProvider exporting to
@@ -118,20 +119,17 @@ func TestOtelMiddleware_NoRouteResolutionIsNoOp(t *testing.T) {
 	}
 }
 
-func TestOtelMiddleware_TenantContextAddsTenantAttribute(t *testing.T) {
+// The span starts before tenant resolution, so tenantResolutionMiddleware
+// is what sets tenant.id on it.
+func TestBuildChain_TenantResolutionAddsTenantAttributeToSpan(t *testing.T) {
+	f := newChainFixture(t)
 	exporter, tp := newRecordingTracer(t)
-	rr := &routeResolution{entry: &route.RouteEntry{PathTemplate: "/widgets"}}
+	h := f.tracedChain(nil, tp.Tracer("test"))
 
-	h := otelMiddleware(tp.Tracer("test"))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/widgets", nil)
-	ctx := withRouteResolution(req.Context(), rr)
-	ctx = withTenantContext(ctx, &tenantresolve.TenantContext{TenantID: "tenant-123"})
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	req := httptest.NewRequest(http.MethodGet, "/widgets/items", nil)
+	req.Host = f.domain
+	req.Header.Set("Authorization", "Bearer "+f.issueToken(t))
+	h.ServeHTTP(httptest.NewRecorder(), req)
 
 	spans := exporter.GetSpans()
 	if len(spans) != 1 {
@@ -143,8 +141,39 @@ func TestOtelMiddleware_TenantContextAddsTenantAttribute(t *testing.T) {
 			gotTenantID = attr.Value.AsString()
 		}
 	}
-	if gotTenantID != "tenant-123" {
-		t.Errorf("tenant.id = %q, want %q", gotTenantID, "tenant-123")
+	if gotTenantID != f.tenantID {
+		t.Errorf("tenant.id = %q, want %q", gotTenantID, f.tenantID)
+	}
+}
+
+// TestBuildChain_AuthRejectionCarriesTraceID proves an auth rejection,
+// which never reaches dispatch, still gets a span and so a trace_id.
+func TestBuildChain_AuthRejectionCarriesTraceID(t *testing.T) {
+	f := newChainFixture(t)
+	exporter, tp := newRecordingTracer(t)
+	h := f.tracedChain(nil, tp.Tracer("test"))
+
+	req := httptest.NewRequest(http.MethodGet, "/widgets/items", nil)
+	req.Host = f.domain
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body: %s", w.Code, w.Body.String())
+	}
+	var env httperr.Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if env.Error.RequestID != w.Header().Get(requestIDHeader) {
+		t.Errorf("request_id = %q, want X-Request-Id %q", env.Error.RequestID, w.Header().Get(requestIDHeader))
+	}
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	if want := spans[0].SpanContext.TraceID().String(); env.Error.TraceID != want {
+		t.Errorf("trace_id = %q, want %q", env.Error.TraceID, want)
 	}
 }
 

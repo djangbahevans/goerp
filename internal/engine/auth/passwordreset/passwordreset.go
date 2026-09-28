@@ -63,14 +63,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
 func recordAudit(ctx context.Context, audit AuditRecorder, row authaudit.Row) {
 	if audit == nil {
 		log.Warn().Str("event", row.EventType).Msg("passwordreset: no audit recorder wired, event not recorded")

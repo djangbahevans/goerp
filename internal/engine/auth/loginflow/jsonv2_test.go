@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // encoding/json/v2 matches JSON field names to Go struct fields
@@ -55,16 +58,27 @@ func TestServeHTTP_InvalidUTF8IsBadRequest(t *testing.T) {
 	}
 }
 
-// encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
-// by default the way v1's Encoder did — writeJSON passes explicit options
-// to keep that parity (goerp#530).
-func TestWriteJSONError_EscapesHTMLUnsafeCharacters(t *testing.T) {
-	w := httptest.NewRecorder()
-	writeJSONError(w, 400, "invalid_request", "<script>&</script>")
+// An auth handler's error envelope carries the request's request_id and
+// trace_id through the shared writer (goerp#1094).
+func TestServeHTTP_ErrorEnvelopeCarriesRequestAndTraceID(t *testing.T) {
+	tp := sdktrace.NewTracerProvider()
+	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })
+	ctx, span := tp.Tracer("test").Start(httperr.WithRequestID(t.Context(), "req-1"), "POST /auth/login")
+	defer span.End()
 
-	body := w.Body.String()
-	wantEscaped := "\\u003cscript\\u003e\\u0026\\u003c/script\\u003e"
-	if !strings.Contains(body, wantEscaped) {
-		t.Errorf("body = %s, want it to contain %s", body, wantEscaped)
+	h := &Handler{}
+	req := httptest.NewRequestWithContext(ctx, "POST", "/auth/login", strings.NewReader(`{`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	var env httperr.Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode %s: %v", w.Body.String(), err)
+	}
+	if env.Error.RequestID != "req-1" {
+		t.Errorf("request_id = %q, want %q", env.Error.RequestID, "req-1")
+	}
+	if want := span.SpanContext().TraceID().String(); env.Error.TraceID != want {
+		t.Errorf("trace_id = %q, want %q", env.Error.TraceID, want)
 	}
 }

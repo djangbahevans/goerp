@@ -33,6 +33,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -125,15 +126,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeInternalError(w http.ResponseWriter, err error, msg string) {
+func writeInternalError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 	log.Error().Err(err).Msg("adminusers: " + msg)
-	writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 }
 
 type caller struct {
@@ -149,29 +144,29 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) (caller, boo
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeInternalError(w, err, "tenant resolution failed")
+			writeInternalError(w, r, err, "tenant resolution failed")
 		}
 		return caller{}, false
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return caller{}, false
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return caller{}, false
 	}
 	if !slices.Contains(authCtx.RolesLive, adminRoleName) {
-		writeJSONError(w, http.StatusForbidden, "forbidden", "admin role required")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "forbidden", "admin role required")
 		return caller{}, false
 	}
 	return caller{tenant: tenantCtx, auth: authCtx}, true
@@ -182,7 +177,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) (caller, boo
 func targetID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := route.ParamsFromContext(r.Context())["id"]
 	if _, err := uuid.Parse(id); err != nil {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return "", false
 	}
 	return id, true
@@ -198,11 +193,11 @@ func (h *Handler) member(w http.ResponseWriter, r *http.Request, c caller) (entr
 	}
 	e, err := h.store.get(r.Context(), c.tenant.Slug, id)
 	if errors.Is(err, errUserNotFound) || (err == nil && e.InvitationID != nil) {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return entry{}, false
 	}
 	if err != nil {
-		writeInternalError(w, err, "target lookup failed")
+		writeInternalError(w, r, err, "target lookup failed")
 		return entry{}, false
 	}
 	return e, true
@@ -235,13 +230,13 @@ func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := listFilter{Search: strings.TrimSpace(q.Get("q")), Status: q.Get("status"), Role: q.Get("role"), Limit: defaultListLimit}
 	if filter.Status != "" && !slices.Contains(listStatuses, filter.Status) {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "status must be one of active, invited, suspended")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "status must be one of active, invited, suspended")
 		return
 	}
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > maxListLimit {
-			writeJSONError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 100")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 100")
 			return
 		}
 		filter.Limit = n
@@ -249,7 +244,7 @@ func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("cursor"); raw != "" {
 		after, err := base64.RawURLEncoding.DecodeString(raw)
 		if err != nil || len(after) == 0 {
-			writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed cursor")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed cursor")
 			return
 		}
 		filter.After = string(after)
@@ -257,7 +252,7 @@ func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
 
 	entries, total, err := h.store.list(r.Context(), c.tenant.Slug, filter)
 	if err != nil {
-		writeInternalError(w, err, "list users failed")
+		writeInternalError(w, r, err, "list users failed")
 		return
 	}
 
@@ -289,16 +284,16 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 
 	e, err := h.store.get(ctx, c.tenant.Slug, id)
 	if errors.Is(err, errUserNotFound) {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
 	if err != nil {
-		writeInternalError(w, err, "get user failed")
+		writeInternalError(w, r, err, "get user failed")
 		return
 	}
 	inv, err := h.store.liveInvitation(ctx, c.tenant.Slug, e.Email)
 	if err != nil {
-		writeInternalError(w, err, "get invitation failed")
+		writeInternalError(w, r, err, "get invitation failed")
 		return
 	}
 
@@ -330,26 +325,26 @@ func (h *Handler) auditRow(r *http.Request, c caller, eventType, targetID string
 func (h *Handler) changeStatus(w http.ResponseWriter, r *http.Request, c caller, targetID string, run func() error, conflictCode, revokeReason string) {
 	if revokeReason != "" {
 		if err := h.revoker.RevokeAllForUserInTenant(r.Context(), targetID, c.tenant.TenantID, revokeReason); err != nil {
-			writeInternalError(w, err, "session revocation failed")
+			writeInternalError(w, r, err, "session revocation failed")
 			return
 		}
 	}
 	if err := run(); err != nil {
 		if errors.Is(err, errStateChanged) {
-			writeJSONError(w, http.StatusConflict, conflictCode, "the user's status doesn't allow this change")
+			httperr.Write(r.Context(), w, http.StatusConflict, conflictCode, "the user's status doesn't allow this change")
 			return
 		}
-		writeInternalError(w, err, "status change failed")
+		writeInternalError(w, r, err, "status change failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func rejectSelf(w http.ResponseWriter, c caller, target entry) bool {
+func rejectSelf(w http.ResponseWriter, r *http.Request, c caller, target entry) bool {
 	if target.ID != c.auth.UserID {
 		return false
 	}
-	writeJSONError(w, http.StatusBadRequest, "cannot_modify_self", "an admin can't suspend or delete their own account")
+	httperr.Write(r.Context(), w, http.StatusBadRequest, "cannot_modify_self", "an admin can't suspend or delete their own account")
 	return true
 }
 
@@ -360,14 +355,14 @@ func (h *Handler) ServeSuspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target, ok := h.member(w, r, c)
-	if !ok || rejectSelf(w, c, target) {
+	if !ok || rejectSelf(w, r, c, target) {
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body suspendRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil || strings.TrimSpace(body.Reason) == "" {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "a reason is required")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "a reason is required")
 		return
 	}
 
@@ -399,7 +394,7 @@ func (h *Handler) ServeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target, ok := h.member(w, r, c)
-	if !ok || rejectSelf(w, c, target) {
+	if !ok || rejectSelf(w, r, c, target) {
 		return
 	}
 
@@ -422,12 +417,12 @@ func (h *Handler) ServeSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	families, err := h.sessions.LiveFamiliesForUserInTenant(ctx, target.ID, c.tenant.TenantID)
 	if err != nil {
-		writeInternalError(w, err, "list sessions failed")
+		writeInternalError(w, r, err, "list sessions failed")
 		return
 	}
 	currentFamily, err := h.callerFamily(ctx, c, target.ID)
 	if err != nil {
-		writeInternalError(w, err, "current session lookup failed")
+		writeInternalError(w, r, err, "current session lookup failed")
 		return
 	}
 	out := make([]sessionJSON, len(families))
@@ -485,30 +480,30 @@ func (h *Handler) ServeRevokeSession(w http.ResponseWriter, r *http.Request) {
 
 	familyID := route.ParamsFromContext(ctx)["family_id"]
 	if _, err := uuid.Parse(familyID); err != nil {
-		writeJSONError(w, http.StatusNotFound, "session_not_found", "session not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "session_not_found", "session not found")
 		return
 	}
 	family, err := h.sessions.LiveFamilyForUserInTenant(ctx, target.ID, c.tenant.TenantID, familyID)
 	if errors.Is(err, session.ErrSessionNotFound) {
-		writeJSONError(w, http.StatusNotFound, "session_not_found", "session not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "session_not_found", "session not found")
 		return
 	}
 	if err != nil {
-		writeInternalError(w, err, "session lookup failed")
+		writeInternalError(w, r, err, "session lookup failed")
 		return
 	}
 	currentFamily, err := h.callerFamily(ctx, c, target.ID)
 	if err != nil {
-		writeInternalError(w, err, "current session lookup failed")
+		writeInternalError(w, r, err, "current session lookup failed")
 		return
 	}
 	if family.ID == currentFamily {
-		writeJSONError(w, http.StatusBadRequest, "cannot_revoke_current_session", "sign out to end the current session")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "cannot_revoke_current_session", "sign out to end the current session")
 		return
 	}
 
 	if err := h.revoker.RevokeFamily(ctx, family.ID, "admin"); err != nil {
-		writeInternalError(w, err, "session revocation failed")
+		writeInternalError(w, r, err, "session revocation failed")
 		return
 	}
 	h.recordSessionRevoked(r, c, target.ID, family)

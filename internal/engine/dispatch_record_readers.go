@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/rs/zerolog/log"
 )
 
@@ -36,25 +37,25 @@ func (e *Engine) dispatchRecordReadersRoute(w http.ResponseWriter, r *http.Reque
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
 	q := r.URL.Query()
 	search := q.Get("q")
 	if !utf8.ValidString(search) || strings.ContainsRune(search, 0) {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "q must be valid UTF-8 text")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "q must be valid UTF-8 text")
 		return
 	}
 	if utf8.RuneCountInString(search) > recordReadersMaxQuery {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "q must be at most 100 characters")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "q must be at most 100 characters")
 		return
 	}
 	limit := recordReadersDefaultLimit
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > recordReadersMaxLimit {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 20")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 20")
 			return
 		}
 		limit = n
@@ -63,7 +64,7 @@ func (e *Engine) dispatchRecordReadersRoute(w http.ResponseWriter, r *http.Reque
 	if raw := q.Get("exclude_self"); raw != "" {
 		b, err := strconv.ParseBool(raw)
 		if err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "exclude_self must be true or false")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "exclude_self must be true or false")
 			return
 		}
 		excludeSelf = b
@@ -81,7 +82,7 @@ func (e *Engine) dispatchRecordReadersRoute(w http.ResponseWriter, r *http.Reque
 	}
 	candidates, err := e.roleStore.SearchMembers(ctx, tenantCtx.Slug, search, excludeID, recordReadersMaxChecked)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "search record readers failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "search record readers failed")
 		return
 	}
 
@@ -107,5 +108,5 @@ func (e *Engine) dispatchRecordReadersRoute(w http.ResponseWriter, r *http.Reque
 		}
 		out = append(out, reader)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out})
 }

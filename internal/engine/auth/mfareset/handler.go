@@ -34,6 +34,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -111,14 +112,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -127,13 +120,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "reset failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
 		}
 		return
 	}
@@ -143,41 +136,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// static admin token.
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
 
 	if !slices.Contains(authCtx.RolesLive, adminRoleName) {
-		writeJSONError(w, http.StatusForbidden, "forbidden", "admin role required")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "forbidden", "admin role required")
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req resetRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
 	confirmed, err := h.confirmCallerPassword(ctx, authCtx.UserID, req.Password)
 	if err != nil {
 		w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
-		writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many password checks in progress, retry shortly")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "overloaded", "too many password checks in progress, retry shortly")
 		return
 	}
 	if !confirmed {
-		writeJSONError(w, http.StatusUnauthorized, "invalid_password", "current password confirmation failed")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_password", "current password confirmation failed")
 		return
 	}
 
 	targetID := route.ParamsFromContext(ctx)["id"]
 	if targetID == "" {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
 
@@ -187,17 +180,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// even a member here.
 	isMember, err := h.roles.IsMember(ctx, tenantCtx.Slug, targetID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reset failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
 		return
 	}
 	if !isMember {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
 
 	target, err := h.users.GetByID(ctx, targetID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reset failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
 		return
 	}
 
@@ -206,14 +199,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// regardless of which tenant it was enrolled through, matching the
 	// doc's own "Revoke every enrolled user_mfa row for {id}" wording.
 	if err := h.mfa.RevokeAllForUser(ctx, targetID); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reset failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
 		return
 	}
 	// Sessions, unlike user_mfa, are tenant-scoped — only this tenant's
 	// sessions for the target are revoked, per the doc's own "all their
 	// active sessions in the tenant" wording.
 	if err := h.sessions.RevokeAllForUserInTenant(ctx, targetID, tenantCtx.TenantID, "admin_mfa_reset"); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reset failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
 		return
 	}
 

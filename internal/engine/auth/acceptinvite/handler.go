@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -45,20 +46,12 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
+func writeInvalidInvite(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusNotFound, "invalid_invite", "invite link is invalid or has expired")
 }
 
-func writeInvalidInvite(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusNotFound, "invalid_invite", "invite link is invalid or has expired")
-}
-
-func writeInternal(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusInternalServerError, "internal_error", "invite acceptance failed")
+func writeInternal(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "invite acceptance failed")
 }
 
 // lookup resolves the tenant and live invitation behind a link, and the
@@ -102,10 +95,10 @@ func (h *Handlers) Info(w http.ResponseWriter, r *http.Request) {
 	t, _, u, err := h.lookup(ctx, q.Get("tenant"), q.Get("token"))
 	if err != nil {
 		if errors.Is(err, errNotFound) {
-			writeInvalidInvite(w)
+			writeInvalidInvite(w, r)
 			return
 		}
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 
@@ -113,7 +106,7 @@ func (h *Handlers) Info(w http.ResponseWriter, r *http.Request) {
 	if p, err := h.users.GetProfile(ctx, u.ID); err == nil {
 		name = p.DisplayName()
 	} else if !errors.Is(err, user.ErrProfileNotFound) {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 
@@ -139,7 +132,7 @@ func (h *Handlers) Accept(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req acceptRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
@@ -147,10 +140,10 @@ func (h *Handlers) Accept(w http.ResponseWriter, r *http.Request) {
 	t, inv, u, err := h.lookup(ctx, req.Tenant, req.Token)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
-			writeInvalidInvite(w)
+			writeInvalidInvite(w, r)
 			return
 		}
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 
@@ -159,25 +152,23 @@ func (h *Handlers) Accept(w http.ResponseWriter, r *http.Request) {
 	if newUser {
 		policy, policyVersion, err := h.policies.Effective(ctx, t.ID)
 		if err != nil {
-			writeInternal(w)
+			writeInternal(w, r)
 			return
 		}
 		if err := policy.Validate(req.Password, u.Email); err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			writeJSON(w, password.TooWeakBody(err, policy))
+			password.WriteTooWeak(r.Context(), w, err, policy)
 			return
 		}
 		slot, err := h.hasher.Acquire(ctx)
 		if err != nil {
 			w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
-			writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many password operations in progress, retry shortly")
+			httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "overloaded", "too many password operations in progress, retry shortly")
 			return
 		}
 		hash, err := slot.Hash(req.Password)
 		slot.Release()
 		if err != nil {
-			writeInternal(w)
+			writeInternal(w, r)
 			return
 		}
 		activate = func(tx *sql.Tx) error {
@@ -188,14 +179,14 @@ func (h *Handlers) Accept(w http.ResponseWriter, r *http.Request) {
 	if err := h.invites.Accept(ctx, t.Slug, inv.ID, u.ID, activate); err != nil {
 		switch {
 		case errors.Is(err, invite.ErrInvitationNotLive):
-			writeInvalidInvite(w)
+			writeInvalidInvite(w, r)
 		case errors.Is(err, user.ErrNotActivatable):
 			// A concurrent accept (or reset) set the password first, or the
 			// account's status changed; this request's password was never
 			// applied.
-			writeJSONError(w, http.StatusConflict, "invite_conflict", "this account was set up by another request; sign in instead")
+			httperr.Write(r.Context(), w, http.StatusConflict, "invite_conflict", "this account was set up by another request; sign in instead")
 		default:
-			writeInternal(w)
+			writeInternal(w, r)
 		}
 		return
 	}

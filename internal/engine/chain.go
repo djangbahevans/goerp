@@ -21,12 +21,12 @@ func buildChain(e *Engine, reg *registry.ModuleRegistry, builtins map[string]htt
 		requestIDMiddleware(),
 		realIPMiddleware(trustedProxies),
 		routeResolutionMiddleware(reg),
+		otelMiddleware(tracer),
 		rateLimitMiddleware(redisClient, defaultRateLimit),
 		tenantResolutionMiddleware(tenantResolver),
 		authMiddleware(authChecker),
 		mfaEnforcementMiddleware(authChecker),
 		routeAuthMiddleware(),
-		otelMiddleware(tracer),
 	}
 
 	var handler = e.buildDispatchHandler(builtins)

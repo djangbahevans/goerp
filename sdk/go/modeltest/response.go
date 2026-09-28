@@ -96,7 +96,7 @@ func (r *Response) JSONArray(path string) []map[string]any {
 
 // ErrorCode returns the response body's error.code field, per the
 // {"error": {"code", "message"}} envelope every error response in this
-// codebase uses (writeRouteError, sdk/go/engine's own error responses).
+// codebase uses (httperr.Write, sdk/go/engine's own error responses).
 func (r *Response) ErrorCode() string {
 	r.t.Helper()
 	code := r.JSON("error.code")
@@ -106,7 +106,7 @@ func (r *Response) ErrorCode() string {
 
 // ValidationErrors returns the response body's error.details as a
 // field-name -> messages map, for a 422 response whose details carry
-// per-field validation errors (writeRouteErrorDetails' generic details
+// per-field validation errors (httperr.WriteDetails' generic details
 // object, keyed by field name).
 func (r *Response) ValidationErrors() map[string][]string {
 	r.t.Helper()

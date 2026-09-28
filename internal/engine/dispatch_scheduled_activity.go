@@ -18,6 +18,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/scheduledactivity"
@@ -101,7 +102,7 @@ func (e *Engine) dispatchScheduledActivityListRoute(w http.ResponseWriter, r *ht
 
 	activities, err := e.scheduledActivityStore.ListOpenForRecord(ctx, tenantCtx.Slug, modelName, recordID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list scheduled activities failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list scheduled activities failed")
 		return
 	}
 	users := e.newActivityAuthorResolver(tenantCtx.Slug)
@@ -109,7 +110,7 @@ func (e *Engine) dispatchScheduledActivityListRoute(w http.ResponseWriter, r *ht
 	for i := range activities {
 		out[i] = scheduledActivityToResponse(ctx, &activities[i], users)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out})
 }
 
 // dispatchScheduledActivityMineRoute is GET /_meta/scheduled-activities/mine's
@@ -127,7 +128,7 @@ func (e *Engine) dispatchScheduledActivityMineRoute(w http.ResponseWriter, r *ht
 	if raw := q.Get("cursor"); raw != "" {
 		c, err := decodeScheduledActivityCursor(raw)
 		if err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "malformed cursor")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed cursor")
 			return
 		}
 		cursor = c
@@ -136,7 +137,7 @@ func (e *Engine) dispatchScheduledActivityMineRoute(w http.ResponseWriter, r *ht
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > scheduledActivityMineMaxLimit {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 200")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 200")
 			return
 		}
 		limit = n
@@ -145,7 +146,7 @@ func (e *Engine) dispatchScheduledActivityMineRoute(w http.ResponseWriter, r *ht
 	ctx := r.Context()
 	activities, hasMore, err := e.scheduledActivityStore.ListOpenForAssignee(ctx, tenantCtx.Slug, authCtx.UserID, cursor, limit)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list scheduled activities failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list scheduled activities failed")
 		return
 	}
 
@@ -176,7 +177,7 @@ func (e *Engine) dispatchScheduledActivityMineRoute(w http.ResponseWriter, r *ht
 		}
 		out = append(out, myScheduledActivityResponse{scheduledActivityToResponse(ctx, a, users), name})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": activityListMeta{Cursor: nextCursor, HasMore: hasMore}})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out, "meta": activityListMeta{Cursor: nextCursor, HasMore: hasMore}})
 }
 
 // dispatchScheduledActivityCreateRoute is POST /_meta/scheduled-activities'
@@ -189,29 +190,29 @@ func (e *Engine) dispatchScheduledActivityCreateRoute(w http.ResponseWriter, r *
 	}
 	var body scheduledActivityCreateRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
 		return
 	}
 	summary, msg := validSummary(body.Summary)
 	if msg != "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
 	var note *string
 	if body.Note != nil {
 		if note, msg = optionalText("note", *body.Note); msg != "" {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 			return
 		}
 	}
 	if msg := validDueDate(body.DueDate); msg != "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
 	assigneeID := authCtx.UserID
 	if body.AssigneeID != nil {
 		if _, err := uuid.Parse(*body.AssigneeID); err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "assignee_id must be a UUID")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "assignee_id must be a UUID")
 			return
 		}
 		assigneeID = *body.AssigneeID
@@ -239,10 +240,10 @@ func (e *Engine) dispatchScheduledActivityCreateRoute(w http.ResponseWriter, r *
 		CreatedBy:  authCtx.UserID,
 	})
 	if err != nil {
-		writeScheduledActivityStoreError(w, err, "create scheduled activity failed")
+		writeScheduledActivityStoreError(ctx, w, err, "create scheduled activity failed")
 		return
 	}
-	writeJSON(w, http.StatusCreated, scheduledActivityToResponse(ctx, a, e.newActivityAuthorResolver(tenantCtx.Slug)))
+	writeJSON(ctx, w, http.StatusCreated, scheduledActivityToResponse(ctx, a, e.newActivityAuthorResolver(tenantCtx.Slug)))
 }
 
 // dispatchScheduledActivityUpdateRoute is PATCH
@@ -255,14 +256,14 @@ func (e *Engine) dispatchScheduledActivityUpdateRoute(w http.ResponseWriter, r *
 	}
 	var body scheduledActivityPatchRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
 		return
 	}
 	var u scheduledactivity.Update
 	if body.Summary != nil {
 		summary, msg := validSummary(*body.Summary)
 		if msg != "" {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 			return
 		}
 		u.Summary = &summary
@@ -270,13 +271,13 @@ func (e *Engine) dispatchScheduledActivityUpdateRoute(w http.ResponseWriter, r *
 	if body.Note != nil {
 		var note *string
 		if err := json.Unmarshal(body.Note, &note); err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "note must be a string or null")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "note must be a string or null")
 			return
 		}
 		if note != nil {
 			var msg string
 			if note, msg = optionalText("note", *note); msg != "" {
-				writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+				httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 				return
 			}
 		}
@@ -284,14 +285,14 @@ func (e *Engine) dispatchScheduledActivityUpdateRoute(w http.ResponseWriter, r *
 	}
 	if body.DueDate != nil {
 		if msg := validDueDate(*body.DueDate); msg != "" {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 			return
 		}
 		u.DueDate = body.DueDate
 	}
 	if body.AssigneeID != nil {
 		if _, err := uuid.Parse(*body.AssigneeID); err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "assignee_id must be a UUID")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "assignee_id must be a UUID")
 			return
 		}
 		u.AssigneeID = body.AssigneeID
@@ -318,10 +319,10 @@ func (e *Engine) dispatchScheduledActivityUpdateRoute(w http.ResponseWriter, r *
 
 	updated, err := e.scheduledActivityStore.Update(ctx, tenantCtx.Slug, a.ID, u)
 	if err != nil {
-		writeScheduledActivityStoreError(w, err, "update scheduled activity failed")
+		writeScheduledActivityStoreError(ctx, w, err, "update scheduled activity failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, scheduledActivityToResponse(ctx, updated, e.newActivityAuthorResolver(tenantCtx.Slug)))
+	writeJSON(ctx, w, http.StatusOK, scheduledActivityToResponse(ctx, updated, e.newActivityAuthorResolver(tenantCtx.Slug)))
 }
 
 // dispatchScheduledActivityDoneRoute is POST
@@ -336,12 +337,12 @@ func (e *Engine) dispatchScheduledActivityDoneRoute(w http.ResponseWriter, r *ht
 	var body scheduledActivityDoneRequest
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body could not be read")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body could not be read")
 		return
 	}
 	if len(bytes.TrimSpace(raw)) > 0 {
 		if err := json.Unmarshal(raw, &body); err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
 			return
 		}
 	}
@@ -349,7 +350,7 @@ func (e *Engine) dispatchScheduledActivityDoneRoute(w http.ResponseWriter, r *ht
 	if body.Feedback != nil {
 		var msg string
 		if feedback, msg = optionalText("feedback", *body.Feedback); msg != "" {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 			return
 		}
 	}
@@ -366,10 +367,10 @@ func (e *Engine) dispatchScheduledActivityDoneRoute(w http.ResponseWriter, r *ht
 	}
 	done, err := e.scheduledActivityStore.MarkDone(ctx, tenantCtx.Slug, a.ID, authCtx.UserID, feedback, requestIDFromContext(ctx), traceID)
 	if err != nil {
-		writeScheduledActivityStoreError(w, err, "mark scheduled activity done failed")
+		writeScheduledActivityStoreError(ctx, w, err, "mark scheduled activity done failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, scheduledActivityToResponse(ctx, done, e.newActivityAuthorResolver(tenantCtx.Slug)))
+	writeJSON(ctx, w, http.StatusOK, scheduledActivityToResponse(ctx, done, e.newActivityAuthorResolver(tenantCtx.Slug)))
 }
 
 // dispatchScheduledActivityCancelRoute is DELETE
@@ -386,7 +387,7 @@ func (e *Engine) dispatchScheduledActivityCancelRoute(w http.ResponseWriter, r *
 		return
 	}
 	if err := e.scheduledActivityStore.Cancel(ctx, tenantCtx.Slug, a.ID); err != nil {
-		writeScheduledActivityStoreError(w, err, "cancel scheduled activity failed")
+		writeScheduledActivityStoreError(ctx, w, err, "cancel scheduled activity failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -396,7 +397,7 @@ func requestContexts(w http.ResponseWriter, r *http.Request) (*authcheck.AuthCon
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return nil, nil, false
 	}
 	return authCtx, tenantCtx, true
@@ -410,24 +411,24 @@ func requestContexts(w http.ResponseWriter, r *http.Request) (*authcheck.AuthCon
 func (e *Engine) openScheduledActivityForParticipant(ctx context.Context, w http.ResponseWriter, authCtx *authcheck.AuthContext, tenantCtx *tenantresolve.TenantContext) *scheduledactivity.Activity {
 	id := route.ParamsFromContext(ctx)["id"]
 	if _, err := uuid.Parse(id); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter must be a UUID")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_path_param", "id path parameter must be a UUID")
 		return nil
 	}
 	a, err := e.scheduledActivityStore.Get(ctx, tenantCtx.Slug, id)
 	if err != nil {
-		writeScheduledActivityStoreError(w, err, "load scheduled activity failed")
+		writeScheduledActivityStoreError(ctx, w, err, "load scheduled activity failed")
 		return nil
 	}
 	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, a.Model, a.RecordID) {
-		writeRouteError(w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
+		httperr.Write(ctx, w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
 		return nil
 	}
 	if authCtx.UserID != a.CreatedBy && authCtx.UserID != a.AssigneeID {
-		writeRouteError(w, http.StatusForbidden, "not_participant", "only the activity's creator or assignee can change it")
+		httperr.Write(ctx, w, http.StatusForbidden, "not_participant", "only the activity's creator or assignee can change it")
 		return nil
 	}
 	if a.DoneAt != nil {
-		writeRouteError(w, http.StatusConflict, "activity_done", "the activity is already done")
+		httperr.Write(ctx, w, http.StatusConflict, "activity_done", "the activity is already done")
 		return nil
 	}
 	return a
@@ -443,11 +444,11 @@ func (e *Engine) checkAssignee(ctx context.Context, w http.ResponseWriter, authC
 	}
 	canRead, err := e.userCanReadRecord(ctx, tenantCtx, assigneeID, modelName, recordID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "check assignee failed")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "check assignee failed")
 		return false
 	}
 	if !canRead {
-		writeRouteError(w, http.StatusBadRequest, "invalid_assignee", "the assignee must be an active member of the tenant who can read the record")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_assignee", "the assignee must be an active member of the tenant who can read the record")
 		return false
 	}
 	return true
@@ -458,26 +459,26 @@ func (e *Engine) checkAssignee(ctx context.Context, w http.ResponseWriter, authC
 func (e *Engine) checkActivityType(ctx context.Context, w http.ResponseWriter, tenantCtx *tenantresolve.TenantContext, key string) bool {
 	active, err := e.activityTypeStore.IsActive(ctx, tenantCtx.Slug, key)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "check activity type failed")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "check activity type failed")
 		return false
 	}
 	if !active {
-		writeRouteError(w, http.StatusBadRequest, "invalid_type", "type must be one of the tenant's active activity types")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_type", "type must be one of the tenant's active activity types")
 		return false
 	}
 	return true
 }
 
-func writeScheduledActivityStoreError(w http.ResponseWriter, err error, internalMsg string) {
+func writeScheduledActivityStoreError(ctx context.Context, w http.ResponseWriter, err error, internalMsg string) {
 	switch {
 	case errors.Is(err, scheduledactivity.ErrUnknownType):
-		writeRouteError(w, http.StatusBadRequest, "invalid_type", "type must be one of the tenant's active activity types")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_type", "type must be one of the tenant's active activity types")
 	case errors.Is(err, scheduledactivity.ErrNotFound):
-		writeRouteError(w, http.StatusNotFound, "not_found", "scheduled activity not found")
+		httperr.Write(ctx, w, http.StatusNotFound, "not_found", "scheduled activity not found")
 	case errors.Is(err, scheduledactivity.ErrDone):
-		writeRouteError(w, http.StatusConflict, "activity_done", "the activity is already done")
+		httperr.Write(ctx, w, http.StatusConflict, "activity_done", "the activity is already done")
 	default:
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", internalMsg)
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", internalMsg)
 	}
 }
 

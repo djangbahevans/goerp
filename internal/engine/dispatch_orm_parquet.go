@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json/v2"
 	"fmt"
 	"maps"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/parquet-go/parquet-go"
 	"github.com/rs/zerolog/log"
 )
@@ -46,7 +48,7 @@ func wantsParquet(r *http.Request) bool {
 // no JSON wrapper to carry a "meta" object the way the JSON list response
 // does. A use_wasm:true pivot caller pages through these to assemble the
 // full filtered dataset client-side (view-system.md §8).
-func writeParquet(w http.ResponseWriter, records []map[string]any, nextCursor string) {
+func writeParquet(ctx context.Context, w http.ResponseWriter, records []map[string]any, nextCursor string) {
 	normalized := make([]map[string]any, len(records))
 	for i, record := range records {
 		row := make(map[string]any, len(record))
@@ -64,13 +66,13 @@ func writeParquet(w http.ResponseWriter, records []map[string]any, nextCursor st
 	for _, row := range normalized {
 		if err := pw.Write(row); err != nil {
 			log.Error().Err(err).Msg("dispatchORMList: encode parquet row")
-			writeRouteError(w, http.StatusInternalServerError, "internal", "failed to encode response")
+			httperr.Write(ctx, w, http.StatusInternalServerError, "internal", "failed to encode response")
 			return
 		}
 	}
 	if err := pw.Close(); err != nil {
 		log.Error().Err(err).Msg("dispatchORMList: close parquet writer")
-		writeRouteError(w, http.StatusInternalServerError, "internal", "failed to encode response")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal", "failed to encode response")
 		return
 	}
 

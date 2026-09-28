@@ -28,6 +28,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
@@ -83,15 +84,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeInternalError(w http.ResponseWriter, err error, msg string) {
+func writeInternalError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 	log.Error().Err(err).Msg("mfafactors: " + msg)
-	writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 }
 
 // authenticate resolves the tenant from Host and validates the access
@@ -102,25 +97,25 @@ func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authch
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeInternalError(w, err, "tenant resolution failed")
+			writeInternalError(w, r, err, "tenant resolution failed")
 		}
 		return nil, false
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated || authCtx.AuthMethod != "jwt" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
 	}
 	return authCtx, true
@@ -152,12 +147,12 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 
 	creds, err := h.mfa.ListActiveByUser(ctx, authCtx.UserID)
 	if err != nil {
-		writeInternalError(w, err, "list mfa factors failed")
+		writeInternalError(w, r, err, "list mfa factors failed")
 		return
 	}
 	required, err := h.policyApplies(ctx, authCtx)
 	if err != nil {
-		writeInternalError(w, err, "load mfa policy failed")
+		writeInternalError(w, r, err, "load mfa policy failed")
 		return
 	}
 
@@ -192,7 +187,7 @@ func readCodeRequest(w http.ResponseWriter, r *http.Request) (codeRequest, bool)
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req codeRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil || req.Type == "" || req.Code == "" {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", `"type" and "code" are required`)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", `"type" and "code" are required`)
 		return codeRequest{}, false
 	}
 	return req, true
@@ -205,29 +200,29 @@ func (h *Handlers) verifyCode(w http.ResponseWriter, r *http.Request, authCtx *a
 	ctx := r.Context()
 	locked, err := h.lockout.Locked(ctx, authCtx.UserID, authCtx.TenantID)
 	if err != nil {
-		writeInternalError(w, err, "mfa lockout check failed")
+		writeInternalError(w, r, err, "mfa lockout check failed")
 		return false
 	}
 	if locked {
-		writeJSONError(w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
+		httperr.Write(r.Context(), w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
 		return false
 	}
 
 	valid, _, err := mfaverify.VerifyCode(ctx, h.totp, h.recovery, req.Type, authCtx.UserID, req.Code)
 	if err != nil {
-		writeInternalError(w, err, "mfa code verification failed")
+		writeInternalError(w, r, err, "mfa code verification failed")
 		return false
 	}
 	if !valid {
 		if err := h.lockout.RecordFailure(ctx, authCtx.UserID, authCtx.TenantID); err != nil {
-			writeInternalError(w, err, "record mfa failure failed")
+			writeInternalError(w, r, err, "record mfa failure failed")
 			return false
 		}
-		writeJSONError(w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
 		return false
 	}
 	if err := h.lockout.Reset(ctx, authCtx.UserID, authCtx.TenantID); err != nil {
-		writeInternalError(w, err, "reset mfa lockout failed")
+		writeInternalError(w, r, err, "reset mfa lockout failed")
 		return false
 	}
 	return true
@@ -248,28 +243,28 @@ func (h *Handlers) Remove(w http.ResponseWriter, r *http.Request) {
 
 	factorID := route.ParamsFromContext(ctx)["id"]
 	if _, err := uuid.Parse(factorID); err != nil {
-		writeJSONError(w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
 		return
 	}
 	creds, err := h.mfa.ListActiveByUser(ctx, authCtx.UserID)
 	if err != nil {
-		writeInternalError(w, err, "list mfa factors failed")
+		writeInternalError(w, r, err, "list mfa factors failed")
 		return
 	}
 	factors := slices.DeleteFunc(creds, func(c *mfa.Credential) bool { return !c.Type.IsFactor() })
 	if !slices.ContainsFunc(factors, func(c *mfa.Credential) bool { return c.ID == factorID }) {
-		writeJSONError(w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
 		return
 	}
 	required, err := h.policyApplies(ctx, authCtx)
 	if err != nil {
-		writeInternalError(w, err, "load mfa policy failed")
+		writeInternalError(w, r, err, "load mfa policy failed")
 		return
 	}
 	// Checked before the code, so a refused removal spends no recovery code
 	// and no lockout attempt.
 	if required && len(factors) == 1 {
-		writeRequiredByPolicy(w)
+		writeRequiredByPolicy(w, r)
 		return
 	}
 
@@ -279,13 +274,13 @@ func (h *Handlers) Remove(w http.ResponseWriter, r *http.Request) {
 
 	switch err := h.factors.RevokeFactor(ctx, authCtx.UserID, factorID, required); {
 	case errors.Is(err, mfa.ErrCredentialNotFound):
-		writeJSONError(w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
 		return
 	case errors.Is(err, revoke.ErrRequiredByPolicy):
-		writeRequiredByPolicy(w)
+		writeRequiredByPolicy(w, r)
 		return
 	case err != nil:
-		writeInternalError(w, err, "revoke mfa factor failed")
+		writeInternalError(w, r, err, "revoke mfa factor failed")
 		return
 	}
 
@@ -293,8 +288,8 @@ func (h *Handlers) Remove(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func writeRequiredByPolicy(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusConflict, "mfa_required_by_policy", "your organisation requires two-factor authentication")
+func writeRequiredByPolicy(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusConflict, "mfa_required_by_policy", "your organisation requires two-factor authentication")
 }
 
 // RegenerateRecoveryCodes serves POST /auth/mfa/recovery-codes/regenerate.
@@ -312,11 +307,11 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 
 	creds, err := h.mfa.ListActiveByUser(ctx, authCtx.UserID)
 	if err != nil {
-		writeInternalError(w, err, "list mfa factors failed")
+		writeInternalError(w, r, err, "list mfa factors failed")
 		return
 	}
 	if !slices.ContainsFunc(creds, func(c *mfa.Credential) bool { return c.Type.IsFactor() }) {
-		writeNotEnrolled(w)
+		writeNotEnrolled(w, r)
 		return
 	}
 
@@ -326,7 +321,7 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 
 	set, err := recoverycode.Prepare()
 	if err != nil {
-		writeInternalError(w, err, "generate recovery codes failed")
+		writeInternalError(w, r, err, "generate recovery codes failed")
 		return
 	}
 	// The other sessions are revoked in the same transaction, so a failure
@@ -341,10 +336,10 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 	})
 	switch {
 	case errors.Is(err, recoverycode.ErrNotEnrolled):
-		writeNotEnrolled(w)
+		writeNotEnrolled(w, r)
 		return
 	case err != nil:
-		writeInternalError(w, err, "regenerate recovery codes failed")
+		writeInternalError(w, r, err, "regenerate recovery codes failed")
 		return
 	}
 	var revokedIDs []string
@@ -362,8 +357,8 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": set.Codes})
 }
 
-func writeNotEnrolled(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusConflict, "mfa_not_enrolled", "no two-factor authentication method is set up")
+func writeNotEnrolled(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusConflict, "mfa_not_enrolled", "no two-factor authentication method is set up")
 }
 
 func (h *Handlers) recordAudit(r *http.Request, authCtx *authcheck.AuthContext, eventType string, metadata map[string]string) {

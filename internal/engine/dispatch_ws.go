@@ -5,6 +5,7 @@ import (
 	"uuid"
 
 	"github.com/coder/websocket"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 )
 
 // dispatchWSRoute is GET /_ws's handler (goerp#616) — registered
@@ -29,7 +30,7 @@ func (e *Engine) dispatchWSRoute(w http.ResponseWriter, r *http.Request) {
 		// requires Auth: "required" (registry.go's registration) before
 		// this handler is ever reached. Guarded for direct-call
 		// testability, matching dispatchPermissionsRoute's identical guard.
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 

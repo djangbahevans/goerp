@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -32,56 +33,56 @@ func (e *Engine) dispatchFrontendTranslationsRoute(w http.ResponseWriter, r *htt
 	moduleName := params["module"]
 	locale, ok := strings.CutSuffix(params["file"], ".json")
 	if !ok {
-		writeRouteError(w, http.StatusNotFound, "not_found", "no such translation file")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "no such translation file")
 		return
 	}
 	if !l10n.ValidLocale(locale) {
-		writeRouteError(w, http.StatusBadRequest, "invalid_locale", "locale must be a BCP 47 tag such as en or pt-BR")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_locale", "locale must be a BCP 47 tag such as en or pt-BR")
 		return
 	}
 
 	snap := e.moduleRegistry.Snapshot()
 	if snap == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
 		return
 	}
 	m, ok := snap.Modules()[moduleName]
 	if !ok || m.Status != module.StatusReady {
-		writeRouteError(w, http.StatusNotFound, "not_found", "no such module")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "no such module")
 		return
 	}
 	if e.storageBackend == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "storage_unavailable", "no object storage backend is configured")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "storage_unavailable", "no object storage backend is configured")
 		return
 	}
 
 	ctx := r.Context()
 	key, err := module.LiveFrontendTranslationKey(ctx, e.storageBackend, moduleName, m.Manifest.Version, locale)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "check translation file failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "check translation file failed")
 		return
 	}
 	exists := false
 	if key != "" {
 		if exists, err = e.storageBackend.Exists(ctx, key); err != nil {
-			writeRouteError(w, http.StatusInternalServerError, "internal_error", "check translation file failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "check translation file failed")
 			return
 		}
 	}
 	if !exists {
-		writeRouteError(w, http.StatusNotFound, "not_found", "no such translation file")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "no such translation file")
 		return
 	}
 
 	rc, _, err := e.storageBackend.Download(ctx, key)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "read translation file failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "read translation file failed")
 		return
 	}
 	defer func() { _ = rc.Close() }()
 	data, err := io.ReadAll(io.LimitReader(rc, maxFrontendTranslationSize+1))
 	if err != nil || len(data) > maxFrontendTranslationSize {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "read translation file failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "read translation file failed")
 		return
 	}
 

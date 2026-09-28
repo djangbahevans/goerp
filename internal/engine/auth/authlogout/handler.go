@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
@@ -42,16 +43,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeUnauthenticated(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+func writeUnauthenticated(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,32 +54,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "logout failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "logout failed")
 		}
 		return
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeUnauthenticated(w)
+		writeUnauthenticated(w, r)
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeUnauthenticated(w)
+		writeUnauthenticated(w, r)
 		return
 	}
 
 	// An API key (authcheck.Checker.authenticateAPIKey) has no
 	// SessionID — there is no session row to revoke, unlike JWT auth.
 	if authCtx.AuthMethod == "api_key" {
-		writeJSONError(w, http.StatusBadRequest, "api_key_no_session", "API key authentication has no session to log out of")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "api_key_no_session", "API key authentication has no session to log out of")
 		return
 	}
 
@@ -94,7 +87,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// behavior) — a second logout for an already-revoked session succeeds
 	// rather than erroring.
 	if err := h.revoker.Revoke(ctx, authCtx.SessionID, "logout"); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "logout failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "logout failed")
 		return
 	}
 

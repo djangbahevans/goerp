@@ -3,8 +3,6 @@ package engine
 import (
 	"bytes"
 	"context"
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +13,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/rs/zerolog/log"
@@ -64,12 +63,12 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 			// Only reachable if buildDispatchHandler is invoked outside
 			// buildChain (e.g. a misconfigured test) — routeResolutionMiddleware
 			// always stashes a value before calling next in production.
-			writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+			httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
 			return
 		}
 
 		if paramName, ok := validatePathParams(rr.entry.Manifest.PathParams, rr.pathParams); !ok {
-			writeRouteError(w, http.StatusBadRequest, "invalid_path_param", fmt.Sprintf("path parameter %q does not match its declared kind", paramName))
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_path_param", fmt.Sprintf("path parameter %q does not match its declared kind", paramName))
 			return
 		}
 
@@ -110,7 +109,7 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		// rather than invent a new failure mode for that test-only case;
 		// downstream dispatch already has its own nil-tenantCtx guard.
 		if tenantCtx := tenantFromContext(ctx); rr.entry.ModuleName != "" && tenantCtx != nil && !tenantCtx.Entitlements.ModuleEnabled(rr.entry.ModuleName) {
-			writeRouteErrorDetails(w, http.StatusForbidden, "billing.module_not_available", "module is not available on the current plan", map[string]any{
+			httperr.WriteDetails(r.Context(), w, http.StatusForbidden, "billing.module_not_available", "module is not available on the current plan", map[string]any{
 				"module":      rr.entry.ModuleName,
 				"upgrade_url": "/settings/billing/upgrade",
 			})
@@ -119,7 +118,7 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 
 		mod, ok := rr.snap.Modules()[rr.entry.ModuleName]
 		if !ok || mod.Status != module.StatusReady {
-			writeRouteError(w, http.StatusServiceUnavailable, "module_unavailable", "module is not ready")
+			httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "module_unavailable", "module is not ready")
 			return
 		}
 
@@ -138,7 +137,7 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		if rr.entry.Manifest.EngineNative {
 			rec := newEngineResponseRecorder()
 			e.dispatchORMRoute(rec, r)
-			writeResponse(w, rec.EngineResponse())
+			writeResponse(ctx, w, rec.EngineResponse())
 			return
 		}
 
@@ -157,7 +156,7 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 	if err != nil {
 		// The only way this read fails is the MaxBytesReader limit set
 		// just before this call.
-		writeRouteError(w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
+		httperr.Write(r.Context(), w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
 		return
 	}
 
@@ -168,13 +167,13 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		// authMiddleware both run for any non-EngineBuiltin route (goerp#369)
 		// before dispatchWASMRoute is ever reached. Guarded for direct-call
 		// testability, matching dispatchORMRoute's own identical guard.
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
 	inst, err := mod.Pool.Borrow(ctx)
 	if err != nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "pool_exhausted", fmt.Sprintf("module %s is at capacity", entry.ModuleName))
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "pool_exhausted", fmt.Sprintf("module %s is at capacity", entry.ModuleName))
 		return
 	}
 	defer mod.Pool.Return(inst)
@@ -228,28 +227,35 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 			if timeout <= 0 {
 				timeout = defaultHandlerTimeout
 			}
-			writeRouteError(w, http.StatusServiceUnavailable, "computation_limit_exceeded", fmt.Sprintf("handler exceeded its %s timeout", timeout))
+			httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "computation_limit_exceeded", fmt.Sprintf("handler exceeded its %s timeout", timeout))
 			return
 		}
-		writeRouteError(w, http.StatusInternalServerError, "dispatch_error", err.Error())
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "dispatch_error", err.Error())
 		return
 	}
 
-	writeResponse(w, resp)
+	writeResponse(ctx, w, resp)
 }
 
 // writeResponse is the one place either dispatch path — dispatchORMRoute
 // (via engineResponseRecorder, for EngineNative routes) or invokeHandler
 // (for WASM-backed routes) — writes an EngineResponse to the wire, so both
 // produce a byte-identical envelope through one function rather than two
-// independently-maintained copies.
-func writeResponse(w http.ResponseWriter, resp EngineResponse) {
+// independently-maintained copies. Error bodies get the request's ids here.
+func writeResponse(ctx context.Context, w http.ResponseWriter, resp EngineResponse) {
+	body := resp.Body
+	if resp.StatusCode >= http.StatusBadRequest {
+		body = httperr.Annotate(ctx, body)
+	}
 	for k, v := range resp.Headers {
 		w.Header().Set(k, v)
 	}
+	if len(body) != len(resp.Body) {
+		w.Header().Del("Content-Length")
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	if _, err := w.Write(resp.Body); err != nil {
+	if _, err := w.Write(body); err != nil {
 		log.Error().Err(err).Msg("dispatch: write response")
 	}
 }
@@ -319,34 +325,4 @@ func validatePathParams(kinds, values map[string]string) (name string, ok bool) 
 		}
 	}
 	return "", true
-}
-
-type routeErrorEnvelope struct {
-	Error routeErrorBody `json:"error"`
-}
-
-type routeErrorBody struct {
-	Code    string         `json:"code"`
-	Message string         `json:"message"`
-	Details map[string]any `json:"details,omitempty"`
-}
-
-func writeRouteError(w http.ResponseWriter, status int, code, message string) {
-	writeRouteErrorDetails(w, status, code, message, nil)
-}
-
-// writeRouteErrorDetails is writeRouteError plus an optional details
-// object — e.g. billing.module_not_available's "module"/"upgrade_url"
-// fields (multitenancy-internals.md §8).
-func writeRouteErrorDetails(w http.ResponseWriter, status int, code, message string, details map[string]any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	// jsontext options match encoding/json v1's Encoder defaults, which
-	// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped
-	// for safe HTML embedding, and U+2028/U+2029 escaped for safe JS
-	// embedding.
-	env := routeErrorEnvelope{Error: routeErrorBody{Code: code, Message: message, Details: details}}
-	if err := json.MarshalWrite(w, env, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)); err != nil {
-		log.Error().Err(err).Msg("dispatch: encode error response")
-	}
 }

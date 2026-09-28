@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/membership"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -63,7 +64,7 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req resetRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 

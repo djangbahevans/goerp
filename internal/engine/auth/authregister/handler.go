@@ -25,6 +25,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -83,31 +84,25 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
+func writeNotFound(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 }
 
-func writeNotFound(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusNotFound, "not_found", "not found")
-}
-
-func writeInternal(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusInternalServerError, "internal_error", "registration failed")
+func writeInternal(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "registration failed")
 }
 
 // CheckSlug serves GET /auth/check-slug?slug= — the register page's
 // availability hint while the company name is typed.
 func (h *Handlers) CheckSlug(w http.ResponseWriter, r *http.Request) {
 	if !h.cfg.Enabled {
-		writeNotFound(w)
+		writeNotFound(w, r)
 		return
 	}
 	slug := r.URL.Query().Get("slug")
 	available, err := h.slugAvailable(r.Context(), slug)
 	if err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"available": available})
@@ -161,13 +156,13 @@ func validate(req registerRequest) (map[string]string, string) {
 // Register serves POST /auth/register.
 func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	if !h.cfg.Enabled {
-		writeNotFound(w)
+		writeNotFound(w, r)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req registerRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
@@ -176,40 +171,38 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 
 	problems, slug := validate(req)
 	if len(problems) > 0 {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"error": map[string]any{"code": "validation_failed", "message": "some fields are invalid", "details": problems},
-		})
+		httperr.WriteDetails(r.Context(), w, http.StatusUnprocessableEntity, "validation_failed", "some fields are invalid", problems)
 		return
 	}
 
 	ctx := r.Context()
 	if _, err := h.users.GetByEmail(ctx, req.Email); err == nil {
-		writeJSONError(w, http.StatusConflict, "auth.email_already_exists", "email already in use")
+		httperr.Write(r.Context(), w, http.StatusConflict, "auth.email_already_exists", "email already in use")
 		return
 	} else if !errors.Is(err, user.ErrUserNotFound) {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	available, err := h.slugAvailable(ctx, slug)
 	if err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	if !available {
-		writeJSONError(w, http.StatusConflict, "tenant.slug_taken", "company name taken, try another")
+		httperr.Write(r.Context(), w, http.StatusConflict, "tenant.slug_taken", "company name taken, try another")
 		return
 	}
 
 	slot, err := h.hasher.Acquire(ctx)
 	if err != nil {
 		w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
-		writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many password operations in progress, retry shortly")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "overloaded", "too many password operations in progress, retry shortly")
 		return
 	}
 	hash, err := slot.Hash(req.Password)
 	slot.Release()
 	if err != nil {
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 
@@ -221,15 +214,15 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	userID, err := h.users.CreateRegistered(ctx, req.Email, hash, status)
 	if err != nil {
 		if errors.Is(err, user.ErrEmailTaken) {
-			writeJSONError(w, http.StatusConflict, "auth.email_already_exists", "email already in use")
+			httperr.Write(r.Context(), w, http.StatusConflict, "auth.email_already_exists", "email already in use")
 			return
 		}
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 	if err := h.users.EnsureProfile(ctx, userID, req.Name); err != nil {
 		h.abandon(ctx, userID)
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 
@@ -253,11 +246,11 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.abandon(ctx, userID)
 		if errors.Is(err, tenantprovision.ErrSlugTaken) {
-			writeJSONError(w, http.StatusConflict, "tenant.slug_taken", "company name taken, try another")
+			httperr.Write(r.Context(), w, http.StatusConflict, "tenant.slug_taken", "company name taken, try another")
 			return
 		}
 		log.Error().Err(err).Str("slug", slug).Msg("authregister: provisioning failed")
-		writeInternal(w)
+		writeInternal(w, r)
 		return
 	}
 

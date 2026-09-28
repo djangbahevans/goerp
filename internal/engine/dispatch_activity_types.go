@@ -13,6 +13,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/activitytype"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -81,7 +82,7 @@ func (e *Engine) dispatchActivityTypeListRoute(w http.ResponseWriter, r *http.Re
 	ctx := r.Context()
 	types, err := e.activityTypeStore.List(ctx, tenantCtx.Slug, false)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list activity types failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list activity types failed")
 		return
 	}
 	locale, tenantDefault := e.requestLocale(ctx, authCtx, tenantCtx), tenantDefaultLocale(tenantCtx)
@@ -94,7 +95,7 @@ func (e *Engine) dispatchActivityTypeListRoute(w http.ResponseWriter, r *http.Re
 		}
 		out[i] = activityTypeResponse{Key: t.Key, Label: label, Icon: t.Icon, DefaultSummary: summary, DefaultDueDays: t.DefaultDueDays, Archived: t.Archived()}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out})
 }
 
 // dispatchAdminActivityTypeListRoute is GET /admin/activity-types' handler.
@@ -115,35 +116,35 @@ func (e *Engine) dispatchAdminActivityTypeCreateRoute(w http.ResponseWriter, r *
 	}
 	var body adminActivityTypeCreateRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
 		return
 	}
 	if !activitytype.KeyPattern.MatchString(body.Key) {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "key must be 1 to 40 lowercase letters, digits or underscores, starting with a letter")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "key must be 1 to 40 lowercase letters, digits or underscores, starting with a letter")
 		return
 	}
 	// PUT /admin/activity-types/order owns that path, so a type keyed
 	// "order" could never be patched or deleted.
 	if body.Key == "order" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", `key "order" is reserved`)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", `key "order" is reserved`)
 		return
 	}
 	label, msg := validActivityTypeLabel(body.Label, tenantDefaultLocale(tenantCtx))
 	if msg != "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
 	summary, msg := validLocaleTextMap("default_summary", body.DefaultSummary, scheduledActivityMaxSummary)
 	if msg != "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
 	if msg := validDefaultDueDays(body.DefaultDueDays); msg != "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
 	if !activitytype.ValidIcon(body.Icon) {
-		writeRouteError(w, http.StatusBadRequest, "invalid_icon", "icon must be a Lucide icon name")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_icon", "icon must be a Lucide icon name")
 		return
 	}
 
@@ -155,10 +156,10 @@ func (e *Engine) dispatchAdminActivityTypeCreateRoute(w http.ResponseWriter, r *
 		DefaultDueDays: body.DefaultDueDays,
 	})
 	if err != nil {
-		writeActivityTypeStoreError(w, err, "create activity type failed")
+		writeActivityTypeStoreError(r.Context(), w, err, "create activity type failed")
 		return
 	}
-	writeJSON(w, http.StatusCreated, adminActivityTypeToResponse(t))
+	writeJSON(r.Context(), w, http.StatusCreated, adminActivityTypeToResponse(t))
 }
 
 // dispatchAdminActivityTypeUpdateRoute is PATCH /admin/activity-types/{key}'s
@@ -175,7 +176,7 @@ func (e *Engine) dispatchAdminActivityTypeUpdateRoute(w http.ResponseWriter, r *
 	}
 	var body adminActivityTypePatchRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
 		return
 	}
 
@@ -183,12 +184,12 @@ func (e *Engine) dispatchAdminActivityTypeUpdateRoute(w http.ResponseWriter, r *
 	if body.Label != nil {
 		var raw map[string]string
 		if err := json.Unmarshal(body.Label, &raw); err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "label must be an object of locale to text")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "label must be an object of locale to text")
 			return
 		}
 		label, msg := validActivityTypeLabel(raw, tenantDefaultLocale(tenantCtx))
 		if msg != "" {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 			return
 		}
 		u.Label = label
@@ -196,12 +197,12 @@ func (e *Engine) dispatchAdminActivityTypeUpdateRoute(w http.ResponseWriter, r *
 	if body.DefaultSummary != nil {
 		var raw map[string]string
 		if err := json.Unmarshal(body.DefaultSummary, &raw); err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "default_summary must be an object of locale to text, or null")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "default_summary must be an object of locale to text, or null")
 			return
 		}
 		summary, msg := validLocaleTextMap("default_summary", raw, scheduledActivityMaxSummary)
 		if msg != "" {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 			return
 		}
 		u.DefaultSummary = summary
@@ -209,26 +210,26 @@ func (e *Engine) dispatchAdminActivityTypeUpdateRoute(w http.ResponseWriter, r *
 	if body.DefaultDueDays != nil {
 		var days *int
 		if err := json.Unmarshal(body.DefaultDueDays, &days); err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "default_due_days must be an integer or null")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "default_due_days must be an integer or null")
 			return
 		}
 		if msg := validDefaultDueDays(days); msg != "" {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", msg)
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", msg)
 			return
 		}
 		u.DefaultDueDays, u.ClearDefaultDueDays = days, days == nil
 	}
 	if body.Icon != nil && !activitytype.ValidIcon(*body.Icon) {
-		writeRouteError(w, http.StatusBadRequest, "invalid_icon", "icon must be a Lucide icon name")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_icon", "icon must be a Lucide icon name")
 		return
 	}
 
 	t, err := e.activityTypeStore.Update(r.Context(), tenantCtx.Slug, key, u)
 	if err != nil {
-		writeActivityTypeStoreError(w, err, "update activity type failed")
+		writeActivityTypeStoreError(r.Context(), w, err, "update activity type failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, adminActivityTypeToResponse(t))
+	writeJSON(r.Context(), w, http.StatusOK, adminActivityTypeToResponse(t))
 }
 
 // dispatchAdminActivityTypeReorderRoute is PUT /admin/activity-types/order's
@@ -241,12 +242,12 @@ func (e *Engine) dispatchAdminActivityTypeReorderRoute(w http.ResponseWriter, r 
 	}
 	var body adminActivityTypeOrderRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil || body.Keys == nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", `request body must be {"keys": [...]}`)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", `request body must be {"keys": [...]}`)
 		return
 	}
 	ctx := r.Context()
 	if err := e.activityTypeStore.Reorder(ctx, tenantCtx.Slug, body.Keys); err != nil {
-		writeActivityTypeStoreError(w, err, "reorder activity types failed")
+		writeActivityTypeStoreError(ctx, w, err, "reorder activity types failed")
 		return
 	}
 	e.writeAdminActivityTypeList(w, ctx, tenantCtx)
@@ -265,7 +266,7 @@ func (e *Engine) dispatchAdminActivityTypeDeleteRoute(w http.ResponseWriter, r *
 		return
 	}
 	if err := e.activityTypeStore.Delete(r.Context(), tenantCtx.Slug, key); err != nil {
-		writeActivityTypeStoreError(w, err, "delete activity type failed")
+		writeActivityTypeStoreError(r.Context(), w, err, "delete activity type failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -274,14 +275,14 @@ func (e *Engine) dispatchAdminActivityTypeDeleteRoute(w http.ResponseWriter, r *
 func (e *Engine) writeAdminActivityTypeList(w http.ResponseWriter, ctx context.Context, tenantCtx *tenantresolve.TenantContext) {
 	types, err := e.activityTypeStore.List(ctx, tenantCtx.Slug, true)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list activity types failed")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "list activity types failed")
 		return
 	}
 	out := make([]adminActivityTypeResponse, len(types))
 	for i := range types {
 		out[i] = adminActivityTypeToResponse(&types[i])
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out})
 }
 
 // adminRequestContexts is requestContexts for a route that needs the admin
@@ -292,7 +293,7 @@ func adminRequestContexts(w http.ResponseWriter, r *http.Request) (*authcheck.Au
 		return nil, nil, false
 	}
 	if !slices.Contains(authCtx.RolesLive, adminRoleName) {
-		writeRouteError(w, http.StatusForbidden, "forbidden", "admin role required")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "forbidden", "admin role required")
 		return nil, nil, false
 	}
 	return authCtx, tenantCtx, true
@@ -303,7 +304,7 @@ func adminRequestContexts(w http.ResponseWriter, r *http.Request) (*authcheck.Au
 func activityTypeKeyParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	key := route.ParamsFromContext(r.Context())["key"]
 	if !activitytype.KeyPattern.MatchString(key) {
-		writeRouteError(w, http.StatusNotFound, "not_found", "activity type not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "activity type not found")
 		return "", false
 	}
 	return key, true
@@ -374,21 +375,21 @@ func adminActivityTypeToResponse(t *activitytype.Type) adminActivityTypeResponse
 	}
 }
 
-func writeActivityTypeStoreError(w http.ResponseWriter, err error, internalMsg string) {
+func writeActivityTypeStoreError(ctx context.Context, w http.ResponseWriter, err error, internalMsg string) {
 	switch {
 	case errors.Is(err, activitytype.ErrNotFound):
-		writeRouteError(w, http.StatusNotFound, "not_found", "activity type not found")
+		httperr.Write(ctx, w, http.StatusNotFound, "not_found", "activity type not found")
 	case errors.Is(err, activitytype.ErrKeyTaken):
-		writeRouteError(w, http.StatusConflict, "type_key_taken", "an activity type with that key already exists")
+		httperr.Write(ctx, w, http.StatusConflict, "type_key_taken", "an activity type with that key already exists")
 	case errors.Is(err, activitytype.ErrLimitReached):
-		writeRouteError(w, http.StatusConflict, "type_limit_reached", fmt.Sprintf("a tenant can have at most %d activity types", activitytype.MaxTypes))
+		httperr.Write(ctx, w, http.StatusConflict, "type_limit_reached", fmt.Sprintf("a tenant can have at most %d activity types", activitytype.MaxTypes))
 	case errors.Is(err, activitytype.ErrLastActive):
-		writeRouteError(w, http.StatusConflict, "last_active_type", "the tenant must keep at least one active activity type")
+		httperr.Write(ctx, w, http.StatusConflict, "last_active_type", "the tenant must keep at least one active activity type")
 	case errors.Is(err, activitytype.ErrInUse):
-		writeRouteError(w, http.StatusConflict, "type_in_use", "the activity type is in use; archive it instead")
+		httperr.Write(ctx, w, http.StatusConflict, "type_in_use", "the activity type is in use; archive it instead")
 	case errors.Is(err, activitytype.ErrOrderMismatch):
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "keys must list every activity type key exactly once")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_request", "keys must list every activity type key exactly once")
 	default:
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", internalMsg)
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", internalMsg)
 	}
 }

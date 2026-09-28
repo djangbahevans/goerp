@@ -14,6 +14,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -65,31 +66,31 @@ type activityCreateRequest struct {
 // request can't proceed.
 func (e *Engine) activityTarget(ctx context.Context, w http.ResponseWriter, authCtx *authcheck.AuthContext, tenantCtx *tenantresolve.TenantContext, modelName, recordID string) bool {
 	if modelName == "" || recordID == "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "model and record_id are required")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_request", "model and record_id are required")
 		return false
 	}
 	if _, err := uuid.Parse(recordID); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "record_id must be a UUID")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_request", "record_id must be a UUID")
 		return false
 	}
 
 	snap := e.moduleRegistry.Snapshot()
 	if snap == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+		httperr.Write(ctx, w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
 		return false
 	}
 	_, _, md, ok := snap.ModelByName(modelName)
 	if !ok {
-		writeRouteError(w, http.StatusBadRequest, "model_not_found", "unknown model: "+modelName)
+		httperr.Write(ctx, w, http.StatusBadRequest, "model_not_found", "unknown model: "+modelName)
 		return false
 	}
 	if md.Backend != "" {
-		writeRouteError(w, http.StatusBadRequest, "activity_unsupported", modelName+" is "+string(md.Backend)+"-backed; activity feeds require a Postgres-backed model")
+		httperr.Write(ctx, w, http.StatusBadRequest, "activity_unsupported", modelName+" is "+string(md.Backend)+"-backed; activity feeds require a Postgres-backed model")
 		return false
 	}
 
 	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, modelName, recordID) {
-		writeRouteError(w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
+		httperr.Write(ctx, w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
 		return false
 	}
 	return true
@@ -101,7 +102,7 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
@@ -109,7 +110,7 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 	cursor := q.Get("cursor")
 	if cursor != "" {
 		if _, err := uuid.Parse(cursor); err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "malformed cursor")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed cursor")
 			return
 		}
 	}
@@ -117,7 +118,7 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > activityMaxLimit {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 100")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 100")
 			return
 		}
 		limit = n
@@ -131,7 +132,7 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 
 	entries, hasMore, err := e.recordActivityStore.List(ctx, tenantCtx.Slug, modelName, recordID, cursor, limit)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list activity failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list activity failed")
 		return
 	}
 
@@ -150,7 +151,7 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 		if entry.Kind == recordactivity.KindChange {
 			changes, keep, err := filterChanges(entry.Changes, readable)
 			if err != nil {
-				writeRouteError(w, http.StatusInternalServerError, "internal_error", "list activity failed")
+				httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list activity failed")
 				return
 			}
 			if !keep {
@@ -161,7 +162,7 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 		out = append(out, activityEntryToResponse(entry, authors.resolve(ctx, entry.AuthorID)))
 	}
 	meta := activityListMeta{HasMore: hasMore, Cursor: nextCursor}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": meta})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out, "meta": meta})
 }
 
 // dispatchActivityCreateRoute is POST /_meta/activity's handler — posts a
@@ -171,18 +172,18 @@ func (e *Engine) dispatchActivityCreateRoute(w http.ResponseWriter, r *http.Requ
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
 	var body activityCreateRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
 		return
 	}
 	text := strings.TrimSpace(body.Body)
 	if text == "" || utf8.RuneCountInString(text) > activityMaxBodyLength {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "body must be 1 to 10000 characters")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "body must be 1 to 10000 characters")
 		return
 	}
 
@@ -197,12 +198,12 @@ func (e *Engine) dispatchActivityCreateRoute(w http.ResponseWriter, r *http.Requ
 	}
 	entry, err := e.recordActivityStore.CreateComment(ctx, tenantCtx.Slug, body.Model, body.RecordID, authCtx.UserID, text, requestIDFromContext(ctx), traceID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "create comment failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "create comment failed")
 		return
 	}
 
 	authors := e.newActivityAuthorResolver(tenantCtx.Slug)
-	writeJSON(w, http.StatusCreated, activityEntryToResponse(entry, authors.resolve(ctx, entry.AuthorID)))
+	writeJSON(ctx, w, http.StatusCreated, activityEntryToResponse(entry, authors.resolve(ctx, entry.AuthorID)))
 }
 
 // dispatchActivityDeleteRoute is DELETE /_meta/activity/{id}'s handler —
@@ -212,13 +213,13 @@ func (e *Engine) dispatchActivityDeleteRoute(w http.ResponseWriter, r *http.Requ
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
 	id := route.ParamsFromContext(r.Context())["id"]
 	if id == "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
 		return
 	}
 
@@ -226,28 +227,28 @@ func (e *Engine) dispatchActivityDeleteRoute(w http.ResponseWriter, r *http.Requ
 	entry, err := e.recordActivityStore.Get(ctx, tenantCtx.Slug, id)
 	if err != nil {
 		if errors.Is(err, recordactivity.ErrNotFound) {
-			writeRouteError(w, http.StatusNotFound, "not_found", "comment not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "comment not found")
 			return
 		}
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "delete comment failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "delete comment failed")
 		return
 	}
 	if entry.Kind != recordactivity.KindComment {
-		writeRouteError(w, http.StatusNotFound, "not_found", "comment not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "comment not found")
 		return
 	}
 	if !e.callerCanReadRecord(ctx, authCtx, tenantCtx, entry.Model, entry.RecordID) {
-		writeRouteError(w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "permission_denied", "you do not have access to this record")
 		return
 	}
 	if entry.AuthorID == nil || *entry.AuthorID != authCtx.UserID {
-		writeRouteError(w, http.StatusForbidden, "not_author", "only a comment's author can delete it")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "not_author", "only a comment's author can delete it")
 		return
 	}
 
 	if entry.DeletedAt == nil {
 		if err := e.recordActivityStore.DeleteComment(ctx, tenantCtx.Slug, id); err != nil {
-			writeRouteError(w, http.StatusInternalServerError, "internal_error", "delete comment failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "delete comment failed")
 			return
 		}
 	}
@@ -277,7 +278,7 @@ func (e *Engine) dispatchActivityFollowersListRoute(w http.ResponseWriter, r *ht
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
@@ -290,7 +291,7 @@ func (e *Engine) dispatchActivityFollowersListRoute(w http.ResponseWriter, r *ht
 
 	followers, err := e.recordActivityStore.ListFollowers(ctx, tenantCtx.Slug, modelName, recordID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list followers failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list followers failed")
 		return
 	}
 
@@ -304,7 +305,7 @@ func (e *Engine) dispatchActivityFollowersListRoute(w http.ResponseWriter, r *ht
 			meta.Following = true
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": meta})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out, "meta": meta})
 }
 
 // dispatchActivityFollowRoute is PUT /_meta/activity/followers's handler —
@@ -326,13 +327,13 @@ func (e *Engine) dispatchActivityFollowChange(w http.ResponseWriter, r *http.Req
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
 	var body activityFollowRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
 		return
 	}
 
@@ -342,7 +343,7 @@ func (e *Engine) dispatchActivityFollowChange(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := change(ctx, tenantCtx.Slug, body.Model, body.RecordID, authCtx.UserID); err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", failure)
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", failure)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
