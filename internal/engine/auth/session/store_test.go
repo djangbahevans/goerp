@@ -277,7 +277,7 @@ func TestUpdateMFAAssurance_SetsColumnsOnExistingRow(t *testing.T) {
 
 	credID := uuid.New().String()
 	verifiedAt := time.Now().Add(-30 * time.Second)
-	if _, err := store.UpdateMFAAssurance(context.Background(), sessionID, "totp", verifiedAt, credID); err != nil {
+	if _, _, err := store.UpdateMFAAssurance(context.Background(), sessionID, "totp", verifiedAt, credID); err != nil {
 		t.Fatalf("UpdateMFAAssurance() error: %v", err)
 	}
 
@@ -306,13 +306,13 @@ func TestUpdateMFAAssurance_OverwritesPreviousValue(t *testing.T) {
 	ctx := context.Background()
 
 	first := uuid.New().String()
-	if _, err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now().Add(-time.Hour), first); err != nil {
+	if _, _, err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now().Add(-time.Hour), first); err != nil {
 		t.Fatalf("first UpdateMFAAssurance() error: %v", err)
 	}
 
 	second := uuid.New().String()
 	verifiedAt := time.Now()
-	if _, err := store.UpdateMFAAssurance(ctx, sessionID, "webauthn", verifiedAt, second); err != nil {
+	if _, _, err := store.UpdateMFAAssurance(ctx, sessionID, "webauthn", verifiedAt, second); err != nil {
 		t.Fatalf("second UpdateMFAAssurance() error: %v", err)
 	}
 
@@ -338,7 +338,7 @@ func TestUpdateMFAAssurance_OverwritesPreviousValue(t *testing.T) {
 func TestUpdateMFAAssurance_UnknownIDReturnsErrSessionNotFound(t *testing.T) {
 	store, _ := openTestStore(t)
 
-	_, err := store.UpdateMFAAssurance(context.Background(), uuid.New().String(), "totp", time.Now(), uuid.New().String())
+	_, _, err := store.UpdateMFAAssurance(context.Background(), uuid.New().String(), "totp", time.Now(), uuid.New().String())
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("UpdateMFAAssurance() error = %v, want ErrSessionNotFound", err)
 	}
@@ -353,7 +353,7 @@ func TestUpdateMFAAssurance_RevokedSessionReturnsErrSessionNotFound(t *testing.T
 		t.Fatalf("Revoke() error: %v", err)
 	}
 
-	_, err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now(), uuid.New().String())
+	_, _, err := store.UpdateMFAAssurance(ctx, sessionID, "totp", time.Now(), uuid.New().String())
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("UpdateMFAAssurance() on a revoked session error = %v, want ErrSessionNotFound", err)
 	}

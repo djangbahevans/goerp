@@ -27,6 +27,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -169,9 +170,26 @@ func (s *Store) GetPrefix(ctx context.Context, tenantID, prefix string) (map[str
 // that didn't actually happen. A key under a versioned prefix bumps its
 // counter only when the value actually changes.
 func (s *Store) Set(ctx context.Context, tenantID, key, value string) error {
-	if isVersionCounter(key) {
-		return ErrReadOnlyKey
+	return s.SetMany(ctx, tenantID, map[string]string{key: value})
+}
+
+// SetMany is Set for several keys in one transaction: every value lands,
+// or none does, and a versioned prefix's counter bumps at most once
+// however many of its keys change.
+func (s *Store) SetMany(ctx context.Context, tenantID string, values map[string]string) error {
+	if len(values) == 0 {
+		return nil
 	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if isVersionCounter(key) {
+			return ErrReadOnlyKey
+		}
+		keys = append(keys, key)
+	}
+	// A fixed write order keeps two concurrent SetMany calls from taking
+	// row locks in opposite orders.
+	slices.Sort(keys)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -179,32 +197,46 @@ func (s *Store) Set(ctx context.Context, tenantID, key, value string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	counter, versioned := versionCounterFor(key)
-	bump := false
-	if versioned {
-		// Serializes writers of this tenant's versioned keys, so the read
-		// below sees the committed value and every real change bumps.
-		lockKey := db.AdvisoryLockKey("tenantconfig.version:" + tenantID + ":" + counter)
-		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
-			return fmt.Errorf("lock tenant config version %s: %w", counter, err)
+	bump := map[string]bool{}
+	for _, key := range keys {
+		counter, versioned := versionCounterFor(key)
+		if !versioned {
+			continue
+		}
+		if _, locked := bump[counter]; !locked {
+			// Serializes writers of this tenant's versioned keys, so the
+			// read below sees the committed value and every real change
+			// bumps.
+			lockKey := db.AdvisoryLockKey("tenantconfig.version:" + tenantID + ":" + counter)
+			if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
+				return fmt.Errorf("lock tenant config version %s: %w", counter, err)
+			}
+			bump[counter] = false
 		}
 		previous, ok, err := getTx(ctx, tx, tenantID, key)
 		if err != nil {
 			return err
 		}
-		bump = !ok || previous != value
+		if !ok || previous != values[key] {
+			bump[counter] = true
+		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO system.tenant_config_overrides (tenant_id, key, value)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (tenant_id, key) DO UPDATE SET value = $3, updated_at = NOW()
-	`, tenantID, key, value); err != nil {
-		return fmt.Errorf("set tenant config value: %w", err)
+	changed := slices.Clone(keys)
+	for _, key := range keys {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO system.tenant_config_overrides (tenant_id, key, value)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (tenant_id, key) DO UPDATE SET value = $3, updated_at = NOW()
+		`, tenantID, key, values[key]); err != nil {
+			return fmt.Errorf("set tenant config value: %w", err)
+		}
 	}
 
-	changed := []string{key}
-	if bump {
+	for counter, changedUnder := range bump {
+		if !changedUnder {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO system.tenant_config_overrides (tenant_id, key, value)
 			VALUES ($1, $2, '1')

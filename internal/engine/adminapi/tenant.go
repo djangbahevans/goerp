@@ -401,20 +401,8 @@ func (h *tenantHandlers) unsuspend(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, t)
 }
 
-// invalidateDomainCache deletes every tenantresolve domain-cache entry
-// for tenantID, so a status change takes effect immediately rather than
-// waiting out the cache's TTL (multitenancy-internals.md §9).
 func (h *tenantHandlers) invalidateDomainCache(ctx context.Context, tenantID string) error {
-	domains, err := h.deps.Store.DomainsForTenant(ctx, tenantID)
-	if err != nil {
-		return fmt.Errorf("list domains: %w", err)
-	}
-	for _, d := range domains {
-		if err := h.deps.DomainCache.Delete(ctx, tenantresolve.DomainCacheKey(d.Domain)); err != nil {
-			return fmt.Errorf("invalidate cache for domain %q: %w", d.Domain, err)
-		}
-	}
-	return nil
+	return tenantresolve.InvalidateTenantDomains(ctx, h.deps.Store, h.deps.DomainCache, tenantID)
 }
 
 func (h *tenantHandlers) resendInvite(w http.ResponseWriter, r *http.Request) {

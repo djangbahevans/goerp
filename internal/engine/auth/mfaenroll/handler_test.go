@@ -444,7 +444,7 @@ func TestBeginAndConfirm_EnrolledUserNeedsMFAInThisSession(t *testing.T) {
 	// A session whose MFA assurance is older than the policy's max age.
 	authCtx := f.authContext(t, verifiedToken)
 	stale := time.Now().Add(-48 * time.Hour)
-	staleToken, _, err := f.issuer.ReissueAccessToken(authCtx.SessionID, f.tenantID, f.userID, authCtx.RolesLive, "totp", &stale)
+	staleToken, _, err := f.issuer.ReissueAccessToken(authCtx.SessionID, f.tenantID, f.userID, authCtx.RolesLive, "totp", &stale, time.Time{})
 	if err != nil {
 		t.Fatalf("ReissueAccessToken() error: %v", err)
 	}

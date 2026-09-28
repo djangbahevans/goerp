@@ -9,6 +9,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"regexp"
+	"time"
 )
 
 // FrontendTranslationsDir is where a module's frontend translations live,
@@ -31,6 +32,16 @@ var localePattern = regexp.MustCompile(`^[a-z]{2,3}(-[A-Z][a-z]{3})?(-([A-Z]{2}|
 
 func ValidLocale(locale string) bool {
 	return localePattern.MatchString(locale)
+}
+
+// ValidTimezone accepts an IANA zone name. time.LoadLocation also accepts
+// "" and "Local", which name no zone a browser can render.
+func ValidTimezone(tz string) bool {
+	if tz == "" || tz == "Local" {
+		return false
+	}
+	_, err := time.LoadLocation(tz)
+	return err == nil
 }
 
 // ValidateFrontendTranslation checks one frontend/translations/{locale}.json

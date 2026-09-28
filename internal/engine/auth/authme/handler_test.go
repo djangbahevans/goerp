@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
@@ -125,7 +126,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	filesStore := files.NewStore(conn)
 
-	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, backend, testAvailableLocales, password.NewPolicyStore(configStore))
+	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, backend, tenantl10n.NewStore(configStore, testAvailableLocales), password.NewPolicyStore(configStore))
 
 	slug := fmt.Sprintf("authmetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Test Co")
@@ -697,6 +698,26 @@ func TestServeHTTP_ReportsDefaultPreferencesAndPlatformLocaleDefaults(t *testing
 	}
 	if strings.Join(resp.Tenant.AvailableLocales, ",") != "en,pt-BR" {
 		t.Errorf("tenant.available_locales = %v, want the configured [en pt-BR]", resp.Tenant.AvailableLocales)
+	}
+}
+
+func TestServeHTTP_ReportsTheTenantLocaleSettings(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.SetMany(t.Context(), f.tenantID, map[string]string{
+		tenantl10n.KeyAvailableLocales: "pt-BR",
+		tenantl10n.KeyDefaultLocale:    "pt-BR",
+		tenantl10n.KeyDefaultTimezone:  "Africa/Accra",
+	}); err != nil {
+		t.Fatalf("SetMany() locale settings error: %v", err)
+	}
+
+	resp := f.me(t)
+
+	if resp.Tenant.DefaultLocale != "pt-BR" || resp.Tenant.DefaultTimezone != "Africa/Accra" {
+		t.Errorf("tenant defaults = %q/%q, want pt-BR/Africa/Accra", resp.Tenant.DefaultLocale, resp.Tenant.DefaultTimezone)
+	}
+	if strings.Join(resp.Tenant.AvailableLocales, ",") != "pt-BR" {
+		t.Errorf("tenant.available_locales = %v, want the tenant's [pt-BR]", resp.Tenant.AvailableLocales)
 	}
 }
 

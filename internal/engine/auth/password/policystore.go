@@ -2,6 +2,7 @@ package password
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -137,4 +138,50 @@ func UpdateRecommended(setTenantID *string, setVersion int64, tenantID string, c
 		return true
 	}
 	return setVersion < currentVersion
+}
+
+// ErrLooserThanGlobal rejects a tenant policy that would loosen Global:
+// Effective keeps the stricter value field by field, so a looser one
+// would be stored but never applied.
+var ErrLooserThanGlobal = errors.New("password policy cannot be looser than the platform policy")
+
+// ValidateTenant reports whether p is a tenant policy Save can store:
+// every field at least as strict as Global, and a length range that
+// admits some password.
+func ValidateTenant(p Policy) error {
+	switch {
+	case p.MinLength < Global.MinLength:
+		return fmt.Errorf("%w: min_length must be at least %d", ErrLooserThanGlobal, Global.MinLength)
+	case p.MaxLength > Global.MaxLength:
+		return fmt.Errorf("%w: max_length must be at most %d", ErrLooserThanGlobal, Global.MaxLength)
+	case p.MaxLength < p.MinLength:
+		return fmt.Errorf("%w: max_length must be at least min_length", ErrLooserThanGlobal)
+	case Global.RequireUppercase && !p.RequireUppercase,
+		Global.RequireDigit && !p.RequireDigit,
+		Global.RequireSymbol && !p.RequireSymbol,
+		Global.BlockCommonList && !p.BlockCommonList,
+		Global.BlockUserInfo && !p.BlockUserInfo:
+		return fmt.Errorf("%w: a rule the platform requires cannot be turned off", ErrLooserThanGlobal)
+	}
+	return nil
+}
+
+// Save writes p as tenantID's policy in one transaction, bumping the
+// policy version once if any field changed. p must pass ValidateTenant.
+func (s *PolicyStore) Save(ctx context.Context, tenantID string, p Policy) error {
+	if err := ValidateTenant(p); err != nil {
+		return err
+	}
+	if err := s.config.SetMany(ctx, tenantID, map[string]string{
+		KeyMinLength:        strconv.Itoa(p.MinLength),
+		KeyMaxLength:        strconv.Itoa(p.MaxLength),
+		KeyRequireUppercase: strconv.FormatBool(p.RequireUppercase),
+		KeyRequireDigit:     strconv.FormatBool(p.RequireDigit),
+		KeyRequireSymbol:    strconv.FormatBool(p.RequireSymbol),
+		KeyBlockCommonList:  strconv.FormatBool(p.BlockCommonList),
+		KeyBlockUserInfo:    strconv.FormatBool(p.BlockUserInfo),
+	}); err != nil {
+		return fmt.Errorf("save password policy: %w", err)
+	}
+	return nil
 }

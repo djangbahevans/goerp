@@ -244,6 +244,27 @@ func DomainCacheKey(domain string) string {
 	return domainCacheKeyPrefix + normaliseDomain(domain)
 }
 
+// CacheDeleter is satisfied by cache.Client.
+type CacheDeleter interface {
+	Delete(ctx context.Context, key string) error
+}
+
+// InvalidateTenantDomains deletes the cached resolution of every domain of
+// tenantID, so a change to the tenant row takes effect immediately rather
+// than after the cache TTL (multitenancy-internals.md §9).
+func InvalidateTenantDomains(ctx context.Context, tenants *tenant.Store, c CacheDeleter, tenantID string) error {
+	domains, err := tenants.DomainsForTenant(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("list domains: %w", err)
+	}
+	for _, d := range domains {
+		if err := c.Delete(ctx, DomainCacheKey(d.Domain)); err != nil {
+			return fmt.Errorf("invalidate cache for domain %q: %w", d.Domain, err)
+		}
+	}
+	return nil
+}
+
 // EntitlementCacheKey returns the Redis key LoadEntitlements caches
 // tenantID's entitlements under — exported so a caller that changes a
 // tenant's plan (billing.Store.ChangeTenantPlan) can invalidate the same

@@ -83,11 +83,13 @@ func newRotateFixture(t *testing.T) *rotateFixture {
 	}
 }
 
-func thirtyDays(bool) time.Time { return time.Now().Add(30 * 24 * time.Hour) }
+func thirtyDays(string, bool, time.Time) (time.Time, error) {
+	return time.Now().Add(30 * 24 * time.Hour), nil
+}
 
 func (f *rotateFixture) rotate(t *testing.T, presentedHash, requestDeviceID string) RotateResult {
 	t.Helper()
-	result, err := f.store.Rotate(context.Background(), presentedHash, uuid.New().String(), "hash-"+uuid.New().String(), requestDeviceID, thirtyDays, "", "", "")
+	result, err := f.store.Rotate(context.Background(), presentedHash, uuid.New().String(), "hash-"+uuid.New().String(), requestDeviceID, time.Now(), thirtyDays, "", "", "")
 	if err != nil {
 		t.Fatalf("Rotate() error: %v", err)
 	}
@@ -144,7 +146,7 @@ func TestRotate_CarriesForwardUserAgentIPAndCountryOnTheNewRow(t *testing.T) {
 	f := newRotateFixture(t)
 	newSessionID := uuid.New().String()
 
-	result, err := f.store.Rotate(context.Background(), f.refreshHash, newSessionID, "hash-"+uuid.New().String(), f.deviceID, thirtyDays, "Mozilla/5.0 test-agent", "203.0.113.7", "GH")
+	result, err := f.store.Rotate(context.Background(), f.refreshHash, newSessionID, "hash-"+uuid.New().String(), f.deviceID, time.Now(), thirtyDays, "Mozilla/5.0 test-agent", "203.0.113.7", "GH")
 	if err != nil {
 		t.Fatalf("Rotate() error: %v", err)
 	}
@@ -182,9 +184,9 @@ func TestRotate_NewRowInheritsPersistentFlagAndItsExpiry(t *testing.T) {
 			wantExpiry := time.Now().Add(time.Hour).Truncate(time.Second)
 			var gotFlag *bool
 			newSessionID := uuid.New().String()
-			result, err := f.store.Rotate(ctx, f.refreshHash, newSessionID, "hash-"+uuid.New().String(), f.deviceID, func(p bool) time.Time {
+			result, err := f.store.Rotate(ctx, f.refreshHash, newSessionID, "hash-"+uuid.New().String(), f.deviceID, time.Now(), func(_ string, p bool, _ time.Time) (time.Time, error) {
 				gotFlag = &p
-				return wantExpiry
+				return wantExpiry, nil
 			}, "", "", "")
 			if err != nil {
 				t.Fatalf("Rotate() error: %v", err)
@@ -239,7 +241,7 @@ func TestRotate_ReusingRotatedTokenFromSameDeviceDoesNotRevoke(t *testing.T) {
 func TestRotate_ReusingRotatedTokenFromDifferentDeviceRevokesFamily(t *testing.T) {
 	f := newRotateFixture(t)
 	legitimateNewHash := "hash-" + uuid.New().String()
-	first, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), legitimateNewHash, f.deviceID, thirtyDays, "", "", "")
+	first, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), legitimateNewHash, f.deviceID, time.Now(), thirtyDays, "", "", "")
 	if err != nil {
 		t.Fatalf("first Rotate() error: %v", err)
 	}
@@ -300,7 +302,7 @@ func TestRotate_ConcurrentRequestsForSameTokenDoNotRace(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, thirtyDays, "", "", "")
+			result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now(), thirtyDays, "", "", "")
 			if err != nil {
 				t.Errorf("concurrent Rotate() error: %v", err)
 				return
@@ -336,5 +338,77 @@ func TestRotate_ConcurrentRequestsForSameTokenDoNotRace(t *testing.T) {
 	}
 	if liveCount != 1 {
 		t.Errorf("live rows in family = %d, want exactly 1 — a race would leave 0 or 2", liveCount)
+	}
+}
+
+func TestRotate_PastExpiresAtIsExpired(t *testing.T) {
+	f := newRotateFixture(t)
+
+	result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now().Add(31*24*time.Hour), thirtyDays, "", "", "")
+	if err != nil {
+		t.Fatalf("Rotate() error: %v", err)
+	}
+	if result.Outcome != RotateExpired {
+		t.Fatalf("Outcome = %v, want RotateExpired", result.Outcome)
+	}
+
+	var rotatedAt sql.NullTime
+	if err := f.conn.QueryRow(`SELECT rotated_at FROM system.sessions WHERE id = $1`, f.firstID).Scan(&rotatedAt); err != nil {
+		t.Fatalf("read presented row: %v", err)
+	}
+	if rotatedAt.Valid {
+		t.Error("an expired row was marked rotated")
+	}
+}
+
+func TestRotate_NewExpiryNotInFutureIsExpired(t *testing.T) {
+	f := newRotateFixture(t)
+	now := time.Now()
+
+	var gotTenant string
+	var gotStart time.Time
+	result, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, now, func(tenantID string, _ bool, familyStart time.Time) (time.Time, error) {
+		gotTenant, gotStart = tenantID, familyStart
+		return now, nil
+	}, "", "", "")
+	if err != nil {
+		t.Fatalf("Rotate() error: %v", err)
+	}
+	if result.Outcome != RotateExpired {
+		t.Fatalf("Outcome = %v, want RotateExpired", result.Outcome)
+	}
+	if gotTenant != f.tenantID {
+		t.Errorf("ExpiryFunc tenantID = %q, want %q", gotTenant, f.tenantID)
+	}
+	var created time.Time
+	if err := f.conn.QueryRow(`SELECT created_at FROM system.sessions WHERE id = $1`, f.familyID).Scan(&created); err != nil {
+		t.Fatalf("read family's first row: %v", err)
+	}
+	if !gotStart.Equal(created) {
+		t.Errorf("ExpiryFunc familyStart = %v, want the first row's created_at %v", gotStart, created)
+	}
+}
+
+func TestRotate_FamilyStartIsTheLoginAcrossRotations(t *testing.T) {
+	f := newRotateFixture(t)
+	secondHash := "hash-" + uuid.New().String()
+	if _, err := f.store.Rotate(context.Background(), f.refreshHash, uuid.New().String(), secondHash, f.deviceID, time.Now(), thirtyDays, "", "", ""); err != nil {
+		t.Fatalf("first Rotate() error: %v", err)
+	}
+
+	var gotStart time.Time
+	result, err := f.store.Rotate(context.Background(), secondHash, uuid.New().String(), "hash-"+uuid.New().String(), f.deviceID, time.Now(), func(_ string, _ bool, familyStart time.Time) (time.Time, error) {
+		gotStart = familyStart
+		return time.Now().Add(time.Hour), nil
+	}, "", "", "")
+	if err != nil || result.Outcome != RotateOK {
+		t.Fatalf("second Rotate() = %v, %v, want RotateOK", result.Outcome, err)
+	}
+	var created time.Time
+	if err := f.conn.QueryRow(`SELECT created_at FROM system.sessions WHERE id = $1`, f.familyID).Scan(&created); err != nil {
+		t.Fatalf("read family's first row: %v", err)
+	}
+	if !gotStart.Equal(created) {
+		t.Errorf("familyStart = %v, want the login row's created_at %v", gotStart, created)
 	}
 }

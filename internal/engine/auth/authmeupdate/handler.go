@@ -23,11 +23,12 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/l10n"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/rs/zerolog/log"
@@ -38,13 +39,13 @@ type Handler struct {
 	auth    *authcheck.Checker
 	users   *user.Store
 	files   *files.Store
-	// availableLocales is what a user may pick as their locale: the
-	// platform's GOERP_AVAILABLE_LOCALES until tenants have locale settings.
-	availableLocales []string
+	// locales supplies the tenant's available locales, the only ones a
+	// user may pick as their locale.
+	locales *tenantl10n.Store
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, availableLocales []string) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, availableLocales: availableLocales}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, locales *tenantl10n.Store) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, locales: locales}
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -88,7 +89,7 @@ func (e *requestError) Error() string { return e.message }
 // be able to reach the "" case — without it, clearing an avatar in the UI
 // and saving would be indistinguishable from never touching the avatar
 // field at all.
-func (h *Handler) parseUpdate(body map[string]jsontext.Value) (user.ProfileUpdate, error) {
+func parseUpdate(body map[string]jsontext.Value, availableLocales []string) (user.ProfileUpdate, error) {
 	var update user.ProfileUpdate
 
 	if raw, ok := body["name"]; ok {
@@ -122,14 +123,19 @@ func (h *Handler) parseUpdate(body map[string]jsontext.Value) (user.ProfileUpdat
 
 	var err error
 	if update.Locale, err = nullablePreference(body, "locale", func(locale string) string {
-		if !slices.Contains(h.availableLocales, locale) {
-			return fmt.Sprintf("locale must be one of %s", strings.Join(h.availableLocales, ", "))
+		if !slices.Contains(availableLocales, locale) {
+			return fmt.Sprintf("locale must be one of %s", strings.Join(availableLocales, ", "))
 		}
 		return ""
 	}); err != nil {
 		return update, err
 	}
-	if update.Timezone, err = nullablePreference(body, "timezone", validTimezone); err != nil {
+	if update.Timezone, err = nullablePreference(body, "timezone", func(tz string) string {
+		if !l10n.ValidTimezone(tz) {
+			return "timezone must be an IANA time zone name"
+		}
+		return ""
+	}); err != nil {
 		return update, err
 	}
 	if update.DateFormat, err = nullablePreference(body, "date_format", func(format string) string {
@@ -162,18 +168,6 @@ func nullablePreference(body map[string]jsontext.Value, field string, check func
 		return user.NullableField{}, &requestError{field: field, message: problem}
 	}
 	return user.NullableField{Set: true, Value: &value}, nil
-}
-
-// validTimezone accepts an IANA zone name. time.LoadLocation also accepts
-// "" and "Local", which name no zone a browser can render.
-func validTimezone(tz string) string {
-	if tz == "" || tz == "Local" {
-		return "timezone must be an IANA time zone name"
-	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return "timezone must be an IANA time zone name"
-	}
-	return ""
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +204,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed JSON body")
 		return
 	}
-	update, err := h.parseUpdate(body)
+	l10nSettings, err := h.locales.Load(ctx, tenantCtx.TenantID)
+	if err != nil {
+		log.Error().Err(err).Str("tenant_id", tenantCtx.TenantID).Msg("authmeupdate: load tenant locale settings")
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "update failed")
+		return
+	}
+	update, err := parseUpdate(body, l10nSettings.AvailableLocales)
 	if err != nil {
 		if reqErr, ok := errors.AsType[*requestError](err); ok && reqErr.field != "" {
 			writeInvalidPreference(w, reqErr.field, reqErr.message)

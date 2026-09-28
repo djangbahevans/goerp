@@ -43,6 +43,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
+	"github.com/djangbahevans/goerp/internal/engine/auth/ipallowlist"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/membership"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
@@ -98,10 +99,11 @@ type Handler struct {
 	resolver   *tenantresolve.Resolver
 	handoffs   *handoff.Store
 	selections *tenantselect.Store
+	allowlists *ipallowlist.Store
 }
 
-func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client, audit *authaudit.Store, resolver *tenantresolve.Resolver, handoffs *handoff.Store, selections *tenantselect.Store) *Handler {
-	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient, audit: audit, resolver: resolver, handoffs: handoffs, selections: selections}
+func NewHandler(users *user.Store, tenants *tenant.Store, roles *role.Store, mfaStore *mfa.Store, issuer *authtoken.Issuer, mfaTokens *mfatoken.Codec, policies *password.PolicyStore, hasher *password.Hasher, cacheClient *cache.Client, audit *authaudit.Store, resolver *tenantresolve.Resolver, handoffs *handoff.Store, selections *tenantselect.Store, allowlists *ipallowlist.Store) *Handler {
+	return &Handler{users: users, tenants: tenants, roles: roles, mfa: mfaStore, issuer: issuer, mfaTokens: mfaTokens, policies: policies, hasher: hasher, cache: cacheClient, audit: audit, resolver: resolver, handoffs: handoffs, selections: selections, allowlists: allowlists}
 }
 
 type loginRequest struct {
@@ -137,6 +139,28 @@ func writeInvalidCredentials(w http.ResponseWriter) {
 func writeOverloaded(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", strconv.Itoa(password.OverloadRetryAfterSeconds))
 	writeJSONError(w, http.StatusServiceUnavailable, "overloaded", "too many sign-in attempts in progress, retry shortly")
+}
+
+// allowedFrom reports whether tenantID's login IP allowlist admits r's
+// client, having written the 403 (or, if the list can't be read, a 500)
+// when it doesn't.
+func (h *Handler) allowedFrom(w http.ResponseWriter, r *http.Request, tenantID string) bool {
+	if h.allowlists == nil {
+		return true
+	}
+	ip := loginsession.ClientIP(r)
+	ok, err := h.allowlists.Check(r.Context(), tenantID, ip)
+	if err != nil {
+		log.Error().Err(err).Str("tenant_id", tenantID).Msg("loginflow: ip allowlist check failed")
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
+		return false
+	}
+	if !ok {
+		log.Info().Str("tenant_id", tenantID).Str("ip", ip).Msg("loginflow: sign-in from an address outside the tenant's ip allowlist")
+		writeJSONError(w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
+		return false
+	}
+	return true
 }
 
 func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
@@ -428,6 +452,12 @@ func (h *Handler) writeTenantRequired(w http.ResponseWriter, r *http.Request, us
 func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, u *user.User, t *tenant.Tenant, deviceID string, remember bool) {
 	ctx := r.Context()
 
+	// Only after the password check, so the response can't be used to
+	// probe a tenant's allowlist without valid credentials.
+	if !h.allowedFrom(w, r, t.ID) {
+		return
+	}
+
 	// auth-internals.md §3 "Password policy versioning": a nudge only,
 	// never a reason to refuse the login.
 	var updateRecommended bool
@@ -586,6 +616,10 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		CountryCode: "",
 		Persistent:  nonBrowser || remember,
 	})
+	if errors.Is(err, authtoken.ErrIPNotAllowed) {
+		writeJSONError(w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
+		return
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
@@ -673,7 +707,8 @@ func (h *Handler) ServeHandoff(w http.ResponseWriter, r *http.Request) {
 		writeHandoffInvalid(w)
 		return
 	}
-
+	// completeLogin's Issue re-checks the IP allowlist against this
+	// request, which can come from another network than the login did.
 	h.completeLogin(w, r, u.ID, tc.TenantID, tc.Slug, "", grant.Remember, grant.PasswordUpdateRecommended)
 }
 

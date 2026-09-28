@@ -27,6 +27,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
+	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -40,17 +41,17 @@ import (
 const avatarURLExpiry = time.Hour
 
 type Handler struct {
-	tenants          *tenantresolve.Resolver
-	auth             *authcheck.Checker
-	users            *user.Store
-	files            *files.Store
-	backend          storage.Backend
-	availableLocales []string
-	policies         *password.PolicyStore
+	tenants  *tenantresolve.Resolver
+	auth     *authcheck.Checker
+	users    *user.Store
+	files    *files.Store
+	backend  storage.Backend
+	locales  *tenantl10n.Store
+	policies *password.PolicyStore
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, backend storage.Backend, availableLocales []string, policies *password.PolicyStore) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, backend: backend, availableLocales: availableLocales, policies: policies}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, backend storage.Backend, locales *tenantl10n.Store, policies *password.PolicyStore) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, backend: backend, locales: locales, policies: policies}
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -105,9 +106,8 @@ type meUser struct {
 	DateFormat       *string `json:"date_format"`
 }
 
-// meTenant is CurrentTenant on the wire. A tenant has no locale settings of
-// its own yet (backlog #1046), so its locale defaults are the platform's
-// (l10n-guide.md §2).
+// meTenant is CurrentTenant on the wire, its locale fields the tenant's
+// effective locale settings (l10n-guide.md §2 "Tenant default locale").
 type meTenant struct {
 	ID               string   `json:"id"`
 	Slug             string   `json:"slug"`
@@ -188,6 +188,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: mfa setup check failed, reporting false")
 	}
 
+	l10nSettings, err := h.locales.Load(ctx, tenantCtx.TenantID)
+	if err != nil {
+		log.Warn().Err(err).Str("tenant_id", tenantCtx.TenantID).Msg("authme: tenant locale settings lookup failed, reporting platform defaults")
+		l10nSettings = tenantl10n.Settings{
+			DefaultLocale:    l10n.PlatformDefaultLocale,
+			DefaultTimezone:  l10n.PlatformDefaultTimezone,
+			AvailableLocales: h.locales.PlatformLocales(),
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, meResponse{
 		User: meUser{
@@ -211,9 +221,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Slug:              tenantCtx.Slug,
 			Name:              tenantCtx.Name,
 			Plan:              string(tenantCtx.Plan),
-			DefaultLocale:     l10n.PlatformDefaultLocale,
-			DefaultTimezone:   l10n.PlatformDefaultTimezone,
-			AvailableLocales:  h.availableLocales,
+			DefaultLocale:     l10nSettings.DefaultLocale,
+			DefaultTimezone:   l10nSettings.DefaultTimezone,
+			AvailableLocales:  l10nSettings.AvailableLocales,
 			PasswordMinLength: h.policies.MinLength(ctx, tenantCtx.TenantID),
 		},
 	})

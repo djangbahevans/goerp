@@ -2,10 +2,8 @@
 // per-tenant policy (mode + assurance-age) and the decision logic step 9
 // of the auth middleware pipeline evaluates on every Authenticated
 // request. This package only implements the policy loading and the
-// evaluation logic itself — wiring Evaluate's result into the actual
-// per-request pipeline as step 9, and returning the corresponding 403,
-// is goerp#224's job, which doesn't exist yet. Nothing in this package
-// is consumed by any route today.
+// evaluation logic itself. SavePolicy is its write side, used by the
+// tenant settings API (PATCH /admin/settings).
 package enforce
 
 import (
@@ -101,10 +99,9 @@ func (s *Store) LoadPolicy(ctx context.Context, tenantID string) (Policy, error)
 	if v, ok, err := s.config.Get(ctx, tenantID, keyMode); err != nil {
 		return Policy{}, fmt.Errorf("load mfa enforcement mode: %w", err)
 	} else if ok {
-		switch Mode(v) {
-		case ModeOptional, ModeRequired, ModeRequiredForRoles:
+		if ValidMode(Mode(v)) {
 			policy.Mode = Mode(v)
-		default:
+		} else {
 			log.Warn().Str("tenant_id", tenantID).Str("value", v).Msg("enforce: unrecognized mfa enforcement mode, defaulting to optional")
 		}
 	}
@@ -133,4 +130,42 @@ func (s *Store) LoadPolicy(ctx context.Context, tenantID string) (Policy, error)
 	}
 
 	return policy, nil
+}
+
+// ValidMode reports whether mode is one of the three enforcement modes.
+func ValidMode(mode Mode) bool {
+	switch mode {
+	case ModeOptional, ModeRequired, ModeRequiredForRoles:
+		return true
+	}
+	return false
+}
+
+// SavePolicy writes every field of policy for tenantID in one
+// transaction, the write side of LoadPolicy. It reads straight from
+// tenantconfig with no cache in between, so the next LoadPolicy (and
+// authcheck.Checker.EnforceMFA with it) sees the new policy immediately.
+// A MaxAssuranceAge is stored in whole hours, rounded up, and
+// RequiredRoles only under ModeRequiredForRoles, the one mode that reads
+// them.
+func (s *Store) SavePolicy(ctx context.Context, tenantID string, policy Policy) error {
+	if !ValidMode(policy.Mode) {
+		return fmt.Errorf("unknown mfa enforcement mode %q", policy.Mode)
+	}
+	if policy.MaxAssuranceAge <= 0 {
+		return fmt.Errorf("mfa max assurance age must be positive, got %s", policy.MaxAssuranceAge)
+	}
+	hours := int64((policy.MaxAssuranceAge + time.Hour - 1) / time.Hour)
+	var roles string
+	if policy.Mode == ModeRequiredForRoles {
+		roles = strings.Join(policy.RequiredRoles, ",")
+	}
+	if err := s.config.SetMany(ctx, tenantID, map[string]string{
+		keyMode:            string(policy.Mode),
+		keyRequiredRoles:   roles,
+		keyMaxAssuranceAge: strconv.FormatInt(hours, 10),
+	}); err != nil {
+		return fmt.Errorf("save mfa enforcement policy: %w", err)
+	}
+	return nil
 }
