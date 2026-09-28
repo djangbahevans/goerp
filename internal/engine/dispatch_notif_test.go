@@ -813,6 +813,23 @@ func TestDispatchNotifUnsubscribeRoute_TurnsOffEmailForOneType(t *testing.T) {
 	}
 }
 
+func TestDispatchNotifUnsubscribeRoute_OutlastsGlobalEmailComingBackOn(t *testing.T) {
+	f := newUnsubscribeFixture(t)
+	if w := f.patchPreferences(t, `{"global": {"email": false}}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d; body: %s", w.Code, w.Body.String())
+	}
+	if w := f.unsubscribe(f.host, f.token(t, f.tenantID, "sales.order_confirmed")); w.Code != http.StatusOK {
+		t.Fatalf("unsubscribe status = %d; body: %s", w.Code, w.Body.String())
+	}
+	if w := f.patchPreferences(t, `{"global": {"email": true}}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d; body: %s", w.Code, w.Body.String())
+	}
+
+	if c, ok := f.getPreferences(t).Types["sales.order_confirmed"]; !ok || c.Email {
+		t.Errorf("sales.order_confirmed = %+v (listed %v), want email still off", c, ok)
+	}
+}
+
 func TestDispatchNotifUnsubscribeRoute_ChangesNothingForABadToken(t *testing.T) {
 	f := newUnsubscribeFixture(t)
 

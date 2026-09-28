@@ -100,11 +100,11 @@ func (c *UnsubscribeCodec) keyFunc(token *jwt.Token) (any, error) {
 	return nil, fmt.Errorf("unrecognized signing key kid %v", token.Header["kid"])
 }
 
-// Unsubscribe turns off userID's email for notificationType, creating the
-// type's row if needed, as a PATCH of { types: { notificationType: {
-// email: false } } } would.
+// Unsubscribe turns off userID's email for notificationType in the type's
+// own row, creating it if needed. The row is kept even when it equals the
+// global row, so turning global email back on doesn't undo the unsubscribe.
 func (s *Store) Unsubscribe(ctx context.Context, tenantSlug, tenantID, userID, notificationType string) error {
-	return s.UpdatePreferences(ctx, tenantSlug, tenantID, userID, nil, map[string]ChannelsPatch{
+	return s.updatePreferences(ctx, tenantSlug, tenantID, userID, nil, map[string]ChannelsPatch{
 		notificationType: {Email: new(false)},
-	})
+	}, true)
 }

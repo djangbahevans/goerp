@@ -176,6 +176,12 @@ func loadPreferences(ctx context.Context, q queryer, tenantSlug, tenantID, userI
 // row removed instead, so it follows global again. Invalidates the user's
 // cached preferences.
 func (s *Store) UpdatePreferences(ctx context.Context, tenantSlug, tenantID, userID string, global *ChannelsPatch, types map[string]ChannelsPatch) error {
+	return s.updatePreferences(ctx, tenantSlug, tenantID, userID, global, types, false)
+}
+
+// updatePreferences is UpdatePreferences, except that pinTypes keeps a type
+// row even when it equals the global row.
+func (s *Store) updatePreferences(ctx context.Context, tenantSlug, tenantID, userID string, global *ChannelsPatch, types map[string]ChannelsPatch, pinTypes bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("update notification preferences: %w", err)
@@ -212,7 +218,7 @@ func (s *Store) UpdatePreferences(ctx context.Context, tenantSlug, tenantID, use
 			base = current.Global
 		}
 		c := patch.apply(base)
-		if c == current.Global {
+		if c == current.Global && !pinTypes {
 			if _, err := tx.ExecContext(ctx, deleteType, tenantID, userID, typ); err != nil {
 				return fmt.Errorf("reset %s notification preferences: %w", typ, err)
 			}
