@@ -15,7 +15,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // testEnv wires *tenant.Store and *role.Store against the real
 // compose.dev.yml Postgres — same convention as tenantoffboard's/

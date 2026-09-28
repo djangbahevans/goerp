@@ -16,7 +16,7 @@ import (
 // localPostgresDSN points directly at the compose.dev.yml Postgres
 // instance (bypassing PgBouncer), same convention as signingkey.Store's
 // tests.
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // memoryBackend is an in-process secrets.Backend that actually supports
 // Set, standing in for a real vault/aws_secretsmanager deployment — neither

@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: dev
       POSTGRES_DB: goerp
     ports:
-      - "55432:5432"
+      - "15432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./docker/postgres-initdb:/docker-entrypoint-initdb.d

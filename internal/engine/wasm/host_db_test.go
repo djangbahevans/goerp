@@ -18,7 +18,7 @@ import (
 // localPostgresDSN points directly at the compose.dev.yml Postgres
 // instance, same convention as internal/engine/role's and internal/engine/
 // tenant's tests.
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // hostDBCallerModule is a hand-assembled WASM module that imports
 // host.db.begin/commit/rollback and re-exports each as call_begin/

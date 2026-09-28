@@ -38,7 +38,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 const testCallerPassword = "correct horse battery staple"
 
 // spyMailer records SendMFAReset calls instead of sending real email.

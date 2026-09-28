@@ -15,12 +15,12 @@ import (
 // docker/postgres-initdb sets.
 func TestSystemSchema_EngineRoleHasDMLButNoDDL(t *testing.T) {
 	openTestPool(t)
-	schemaSync, err := New("postgres://schema_sync_user:dev@localhost:55432/goerp")
+	schemaSync, err := New("postgres://schema_sync_user:dev@localhost:15432/goerp")
 	if err != nil {
 		t.Fatalf("connect as schema_sync_user (recreate the dev stack with docker compose down -v): %v", err)
 	}
 	t.Cleanup(func() { _ = schemaSync.Close() })
-	engine, err := New("postgres://engine_user:dev@localhost:55432/goerp")
+	engine, err := New("postgres://engine_user:dev@localhost:15432/goerp")
 	if err != nil {
 		t.Fatalf("connect as engine_user (recreate the dev stack with docker compose down -v): %v", err)
 	}
@@ -56,12 +56,12 @@ func TestSystemSchema_EngineRoleHasDMLButNoDDL(t *testing.T) {
 
 func TestTenantRoleFunctions(t *testing.T) {
 	openTestPool(t)
-	schemaSync, err := New("postgres://schema_sync_user:dev@localhost:55432/goerp")
+	schemaSync, err := New("postgres://schema_sync_user:dev@localhost:15432/goerp")
 	if err != nil {
 		t.Fatalf("connect as schema_sync_user (recreate the dev stack with docker compose down -v): %v", err)
 	}
 	t.Cleanup(func() { _ = schemaSync.Close() })
-	engine, err := New("postgres://engine_user:dev@localhost:55432/goerp")
+	engine, err := New("postgres://engine_user:dev@localhost:15432/goerp")
 	if err != nil {
 		t.Fatalf("connect as engine_user (recreate the dev stack with docker compose down -v): %v", err)
 	}

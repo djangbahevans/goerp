@@ -606,7 +606,7 @@ func openTestRLSReaderORM(t *testing.T, adminConn *sql.DB, schemaName, table str
 		t.Fatalf("grant select: %v", err)
 	}
 
-	readerConn, err := db.New("postgres://" + roleName + ":dev@localhost:55432/goerp")
+	readerConn, err := db.New("postgres://" + roleName + ":dev@localhost:15432/goerp")
 	if err != nil {
 		t.Fatalf("connect as test reader role: %v", err)
 	}

@@ -12,7 +12,7 @@ import (
 
 // localPostgresDSN points directly at the compose.dev.yml Postgres
 // instance, same convention as internal/engine/recordshares' tests.
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // openTestStore creates a fixture tenant_<random> schema directly (this
 // package's tests don't wait on real tenant provisioning to exist — same

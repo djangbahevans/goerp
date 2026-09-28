@@ -75,7 +75,7 @@ func connectTenantConn(t *testing.T, hub *ws.Hub, tenantID string) *websocket.Co
 
 // localPostgresDSN matches internal/engine/tenant/sync's own test
 // convention — the compose.dev.yml Postgres instance.
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`

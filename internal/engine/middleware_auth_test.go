@@ -39,7 +39,7 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
-const chainTestPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const chainTestPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 const chainTestRedisAddr = "localhost:6379"
 const chainTestPermission = "widgets.read"
 

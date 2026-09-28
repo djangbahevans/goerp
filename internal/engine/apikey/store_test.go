@@ -16,7 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // testEnv wires an apikey.Store plus tenant.Store/user.Store against the
 // real compose.dev.yml Postgres — api_keys FK-references both tenants and

@@ -19,7 +19,7 @@ import (
 // localPostgresDSN/localRedisConfig point directly at the compose.dev.yml
 // instances, same convention as internal/engine/tenant's and
 // internal/engine/cache's own tests.
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func localRedisConfig() cache.Config {
 	return cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1}

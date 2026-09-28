@@ -33,7 +33,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func openTestPrimaryDB(t *testing.T) *sql.DB {
 	t.Helper()

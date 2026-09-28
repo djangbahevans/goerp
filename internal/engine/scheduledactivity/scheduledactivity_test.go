@@ -18,7 +18,7 @@ import (
 
 // localPostgresDSN points directly at the compose.dev.yml Postgres
 // instance, same convention as internal/engine/recordactivity's tests.
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 const (
 	testModel    = "sales.order"

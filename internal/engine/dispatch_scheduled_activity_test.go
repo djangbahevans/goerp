@@ -181,7 +181,7 @@ func (f *scheduledActivityFixture) restrictWidgetsToOwner(t *testing.T) {
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}
-	reader, err := db.New("postgres://" + roleName + ":dev@localhost:55432/goerp")
+	reader, err := db.New("postgres://" + roleName + ":dev@localhost:15432/goerp")
 	if err != nil {
 		t.Fatalf("connect as %s: %v", roleName, err)
 	}

@@ -50,7 +50,7 @@ var riverMigrateOnce sync.Once
 // default host_db_test.go and its siblings already use for the engine's
 // own real-Postgres test suite (testing-guide.md §2's docker-compose.test.yml
 // documents the equivalent standalone setup).
-const defaultTestDBDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const defaultTestDBDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 const lockAcquireTimeout = 10 * time.Second
 
@@ -101,7 +101,7 @@ func WithFixture(path string) Option {
 // schema are dropped automatically via t.Cleanup.
 //
 // Requires a reachable Postgres at GOERP_TEST_DB_DSN (default
-// postgres://goerp:dev@localhost:55432/goerp, compose.dev.yml's own
+// postgres://goerp:dev@localhost:15432/goerp, compose.dev.yml's own
 // credentials) — the test skips, rather than failing, if none is
 // reachable.
 func NewHarness(t *testing.T, opts ...Option) *Harness {

@@ -15,7 +15,7 @@ import (
 // localPostgresDSN points directly at the compose.dev.yml Postgres
 // instance (bypassing PgBouncer), same convention as tenant.Store's own
 // tests.
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func openTestStore(t *testing.T) (*Store, *tenant.Store, *sql.DB) {
 	t.Helper()

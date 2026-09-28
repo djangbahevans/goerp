@@ -32,7 +32,7 @@ import (
 	"go.temporal.io/sdk/worker"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func widgetModel() model.ModelDeclaration {
 	return *model.Define("sales.widget", model.Table("widgets")).

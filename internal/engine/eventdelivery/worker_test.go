@@ -29,7 +29,7 @@ import (
 // bypassing PgBouncer) and internal/engine/tenant/offboard/
 // offboarder_test.go (jobs pool, via PgBouncer) respectively.
 const (
-	localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+	localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 	jobsTestDSN      = "postgres://goerp:dev@localhost:6432/goerp"
 )
 

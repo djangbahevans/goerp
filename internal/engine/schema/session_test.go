@@ -12,11 +12,11 @@ import (
 )
 
 // localSchemaSyncDSN points directly at the compose.dev.yml Postgres
-// instance (localhost:55432), bypassing PgBouncer — schema sync needs a
+// instance (localhost:15432), bypassing PgBouncer — schema sync needs a
 // session-scoped connection for advisory locks and SET search_path to
 // reliably stay on one backend, which a PgBouncer transaction-pooled
 // connection cannot guarantee (data-layer.md §2.7).
-const localSchemaSyncDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localSchemaSyncDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func openTestPool(t *testing.T, lockAcquireTimeout time.Duration) (*sql.DB, *SchemaSyncPool) {
 	t.Helper()

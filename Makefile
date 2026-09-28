@@ -3,7 +3,7 @@
 # Dev engine environment (README.md "Running the engine"). Override any of
 # these on the command line, e.g. `make engine GOERP_ADMIN_TOKEN=other`.
 GOERP_DB_PRIMARY_DSN ?= postgres://engine_user:dev@localhost:6432/goerp_dev
-GOERP_DB_SCHEMA_SYNC_DSN ?= postgres://schema_sync_user:dev@localhost:55432/goerp_dev
+GOERP_DB_SCHEMA_SYNC_DSN ?= postgres://schema_sync_user:dev@localhost:15432/goerp_dev
 GOERP_ADMIN_TOKEN ?= dev-admin-token
 GOERP_STORAGE_LOCAL_DIR ?= $(CURDIR)/storage
 GOERP_MODULE_DIR ?= $(CURDIR)/.dev/modules

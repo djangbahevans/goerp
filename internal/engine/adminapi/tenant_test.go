@@ -21,7 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func newTestTenantMux(t *testing.T) *http.ServeMux {
 	t.Helper()
