@@ -2,6 +2,9 @@ package engine
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"database/sql"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -13,6 +16,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -439,12 +443,23 @@ func (f *dispatchNotifFixture) withRealTenant(t *testing.T) {
 	if err := billing.NewStore(f.e.primaryDB).Bootstrap(ctx); err != nil {
 		t.Fatalf("billing Bootstrap() error: %v", err)
 	}
-	tt, err := tenantStore.CreateTenant(ctx, f.slug, "Notification Preferences Test")
+	f.tenantID = createNotifTestTenant(t, f.e.primaryDB, f.slug)
+}
+
+// createNotifTestTenant creates a system.tenants row for slug, reachable
+// at the Host "<slug>.notif.test", and returns its id.
+func createNotifTestTenant(t *testing.T, conn *sql.DB, slug string) string {
+	t.Helper()
+	tenantStore := tenant.NewStore(conn)
+	tt, err := tenantStore.CreateTenant(t.Context(), slug, "Notification Test")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = f.e.primaryDB.Exec("DELETE FROM system.tenants WHERE id = $1", tt.ID) })
-	f.tenantID = tt.ID
+	t.Cleanup(func() { _, _ = conn.Exec("DELETE FROM system.tenants WHERE id = $1", tt.ID) })
+	if _, err := tenantStore.CreateDomain(t.Context(), tt.ID, slug+".notif.test", tenant.DomainSubdomain, true); err != nil {
+		t.Fatalf("CreateDomain() error: %v", err)
+	}
+	return tt.ID
 }
 
 func (f *dispatchNotifFixture) setModule(t *testing.T, name, providerCategory string, enabled bool) {
@@ -615,5 +630,177 @@ func TestDispatchNotifPreferencesUpdateRoute_RejectsABadBody(t *testing.T) {
 		if w := f.patchPreferences(t, body); w.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", body, w.Code)
 		}
+	}
+}
+
+// unsubscribeFixture is dispatchNotifFixture's caller in a real tenant at
+// "<slug>.notif.test", with a Host resolver and an unsubscribe codec.
+type unsubscribeFixture struct {
+	*dispatchNotifFixture
+	host string
+}
+
+func newUnsubscribeFixture(t *testing.T) *unsubscribeFixture {
+	t.Helper()
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+	cacheClient := newRateLimitTestCacheClient(t)
+	f.e.tenantResolver = tenantresolve.NewResolver(tenant.NewStore(f.e.primaryDB), cacheClient, billing.NewStore(f.e.primaryDB))
+	f.e.notificationStore.WithCache(cacheClient)
+
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	f.e.unsubscribeCodec = notifications.NewUnsubscribeCodec(&signingkey.SigningKeySet{
+		Active: signingkey.SigningKey{KID: "test", Algorithm: "RS256", Private: priv, Public: &priv.PublicKey},
+	})
+	return &unsubscribeFixture{dispatchNotifFixture: f, host: f.slug + ".notif.test"}
+}
+
+func (f *unsubscribeFixture) token(t *testing.T, tenantID, notificationType string) string {
+	t.Helper()
+	tok, err := f.e.unsubscribeCodec.Issue(f.callerID, tenantID, notificationType)
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+	return tok
+}
+
+// openLink calls GET /_notif/unsubscribe on host with no session, as
+// following the emailed link (or a mail scanner) does.
+func (f *unsubscribeFixture) openLink(host, token string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodGet, "/_notif/unsubscribe?token="+url.QueryEscape(token), nil)
+	r.Host = host
+	w := httptest.NewRecorder()
+	f.e.dispatchNotifUnsubscribeRoute(w, r)
+	return w
+}
+
+// unsubscribe POSTs the confirmation page's form on host.
+func (f *unsubscribeFixture) unsubscribe(host, token string) *httptest.ResponseRecorder {
+	return f.postUnsubscribe(host, "/_notif/unsubscribe", url.Values{"token": {token}}.Encode())
+}
+
+func (f *unsubscribeFixture) postUnsubscribe(host, target, form string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Host = host
+	w := httptest.NewRecorder()
+	f.e.dispatchNotifUnsubscribeConfirmRoute(w, r)
+	return w
+}
+
+// preferenceRows counts the caller's tenant's stored preference rows.
+func (f *unsubscribeFixture) preferenceRows(t *testing.T) int {
+	t.Helper()
+	var n int
+	err := f.e.primaryDB.QueryRowContext(t.Context(), fmt.Sprintf(
+		`SELECT count(*) FROM %s.notification_preferences`, tenantschema.Name(f.slug))).Scan(&n)
+	if err != nil {
+		t.Fatalf("count preference rows: %v", err)
+	}
+	return n
+}
+
+func TestDispatchNotifUnsubscribeRoute_OpeningTheLinkOnlyAsksForConfirmation(t *testing.T) {
+	f := newUnsubscribeFixture(t)
+	tok := f.token(t, f.tenantID, "sales.order_confirmed")
+
+	w := f.openLink(f.host, tok)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `<form method="post" action="/_notif/unsubscribe">`) ||
+		!strings.Contains(body, `name="token" value="`+tok+`"`) {
+		t.Errorf("GET page = %s, want a form POSTing the token", body)
+	}
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("Content-Security-Policy = %q, want framing forbidden", csp)
+	}
+	if n := f.preferenceRows(t); n != 0 {
+		t.Errorf("GET wrote %d preference rows, want none", n)
+	}
+}
+
+func TestDispatchNotifUnsubscribeRoute_AcceptsAOneClickPost(t *testing.T) {
+	f := newUnsubscribeFixture(t)
+	tok := f.token(t, f.tenantID, "sales.order_confirmed")
+
+	// RFC 8058: the token stays in the link's query; the body only says
+	// it's a one-click unsubscribe.
+	w := f.postUnsubscribe(f.host, "/_notif/unsubscribe?token="+url.QueryEscape(tok), "List-Unsubscribe=One-Click")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if c, ok := f.getPreferences(t).Types["sales.order_confirmed"]; !ok || c.Email {
+		t.Errorf("sales.order_confirmed = %+v (listed %v), want email off", c, ok)
+	}
+}
+
+func TestDispatchNotifUnsubscribeRoute_TurnsOffEmailForOneType(t *testing.T) {
+	f := newUnsubscribeFixture(t)
+	if w := f.patchPreferences(t, `{"types": {"hr.leave_approved": {"email": false}}}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d; body: %s", w.Code, w.Body.String())
+	}
+	before := f.getPreferences(t)
+	if _, ok := before.Types["hr.leave_approved"]; !ok {
+		t.Fatalf("types = %+v, want hr.leave_approved listed", before.Types)
+	}
+
+	tok := f.token(t, f.tenantID, "sales.order_confirmed")
+	for range 2 {
+		w := f.unsubscribe(f.host, tok)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /_notif/unsubscribe status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Errorf("Content-Type = %q, want an HTML page", ct)
+		}
+	}
+
+	got := f.getPreferences(t)
+	if got.Global != before.Global {
+		t.Errorf("global = %+v, want unchanged %+v", got.Global, before.Global)
+	}
+	want := map[string]notifications.Channels{
+		"sales.order_confirmed": {Email: false, SMS: before.Global.SMS, Push: before.Global.Push},
+		"hr.leave_approved":     before.Types["hr.leave_approved"],
+	}
+	if fmt.Sprint(got.Types) != fmt.Sprint(want) {
+		t.Errorf("types = %+v, want %+v", got.Types, want)
+	}
+}
+
+func TestDispatchNotifUnsubscribeRoute_ChangesNothingForABadToken(t *testing.T) {
+	f := newUnsubscribeFixture(t)
+
+	otherSlug := f.slug + "other"
+	otherTenantID := createNotifTestTenant(t, f.e.primaryDB, otherSlug)
+	good := f.token(t, f.tenantID, "sales.order_confirmed")
+	parts := strings.Split(good, ".")
+
+	for name, c := range map[string]struct {
+		host, token string
+		status      int
+	}{
+		"missing token":            {f.host, "", http.StatusBadRequest},
+		"tampered token":           {f.host, parts[0] + "." + parts[1] + "." + strings.Repeat("A", len(parts[2])), http.StatusBadRequest},
+		"another tenant's token":   {f.host, f.token(t, otherTenantID, "sales.order_confirmed"), http.StatusBadRequest},
+		"on another tenant's host": {otherSlug + ".notif.test", good, http.StatusBadRequest},
+		"on an unknown host":       {"nobody.notif.test", good, http.StatusNotFound},
+	} {
+		if w := f.openLink(c.host, c.token); w.Code != c.status || strings.Contains(w.Body.String(), "<form") {
+			t.Errorf("%s: GET status = %d, want %d and no form; body: %s", name, w.Code, c.status, w.Body.String())
+		}
+		if w := f.unsubscribe(c.host, c.token); w.Code != c.status {
+			t.Errorf("%s: POST status = %d, want %d; body: %s", name, w.Code, c.status, w.Body.String())
+		}
+	}
+
+	// A token that had wrongly passed would have written a row here.
+	if n := f.preferenceRows(t); n != 0 {
+		t.Errorf("%d preference rows, want none", n)
 	}
 }

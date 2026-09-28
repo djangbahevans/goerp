@@ -174,6 +174,8 @@ type Engine struct {
 	recordActivityStore *recordactivity.Store
 	// notificationStore backs /_notif/*.
 	notificationStore *notifications.Store
+	// unsubscribeCodec verifies /_notif/unsubscribe's tokens.
+	unsubscribeCodec *notifications.UnsubscribeCodec
 	// scheduledActivityStore backs /_meta/scheduled-activities.
 	scheduledActivityStore *scheduledactivity.Store
 	// roleStore resolves another user's tenant roles when a route reads a
@@ -1017,6 +1019,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		savedFiltersStore:      savedFiltersStore,
 		recordActivityStore:    recordActivityStore,
 		notificationStore:      notificationStore,
+		unsubscribeCodec:       notifications.NewUnsubscribeCodec(signingKeySet),
 		scheduledActivityStore: scheduledActivityStore,
 		roleStore:              roleStore,
 		filesStore:             filesStore,
@@ -1084,6 +1087,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["POST /_notif/device-token"] = http.HandlerFunc(e.dispatchNotifDeviceTokenRoute)
 	builtinRoutes["GET /_notif/preferences"] = http.HandlerFunc(e.dispatchNotifPreferencesRoute)
 	builtinRoutes["PATCH /_notif/preferences"] = http.HandlerFunc(e.dispatchNotifPreferencesUpdateRoute)
+	builtinRoutes["GET /_notif/unsubscribe"] = http.HandlerFunc(e.dispatchNotifUnsubscribeRoute)
+	builtinRoutes["POST /_notif/unsubscribe"] = http.HandlerFunc(e.dispatchNotifUnsubscribeConfirmRoute)
 
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.
