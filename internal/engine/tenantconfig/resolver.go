@@ -3,6 +3,7 @@ package tenantconfig
 import (
 	"context"
 	"database/sql"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"sync"
@@ -95,9 +96,12 @@ func (r *Resolver) Get(ctx context.Context, tenantID, key string) (value string,
 
 // manifestDefault returns moduleName's declared TenantConfigSeeds[subKey],
 // rendered as plain text the same way resolveConfigQuery's own `#>> '{}'`
-// unwraps a JSONB scalar — nil (SQL NULL, the query's own lowest-priority
-// COALESCE fallback) when the module isn't loaded, failed to load, or
-// declares no such key.
+// unwraps a JSONB scalar: a string value comes back bare (unquoted), and
+// everything else (number, bool, array, object) comes back as its JSON
+// text form — `#>>'{}'` only strips the surrounding quotes of a string
+// scalar, an array or object's brackets/braces stay put. Returns nil (SQL
+// NULL, the query's own lowest-priority COALESCE fallback) when the
+// module isn't loaded, failed to load, or declares no such key.
 func (r *Resolver) manifestDefault(moduleName, subKey string) any {
 	snap := r.registry.Snapshot()
 	if snap == nil {
@@ -111,7 +115,14 @@ func (r *Resolver) manifestDefault(moduleName, subKey string) any {
 	if !ok {
 		return nil
 	}
-	return fmt.Sprint(v)
+	if s, ok := v.(string); ok {
+		return s
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return string(data)
 }
 
 // cachedGet evicts cacheKey on a stale hit rather than merely ignoring

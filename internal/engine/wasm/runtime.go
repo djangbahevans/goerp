@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/files"
@@ -37,6 +38,67 @@ type Runtime struct {
 	schemaSyncDB          atomic.Pointer[sql.DB]
 	ormBulkMaxRows        int
 	ormStatementTimeout   time.Duration
+
+	// configResolver/configStore back host.config.get/set
+	// (host_config.go). Declared as interfaces here, not a direct
+	// *tenantconfig.Resolver/*tenantconfig.Store dependency, because
+	// tenantconfig imports registry, which imports this wasm package
+	// itself (registry/snapshot.go) — the same import-cycle constraint
+	// register.go's own doc comment describes for host.db/host.orm/etc,
+	// just from the tenantconfig side instead. Set via SetTenantConfig,
+	// same "not a New parameter" reasoning as SetReplicaDB below:
+	// tenantconfig.NewResolver needs the *registry.ModuleRegistry engine.go
+	// only constructs after this Runtime already exists.
+	configResolver ConfigResolver
+	configStore    ConfigStore
+
+	// rowCryptKeys encrypts/decrypts an "encrypted": true config_schema
+	// entry's value (host-abi-reference.md §14). Set via SetRowCryptKeys.
+	// rowcrypt itself doesn't import registry/wasm, so unlike
+	// configResolver/configStore above this could have been a New
+	// parameter — it stays a setter purely to keep every tenant-config-
+	// related dependency wired at the same call site in engine.go.
+	rowCryptKeys *rowcrypt.RowKeySet
+}
+
+// ConfigResolver resolves a fully namespaced "{module}.{key}" config
+// value for a tenant through multitenancy-internals.md §7's three-tier
+// resolution chain (operator override, tenant-admin module_config,
+// manifest default) — satisfied by *tenantconfig.Resolver.
+type ConfigResolver interface {
+	Get(ctx context.Context, tenantID, key string) (value string, found bool, err error)
+
+	// Invalidate drops tenantID/key's cached entry, if any. host.config.set
+	// (host_config.go) calls this on this instance's own resolver right
+	// after a successful write — Store.Set's own pg_notify only reaches
+	// this instance's Resolver asynchronously through a Listener, too
+	// slow to guarantee this ticket's own AC (goerp#1283): "A set followed
+	// immediately by a get (same or a different in-process instance)
+	// observes the new value — no stale read from the generation-counted
+	// cache." A different replica's Resolver still depends on its own
+	// Listener receiving that notification, same as any other write
+	// through this package.
+	Invalidate(tenantID, key string)
+}
+
+// ConfigStore writes a module's own declared config key into its tenant's
+// module_config table — satisfied by *tenantconfig.Store.
+type ConfigStore interface {
+	SetModuleConfig(ctx context.Context, tenantID, tenantSchema, moduleName, key string, value []byte, valueType string, encrypted bool, updatedBy string) error
+}
+
+// SetTenantConfig wires host.config.get/set's storage layer. Unset,
+// host.config.get/set return abi.unavailable.
+func (r *Runtime) SetTenantConfig(resolver ConfigResolver, store ConfigStore) {
+	r.configResolver = resolver
+	r.configStore = store
+}
+
+// SetRowCryptKeys wires host.config.get/set's encryption layer for an
+// "encrypted": true config_schema entry. Unset, a get/set touching such a
+// key returns abi.unavailable rather than silently skipping encryption.
+func (r *Runtime) SetRowCryptKeys(keys *rowcrypt.RowKeySet) {
+	r.rowCryptKeys = keys
 }
 
 // SetSyncEventDispatcher wires the resolver host.event.emit's inline
@@ -178,6 +240,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := registerHostSearch(ctx, rt, r, db); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.search: %w", err)
+	}
+
+	if err := registerHostConfig(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.config: %w", err)
 	}
 
 	stdout := log.With().Str("component", "wasm").Str("stream", "stdout").Logger()

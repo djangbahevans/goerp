@@ -9,14 +9,14 @@ import (
 
 // hostNamespaces is the complete set of host.* namespaces from
 // host-abi-reference.md §4, minus "host.db", "host.storage", "host.orm",
-// "host.event", "host.authz", and "host.search" — their real functions
-// are registered separately by
-// wasm.registerHostDB/registerHostStorage/registerHostORM/registerHostEvent/registerHostAuthz/registerHostSearch
+// "host.event", "host.authz", "host.search", and "host.config" — their
+// real functions are registered separately by
+// wasm.registerHostDB/registerHostStorage/registerHostORM/registerHostEvent/registerHostAuthz/registerHostSearch/registerHostConfig
 // (which need direct access to *sql.DB/storage.Backend/Runtime/a River
-// client/*Runtime, wasm-package types abi cannot import without an
-// import cycle). Every other namespace here still has no functions
-// attached — the individual host.*.* functions are each their own
-// ticket and attach to these builders separately.
+// client/*Runtime/the tenant-config resolver+store, wasm-package types
+// abi cannot import without an import cycle). Every other namespace here
+// still has no functions attached — the individual host.*.* functions are
+// each their own ticket and attach to these builders separately.
 var hostNamespaces = []string{
 	"host.cache",
 	"host.http",
@@ -24,7 +24,6 @@ var hostNamespaces = []string{
 	"host.connector",
 	"host.notify",
 	"host.webhooks",
-	"host.config",
 	"host.workflow",
 	"host.analytics",
 	"host.crypto",

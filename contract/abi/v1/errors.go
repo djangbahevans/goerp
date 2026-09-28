@@ -151,3 +151,18 @@ const (
 const (
 	ErrCodeIndexNotFound = "search.index_not_found"
 )
+
+// host.config error codes (host-abi-reference.md §14 "host.config.get"/
+// "host.config.set").
+const (
+	// ErrCodeConfigKeyNotDeclared rejects a get/set whose key isn't
+	// "{caller's own module}.{a key in that module's own config_schema}"
+	// — a module can neither read nor write another module's config, nor
+	// a key it never declared.
+	ErrCodeConfigKeyNotDeclared = "config.key_not_declared"
+	// ErrCodeConfigEncryptionError covers both directions of an
+	// "encrypted": true key's AES-256-GCM round trip (rowcrypt.RowKeySet
+	// Encrypt/Decrypt) — a malformed or unrecognized-key-id ciphertext on
+	// get, or an encrypt failure on set.
+	ErrCodeConfigEncryptionError = "config.encryption_error"
+)

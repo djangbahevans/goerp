@@ -11,6 +11,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
 const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
@@ -285,5 +286,62 @@ func TestGetPrefix_ReturnsOnlyMatchingKeys(t *testing.T) {
 	want := map[string]string{PasswordPolicyPrefix + "min_length": "14", PasswordPolicyVersionKey: "1"}
 	if len(got) != len(want) || got[PasswordPolicyPrefix+"min_length"] != "14" || got[PasswordPolicyVersionKey] != "1" {
 		t.Errorf("GetPrefix() = %v, want %v", got, want)
+	}
+}
+
+func TestSetModuleConfig_UpsertsAndIsVisibleThroughResolver(t *testing.T) {
+	env := openTestEnv(t)
+	tt := env.createTenant(t)
+	env.createModuleConfigSchema(t, tt.Slug)
+	ctx := t.Context()
+
+	reg := testRegistryWithSeed("contacts", "default_country_code", "US")
+	resolver := NewResolver(env.store, env.tenantStore, reg)
+	tenantSchema := tenantschema.Name(tt.Slug)
+
+	if err := env.store.SetModuleConfig(ctx, tt.ID, tenantSchema, "contacts", "default_country_code", []byte(`"FR"`), "string", false, ""); err != nil {
+		t.Fatalf("SetModuleConfig() error: %v", err)
+	}
+	// Store.Set's own pg_notify only reaches this Resolver asynchronously
+	// through a running Listener — this test has none, so it invalidates
+	// directly, the same way host.config.set itself does synchronously
+	// right after a successful write (internal/engine/wasm/host_config.go)
+	// to satisfy this ticket's own no-stale-read AC (goerp#1283).
+	resolver.Invalidate(tt.ID, "contacts.default_country_code")
+
+	// A read through the Resolver immediately after Set must observe the
+	// new value, never a stale cache entry — this ticket's own AC
+	// (goerp#1283): "A set followed immediately by a get ... observes the
+	// new value — no stale read from the generation-counted cache."
+	value, ok, err := resolver.Get(ctx, tt.ID, "contacts.default_country_code")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if !ok || value != "FR" {
+		t.Fatalf("Get() = %q, %v, want %q, true", value, ok, "FR")
+	}
+
+	// A second Set (the ON CONFLICT DO UPDATE path) upserts rather than
+	// erroring, and the Resolver again observes the change with no stale
+	// read.
+	if err := env.store.SetModuleConfig(ctx, tt.ID, tenantSchema, "contacts", "default_country_code", []byte(`"DE"`), "string", false, ""); err != nil {
+		t.Fatalf("SetModuleConfig() upsert error: %v", err)
+	}
+	resolver.Invalidate(tt.ID, "contacts.default_country_code")
+	value, ok, err = resolver.Get(ctx, tt.ID, "contacts.default_country_code")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if !ok || value != "DE" {
+		t.Fatalf("Get() after upsert = %q, %v, want %q, true", value, ok, "DE")
+	}
+
+	var encrypted bool
+	row := env.conn.QueryRowContext(ctx, fmt.Sprintf("SELECT encrypted FROM %s.module_config WHERE module_name = $1 AND key = $2", tenantSchema), "contacts", "default_country_code")
+	if err := row.Scan(&encrypted); err != nil {
+		t.Fatalf("scan encrypted column: %v", err)
+	}
+	if encrypted {
+		t.Errorf("encrypted = true, want false")
 	}
 }

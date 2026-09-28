@@ -416,6 +416,9 @@ func TestStorageSearchAuthzEventWireFields(t *testing.T) {
 			[]string{"name", "version", "payload", "delay_ms", "idempotency_key", "sync"}},
 		{"EventEmitTxOutput", EventEmitTxOutput{}, []string{"event_id"}},
 		{"EventEmitOutput", EventEmitOutput{}, []string{"event_id"}},
+		{"ConfigGetInput", ConfigGetInput{}, []string{"key"}},
+		{"ConfigGetOutput", ConfigGetOutput{Value: "v", Found: true}, []string{"value", "found"}},
+		{"ConfigSetInput", ConfigSetInput{}, []string{"key", "value"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

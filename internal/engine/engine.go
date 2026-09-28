@@ -511,6 +511,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	// rather than a nil-pointer panic.
 	runtime.SetReplicaDB(replicaPool)
 	runtime.SetSchemaSyncDB(schemaPool)
+	// rowKeySet was already loaded above (needed before totp.Service could
+	// decrypt an enrolled TOTP secret) — host.config's own encrypted
+	// config_schema entries (host-abi-reference.md §14) reuse the same
+	// key set rather than a second AES-256-GCM implementation.
+	runtime.SetRowCryptKeys(rowKeySet)
 
 	// Telemetry setup happens here, immediately before closeOnFailure is
 	// first defined, rather than at the top of New() — SetupTracing opens
@@ -587,13 +592,18 @@ func New(cfg *config.Config) (*Engine, error) {
 	}
 
 	// tenantConfigResolver isn't stored as an Engine field, matching
-	// tenantConfigStore's own convention above — nothing outside this
-	// Listener consumes it yet (host.config's own ABI, resolving it
-	// against a real request, is unbuilt). tenantConfigListener is kept,
-	// since Start/Shutdown (below, and *Engine methods, so outside New's
-	// own scope) need it to start and stop the LISTEN goroutine.
+	// tenantConfigStore's own convention above — runtime.SetTenantConfig
+	// below is its only consumer besides Listener. tenantConfigListener is
+	// kept, since Start/Shutdown (below, and *Engine methods, so outside
+	// New's own scope) need it to start and stop the LISTEN goroutine.
 	tenantConfigResolver := tenantconfig.NewResolver(tenantConfigStore, tenantStore, moduleRegistry)
 	tenantConfigListener := tenantconfig.NewListener(primaryPool, tenantConfigResolver)
+	// Wires host.config.get/set (host_config.go) to the same resolver and
+	// store the Listener above keeps cache-fresh across replicas —
+	// moduleRegistry (Resolver's own manifest-default fallback) only
+	// exists from this point on in New, so this can't happen any earlier,
+	// same reasoning as SetSyncEventDispatcher just above.
+	runtime.SetTenantConfig(tenantConfigResolver, tenantConfigStore)
 
 	// Rebuilds a tenant's rolePermissionMap entries on this replica when a
 	// tenant admin changes roles on any replica (auth/adminroles).
@@ -1270,6 +1280,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 		SearchIndexRegistry: searchIndexRegistry,
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
+		ConfigSchema:        mod.Manifest.ConfigSchema,
 		ORMBulkMaxRows:      e.wasmRuntime.ORMBulkMaxRows(),
 		ORMStatementTimeout: e.wasmRuntime.ORMStatementTimeout(),
 	})
