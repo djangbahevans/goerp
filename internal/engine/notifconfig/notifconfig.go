@@ -225,7 +225,7 @@ func (s *Service) Load(ctx context.Context, tenantID string) (*Config, error) {
 }
 
 func (s *Service) get(ctx context.Context, tenantID string, entry manifest.ConfigEntry) (any, error) {
-	raw, found, err := s.resolver.Get(ctx, tenantID, Namespace+"."+entry.Key)
+	raw, encrypted, found, err := s.resolver.Get(ctx, tenantID, Namespace+"."+entry.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (s *Service) get(ctx context.Context, tenantID string, entry manifest.Confi
 		return entry.Default, nil
 	}
 
-	if entry.Encrypted {
+	if encrypted {
 		if raw, err = s.decrypt(raw); err != nil {
 			return nil, fmt.Errorf("decrypt %s: %w", entry.Key, err)
 		}
@@ -257,16 +257,11 @@ func (s *Service) get(ctx context.Context, tenantID string, entry manifest.Confi
 	}
 }
 
-// decrypt falls back to raw on malformed ciphertext, since an operator
-// override tier value is never encrypted (same rule as host.config.get).
 func (s *Service) decrypt(raw string) (string, error) {
 	if s.rowKeys == nil {
 		return "", ErrNoRowKeys
 	}
 	plaintext, err := s.rowKeys.Decrypt([]byte(raw))
-	if errors.Is(err, rowcrypt.ErrMalformedCiphertext) {
-		return raw, nil
-	}
 	if err != nil {
 		return "", err
 	}

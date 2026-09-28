@@ -53,9 +53,10 @@ type Runtime struct {
 }
 
 // ConfigResolver resolves a fully namespaced "{module}.{key}" config
-// value for a tenant — satisfied by *tenantconfig.Resolver.
+// value for a tenant — satisfied by *tenantconfig.Resolver. encrypted
+// reports whether value is ciphertext from an encrypted module_config row.
 type ConfigResolver interface {
-	Get(ctx context.Context, tenantID, key string) (value string, found bool, err error)
+	Get(ctx context.Context, tenantID, key string) (value string, encrypted, found bool, err error)
 
 	// Invalidate drops tenantID/key's cached entry. host.config.set calls
 	// this synchronously after a write, since Store.Set's own NOTIFY only
