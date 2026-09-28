@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -637,7 +638,7 @@ func TestDispatchActivityFollowersListRoute_OldestFirst(t *testing.T) {
 		}
 	}
 
-	if got, want := followerUserIDs(f.followers(t, f.callerID)), []string{f.otherCallerID, f.callerID}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := followerUserIDs(f.followers(t, f.callerID)), []string{f.otherCallerID, f.callerID}; !slices.Equal(got, want) {
 		t.Errorf("followers = %v, want %v", got, want)
 	}
 }
