@@ -1,4 +1,12 @@
-import { AlertDialog, Button, EscapeLayer, Icon, IconButton, Skeleton } from "@goerp/sdk/components";
+import {
+  AlertDialog,
+  Button,
+  EscapeLayer,
+  Icon,
+  IconButton,
+  Skeleton,
+  useFloatingPanelLayer,
+} from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
 import type { SavedFilter } from "@goerp/sdk/react";
 import { useSavedFilters } from "@goerp/sdk/react";
@@ -66,6 +74,7 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const layerClassName = useFloatingPanelLayer(triggerRef);
 
   // Re-measured on isLoading/filters.length too, not just open — the panel's
   // height changes once the fetch resolves or a row is deleted.
@@ -165,7 +174,7 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
                   ? { position: "fixed", top: position.top, left: position.left }
                   : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
               }
-              className="z-(--z-dropdown) min-w-40 max-w-70 rounded-structural border border-border bg-surface py-1 shadow-md"
+              className={`${layerClassName} min-w-40 max-w-70 rounded-structural border border-border bg-surface py-1 shadow-md`}
             >
               <h2
                 id={headingId}

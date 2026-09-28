@@ -3,9 +3,10 @@ import { Markdown } from "@tiptap/markdown";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import type { ReactNode } from "react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "./button.js";
 import { fieldInputClassName } from "./field-input-styles.js";
+import { useFloatingPanelLayer } from "./floating-panel.js";
 import { IconButton } from "./icon-button.js";
 
 export interface MarkdownFieldProps {
@@ -78,6 +79,8 @@ export function MarkdownField({
   const linkInputId = `${id}-link-url`;
   const labelledById = ariaLabelledBy ?? (label !== undefined ? id : undefined);
   const [linkPopoverOpen, setLinkPopoverOpen] = useState(false);
+  const linkTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const linkPopoverLayerClassName = useFloatingPanelLayer(linkTriggerRef);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkUrlInvalid, setLinkUrlInvalid] = useState(false);
 
@@ -289,7 +292,7 @@ export function MarkdownField({
           />
           <ToolbarDivider />
           <PopoverPrimitive.Root open={linkPopoverOpen && !disabled} onOpenChange={setLinkPopoverOpen}>
-            <PopoverPrimitive.Trigger asChild>
+            <PopoverPrimitive.Trigger ref={linkTriggerRef} asChild>
               <IconButton
                 icon="link"
                 label="Link"
@@ -302,7 +305,7 @@ export function MarkdownField({
             <PopoverPrimitive.Portal>
               <PopoverPrimitive.Content
                 sideOffset={4}
-                className="z-(--z-dropdown) flex flex-col gap-1 rounded-structural border border-border bg-surface p-2 shadow-md"
+                className={`${linkPopoverLayerClassName} flex flex-col gap-1 rounded-structural border border-border bg-surface p-2 shadow-md`}
               >
                 <div className="flex items-center gap-1">
                   <label htmlFor={linkInputId} className="sr-only">

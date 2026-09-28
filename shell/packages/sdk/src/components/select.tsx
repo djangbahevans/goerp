@@ -9,6 +9,7 @@ import { fieldInputClassName } from "./field-input-styles.js";
 import { useFieldControl } from "./field-wrapper.js";
 import {
   optionElementId,
+  useFloatingPanelLayer,
   useFloatingPanelPosition,
   useOutsideClickClose,
   useScrollHighlightedOptionIntoView,
@@ -48,7 +49,7 @@ const TRIGGER_CLASSES = `flex w-full items-center justify-between gap-2 text-lef
 // manages its own scrolling/available-height internally, so this stays
 // unscrolled/uncapped here — only SelectMultiple's hand-rolled panel below
 // gets an explicit max-height, since Radix isn't managing that one.
-const PANEL_CLASSES = "z-(--z-dropdown) w-max rounded-structural border border-border bg-surface p-2 shadow-md";
+const PANEL_CLASSES = "w-max rounded-structural border border-border bg-surface p-2 shadow-md";
 const MULTI_PANEL_CLASSES = `${PANEL_CLASSES} max-h-80 overflow-y-auto`;
 const ROW_CLASSES =
   "flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-control px-2 py-1 text-sm text-text outline-none";
@@ -108,10 +109,13 @@ function SelectSingle({
 }: Omit<SelectProps, "multiple">) {
   const selected = options.find((option) => option.value === value);
   const clearable = selected !== undefined && value !== emptyValue;
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const layerClassName = useFloatingPanelLayer(triggerRef);
   return (
     <div className="relative">
       <SelectPrimitive.Root value={typeof value === "string" ? value : ""} onValueChange={onChange} disabled={disabled}>
         <SelectPrimitive.Trigger
+          ref={triggerRef}
           id={id}
           style={clearable ? TRIGGER_PADDING_WITH_VALUE : TRIGGER_PADDING_DEFAULT}
           className={TRIGGER_CLASSES}
@@ -124,7 +128,7 @@ function SelectSingle({
           </SelectPrimitive.Icon>
         </SelectPrimitive.Trigger>
         <SelectPrimitive.Portal>
-          <SelectPrimitive.Content position="popper" sideOffset={4} className={PANEL_CLASSES}>
+          <SelectPrimitive.Content position="popper" sideOffset={4} className={`${layerClassName} ${PANEL_CLASSES}`}>
             <SelectPrimitive.Viewport>
               {options.map((option) => (
                 <SelectPrimitive.Item
@@ -199,6 +203,7 @@ function SelectMultiple({
   }
 
   const position = useFloatingPanelPosition(isOpen, triggerRef, panelRef, false);
+  const layerClassName = useFloatingPanelLayer(triggerRef);
   useOutsideClickClose(isOpen, [triggerRef, panelRef], close);
   useScrollHighlightedOptionIntoView(isOpen, listboxId, activeIndex, options.length);
 
@@ -290,7 +295,7 @@ function SelectMultiple({
                   ? { position: "fixed", top: position.top, left: position.left }
                   : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
               }
-              className={MULTI_PANEL_CLASSES}
+              className={`${layerClassName} ${MULTI_PANEL_CLASSES}`}
             >
               {options.map((option, index) => (
                 // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG listbox-button pattern — options are never independently focusable, only virtually "focused" via aria-activedescendant on the trigger button.

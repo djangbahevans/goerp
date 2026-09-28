@@ -54,6 +54,29 @@ export function useFloatingPanelPosition(
   return position;
 }
 
+const MODAL_SELECTOR = '[role="dialog"], [role="alertdialog"]';
+
+// The z-index class for a panel portaled onto document.body. --z-dropdown
+// sits below --z-modal, so a panel whose trigger lives inside a modal
+// (AlertDialog, BulkActionPanel, SideSheet — every one a Radix dialog)
+// would open behind that modal's own overlay. Such a panel takes --z-modal
+// instead: the modal's own layer, painted above it because the panel's
+// portal is appended to document.body after the modal's.
+export function useFloatingPanelLayer(anchorRef: RefObject<HTMLElement | null>): string {
+  const [inModal, setInModal] = useState(false);
+
+  // A trigger never moves in or out of a modal over its lifetime, so this
+  // is read once on mount, before the first paint. If a future trigger is
+  // reparented into a dialog without remounting, it'll stay stuck on
+  // --z-dropdown — give it a `key` change instead so it mounts fresh.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: anchorRef is a stable ref, not a reactive value.
+  useLayoutEffect(() => {
+    setInModal(anchorRef.current?.closest(MODAL_SELECTOR) != null);
+  }, []);
+
+  return inModal ? "z-(--z-modal)" : "z-(--z-dropdown)";
+}
+
 // Closes on a click outside every ref in `boundaryRefs` — mousedown (not
 // click) so it commits first; a portaled panel isn't a DOM descendant of
 // its trigger, so blur/relatedTarget can't be used instead.

@@ -2,7 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import type { MutableRefObject, ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { useFloatingPanelPosition } from "./floating-panel.js";
+import { useFloatingPanelLayer, useFloatingPanelPosition } from "./floating-panel.js";
 
 afterEach(cleanup);
 
@@ -94,5 +94,31 @@ describe("useFloatingPanelPosition", () => {
     // Below: 370 + 4 + 100 = 474 > 400 - 8 = 392, doesn't fit — flips above:
     // max(8, 350 - 4 - 100) = 246.
     expect(renderAndCapture(true)?.top).toBe(246);
+  });
+});
+
+function LayerHarness(): ReactNode {
+  const anchorRef = useRef<HTMLButtonElement | null>(null);
+  const layerClassName = useFloatingPanelLayer(anchorRef);
+  return (
+    <button ref={anchorRef} type="button" data-layer={layerClassName}>
+      Open
+    </button>
+  );
+}
+
+describe("useFloatingPanelLayer", () => {
+  it("stays on --z-dropdown for a trigger on the page", () => {
+    const { getByRole } = render(<LayerHarness />);
+    expect(getByRole("button").dataset.layer).toBe("z-(--z-dropdown)");
+  });
+
+  it.each(["dialog", "alertdialog"])("takes --z-modal for a trigger inside a %s", (role) => {
+    const { getByRole } = render(
+      <div role={role}>
+        <LayerHarness />
+      </div>,
+    );
+    expect(getByRole("button").dataset.layer).toBe("z-(--z-modal)");
   });
 });
