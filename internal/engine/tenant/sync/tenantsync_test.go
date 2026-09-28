@@ -19,7 +19,7 @@ import (
 // localPostgresDSN points directly at the compose.dev.yml Postgres
 // instance, same convention as internal/engine/schema's and
 // internal/engine/tenant's tests.
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`

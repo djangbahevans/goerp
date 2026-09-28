@@ -18,7 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // fixture is a Service plus one real user with an enrolled MFA factor and
 // an active session (and its FK-satisfying tenant row) — mirrors

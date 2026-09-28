@@ -24,7 +24,7 @@ import (
 	"go.temporal.io/sdk/worker"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 const localRedisAddr = "localhost:6379"
 const localMeilisearchURL = "http://localhost:7700"
 const localMeilisearchKey = "2f14b775804ecaf5dc4084d32aa034a7"

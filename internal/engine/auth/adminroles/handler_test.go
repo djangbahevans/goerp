@@ -39,7 +39,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 const (
 	permRead   = "rolestest:widget:read"

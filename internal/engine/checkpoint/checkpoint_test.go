@@ -10,7 +10,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()

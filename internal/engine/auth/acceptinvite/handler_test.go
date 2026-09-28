@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+	localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 	newPassword      = "a brand new long passphrase"
 )
 

@@ -16,7 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // fakeUserResolver hands out a fresh fake id per unique email, without
 // needing a real system.users table — most tests here exercise

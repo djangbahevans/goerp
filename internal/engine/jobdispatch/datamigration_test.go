@@ -34,7 +34,7 @@ func testJob(args jobqueue.WASMJobArgs) *river.Job[jobqueue.WASMJobArgs] {
 // internal/engine/schema's own session_test.go and
 // internal/engine/eventdelivery's own worker_test.go respectively.
 const (
-	localSchemaSyncDSN = "postgres://goerp:dev@localhost:55432/goerp"
+	localSchemaSyncDSN = "postgres://goerp:dev@localhost:15432/goerp"
 	jobsTestDSN        = "postgres://goerp:dev@localhost:6432/goerp"
 )
 

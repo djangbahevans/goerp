@@ -17,7 +17,7 @@ import (
 
 // baseTestConfig returns a Config pointing at the compose.dev.yml dev stack
 // (README.md's local development section: PgBouncer on 6432, direct
-// Postgres on 55432 for schema sync, Redis on 6379, credentials
+// Postgres on 15432 for schema sync, Redis on 6379, credentials
 // goerp/dev/goerp). Individual tests override the one field they're
 // exercising.
 func baseTestConfig(t *testing.T) *config.Config {
@@ -38,7 +38,7 @@ func baseTestConfig(t *testing.T) *config.Config {
 		ShutdownTimeout:          time.Second,
 		ShutdownDrainDelay:       0,
 		DBPrimaryDSN:             "postgres://goerp:dev@localhost:6432/goerp",
-		DBSchemaSyncDSN:          "postgres://goerp:dev@localhost:55432/goerp",
+		DBSchemaSyncDSN:          "postgres://goerp:dev@localhost:15432/goerp",
 		RedisAddr:                "localhost:6379",
 		RedisMaxRetries:          1,
 		SecretsBackend:           "env",

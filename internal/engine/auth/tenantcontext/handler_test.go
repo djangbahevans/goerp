@@ -19,7 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 type fixture struct {
 	handler     *Handler

@@ -16,7 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // fixture is a Revoker plus one real session row (and its FK-satisfying
 // tenant/user rows), cleaned up by exact row id.

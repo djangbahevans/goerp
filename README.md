@@ -51,7 +51,7 @@ docker compose -f compose.dev.yml down -v
 
 | Service | Host address | Purpose | Credentials / notes |
 | --- | --- | --- | --- |
-| Postgres | `localhost:55432` | Primary database | Superuser `goerp`, password `dev`. Database `goerp_dev` is the running engine's; database `goerp` is the test suite's. Roles `engine_user` and `schema_sync_user`, password `dev`. Bound to a static non-default port to avoid clashing with a locally installed Postgres. |
+| Postgres | `localhost:15432` | Primary database | Superuser `goerp`, password `dev`. Database `goerp_dev` is the running engine's; database `goerp` is the test suite's. Roles `engine_user` and `schema_sync_user`, password `dev`. Bound to a static non-default port to avoid clashing with a locally installed Postgres, and below 49152 so it stays outside the dynamic range Windows (WinNAT/Hyper-V) reserves blocks of under WSL2 and Docker Desktop. |
 | PgBouncer | `localhost:6432` | Connection pooler in front of Postgres (transaction pooling) | Serves `engine_user` on `goerp_dev`, the engine's primary pool, and `goerp` on `goerp` for the test suite. |
 | Redis | `localhost:6379` | Cache / pub-sub | No auth |
 | RedisInsight | [http://localhost:8001](http://localhost:8001) | Redis GUI | Connect it to `redis:6379` inside the compose network |
@@ -73,7 +73,7 @@ With the stack up, the only environment variables actually required are `GOERP_D
 
 ```bash
 export GOERP_DB_PRIMARY_DSN="postgres://engine_user:dev@localhost:6432/goerp_dev"
-export GOERP_DB_SCHEMA_SYNC_DSN="postgres://schema_sync_user:dev@localhost:55432/goerp_dev"
+export GOERP_DB_SCHEMA_SYNC_DSN="postgres://schema_sync_user:dev@localhost:15432/goerp_dev"
 export GOERP_ADMIN_TOKEN="dev-admin-token"
 export GOERP_STORAGE_LOCAL_DIR="./storage"
 

@@ -19,7 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // memoryBackend is an in-process secrets.Backend that supports Set,
 // standing in for a real vault/aws_secretsmanager deployment — mirrors

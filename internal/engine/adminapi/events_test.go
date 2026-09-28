@@ -56,7 +56,7 @@ func newInsertOnlyEventsJobClient(t *testing.T) *river.Client[pgx.Tx] {
 	return client
 }
 
-const eventsLocalPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const eventsLocalPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // newTestEventsDeps builds a real EventsDeps against the dev stack: a
 // primary pool, a real active tenant with a fixture event_log table, a

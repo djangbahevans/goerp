@@ -36,7 +36,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 const testPassword = "correct horse battery staple"
 
 // fixture is one login's worth of real, FK-satisfying rows: a tenant, an

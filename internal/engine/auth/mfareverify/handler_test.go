@@ -37,7 +37,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // fixture is one authenticated session's worth of real, FK-satisfying
 // rows — a tenant with a resolvable subdomain, an active user with an

@@ -36,7 +36,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // spyAudit records Emit calls instead of writing to a real audit log —
 // same shape as roleassign's own spyAudit.

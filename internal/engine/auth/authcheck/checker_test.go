@@ -34,7 +34,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 const localRedisAddr = "localhost:6379"
 
 const testPermission = "widgets.read"

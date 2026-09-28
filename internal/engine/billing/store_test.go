@@ -13,7 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // testEnv wires a billing.Store plus a tenant.Store against the real
 // compose.dev.yml Postgres — tenant_subscriptions/tenant_entitlement_overrides

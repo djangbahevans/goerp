@@ -15,7 +15,7 @@ import (
 // localPostgresDSN points directly at the compose.dev.yml Postgres
 // instance (bypassing PgBouncer, same convention as
 // internal/engine/schema's tests — see that package's localSchemaSyncDSN).
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // openTestStore returns a Store plus its underlying connection, so callers
 // that create tenants can clean up exactly the rows they created (see

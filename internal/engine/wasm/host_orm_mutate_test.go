@@ -638,7 +638,7 @@ func openTestRLSWriterORM(t *testing.T, adminConn *sql.DB, schemaName, table str
 		}
 	}
 
-	conn, err := db.New("postgres://" + roleName + ":dev@localhost:55432/goerp")
+	conn, err := db.New("postgres://" + roleName + ":dev@localhost:15432/goerp")
 	if err != nil {
 		t.Fatalf("connect as test writer role: %v", err)
 	}

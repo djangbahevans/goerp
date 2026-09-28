@@ -13,7 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // testEnv wires an mfa.Store plus user.Store against the real
 // compose.dev.yml Postgres — user_mfa FK-references users, so tests need

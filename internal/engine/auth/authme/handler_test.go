@@ -35,7 +35,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-const localPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // fixture mirrors mfareverify's own fixture shape, trimmed to what a
 // plain "is there a valid session" check needs, plus the MFA stores the

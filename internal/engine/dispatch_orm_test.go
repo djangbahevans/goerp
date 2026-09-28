@@ -35,7 +35,7 @@ import (
 
 // dispatchORMTestPostgresDSN points directly at the compose.dev.yml
 // Postgres instance, same convention internal/engine/wasm's own tests use.
-const dispatchORMTestPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const dispatchORMTestPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 func openDispatchORMTestDB(t *testing.T) *sql.DB {
 	t.Helper()

@@ -17,7 +17,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-const inviteExpiryTestDSN = "postgres://goerp:dev@localhost:55432/goerp"
+const inviteExpiryTestDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 // fakeUserResolver hands out a fresh fake id per unique email, mirroring
 // invite package's own test fixture — this package can't import invite's

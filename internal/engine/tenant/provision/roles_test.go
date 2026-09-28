@@ -25,8 +25,8 @@ import (
 
 // The roles docker/postgres-initdb creates (data-layer.md §2.2).
 const (
-	schemaSyncRoleDSN = "postgres://schema_sync_user:dev@localhost:55432/goerp"
-	engineRoleDSN     = "postgres://engine_user:dev@localhost:55432/goerp"
+	schemaSyncRoleDSN = "postgres://schema_sync_user:dev@localhost:15432/goerp"
+	engineRoleDSN     = "postgres://engine_user:dev@localhost:15432/goerp"
 )
 
 // openRolePools skips when the dev Postgres isn't running at all, and fails
