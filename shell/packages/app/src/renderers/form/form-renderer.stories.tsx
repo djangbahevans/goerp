@@ -45,6 +45,10 @@ function fakeRegistry(): Pick<ResourceRegistry, "resolve"> {
       createMethod: "POST",
       updateMethod: "PUT",
       deleteMethod: null,
+      createPermissions: null,
+      updatePermissions: null,
+      deletePermissions: null,
+      previewPath: null,
     }),
   };
 }

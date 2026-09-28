@@ -18,6 +18,14 @@ export interface ResourceRegistryEntry {
   createMethod: string;
   updateMethod: string;
   deleteMethod: string | null;
+  // The permissions each write route declares, all of which a caller
+  // must hold (editable-sub-list.md). null when the route doesn't exist.
+  createPermissions: string[] | null;
+  updatePermissions: string[] | null;
+  deletePermissions: string[] | null;
+  // POST /{plural}/preview (go-sdk-reference.md §22 "Preview action"),
+  // null when the model doesn't enable it.
+  previewPath: string | null;
 }
 
 // buildResourceRegistry scans every module's routes for entries with
@@ -40,7 +48,7 @@ export function buildResourceRegistry(schema: MetaSchema): Map<string, ResourceR
     }
 
     for (const [modelName, crudRoutes] of byModel) {
-      const { list, get, create, update, delete: del, pivot } = crudRoutes;
+      const { list, get, create, update, delete: del, preview, pivot } = crudRoutes;
       if (!list && !get) continue; // no usable routes — skip
 
       registry.set(modelName, {
@@ -56,6 +64,10 @@ export function buildResourceRegistry(schema: MetaSchema): Map<string, ResourceR
         createMethod: create?.method ?? "POST",
         updateMethod: update?.method ?? "PUT",
         deleteMethod: del?.method ?? null,
+        createPermissions: create?.permissions ?? null,
+        updatePermissions: update?.permissions ?? null,
+        deletePermissions: del?.permissions ?? null,
+        previewPath: preview?.path ?? null,
       });
     }
   }

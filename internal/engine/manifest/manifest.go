@@ -262,6 +262,9 @@ type ListColumn struct {
 	DisplayField       string       `json:"display_field,omitempty"`
 	ResourceLabelField string       `json:"resource_label_field,omitempty"`
 	CurrencyField      string       `json:"currency_field,omitempty"`
+	// Readonly keeps the column out of an inline_edit sub_list's row
+	// editor (manifest-spec.md §9.1) — e.g. a computed subtotal.
+	Readonly bool `json:"readonly,omitzero"`
 	// Permission gates a view-extension "columns" definition's own
 	// contributed column (view-system.md §10 "Adding columns to another
 	// module's list") — the field it contributes is namespaced

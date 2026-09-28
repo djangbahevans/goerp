@@ -4,6 +4,7 @@ import { schemaRegistry } from "../schema/index.js";
 export interface ActionRoute {
   method: string;
   path: string;
+  permissions: string[];
 }
 
 // Shared with use-action.ts's onError, which needs the same
@@ -36,7 +37,7 @@ export class ActionRegistry {
     if (!route) {
       throw new Error(`useAction: no action named "${actionName}" in module "${moduleName}"`);
     }
-    return { method: route.method, path: route.path };
+    return { method: route.method, path: route.path, permissions: route.permissions };
   }
 }
 

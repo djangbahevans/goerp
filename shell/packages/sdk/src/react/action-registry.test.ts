@@ -44,6 +44,7 @@ describe("ActionRegistry", () => {
     await expect(registry.resolve("sales.confirm")).resolves.toEqual({
       method: "POST",
       path: "/orders/{id}/confirm",
+      permissions: [],
     });
   });
 
@@ -82,6 +83,7 @@ describe("ActionRegistry", () => {
     await expect(registry.resolve("sales.confirm")).resolves.toEqual({
       method: "POST",
       path: "/orders/{id}/confirm",
+      permissions: [],
     });
     expect(client.get).toHaveBeenCalledTimes(2);
   });

@@ -24,6 +24,10 @@ const entry: ResourceRegistryEntry = {
   createMethod: "POST",
   updateMethod: "PUT",
   deleteMethod: "DELETE",
+  createPermissions: null,
+  updatePermissions: null,
+  deletePermissions: null,
+  previewPath: null,
 };
 
 function fakeRegistry(overrides: Partial<ResourceRegistryEntry> = {}): Pick<ResourceRegistry, "resolve"> {

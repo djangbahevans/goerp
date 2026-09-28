@@ -36,6 +36,10 @@ const { resolveViewMock, resolveResourceMock, forTargetMock, useInfiniteListMock
       createMethod: "POST",
       updateMethod: "PUT",
       deleteMethod: "DELETE",
+      createPermissions: null,
+      updatePermissions: null,
+      deletePermissions: null,
+      previewPath: null,
     })),
     // No extensions target the current view by default — form-tabs.test.tsx's
     // own view-extension-registry.test.ts tests the join/ordering logic

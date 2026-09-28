@@ -23,13 +23,18 @@ const permissions = createPermissionContextValue({
   modulesEnabled: new Set(),
 });
 
-const { resolveModelMock, useInfiniteListMock } = vi.hoisted(() => ({
+const { resolveModelMock, resolveResourceMock, useInfiniteListMock } = vi.hoisted(() => ({
   resolveModelMock: vi.fn(),
+  resolveResourceMock: vi.fn(),
   useInfiniteListMock: vi.fn(),
 }));
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/schema")>();
-  return { ...actual, modelRegistry: { resolve: resolveModelMock } };
+  return {
+    ...actual,
+    modelRegistry: { resolve: resolveModelMock },
+    resourceRegistry: { resolve: resolveResourceMock },
+  };
 });
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
@@ -39,6 +44,7 @@ vi.mock("@goerp/sdk/react", async (importOriginal) => {
 afterEach(() => {
   cleanup();
   resolveModelMock.mockReset();
+  resolveResourceMock.mockReset();
   useInfiniteListMock.mockReset();
 });
 
@@ -172,6 +178,54 @@ describe("FormSectionRenderer", () => {
     });
     await renderSection({ type: "sub_list", field: "not_a_field", columns: [] });
     expect(await screen.findByRole("alert")).toBeTruthy();
+  });
+
+  it('"sub_list" with inline_edit: renders editable rows, even for inline_key rows', async () => {
+    resolveModelMock.mockImplementation(async (name: string) =>
+      name === "contacts.contact"
+        ? {
+            name,
+            label: "Contact",
+            label_plural: "Contacts",
+            shareable: false,
+            enabled_ops: [],
+            fields: [
+              { name: "address_ids", type: "one2many", related_model: "contacts.address", inverse_field: "contact_id" },
+            ],
+          }
+        : { name, label: "Address", label_plural: "Addresses", shareable: false, enabled_ops: [], fields: [] },
+    );
+    resolveResourceMock.mockResolvedValue({
+      module: "contacts",
+      resource: "contacts.address",
+      listPath: "/contacts/addresses",
+      getPath: "/contacts/addresses/{id}",
+      createPath: "/contacts/addresses",
+      updatePath: "/contacts/addresses/{id}",
+      deletePath: null,
+      pivotPath: null,
+      listMethod: "GET",
+      createMethod: "POST",
+      updateMethod: "PATCH",
+      deleteMethod: null,
+      createPermissions: [],
+      updatePermissions: [],
+      deletePermissions: null,
+      previewPath: null,
+    });
+    await renderSection(
+      {
+        type: "sub_list",
+        field: "address_ids",
+        inline_key: "addresses",
+        inline_edit: true,
+        columns: [{ field: "city", label: "City", primary: true }],
+      },
+      { addresses: [{ id: "a1", city: "Accra" }] },
+    );
+    expect(await screen.findByRole("button", { name: "Edit Accra" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add Address" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Delete/ })).toBeNull();
   });
 
   it('"custom": falls back to a message naming the unresolvable component', async () => {

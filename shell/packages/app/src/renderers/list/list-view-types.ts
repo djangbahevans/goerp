@@ -66,6 +66,9 @@ export const ListColumnSchema = v.looseObject({
   display_field: opt(v.string()),
   resource_label_field: opt(v.string()),
   currency_field: opt(v.string()),
+  // Only read by an inline_edit sub_list (editable-sub-list.md): the
+  // column is never editable, e.g. a computed subtotal.
+  readonly: opt(v.boolean()),
   component: opt(v.string()),
   component_props: opt(v.record(v.string(), v.unknown())),
   // Set only on a view-extension "columns" definition's own column
