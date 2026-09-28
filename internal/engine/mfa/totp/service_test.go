@@ -351,12 +351,23 @@ func TestVerify_RejectsWrongCode(t *testing.T) {
 	}
 }
 
+// waitOutWindowBoundary sleeps past the next TOTP period boundary when it
+// is less than margin away, so a code generated now is still judged
+// against the same window by a Verify call made shortly after.
+func waitOutWindowBoundary(margin time.Duration) {
+	window := period * time.Second
+	if untilNext := window - time.Duration(time.Now().UnixNano())%window; untilNext < margin {
+		time.Sleep(untilNext)
+	}
+}
+
 func TestVerify_AcceptsPreviousWindowWithinSkew(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
 	_, secret := seedFactor(t, env, userID)
 
+	waitOutWindowBoundary(5 * time.Second)
 	previousWindow := time.Now().Add(-period * time.Second)
 	code, err := pquernatotp.GenerateCode(secret, previousWindow)
 	if err != nil {
