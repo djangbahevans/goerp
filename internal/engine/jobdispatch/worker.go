@@ -30,16 +30,25 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+// handle_job's reserved status codes (manifest-spec.md §26), the same
+// ones handle_event returns. Any value other than these is treated as a
+// retryable failure.
+const (
+	statusSuccess   = 0
+	statusPermanent = 2
+)
+
 // Worker processes jobqueue.WASMJobArgs jobs: resolve the target module,
-// borrow an instance from its InstancePool, call InvokeHandleJob, and
-// translate the result onto River's own retry semantics — a non-zero
-// status or a Go/trap-level error both return a non-nil error from Work,
-// so River retries per the job's own MaxAttempts (set at insert time,
-// jobqueue.WASMJobArgs.InsertOpts) and marks it discarded once exhausted,
-// never silently drops it. Doesn't itself build any richer per-job-type
-// backoff/snooze policy — that's event-subscriber delivery's own
-// retry_policy work (goerp#129), generalized to ordinary jobs by
-// implementation-backlog.md #165, not this package's scope.
+// borrow an instance from its InstancePool, call InvokeHandleJob with the
+// job's abiv1.JobEnvelope, and translate the result onto River's own retry
+// semantics — status 2 (permanent) cancels the job via river.JobCancel;
+// any other non-zero status or a Go/trap-level error returns a plain
+// error from Work, so River retries per the job's own MaxAttempts (set at
+// insert time, jobqueue.WASMJobArgs.InsertOpts) and marks it discarded
+// once exhausted, never silently drops it. Doesn't itself build any
+// richer per-job-type backoff/snooze policy — that's event-subscriber
+// delivery's own retry_policy work (goerp#129), generalized to ordinary
+// jobs by implementation-backlog.md #165, not this package's scope.
 //
 // SchemaSyncPool is only consulted for an IsDataMigration job (goerp#114):
 // advancing the tenant's data_migration_version watermark on success, and
@@ -114,11 +123,14 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 		return fmt.Errorf("resolve tenant %s: %w", args.TenantID, err)
 	}
 
-	status, _, err := invokeHandleJob(ctx, w.Runtime, snap, mod, args, t.Slug, false)
+	status, _, err := invokeHandleJob(ctx, w.Runtime, snap, mod, args, t.Slug, newJobEnvelope(job), false)
 	if err != nil {
 		return err
 	}
-	if status != 0 {
+	if status == statusPermanent {
+		return river.JobCancel(fmt.Errorf("handle_job for %s/%s returned a permanent failure", args.ModuleName, args.JobType))
+	}
+	if status != statusSuccess {
 		return fmt.Errorf("handle_job for %s/%s returned status %d", args.ModuleName, args.JobType, status)
 	}
 
@@ -175,11 +187,16 @@ func readyModule(snap *registry.RegistrySnapshot, moduleName string) (*module.Lo
 }
 
 // invokeHandleJob borrows an instance of mod and runs its handle_job
-// export on args.Payload under a ModuleContext for args' tenant — the step
+// export on env under a ModuleContext for args' tenant — the step
 // Worker.Work and SyncDispatcher.DispatchJobSync share. With captureResult,
 // the value the handler passes to host.jobs.set_result is returned as
 // result; without it set_result is a no-op.
-func invokeHandleJob(ctx context.Context, rt *wasm.Runtime, snap *registry.RegistrySnapshot, mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, captureResult bool) (status int32, result []byte, err error) {
+func invokeHandleJob(ctx context.Context, rt *wasm.Runtime, snap *registry.RegistrySnapshot, mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, env abiv1.JobEnvelope, captureResult bool) (status int32, result []byte, err error) {
+	envelope, err := msgpack.Marshal(env)
+	if err != nil {
+		return 0, nil, fmt.Errorf("marshal job envelope: %w", err)
+	}
+
 	inst, err := mod.Pool.Borrow(ctx)
 	if err != nil {
 		return 0, nil, fmt.Errorf("borrow instance for %s: %w: %w", args.ModuleName, wasm.ErrSyncJobTargetUnavailable, err)
@@ -198,11 +215,27 @@ func invokeHandleJob(ctx context.Context, rt *wasm.Runtime, snap *registry.Regis
 		inst.SetModuleContext(nil)
 	}()
 
-	status, err = inst.InvokeHandleJob(ctx, args.Payload)
+	status, err = inst.InvokeHandleJob(ctx, envelope)
 	if err != nil {
 		return 0, nil, fmt.Errorf("invoke handle_job for %s/%s: %w", args.ModuleName, args.JobType, err)
 	}
 	return status, moduleCtx.JobResult(), nil
+}
+
+// newJobEnvelope builds the abi.JobEnvelope handle_job receives for job.
+func newJobEnvelope(job *river.Job[jobqueue.WASMJobArgs]) abiv1.JobEnvelope {
+	args := job.Args
+	return abiv1.JobEnvelope{
+		JobID:           jobqueue.EncodeJobID(job.ID),
+		JobType:         args.JobType,
+		TenantID:        args.TenantID,
+		ModuleName:      args.ModuleName,
+		TraceID:         args.TraceID,
+		Attempt:         job.Attempt,
+		MaxAttempts:     job.MaxAttempts,
+		IsDataMigration: args.IsDataMigration,
+		Payload:         args.Payload,
+	}
 }
 
 // newModuleContext builds the wasm.ModuleContext a handle_job invocation
@@ -286,8 +319,8 @@ func EnqueueApplicableDataMigration(ctx context.Context, riverClient *river.Clie
 		return fmt.Errorf("migration %q: %w", next.Handler, err)
 	}
 
-	// The wire payload engine.DispatchDataMigration decodes on the
-	// module's own side.
+	// The JobEnvelope payload engine.DispatchJob decodes for a data
+	// migration job on the module's own side.
 	payload, err := msgpack.Marshal(abiv1.MigrationJobPayload{
 		Handler:     next.Handler,
 		TenantID:    tenantID,
@@ -309,8 +342,9 @@ func EnqueueApplicableDataMigration(ctx context.Context, riverClient *river.Clie
 	}, &river.InsertOpts{
 		Queue: jobqueue.QueueDefault,
 		// ByState covers redelivery after this exact migration already
-		// ran to completion or was discarded — a handler's version range
-		// only ever matches once a tenant's watermark has passed it, so a
+		// ran to completion, was discarded, or was cancelled by a
+		// handler's jobs.PermanentError — a handler's version range only
+		// ever matches once a tenant's watermark has passed it, so a
 		// repeat call here (e.g. two triggers racing to start the same
 		// tenant's chain) must never re-run it. Matches
 		// eventdelivery.Worker's identical use of

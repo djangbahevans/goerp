@@ -26,7 +26,7 @@ type MigrationJobPayload = abi.MigrationJobPayload
 // own stdout — already wired via WASI to the engine's structured logger
 // (internal/engine/wasm/runtime.go's WithStdout, tagged component=wasm)
 // — rather than a dedicated host call; see MigrationContext's own
-// construction site (engine.DispatchDataMigration) for how a wire
+// construction site (engine.DispatchJob) for how a wire
 // MigrationJobPayload becomes one of these.
 type MigrationContext struct {
 	TenantID    string
@@ -41,7 +41,7 @@ type MigrationContext struct {
 }
 
 // NewMigrationContext builds a MigrationContext from a decoded
-// MigrationJobPayload — exported so engine.DispatchDataMigration
+// MigrationJobPayload — exported so engine.DispatchJob
 // (a different package) can construct one without this package exposing
 // its otherwise-unexported handler field through a struct literal.
 func NewMigrationContext(payload MigrationJobPayload) *MigrationContext {

@@ -1,7 +1,26 @@
 package abi
 
-// MigrationJobPayload is the wire shape a data migration job carries into a
-// module's handle_job export.
+// JobEnvelope is the wire shape a handle_job invocation carries, the job
+// counterpart to EventEnvelope. The engine wraps every job in one, so the
+// module's single handle_job export has the job type it needs to route to
+// the handler registered for it. JobID has the same "job_"-prefixed form
+// host.jobs.enqueue returns. A data migration job sets
+// IsDataMigration, and its Payload is then a msgpack MigrationJobPayload
+// whose Handler equals JobType.
+type JobEnvelope struct {
+	JobID           string `msgpack:"job_id"`
+	JobType         string `msgpack:"job_type"`
+	TenantID        string `msgpack:"tenant_id"`
+	ModuleName      string `msgpack:"module_name"`
+	TraceID         string `msgpack:"trace_id,omitempty"`
+	Attempt         int    `msgpack:"attempt"`
+	MaxAttempts     int    `msgpack:"max_attempts"`
+	IsDataMigration bool   `msgpack:"is_data_migration,omitempty"`
+	Payload         []byte `msgpack:"payload"`
+}
+
+// MigrationJobPayload is the payload of a data migration job's
+// JobEnvelope.
 type MigrationJobPayload struct {
 	Handler     string `msgpack:"handler"`
 	TenantID    string `msgpack:"tenant_id"`

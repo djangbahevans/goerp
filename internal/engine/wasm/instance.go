@@ -556,10 +556,10 @@ func (inst *ModuleInstance) InvokeHandleEvent(ctx context.Context, payload []byt
 
 // InvokeHandleJob is InvokeHandleEvent's counterpart for a module's
 // handle_job export (manifest-spec.md §26: `(job_ptr, job_len) → i32`,
-// goerp#110) — identical calling convention and the identical bare-status
-// contract: 0 means success, any other value means failure (retryable by
-// the caller per the dispatching job's own RetryPolicy). No response
-// payload, same as handle_event.
+// goerp#110) — identical calling convention and the identical reserved
+// status codes: 0 success, 2 permanent failure, any other value a
+// retryable failure. payload is a msgpack contract/abi/v1 JobEnvelope. No
+// response payload, same as handle_event.
 func (inst *ModuleInstance) InvokeHandleJob(ctx context.Context, payload []byte) (int32, error) {
 	if inst.allocate == nil {
 		return 0, fmt.Errorf("module missing allocate export")
