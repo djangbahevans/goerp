@@ -79,8 +79,8 @@ export function createRecordReadersQueryOptions(
   };
 }
 
-// No shared debounce hook exists in this codebase; RelationPicker inlines
-// the same idiom. null passes through at once, so disabling never waits.
+// null passes through at once, so disabling never waits and re-enabling
+// never fetches a stale pre-null query.
 function useDebouncedQuery(query: string | null): string | null {
   const [debounced, setDebounced] = useState(query);
   useEffect(() => {

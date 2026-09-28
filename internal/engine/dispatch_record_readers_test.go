@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -61,9 +62,7 @@ func (f *scheduledActivityFixture) newNamedUser(t *testing.T, localPart, name st
 func (f *scheduledActivityFixture) readers(t *testing.T, callerID, recordID string, params url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 	q := url.Values{"model": {activityTestModel}, "record_id": {recordID}}
-	for k, v := range params {
-		q[k] = v
-	}
+	maps.Copy(q, params)
 	return f.do(t, callerID, http.MethodGet, "/_meta/record-readers?"+q.Encode(), nil, f.e.dispatchRecordReadersRoute, nil)
 }
 
@@ -180,6 +179,8 @@ func TestDispatchRecordReaders_RejectsInvalidRequests(t *testing.T) {
 	f := newReadersFixture(t)
 	cases := map[string]url.Values{
 		"q too long":           {"q": {strings.Repeat("a", 101)}},
+		"q not UTF-8":          {"q": {"\xff"}},
+		"q with NUL":           {"q": {"a\x00b"}},
 		"limit zero":           {"limit": {"0"}},
 		"limit over max":       {"limit": {"21"}},
 		"limit not a number":   {"limit": {"x"}},

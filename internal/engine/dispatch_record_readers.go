@@ -3,15 +3,12 @@ package engine
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
 	"github.com/rs/zerolog/log"
 )
-
-// GET /_meta/record-readers (record-activity.md §6): the active tenant
-// members who can read a record, matching a search, for the mention
-// autocomplete and the scheduled-activity assignee picker.
 
 const (
 	recordReadersDefaultLimit = 8
@@ -30,8 +27,9 @@ type recordReaderResponse struct {
 	AvatarURL *string `json:"avatar_url"`
 }
 
-// dispatchRecordReadersRoute is GET /_meta/record-readers' handler —
-// ?model=&record_id=&q=&limit=&exclude_self=. Members matching q are
+// dispatchRecordReadersRoute is GET /_meta/record-readers' handler
+// (record-activity.md §6) — ?model=&record_id=&q=&limit=&exclude_self=,
+// the one user lookup behind every per-record picker. Members matching q are
 // filtered in SQL, then read-checked as themselves in name order until
 // limit readers or recordReadersMaxChecked matches.
 func (e *Engine) dispatchRecordReadersRoute(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +42,10 @@ func (e *Engine) dispatchRecordReadersRoute(w http.ResponseWriter, r *http.Reque
 
 	q := r.URL.Query()
 	search := q.Get("q")
+	if !utf8.ValidString(search) || strings.ContainsRune(search, 0) {
+		writeRouteError(w, http.StatusBadRequest, "invalid_request", "q must be valid UTF-8 text")
+		return
+	}
 	if utf8.RuneCountInString(search) > recordReadersMaxQuery {
 		writeRouteError(w, http.StatusBadRequest, "invalid_request", "q must be at most 100 characters")
 		return
