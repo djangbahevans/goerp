@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
 )
 
@@ -87,16 +89,10 @@ func (s *PolicyStore) MinLength(ctx context.Context, tenantID string) int {
 	return policy.MinLength
 }
 
-// TooWeakBody is the 422 auth.password_too_weak body: err's message, with
-// the minimum length p enforces as details.min_length.
-func TooWeakBody(err error, p Policy) map[string]any {
-	return map[string]any{
-		"error": map[string]any{
-			"code":    "auth.password_too_weak",
-			"message": err.Error(),
-			"details": map[string]any{"min_length": p.MinLength},
-		},
-	}
+// WriteTooWeak writes the 422 auth.password_too_weak error: err's
+// message, with the minimum length p enforces as details.min_length.
+func WriteTooWeak(ctx context.Context, w http.ResponseWriter, err error, p Policy) {
+	httperr.WriteDetails(ctx, w, http.StatusUnprocessableEntity, "auth.password_too_weak", err.Error(), map[string]any{"min_length": p.MinLength})
 }
 
 func parseInt(tenantID string, values map[string]string, key string, dst *int) {

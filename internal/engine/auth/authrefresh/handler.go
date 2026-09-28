@@ -18,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 )
 
 // maxBodyBytes bounds the request body before JSON parsing — no shared
@@ -44,16 +45,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeInvalidToken(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusUnauthorized, "invalid_refresh_token", "the refresh token is invalid, expired, or already used")
+func writeInvalidToken(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_refresh_token", "the refresh token is invalid, expired, or already used")
 }
 
 // extractRefreshToken returns the presented refresh token — the
@@ -116,7 +109,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	presentedToken := extractRefreshToken(r)
 	if presentedToken == "" {
-		writeInvalidToken(w)
+		writeInvalidToken(w, r)
 		return
 	}
 
@@ -125,7 +118,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if nonBrowser && r.ContentLength != 0 {
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		if err := json.UnmarshalRead(r.Body, &req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 			return
 		}
 	}
@@ -137,7 +130,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		IPAddress: loginsession.ClientIP(r),
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "refresh failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "refresh failed")
 		return
 	}
 	switch outcome {
@@ -150,7 +143,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Info().Str("device_id", deviceID).Msg("authrefresh: replayed refresh token from the same device — likely a duplicate submission, not revoked")
 	}
 	if outcome != session.RotateOK {
-		writeInvalidToken(w)
+		writeInvalidToken(w, r)
 		return
 	}
 

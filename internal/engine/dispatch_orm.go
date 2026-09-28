@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -29,36 +30,31 @@ const (
 )
 
 // dispatchORMRoute is the HTTP-side entry point for any EnableOps-derived
-// Table/Transient route (goerp#346) — resolves the model, runs the
-// matching host.orm pipeline function (goerp#367) with zero WASM instance
-// calls, and writes the response directly, mirroring writeRouteError's
-// existing shape rather than routing through EngineResponse/writeResponse
-// (that shared-with-the-WASM-path design is goerp#92's own scope, not
-// this ticket's — see the plan this shipped against). Not yet wired into
-// buildDispatchHandler's actual routing (also goerp#92's job); called
-// directly today, by tests and by whichever future caller replaces
-// dispatch.go's "dispatch_not_implemented" stub.
+// Table/Transient route — resolves the model and runs the matching
+// host.orm pipeline function with zero WASM instance calls.
+// buildDispatchHandler records its output and passes it through
+// writeResponse, the same as a WASM handler's.
 func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 	rr := routeResolutionFromContext(r.Context())
 	if rr == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
 		return
 	}
 	entry := rr.entry
 
 	_, mod, md, ok := rr.snap.ModelByName(entry.Manifest.Model)
 	if !ok {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
 		return
 	}
 
 	if entry.Manifest.StorageBackend == "virtual" {
-		writeRouteError(w, http.StatusNotImplemented, "not_implemented", "Virtual-backed EnableOps routes are not yet served (goerp#373)")
+		httperr.Write(r.Context(), w, http.StatusNotImplemented, "not_implemented", "Virtual-backed EnableOps routes are not yet served (goerp#373)")
 		return
 	}
 
 	if entry.Manifest.StorageBackend == "transient" && e.cacheClient == nil {
-		writeRouteError(w, http.StatusNotImplemented, "not_implemented", "Transient-backed routes need a cache client, which this engine was built without")
+		httperr.Write(r.Context(), w, http.StatusNotImplemented, "not_implemented", "Transient-backed routes need a cache client, which this engine was built without")
 		return
 	}
 
@@ -70,7 +66,7 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		// route (goerp#369) before dispatchORMRoute is ever reached. Guarded
 		// for direct-call testability, matching buildDispatchHandler's own
 		// rr==nil guard above.
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
 
@@ -107,7 +103,7 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 	case "workflow_transition":
 		e.dispatchORMWorkflowTransition(ctx, w, rr.pathParams, entry, modCtx, md, insertClient)
 	default:
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "unknown crud action: "+entry.Manifest.CrudAction)
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "unknown crud action: "+entry.Manifest.CrudAction)
 	}
 }
 
@@ -147,12 +143,12 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 
 	md, ok := resolveModelDecl(modCtx, entry.Manifest.Model)
 	if !ok {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
 		return
 	}
 	domainExpr, hostErr := compileListFilter(q, entry.Manifest.Model, md)
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
@@ -165,16 +161,16 @@ func (e *Engine) dispatchORMList(ctx context.Context, w http.ResponseWriter, r *
 		Cursor: q.Get("cursor"),
 	})
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
 	if wantsParquet(r) {
-		writeParquet(w, out.Records, out.NextCursor)
+		writeParquet(ctx, w, out.Records, out.NextCursor)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(ctx, w, http.StatusOK, map[string]any{
 		"data": ormRecordsToJSON(md, out.Records),
 		"meta": map[string]any{
 			"cursor":   out.NextCursor,
@@ -197,18 +193,18 @@ func (e *Engine) dispatchORMPivot(ctx context.Context, w http.ResponseWriter, r 
 
 	values, hostErr := parsePivotValues(q.Get("values"))
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
 	md, ok := resolveModelDecl(modCtx, entry.Manifest.Model)
 	if !ok {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "route names an unresolvable model")
 		return
 	}
 	domainExpr, hostErr := compileListFilter(q, entry.Manifest.Model, md)
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
@@ -220,11 +216,11 @@ func (e *Engine) dispatchORMPivot(ctx context.Context, w http.ResponseWriter, r 
 		Values:  values,
 	})
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"cells": out.Cells})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"cells": out.Cells})
 }
 
 // splitNonEmpty splits a comma-separated query param into its fields,
@@ -260,7 +256,7 @@ func parsePivotValues(raw string) ([]wasm.PivotValue, *abiv1.HostError) {
 func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *http.Request, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration) {
 	id := pathParams["id"]
 	if id == "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
 		return
 	}
 
@@ -269,15 +265,15 @@ func (e *Engine) dispatchORMGet(ctx context.Context, w http.ResponseWriter, r *h
 		IDs:   []string{id},
 	})
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 	if len(out.Records) == 0 {
-		writeRouteError(w, http.StatusNotFound, abiv1.ErrCodeNotFound, "record not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, abiv1.ErrCodeNotFound, "record not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ormRecordToJSON(md, out.Records[0]))
+	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, out.Records[0]))
 }
 
 // dispatchORMPreview serves the Preview CRUD op (goerp#372) —
@@ -297,11 +293,11 @@ func (e *Engine) dispatchORMPreview(ctx context.Context, w http.ResponseWriter, 
 		Record: record,
 	})
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ormRecordToJSON(md, out.Record))
+	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, out.Record))
 }
 
 func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r *http.Request, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
@@ -315,17 +311,17 @@ func (e *Engine) dispatchORMCreate(ctx context.Context, w http.ResponseWriter, r
 		Record: record,
 	})
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, ormRecordToJSON(md, out.Record))
+	writeJSON(ctx, w, http.StatusCreated, ormRecordToJSON(md, out.Record))
 }
 
 func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
 		return
 	}
 
@@ -346,11 +342,11 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 		ExpectedEtag: expectedEtag,
 	})
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ormRecordToJSON(md, out.Record))
+	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, out.Record))
 }
 
 // dispatchORMWorkflowTransition serves a .Workflow()-declared transition
@@ -380,7 +376,7 @@ func (e *Engine) dispatchORMUpdate(ctx context.Context, w http.ResponseWriter, r
 func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, md model.ModelDeclaration, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
 		return
 	}
 
@@ -411,18 +407,18 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 		IDs:   []string{id},
 	}, wasm.SkipFieldSecurity())
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 	if len(readOut.Records) == 0 {
-		writeRouteError(w, http.StatusNotFound, abiv1.ErrCodeNotFound, "record not found")
+		httperr.Write(ctx, w, http.StatusNotFound, abiv1.ErrCodeNotFound, "record not found")
 		return
 	}
 
 	record := readOut.Records[0]
 	current, _ := record[wf.Field].(string)
 	if current != wf.From {
-		writeRouteError(w, http.StatusConflict, abiv1.ErrCodeInvalidTransition,
+		httperr.Write(ctx, w, http.StatusConflict, abiv1.ErrCodeInvalidTransition,
 			entry.Manifest.Name+" requires "+wf.Field+" to be "+wf.From+", but it is "+current)
 		return
 	}
@@ -435,17 +431,17 @@ func (e *Engine) dispatchORMWorkflowTransition(ctx context.Context, w http.Respo
 		ExpectedEtag: new(etag),
 	})
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ormRecordToJSON(md, writeOut.Record))
+	writeJSON(ctx, w, http.StatusOK, ormRecordToJSON(md, writeOut.Record))
 }
 
 func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, pathParams map[string]string, entry *route.RouteEntry, modCtx *wasm.ModuleContext, insertClient *river.Client[*sql.Tx]) {
 	id := pathParams["id"]
 	if id == "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
 		return
 	}
 
@@ -454,7 +450,7 @@ func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, p
 		IDs:   []string{id},
 	})
 	if hostErr != nil {
-		writeHostError(w, hostErr)
+		writeHostError(ctx, w, hostErr)
 		return
 	}
 
@@ -469,10 +465,10 @@ func (e *Engine) dispatchORMDelete(ctx context.Context, w http.ResponseWriter, p
 func decodeJSONRecord(w http.ResponseWriter, r *http.Request) (record map[string]any, ok bool) {
 	if err := json.UnmarshalRead(r.Body, &record); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			writeRouteError(w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
+			httperr.Write(r.Context(), w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds limit")
 			return nil, false
 		}
-		writeRouteError(w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_body", "request body must be a JSON object")
 		return nil, false
 	}
 	return record, true
@@ -487,7 +483,7 @@ func decodeORMRecord(w http.ResponseWriter, r *http.Request, md model.ModelDecla
 	}
 	converted, err := ormRecordFromJSON(md, record)
 	if err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_body", err.Error())
 		return nil, false
 	}
 	return converted, true
@@ -501,11 +497,11 @@ func decodeORMRecord(w http.ResponseWriter, r *http.Request, md model.ModelDecla
 // v1's Encoder defaults, which json.Marshal doesn't apply on its own:
 // '<', '>', '&' escaped for safe HTML embedding, and U+2028/U+2029
 // escaped for safe JS embedding.
-func writeJSON(w http.ResponseWriter, status int, body any) {
+func writeJSON(ctx context.Context, w http.ResponseWriter, status int, body any) {
 	encoded, err := json.Marshal(body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
 		log.Error().Err(err).Msg("dispatchORMRoute: encode response")
-		writeRouteError(w, http.StatusInternalServerError, "internal", "failed to encode response")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal", "failed to encode response")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -516,11 +512,11 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 // writeHostError translates a host.orm *abiv1.HostError into the same
-// {"error": {"code","message"}} envelope writeRouteError already
+// {"error": {"code","message"}} envelope httperr.Write already
 // produces, so an ORM-dispatched failure looks identical, over HTTP, to
 // any other route error.
-func writeHostError(w http.ResponseWriter, hostErr *abiv1.HostError) {
-	writeRouteError(w, ormErrorStatus(hostErr.Code), hostErr.Code, hostErr.Message)
+func writeHostError(ctx context.Context, w http.ResponseWriter, hostErr *abiv1.HostError) {
+	httperr.Write(ctx, w, ormErrorStatus(hostErr.Code), hostErr.Code, hostErr.Message)
 }
 
 // ormErrorStatus maps a host.orm *abiv1.HostError's Code to an HTTP status.

@@ -35,6 +35,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -134,15 +135,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeInternalError(w http.ResponseWriter, err error, msg string) {
+func writeInternalError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 	log.Error().Err(err).Msg("adminroles: " + msg)
-	writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 }
 
 type caller struct {
@@ -156,29 +151,29 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) (caller, boo
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeInternalError(w, err, "tenant resolution failed")
+			writeInternalError(w, r, err, "tenant resolution failed")
 		}
 		return caller{}, false
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return caller{}, false
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return caller{}, false
 	}
 	if !slices.Contains(authCtx.RolesLive, adminRoleName) {
-		writeJSONError(w, http.StatusForbidden, "forbidden", "admin role required")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "forbidden", "admin role required")
 		return caller{}, false
 	}
 	return caller{tenant: tenantCtx, auth: authCtx}, true
@@ -187,7 +182,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) (caller, boo
 func roleID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := route.ParamsFromContext(r.Context())["id"]
 	if _, err := uuid.Parse(id); err != nil {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return "", false
 	}
 	return id, true
@@ -339,7 +334,7 @@ func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
 	}
 	roles, err := h.roles.ListRoles(r.Context(), c.tenant.Slug)
 	if err != nil {
-		writeInternalError(w, err, "list roles failed")
+		writeInternalError(w, r, err, "list roles failed")
 		return
 	}
 	data := make([]roleJSON, len(roles))
@@ -361,11 +356,11 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 	}
 	detail, err := h.roles.GetRole(r.Context(), c.tenant.Slug, id)
 	if errors.Is(err, role.ErrRoleNotFound) {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
 	if err != nil {
-		writeInternalError(w, err, "get role failed")
+		writeInternalError(w, r, err, "get role failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, toDetailJSON(detail))
@@ -392,21 +387,21 @@ func (h *Handler) ServeCreate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body createRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 	name, problem := validName(body.Name)
 	if problem != "" {
-		writeJSONError(w, http.StatusBadRequest, "invalid_name", problem)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_name", problem)
 		return
 	}
 	description, ok := validDescription(body.Description)
 	if !ok {
-		writeJSONError(w, http.StatusBadRequest, "invalid_description", "a description is at most 500 characters")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_description", "a description is at most 500 characters")
 		return
 	}
 	if unknown := h.unknownPermissions(c, body.Permissions, nil); len(unknown) > 0 {
-		writeJSONError(w, http.StatusBadRequest, "unknown_permission", "unknown permission: "+strings.Join(unknown, ", "))
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "unknown_permission", "unknown permission: "+strings.Join(unknown, ", "))
 		return
 	}
 
@@ -414,11 +409,11 @@ func (h *Handler) ServeCreate(w http.ResponseWriter, r *http.Request) {
 		return h.commit(ctx, tx, c, h.auditRow(r, c, "role.created", map[string]any{"role_id": id, "name": name, "permissions": body.Permissions}))
 	})
 	if errors.Is(err, role.ErrRoleNameTaken) {
-		writeJSONError(w, http.StatusConflict, "role_name_taken", "a role with that name already exists")
+		httperr.Write(r.Context(), w, http.StatusConflict, "role_name_taken", "a role with that name already exists")
 		return
 	}
 	if err != nil {
-		writeInternalError(w, err, "create role failed")
+		writeInternalError(w, r, err, "create role failed")
 		return
 	}
 	h.rebuild(ctx, c)
@@ -440,7 +435,7 @@ func (h *Handler) ServeUpdate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body updateRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 	change := role.Change{Permissions: body.Permissions}
@@ -448,7 +443,7 @@ func (h *Handler) ServeUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.Name != nil {
 		name, problem := validName(*body.Name)
 		if problem != "" {
-			writeJSONError(w, http.StatusBadRequest, "invalid_name", problem)
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_name", problem)
 			return
 		}
 		change.Name = &name
@@ -457,7 +452,7 @@ func (h *Handler) ServeUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.Description != nil {
 		description, ok := validDescription(body.Description)
 		if !ok {
-			writeJSONError(w, http.StatusBadRequest, "invalid_description", "a description is at most 500 characters")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_description", "a description is at most 500 characters")
 			return
 		}
 		change.Description = new(derefOr(description))
@@ -465,15 +460,15 @@ func (h *Handler) ServeUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.Permissions != nil {
 		current, err := h.roles.GetRole(ctx, c.tenant.Slug, id)
 		if errors.Is(err, role.ErrRoleNotFound) {
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 			return
 		}
 		if err != nil {
-			writeInternalError(w, err, "get role failed")
+			writeInternalError(w, r, err, "get role failed")
 			return
 		}
 		if unknown := h.unknownPermissions(c, *body.Permissions, current.Permissions); len(unknown) > 0 {
-			writeJSONError(w, http.StatusBadRequest, "unknown_permission", "unknown permission: "+strings.Join(unknown, ", "))
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "unknown_permission", "unknown permission: "+strings.Join(unknown, ", "))
 			return
 		}
 		metadata["permissions"] = *body.Permissions
@@ -484,23 +479,23 @@ func (h *Handler) ServeUpdate(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, role.ErrRoleNotFound):
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return
 	case errors.Is(err, role.ErrRoleImmutable):
-		writeJSONError(w, http.StatusForbidden, "role_immutable", "built-in roles can't be changed")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "role_immutable", "built-in roles can't be changed")
 		return
 	case errors.Is(err, role.ErrRoleNameTaken):
-		writeJSONError(w, http.StatusConflict, "role_name_taken", "a role with that name already exists")
+		httperr.Write(r.Context(), w, http.StatusConflict, "role_name_taken", "a role with that name already exists")
 		return
 	case err != nil:
-		writeInternalError(w, err, "update role failed")
+		writeInternalError(w, r, err, "update role failed")
 		return
 	}
 	h.rebuild(ctx, c)
 
 	detail, err := h.roles.GetRole(ctx, c.tenant.Slug, id)
 	if err != nil {
-		writeInternalError(w, err, "reload role failed")
+		writeInternalError(w, r, err, "reload role failed")
 		return
 	}
 	if change.Name != nil || change.Permissions != nil {
@@ -533,16 +528,16 @@ func (h *Handler) ServeDelete(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, role.ErrRoleNotFound):
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return
 	case errors.Is(err, role.ErrRoleImmutable):
-		writeJSONError(w, http.StatusForbidden, "role_immutable", "built-in roles can't be deleted")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "role_immutable", "built-in roles can't be deleted")
 		return
 	case errors.Is(err, role.ErrRoleInUse):
-		writeJSONError(w, http.StatusConflict, "role_in_use", "remove this role from every user before deleting it")
+		httperr.Write(r.Context(), w, http.StatusConflict, "role_in_use", "remove this role from every user before deleting it")
 		return
 	case err != nil:
-		writeInternalError(w, err, "delete role failed")
+		writeInternalError(w, r, err, "delete role failed")
 		return
 	}
 	h.rebuild(ctx, c)
@@ -552,7 +547,7 @@ func (h *Handler) ServeDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) respondWithRole(w http.ResponseWriter, r *http.Request, c caller, id string, status int) {
 	detail, err := h.roles.GetRole(r.Context(), c.tenant.Slug, id)
 	if err != nil {
-		writeInternalError(w, err, "reload role failed")
+		writeInternalError(w, r, err, "reload role failed")
 		return
 	}
 	writeJSON(w, status, toDetailJSON(detail))

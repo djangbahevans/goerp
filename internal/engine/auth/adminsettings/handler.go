@@ -37,6 +37,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -92,15 +93,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeInternalError(w http.ResponseWriter, err error, msg string) {
+func writeInternalError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 	log.Error().Err(err).Msg("adminsettings: " + msg)
-	writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 }
 
 // fieldError is a request value that fails validation, reported as a 422
@@ -116,10 +111,8 @@ func invalid(field, format string, args ...any) *fieldError {
 	return &fieldError{field: field, message: fmt.Sprintf(format, args...)}
 }
 
-func writeFieldError(w http.ResponseWriter, e *fieldError) {
-	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-		"error": map[string]any{"code": "invalid_setting", "message": e.message, "details": map[string]string{"field": e.field}},
-	})
+func writeFieldError(w http.ResponseWriter, r *http.Request, e *fieldError) {
+	httperr.WriteDetails(r.Context(), w, http.StatusUnprocessableEntity, "invalid_setting", e.message, map[string]string{"field": e.field})
 }
 
 type caller struct {
@@ -133,29 +126,29 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) (caller, boo
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeInternalError(w, err, "tenant resolution failed")
+			writeInternalError(w, r, err, "tenant resolution failed")
 		}
 		return caller{}, false
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return caller{}, false
 	}
 	authCtx, err := h.deps.Auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return caller{}, false
 	}
 	if !slices.Contains(authCtx.RolesLive, adminRoleName) {
-		writeJSONError(w, http.StatusForbidden, "forbidden", "admin role required")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "forbidden", "admin role required")
 		return caller{}, false
 	}
 	return caller{tenant: tenantCtx, auth: authCtx}, true
@@ -169,7 +162,7 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 	}
 	settings, err := h.load(r.Context(), c.tenant)
 	if err != nil {
-		writeInternalError(w, err, "load settings")
+		writeInternalError(w, r, err, "load settings")
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
@@ -188,22 +181,22 @@ func (h *Handler) ServePatch(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body patchRequest
 	if err := json.UnmarshalRead(r.Body, &body, json.RejectUnknownMembers(true)); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
 	current, err := h.load(ctx, c.tenant)
 	if err != nil {
-		writeInternalError(w, err, "load settings")
+		writeInternalError(w, r, err, "load settings")
 		return
 	}
 	plan, ferr, err := h.plan(ctx, c, loginsession.ClientIP(r), current, body)
 	if err != nil {
-		writeInternalError(w, err, "validate settings")
+		writeInternalError(w, r, err, "validate settings")
 		return
 	}
 	if ferr != nil {
-		writeFieldError(w, ferr)
+		writeFieldError(w, r, ferr)
 		return
 	}
 
@@ -215,13 +208,13 @@ func (h *Handler) ServePatch(w http.ResponseWriter, r *http.Request) {
 		h.recordAudit(r, c, "tenant.settings_updated", map[string]any{"fields": committed})
 	}
 	if err != nil {
-		writeInternalError(w, err, "save settings")
+		writeInternalError(w, r, err, "save settings")
 		return
 	}
 
 	updated, err := h.load(ctx, c.tenant)
 	if err != nil {
-		writeInternalError(w, err, "reload settings")
+		writeInternalError(w, r, err, "reload settings")
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)

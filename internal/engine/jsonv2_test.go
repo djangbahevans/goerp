@@ -35,7 +35,7 @@ func TestDispatchORMRoute_Create_InvalidUTF8IsBadRequest(t *testing.T) {
 }
 
 // encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
-// by default the way v1's Encoder did — writeJSON/writeRouteErrorDetails
+// by default the way v1's Encoder did — writeJSON/httperr.WriteDetails
 // pass explicit options to keep that parity (goerp#531).
 func TestDispatchORMRoute_Create_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	f := newDispatchORMFixture(t)
@@ -47,16 +47,6 @@ func TestDispatchORMRoute_Create_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
 	}
-	wantEscaped := "\\u003cscript\\u003e\\u0026\\u003c/script\\u003e"
-	if !strings.Contains(w.Body.String(), wantEscaped) {
-		t.Errorf("body = %s, want it to contain %s", w.Body.String(), wantEscaped)
-	}
-}
-
-func TestWriteRouteErrorDetails_EscapesHTMLUnsafeCharacters(t *testing.T) {
-	w := httptest.NewRecorder()
-	writeRouteError(w, http.StatusBadRequest, "invalid_request", "<script>&</script>")
-
 	wantEscaped := "\\u003cscript\\u003e\\u0026\\u003c/script\\u003e"
 	if !strings.Contains(w.Body.String(), wantEscaped) {
 		t.Errorf("body = %s, want it to contain %s", w.Body.String(), wantEscaped)

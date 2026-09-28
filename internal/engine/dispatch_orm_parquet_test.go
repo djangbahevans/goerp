@@ -86,7 +86,7 @@ func TestWriteParquet_RoundTrips(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	writeParquet(rec, records, "")
+	writeParquet(t.Context(), rec, records, "")
 
 	if got := rec.Header().Get("Content-Type"); got != parquetContentType {
 		t.Fatalf("Content-Type = %q, want %q", got, parquetContentType)
@@ -127,7 +127,7 @@ func TestWriteParquet_RoundTrips(t *testing.T) {
 
 func TestWriteParquet_EmptyRecords(t *testing.T) {
 	rec := httptest.NewRecorder()
-	writeParquet(rec, []map[string]any{}, "")
+	writeParquet(t.Context(), rec, []map[string]any{}, "")
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
@@ -142,7 +142,7 @@ func TestWriteParquet_EmptyRecords(t *testing.T) {
 // since the body itself is a raw Parquet file with no JSON envelope.
 func TestWriteParquet_NextCursor_SetsPaginationHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
-	writeParquet(rec, []map[string]any{{"id": "1"}}, "next-page-cursor")
+	writeParquet(t.Context(), rec, []map[string]any{{"id": "1"}}, "next-page-cursor")
 
 	if got := rec.Header().Get("X-Next-Cursor"); got != "next-page-cursor" {
 		t.Errorf("X-Next-Cursor = %q, want %q", got, "next-page-cursor")

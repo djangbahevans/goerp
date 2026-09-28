@@ -14,7 +14,6 @@ package mfaverify
 
 import (
 	"context"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"net/http"
@@ -24,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
@@ -69,30 +69,15 @@ type verifyRequest struct {
 	DeviceID string `json:"device_id"`
 }
 
-// writeJSON matches encoding/json v1's Encoder defaults, which
-// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
-// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
-func writeJSON(w http.ResponseWriter, v any) {
-	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
-}
-
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeInvalidToken(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusUnauthorized, "invalid_mfa_token", "invalid, expired, or already-used mfa_token")
+func writeInvalidToken(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_mfa_token", "invalid, expired, or already-used mfa_token")
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req verifyRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
@@ -101,14 +86,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Steps 1-2: validate HMAC signature + expiry, extract claims.
 	claims, err := h.mfaTokens.Verify(req.MFAToken)
 	if err != nil {
-		writeInvalidToken(w)
+		writeInvalidToken(w, r)
 		return
 	}
 
 	// Step 3: Origin check — rejects a captured token being submitted
 	// from a different origin than the one that requested it.
 	if r.Header.Get("Origin") != claims.Origin {
-		writeInvalidToken(w)
+		writeInvalidToken(w, r)
 		return
 	}
 
@@ -117,27 +102,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// needs to outlive the token it's guarding.
 	remaining := time.Until(claims.ExpiresAt.Time)
 	if remaining <= 0 {
-		writeInvalidToken(w)
+		writeInvalidToken(w, r)
 		return
 	}
 	claimed, err := h.cache.SetNXWithTTL(ctx, consumedKey(claims.Txn), "1", remaining)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
 	if !claimed {
-		writeInvalidToken(w)
+		writeInvalidToken(w, r)
 		return
 	}
 
 	// Step 5: lockout check, before spending effort verifying the code.
 	locked, err := h.lockout.Locked(ctx, claims.Subject, claims.TenantID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
 	if locked {
-		writeJSONError(w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
+		httperr.Write(r.Context(), w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
 		return
 	}
 
@@ -145,17 +130,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// requested type.
 	valid, credentialID, err := VerifyCode(ctx, h.totp, h.recovery, req.Type, claims.Subject, req.Code)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
 	if !valid {
 		// Step 8: on failure, increment the (user_id, tenant_id) attempt
 		// counter — never the already-consumed txn from step 4.
 		if err := h.lockout.RecordFailure(ctx, claims.Subject, claims.TenantID); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 			return
 		}
-		writeJSONError(w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
 		return
 	}
 
@@ -172,7 +157,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// prevents reuse, not the transaction boundary.
 	t, err := h.tenants.GetByID(ctx, claims.TenantID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
 
@@ -192,18 +177,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		MFACredentialID: credentialID,
 	})
 	if errors.Is(err, authtoken.ErrIPNotAllowed) {
-		writeJSONError(w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
 		return
 	}
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
 
 	// Reset the attempt counter on success so a later, separate login
 	// attempt doesn't inherit an in-progress failure count.
 	if err := h.lockout.Reset(ctx, claims.Subject, claims.TenantID); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
 

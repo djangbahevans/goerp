@@ -27,6 +27,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -48,28 +49,12 @@ func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users 
 	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, locales: locales}
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
-	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+func writeUnauthenticated(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeUnauthenticated(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
-}
-
-func writeInvalidPreference(w http.ResponseWriter, field, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	writeJSON(w, map[string]any{
-		"error": map[string]any{"code": "invalid_preference", "message": message, "details": map[string]string{"field": field}},
-	})
+func writeInvalidPreference(w http.ResponseWriter, r *http.Request, field, message string) {
+	httperr.WriteDetails(r.Context(), w, http.StatusUnprocessableEntity, "invalid_preference", message, map[string]string{"field": field})
 }
 
 // requestError is a body the handler rejects: status 400 invalid_request,
@@ -177,46 +162,46 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "update failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update failed")
 		}
 		return
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeUnauthenticated(w)
+		writeUnauthenticated(w, r)
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeUnauthenticated(w)
+		writeUnauthenticated(w, r)
 		return
 	}
 
 	var body map[string]jsontext.Value
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed JSON body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed JSON body")
 		return
 	}
 	l10nSettings, err := h.locales.Load(ctx, tenantCtx.TenantID)
 	if err != nil {
 		log.Error().Err(err).Str("tenant_id", tenantCtx.TenantID).Msg("authmeupdate: load tenant locale settings")
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "update failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update failed")
 		return
 	}
 	update, err := parseUpdate(body, l10nSettings.AvailableLocales)
 	if err != nil {
 		if reqErr, ok := errors.AsType[*requestError](err); ok && reqErr.field != "" {
-			writeInvalidPreference(w, reqErr.field, reqErr.message)
+			writeInvalidPreference(w, r, reqErr.field, reqErr.message)
 			return
 		}
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -228,27 +213,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if update.AvatarFileID != nil && *update.AvatarFileID != "" {
 		if h.files == nil {
 			log.Warn().Str("user_id", authCtx.UserID).Msg("authmeupdate: no files.Store configured, rejecting avatar_id")
-			writeJSONError(w, http.StatusServiceUnavailable, "storage_unavailable", "avatar updates are unavailable right now")
+			httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "storage_unavailable", "avatar updates are unavailable right now")
 			return
 		}
 		f, err := h.files.GetByID(ctx, tenantCtx.Slug, *update.AvatarFileID)
 		if err != nil {
 			if errors.Is(err, files.ErrFileNotFound) {
-				writeJSONError(w, http.StatusBadRequest, "invalid_request", "avatar_id does not reference an uploaded file")
+				httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "avatar_id does not reference an uploaded file")
 				return
 			}
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "update failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update failed")
 			return
 		}
 		if f.DeletedAt != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid_request", "avatar_id does not reference an uploaded file")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "avatar_id does not reference an uploaded file")
 			return
 		}
 	}
 
 	oldAvatarID, err := h.users.UpdateProfile(ctx, authCtx.UserID, update)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "update failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update failed")
 		return
 	}
 

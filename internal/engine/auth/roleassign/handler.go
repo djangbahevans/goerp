@@ -27,6 +27,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -83,14 +84,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
 // resolved is what ServeAssign and ServeRevoke both need before touching
 // anything — tenant/auth resolution, admin-role check, and target
 // tenant-membership check are identical for grant and revoke.
@@ -108,13 +101,13 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (resolved, boo
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		}
 		return resolved{}, false
 	}
@@ -122,23 +115,23 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (resolved, boo
 	// Step 7 (Class A, JWT branch): requires a currently-valid access token.
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return resolved{}, false
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return resolved{}, false
 	}
 
 	if !slices.Contains(authCtx.RolesLive, adminRoleName) {
-		writeJSONError(w, http.StatusForbidden, "forbidden", "admin role required")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "forbidden", "admin role required")
 		return resolved{}, false
 	}
 
 	targetID := route.ParamsFromContext(ctx)["id"]
 	if targetID == "" {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return resolved{}, false
 	}
 
@@ -148,11 +141,11 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (resolved, boo
 	// member here (mirrors mfareset's own identical check).
 	isMember, err := h.roles.IsMember(ctx, tenantCtx.Slug, targetID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return resolved{}, false
 	}
 	if !isMember {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return resolved{}, false
 	}
 
@@ -170,22 +163,22 @@ func (h *Handler) ServeAssign(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body assignRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil || body.Role == "" {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
 	roleID, err := h.roles.GetRoleByName(ctx, req.tenantCtx.Slug, body.Role)
 	if err != nil {
 		if errors.Is(err, role.ErrRoleNotFound) {
-			writeJSONError(w, http.StatusNotFound, "role_not_found", "unknown role")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "role_not_found", "unknown role")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return
 	}
 
 	if err := h.roles.AssignRole(ctx, req.tenantCtx.Slug, req.targetID, roleID, req.authCtx.UserID); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return
 	}
 
@@ -206,22 +199,22 @@ func (h *Handler) ServeRevoke(w http.ResponseWriter, r *http.Request) {
 
 	roleName := route.ParamsFromContext(ctx)["role"]
 	if roleName == "" {
-		writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
 
 	roleID, err := h.roles.GetRoleByName(ctx, req.tenantCtx.Slug, roleName)
 	if err != nil {
 		if errors.Is(err, role.ErrRoleNotFound) {
-			writeJSONError(w, http.StatusNotFound, "role_not_found", "unknown role")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "role_not_found", "unknown role")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return
 	}
 
 	if err := h.roles.RevokeRole(ctx, req.tenantCtx.Slug, req.targetID, roleID); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return
 	}
 

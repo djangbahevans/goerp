@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -66,7 +67,7 @@ func TestRateLimitMiddleware_AllowsWithinLimitThenRejects(t *testing.T) {
 		t.Error("missing Retry-After header on a 429 response")
 	}
 
-	var body routeErrorEnvelope
+	var body httperr.Envelope
 	if err := json.UnmarshalRead(w.Body, &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

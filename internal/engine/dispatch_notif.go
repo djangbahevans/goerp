@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -52,7 +53,7 @@ func notifCaller(w http.ResponseWriter, r *http.Request) (*authcheck.AuthContext
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return nil, nil, false
 	}
 	return authCtx, tenantCtx, true
@@ -72,7 +73,7 @@ func (e *Engine) dispatchNotifFeedRoute(w http.ResponseWriter, r *http.Request) 
 	if raw := q.Get("cursor"); raw != "" {
 		c, err := notifications.ParseCursor(raw)
 		if err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "malformed cursor")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed cursor")
 			return
 		}
 		cursor = &c
@@ -81,7 +82,7 @@ func (e *Engine) dispatchNotifFeedRoute(w http.ResponseWriter, r *http.Request) 
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > notifFeedMaxLimit {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 100")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "limit must be an integer from 1 to 100")
 			return
 		}
 		limit = n
@@ -90,7 +91,7 @@ func (e *Engine) dispatchNotifFeedRoute(w http.ResponseWriter, r *http.Request) 
 	if raw := q.Get("unread"); raw != "" {
 		b, err := strconv.ParseBool(raw)
 		if err != nil {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "unread must be true or false")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "unread must be true or false")
 			return
 		}
 		unreadOnly = b
@@ -99,12 +100,12 @@ func (e *Engine) dispatchNotifFeedRoute(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	items, hasMore, err := e.notificationStore.List(ctx, tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID, cursor, unreadOnly, limit)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list notifications failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list notifications failed")
 		return
 	}
 	unread, err := e.notificationStore.CountUnread(ctx, tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "list notifications failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "list notifications failed")
 		return
 	}
 
@@ -127,7 +128,7 @@ func (e *Engine) dispatchNotifFeedRoute(w http.ResponseWriter, r *http.Request) 
 			CreatedAt: n.CreatedAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": meta})
+	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out, "meta": meta})
 }
 
 // dispatchNotifCountRoute is GET /_notif/count's handler — the caller's
@@ -139,10 +140,10 @@ func (e *Engine) dispatchNotifCountRoute(w http.ResponseWriter, r *http.Request)
 	}
 	n, err := e.notificationStore.CountUnread(r.Context(), tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "count notifications failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "count notifications failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"count": n})
+	writeJSON(r.Context(), w, http.StatusOK, map[string]int{"count": n})
 }
 
 // dispatchNotifReadRoute is POST /_notif/{id}/read's handler.
@@ -175,19 +176,19 @@ func (e *Engine) notifUpdateOne(w http.ResponseWriter, r *http.Request, update f
 	}
 	id := route.ParamsFromContext(r.Context())["id"]
 	if id == "" {
-		writeRouteError(w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_path_param", "id path parameter is required")
 		return
 	}
 	if _, err := uuid.Parse(id); err != nil {
-		writeRouteError(w, http.StatusNotFound, "not_found", "notification not found")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "notification not found")
 		return
 	}
 	if err := update(r.Context(), tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID, id); err != nil {
 		if errors.Is(err, notifications.ErrNotFound) {
-			writeRouteError(w, http.StatusNotFound, "not_found", "notification not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "notification not found")
 			return
 		}
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", failMsg)
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", failMsg)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -199,7 +200,7 @@ func (e *Engine) notifUpdateAll(w http.ResponseWriter, r *http.Request, update f
 		return
 	}
 	if err := update(r.Context(), tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID); err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", failMsg)
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", failMsg)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -226,20 +227,20 @@ func (e *Engine) dispatchNotifDeviceTokenRoute(w http.ResponseWriter, r *http.Re
 
 	var body notifDeviceTokenRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object")
 		return
 	}
 	if !slices.Contains(notifications.DeviceTokenPlatforms, body.Platform) {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "platform must be ios, android or web")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "platform must be ios, android or web")
 		return
 	}
 	if body.Token == "" || len(body.Token) > notifDeviceTokenMaxLength {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "token must be 1 to 4096 bytes")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "token must be 1 to 4096 bytes")
 		return
 	}
 
 	if err := e.notificationStore.RegisterDeviceToken(r.Context(), tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID, body.Platform, body.Token, body.AppVersion); err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "register device token failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "register device token failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -271,10 +272,10 @@ func (e *Engine) dispatchNotifPreferencesRoute(w http.ResponseWriter, r *http.Re
 	}
 	resp, err := e.notifPreferences(r.Context(), tenantCtx, authCtx.UserID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "load notification preferences failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "load notification preferences failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(r.Context(), w, http.StatusOK, resp)
 }
 
 // dispatchNotifPreferencesUpdateRoute is PATCH /_notif/preferences's
@@ -289,12 +290,12 @@ func (e *Engine) dispatchNotifPreferencesUpdateRoute(w http.ResponseWriter, r *h
 
 	var body notifPreferencesPatch
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		writeRouteError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object of { global?, types? }")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object of { global?, types? }")
 		return
 	}
 	for typ := range body.Types {
 		if typ == "" || len(typ) > notifTypeMaxLength {
-			writeRouteError(w, http.StatusBadRequest, "invalid_request", "notification type names must be 1 to 200 bytes")
+			httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "notification type names must be 1 to 200 bytes")
 			return
 		}
 	}
@@ -302,7 +303,7 @@ func (e *Engine) dispatchNotifPreferencesUpdateRoute(w http.ResponseWriter, r *h
 	ctx := r.Context()
 	available, err := e.notificationStore.AvailableChannels(ctx, tenantCtx.TenantID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "update notification preferences failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update notification preferences failed")
 		return
 	}
 	keepAvailable := func(p notifications.ChannelsPatch) notifications.ChannelsPatch {
@@ -322,15 +323,15 @@ func (e *Engine) dispatchNotifPreferencesUpdateRoute(w http.ResponseWriter, r *h
 	}
 
 	if err := e.notificationStore.UpdatePreferences(ctx, tenantCtx.Slug, tenantCtx.TenantID, authCtx.UserID, body.Global, body.Types); err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "update notification preferences failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update notification preferences failed")
 		return
 	}
 	resp, err := e.notifPreferences(ctx, tenantCtx, authCtx.UserID)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "load notification preferences failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "load notification preferences failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(ctx, w, http.StatusOK, resp)
 }
 
 func (e *Engine) notifPreferences(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID string) (*notifPreferencesResponse, error) {

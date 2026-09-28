@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -176,7 +177,7 @@ func TestDispatchHandler_NilSnapshotReturns503(t *testing.T) {
 
 func assertRouteErrorCode(t *testing.T, w *httptest.ResponseRecorder, wantCode string) {
 	t.Helper()
-	var body routeErrorEnvelope
+	var body httperr.Envelope
 	if err := json.UnmarshalRead(w.Body, &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

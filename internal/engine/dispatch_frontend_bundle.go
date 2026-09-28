@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/rs/zerolog/log"
@@ -29,14 +30,14 @@ var bundleFilenamePattern = regexp.MustCompile(`^bundle\.[0-9a-f]{12}\.js$`)
 // the module's current version.
 func (e *Engine) dispatchFrontendBundleRoute(w http.ResponseWriter, r *http.Request) {
 	if e.storageBackend == nil {
-		writeRouteError(w, http.StatusServiceUnavailable, "storage_unavailable", "no object storage backend is configured")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "storage_unavailable", "no object storage backend is configured")
 		return
 	}
 
 	params := route.ParamsFromContext(r.Context())
 	moduleName, file := params["module"], params["file"]
 	if !bundleFilenamePattern.MatchString(file) {
-		writeRouteError(w, http.StatusNotFound, "not_found", "no such frontend bundle")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "no such frontend bundle")
 		return
 	}
 
@@ -44,17 +45,17 @@ func (e *Engine) dispatchFrontendBundleRoute(w http.ResponseWriter, r *http.Requ
 	key := module.BundleStorageKey(moduleName, file)
 	exists, err := e.storageBackend.Exists(ctx, key)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "check frontend bundle failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "check frontend bundle failed")
 		return
 	}
 	if !exists {
-		writeRouteError(w, http.StatusNotFound, "not_found", "no such frontend bundle")
+		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "no such frontend bundle")
 		return
 	}
 
 	rc, size, err := e.storageBackend.Download(ctx, key)
 	if err != nil {
-		writeRouteError(w, http.StatusInternalServerError, "internal_error", "read frontend bundle failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "read frontend bundle failed")
 		return
 	}
 	defer func() { _ = rc.Close() }()

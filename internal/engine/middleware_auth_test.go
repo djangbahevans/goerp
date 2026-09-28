@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
@@ -36,6 +37,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
+	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -286,6 +288,12 @@ func (f *chainFixture) issueToken(t *testing.T) string {
 }
 
 func (f *chainFixture) chain(builtins map[string]http.Handler) http.Handler {
+	return f.tracedChain(builtins, noop.NewTracerProvider().Tracer("test"))
+}
+
+// tracedChain is chain with the caller's own tracer, for tests asserting
+// on recorded spans.
+func (f *chainFixture) tracedChain(builtins map[string]http.Handler, tracer trace.Tracer) http.Handler {
 	// A generous default so existing tests firing several requests in a
 	// row don't trip the limiter incidentally — rate limiting itself is
 	// covered by its own dedicated tests using a deliberately tight
@@ -295,12 +303,12 @@ func (f *chainFixture) chain(builtins map[string]http.Handler) http.Handler {
 	// Status (never StatusReady), so every test in this file hits the
 	// module_unavailable gate in buildDispatchHandler before touching any
 	// *Engine field — a zero-value Engine is enough here.
-	return buildChain(&Engine{}, f.reg, builtins, nil, f.resolver, f.checker, noop.NewTracerProvider().Tracer("test"), f.cacheClient, generousDefault)
+	return buildChain(&Engine{}, f.reg, builtins, nil, f.resolver, f.checker, tracer, f.cacheClient, generousDefault)
 }
 
 func decodeErrorCode(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
-	var body routeErrorEnvelope
+	var body httperr.Envelope
 	if err := json.UnmarshalRead(w.Body, &body); err != nil {
 		t.Fatalf("decode error response: %v", err)
 	}

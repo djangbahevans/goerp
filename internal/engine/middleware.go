@@ -7,6 +7,7 @@ import (
 	"strings"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/rs/zerolog/log"
@@ -51,18 +52,18 @@ func routeResolutionMiddleware(reg *registry.ModuleRegistry) func(http.Handler) 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			snap := reg.Snapshot()
 			if snap == nil {
-				writeRouteError(w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
+				httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "engine has not finished starting")
 				return
 			}
 
 			entry, params, result, allowedMethods := snap.RouteTable().Lookup(r.Method, r.URL.Path)
 			switch result {
 			case route.RouteNotFound, route.RouteBadPath:
-				writeRouteError(w, http.StatusNotFound, "route_not_found", "No route matches this path")
+				httperr.Write(r.Context(), w, http.StatusNotFound, "route_not_found", "No route matches this path")
 				return
 			case route.RouteMethodNotAllowed:
 				w.Header().Set("Allow", strings.Join(allowedMethods, ", "))
-				writeRouteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "This path does not support "+r.Method)
+				httperr.Write(r.Context(), w, http.StatusMethodNotAllowed, "method_not_allowed", "This path does not support "+r.Method)
 				return
 			}
 
@@ -81,14 +82,11 @@ func routeResolutionMiddleware(reg *registry.ModuleRegistry) func(http.Handler) 
 // how it's written here (net/http canonicalizes it on both Set and Get).
 const requestIDHeader = "X-Request-Id"
 
-type requestIDContextKey struct{}
-
 // requestIDFromContext returns the id requestIDMiddleware minted for this
 // request, or "" if the middleware hasn't run (e.g. a direct unit test of
 // a handler in isolation).
 func requestIDFromContext(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDContextKey{}).(string)
-	return id
+	return httperr.RequestIDFromContext(ctx)
 }
 
 // requestIDMiddleware assigns a fresh UUIDv7 request id to every request
@@ -102,7 +100,7 @@ func requestIDMiddleware() func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			idStr := uuid.NewV7().String()
 			w.Header().Set(requestIDHeader, idStr)
-			ctx := context.WithValue(r.Context(), requestIDContextKey{}, idStr)
+			ctx := httperr.WithRequestID(r.Context(), idStr)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -38,7 +39,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req confirmRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
@@ -46,10 +47,10 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u, err := h.users.ConsumeEmailVerifyToken(ctx, hashToken(req.Token))
 	if err != nil {
 		if errors.Is(err, user.ErrVerifyTokenInvalid) {
-			writeJSONError(w, http.StatusNotFound, "invalid_token", "verification link is invalid or has expired")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "invalid_token", "verification link is invalid or has expired")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "email verification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "email verification failed")
 		return
 	}
 
@@ -72,11 +73,11 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Persistent: nonBrowser,
 	})
 	if errors.Is(err, authtoken.ErrIPNotAllowed) {
-		writeJSONError(w, http.StatusForbidden, "ip_not_allowed", "your email is verified, but signing in to this tenant is not allowed from your network")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "ip_not_allowed", "your email is verified, but signing in to this tenant is not allowed from your network")
 		return
 	}
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "email verification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "email verification failed")
 		return
 	}
 	if err := h.users.ResetLoginState(ctx, u.ID, loginsession.ClientIP(r)); err != nil {

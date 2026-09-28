@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
@@ -81,12 +82,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tenantCtx, err := h.tenants.ResolveByHost(r.Context(), r.Host)
 	switch {
@@ -95,14 +90,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, tenantresolve.ErrTenantNotFound) && h.isSharedHost(r.Host):
 		writeJSON(w, http.StatusOK, response{RegistrationEnabled: h.registrationEnabled, TermsURL: h.termsURL, AppURL: h.appBaseURL, PasswordMinLength: password.Global.MinLength})
 	case errors.Is(err, tenantresolve.ErrTenantNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]any{
-			"error": map[string]any{"code": "tenant_not_found", "message": "no workspace at this address", "details": map[string]string{"app_url": h.appBaseURL}},
-		})
+		httperr.WriteDetails(r.Context(), w, http.StatusNotFound, "tenant_not_found", "no workspace at this address", map[string]string{"app_url": h.appBaseURL})
 	case errors.Is(err, tenantresolve.ErrTenantSuspended):
-		writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 	case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-		writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 	default:
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "tenant lookup failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "tenant lookup failed")
 	}
 }

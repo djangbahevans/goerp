@@ -26,6 +26,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -61,16 +62,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeUnauthenticated(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+func writeUnauthenticated(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 }
 
 type meResponse struct {
@@ -128,35 +121,35 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "session check failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "session check failed")
 		}
 		return
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeUnauthenticated(w)
+		writeUnauthenticated(w, r)
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeUnauthenticated(w)
+		writeUnauthenticated(w, r)
 		return
 	}
 
 	u, err := h.users.GetByID(ctx, authCtx.UserID)
 	if err != nil {
 		if errors.Is(err, user.ErrUserNotFound) {
-			writeUnauthenticated(w)
+			writeUnauthenticated(w, r)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "session check failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "session check failed")
 		return
 	}
 

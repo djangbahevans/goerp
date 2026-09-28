@@ -24,6 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
@@ -76,16 +77,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
-func writeUnauthenticated(w http.ResponseWriter) {
-	writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+func writeUnauthenticated(w http.ResponseWriter, r *http.Request) {
+	httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 }
 
 type uploadResponse struct {
@@ -102,25 +95,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "upload failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "upload failed")
 		}
 		return
 	}
 
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeUnauthenticated(w)
+		writeUnauthenticated(w, r)
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeUnauthenticated(w)
+		writeUnauthenticated(w, r)
 		return
 	}
 
@@ -128,30 +121,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// successful Engine.New() can still leave this nil, same guard
 	// host.storage.upload applies.
 	if h.backend == nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "storage_unavailable", "no object storage backend is configured")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "storage_unavailable", "no object storage backend is configured")
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, h.limits.MaxFileBytes+multipartOverheadBytes)
 	if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			writeJSONError(w, http.StatusRequestEntityTooLarge, "file_too_large", "upload exceeds the maximum allowed size")
+			httperr.Write(r.Context(), w, http.StatusRequestEntityTooLarge, "file_too_large", "upload exceeds the maximum allowed size")
 			return
 		}
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed multipart/form-data body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed multipart/form-data body")
 		return
 	}
 	defer func() { _ = r.MultipartForm.RemoveAll() }()
 
 	fileHeaders := r.MultipartForm.File["file"]
 	if len(fileHeaders) == 0 {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", `"file" field is required`)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", `"file" field is required`)
 		return
 	}
 	fileHeader := fileHeaders[0]
 
 	if fileHeader.Size > h.limits.MaxFileBytes {
-		writeJSONError(w, http.StatusRequestEntityTooLarge, "file_too_large", "upload exceeds the maximum allowed size")
+		httperr.Write(r.Context(), w, http.StatusRequestEntityTooLarge, "file_too_large", "upload exceeds the maximum allowed size")
 		return
 	}
 
@@ -160,7 +153,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		contentType = "application/octet-stream"
 	}
 	if !storage.ContentTypeAllowed(contentType, h.limits.AllowedTypes, h.limits.BlockedTypes) {
-		writeJSONError(w, http.StatusUnsupportedMediaType, "invalid_content_type", fmt.Sprintf("content type %q is not permitted", contentType))
+		httperr.Write(r.Context(), w, http.StatusUnsupportedMediaType, "invalid_content_type", fmt.Sprintf("content type %q is not permitted", contentType))
 		return
 	}
 
@@ -169,7 +162,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		purpose = defaultPurpose
 	}
 	if !storage.ValidPurpose(purpose) {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("purpose %q is not a valid storage key segment", purpose))
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("purpose %q is not a valid storage key segment", purpose))
 		return
 	}
 
@@ -178,7 +171,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	f, err := fileHeader.Open()
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "could not read uploaded file")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "could not read uploaded file")
 		return
 	}
 	defer func() { _ = f.Close() }()
@@ -188,7 +181,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// never returns one itself.
 	hasher := sha256.New()
 	if _, err := h.backend.Upload(ctx, key, io.TeeReader(f, hasher), storage.UploadOptions{ContentType: contentType}); err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "storage_unavailable", "upload failed")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "storage_unavailable", "upload failed")
 		return
 	}
 	checksumHex := hex.EncodeToString(hasher.Sum(nil))
@@ -208,7 +201,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// orphaned object with no files row pointing at it — same pattern
 		// host.storage.upload uses.
 		_ = h.backend.Delete(ctx, key)
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "upload failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "upload failed")
 		return
 	}
 

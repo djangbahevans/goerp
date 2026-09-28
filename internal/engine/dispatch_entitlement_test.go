@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	sdkengine "github.com/djangbahevans/goerp/sdk/go/engine"
@@ -47,18 +48,19 @@ func TestBuildChain_UnentitledModuleRouteReturns403BillingModuleNotAvailable(t *
 		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
 	}
 
-	var body routeErrorEnvelope
+	var body httperr.Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if body.Error.Code != "billing.module_not_available" {
 		t.Errorf("error.code = %q, want %q", body.Error.Code, "billing.module_not_available")
 	}
-	if body.Error.Details["module"] != "premium" {
-		t.Errorf("details.module = %v, want %q", body.Error.Details["module"], "premium")
+	details, _ := body.Error.Details.(map[string]any)
+	if details["module"] != "premium" {
+		t.Errorf("details.module = %v, want %q", details["module"], "premium")
 	}
-	if body.Error.Details["upgrade_url"] != "/settings/billing/upgrade" {
-		t.Errorf("details.upgrade_url = %v, want %q", body.Error.Details["upgrade_url"], "/settings/billing/upgrade")
+	if details["upgrade_url"] != "/settings/billing/upgrade" {
+		t.Errorf("details.upgrade_url = %v, want %q", details["upgrade_url"], "/settings/billing/upgrade")
 	}
 }
 

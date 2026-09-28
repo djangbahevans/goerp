@@ -24,6 +24,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
@@ -78,14 +79,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
 
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
 // ServeHTTP is POST /admin/tenant/plan.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -95,13 +88,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		}
 		return
 	}
@@ -109,52 +102,52 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Step 7 (Class A, JWT branch): requires a currently-valid access token.
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
 
 	if !slices.Contains(authCtx.RolesLive, adminRoleName) {
-		writeJSONError(w, http.StatusForbidden, "forbidden", "admin role required")
+		httperr.Write(r.Context(), w, http.StatusForbidden, "forbidden", "admin role required")
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body changePlanRequest
 	if err := json.UnmarshalRead(r.Body, &body); err != nil || body.Plan == "" {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
 	requestedPlan := tenant.Plan(body.Plan)
 	if !slices.Contains(tenant.AllPlans, requestedPlan) {
-		writeJSONError(w, http.StatusBadRequest, "invalid_plan", "unknown plan")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_plan", "unknown plan")
 		return
 	}
 
 	plan, err := h.billing.GetPlanByName(ctx, body.Plan)
 	if err != nil {
 		if errors.Is(err, billing.ErrPlanNotFound) {
-			writeJSONError(w, http.StatusNotFound, "plan_not_found", "unknown plan")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "plan_not_found", "unknown plan")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return
 	}
 
 	if _, err := h.billing.ChangeTenantPlan(ctx, tenantCtx.TenantID, plan.ID); err != nil {
 		switch {
 		case errors.Is(err, billing.ErrNoActiveSubscription):
-			writeJSONError(w, http.StatusConflict, "no_active_subscription", "tenant has no active subscription")
+			httperr.Write(r.Context(), w, http.StatusConflict, "no_active_subscription", "tenant has no active subscription")
 		case errors.Is(err, billing.ErrMultipleActiveSubscriptions):
 			log.Error().Err(err).Str("tenant", tenantCtx.Slug).Msg("planchange: tenant has more than one active subscription, moved all of them")
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		}
 		return
 	}
@@ -166,7 +159,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// today; see this package's own tests for the reasoning this doesn't
 	// attempt to close.
 	if _, err := h.tenantStore.UpdatePlan(ctx, tenantCtx.Slug, requestedPlan); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "request failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return
 	}
 
@@ -177,7 +170,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// (suspend/unsuspend) and fails the request rather than silently
 	// degrading.
 	if err := h.invalidateDomainCache(ctx, tenantCtx.TenantID); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "plan changed, but invalidating the domain cache failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "plan changed, but invalidating the domain cache failed")
 		return
 	}
 

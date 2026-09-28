@@ -78,9 +78,3 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	// json.MarshalWrite doesn't apply on its own.
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
-
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}

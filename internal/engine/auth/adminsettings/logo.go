@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/files"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 )
 
@@ -54,7 +55,7 @@ func (h *Handler) ServeUploadLogo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if h.deps.Storage == nil || h.deps.Files == nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "storage_unavailable", "no object storage backend is configured")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "storage_unavailable", "no object storage backend is configured")
 		return
 	}
 
@@ -62,10 +63,10 @@ func (h *Handler) ServeUploadLogo(w http.ResponseWriter, r *http.Request) {
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
-			writeJSONError(w, http.StatusRequestEntityTooLarge, "file_too_large", "logo exceeds the maximum allowed size")
+			httperr.Write(r.Context(), w, http.StatusRequestEntityTooLarge, "file_too_large", "logo exceeds the maximum allowed size")
 			return
 		}
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", `a multipart/form-data "file" field is required`)
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", `a multipart/form-data "file" field is required`)
 		return
 	}
 	defer func() { _ = file.Close() }()
@@ -73,7 +74,7 @@ func (h *Handler) ServeUploadLogo(w http.ResponseWriter, r *http.Request) {
 		defer func() { _ = r.MultipartForm.RemoveAll() }()
 	}
 	if header.Size > h.deps.MaxLogoBytes {
-		writeJSONError(w, http.StatusRequestEntityTooLarge, "file_too_large", "logo exceeds the maximum allowed size")
+		httperr.Write(r.Context(), w, http.StatusRequestEntityTooLarge, "file_too_large", "logo exceeds the maximum allowed size")
 		return
 	}
 
@@ -82,14 +83,14 @@ func (h *Handler) ServeUploadLogo(w http.ResponseWriter, r *http.Request) {
 	head := make([]byte, 512)
 	n, err := io.ReadFull(file, head)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "could not read uploaded file")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "could not read uploaded file")
 		return
 	}
 	head = head[:n]
 	contentType := http.DetectContentType(head)
 	ext, ok := logoTypes[contentType]
 	if !ok {
-		writeJSONError(w, http.StatusUnsupportedMediaType, "invalid_content_type", "a logo must be a PNG, JPEG, GIF or WebP image")
+		httperr.Write(r.Context(), w, http.StatusUnsupportedMediaType, "invalid_content_type", "a logo must be a PNG, JPEG, GIF or WebP image")
 		return
 	}
 
@@ -98,13 +99,13 @@ func (h *Handler) ServeUploadLogo(w http.ResponseWriter, r *http.Request) {
 	hasher := sha256.New()
 	body := io.TeeReader(io.MultiReader(bytes.NewReader(head), file), hasher)
 	if _, err := h.deps.Storage.Upload(ctx, key, body, storage.UploadOptions{ContentType: contentType, Public: true}); err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "storage_unavailable", "upload failed")
+		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "storage_unavailable", "upload failed")
 		return
 	}
 	logoURL, err := h.deps.Storage.PublicURL(ctx, key)
 	if err != nil {
 		_ = h.deps.Storage.Delete(ctx, key)
-		writeInternalError(w, err, "resolve logo public url")
+		writeInternalError(w, r, err, "resolve logo public url")
 		return
 	}
 
@@ -121,14 +122,14 @@ func (h *Handler) ServeUploadLogo(w http.ResponseWriter, r *http.Request) {
 		IsPublic:       true,
 	}); err != nil {
 		_ = h.deps.Storage.Delete(ctx, key)
-		writeInternalError(w, err, "record logo file")
+		writeInternalError(w, r, err, "record logo file")
 		return
 	}
 
 	previous, err := h.deps.TenantStore.SetLogoURL(ctx, c.tenant.TenantID, logoURL)
 	if err != nil {
 		h.retireLogoFile(ctx, c.tenant.Slug, fileID)
-		writeInternalError(w, err, "set logo url")
+		writeInternalError(w, r, err, "set logo url")
 		return
 	}
 	h.retireLogo(ctx, c.tenant.Slug, previous)
@@ -147,7 +148,7 @@ func (h *Handler) ServeDeleteLogo(w http.ResponseWriter, r *http.Request) {
 
 	previous, err := h.deps.TenantStore.SetLogoURL(ctx, c.tenant.TenantID, "")
 	if err != nil {
-		writeInternalError(w, err, "clear logo url")
+		writeInternalError(w, r, err, "clear logo url")
 		return
 	}
 	if previous != nil {

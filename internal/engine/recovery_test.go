@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 )
 
 func TestRecoveryMiddleware_RecoversPanicReturns500WithoutLeakingDetails(t *testing.T) {
@@ -29,7 +31,7 @@ func TestRecoveryMiddleware_RecoversPanicReturns500WithoutLeakingDetails(t *test
 		t.Fatal("empty response body")
 	}
 
-	var body routeErrorEnvelope
+	var body httperr.Envelope
 	if err := json.Unmarshal([]byte(rawBody), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

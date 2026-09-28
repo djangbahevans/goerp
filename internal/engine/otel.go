@@ -4,30 +4,19 @@ import (
 	"fmt"
 	"net/http"
 
-	"go.opentelemetry.io/otel/attribute"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// otelMiddleware is buildChain's innermost wrapper — engine-internals.md
-// §6 step 12 — starting one root span per request under the engine's own
-// tracer (goerp#326), named after the resolved route's own path template
-// (not the raw URL path, so spans group correctly across different
-// path-param values of the same route) rather than done per route class:
-// unlike the tenant/auth steps above it in the chain, the pipeline
-// diagram gives this step no route-class exemptions, so it runs
-// unconditionally for every request that reaches it — EngineNative
-// (builtin) routes included, since tracing them is exactly as valuable
-// and doesn't touch the tenant/auth-resolution redundancy those routes'
-// own no-op middleware exists to avoid.
-//
-// A request short-circuited earlier in the chain (404/405 from
-// routeResolutionMiddleware, a rejected auth/tenant/MFA check) never
-// reaches this middleware at all, since it sits innermost, immediately
-// around buildDispatchHandler — so no span is ever started for those,
-// consistent with the pipeline diagram's own "Module dispatch" placement
-// for this step.
+// otelMiddleware starts one root span per request, named after the
+// resolved route's path template so spans group across path-param values.
+// It runs right after routeResolutionMiddleware (auth-internals.md §9 step
+// 3a) for every route class, so rate-limit, tenant, auth and MFA
+// rejections still get a span and their error envelope a trace_id. Route
+// resolution's own 404/405/503 have no template to name a span after and
+// carry request_id alone.
 func otelMiddleware(tracer trace.Tracer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +31,7 @@ func otelMiddleware(tracer trace.Tracer) func(http.Handler) http.Handler {
 				semconv.HTTPRoute(rr.entry.PathTemplate),
 			))
 			defer span.End()
+			httperr.NoteSpan(ctx)
 
 			// A panic downstream (caught by the outer recoveryMiddleware,
 			// which turns it into a 500) unwinds straight through this
@@ -58,10 +48,6 @@ func otelMiddleware(tracer trace.Tracer) func(http.Handler) http.Handler {
 					panic(panicVal)
 				}
 			}()
-
-			if tenantCtx := tenantFromContext(ctx); tenantCtx != nil {
-				span.SetAttributes(attribute.String("tenant.id", tenantCtx.TenantID))
-			}
 
 			rec := &statusRecordingWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r.WithContext(ctx))

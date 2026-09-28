@@ -20,7 +20,6 @@
 package mfareverify
 
 import (
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"net/http"
@@ -31,6 +30,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
@@ -69,21 +69,6 @@ type reverifyRequest struct {
 	Code string `json:"code"`
 }
 
-// writeJSON matches encoding/json v1's Encoder defaults, which
-// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
-// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
-func writeJSON(w http.ResponseWriter, v any) {
-	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
-}
-
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{
-		"error": map[string]string{"code": code, "message": message},
-	})
-}
-
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -92,13 +77,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, tenantresolve.ErrTenantNotFound):
-			writeJSONError(w, http.StatusNotFound, "not_found", "not found")
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		case errors.Is(err, tenantresolve.ErrTenantSuspended):
-			writeJSONError(w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_suspended", "tenant suspended")
 		case errors.Is(err, tenantresolve.ErrTenantOffboarding):
-			writeJSONError(w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
+			httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_offboarding", "tenant offboarding")
 		default:
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		}
 		return
 	}
@@ -107,19 +92,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// token — auth-internals.md §8's own distinction from /auth/mfa/verify.
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
-		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req reverifyRequest
 	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return
 	}
 
@@ -128,11 +113,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// /auth/mfa/verify uses, scoped the same way (user_id, tenant_id).
 	locked, err := h.lockout.Locked(ctx, authCtx.UserID, authCtx.TenantID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
 	if locked {
-		writeJSONError(w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
+		httperr.Write(r.Context(), w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
 		return
 	}
 
@@ -141,15 +126,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// session, per auth-internals.md §8's own wording.
 	valid, credentialID, err := mfaverify.VerifyCode(ctx, h.totp, h.recovery, req.Type, authCtx.UserID, req.Code)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
 	if !valid {
 		if err := h.lockout.RecordFailure(ctx, authCtx.UserID, authCtx.TenantID); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
+			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 			return
 		}
-		writeJSONError(w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
+		httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
 		return
 	}
 
@@ -159,17 +144,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	persistent, sessionEnd, err := h.sessions.UpdateMFAAssurance(ctx, authCtx.SessionID, req.Type, now, credentialID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
 	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, req.Type, &now, sessionEnd)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
 
 	if err := h.lockout.Reset(ctx, authCtx.UserID, authCtx.TenantID); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal_error", "reverification failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
 
