@@ -84,7 +84,11 @@ describe("callActionWith", () => {
 
 describe("callAction", () => {
   it("resolves through the shared action registry and calls the shared apiClient", async () => {
-    vi.spyOn(actionRegistry, "resolve").mockResolvedValue({ method: "POST", path: "/orders/{id}/confirm" });
+    vi.spyOn(actionRegistry, "resolve").mockResolvedValue({
+      method: "POST",
+      path: "/orders/{id}/confirm",
+      permissions: [],
+    });
     const post = vi.spyOn(apiClient, "post").mockResolvedValue({ id: "o1", state: "confirmed" });
 
     await expect(callAction("sales.confirm", "o1")).resolves.toEqual({ id: "o1", state: "confirmed" });

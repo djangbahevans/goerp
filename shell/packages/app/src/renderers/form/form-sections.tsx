@@ -1,4 +1,11 @@
-import { DataTable, type DataTableColumn, EmptyState, SectionCard, type SectionCardProps } from "@goerp/sdk/components";
+import {
+  DataTable,
+  type DataTableColumn,
+  EmptyState,
+  SectionCard,
+  type SectionCardProps,
+  Skeleton,
+} from "@goerp/sdk/components";
 import { modelRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -6,6 +13,7 @@ import { useConditionEvaluator } from "../../conditions/use-condition-evaluator.
 import { renderCell } from "../list/column-renderers.js";
 import { ListRenderer } from "../list/list-renderer.js";
 import type { ListColumn, Row } from "../list/list-view-types.js";
+import { EditableSubList } from "./editable-sub-list.js";
 import { FormFieldRow } from "./form-fields.js";
 import type { FormSection } from "./form-view-types.js";
 
@@ -139,22 +147,78 @@ function InlineSubList({ rows, columns, emptyLabel }: { rows: Row[]; columns: Li
   );
 }
 
-function SubListSection({ section, resource, module, record, recordId }: FormSectionRendererProps) {
+function SubListSection({ section, resource, module, record, recordId, formReadonly }: FormSectionRendererProps) {
   const columns = sectionListColumns(section);
   const inlineKey = section.inline_key;
   const label = section.label ?? section.field ?? "items";
+  // editable-sub-list.md: rows are written through the related model's
+  // routes, so an inline_edit section resolves its target even when its
+  // rows come inline.
+  const inlineEdit = section.inline_edit === true;
   const {
     data: target,
     isLoading,
     isError,
     error,
-  } = useOne2ManyTarget(resource, section.field, inlineKey === undefined);
+  } = useOne2ManyTarget(resource, section.field, inlineKey === undefined || inlineEdit);
 
   const card = (children: ReactNode) => <SectionCard {...sectionCardProps(section)}>{children}</SectionCard>;
 
+  const readOnly =
+    inlineKey !== undefined ? (
+      <InlineSubList
+        rows={Array.isArray(record[inlineKey]) ? (record[inlineKey] as Row[]) : []}
+        columns={columns}
+        emptyLabel={label}
+      />
+    ) : recordId !== undefined && target ? (
+      <ListRenderer
+        view={{
+          name: `${section.field}-sub-list`,
+          type: "list",
+          resource: target.relatedModel,
+          label,
+          columns,
+        }}
+        module={module}
+        embedded
+        baseFilter={{ [target.inverseField]: recordId }}
+        recordId={recordId}
+      />
+    ) : null;
+
+  if (inlineEdit && !formReadonly) {
+    if (recordId === undefined) {
+      // No parent record yet — no inverse-FK value to create a row with.
+      return card(
+        <p className="text-sm text-text-secondary">
+          Save {resource} first to manage its {label}.
+        </p>,
+      );
+    }
+    if (isLoading) return card(<Skeleton type="table" columns={Math.max(columns.length, 1)} />);
+    // An inline_key section whose field isn't a resolvable one2many can
+    // still show its rows, just not edit them.
+    if (target) {
+      return card(
+        <EditableSubList
+          section={section}
+          parentResource={resource}
+          parentRecord={record}
+          recordId={recordId}
+          target={target}
+          columns={columns}
+          label={label}
+          formReadonly={formReadonly}
+          readOnlyFallback={readOnly}
+        />,
+      );
+    }
+    if (inlineKey !== undefined) return card(readOnly);
+  }
+
   if (inlineKey !== undefined) {
-    const rows = Array.isArray(record[inlineKey]) ? (record[inlineKey] as Row[]) : [];
-    return card(<InlineSubList rows={rows} columns={columns} emptyLabel={label} />);
+    return card(readOnly);
   }
 
   if (recordId === undefined) {
@@ -176,21 +240,7 @@ function SubListSection({ section, resource, module, record, recordId }: FormSec
   }
   if (!target) return null;
 
-  return card(
-    <ListRenderer
-      view={{
-        name: `${section.field}-sub-list`,
-        type: "list",
-        resource: target.relatedModel,
-        label,
-        columns,
-      }}
-      module={module}
-      embedded
-      baseFilter={{ [target.inverseField]: recordId }}
-      recordId={recordId}
-    />,
-  );
+  return card(readOnly);
 }
 
 export function FormSectionRenderer(props: FormSectionRendererProps) {

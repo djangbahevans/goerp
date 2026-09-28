@@ -16,6 +16,19 @@ export function useFieldControl(): FieldControlProps | null {
   return useContext(FieldContext);
 }
 
+// FieldWrapper's wiring without its label and error layout, for a caller
+// that lays those out itself — an editable table cell, whose column header
+// is the visible label (editable-sub-list.md).
+export function FieldControlProvider({
+  value,
+  children,
+}: {
+  value: FieldControlProps;
+  children: ReactNode;
+}): ReactNode {
+  return <FieldContext value={value}>{children}</FieldContext>;
+}
+
 export interface FieldWrapperProps {
   label: string;
   description?: string | undefined;

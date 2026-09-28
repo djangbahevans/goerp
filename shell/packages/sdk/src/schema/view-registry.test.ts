@@ -367,6 +367,10 @@ describe("filterViewByCapability", () => {
       createMethod: "POST",
       updateMethod: "PUT",
       deleteMethod: null,
+      createPermissions: null,
+      updatePermissions: null,
+      deletePermissions: null,
+      previewPath: null,
     });
     expect(view.columns).toEqual([{ field: "name" }]);
     expect(view.actions).toEqual([
@@ -402,6 +406,10 @@ describe("filterViewByCapability", () => {
       createMethod: "POST",
       updateMethod: "PUT",
       deleteMethod: null,
+      createPermissions: null,
+      updatePermissions: null,
+      deletePermissions: null,
+      previewPath: null,
     });
     expect(view.actions).toEqual([]);
     expect(view.card_actions).toEqual([{ label: "Archive", type: "route", route: "x.y" }]);
@@ -446,6 +454,10 @@ describe("filterViewByCapability", () => {
       createMethod: "POST",
       updateMethod: "PUT",
       deleteMethod: null,
+      createPermissions: null,
+      updatePermissions: null,
+      deletePermissions: null,
+      previewPath: null,
     });
     expect(view.actions).toEqual([]);
     expect(view2.actions).toEqual([

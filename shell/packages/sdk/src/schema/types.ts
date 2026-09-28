@@ -20,7 +20,7 @@ import { optionalNullable as opt } from "./optional-nullable.js";
 // `navigation`, `models`, `permissions`, and `frontend` stay loosely
 // typed — goerp#575/#674's own jobs, not this module's.
 
-export const CRUD_ACTIONS = ["get", "list", "create", "update", "delete", "pivot"] as const;
+export const CRUD_ACTIONS = ["get", "list", "create", "update", "delete", "preview", "pivot"] as const;
 export type CRUDAction = (typeof CRUD_ACTIONS)[number];
 
 export function isCRUDAction(value: string): value is CRUDAction {

@@ -46,7 +46,7 @@ export { currencyMinorUnitDigits, Field, formatFieldValue, formatRelativeTime } 
 export type { FieldInputHeight } from "./field-input-styles.js";
 export { fieldInputClassName } from "./field-input-styles.js";
 export type { FieldControlProps, FieldWrapperProps } from "./field-wrapper.js";
-export { FieldWrapper, useFieldControl } from "./field-wrapper.js";
+export { FieldControlProvider, FieldWrapper, useFieldControl } from "./field-wrapper.js";
 export type { FileFieldProps, FileValue } from "./file-field.js";
 export { FileField } from "./file-field.js";
 export type { IconName, IconNameLike, IconProps } from "./icon.js";

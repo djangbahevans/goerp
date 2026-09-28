@@ -85,6 +85,10 @@ describe("buildResourceRegistry", () => {
       createMethod: "POST",
       updateMethod: "PUT",
       deleteMethod: "DELETE",
+      createPermissions: [],
+      updatePermissions: [],
+      deletePermissions: [],
+      previewPath: null,
     });
   });
 
@@ -112,6 +116,10 @@ describe("buildResourceRegistry", () => {
       createMethod: "POST",
       updateMethod: "PUT",
       deleteMethod: null,
+      createPermissions: null,
+      updatePermissions: null,
+      deletePermissions: null,
+      previewPath: null,
     });
   });
 
@@ -135,6 +143,33 @@ describe("buildResourceRegistry", () => {
     });
 
     expect(registry.get("sales.order")).toMatchObject({ listPath: "/orders", createPath: "", updatePath: "" });
+  });
+
+  it("carries each write route's declared permissions and the preview path", () => {
+    const registry = buildResourceRegistry({
+      ...schema,
+      modules: {
+        sales: {
+          ...(schema.modules.sales as MetaSchema["modules"][string]),
+          routes: [
+            route({ method: "GET", path: "/order-lines", model: "sales.order_line", crud_action: "list" }),
+            route({
+              method: "POST",
+              path: "/order-lines",
+              model: "sales.order_line",
+              crud_action: "create",
+              permissions: ["sales:order:write"],
+            }),
+            route({ method: "POST", path: "/order-lines/preview", model: "sales.order_line", crud_action: "preview" }),
+          ],
+        },
+      },
+    });
+    const entry = registry.get("sales.order_line");
+
+    expect(entry?.createPermissions).toEqual(["sales:order:write"]);
+    expect(entry?.updatePermissions).toBeNull();
+    expect(entry?.previewPath).toBe("/order-lines/preview");
   });
 
   it("skips a model with neither list nor get routes", () => {

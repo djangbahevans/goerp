@@ -18,6 +18,10 @@ function fakeRegistry(entry: Partial<ResourceRegistryEntry> = {}): Pick<Resource
       createMethod: "POST",
       updateMethod: "PUT",
       deleteMethod: null,
+      createPermissions: null,
+      updatePermissions: null,
+      deletePermissions: null,
+      previewPath: null,
       ...entry,
     })),
   };
