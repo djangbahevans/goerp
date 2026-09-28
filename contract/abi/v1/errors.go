@@ -162,6 +162,23 @@ const (
 	// the tenant's primary, or none provides it at all.
 	ErrCodeJobsNoProviderSelected  = "jobs.no_provider_selected"
 	ErrCodeJobsNoProviderInstalled = "jobs.no_provider_installed"
+	// ErrCodeJobsProviderModuleNotEnabled rejects an explicit
+	// provider_module that isn't installed, enabled and providing the
+	// category for the tenant.
+	ErrCodeJobsProviderModuleNotEnabled = "jobs.provider_module_not_enabled"
+	// ErrCodeJobsInvalidProviderCategory rejects a category that isn't a
+	// provider category, and payment_provider without a provider_module:
+	// a multi-active category is never resolved.
+	ErrCodeJobsInvalidProviderCategory = "jobs.invalid_provider_category"
+	// ErrCodeJobsSyncInTransaction rejects host.jobs.dispatch_provider_sync
+	// while the caller has a host.db transaction open.
+	ErrCodeJobsSyncInTransaction = "jobs.sync_in_transaction"
+	// ErrCodeJobsSyncDispatchTimeout: the synchronously dispatched handler
+	// did not return within timeout_ms.
+	ErrCodeJobsSyncDispatchTimeout = "jobs.sync_dispatch_timeout"
+	// ErrCodeJobsHandlerFailed: the synchronously dispatched handler
+	// returned a failure status or trapped.
+	ErrCodeJobsHandlerFailed = "jobs.handler_failed"
 )
 
 // host.search error codes (host-abi-reference.md §12 "host.search.query").

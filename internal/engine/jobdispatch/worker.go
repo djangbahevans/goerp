@@ -72,46 +72,39 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 		return fmt.Errorf("module registry has no snapshot yet")
 	}
 
-	mod, ok := snap.Modules()[args.ModuleName]
-	if !ok || mod.Status != module.StatusReady {
-		return fmt.Errorf("module %q is not ready", args.ModuleName)
+	mod, err := readyModule(snap, args.ModuleName)
+	if err != nil {
+		return err
 	}
 
-	// Ownership is checked against two different name spaces depending on
+	// Ownership is checked against three different name spaces depending on
 	// who is allowed to have enqueued this class of job — see
-	// jobqueue.WASMJobArgs.IsDataMigration's own doc comment for why a
-	// data migration handler can't be checked against JobRegistry the way
-	// an ordinary job is.
-	if args.IsDataMigration {
+	// jobqueue.WASMJobArgs's own doc comment for why neither a data
+	// migration handler nor a provider-category job can be checked against
+	// JobRegistry the way an ordinary job is.
+	switch {
+	case args.IsDataMigration:
 		if !hasDataMigrationHandler(mod, args.JobType) {
 			return fmt.Errorf("module %q has no declared data migration handler %q", args.ModuleName, args.JobType)
 		}
-	} else if owner, ok := snap.JobRegistry().Owner(args.JobType); !ok || owner != args.ModuleName {
-		// A job whose declared (ModuleName, JobType) pair no longer
-		// matches a live manifest declaration — a stale job surviving a
-		// module removal/rename, or simply a caller-constructed args
-		// value that named the wrong module for a real job type. Neither
-		// is retryable: the mismatch won't resolve itself on a later
-		// attempt.
-		return fmt.Errorf("job type %q is not registered to module %q", args.JobType, args.ModuleName)
+	case args.ProviderCategory != "":
+		// The provider was resolved at enqueue time; a module reloaded
+		// since without this category in its provides must not receive
+		// a job it no longer claims to handle.
+		if !mod.Manifest.Provides[args.ProviderCategory] {
+			return fmt.Errorf("module %q no longer provides %s", args.ModuleName, args.ProviderCategory)
+		}
+	default:
+		if owner, ok := snap.JobRegistry().Owner(args.JobType); !ok || owner != args.ModuleName {
+			// A job whose declared (ModuleName, JobType) pair no longer
+			// matches a live manifest declaration — a stale job surviving
+			// a module removal/rename, or simply a caller-constructed args
+			// value that named the wrong module for a real job type.
+			// Neither is retryable: the mismatch won't resolve itself on
+			// a later attempt.
+			return fmt.Errorf("job type %q is not registered to module %q", args.JobType, args.ModuleName)
+		}
 	}
-
-	if mod.Pool == nil {
-		// A module manifest can legitimately declare wasm: false (e.g.
-		// the "theme" type requires it, manifest/module_type.go) and
-		// still reach StatusReady with no compiled WASM at all — job_types
-		// on such a module would be a manifest inconsistency nothing
-		// today rejects at load time, but this must not panic on
-		// mod.Pool.Borrow if it ever happens; not retryable, the mismatch
-		// won't resolve itself on a later attempt.
-		return fmt.Errorf("module %q has no WASM instance pool (wasm: false)", args.ModuleName)
-	}
-
-	inst, err := mod.Pool.Borrow(ctx)
-	if err != nil {
-		return fmt.Errorf("borrow instance for %s: %w", args.ModuleName, err)
-	}
-	defer mod.Pool.Return(inst)
 
 	// ModuleContext needs the tenant slug too (wasm.applyTenantScope builds
 	// the search path from it); args only carries the ID — same reason
@@ -121,18 +114,9 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 		return fmt.Errorf("resolve tenant %s: %w", args.TenantID, err)
 	}
 
-	moduleCtx := w.newModuleContext(mod, args, t.Slug, snap)
-	inst.SetModuleContext(moduleCtx)
-	w.Runtime.RegisterInstance(inst)
-	defer func() {
-		w.Runtime.UnregisterInstance(inst)
-		moduleCtx.RollbackAll()
-		inst.SetModuleContext(nil)
-	}()
-
-	status, err := inst.InvokeHandleJob(ctx, args.Payload)
+	status, _, err := invokeHandleJob(ctx, w.Runtime, snap, mod, args, t.Slug, false)
 	if err != nil {
-		return fmt.Errorf("invoke handle_job for %s/%s: %w", args.ModuleName, args.JobType, err)
+		return err
 	}
 	if status != 0 {
 		return fmt.Errorf("handle_job for %s/%s returned status %d", args.ModuleName, args.JobType, status)
@@ -170,6 +154,57 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 	return nil
 }
 
+// readyModule returns moduleName's loaded module when it is ready to run a
+// handle_job invocation.
+func readyModule(snap *registry.RegistrySnapshot, moduleName string) (*module.LoadedModule, error) {
+	mod, ok := snap.Modules()[moduleName]
+	if !ok || mod.Status != module.StatusReady {
+		return nil, fmt.Errorf("module %q is not ready", moduleName)
+	}
+	if mod.Pool == nil {
+		// A module manifest can legitimately declare wasm: false (e.g.
+		// the "theme" type requires it, manifest/module_type.go) and
+		// still reach StatusReady with no compiled WASM at all — job_types
+		// on such a module would be a manifest inconsistency nothing
+		// today rejects at load time, but this must not panic on
+		// mod.Pool.Borrow if it ever happens; not retryable, the mismatch
+		// won't resolve itself on a later attempt.
+		return nil, fmt.Errorf("module %q has no WASM instance pool (wasm: false)", moduleName)
+	}
+	return mod, nil
+}
+
+// invokeHandleJob borrows an instance of mod and runs its handle_job
+// export on args.Payload under a ModuleContext for args' tenant — the step
+// Worker.Work and SyncDispatcher.DispatchJobSync share. With captureResult,
+// the value the handler passes to host.jobs.set_result is returned as
+// result; without it set_result is a no-op.
+func invokeHandleJob(ctx context.Context, rt *wasm.Runtime, snap *registry.RegistrySnapshot, mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, captureResult bool) (status int32, result []byte, err error) {
+	inst, err := mod.Pool.Borrow(ctx)
+	if err != nil {
+		return 0, nil, fmt.Errorf("borrow instance for %s: %w: %w", args.ModuleName, wasm.ErrSyncJobTargetUnavailable, err)
+	}
+	defer mod.Pool.Return(inst)
+
+	moduleCtx := newModuleContext(rt, mod, args, tenantSlug, snap)
+	if captureResult {
+		moduleCtx.CaptureJobResult()
+	}
+	inst.SetModuleContext(moduleCtx)
+	rt.RegisterInstance(inst)
+	defer func() {
+		rt.UnregisterInstance(inst)
+		moduleCtx.RollbackAll()
+		inst.SetModuleContext(nil)
+	}()
+
+	status, err = inst.InvokeHandleJob(ctx, args.Payload)
+	if err != nil {
+		return 0, nil, fmt.Errorf("invoke handle_job for %s/%s: %w", args.ModuleName, args.JobType, err)
+	}
+	return status, moduleCtx.JobResult(), nil
+}
+
 // newModuleContext builds the wasm.ModuleContext a handle_job invocation
 // runs under — the same registry-derived data engine.go's own
 // newModuleContext pulls from a snapshot for an HTTP-dispatched request,
@@ -179,8 +214,8 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 // IsDataMigrationJob is set only for a real data-migration job — the gate
 // host.db.migration_ddl (host_db_migration_ddl.go, goerp#500) checks so
 // CapDBMigrationDDL alone isn't enough to call it from an ordinary job.
-func (w *Worker) newModuleContext(mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
-	mc := wasm.NewModuleContext("", mod.Manifest.Name, "", "", nil, nil, args.TenantID, tenantSlug, args.TraceID, mod.Capabilities, w.Runtime.TxLimiter(), wasm.ModuleSnapshot{
+func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
+	mc := wasm.NewModuleContext("", mod.Manifest.Name, "", "", nil, nil, args.TenantID, tenantSlug, args.TraceID, mod.Capabilities, rt.TxLimiter(), wasm.ModuleSnapshot{
 		ModelDecls:          mod.ModelDecls,
 		FieldSecRegistry:    snap.FieldSecRegistry(),
 		EventRegistry:       snap.EventRegistry(),
@@ -192,8 +227,8 @@ func (w *Worker) newModuleContext(mod *module.LoadedModule, args jobqueue.WASMJo
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
 		JobTypes:            mod.Manifest.JobTypes,
-		ORMBulkMaxRows:      w.Runtime.ORMBulkMaxRows(),
-		ORMStatementTimeout: w.Runtime.ORMStatementTimeout(),
+		ORMBulkMaxRows:      rt.ORMBulkMaxRows(),
+		ORMStatementTimeout: rt.ORMStatementTimeout(),
 	})
 	mc.IsDataMigrationJob = args.IsDataMigration
 	return mc

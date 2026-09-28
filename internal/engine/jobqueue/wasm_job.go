@@ -7,12 +7,15 @@ import "github.com/riverqueue/river"
 // covers every WASM-dispatched job type, discriminated by
 // ModuleName/JobType.
 //
-// Two callers insert these, across different trust boundaries:
+// Three callers insert these, across different trust boundaries:
 // host.jobs.enqueue/enqueue_tx, whose JobType must be declared in the
 // enqueuing module's own manifest job_types[] (globally unique, enforced by
-// JobRegistry), and the engine's data migration dispatch, whose JobType is
-// one of the target module's DataMigrations[].Handler names (scoped
-// per-module, never required to be globally unique).
+// JobRegistry); host.jobs.enqueue_provider/enqueue_provider_tx, whose
+// JobType is a standardized provider-category name and whose ModuleName is
+// the resolved provider (ProviderCategory); and the engine's data migration
+// dispatch, whose JobType is one of the target module's
+// DataMigrations[].Handler names (scoped per-module, never required to be
+// globally unique).
 //
 // The river:"unique" fields define what River's ByArgs dedup hashes:
 // everything identifying the job except Payload, Queue, MaxAttempts and
@@ -42,6 +45,12 @@ type WASMJobArgs struct {
 	// enqueued, reported to the handler alongside MigrationToVersion. Only
 	// meaningful when IsDataMigration is true.
 	MigrationFromVersion string `json:"migration_from_version,omitempty" river:"unique"`
+	// ProviderCategory marks a host.jobs.enqueue_provider job: ModuleName is
+	// the provider resolved at enqueue time, and JobType is in no JobRegistry.
+	ProviderCategory string `json:"provider_category,omitempty" river:"unique"`
+	// EnqueuedBy is set only on a provider job, so two modules' idempotency
+	// keys never collide on the same provider.
+	EnqueuedBy string `json:"enqueued_by,omitempty" river:"unique"`
 }
 
 func (WASMJobArgs) Kind() string { return "wasm_job" }

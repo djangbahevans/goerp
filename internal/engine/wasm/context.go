@@ -143,6 +143,12 @@ type ModuleContext struct {
 	// module call it from an ordinary HTTP/event/workflow dispatch.
 	IsDataMigrationJob bool
 
+	// jobResult is non-nil only for a handle_job invocation that
+	// host.jobs.dispatch_provider_sync is waiting on (CaptureJobResult):
+	// host.jobs.set_result records its value here. Everywhere else it
+	// stays nil and set_result is a silent no-op.
+	jobResult *[]byte
+
 	transactions map[string]openTransaction
 	txMu         sync.Mutex
 	txLimiter    *TransactionLimiter
@@ -246,6 +252,30 @@ func (mc *ModuleContext) JobType(name string) (manifest.JobType, bool) {
 		return manifest.JobType{}, false
 	}
 	return mc.snapshot.JobTypes[i], true
+}
+
+// CaptureJobResult makes host.jobs.set_result calls made under this
+// context record their value, for JobResult to hand back to a
+// host.jobs.dispatch_provider_sync caller.
+func (mc *ModuleContext) CaptureJobResult() {
+	mc.jobResult = new([]byte)
+}
+
+// JobResult returns the value host.jobs.set_result last recorded, or nil
+// when the handler set none or the context isn't capturing results.
+func (mc *ModuleContext) JobResult() []byte {
+	if mc.jobResult == nil {
+		return nil
+	}
+	return *mc.jobResult
+}
+
+// setJobResult records value when CaptureJobResult was called, and does
+// nothing otherwise.
+func (mc *ModuleContext) setJobResult(value []byte) {
+	if mc.jobResult != nil {
+		*mc.jobResult = value
+	}
 }
 
 // defaultORMBulkMaxRows/defaultORMStatementTimeout mirror

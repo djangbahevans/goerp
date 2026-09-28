@@ -12,3 +12,19 @@ func hostJobsEnqueue(ptr, size uint32) uint64 {
 func hostJobsEnqueueTx(ptr, size uint32) uint64 {
 	panic("sdk/go/jobs: host.jobs.enqueue_tx is only available in a wasip1 build")
 }
+
+func hostJobsEnqueueProvider(ptr, size uint32) uint64 {
+	panic("sdk/go/jobs: host.jobs.enqueue_provider is only available in a wasip1 build")
+}
+
+func hostJobsEnqueueProviderTx(ptr, size uint32) uint64 {
+	panic("sdk/go/jobs: host.jobs.enqueue_provider_tx is only available in a wasip1 build")
+}
+
+func hostJobsDispatchProviderSync(ptr, size uint32) uint64 {
+	panic("sdk/go/jobs: host.jobs.dispatch_provider_sync is only available in a wasip1 build")
+}
+
+func hostJobsSetResult(ptr, size uint32) uint64 {
+	panic("sdk/go/jobs: host.jobs.set_result is only available in a wasip1 build")
+}
