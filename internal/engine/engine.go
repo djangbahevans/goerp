@@ -1085,6 +1085,9 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["POST /_meta/activity"] = http.HandlerFunc(e.dispatchActivityCreateRoute)
 	builtinRoutes["DELETE /_meta/activity/{id}"] = http.HandlerFunc(e.dispatchActivityDeleteRoute)
 
+	// /_meta/record-readers (record-activity.md §6) follows the same pattern.
+	builtinRoutes["GET /_meta/record-readers"] = http.HandlerFunc(e.dispatchRecordReadersRoute)
+
 	// /_meta/scheduled-activities follows the same pattern.
 	builtinRoutes["GET /_meta/scheduled-activities"] = http.HandlerFunc(e.dispatchScheduledActivityListRoute)
 	builtinRoutes["GET /_meta/scheduled-activities/mine"] = http.HandlerFunc(e.dispatchScheduledActivityMineRoute)

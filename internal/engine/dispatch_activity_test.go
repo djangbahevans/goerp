@@ -408,6 +408,12 @@ func TestDispatchActivityRoutes_RejectVirtualAndTransientModels(t *testing.T) {
 		if w.Code != http.StatusBadRequest || decodeErrorCode(t, w) != "activity_unsupported" {
 			t.Errorf("POST %s: status = %d, want 400 activity_unsupported; body: %s", name, w.Code, w.Body.String())
 		}
+
+		w = httptest.NewRecorder()
+		e.dispatchRecordReadersRoute(w, httptest.NewRequest(http.MethodGet, "/_meta/record-readers?model="+name+"&record_id="+recordID, nil).WithContext(ctx))
+		if w.Code != http.StatusBadRequest || decodeErrorCode(t, w) != "activity_unsupported" {
+			t.Errorf("GET record-readers %s: status = %d, want 400 activity_unsupported; body: %s", name, w.Code, w.Body.String())
+		}
 	}
 }
 
