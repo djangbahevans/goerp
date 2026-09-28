@@ -419,6 +419,12 @@ func TestStorageSearchAuthzEventWireFields(t *testing.T) {
 		{"ConfigGetInput", ConfigGetInput{}, []string{"key"}},
 		{"ConfigGetOutput", ConfigGetOutput{Value: "v", Found: true}, []string{"value", "found"}},
 		{"ConfigSetInput", ConfigSetInput{}, []string{"key", "value"}},
+		{"JobEnqueueOptions", JobEnqueueOptions{Queue: "q", Priority: 1, DelayMs: 1, MaxAttempts: 1, IdempotencyKey: "k", ScheduledAt: 1},
+			[]string{"queue", "priority", "delay_ms", "max_attempts", "idempotency_key", "scheduled_at"}},
+		{"JobEnqueueOptions omits empty members", JobEnqueueOptions{}, nil},
+		{"JobsEnqueueInput", JobsEnqueueInput{}, []string{"type", "payload", "opts"}},
+		{"JobsEnqueueTxInput", JobsEnqueueTxInput{}, []string{"tx_id", "type", "payload", "opts"}},
+		{"JobsEnqueueOutput", JobsEnqueueOutput{}, []string{"job_id", "deduplicated"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

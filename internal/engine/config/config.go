@@ -100,7 +100,7 @@ type Config struct {
 	SchemaSyncConcurrency         int           `env:"GOERP_SCHEMA_SYNC_CONCURRENCY" envDefault:"8"`
 	QueueCriticalConcurrency      int           `env:"GOERP_QUEUE_CRITICAL_CONCURRENCY" envDefault:"5"`
 	QueueDefaultConcurrency       int           `env:"GOERP_QUEUE_DEFAULT_CONCURRENCY" envDefault:"10"`
-	QueueBulkConcurrency          int           `env:"GOERP_QUEUE_BULK_CONCURRENCY" envDefault:"20"`
+	QueueBulkConcurrency          int           `env:"GOERP_QUEUE_BULK_CONCURRENCY" envDefault:"3"`
 	QueueSearchConcurrency        int           `env:"GOERP_QUEUE_SEARCH_CONCURRENCY" envDefault:"5"`
 	QueueEmailConcurrency         int           `env:"GOERP_QUEUE_EMAIL_CONCURRENCY" envDefault:"5"`
 	QueueAdminConcurrency         int           `env:"GOERP_QUEUE_ADMIN_CONCURRENCY" envDefault:"5"`

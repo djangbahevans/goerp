@@ -52,11 +52,9 @@ type Worker struct {
 	river.WorkerDefaults[jobqueue.WASMJobArgs]
 	ModuleRegistry *registry.ModuleRegistry
 	SchemaSyncPool *schema.SchemaSyncPool
-	// Runtime and TenantStore are what Work needs to build a real
-	// wasm.ModuleContext around each handle_job invocation (goerp#500) —
-	// previously missing entirely, so any host.db/host.orm call from
-	// inside a job handler (data migration or ordinary) would
-	// nil-dereference on (*wasm.ModuleInstance).ModuleContext.
+	// Runtime and TenantStore build the wasm.ModuleContext each
+	// handle_job invocation runs under, which every host.* call from
+	// inside a job handler needs.
 	Runtime     *wasm.Runtime
 	TenantStore *tenant.Store
 }
@@ -176,12 +174,13 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 // runs under — the same registry-derived data engine.go's own
 // newModuleContext pulls from a snapshot for an HTTP-dispatched request,
 // with no live user (permSet/roles empty, same as
-// adminapi/activitydispatch.go's own workflow-activity dispatch).
+// adminapi/activitydispatch.go's own workflow-activity dispatch) and the
+// trace ID the job was enqueued under.
 // IsDataMigrationJob is set only for a real data-migration job — the gate
 // host.db.migration_ddl (host_db_migration_ddl.go, goerp#500) checks so
 // CapDBMigrationDDL alone isn't enough to call it from an ordinary job.
 func (w *Worker) newModuleContext(mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
-	mc := wasm.NewModuleContext("", mod.Manifest.Name, "", "", nil, nil, args.TenantID, tenantSlug, "", mod.Capabilities, w.Runtime.TxLimiter(), wasm.ModuleSnapshot{
+	mc := wasm.NewModuleContext("", mod.Manifest.Name, "", "", nil, nil, args.TenantID, tenantSlug, args.TraceID, mod.Capabilities, w.Runtime.TxLimiter(), wasm.ModuleSnapshot{
 		ModelDecls:          mod.ModelDecls,
 		FieldSecRegistry:    snap.FieldSecRegistry(),
 		EventRegistry:       snap.EventRegistry(),
@@ -191,6 +190,8 @@ func (w *Worker) newModuleContext(mod *module.LoadedModule, args jobqueue.WASMJo
 		SearchIndexRegistry: snap.SearchIndexRegistry(),
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
+		ConfigSchema:        mod.Manifest.ConfigSchema,
+		JobTypes:            mod.Manifest.JobTypes,
 		ORMBulkMaxRows:      w.Runtime.ORMBulkMaxRows(),
 		ORMStatementTimeout: w.Runtime.ORMStatementTimeout(),
 	})

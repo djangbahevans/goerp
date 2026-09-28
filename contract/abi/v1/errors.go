@@ -147,6 +147,17 @@ const (
 	ErrCodeDispatchFailed = "event.dispatch_failed"
 )
 
+// host.jobs error codes (host-abi-reference.md §10 "host.jobs.enqueue").
+const (
+	ErrCodeJobsUndeclaredType   = "jobs.undeclared_type"
+	ErrCodeJobsPayloadTooLarge  = "jobs.payload_too_large"
+	ErrCodeJobsQueueUnavailable = "jobs.queue_unavailable"
+	// ErrCodeJobsInvalidOptions rejects an unknown queue, a priority
+	// outside 1-100, a negative delay or max_attempts, or delay_ms
+	// combined with scheduled_at.
+	ErrCodeJobsInvalidOptions = "jobs.invalid_options"
+)
+
 // host.search error codes (host-abi-reference.md §12 "host.search.query").
 const (
 	ErrCodeIndexNotFound = "search.index_not_found"

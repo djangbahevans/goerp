@@ -179,8 +179,9 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	}
 
 	// eventInsertClient is a separate, never-started river.Client[*sql.Tx]
-	// purely so host.event.emit_tx's InsertTx can accept the stdlib *sql.Tx
-	// modCtx.Transaction returns — the engine's own job-working client
+	// purely so host.event.emit_tx's and host.jobs.enqueue_tx's InsertTx
+	// can accept the stdlib *sql.Tx modCtx.Transaction returns — the
+	// engine's own job-working client
 	// (jobqueue.New) is pgx-based and generic over pgx.Tx, incompatible
 	// with that transaction type. A job inserted through this client is
 	// fully visible to and worked by the pgx-based client regardless
@@ -203,6 +204,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := registerHostEvent(ctx, rt, r, eventInsertClient); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.event: %w", err)
+	}
+
+	if err := registerHostJobs(ctx, rt, r, eventInsertClient); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.jobs: %w", err)
 	}
 
 	filesStore := files.NewStore(db)

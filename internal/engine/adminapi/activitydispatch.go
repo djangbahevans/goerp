@@ -165,8 +165,11 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		ComputedIndex:       snap.ComputedIndex(),
 		ComputeTargets:      registry.ComputeTargets(snap),
 		PermissionRegistry:  snap.PermissionRegistry(),
+		SearchIndexRegistry: snap.SearchIndexRegistry(),
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
+		ConfigSchema:        mod.Manifest.ConfigSchema,
+		JobTypes:            mod.Manifest.JobTypes,
 		ORMBulkMaxRows:      h.deps.ORMBulkMaxRows,
 		ORMStatementTimeout: h.deps.ORMStatementTimeout,
 	})

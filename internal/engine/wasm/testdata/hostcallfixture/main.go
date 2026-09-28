@@ -1,9 +1,10 @@
 // Command hostcallfixture is a real Go module compiled to wasip1 WASM for
 // internal/engine/wasm's own module-side host-call FFI tests (goerp#432)
-// — it calls OUT to host.db/host.event through the real sdk/go/db and
-// sdk/go/events packages (db.Begin/events.EmitTx/tx.Commit,
-// events.Emit(..., events.WithSync()), tx.Lock/tx.TryLock — goerp#508),
-// rather than a hand-assembled bytecode stand-in.
+// — it calls OUT to host.db/host.event/host.jobs through the real
+// sdk/go/db, sdk/go/events and sdk/go/jobs packages
+// (db.Begin/events.EmitTx/tx.Commit, events.Emit(..., events.WithSync()),
+// tx.Lock/tx.TryLock, jobs.EnqueueTx), rather than a hand-assembled
+// bytecode stand-in.
 //
 // Must be built with:
 //
@@ -14,6 +15,7 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/events"
+	"github.com/djangbahevans/goerp/sdk/go/jobs"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -23,6 +25,7 @@ import (
 type flowResult struct {
 	OK      bool   `msgpack:"ok"`
 	EventID string `msgpack:"event_id,omitempty"`
+	JobID   string `msgpack:"job_id,omitempty"`
 	Error   string `msgpack:"error,omitempty"`
 }
 
@@ -54,6 +57,27 @@ func runEmitTxFlow() uint64 {
 	}
 
 	return writeResult(flowResult{OK: true, EventID: eventID})
+}
+
+//go:wasmexport run_enqueue_tx_flow
+func runEnqueueTxFlow() uint64 {
+	tx, err := db.Begin()
+	if err != nil {
+		return writeResult(flowResult{Error: "begin: " + err.Error()})
+	}
+
+	jobID, err := jobs.EnqueueTx(tx, "contacts_import", map[string]any{"file_id": "e2e"},
+		jobs.OnQueue(jobs.QueueBulk), jobs.WithIdempotencyKey("import:e2e"))
+	if err != nil {
+		_ = tx.Rollback()
+		return writeResult(flowResult{Error: "enqueue_tx: " + err.Error()})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return writeResult(flowResult{Error: "commit: " + err.Error()})
+	}
+
+	return writeResult(flowResult{OK: true, JobID: jobID})
 }
 
 //go:wasmexport run_emit_sync_flow
