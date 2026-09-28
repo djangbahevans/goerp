@@ -1,6 +1,6 @@
 // Package notifconfig is the tenant-level notification configuration
 // (notification-system.md §13): the platform-wide per-channel kill
-// switches, the email provider section, the SMS/push connector sections,
+// switches, the email provider section, the SMS sender ID,
 // and per-notification-type tenant default channels. Every key lives in
 // module_config under the reserved "engine" namespace and resolves
 // through tenantconfig.Resolver like any module's own config.
@@ -43,9 +43,7 @@ const (
 	KeySMTPPassword = "notifications.email.smtp.password"
 	KeySMTPUseTLS   = "notifications.email.smtp.use_tls"
 
-	KeySMSConnector  = "notifications.sms.connector"
-	KeySMSSenderID   = "notifications.sms.sender_id"
-	KeyPushConnector = "notifications.push.connector"
+	KeySMSSenderID = "notifications.sms.sender_id"
 
 	KeyDefaults = "notification_defaults"
 )
@@ -80,9 +78,7 @@ var Schema = []manifest.ConfigEntry{
 	{Key: KeySMTPPassword, Type: "string", Encrypted: true},
 	{Key: KeySMTPUseTLS, Type: "boolean", Default: true},
 
-	{Key: KeySMSConnector, Type: "string"},
 	{Key: KeySMSSenderID, Type: "string"},
-	{Key: KeyPushConnector, Type: "string"},
 
 	{Key: KeyDefaults, Type: "json"},
 }
@@ -112,8 +108,7 @@ type Config struct {
 	PushEnabled  bool
 
 	Email EmailConfig
-	SMS   ConnectorConfig
-	Push  ConnectorConfig
+	SMS   SMSConfig
 
 	// Defaults maps a notification type to the channels it routes to for
 	// a user with no preference of their own, overriding the type's
@@ -138,11 +133,11 @@ type SMTPConfig struct {
 	UseTLS   bool
 }
 
-// ConnectorConfig is tenant-facing only: dispatch resolves the handling
-// connector through tenant_provider_selections, not Connector.
-type ConnectorConfig struct {
-	Connector string
-	SenderID  string
+// SMSConfig holds engine-level SMS settings the engine passes to the
+// selected connector in the sms_send payload; the connector itself is
+// chosen by tenant_provider_selections.
+type SMSConfig struct {
+	SenderID string
 }
 
 // DefaultChannels is routing step 2: the tenant's notification_defaults
@@ -224,8 +219,7 @@ func (s *Service) Load(ctx context.Context, tenantID string) (*Config, error) {
 				UseTLS:   boolean(KeySMTPUseTLS),
 			},
 		},
-		SMS:      ConnectorConfig{Connector: str(KeySMSConnector), SenderID: str(KeySMSSenderID)},
-		Push:     ConnectorConfig{Connector: str(KeyPushConnector)},
+		SMS:      SMSConfig{SenderID: str(KeySMSSenderID)},
 		Defaults: defaults,
 	}, nil
 }
