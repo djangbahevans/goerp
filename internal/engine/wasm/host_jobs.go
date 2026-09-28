@@ -11,6 +11,7 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/tetratelabs/wazero"
@@ -37,14 +38,21 @@ var enqueueableQueues = map[string]bool{
 	jobqueue.QueueSearch:   true,
 }
 
-// registerHostJobs attaches host.jobs.enqueue and host.jobs.enqueue_tx.
+// registerHostJobs attaches host.jobs: enqueue/enqueue_tx for the calling
+// module's own job types, enqueue_provider/enqueue_provider_tx and
+// dispatch_provider_sync for provider-category jobs (host_jobs_provider.go),
+// and set_result for a handler answering dispatch_provider_sync.
 // insertClient is the never-started database/sql River client
-// registerHostEvent also uses, so enqueue_tx can insert on the *sql.Tx a
-// module opened through host.db.begin.
+// registerHostEvent also uses, so the _tx variants can insert on the
+// *sql.Tx a module opened through host.db.begin.
 func registerHostJobs(ctx context.Context, rt wazero.Runtime, r *Runtime, insertClient *river.Client[*sql.Tx]) error {
 	_, err := rt.NewHostModuleBuilder("host.jobs").
 		NewFunctionBuilder().WithFunc(makeJobsEnqueue(r, insertClient)).Export("enqueue").
 		NewFunctionBuilder().WithFunc(makeJobsEnqueueTx(r, insertClient)).Export("enqueue_tx").
+		NewFunctionBuilder().WithFunc(makeJobsEnqueueProvider(r, insertClient)).Export("enqueue_provider").
+		NewFunctionBuilder().WithFunc(makeJobsEnqueueProviderTx(r, insertClient)).Export("enqueue_provider_tx").
+		NewFunctionBuilder().WithFunc(makeJobsDispatchProviderSync(r)).Export("dispatch_provider_sync").
+		NewFunctionBuilder().WithFunc(makeJobsSetResult(r)).Export("set_result").
 		Instantiate(ctx)
 	return err
 }
@@ -127,11 +135,14 @@ func writeJobInsertResult(ctx context.Context, m api.Module, allocate api.Functi
 }
 
 // jobMetadata is stamped onto every module-enqueued River job's metadata,
-// so the job's origin is visible without decoding its args.
+// so the job's origin is visible without decoding its args. ModuleName is
+// the module whose handler runs the job; EnqueuedBy is set only for a
+// provider-category job, where that is not the enqueuing module.
 type jobMetadata struct {
 	TenantID   string `json:"tenant_id"`
 	ModuleName string `json:"module_name"`
 	TraceID    string `json:"trace_id,omitempty"`
+	EnqueuedBy string `json:"enqueued_by,omitempty"`
 }
 
 // buildJobInsert validates one host.jobs enqueue against the calling
@@ -146,7 +157,16 @@ func buildJobInsert(modCtx *ModuleContext, jobType string, payload []byte, o abi
 			Message: fmt.Sprintf("job type %q is not in this module's declared job_types", jobType),
 		}
 	}
+	return buildJobInsertFor(modCtx, jt, modCtx.ModuleName, "", payload, o, now)
+}
 
+// buildJobInsertFor builds the River insert for a jt job handled by
+// moduleName. providerCategory is empty for the calling module's own job
+// types, whose moduleName is the caller itself; for a provider-category job
+// it names the category moduleName was resolved for, and jt carries only
+// the standardized job name, so its options fall straight back to the
+// engine defaults.
+func buildJobInsertFor(modCtx *ModuleContext, jt manifest.JobType, moduleName, providerCategory string, payload []byte, o abiv1.JobEnqueueOptions, now time.Time) (jobqueue.WASMJobArgs, *river.InsertOpts, *abiv1.HostError) {
 	if len(payload) > maxJobPayloadBytes {
 		return jobqueue.WASMJobArgs{}, nil, &abiv1.HostError{
 			Code:    abiv1.ErrCodeJobsPayloadTooLarge,
@@ -185,20 +205,26 @@ func buildJobInsert(modCtx *ModuleContext, jobType string, payload []byte, o abi
 		idempotencyKey, _ = extractPayloadField(payload, jt.UniqueBy)
 	}
 
-	metadata, err := json.Marshal(jobMetadata{TenantID: modCtx.TenantID, ModuleName: modCtx.ModuleName, TraceID: modCtx.TraceID})
+	var enqueuedBy string
+	if providerCategory != "" {
+		enqueuedBy = modCtx.ModuleName
+	}
+	metadata, err := json.Marshal(jobMetadata{TenantID: modCtx.TenantID, ModuleName: moduleName, TraceID: modCtx.TraceID, EnqueuedBy: enqueuedBy})
 	if err != nil {
 		return jobqueue.WASMJobArgs{}, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 
 	args := jobqueue.WASMJobArgs{
-		ModuleName:     modCtx.ModuleName,
-		JobType:        jobType,
-		Payload:        payload,
-		TenantID:       modCtx.TenantID,
-		Queue:          queue,
-		MaxAttempts:    maxAttempts,
-		IdempotencyKey: idempotencyKey,
-		TraceID:        modCtx.TraceID,
+		ModuleName:       moduleName,
+		JobType:          jt.Name,
+		Payload:          payload,
+		TenantID:         modCtx.TenantID,
+		Queue:            queue,
+		MaxAttempts:      maxAttempts,
+		IdempotencyKey:   idempotencyKey,
+		TraceID:          modCtx.TraceID,
+		ProviderCategory: providerCategory,
+		EnqueuedBy:       enqueuedBy,
 	}
 	opts := &river.InsertOpts{
 		Queue:       queue,

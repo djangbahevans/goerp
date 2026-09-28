@@ -591,6 +591,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	// populated Snapshot() the same way every other ModuleRegistry-backed
 	// worker does.
 	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry})
+	runtime.SetSyncJobDispatcher(&jobdispatch.SyncDispatcher{ModuleRegistry: moduleRegistry, Runtime: runtime})
+	runtime.SetProviderStore(providerselect.NewStore(primaryPool))
 	snap, err := moduleRegistry.Update(loadedModules)
 	if err != nil {
 		closeOnFailure()

@@ -43,6 +43,18 @@ func isSingleActive(category string) bool {
 	return slices.Contains(singleActiveCategories, category)
 }
 
+// IsCategory reports whether category is one of the provider categories a
+// connector manifest can declare, single- or multi-active.
+func IsCategory(category string) bool {
+	return IsMultiActive(category) || isSingleActive(category)
+}
+
+// IsMultiActive reports whether category is multi-active: its callers must
+// always name the target module, since Resolve refuses it.
+func IsMultiActive(category string) bool {
+	return category == CategoryPayment
+}
+
 // selected_by is SET NULL on user deletion: a selection outlives the admin
 // who made it.
 const createTenantProviderSelectionsTable = `
@@ -215,4 +227,22 @@ func (s *Store) EnabledProviders(ctx context.Context, tenantID, category string)
 		return nil, fmt.Errorf("list enabled providers: %w", err)
 	}
 	return providers, nil
+}
+
+// IsEnabledProvider reports whether moduleName is installed and enabled for
+// tenantID with category as its provider_category — the check an
+// explicitly targeted provider job (connector-guide.md §7 "Multi-active
+// categories") gets in place of Resolve.
+func (s *Store) IsEnabledProvider(ctx context.Context, tenantID, moduleName, category string) (bool, error) {
+	var ok bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM system.tenant_module_settings
+			WHERE tenant_id = $1 AND module_name = $2 AND provider_category = $3 AND enabled
+		)
+	`, tenantID, moduleName, category).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("check enabled provider: %w", err)
+	}
+	return ok, nil
 }

@@ -425,6 +425,19 @@ func TestStorageSearchAuthzEventWireFields(t *testing.T) {
 		{"JobsEnqueueInput", JobsEnqueueInput{}, []string{"type", "payload", "opts"}},
 		{"JobsEnqueueTxInput", JobsEnqueueTxInput{}, []string{"tx_id", "type", "payload", "opts"}},
 		{"JobsEnqueueOutput", JobsEnqueueOutput{}, []string{"job_id", "deduplicated"}},
+		{"JobsEnqueueProviderInput", JobsEnqueueProviderInput{ProviderModule: "m"},
+			[]string{"category", "job_type", "payload", "provider_module", "opts"}},
+		{"JobsEnqueueProviderInput omits empty provider_module", JobsEnqueueProviderInput{},
+			[]string{"category", "job_type", "payload", "opts"}},
+		{"JobsEnqueueProviderTxInput", JobsEnqueueProviderTxInput{ProviderModule: "m"},
+			[]string{"tx_id", "category", "job_type", "payload", "provider_module", "opts"}},
+		{"JobsEnqueueProviderOutput", JobsEnqueueProviderOutput{}, []string{"job_id", "deduplicated", "resolved_module"}},
+		{"JobsDispatchProviderSyncInput", JobsDispatchProviderSyncInput{TimeoutMs: 1},
+			[]string{"category", "provider_module", "job_type", "payload", "timeout_ms"}},
+		{"JobsDispatchProviderSyncOutput", JobsDispatchProviderSyncOutput{ResultPayload: []byte{1}}, []string{"result_payload"}},
+		{"JobsDispatchProviderSyncOutput omits an unset result", JobsDispatchProviderSyncOutput{}, nil},
+		{"JobsSetResultInput", JobsSetResultInput{}, []string{"value"}},
+		{"JobsSetResultOutput", JobsSetResultOutput{}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

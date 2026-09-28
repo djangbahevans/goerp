@@ -74,6 +74,12 @@ type Config struct {
 	// of and nested inside the emitter's own request timeout.
 	SyncSubscriberTimeout time.Duration `env:"GOERP_SYNC_SUBSCRIBER_TIMEOUT" envDefault:"3s"`
 
+	// SyncProviderTimeout is host.jobs.dispatch_provider_sync's default
+	// budget when the caller gives no timeout_ms (host-abi-reference.md
+	// §10) — higher than SyncSubscriberTimeout, since the target handler
+	// is expected to make its own outbound API call.
+	SyncProviderTimeout time.Duration `env:"GOERP_SYNC_PROVIDER_TIMEOUT" envDefault:"15s"`
+
 	// Database
 	DBPrimaryDSN                string `env:"GOERP_DB_PRIMARY_DSN,required"`
 	DBReplicaDSN                string `env:"GOERP_DB_REPLICA_DSN"`

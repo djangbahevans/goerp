@@ -34,6 +34,9 @@ type Runtime struct {
 	eventInsertClient     *river.Client[*sql.Tx]
 	syncEventDispatcher   SyncEventDispatcher
 	syncSubscriberTimeout time.Duration
+	syncJobDispatcher     SyncJobDispatcher
+	syncProviderTimeout   time.Duration
+	providerStore         ProviderStore
 	replicaDB             atomic.Pointer[sql.DB]
 	schemaSyncDB          atomic.Pointer[sql.DB]
 	ormBulkMaxRows        int
@@ -94,6 +97,21 @@ func (r *Runtime) SetRowCryptKeys(keys *rowcrypt.RowKeySet) {
 // dereference.
 func (r *Runtime) SetSyncEventDispatcher(d SyncEventDispatcher) {
 	r.syncEventDispatcher = d
+}
+
+// SetSyncJobDispatcher wires the resolver host.jobs.dispatch_provider_sync
+// uses to invoke another module's handle_job export in-process — set after
+// New returns for the same reason as SetSyncEventDispatcher. Nil until
+// then, in which case dispatch_provider_sync returns abi.unavailable.
+func (r *Runtime) SetSyncJobDispatcher(d SyncJobDispatcher) {
+	r.syncJobDispatcher = d
+}
+
+// SetProviderStore wires the tenant provider lookups host.jobs'
+// provider-category functions route through. Unset, they return
+// abi.unavailable.
+func (r *Runtime) SetProviderStore(s ProviderStore) {
+	r.providerStore = s
 }
 
 // SetReplicaDB wires the read-replica pool host.db.query/query_replica
@@ -164,6 +182,7 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		registry:              newInstanceRegistry(),
 		txLimiter:             NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
 		syncSubscriberTimeout: cfg.SyncSubscriberTimeout,
+		syncProviderTimeout:   cfg.SyncProviderTimeout,
 		ormBulkMaxRows:        cfg.ORMBulkMaxRows,
 		ormStatementTimeout:   cfg.ORMStatementTimeout,
 	}

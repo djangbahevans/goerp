@@ -3,7 +3,8 @@
 // — it calls OUT to host.db/host.event/host.jobs through the real
 // sdk/go/db, sdk/go/events and sdk/go/jobs packages
 // (db.Begin/events.EmitTx/tx.Commit, events.Emit(..., events.WithSync()),
-// tx.Lock/tx.TryLock, jobs.EnqueueTx), rather than a hand-assembled
+// tx.Lock/tx.TryLock, jobs.EnqueueTx, jobs.EnqueueProviderTx,
+// jobs.DispatchProviderSync), rather than a hand-assembled
 // bytecode stand-in.
 //
 // Must be built with:
@@ -26,6 +27,7 @@ type flowResult struct {
 	OK      bool   `msgpack:"ok"`
 	EventID string `msgpack:"event_id,omitempty"`
 	JobID   string `msgpack:"job_id,omitempty"`
+	Result  string `msgpack:"result,omitempty"`
 	Error   string `msgpack:"error,omitempty"`
 }
 
@@ -78,6 +80,40 @@ func runEnqueueTxFlow() uint64 {
 	}
 
 	return writeResult(flowResult{OK: true, JobID: jobID})
+}
+
+//go:wasmexport run_enqueue_provider_tx_flow
+func runEnqueueProviderTxFlow() uint64 {
+	tx, err := db.Begin()
+	if err != nil {
+		return writeResult(flowResult{Error: "begin: " + err.Error()})
+	}
+
+	jobID, err := jobs.EnqueueProviderTx(tx, "sms_provider", "sms_send",
+		map[string]any{"schema_version": 1, "to": "+233200000000", "body": "e2e"})
+	if err != nil {
+		_ = tx.Rollback()
+		return writeResult(flowResult{Error: "enqueue_provider_tx: " + err.Error()})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return writeResult(flowResult{Error: "commit: " + err.Error()})
+	}
+
+	return writeResult(flowResult{OK: true, JobID: jobID})
+}
+
+//go:wasmexport run_dispatch_provider_sync_flow
+func runDispatchProviderSyncFlow() uint64 {
+	var result struct {
+		CheckoutURL string `msgpack:"checkout_url"`
+	}
+	err := jobs.DispatchProviderSync("payment_provider", "connector_paystack", "payment_charge",
+		map[string]any{"schema_version": 1, "amount": 1000}, &result)
+	if err != nil {
+		return writeResult(flowResult{Error: "dispatch_provider_sync: " + err.Error()})
+	}
+	return writeResult(flowResult{OK: true, Result: result.CheckoutURL})
 }
 
 //go:wasmexport run_emit_sync_flow

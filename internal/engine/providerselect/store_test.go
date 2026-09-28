@@ -285,3 +285,39 @@ func TestSetPrimary_ConcurrentSwitchesLeaveOneRow(t *testing.T) {
 		t.Fatalf("Resolve() = %q, want one of %v", got, modules)
 	}
 }
+
+func TestIsEnabledProvider(t *testing.T) {
+	f := newFixture(t)
+	f.install(t, "connector_paystack", CategoryPayment, true)
+	f.install(t, "connector_mtn_momo", CategoryPayment, false)
+	f.install(t, "connector_twilio", CategorySMS, true)
+
+	for _, tt := range []struct {
+		module, category string
+		want             bool
+	}{
+		{"connector_paystack", CategoryPayment, true},
+		{"connector_mtn_momo", CategoryPayment, false},
+		{"connector_twilio", CategoryPayment, false},
+		{"connector_missing", CategoryPayment, false},
+	} {
+		got, err := f.store.IsEnabledProvider(t.Context(), f.tenantID, tt.module, tt.category)
+		if err != nil || got != tt.want {
+			t.Errorf("IsEnabledProvider(%s, %s) = %v, %v; want %v", tt.module, tt.category, got, err, tt.want)
+		}
+	}
+}
+
+func TestIsCategory(t *testing.T) {
+	for _, c := range []string{CategorySMS, CategoryPush, CategoryOAuth, CategoryPayment} {
+		if !IsCategory(c) {
+			t.Errorf("IsCategory(%q) = false", c)
+		}
+	}
+	if IsCategory("email_provider") || IsCategory("") {
+		t.Error("IsCategory accepted a non-provider category")
+	}
+	if !IsMultiActive(CategoryPayment) || IsMultiActive(CategorySMS) {
+		t.Error("IsMultiActive: only payment_provider is multi-active")
+	}
+}

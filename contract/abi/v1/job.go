@@ -45,3 +45,63 @@ type JobsEnqueueOutput struct {
 	JobID        string `msgpack:"job_id"`
 	Deduplicated bool   `msgpack:"deduplicated"`
 }
+
+// JobsEnqueueProviderInput is the request of host.jobs.enqueue_provider: a
+// provider-category job (connector-guide.md §7) dispatched to the tenant's
+// active provider for Category, or to ProviderModule when given.
+type JobsEnqueueProviderInput struct {
+	Category       string            `msgpack:"category"`
+	JobType        string            `msgpack:"job_type"`
+	Payload        []byte            `msgpack:"payload"`
+	ProviderModule string            `msgpack:"provider_module,omitempty"`
+	Opts           JobEnqueueOptions `msgpack:"opts"`
+}
+
+// JobsEnqueueProviderTxInput is the request of
+// host.jobs.enqueue_provider_tx: the shape of JobsEnqueueProviderInput
+// scoped to an open host.db transaction.
+type JobsEnqueueProviderTxInput struct {
+	TxID           string            `msgpack:"tx_id"`
+	Category       string            `msgpack:"category"`
+	JobType        string            `msgpack:"job_type"`
+	Payload        []byte            `msgpack:"payload"`
+	ProviderModule string            `msgpack:"provider_module,omitempty"`
+	Opts           JobEnqueueOptions `msgpack:"opts"`
+}
+
+// JobsEnqueueProviderOutput is the response of
+// host.jobs.enqueue_provider/enqueue_provider_tx: JobsEnqueueOutput plus
+// the module the job was dispatched to.
+type JobsEnqueueProviderOutput struct {
+	JobID          string `msgpack:"job_id"`
+	Deduplicated   bool   `msgpack:"deduplicated"`
+	ResolvedModule string `msgpack:"resolved_module"`
+}
+
+// JobsDispatchProviderSyncInput is the request of
+// host.jobs.dispatch_provider_sync. TimeoutMs zero means the engine's
+// GOERP_SYNC_PROVIDER_TIMEOUT default.
+type JobsDispatchProviderSyncInput struct {
+	Category       string `msgpack:"category"`
+	ProviderModule string `msgpack:"provider_module"`
+	JobType        string `msgpack:"job_type"`
+	Payload        []byte `msgpack:"payload"`
+	TimeoutMs      int64  `msgpack:"timeout_ms,omitempty"`
+}
+
+// JobsDispatchProviderSyncOutput is the response of
+// host.jobs.dispatch_provider_sync. ResultPayload is the msgpack value the
+// handler passed to host.jobs.set_result, nil when it set none.
+type JobsDispatchProviderSyncOutput struct {
+	ResultPayload []byte `msgpack:"result_payload,omitempty"`
+}
+
+// JobsSetResultInput is the request of host.jobs.set_result: the
+// msgpack-encoded value a job handler hands back to a
+// host.jobs.dispatch_provider_sync caller.
+type JobsSetResultInput struct {
+	Value []byte `msgpack:"value"`
+}
+
+// JobsSetResultOutput is the empty response of host.jobs.set_result.
+type JobsSetResultOutput struct{}

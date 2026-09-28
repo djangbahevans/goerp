@@ -69,6 +69,7 @@ type flowResult struct {
 	OK      bool   `msgpack:"ok"`
 	EventID string `msgpack:"event_id,omitempty"`
 	JobID   string `msgpack:"job_id,omitempty"`
+	Result  string `msgpack:"result,omitempty"`
 	Error   string `msgpack:"error,omitempty"`
 }
 
