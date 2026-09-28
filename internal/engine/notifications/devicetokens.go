@@ -21,16 +21,31 @@ const DeviceTokenStaleAfter = 90 * 24 * time.Hour
 
 // RegisterDeviceToken upserts userID's token: a first registration inserts
 // it, and a repeat one refreshes last_seen_at and app_version. appVersion
-// "" stores NULL.
+// "" stores NULL. A token belongs to one device, so registering it also
+// removes it from any other user in the tenant — the previous user of a
+// shared device stops getting pushes on it.
 func (s *Store) RegisterDeviceToken(ctx context.Context, tenantSlug, tenantID, userID, platform, token, appVersion string) error {
-	query := fmt.Sprintf(`
+	schema := tenantschema.Name(tenantSlug)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("register device token: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	release := fmt.Sprintf(`DELETE FROM %s.user_device_tokens WHERE tenant_id = $1 AND token = $2 AND user_id <> $3`, schema)
+	if _, err := tx.ExecContext(ctx, release, tenantID, token, userID); err != nil {
+		return fmt.Errorf("register device token: %w", err)
+	}
+	upsert := fmt.Sprintf(`
 		INSERT INTO %s.user_device_tokens (tenant_id, user_id, platform, token, app_version)
 		VALUES ($1, $2, $3, $4, NULLIF($5, ''))
 		ON CONFLICT (tenant_id, user_id, token) DO UPDATE
 		SET last_seen_at = NOW(), app_version = EXCLUDED.app_version
-	`, tenantschema.Name(tenantSlug))
-
-	if _, err := s.db.ExecContext(ctx, query, tenantID, userID, platform, token, appVersion); err != nil {
+	`, schema)
+	if _, err := tx.ExecContext(ctx, upsert, tenantID, userID, platform, token, appVersion); err != nil {
+		return fmt.Errorf("register device token: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("register device token: %w", err)
 	}
 	return nil
@@ -74,6 +89,11 @@ func (s *Store) BootstrapDeviceTokens(ctx context.Context, tenantSlug string) er
 		fmt.Sprintf(`
 			CREATE INDEX IF NOT EXISTS idx_device_tokens_user
 			    ON %s.user_device_tokens (tenant_id, user_id)
+		`, schema),
+		// RegisterDeviceToken finds a token's other users by it.
+		fmt.Sprintf(`
+			CREATE INDEX IF NOT EXISTS idx_device_tokens_token
+			    ON %s.user_device_tokens (tenant_id, token)
 		`, schema),
 	})
 }

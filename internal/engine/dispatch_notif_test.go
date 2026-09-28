@@ -360,12 +360,36 @@ func TestDispatchNotifDeviceTokenRoute_UpsertsTheCallersToken(t *testing.T) {
 		t.Errorf("app_version = %v, want 1.3.0", again[0].appVersion)
 	}
 
-	// The same token for another user, or with no app_version, is its own row.
-	if w := f.registerToken(t, f.otherID, map[string]any{"platform": "web", "token": "fcm-token"}); w.Code != http.StatusNoContent {
-		t.Fatalf("other user's register status = %d, want 204; body: %s", w.Code, w.Body.String())
+	// A different token is its own row.
+	if w := f.registerToken(t, f.callerID, map[string]any{"platform": "web", "token": "web-token"}); w.Code != http.StatusNoContent {
+		t.Fatalf("second token register status = %d, want 204; body: %s", w.Code, w.Body.String())
 	}
-	if all := f.deviceTokens(t); len(all) != 2 || all[1].userID != f.otherID || all[1].appVersion != nil {
-		t.Errorf("tokens = %+v, want a second row for the other user with no app_version", all)
+	if all := f.deviceTokens(t); len(all) != 2 || all[1].token != "web-token" || all[1].appVersion != nil {
+		t.Errorf("tokens = %+v, want a second row for web-token with no app_version", all)
+	}
+}
+
+func TestDispatchNotifDeviceTokenRoute_MovesASharedDevicesTokenToItsNewUser(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	for _, userID := range []string{f.callerID, f.otherID} {
+		if w := f.registerToken(t, userID, map[string]any{"platform": "ios", "token": "shared-device"}); w.Code != http.StatusNoContent {
+			t.Fatalf("register status = %d, want 204; body: %s", w.Code, w.Body.String())
+		}
+	}
+	all := f.deviceTokens(t)
+	if len(all) != 1 || all[0].userID != f.otherID {
+		t.Fatalf("tokens = %+v, want only the latest user's row", all)
+	}
+
+	// The previous user's other devices keep their tokens.
+	if w := f.registerToken(t, f.callerID, map[string]any{"platform": "android", "token": "own-device"}); w.Code != http.StatusNoContent {
+		t.Fatalf("register status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+	if w := f.registerToken(t, f.otherID, map[string]any{"platform": "ios", "token": "shared-device"}); w.Code != http.StatusNoContent {
+		t.Fatalf("register status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+	if got := f.deviceTokens(t); len(got) != 2 {
+		t.Errorf("tokens = %+v, want the shared device's row and the previous user's own device", got)
 	}
 }
 
