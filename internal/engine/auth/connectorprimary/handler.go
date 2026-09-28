@@ -31,7 +31,7 @@ const adminRoleName = "admin"
 // AuditEmitter mirrors planchange's own accept-an-interface-where-used
 // convention; a nil AuditEmitter is logged rather than failing the request.
 type AuditEmitter interface {
-	Emit(ctx context.Context, tenantSlug, eventName string, payload map[string]any) error
+	Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error
 }
 
 type Handler struct {
@@ -128,10 +128,9 @@ func (h *Handler) emitAudit(ctx context.Context, tenantSlug, performedBy, module
 		log.Warn().Str("tenant", tenantSlug).Str("event", event).Msg("connectorprimary: no audit emitter wired, event not recorded")
 		return
 	}
-	if err := h.audit.Emit(ctx, tenantSlug, event, map[string]any{
-		"performed_by": performedBy,
-		"module_name":  moduleName,
-		"category":     category,
+	if err := h.audit.Emit(ctx, tenantSlug, event, "", performedBy, map[string]any{
+		"module_name": moduleName,
+		"category":    category,
 	}); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantSlug).Str("event", event).Msg("connectorprimary: audit emit failed")
 	}

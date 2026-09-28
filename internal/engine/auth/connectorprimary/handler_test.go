@@ -41,10 +41,10 @@ type spyAudit struct {
 	events []map[string]any
 }
 
-func (a *spyAudit) Emit(ctx context.Context, tenantSlug, eventName string, payload map[string]any) error {
+func (a *spyAudit) Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.events = append(a.events, map[string]any{"tenant": tenantSlug, "event": eventName, "payload": payload})
+	a.events = append(a.events, map[string]any{"tenant": tenantSlug, "event": eventName, "user_id": userID, "actor_user_id": actorUserID, "payload": payload})
 	return nil
 }
 
@@ -267,7 +267,8 @@ func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 
 func TestServeSetPrimary_SwitchesProviderImmediately(t *testing.T) {
 	f := newFixture(t)
-	token := f.issueAccessToken(t, f.createUserWithRole(t, "admin"))
+	adminID := f.createUserWithRole(t, "admin")
+	token := f.issueAccessToken(t, adminID)
 	f.install(t, "connector_twilio", providerselect.CategorySMS)
 	f.install(t, "connector_africastalking", providerselect.CategorySMS)
 
@@ -294,6 +295,14 @@ func TestServeSetPrimary_SwitchesProviderImmediately(t *testing.T) {
 	}
 	if n := f.audit.count(); n != 2 {
 		t.Fatalf("audit events = %d, want 2", n)
+	}
+	for _, e := range f.audit.events {
+		if e["user_id"] != "" || e["actor_user_id"] != adminID {
+			t.Errorf("%s user_id/actor_user_id = %q/%q, want \"\"/%q", e["event"], e["user_id"], e["actor_user_id"], adminID)
+		}
+		if _, ok := e["payload"].(map[string]any)["performed_by"]; ok {
+			t.Errorf("%s payload contains performed_by", e["event"])
+		}
 	}
 }
 
