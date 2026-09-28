@@ -172,7 +172,9 @@ func loadPreferences(ctx context.Context, q queryer, tenantSlug, tenantID, userI
 // UpdatePreferences applies global, when non-nil, to userID's global row,
 // then each of types to that type's row, creating rows as needed. A new
 // type row takes any channel its patch leaves unset from the (updated)
-// global row. Invalidates the user's cached preferences.
+// global row. A type whose patched settings equal the global row has its
+// row removed instead, so it follows global again. Invalidates the user's
+// cached preferences.
 func (s *Store) UpdatePreferences(ctx context.Context, tenantSlug, tenantID, userID string, global *ChannelsPatch, types map[string]ChannelsPatch) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -193,6 +195,10 @@ func (s *Store) UpdatePreferences(ctx context.Context, tenantSlug, tenantID, use
 		    push_enabled  = EXCLUDED.push_enabled,
 		    updated_at    = NOW()
 	`, tenantschema.Name(tenantSlug))
+	deleteType := fmt.Sprintf(`
+		DELETE FROM %s.notification_preferences
+		WHERE tenant_id = $1 AND user_id = $2 AND notification_type = $3
+	`, tenantschema.Name(tenantSlug))
 
 	if global != nil {
 		current.Global = global.apply(current.Global)
@@ -206,6 +212,12 @@ func (s *Store) UpdatePreferences(ctx context.Context, tenantSlug, tenantID, use
 			base = current.Global
 		}
 		c := patch.apply(base)
+		if c == current.Global {
+			if _, err := tx.ExecContext(ctx, deleteType, tenantID, userID, typ); err != nil {
+				return fmt.Errorf("reset %s notification preferences: %w", typ, err)
+			}
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, upsert, tenantID, userID, typ, c.Email, c.SMS, c.Push); err != nil {
 			return fmt.Errorf("update %s notification preferences: %w", typ, err)
 		}

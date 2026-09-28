@@ -262,8 +262,8 @@ type notifPreferencesPatch struct {
 
 // dispatchNotifPreferencesRoute is GET /_notif/preferences's handler
 // (notification-system.md §8): the tenant's available channels, the
-// caller's global preferences, and the per-type ones that differ from
-// global.
+// caller's global preferences, and every type they have their own
+// preferences for.
 func (e *Engine) dispatchNotifPreferencesRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx, tenantCtx, ok := notifCaller(w, r)
 	if !ok {
@@ -342,13 +342,7 @@ func (e *Engine) notifPreferences(ctx context.Context, tenantCtx *tenantresolve.
 	if err != nil {
 		return nil, err
 	}
-	types := map[string]notifications.Channels{}
-	for typ, c := range prefs.Types {
-		if c != prefs.Global {
-			types[typ] = c
-		}
-	}
-	return &notifPreferencesResponse{AvailableChannels: available, Global: prefs.Global, Types: types}, nil
+	return &notifPreferencesResponse{AvailableChannels: available, Global: prefs.Global, Types: prefs.Types}, nil
 }
 
 // notifUnsubscribePage is the whole page /_notif/unsubscribe answers with.

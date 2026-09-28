@@ -8,8 +8,8 @@ export const TOGGLE_CHANNELS: readonly ToggleChannel[] = ["email", "sms", "push"
 export type ChannelSettings = Record<ToggleChannel, boolean>;
 export type ChannelPatch = Partial<ChannelSettings>;
 
-// GET /_notif/preferences (notification-system.md §8). `types` holds only
-// the types whose settings differ from `global`; the rest inherit it.
+// GET /_notif/preferences (notification-system.md §8). `types` holds the
+// types with their own settings; the rest follow `global`.
 export interface NotificationPreferences {
   availableChannels: string[];
   global: ChannelSettings;
@@ -49,7 +49,8 @@ export function typeSettings(prefs: NotificationPreferences, type: string): Chan
 
 // Applies patch the way the engine does: global first, then each type's
 // patch onto its current settings, or onto the updated global settings for
-// a type that has none of its own.
+// a type that has none of its own. A type patched to equal global drops its
+// own settings and follows global again.
 export function applyPreferencesPatch(
   prefs: NotificationPreferences,
   patch: NotificationPreferencesPatch,
@@ -57,7 +58,9 @@ export function applyPreferencesPatch(
   const global = { ...prefs.global, ...patch.global };
   const types = { ...prefs.types };
   for (const [type, p] of Object.entries(patch.types ?? {})) {
-    types[type] = { ...(prefs.types[type] ?? global), ...p };
+    const next = { ...(prefs.types[type] ?? global), ...p };
+    if (TOGGLE_CHANNELS.every((c) => next[c] === global[c])) delete types[type];
+    else types[type] = next;
   }
   return { ...prefs, global, types };
 }

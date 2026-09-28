@@ -44,21 +44,14 @@ const PREFS: NotificationPreferences = {
   types: { "sales.invoice_overdue": { email: false, sms: false, push: true } },
 };
 
-// An in-memory GET/PATCH /_notif/preferences, including the engine's
-// omission of types whose settings equal global.
+// An in-memory GET/PATCH /_notif/preferences.
 function fakeServer(initial: NotificationPreferences = PREFS) {
   let stored = initial;
-  const respond = (): NotificationPreferences => ({
-    ...stored,
-    types: Object.fromEntries(
-      Object.entries(stored.types).filter(([, c]) => JSON.stringify(c) !== JSON.stringify(stored.global)),
-    ),
-  });
   const client: NotificationPreferencesClient = {
-    get: vi.fn(async () => respond()),
+    get: vi.fn(async () => stored),
     update: vi.fn(async (patch: NotificationPreferencesPatch) => {
       stored = applyPreferencesPatch(stored, patch);
-      return respond();
+      return stored;
     }),
   };
   return client;
@@ -68,10 +61,12 @@ function renderPage({
   client = fakeServer(),
   groups = GROUPS,
   status = "ready",
+  reload = vi.fn(),
 }: {
   client?: NotificationPreferencesClient;
   groups?: NotificationTypeGroup[];
   status?: LoadStatus;
+  reload?: () => void;
 } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const registry = { ...buildEmptyViewRegistry(), notificationTypes: groups };
@@ -79,7 +74,7 @@ function renderPage({
     <QueryClientProvider client={queryClient}>
       <ViewRegistryContext.Provider value={registry}>
         <ViewRegistryStatusContext.Provider value={status}>
-          <NotificationsPage client={client} />
+          <NotificationsPage client={client} reload={reload} />
         </ViewRegistryStatusContext.Provider>
       </ViewRegistryContext.Provider>
     </QueryClientProvider>,
@@ -238,6 +233,30 @@ describe("NotificationsPage", () => {
   });
 });
 
+describe("NotificationsPage schema failure", () => {
+  it("reloads the page to retry a failed schema load", async () => {
+    const reload = vi.fn();
+    renderPage({ status: "error", reload });
+
+    const alert = await screen.findByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("NotificationsPage with a type set back to global", () => {
+  it("follows a later global change for that type", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "Sales" });
+
+    fireEvent.click(checkbox("Email for Invoice overdue"));
+    await waitFor(() => expect(checkbox("Email for Invoice overdue").checked).toBe(true));
+    fireEvent.click(globalSwitch("Email"));
+    await waitFor(() => expect(globalSwitch("Email").checked).toBe(false));
+    expect(checkbox("Email for Invoice overdue").checked).toBe(false);
+  });
+});
+
 describe("applyPreferencesPatch", () => {
   it("fills a new type's unpatched channels from the updated global settings", () => {
     const next = applyPreferencesPatch(PREFS, {
@@ -247,5 +266,10 @@ describe("applyPreferencesPatch", () => {
     expect(next.global).toEqual({ email: true, sms: false, push: false });
     expect(next.types["sales.order_confirmed"]).toEqual({ email: false, sms: false, push: false });
     expect(next.types["sales.invoice_overdue"]).toEqual({ email: false, sms: false, push: true });
+  });
+
+  it("drops a type's own settings once a patch makes them equal global", () => {
+    const next = applyPreferencesPatch(PREFS, { types: { "sales.invoice_overdue": { email: true } } });
+    expect(next.types).toEqual({});
   });
 });

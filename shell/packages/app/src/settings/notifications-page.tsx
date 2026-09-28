@@ -37,11 +37,16 @@ const CHANNEL_LABELS: Record<ToggleChannel, string> = { email: "Email", sms: "SM
 
 export interface NotificationsPageProps {
   client?: NotificationPreferencesClient | undefined;
+  // Retries a failed schema load, which has no refetch of its own.
+  reload?: () => void;
 }
 
 // shell-ux.md §4.2: every toggle saves on change, applied optimistically
 // and reverted with a toast if the save fails.
-export function NotificationsPage({ client = notificationPreferencesClient }: NotificationsPageProps): ReactNode {
+export function NotificationsPage({
+  client = notificationPreferencesClient,
+  reload = () => window.location.reload(),
+}: NotificationsPageProps): ReactNode {
   const registry = useContext(ViewRegistryContext);
   const registryStatus = useViewRegistryStatus();
   const queryClient = useQueryClient();
@@ -111,7 +116,11 @@ export function NotificationsPage({ client = notificationPreferencesClient }: No
       {query.isError || registryStatus === "error" ? (
         <div role="alert" className="flex flex-col items-start gap-2 text-sm">
           <span className="text-text">Couldn't load your notification settings.</span>
-          <Button variant="secondary" size="sm" onClick={() => void query.refetch()}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => (registryStatus === "error" ? reload() : void query.refetch())}
+          >
             Retry
           </Button>
         </div>
