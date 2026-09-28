@@ -36,6 +36,7 @@ export type {
   MetaSchema,
   ModelDef,
   ModuleSchema,
+  NotificationTypeSchema,
   RouteSchema,
   ViewExtensionDef,
   ViewExtensionRef,
@@ -43,7 +44,14 @@ export type {
 } from "./types.js";
 export type { ViewExtensionEntry } from "./view-extension-registry.js";
 export { buildViewExtensionRegistry, ViewExtensionRegistry } from "./view-extension-registry.js";
-export type { NavigationGroup, NavigationItem, ResolvedView, ViewRegistry } from "./view-registry.js";
+export type {
+  NavigationGroup,
+  NavigationItem,
+  NotificationTypeEntry,
+  NotificationTypeGroup,
+  ResolvedView,
+  ViewRegistry,
+} from "./view-registry.js";
 export { buildEmptyViewRegistry, buildViewRegistry, filterViewByCapability } from "./view-registry.js";
 export {
   type LoadStatus,

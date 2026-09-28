@@ -50,6 +50,32 @@ type SchemaModule struct {
 	Permissions  []SchemaPermission     `json:"permissions"`
 	Frontend     *SchemaFrontend        `json:"frontend"`
 	PublicConfig map[string]any         `json:"public_config"`
+	// NotificationTypes is [] rather than omitted when the module declares
+	// none; the shell's notification preferences page lists every module's.
+	NotificationTypes []SchemaNotificationType `json:"notification_types"`
+}
+
+// SchemaNotificationType is shell-architecture.md §9's
+// NotificationTypeSchema: the parts of a manifest notification_types entry
+// a user's preferences page needs.
+type SchemaNotificationType struct {
+	Name              string   `json:"name"`
+	Label             string   `json:"label"`
+	Description       string   `json:"description,omitempty"`
+	AvailableChannels []string `json:"available_channels"`
+}
+
+func schemaNotificationTypesFrom(types []manifest.NotificationType) []SchemaNotificationType {
+	out := make([]SchemaNotificationType, 0, len(types))
+	for _, nt := range types {
+		out = append(out, SchemaNotificationType{
+			Name:              nt.Name,
+			Label:             nt.Label,
+			Description:       nt.Description,
+			AvailableChannels: nt.AvailableChannels,
+		})
+	}
+	return out
 }
 
 // SchemaRoute is shell-architecture.md §9's RouteSchema — a subset of
@@ -217,6 +243,7 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 			Permissions:              m.Manifest.Permissions,
 			Frontend:                 schemaFrontendFor(name, &m.Manifest),
 			PublicConfig:             publicConfig,
+			NotificationTypes:        schemaNotificationTypesFrom(m.Manifest.NotificationTypes),
 		}
 	}
 

@@ -126,3 +126,67 @@ func TestModuleRegistry_Update_SchemaResponseCachedPerSnapshot(t *testing.T) {
 		t.Errorf("updated response route path = %q, want /contacts/other", got)
 	}
 }
+
+func TestBuildSchemaResponse_NotificationTypes(t *testing.T) {
+	sales := manifest.Manifest{Type: "standard", NotificationTypes: []manifest.NotificationType{{
+		Name:              "order_confirmed",
+		Label:             "Order Confirmed",
+		Description:       "Sent when a sales order is confirmed",
+		DefaultChannels:   []string{"in_app", "email"},
+		AvailableChannels: []string{"in_app", "email", "push"},
+		Templates:         map[string]string{"email": "notifications/order_confirmed/email.{locale}.html"},
+	}}}
+	modules := map[string]*module.LoadedModule{
+		"sales":    {Status: module.StatusReady, Manifest: sales},
+		"contacts": {Status: module.StatusReady, Manifest: manifest.Manifest{Type: "standard"}},
+	}
+	table, err := buildRouteTable(modules)
+	if err != nil {
+		t.Fatalf("buildRouteTable() error = %v", err)
+	}
+	resp := buildSchemaResponse(modules, table, "")
+
+	out, err := json.Marshal(resp.Modules["sales"].NotificationTypes)
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	want := `[{"name":"order_confirmed","label":"Order Confirmed","description":"Sent when a sales order is confirmed","available_channels":["in_app","email","push"]}]`
+	if string(out) != want {
+		t.Errorf("sales notification_types = %s, want %s", out, want)
+	}
+
+	out, err = json.Marshal(resp.Modules["contacts"])
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	if !strings.Contains(string(out), `"notification_types":[]`) {
+		t.Errorf("contacts module JSON lacks \"notification_types\":[]: %s", out)
+	}
+}
+
+func TestComputeSchemaHash_NotificationTypes(t *testing.T) {
+	hash := func(nt manifest.NotificationType) string {
+		modules := map[string]*module.LoadedModule{"sales": {
+			Status:   module.StatusReady,
+			Manifest: manifest.Manifest{Type: "standard", NotificationTypes: []manifest.NotificationType{nt}},
+		}}
+		table, err := buildRouteTable(modules)
+		if err != nil {
+			t.Fatalf("buildRouteTable() error = %v", err)
+		}
+		return computeSchemaHash(modules, table)
+	}
+	base := manifest.NotificationType{Name: "order_confirmed", Label: "Order Confirmed", AvailableChannels: []string{"in_app", "email"}}
+
+	relabelled := base
+	relabelled.Label = "Order confirmed"
+	if hash(base) == hash(relabelled) {
+		t.Error("schema hash unchanged after a notification type's label changed")
+	}
+
+	retemplated := base
+	retemplated.Templates = map[string]string{"email": "notifications/order_confirmed/email.{locale}.html"}
+	if hash(base) != hash(retemplated) {
+		t.Error("schema hash changed for a templates edit, which the schema response doesn't include")
+	}
+}

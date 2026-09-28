@@ -24,6 +24,7 @@ function moduleSchema(overrides: Partial<MetaSchema["modules"][string]>): MetaSc
     frontend: null,
     view_extensions: [],
     view_extension_definitions: [],
+    notification_types: [],
     load_order: 0,
     public_config: {},
     routes: [],
@@ -478,5 +479,64 @@ describe("buildEmptyViewRegistry", () => {
     expect(registry.getBundleUrl("anything")).toBeNull();
     expect(registry.getBundleSHA256("anything")).toBeNull();
     expect(registry.getModuleDisplayName("anything")).toBeNull();
+    expect(registry.notificationTypes).toEqual([]);
+  });
+});
+
+describe("buildViewRegistry — notificationTypes", () => {
+  it("groups each declaring module's types by display name, with fully-qualified type keys", () => {
+    const registry = buildViewRegistry({
+      engine_version: "test",
+      schema_hash: "abc",
+      modules: {
+        sales: moduleSchema({
+          name: "sales",
+          display_name: "Sales",
+          notification_types: [
+            {
+              name: "order_confirmed",
+              label: "Order Confirmed",
+              description: "Sent when a sales order is confirmed",
+              available_channels: ["in_app", "email", "push"],
+            },
+            { name: "invoice_overdue", label: "Invoice Overdue", available_channels: ["in_app", "email"] },
+          ],
+        }),
+        hr: moduleSchema({
+          name: "hr",
+          display_name: "HR",
+          notification_types: [{ name: "leave_approved", label: "Leave Approved", available_channels: ["in_app"] }],
+        }),
+        contacts: moduleSchema({ name: "contacts", display_name: "Contacts" }),
+      },
+    });
+
+    expect(registry.notificationTypes).toEqual([
+      {
+        module: "hr",
+        displayName: "HR",
+        types: [
+          { type: "hr.leave_approved", label: "Leave Approved", description: null, availableChannels: ["in_app"] },
+        ],
+      },
+      {
+        module: "sales",
+        displayName: "Sales",
+        types: [
+          {
+            type: "sales.order_confirmed",
+            label: "Order Confirmed",
+            description: "Sent when a sales order is confirmed",
+            availableChannels: ["in_app", "email", "push"],
+          },
+          {
+            type: "sales.invoice_overdue",
+            label: "Invoice Overdue",
+            description: null,
+            availableChannels: ["in_app", "email"],
+          },
+        ],
+      },
+    ]);
   });
 });

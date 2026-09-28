@@ -530,8 +530,8 @@ func TestDispatchNotifPreferencesRoute_PatchThenGetReturnsTheSavedValues(t *test
 	if got.Global != wantGlobal {
 		t.Errorf("global = %+v, want %+v", got.Global, wantGlobal)
 	}
-	// A new type row takes unset channels from global; one equal to global
-	// isn't listed.
+	// A new type row takes unset channels from global; a type patched to
+	// equal global keeps no row of its own.
 	wantTypes := map[string]notifications.Channels{"sales.order_confirmed": {Email: false, SMS: true, Push: false}}
 	if fmt.Sprint(got.Types) != fmt.Sprint(wantTypes) {
 		t.Errorf("types = %+v, want %+v", got.Types, wantTypes)
@@ -551,6 +551,46 @@ func TestDispatchNotifPreferencesRoute_PatchThenGetReturnsTheSavedValues(t *test
 	}
 	if got.Global != wantGlobal {
 		t.Errorf("global = %+v after a types-only patch, want %+v", got.Global, wantGlobal)
+	}
+}
+
+func TestDispatchNotifPreferencesRoute_TypeSetBackToGlobalFollowsGlobal(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+
+	for _, body := range []string{
+		`{"types": {"sales.order_confirmed": {"email": false}}}`,
+		`{"types": {"sales.order_confirmed": {"email": true}}}`,
+		`{"global": {"email": false}}`,
+	} {
+		if w := f.patchPreferences(t, body); w.Code != http.StatusOK {
+			t.Fatalf("PATCH %s status = %d; body: %s", body, w.Code, w.Body.String())
+		}
+	}
+
+	got := f.getPreferences(t)
+	if len(got.Types) != 0 {
+		t.Errorf("types = %+v, want none: sales.order_confirmed was set back to global and follows it", got.Types)
+	}
+}
+
+func TestDispatchNotifPreferencesRoute_ListsATypeEqualToGlobalAfterAGlobalChange(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	f.withRealTenant(t)
+
+	for _, body := range []string{
+		`{"types": {"sales.order_confirmed": {"email": false}}}`,
+		`{"global": {"email": false}}`,
+	} {
+		if w := f.patchPreferences(t, body); w.Code != http.StatusOK {
+			t.Fatalf("PATCH %s status = %d; body: %s", body, w.Code, w.Body.String())
+		}
+	}
+
+	got := f.getPreferences(t)
+	want := notifications.Channels{Email: false, SMS: false, Push: true}
+	if c, ok := got.Types["sales.order_confirmed"]; !ok || c != want {
+		t.Errorf("types[sales.order_confirmed] = %+v (present %v), want %+v: its own row still applies", c, ok, want)
 	}
 }
 
@@ -770,6 +810,23 @@ func TestDispatchNotifUnsubscribeRoute_TurnsOffEmailForOneType(t *testing.T) {
 	}
 	if fmt.Sprint(got.Types) != fmt.Sprint(want) {
 		t.Errorf("types = %+v, want %+v", got.Types, want)
+	}
+}
+
+func TestDispatchNotifUnsubscribeRoute_OutlastsGlobalEmailComingBackOn(t *testing.T) {
+	f := newUnsubscribeFixture(t)
+	if w := f.patchPreferences(t, `{"global": {"email": false}}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d; body: %s", w.Code, w.Body.String())
+	}
+	if w := f.unsubscribe(f.host, f.token(t, f.tenantID, "sales.order_confirmed")); w.Code != http.StatusOK {
+		t.Fatalf("unsubscribe status = %d; body: %s", w.Code, w.Body.String())
+	}
+	if w := f.patchPreferences(t, `{"global": {"email": true}}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d; body: %s", w.Code, w.Body.String())
+	}
+
+	if c, ok := f.getPreferences(t).Types["sales.order_confirmed"]; !ok || c.Email {
+		t.Errorf("sales.order_confirmed = %+v (listed %v), want email still off", c, ok)
 	}
 }
 

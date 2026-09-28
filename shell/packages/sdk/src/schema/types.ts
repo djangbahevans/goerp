@@ -122,6 +122,15 @@ export const ViewExtensionDefSchema = v.looseObject({
 });
 export type ViewExtensionDef = v.InferOutput<typeof ViewExtensionDefSchema>;
 
+// shell-architecture.md §9's NotificationTypeSchema.
+export const NotificationTypeSchemaSchema = v.looseObject({
+  name: v.string(),
+  label: v.string(),
+  description: v.optional(v.string()),
+  available_channels: v.array(v.string()),
+});
+export type NotificationTypeSchema = v.InferOutput<typeof NotificationTypeSchemaSchema>;
+
 export const ModuleSchemaSchema = v.looseObject({
   name: v.string(),
   version: v.string(),
@@ -141,6 +150,7 @@ export const ModuleSchemaSchema = v.looseObject({
   permissions: v.array(v.unknown()),
   frontend: v.nullable(v.looseObject({ bundle_url: v.string(), bundle_sha256: v.string() })),
   public_config: v.record(v.string(), v.unknown()),
+  notification_types: v.array(NotificationTypeSchemaSchema),
 });
 export type ModuleSchema = v.InferOutput<typeof ModuleSchemaSchema>;
 

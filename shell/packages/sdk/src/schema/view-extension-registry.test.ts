@@ -17,6 +17,7 @@ function module(
     navigation: [],
     view_extensions: viewExtensions,
     view_extension_definitions: viewExtensionDefinitions,
+    notification_types: [],
     load_order: loadOrder,
     models: {},
     permissions: [],
