@@ -33,6 +33,9 @@ var (
 type Store struct {
 	db    *sql.DB
 	cache *cache.Client
+	// afterLoad, when set, runs between Preferences' database read and its
+	// cache write; tests use it to interleave a write.
+	afterLoad func()
 }
 
 func NewStore(db *sql.DB) *Store {

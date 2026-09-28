@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -79,15 +80,40 @@ func preferencesCacheKey(tenantID, userID string) string {
 	return tenantID + ":notif_prefs:" + userID
 }
 
+// The preference cache entry is a Redis hash: prefsDataField holds the
+// encoded Preferences ("" when not cached), prefsGenField a generation id
+// that every write replaces. A reader caches what it loaded only while the
+// generation it started with is still current, so a read that raced a
+// write can't put the pre-write preferences back.
+const (
+	prefsGenField  = "gen"
+	prefsDataField = "data"
+)
+
 // Preferences returns userID's preferences, from the cache when it holds
 // them. A cache failure falls back to the database.
 func (s *Store) Preferences(ctx context.Context, tenantSlug, tenantID, userID string) (*Preferences, error) {
+	if s.cache == nil {
+		return loadPreferences(ctx, s.db, tenantSlug, tenantID, userID)
+	}
+
 	key := preferencesCacheKey(tenantID, userID)
-	if s.cache != nil {
-		if cached, found, err := s.cache.Get(ctx, key); err == nil && found {
+	gen := ""
+	fields, found, err := s.cache.GetHash(ctx, key)
+	if err == nil {
+		if data := fields[prefsDataField]; found && data != "" {
 			var p Preferences
-			if err := json.Unmarshal([]byte(cached), &p); err == nil {
+			if err := json.Unmarshal([]byte(data), &p); err == nil {
 				return &p, nil
+			}
+		}
+		gen = fields[prefsGenField]
+		if gen == "" {
+			// Start a generation before reading, so a write that commits
+			// after the read below replaces it.
+			gen = uuid.New().String()
+			if _, err := s.cache.CompareAndSetHash(ctx, key, prefsGenField, false, false, "", prefsDataField, "", gen, preferencesCacheTTL); err != nil {
+				gen = ""
 			}
 		}
 	}
@@ -96,9 +122,12 @@ func (s *Store) Preferences(ctx context.Context, tenantSlug, tenantID, userID st
 	if err != nil {
 		return nil, err
 	}
-	if s.cache != nil {
+	if s.afterLoad != nil {
+		s.afterLoad()
+	}
+	if gen != "" {
 		if encoded, err := json.Marshal(p); err == nil {
-			_ = s.cache.SetWithTTL(ctx, key, string(encoded), preferencesCacheTTL)
+			_, _ = s.cache.CompareAndSetHash(ctx, key, prefsGenField, true, true, gen, prefsDataField, string(encoded), gen, preferencesCacheTTL)
 		}
 	}
 	return p, nil
@@ -193,7 +222,8 @@ func (s *Store) invalidatePreferences(ctx context.Context, tenantID, userID stri
 	if s.cache == nil {
 		return
 	}
-	if err := s.cache.Delete(ctx, preferencesCacheKey(tenantID, userID)); err != nil {
+	_, err := s.cache.CompareAndSetHash(ctx, preferencesCacheKey(tenantID, userID), prefsGenField, false, false, "", prefsDataField, "", uuid.New().String(), preferencesCacheTTL)
+	if err != nil {
 		log.Warn().Err(err).Str("tenant_id", tenantID).Str("user_id", userID).Msg("notification preferences: cache invalidation failed")
 	}
 }
