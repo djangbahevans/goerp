@@ -66,7 +66,9 @@ export function useFloatingPanelLayer(anchorRef: RefObject<HTMLElement | null>):
   const [inModal, setInModal] = useState(false);
 
   // A trigger never moves in or out of a modal over its lifetime, so this
-  // is read once on mount, before the first paint.
+  // is read once on mount, before the first paint. If a future trigger is
+  // reparented into a dialog without remounting, it'll stay stuck on
+  // --z-dropdown — give it a `key` change instead so it mounts fresh.
   // biome-ignore lint/correctness/useExhaustiveDependencies: anchorRef is a stable ref, not a reactive value.
   useLayoutEffect(() => {
     setInModal(anchorRef.current?.closest(MODAL_SELECTOR) != null);
