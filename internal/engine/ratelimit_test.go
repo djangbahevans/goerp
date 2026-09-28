@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 )
 
@@ -204,5 +206,77 @@ func TestRateLimitMiddleware_RedisErrorFailsOpen(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200 (a Redis/context error should fail open, not block the request)", w.Code)
+	}
+}
+
+// TestRateLimitMiddleware_RegistrationRoutesUseOwnLimits runs the real
+// builtin route table so the limits under test are the ones
+// registerBuiltinRoutes declares (goerp#1058).
+func TestRateLimitMiddleware_RegistrationRoutesUseOwnLimits(t *testing.T) {
+	redisClient := newRateLimitTestCacheClient(t)
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(map[string]*module.LoadedModule{}); err != nil {
+		t.Fatalf("reg.Update() error = %v", err)
+	}
+
+	var reached int
+	counting := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached++
+		w.WriteHeader(http.StatusOK)
+	})
+	// A default of 1 is already spent if any registration request drew from it.
+	defaultCfg := route.RateLimitConfig{Requests: 1, WindowSeconds: 60, Scope: "ip"}
+	h := routeResolutionMiddleware(reg)(rateLimitMiddleware(redisClient, defaultCfg)(counting))
+
+	ip := fmt.Sprintf("203.0.113.%d", time.Now().UnixNano()%250+1)
+	clearBuckets := func() {
+		for _, bucket := range []string{"route:/auth/register", "route:/auth/check-slug", "default"} {
+			_ = redisClient.Delete(t.Context(), "ratelimit:"+bucket+":ip:"+ip)
+		}
+	}
+	// The register window is an hour, so a key left by an interrupted run
+	// would otherwise still count.
+	clearBuckets()
+	defer clearBuckets()
+
+	do := func(method, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.RemoteAddr = ip
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+
+	for i := range 5 {
+		if w := do(http.MethodPost, "/auth/register"); w.Code != http.StatusOK {
+			t.Fatalf("register request %d: status = %d, want 200", i+1, w.Code)
+		}
+	}
+	w := do(http.MethodPost, "/auth/register")
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("6th register request: status = %d, want 429", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Error("6th register request: missing Retry-After header")
+	}
+	if reached != 5 {
+		t.Errorf("handler reached %d times, want 5 (the 429 must stop before the handler)", reached)
+	}
+
+	for i := range 60 {
+		if w := do(http.MethodGet, "/auth/check-slug?slug=acme"); w.Code != http.StatusOK {
+			t.Fatalf("check-slug request %d after register's bucket filled: status = %d, want 200", i+1, w.Code)
+		}
+	}
+	w = do(http.MethodGet, "/auth/check-slug?slug=acme")
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("61st check-slug request: status = %d, want 429", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Error("61st check-slug request: missing Retry-After header")
+	}
+
+	if w := do(http.MethodGet, "/auth/tenant-context"); w.Code != http.StatusOK {
+		t.Errorf("first default-bucket request: status = %d, want 200 (registration routes must not draw from the default bucket)", w.Code)
 	}
 }

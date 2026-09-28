@@ -687,6 +687,40 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	}
 }
 
+// TestBuildRouteTable_RegistrationRoutesDeclareRateLimits checks the
+// registration routes carry their own per-IP limits (goerp#1058) and a
+// neighboring builtin route still uses the engine-wide default.
+func TestBuildRouteTable_RegistrationRoutesDeclareRateLimits(t *testing.T) {
+	table, err := buildRouteTable(map[string]*module.LoadedModule{})
+	if err != nil {
+		t.Fatalf("buildRouteTable() error = %v", err)
+	}
+
+	for _, c := range []struct {
+		method, path string
+		want         route.RateLimitConfig
+	}{
+		{"POST", "/auth/register", route.RateLimitConfig{Requests: 5, WindowSeconds: 3600, Scope: "ip"}},
+		{"GET", "/auth/check-slug", route.RateLimitConfig{Requests: 60, WindowSeconds: 60, Scope: "ip"}},
+	} {
+		entry, _, result, _ := table.Lookup(c.method, c.path)
+		if result != route.RouteFound {
+			t.Fatalf("Lookup(%s, %s) result = %v, want RouteFound", c.method, c.path, result)
+		}
+		if entry.Manifest.RateLimit == nil || *entry.Manifest.RateLimit != c.want {
+			t.Errorf("Lookup(%s, %s).Manifest.RateLimit = %+v, want %+v", c.method, c.path, entry.Manifest.RateLimit, c.want)
+		}
+	}
+
+	entry, _, result, _ := table.Lookup("POST", "/auth/accept-invite")
+	if result != route.RouteFound {
+		t.Fatalf("Lookup(POST, /auth/accept-invite) result = %v, want RouteFound", result)
+	}
+	if entry.Manifest.RateLimit != nil {
+		t.Errorf("Lookup(POST, /auth/accept-invite).Manifest.RateLimit = %+v, want nil (engine-wide default)", entry.Manifest.RateLimit)
+	}
+}
+
 // TestBuildRouteTable_IncludesNotifRoutes checks every /_notif route
 // resolves as an engine-native, session-authenticated route, and that the
 // static all/read-all segments resolve to their own entries, not {id}'s.
