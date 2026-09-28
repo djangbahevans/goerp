@@ -4,8 +4,14 @@ import (
 	"testing"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 )
+
+func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
+	t.Helper()
+	return &rowcrypt.RowKeySet{Active: rowcrypt.RowKey{KeyID: "test-key", Key: make([]byte, 32)}}
+}
 
 func newConfigTestModuleContext(moduleName string, schema []manifest.ConfigEntry) *ModuleContext {
 	return NewModuleContext("req-1", moduleName, "user-1", "", nil, nil, "tenant-1", "tenant-slug", "trace-1", 0, nil, ModuleSnapshot{
@@ -151,5 +157,71 @@ func TestEncodeConfigValue_EncryptedWithNoRowCryptKeysIsUnavailable(t *testing.T
 	_, hostErr := encodeConfigValue(r, entry, "sk_live_secret")
 	if hostErr == nil || hostErr.Code != abiv1.ErrCodeUnavailable {
 		t.Fatalf("got %v, want %s", hostErr, abiv1.ErrCodeUnavailable)
+	}
+}
+
+func TestDecryptConfigValue_RoundTrips(t *testing.T) {
+	keys := testRowKeySet(t)
+	ciphertext, err := keys.Encrypt([]byte("sk_live_secret"))
+	if err != nil {
+		t.Fatalf("Encrypt() error: %v", err)
+	}
+
+	got, hostErr := decryptConfigValue(keys, string(ciphertext))
+	if hostErr != nil {
+		t.Fatalf("unexpected error: %v", hostErr)
+	}
+	if got != "sk_live_secret" {
+		t.Errorf("got %q, want %q", got, "sk_live_secret")
+	}
+}
+
+func TestDecryptConfigValue_MalformedCiphertextPassesThroughAsPlaintext(t *testing.T) {
+	keys := testRowKeySet(t)
+
+	// A plaintext value from a tier resolveConfigQuery never encrypts —
+	// an operator override or a manifest tenant_config_seeds default —
+	// must be returned as-is, not rejected as a decrypt failure.
+	got, hostErr := decryptConfigValue(keys, "US")
+	if hostErr != nil {
+		t.Fatalf("unexpected error: %v", hostErr)
+	}
+	if got != "US" {
+		t.Errorf("got %q, want %q", got, "US")
+	}
+}
+
+func TestDecryptConfigValue_UnknownKeyIDStillErrors(t *testing.T) {
+	keys := testRowKeySet(t)
+
+	_, hostErr := decryptConfigValue(keys, "other-key-id:bm9uY2U:Y2lwaGVydGV4dA")
+	if hostErr == nil {
+		t.Fatal("expected an error for ciphertext referencing an unknown key id")
+	}
+	if hostErr.Code != abiv1.ErrCodeConfigEncryptionError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeConfigEncryptionError)
+	}
+}
+
+func TestEncodeConfigValue_RejectsWrongTypedValue(t *testing.T) {
+	r := &Runtime{}
+	entry := manifest.ConfigEntry{Type: "integer"}
+
+	_, hostErr := encodeConfigValue(r, entry, "not-a-number")
+	if hostErr == nil {
+		t.Fatal("expected an error setting a string value on an integer key")
+	}
+}
+
+func TestEncodeConfigValue_AcceptsMatchingType(t *testing.T) {
+	r := &Runtime{}
+	entry := manifest.ConfigEntry{Type: "integer"}
+
+	data, hostErr := encodeConfigValue(r, entry, int64(42))
+	if hostErr != nil {
+		t.Fatalf("unexpected error: %v", hostErr)
+	}
+	if string(data) != "42" {
+		t.Errorf("got %s, want %q", data, "42")
 	}
 }

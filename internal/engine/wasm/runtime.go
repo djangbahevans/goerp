@@ -39,45 +39,27 @@ type Runtime struct {
 	ormBulkMaxRows        int
 	ormStatementTimeout   time.Duration
 
-	// configResolver/configStore back host.config.get/set
-	// (host_config.go). Declared as interfaces here, not a direct
-	// *tenantconfig.Resolver/*tenantconfig.Store dependency, because
-	// tenantconfig imports registry, which imports this wasm package
-	// itself (registry/snapshot.go) — the same import-cycle constraint
-	// register.go's own doc comment describes for host.db/host.orm/etc,
-	// just from the tenantconfig side instead. Set via SetTenantConfig,
-	// same "not a New parameter" reasoning as SetReplicaDB below:
-	// tenantconfig.NewResolver needs the *registry.ModuleRegistry engine.go
-	// only constructs after this Runtime already exists.
+	// configResolver/configStore back host.config.get/set (host_config.go).
+	// Interfaces, not a direct tenantconfig dependency: tenantconfig
+	// imports registry, which imports this package, so a direct import
+	// here would cycle.
 	configResolver ConfigResolver
 	configStore    ConfigStore
 
 	// rowCryptKeys encrypts/decrypts an "encrypted": true config_schema
-	// entry's value (host-abi-reference.md §14). Set via SetRowCryptKeys.
-	// rowcrypt itself doesn't import registry/wasm, so unlike
-	// configResolver/configStore above this could have been a New
-	// parameter — it stays a setter purely to keep every tenant-config-
-	// related dependency wired at the same call site in engine.go.
+	// entry's value (host-abi-reference.md §14), reusing the engine's
+	// existing row-encryption key set.
 	rowCryptKeys *rowcrypt.RowKeySet
 }
 
 // ConfigResolver resolves a fully namespaced "{module}.{key}" config
-// value for a tenant through multitenancy-internals.md §7's three-tier
-// resolution chain (operator override, tenant-admin module_config,
-// manifest default) — satisfied by *tenantconfig.Resolver.
+// value for a tenant — satisfied by *tenantconfig.Resolver.
 type ConfigResolver interface {
 	Get(ctx context.Context, tenantID, key string) (value string, found bool, err error)
 
-	// Invalidate drops tenantID/key's cached entry, if any. host.config.set
-	// (host_config.go) calls this on this instance's own resolver right
-	// after a successful write — Store.Set's own pg_notify only reaches
-	// this instance's Resolver asynchronously through a Listener, too
-	// slow to guarantee this ticket's own AC (goerp#1283): "A set followed
-	// immediately by a get (same or a different in-process instance)
-	// observes the new value — no stale read from the generation-counted
-	// cache." A different replica's Resolver still depends on its own
-	// Listener receiving that notification, same as any other write
-	// through this package.
+	// Invalidate drops tenantID/key's cached entry. host.config.set calls
+	// this synchronously after a write, since Store.Set's own NOTIFY only
+	// reaches this instance asynchronously via a Listener.
 	Invalidate(tenantID, key string)
 }
 

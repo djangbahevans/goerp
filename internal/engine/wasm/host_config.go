@@ -3,12 +3,14 @@ package wasm
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/tetratelabs/wazero"
@@ -17,8 +19,7 @@ import (
 )
 
 // registerHostConfig attaches host.config.get/set to the runtime.
-// host.config needs no capability (host-abi-reference.md §4 lists it
-// "none (always available)"), unlike most other host.* namespaces.
+// host.config needs no capability, unlike most other host.* namespaces.
 func registerHostConfig(ctx context.Context, rt wazero.Runtime, r *Runtime) error {
 	_, err := rt.NewHostModuleBuilder("host.config").
 		NewFunctionBuilder().WithFunc(makeConfigGet(r)).Export("get").
@@ -27,13 +28,8 @@ func registerHostConfig(ctx context.Context, rt wazero.Runtime, r *Runtime) erro
 	return err
 }
 
-// ownConfigEntry validates that key is "{caller's own module}.{subKey}"
-// and that subKey is declared in the caller's own config_schema —
-// host.config.get/set both reject a key belonging to another module or
-// undeclared by the caller's own manifest (host-abi-reference.md §14
-// "Only keys declared in the module's config_schema can be set" — get
-// applies the identical restriction, since decoding a value to its
-// declared type requires knowing that declaration).
+// ownConfigEntry rejects a key not of the form "{caller's own
+// module}.{subKey}" declared in the caller's own config_schema.
 func ownConfigEntry(modCtx *ModuleContext, key string) (manifest.ConfigEntry, string, *abiv1.HostError) {
 	subKey, ok := strings.CutPrefix(key, modCtx.ModuleName+".")
 	if !ok || subKey == "" {
@@ -98,13 +94,11 @@ func makeConfigGet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 					Message: "no row encryption key is configured",
 				})
 			}
-			plaintext, err := r.rowCryptKeys.Decrypt([]byte(raw))
-			if err != nil {
-				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
-					Code: abiv1.ErrCodeConfigEncryptionError, Message: err.Error(),
-				})
+			decrypted, hostErr := decryptConfigValue(r.rowCryptKeys, raw)
+			if hostErr != nil {
+				return abi.EncodeHostError(ctx, m, allocate, hostErr)
 			}
-			raw = string(plaintext)
+			raw = decrypted
 		}
 
 		value, err := decodeConfigValue(entry.Type, raw)
@@ -154,9 +148,8 @@ func makeConfigSet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 				Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true,
 			})
 		}
-		// This instance's own resolver cache is invalidated synchronously
-		// here — see ConfigResolver.Invalidate's own doc comment for why
-		// Store.Set's NOTIFY-driven Listener path alone isn't enough.
+		// Invalidate this instance's own cache synchronously; see
+		// ConfigResolver.Invalidate's doc comment.
 		if r.configResolver != nil {
 			r.configResolver.Invalidate(modCtx.TenantID, input.Key)
 		}
@@ -165,9 +158,27 @@ func makeConfigSet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 	}
 }
 
-// encodeConfigValue produces module_config.value's on-disk JSONB bytes
-// for entry, either the AES-256-GCM-sealed ciphertext (as a JSON string)
-// for an "encrypted": true entry, or value's own JSON encoding otherwise.
+// decryptConfigValue opens raw for an "encrypted": true entry. raw may
+// come from a tier that's never actually encrypted (an operator override
+// or manifest default rather than a host.config.set write), so a
+// malformed-ciphertext error falls back to treating raw as plaintext
+// instead of failing a well-formed read; any other decrypt failure
+// still errors.
+func decryptConfigValue(keys *rowcrypt.RowKeySet, raw string) (string, *abiv1.HostError) {
+	plaintext, err := keys.Decrypt([]byte(raw))
+	switch {
+	case err == nil:
+		return string(plaintext), nil
+	case errors.Is(err, rowcrypt.ErrMalformedCiphertext):
+		return raw, nil
+	default:
+		return "", &abiv1.HostError{Code: abiv1.ErrCodeConfigEncryptionError, Message: err.Error()}
+	}
+}
+
+// encodeConfigValue produces module_config.value's on-disk JSONB bytes:
+// AES-256-GCM ciphertext for an "encrypted": true entry, or value's own
+// JSON encoding otherwise.
 func encodeConfigValue(r *Runtime, entry manifest.ConfigEntry, value any) ([]byte, *abiv1.HostError) {
 	if entry.Encrypted {
 		plaintext, ok := value.(string)
@@ -194,6 +205,10 @@ func encodeConfigValue(r *Runtime, entry manifest.ConfigEntry, value any) ([]byt
 		return data, nil
 	}
 
+	if err := validateConfigValueType(entry.Type, value); err != nil {
+		return nil, &abiv1.HostError{Code: abiv1.ErrCodeDeserializeError, Message: err.Error()}
+	}
+
 	data, err := json.Marshal(value, json.Deterministic(true))
 	if err != nil {
 		return nil, &abiv1.HostError{Code: abiv1.ErrCodeDeserializeError, Message: err.Error()}
@@ -201,10 +216,60 @@ func encodeConfigValue(r *Runtime, entry manifest.ConfigEntry, value any) ([]byt
 	return data, nil
 }
 
-// decodeConfigValue parses raw — resolveConfigQuery's `#>> '{}'` text form
-// (tenantconfig/resolver.go), or the plaintext an encrypted entry was just
-// decrypted to — into entryType's declared Go representation
-// (manifest-spec.md §17's 8 config_schema types).
+// validateConfigValueType rejects a Set value that wouldn't decode back
+// through decodeConfigValue for entryType, so a type mismatch fails at
+// Set time rather than surfacing later as a swallowed Get default.
+func validateConfigValueType(entryType string, value any) error {
+	switch entryType {
+	case "string":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("config value %v is not a string", value)
+		}
+	case "integer":
+		if _, ok := asInt64(value); !ok {
+			return fmt.Errorf("config value %v is not an integer", value)
+		}
+	case "float":
+		if _, ok := asFloat64(value); !ok {
+			return fmt.Errorf("config value %v is not a number", value)
+		}
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("config value %v is not a boolean", value)
+		}
+	case "string[]", "integer[]", "float[]":
+		if _, ok := value.([]any); !ok {
+			return fmt.Errorf("config value %v is not an array", value)
+		}
+	}
+	return nil
+}
+
+// asInt64/asFloat64 coerce a msgpack-decoded numeric any.
+func asInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case float64:
+		return int64(n), true
+	default:
+		return 0, false
+	}
+}
+
+func asFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
+// decodeConfigValue parses raw (resolveConfigQuery's bare-text form, or a
+// decrypted plaintext) into entryType's declared Go representation.
 func decodeConfigValue(entryType, raw string) (any, error) {
 	switch entryType {
 	case "string":

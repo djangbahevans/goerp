@@ -11,13 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/internal/hostcall"
 )
 
-// Get returns key's resolved value, or defaultValue if key isn't set
-// (host-abi-reference.md §14: "if a key is not found and no default is
-// provided ... nil. Always provide defaults for optional config"). A
-// host.config.get failure (WASM boundary error, host.config unavailable)
-// is treated the same as "not found" — this signature has no error
-// return to surface it through, matching host-abi-reference.md's
-// documented `func config.Get(key string, defaultValue any) any`.
+// Get returns key's resolved value, or defaultValue if unset or on error.
 func Get(key string, defaultValue any) any {
 	var out abi.ConfigGetOutput
 	if err := hostcall.Do(hostConfigGet, abi.ConfigGetInput{Key: key}, &out); err != nil || !out.Found {

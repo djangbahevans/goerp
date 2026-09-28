@@ -240,17 +240,11 @@ ON CONFLICT (module_name, key) DO UPDATE SET
 `
 
 // SetModuleConfig upserts moduleName.key's value into tenantSchema's own
-// module_config table — multitenancy-internals.md §7's tenant-admin-set
-// tier, the same table the settings UI writes to — and broadcasts
-// configChangedChannel with the fully namespaced "{module}.{key}" so
-// every Resolver, this instance's own and every other engine replica's
-// via Listener, drops its now-stale cache entry the moment this commits.
-// value is already the caller's chosen on-disk encoding (host.config.set,
-// internal/engine/wasm/host_config.go, JSON-encodes the plaintext value,
-// or the AES-256-GCM ciphertext string for an "encrypted": true key) —
-// this package stays ignorant of manifests, config_schema types, and
-// encryption, per its own package doc comment. updatedBy is the acting
-// user ID, empty for a call with no live caller (stored as SQL NULL).
+// module_config table (the tenant-admin tier, distinct from Store.Set's
+// operator-override tier) and broadcasts configChangedChannel so every
+// Resolver drops its now-stale cache entry. value is already the
+// caller's chosen on-disk encoding; this package stays ignorant of
+// config_schema types and encryption. updatedBy empty stores SQL NULL.
 func (s *Store) SetModuleConfig(ctx context.Context, tenantID, tenantSchema, moduleName, key string, value []byte, valueType string, encrypted bool, updatedBy string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
