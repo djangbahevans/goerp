@@ -18,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -249,6 +250,20 @@ func TestProvisionTenantWorkflow_EndToEnd(t *testing.T) {
 	}
 	if got != "USD" {
 		t.Errorf("module_config currency = %q, want %q", got, "USD")
+	}
+
+	for key := range notifconfig.Seeds() {
+		var seeded string
+		err := env.conn.QueryRow(
+			`SELECT value #>> '{}' FROM `+tenantschema.Name(slug)+`.module_config WHERE module_name = $1 AND key = $2`,
+			notifconfig.Namespace, key,
+		).Scan(&seeded)
+		if err != nil {
+			t.Fatalf("query engine seed %s: %v", key, err)
+		}
+		if seeded != "true" {
+			t.Errorf("engine seed %s = %q, want %q", key, seeded, "true")
+		}
 	}
 
 	roleID, err := role.NewStore(env.conn).GetRoleByName(context.Background(), slug, "admin")

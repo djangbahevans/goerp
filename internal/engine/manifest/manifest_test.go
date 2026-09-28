@@ -148,6 +148,21 @@ func TestLoadManifestEmitsNameConvention(t *testing.T) {
 	}
 }
 
+func TestLoadManifest_ReservedEngineName_Rejected(t *testing.T) {
+	fields := minimalManifestFields()
+	fields["name"] = "engine"
+
+	m, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+
+	_, err = Load(m)
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected a reserved-name error, got %v", err)
+	}
+}
+
 func TestLoadManifestHTTPFetchRequiresNonEmptyAllowlist(t *testing.T) {
 	cases := map[string]struct {
 		capabilities  []string
