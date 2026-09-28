@@ -96,6 +96,7 @@ describe("ModuleSchemaSchema", () => {
     navigation: [],
     view_extensions: [],
     view_extension_definitions: [],
+    notification_types: [],
     load_order: 0,
     models: {},
     permissions: [],

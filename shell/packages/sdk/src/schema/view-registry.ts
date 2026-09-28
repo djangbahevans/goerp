@@ -63,6 +63,23 @@ export interface ViewRegistry {
   getBundleUrl(moduleName: string): string | null;
   getBundleSHA256(moduleName: string): string | null;
   getModuleDisplayName(moduleName: string): string | null;
+  notificationTypes: NotificationTypeGroup[];
+}
+
+// One module's declared notification types (shell-architecture.md §9),
+// for the notification preferences page.
+export interface NotificationTypeGroup {
+  module: string;
+  displayName: string;
+  types: NotificationTypeEntry[];
+}
+
+export interface NotificationTypeEntry {
+  // "{module}.{name}", the key GET/PATCH /_notif/preferences use.
+  type: string;
+  label: string;
+  description: string | null;
+  availableChannels: string[];
 }
 
 const DEFAULT_GROUP_ICON = "folder";
@@ -275,7 +292,24 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
     getBundleUrl: (moduleName) => schema.modules[moduleName]?.frontend?.bundle_url ?? null,
     getBundleSHA256: (moduleName) => schema.modules[moduleName]?.frontend?.bundle_sha256 ?? null,
     getModuleDisplayName: (moduleName) => schema.modules[moduleName]?.display_name ?? null,
+    notificationTypes: buildNotificationTypeGroups(schema),
   };
+}
+
+function buildNotificationTypeGroups(schema: MetaSchema): NotificationTypeGroup[] {
+  return Object.entries(schema.modules)
+    .filter(([, m]) => m.notification_types.length > 0)
+    .map(([moduleName, m]) => ({
+      module: moduleName,
+      displayName: m.display_name || moduleName,
+      types: m.notification_types.map((nt) => ({
+        type: `${moduleName}.${nt.name}`,
+        label: nt.label,
+        description: nt.description ?? null,
+        availableChannels: nt.available_channels,
+      })),
+    }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
 // buildEmptyViewRegistry is the ViewRegistryProvider's default value before
@@ -293,5 +327,6 @@ export function buildEmptyViewRegistry(): ViewRegistry {
     getBundleUrl: () => null,
     getBundleSHA256: () => null,
     getModuleDisplayName: () => null,
+    notificationTypes: [],
   };
 }

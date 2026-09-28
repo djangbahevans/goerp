@@ -27,6 +27,7 @@ const schema: MetaSchema = {
       frontend: null,
       view_extensions: [],
       view_extension_definitions: [],
+      notification_types: [],
       load_order: 0,
       public_config: {},
       routes: [
@@ -54,6 +55,7 @@ const schema: MetaSchema = {
       frontend: null,
       view_extensions: [],
       view_extension_definitions: [],
+      notification_types: [],
       load_order: 0,
       public_config: {},
       routes: [

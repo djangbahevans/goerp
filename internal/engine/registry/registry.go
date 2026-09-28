@@ -285,13 +285,14 @@ type schemaHashField struct {
 }
 
 type schemaHashModule struct {
-	Version      string
-	Routes       []schemaHashRoute
-	Views        []manifest.View
-	Navigation   []manifest.NavGroup
-	Models       map[string]schemaHashModel
-	Permissions  []manifest.Permission
-	PublicConfig map[string]any
+	Version           string
+	Routes            []schemaHashRoute
+	Views             []manifest.View
+	Navigation        []manifest.NavGroup
+	Models            map[string]schemaHashModel
+	Permissions       []manifest.Permission
+	PublicConfig      map[string]any
+	NotificationTypes []SchemaNotificationType
 }
 
 // computeSchemaHash returns a stable hex digest that changes if and only
@@ -345,13 +346,14 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 		}
 
 		hashModules[name] = schemaHashModule{
-			Version:      m.Manifest.Version,
-			Routes:       []schemaHashRoute{},
-			Views:        m.Manifest.Views,
-			Navigation:   m.Manifest.Navigation,
-			Models:       models,
-			Permissions:  m.Manifest.Permissions,
-			PublicConfig: publicConfig,
+			Version:           m.Manifest.Version,
+			Routes:            []schemaHashRoute{},
+			Views:             m.Manifest.Views,
+			Navigation:        m.Manifest.Navigation,
+			Models:            models,
+			Permissions:       m.Manifest.Permissions,
+			PublicConfig:      publicConfig,
+			NotificationTypes: schemaNotificationTypesFrom(m.Manifest.NotificationTypes),
 		}
 	}
 
