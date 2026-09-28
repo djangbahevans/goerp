@@ -1088,6 +1088,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["GET /_notif/preferences"] = http.HandlerFunc(e.dispatchNotifPreferencesRoute)
 	builtinRoutes["PATCH /_notif/preferences"] = http.HandlerFunc(e.dispatchNotifPreferencesUpdateRoute)
 	builtinRoutes["GET /_notif/unsubscribe"] = http.HandlerFunc(e.dispatchNotifUnsubscribeRoute)
+	builtinRoutes["POST /_notif/unsubscribe"] = http.HandlerFunc(e.dispatchNotifUnsubscribeConfirmRoute)
 
 	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
 	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.

@@ -351,54 +351,109 @@ func (e *Engine) notifPreferences(ctx context.Context, tenantCtx *tenantresolve.
 	return &notifPreferencesResponse{AvailableChannels: available, Global: prefs.Global, Types: types}, nil
 }
 
-// notifUnsubscribePage is the whole page GET /_notif/unsubscribe answers
-// with; Heading and Message are escaped.
+// notifUnsubscribePage is the whole page /_notif/unsubscribe answers with.
+// With a Token it is the confirmation step: a button that POSTs the token
+// back. Every field is escaped.
 var notifUnsubscribePage = template.Must(template.New("unsubscribe").Parse(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Heading}}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;color:#1f2328}h1{font-size:1.25rem}</style>
+<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;color:#1f2328}h1{font-size:1.25rem}button{font:inherit;padding:.5rem 1rem;cursor:pointer}</style>
 </head>
 <body>
 <h1>{{.Heading}}</h1>
 <p>{{.Message}}</p>
+{{if .Token}}<form method="post" action="/_notif/unsubscribe">
+<input type="hidden" name="token" value="{{.Token}}">
+<button type="submit">Unsubscribe</button>
+</form>{{end}}
 </body>
 </html>
 `))
 
-func writeNotifUnsubscribePage(w http.ResponseWriter, status int, heading, message string) {
+type notifUnsubscribePageData struct {
+	Heading, Message, Token string
+}
+
+func writeNotifUnsubscribePage(w http.ResponseWriter, status int, data notifUnsubscribePageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	// The token is in this page's URL; keep it out of any Referer.
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	// No scripts, and no framing: the confirm button can't be clickjacked.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
 	w.WriteHeader(status)
-	_ = notifUnsubscribePage.Execute(w, struct{ Heading, Message string }{heading, message})
+	_ = notifUnsubscribePage.Execute(w, data)
 }
 
-// dispatchNotifUnsubscribeRoute is GET /_notif/unsubscribe's handler
-// (notification-system.md §10): the one-click link in notification
-// emails. EngineBuiltin, with no session: the tenant comes from Host and
-// the user and notification type from the signed token, whose tenant must
-// match Host's. Turns off email for that type, and repeating it is fine.
-func (e *Engine) dispatchNotifUnsubscribeRoute(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	tenantCtx, err := e.tenantResolver.ResolveByHost(ctx, r.Host)
+// notifUnsubscribeTarget resolves the tenant from Host and verifies token
+// against it, writing the error page and returning false when either
+// fails. A token for another tenant is as invalid as a tampered one.
+func (e *Engine) notifUnsubscribeTarget(w http.ResponseWriter, r *http.Request, token string) (*tenantresolve.TenantContext, *notifications.UnsubscribeClaims, bool) {
+	tenantCtx, err := e.tenantResolver.ResolveByHost(r.Context(), r.Host)
 	if err != nil {
-		writeNotifUnsubscribePage(w, http.StatusNotFound, "Workspace not found", "This unsubscribe link doesn't belong to a workspace at this address.")
+		writeNotifUnsubscribePage(w, http.StatusNotFound, notifUnsubscribePageData{
+			Heading: "Workspace not found",
+			Message: "This unsubscribe link doesn't belong to a workspace at this address.",
+		})
+		return nil, nil, false
+	}
+	claims, err := e.unsubscribeCodec.Verify(token)
+	if err != nil || claims.TenantID != tenantCtx.TenantID {
+		writeNotifUnsubscribePage(w, http.StatusBadRequest, notifUnsubscribePageData{
+			Heading: "Invalid unsubscribe link",
+			Message: "This unsubscribe link is invalid or has expired. You can change which emails you get in your notification settings.",
+		})
+		return nil, nil, false
+	}
+	return tenantCtx, claims, true
+}
+
+// dispatchNotifUnsubscribeRoute is GET /_notif/unsubscribe's handler: the
+// link in notification emails (notification-system.md §10). It only asks
+// for confirmation — mail scanners and link prefetchers open every link
+// in an email, so a GET must not unsubscribe anyone. EngineBuiltin, with
+// no session: the tenant comes from Host, the user and notification type
+// from the signed token.
+func (e *Engine) dispatchNotifUnsubscribeRoute(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if _, _, ok := e.notifUnsubscribeTarget(w, r, token); !ok {
 		return
 	}
-	claims, err := e.unsubscribeCodec.Verify(r.URL.Query().Get("token"))
-	if err != nil || claims.TenantID != tenantCtx.TenantID {
-		writeNotifUnsubscribePage(w, http.StatusBadRequest, "Invalid unsubscribe link", "This unsubscribe link is invalid or has expired. You can change which emails you get in your notification settings.")
+	writeNotifUnsubscribePage(w, http.StatusOK, notifUnsubscribePageData{
+		Heading: "Unsubscribe from these emails?",
+		Message: "You'll still see these notifications in the app.",
+		Token:   token,
+	})
+}
+
+// notifUnsubscribeMaxBody bounds POST /_notif/unsubscribe's form body.
+const notifUnsubscribeMaxBody = 64 << 10
+
+// dispatchNotifUnsubscribeConfirmRoute is POST /_notif/unsubscribe's
+// handler: the confirmation page's button, and RFC 8058 one-click
+// unsubscribe (a mail client POSTing "List-Unsubscribe=One-Click" to the
+// link, token still in its query). Turns off email for the token's
+// notification type; repeating it succeeds.
+func (e *Engine) dispatchNotifUnsubscribeConfirmRoute(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, notifUnsubscribeMaxBody)
+	tenantCtx, claims, ok := e.notifUnsubscribeTarget(w, r, r.FormValue("token"))
+	if !ok {
 		return
 	}
 
-	if err := e.notificationStore.Unsubscribe(ctx, tenantCtx.Slug, tenantCtx.TenantID, claims.Subject, claims.NotificationType); err != nil {
+	if err := e.notificationStore.Unsubscribe(r.Context(), tenantCtx.Slug, tenantCtx.TenantID, claims.Subject, claims.NotificationType); err != nil {
 		log.Error().Err(err).Str("tenant", tenantCtx.Slug).Str("user_id", claims.Subject).Msg("notification unsubscribe failed")
-		writeNotifUnsubscribePage(w, http.StatusInternalServerError, "Something went wrong", "We couldn't unsubscribe you just now. Please try the link again later.")
+		writeNotifUnsubscribePage(w, http.StatusInternalServerError, notifUnsubscribePageData{
+			Heading: "Something went wrong",
+			Message: "We couldn't unsubscribe you just now. Please try the link again later.",
+		})
 		return
 	}
-	writeNotifUnsubscribePage(w, http.StatusOK, "You're unsubscribed", "You won't get these emails any more. You'll still see these notifications in the app, and you can turn the emails back on in your notification settings.")
+	writeNotifUnsubscribePage(w, http.StatusOK, notifUnsubscribePageData{
+		Heading: "You're unsubscribed",
+		Message: "You won't get these emails any more. You'll still see these notifications in the app, and you can turn the emails back on in your notification settings.",
+	})
 }

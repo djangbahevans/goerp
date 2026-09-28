@@ -667,13 +667,76 @@ func (f *unsubscribeFixture) token(t *testing.T, tenantID, notificationType stri
 	return tok
 }
 
-// unsubscribe calls GET /_notif/unsubscribe on host with no session.
-func (f *unsubscribeFixture) unsubscribe(host, token string) *httptest.ResponseRecorder {
+// openLink calls GET /_notif/unsubscribe on host with no session, as
+// following the emailed link (or a mail scanner) does.
+func (f *unsubscribeFixture) openLink(host, token string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodGet, "/_notif/unsubscribe?token="+url.QueryEscape(token), nil)
 	r.Host = host
 	w := httptest.NewRecorder()
 	f.e.dispatchNotifUnsubscribeRoute(w, r)
 	return w
+}
+
+// unsubscribe POSTs the confirmation page's form on host.
+func (f *unsubscribeFixture) unsubscribe(host, token string) *httptest.ResponseRecorder {
+	return f.postUnsubscribe(host, "/_notif/unsubscribe", url.Values{"token": {token}}.Encode())
+}
+
+func (f *unsubscribeFixture) postUnsubscribe(host, target, form string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Host = host
+	w := httptest.NewRecorder()
+	f.e.dispatchNotifUnsubscribeConfirmRoute(w, r)
+	return w
+}
+
+// preferenceRows counts the caller's tenant's stored preference rows.
+func (f *unsubscribeFixture) preferenceRows(t *testing.T) int {
+	t.Helper()
+	var n int
+	err := f.e.primaryDB.QueryRowContext(t.Context(), fmt.Sprintf(
+		`SELECT count(*) FROM %s.notification_preferences`, tenantschema.Name(f.slug))).Scan(&n)
+	if err != nil {
+		t.Fatalf("count preference rows: %v", err)
+	}
+	return n
+}
+
+func TestDispatchNotifUnsubscribeRoute_OpeningTheLinkOnlyAsksForConfirmation(t *testing.T) {
+	f := newUnsubscribeFixture(t)
+	tok := f.token(t, f.tenantID, "sales.order_confirmed")
+
+	w := f.openLink(f.host, tok)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `<form method="post" action="/_notif/unsubscribe">`) ||
+		!strings.Contains(body, `name="token" value="`+tok+`"`) {
+		t.Errorf("GET page = %s, want a form POSTing the token", body)
+	}
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("Content-Security-Policy = %q, want framing forbidden", csp)
+	}
+	if n := f.preferenceRows(t); n != 0 {
+		t.Errorf("GET wrote %d preference rows, want none", n)
+	}
+}
+
+func TestDispatchNotifUnsubscribeRoute_AcceptsAOneClickPost(t *testing.T) {
+	f := newUnsubscribeFixture(t)
+	tok := f.token(t, f.tenantID, "sales.order_confirmed")
+
+	// RFC 8058: the token stays in the link's query; the body only says
+	// it's a one-click unsubscribe.
+	w := f.postUnsubscribe(f.host, "/_notif/unsubscribe?token="+url.QueryEscape(tok), "List-Unsubscribe=One-Click")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if c, ok := f.getPreferences(t).Types["sales.order_confirmed"]; !ok || c.Email {
+		t.Errorf("sales.order_confirmed = %+v (listed %v), want email off", c, ok)
+	}
 }
 
 func TestDispatchNotifUnsubscribeRoute_TurnsOffEmailForOneType(t *testing.T) {
@@ -728,19 +791,16 @@ func TestDispatchNotifUnsubscribeRoute_ChangesNothingForABadToken(t *testing.T) 
 		"on another tenant's host": {otherSlug + ".notif.test", good, http.StatusBadRequest},
 		"on an unknown host":       {"nobody.notif.test", good, http.StatusNotFound},
 	} {
+		if w := f.openLink(c.host, c.token); w.Code != c.status || strings.Contains(w.Body.String(), "<form") {
+			t.Errorf("%s: GET status = %d, want %d and no form; body: %s", name, w.Code, c.status, w.Body.String())
+		}
 		if w := f.unsubscribe(c.host, c.token); w.Code != c.status {
-			t.Errorf("%s: status = %d, want %d; body: %s", name, w.Code, c.status, w.Body.String())
+			t.Errorf("%s: POST status = %d, want %d; body: %s", name, w.Code, c.status, w.Body.String())
 		}
 	}
 
 	// A token that had wrongly passed would have written a row here.
-	var n int
-	err := f.e.primaryDB.QueryRowContext(t.Context(), fmt.Sprintf(
-		`SELECT count(*) FROM %s.notification_preferences`, tenantschema.Name(f.slug))).Scan(&n)
-	if err != nil {
-		t.Fatalf("count preference rows: %v", err)
-	}
-	if n != 0 {
+	if n := f.preferenceRows(t); n != 0 {
 		t.Errorf("%d preference rows, want none", n)
 	}
 }

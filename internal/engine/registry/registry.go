@@ -650,14 +650,16 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		})
 	}
 
-	// The one-click email unsubscribe link (notification-system.md §10)
-	// resolves its own tenant from Host and its user from the signed
-	// token, with no session, so unlike the rest of /_notif it is
-	// EngineBuiltin.
-	table.Register("GET", "/_notif/unsubscribe", &route.RouteEntry{
-		Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
-		PathTemplate: "/_notif/unsubscribe",
-	})
+	// The email unsubscribe link (notification-system.md §10): GET asks
+	// for confirmation, POST unsubscribes. Both resolve their own tenant
+	// from Host and their user from the signed token, with no session, so
+	// unlike the rest of /_notif they are EngineBuiltin.
+	for _, method := range []string{"GET", "POST"} {
+		table.Register(method, "/_notif/unsubscribe", &route.RouteEntry{
+			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},
+			PathTemplate: "/_notif/unsubscribe",
+		})
+	}
 
 	// /_meta/scheduled-activities (scheduled-activities.md §5) — same
 	// posture as /_meta/activity above.
