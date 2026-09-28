@@ -15,6 +15,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// ReservedEngineName is the namespace the engine's own notification types
+// and config keys (module_config rows with module_name "engine") live under.
+const ReservedEngineName = "engine"
+
 var validNameRegex = regexp.MustCompile("^[a-z][a-z0-9_]{0,63}$")
 var validABIVersionRegex = regexp.MustCompile(`^[0-9]+$`)
 var validSha256Regex = regexp.MustCompile("^[a-fA-F0-9]{64}$")
@@ -123,6 +127,7 @@ func validateManifest(m Manifest) error {
 		"required_with_workflow_types": "{0} is required when workflow_types is not empty",
 		"required_with_http_fetch":     "{0} must be non-empty when the http.fetch capability is declared",
 		"required_for_emits":           "{0} must include the event.emit capability when emits is not empty",
+		"reserved_name":                "{0} must not be \"engine\", which is reserved for the engine's own namespace",
 	}
 	for tag, translation := range customTranslations {
 		if err := registerSimpleTranslation(validate, trans, tag, translation); err != nil {
@@ -132,6 +137,10 @@ func validateManifest(m Manifest) error {
 
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		m := sl.Current().Interface().(Manifest)
+		if m.Name == ReservedEngineName {
+			sl.ReportError(m.Name, "Name", "name", "reserved_name", "")
+		}
+
 		if len(m.WorkflowTypes) > 0 && m.WorkerChecksum == "" {
 			sl.ReportError(m.WorkerChecksum,
 				"WorkerChecksum",

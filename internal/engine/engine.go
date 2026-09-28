@@ -102,6 +102,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/moduleinstall"
 	"github.com/djangbahevans/goerp/internal/engine/modulereload"
+	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
@@ -174,6 +175,9 @@ type Engine struct {
 	recordActivityStore *recordactivity.Store
 	// notificationStore backs /_notif/*.
 	notificationStore *notifications.Store
+	// notificationConfig resolves the tenant notification configuration
+	// channel routing consumes.
+	notificationConfig *notifconfig.Service
 	// unsubscribeCodec verifies /_notif/unsubscribe's tokens.
 	unsubscribeCodec *notifications.UnsubscribeCodec
 	// scheduledActivityStore backs /_meta/scheduled-activities.
@@ -604,6 +608,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	// exists from this point on in New, so this can't happen any earlier,
 	// same reasoning as SetSyncEventDispatcher just above.
 	runtime.SetTenantConfig(tenantConfigResolver, tenantConfigStore)
+	notificationConfig := notifconfig.NewService(tenantConfigResolver, tenantConfigStore, rowKeySet)
 
 	// Rebuilds a tenant's rolePermissionMap entries on this replica when a
 	// tenant admin changes roles on any replica (auth/adminroles).
@@ -1029,6 +1034,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		savedFiltersStore:      savedFiltersStore,
 		recordActivityStore:    recordActivityStore,
 		notificationStore:      notificationStore,
+		notificationConfig:     notificationConfig,
 		unsubscribeCodec:       notifications.NewUnsubscribeCodec(signingKeySet),
 		scheduledActivityStore: scheduledActivityStore,
 		roleStore:              roleStore,

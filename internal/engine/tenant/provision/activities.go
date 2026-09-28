@@ -6,12 +6,14 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/jobdispatch"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
@@ -220,52 +222,65 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (module_name, key) DO NOTHING
 `
 
-// SeedTenantConfig inserts every loaded module's declared
-// TenantConfigSeeds into module_config. ON CONFLICT DO NOTHING is load-
-// bearing, not just tidy: a Temporal workflow retry after a transient
-// failure later in the run replays this activity, and seeds must not be
-// re-applied over whatever an operator may have already changed since.
+// SeedTenantConfig inserts the engine's own notifconfig seeds and every
+// loaded module's declared TenantConfigSeeds into module_config. ON
+// CONFLICT DO NOTHING is load-bearing, not just tidy: a Temporal workflow
+// retry after a transient failure later in the run replays this activity,
+// and seeds must not be re-applied over whatever an operator may have
+// already changed since.
 func (a *Activities) SeedTenantConfig(ctx context.Context, slug string) error {
+	query := fmt.Sprintf(upsertModuleConfig, tenantschema.Name(slug))
+
+	if err := a.seedModuleConfig(ctx, query, notifconfig.Namespace, notifconfig.Seeds()); err != nil {
+		return err
+	}
+
 	snap := a.registry.Snapshot()
 	if snap == nil {
 		return nil
 	}
-
-	schemaName := tenantschema.Name(slug)
-	query := fmt.Sprintf(upsertModuleConfig, schemaName)
-
 	for _, mod := range snap.Modules() {
 		if mod.Status == module.StatusFailed {
 			continue
 		}
-		for key, value := range mod.Manifest.TenantConfigSeeds {
-			valueJSON, err := json.Marshal(value, json.Deterministic(true))
-			if err != nil {
-				return fmt.Errorf("encode config seed %s.%s: %w", mod.Manifest.Name, key, err)
-			}
-			if _, err := a.schemaSyncPool.ExecContext(ctx, query, mod.Manifest.Name, key, valueJSON, jsonValueType(value)); err != nil {
-				return fmt.Errorf("seed config %s.%s: %w", mod.Manifest.Name, key, err)
-			}
+		if err := a.seedModuleConfig(ctx, query, mod.Manifest.Name, mod.Manifest.TenantConfigSeeds); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
+func (a *Activities) seedModuleConfig(ctx context.Context, query, moduleName string, seeds map[string]any) error {
+	for key, value := range seeds {
+		valueJSON, err := json.Marshal(value, json.Deterministic(true))
+		if err != nil {
+			return fmt.Errorf("encode config seed %s.%s: %w", moduleName, key, err)
+		}
+		if _, err := a.schemaSyncPool.ExecContext(ctx, query, moduleName, key, valueJSON, jsonValueType(value)); err != nil {
+			return fmt.Errorf("seed config %s.%s: %w", moduleName, key, err)
+		}
+	}
+	return nil
+}
+
+// jsonValueType names v in module_config.value_type's vocabulary
+// (multitenancy-internals.md §3): string, integer, float, boolean, json.
 func jsonValueType(v any) string {
-	switch v.(type) {
+	switch n := v.(type) {
 	case string:
 		return "string"
 	case bool:
-		return "bool"
-	case float64, int, int64:
-		return "number"
-	case nil:
-		return "null"
-	case []any:
-		return "array"
+		return "boolean"
+	case int, int64:
+		return "integer"
+	case float64:
+		if n == math.Trunc(n) {
+			return "integer"
+		}
+		return "float"
 	default:
-		return "object"
+		return "json"
 	}
 }
 
