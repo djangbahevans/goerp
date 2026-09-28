@@ -1,6 +1,12 @@
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
-import { FieldDefSchema, ModuleSchemaSchema, RouteSchemaSchema, WorkflowTransitionSchema } from "./types.js";
+import {
+  FieldDefSchema,
+  isCRUDAction,
+  ModuleSchemaSchema,
+  RouteSchemaSchema,
+  WorkflowTransitionSchema,
+} from "./types.js";
 
 const baseRoute = { method: "GET", path: "/x", permissions: [], response_is_list: false };
 
@@ -13,9 +19,15 @@ describe("RouteSchemaSchema", () => {
     expect(v.safeParse(RouteSchemaSchema, withoutPermissions).success).toBe(false);
   });
 
-  it("rejects a crud_action outside the documented enum", () => {
+  it("accepts a crud_action that isn't a CRUD op, rather than failing the whole schema", () => {
+    // The engine sends one "workflow_transition" route per .Workflow() transition.
     expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, crud_action: "list" }).success).toBe(true);
-    expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, crud_action: "upsert" }).success).toBe(false);
+    expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, crud_action: "workflow_transition" }).success).toBe(true);
+  });
+
+  it("isCRUDAction narrows to the ops the resource registry uses", () => {
+    expect(isCRUDAction("list")).toBe(true);
+    expect(isCRUDAction("workflow_transition")).toBe(false);
   });
 
   it("name/model/view stay optional", () => {

@@ -115,6 +115,28 @@ describe("buildResourceRegistry", () => {
     });
   });
 
+  it("ignores a route whose crud_action isn't a CRUD op", () => {
+    const registry = buildResourceRegistry({
+      ...schema,
+      modules: {
+        sales: {
+          ...(schema.modules.sales as MetaSchema["modules"][string]),
+          routes: [
+            route({ method: "GET", path: "/orders", model: "sales.order", crud_action: "list" }),
+            route({
+              method: "POST",
+              path: "/orders/{id}/confirm",
+              model: "sales.order",
+              crud_action: "workflow_transition",
+            }),
+          ],
+        },
+      },
+    });
+
+    expect(registry.get("sales.order")).toMatchObject({ listPath: "/orders", createPath: "", updatePath: "" });
+  });
+
   it("skips a model with neither list nor get routes", () => {
     const registry = buildResourceRegistry(schema);
     expect(registry.has("contacts.import_job")).toBe(false);
