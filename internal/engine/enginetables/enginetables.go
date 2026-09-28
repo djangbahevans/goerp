@@ -92,6 +92,12 @@ var Groups = []Group{
 		},
 	},
 	{
+		Tables: []Table{{Name: notifications.DeviceTokensTable}},
+		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
+			return notifications.NewStore(pool).BootstrapDeviceTokens(ctx, slug)
+		},
+	},
+	{
 		Tables: []Table{{Name: scheduledactivity.TableName}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return scheduledactivity.NewStore(pool).Bootstrap(ctx, slug)
