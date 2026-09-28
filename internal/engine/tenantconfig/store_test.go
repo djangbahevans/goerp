@@ -313,7 +313,7 @@ func TestSetModuleConfig_UpsertsAndIsVisibleThroughResolver(t *testing.T) {
 	// new value, never a stale cache entry — this ticket's own AC
 	// (goerp#1283): "A set followed immediately by a get ... observes the
 	// new value — no stale read from the generation-counted cache."
-	value, ok, err := resolver.Get(ctx, tt.ID, "contacts.default_country_code")
+	value, _, ok, err := resolver.Get(ctx, tt.ID, "contacts.default_country_code")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestSetModuleConfig_UpsertsAndIsVisibleThroughResolver(t *testing.T) {
 		t.Fatalf("SetModuleConfig() upsert error: %v", err)
 	}
 	resolver.Invalidate(tt.ID, "contacts.default_country_code")
-	value, ok, err = resolver.Get(ctx, tt.ID, "contacts.default_country_code")
+	value, _, ok, err = resolver.Get(ctx, tt.ID, "contacts.default_country_code")
 	if err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}

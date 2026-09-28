@@ -176,22 +176,19 @@ func TestDecryptConfigValue_RoundTrips(t *testing.T) {
 	}
 }
 
-func TestDecryptConfigValue_MalformedCiphertextPassesThroughAsPlaintext(t *testing.T) {
+func TestDecryptConfigValue_MalformedCiphertextErrors(t *testing.T) {
 	keys := testRowKeySet(t)
 
-	// A plaintext value from a tier resolveConfigQuery never encrypts —
-	// an operator override or a manifest tenant_config_seeds default —
-	// must be returned as-is, not rejected as a decrypt failure.
-	got, hostErr := decryptConfigValue(keys, "US")
-	if hostErr != nil {
-		t.Fatalf("unexpected error: %v", hostErr)
+	_, hostErr := decryptConfigValue(keys, "US")
+	if hostErr == nil {
+		t.Fatal("expected an error for a value that isn't ciphertext")
 	}
-	if got != "US" {
-		t.Errorf("got %q, want %q", got, "US")
+	if hostErr.Code != abiv1.ErrCodeConfigEncryptionError {
+		t.Errorf("Code = %q, want %q", hostErr.Code, abiv1.ErrCodeConfigEncryptionError)
 	}
 }
 
-func TestDecryptConfigValue_UnknownKeyIDStillErrors(t *testing.T) {
+func TestDecryptConfigValue_UnknownKeyIDErrors(t *testing.T) {
 	keys := testRowKeySet(t)
 
 	_, hostErr := decryptConfigValue(keys, "other-key-id:bm9uY2U:Y2lwaGVydGV4dA")

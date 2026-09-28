@@ -249,13 +249,51 @@ func TestSet_SecretsStoredEncrypted(t *testing.T) {
 }
 
 func TestLoad_PlaintextOverrideForEncryptedKey(t *testing.T) {
-	env := openTestEnv(t)
-	if err := env.store.Set(t.Context(), env.tenant.ID, Namespace+"."+KeyEmailAPIKey, "operator-plaintext"); err != nil {
-		t.Fatalf("operator override Set() error: %v", err)
-	}
+	for _, plaintext := range []string{"operator-plaintext", "ab:cd:ef"} {
+		t.Run(plaintext, func(t *testing.T) {
+			env := openTestEnv(t)
+			if err := env.store.Set(t.Context(), env.tenant.ID, Namespace+"."+KeySMTPPassword, plaintext); err != nil {
+				t.Fatalf("operator override Set() error: %v", err)
+			}
 
-	if got := env.load(t).Email.APIKey; got != "operator-plaintext" {
-		t.Errorf("APIKey = %q, want the override's plaintext", got)
+			if got := env.load(t).Email.SMTP.Password; got != plaintext {
+				t.Errorf("Password = %q, want the override's plaintext %q", got, plaintext)
+			}
+		})
+	}
+}
+
+func (e *testEnv) insertModuleConfig(t *testing.T, key, jsonValue string, encrypted bool) {
+	t.Helper()
+	query := `INSERT INTO ` + tenantschema.Name(e.tenant.Slug) + `.module_config (module_name, key, value, value_type, encrypted) VALUES ($1, $2, $3, 'string', $4)`
+	if _, err := e.conn.ExecContext(t.Context(), query, Namespace, key, jsonValue, encrypted); err != nil {
+		t.Fatalf("insert module_config %s: %v", key, err)
+	}
+}
+
+func TestLoad_UnencryptedModuleConfigRowIsPlaintext(t *testing.T) {
+	env := openTestEnv(t)
+	env.insertModuleConfig(t, KeyEmailAPIKey, `"seeded:plain:text"`, false)
+
+	if got := env.load(t).Email.APIKey; got != "seeded:plain:text" {
+		t.Errorf("APIKey = %q, want the unencrypted row's value", got)
+	}
+}
+
+func TestLoad_BadEncryptedModuleConfigRowFails(t *testing.T) {
+	tests := map[string]string{
+		"malformed ciphertext": `"not-ciphertext"`,
+		"unknown key id":       `"retired-key:bm9uY2U:Y2lwaGVydGV4dA"`,
+	}
+	for name, value := range tests {
+		t.Run(name, func(t *testing.T) {
+			env := openTestEnv(t)
+			env.insertModuleConfig(t, KeyEmailAPIKey, value, true)
+
+			if _, err := env.service.Load(t.Context(), env.tenant.ID); err == nil {
+				t.Error("Load() succeeded, want a decrypt error")
+			}
+		})
 	}
 }
 

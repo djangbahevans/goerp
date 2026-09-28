@@ -3,7 +3,6 @@ package wasm
 import (
 	"context"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -77,7 +76,7 @@ func makeConfigGet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 			})
 		}
 
-		raw, found, err := r.configResolver.Get(ctx, modCtx.TenantID, input.Key)
+		raw, encrypted, found, err := r.configResolver.Get(ctx, modCtx.TenantID, input.Key)
 		if err != nil {
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 				Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true,
@@ -87,7 +86,7 @@ func makeConfigGet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 			return abi.WriteToModule(ctx, m, allocate, abiv1.ConfigGetOutput{Found: false})
 		}
 
-		if entry.Encrypted {
+		if encrypted {
 			if r.rowCryptKeys == nil {
 				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 					Code:    abiv1.ErrCodeUnavailable,
@@ -158,22 +157,15 @@ func makeConfigSet(r *Runtime) func(ctx context.Context, m api.Module, ptr, leng
 	}
 }
 
-// decryptConfigValue opens raw for an "encrypted": true entry. raw may
-// come from a tier that's never actually encrypted (an operator override
-// or manifest default rather than a host.config.set write), so a
-// malformed-ciphertext error falls back to treating raw as plaintext
-// instead of failing a well-formed read; any other decrypt failure
-// still errors.
+// decryptConfigValue opens raw, a value the resolver reported as
+// ciphertext; any failure, including a key id no longer in keys, errors
+// rather than returning ciphertext as a secret.
 func decryptConfigValue(keys *rowcrypt.RowKeySet, raw string) (string, *abiv1.HostError) {
 	plaintext, err := keys.Decrypt([]byte(raw))
-	switch {
-	case err == nil:
-		return string(plaintext), nil
-	case errors.Is(err, rowcrypt.ErrMalformedCiphertext):
-		return raw, nil
-	default:
+	if err != nil {
 		return "", &abiv1.HostError{Code: abiv1.ErrCodeConfigEncryptionError, Message: err.Error()}
 	}
+	return string(plaintext), nil
 }
 
 // encodeConfigValue produces module_config.value's on-disk JSONB bytes:

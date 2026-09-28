@@ -66,7 +66,7 @@ func TestListener_InvalidatesOtherInstancesCacheOnConfigWrite(t *testing.T) {
 
 	// Populate both caches.
 	for _, r := range []*Resolver{resolverA, resolverB} {
-		value, ok, err := r.Get(context.Background(), tt.ID, "contacts.default_country_code")
+		value, _, ok, err := r.Get(context.Background(), tt.ID, "contacts.default_country_code")
 		if err != nil || !ok || value != "DE" {
 			t.Fatalf("priming Get() = %q, %v, %v, want %q, true, nil", value, ok, err, "DE")
 		}
@@ -94,7 +94,7 @@ func TestListener_InvalidatesOtherInstancesCacheOnConfigWrite(t *testing.T) {
 	}
 
 	for name, r := range map[string]*Resolver{"A": resolverA, "B": resolverB} {
-		value, ok, err := r.Get(context.Background(), tt.ID, "contacts.default_country_code")
+		value, _, ok, err := r.Get(context.Background(), tt.ID, "contacts.default_country_code")
 		if err != nil || !ok || value != "FR" {
 			t.Fatalf("resolver %s post-invalidation Get() = %q, %v, %v, want %q, true, nil", name, value, ok, err, "FR")
 		}
@@ -122,7 +122,7 @@ func TestListener_StartStop_InvalidatesAcrossInstances(t *testing.T) {
 		t.Fatal("listener did not become ready (LISTEN not issued) in time")
 	}
 
-	value, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+	value, _, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
 	if err != nil || !ok || value != "DE" {
 		t.Fatalf("priming Get() = %q, %v, %v, want %q, true, nil", value, ok, err, "DE")
 	}
@@ -133,7 +133,7 @@ func TestListener_StartStop_InvalidatesAcrossInstances(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		value, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
+		value, _, ok, err := resolver.Get(context.Background(), tt.ID, "contacts.default_country_code")
 		if err == nil && ok && value == "FR" {
 			break
 		}

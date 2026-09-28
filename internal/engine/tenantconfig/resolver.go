@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -21,24 +22,30 @@ import (
 // (e.g. its LISTEN connection was down when configChangedChannel fired).
 const cacheTTL = 5 * time.Minute
 
-// resolveConfigQuery COALESCEs the three sources multitenancy-internals.md
-// §7's "Config resolution order" documents, in priority order: an
-// operator override, then a tenant-admin-set value, then the manifest's
-// own default. module_config's JSONB value is unwrapped with `#>> '{}'`
-// to a plain scalar's text so it lines up with tenant_config_overrides'
-// own already-plain-text value column — both existing tenantconfig.Store
-// callers (internal/engine/mfa/enforce) already treat that column as a
-// bare string, not JSON-encoded.
+// resolveConfigQuery picks the highest-priority of the three sources
+// multitenancy-internals.md §7's "Config resolution order" documents: an
+// operator override, then a tenant-admin-set module_config value, then
+// the manifest's own default. module_config's JSONB value is unwrapped
+// with `#>> '{}'` to a plain scalar's text so it lines up with
+// tenant_config_overrides' own plain-text value column. encrypted is
+// module_config's own flag; the other two tiers are always plaintext.
 const resolveConfigQuery = `
-SELECT COALESCE(
-    (SELECT value FROM system.tenant_config_overrides WHERE tenant_id = $1 AND key = $2),
-    (SELECT value #>> '{}' FROM %s.module_config WHERE module_name = $3 AND key = $4),
-    $5
-) AS resolved_value
+SELECT value, encrypted FROM (
+    SELECT 1 AS priority, value, false AS encrypted
+    FROM system.tenant_config_overrides WHERE tenant_id = $1 AND key = $2
+    UNION ALL
+    SELECT 2, value #>> '{}', encrypted
+    FROM %s.module_config WHERE module_name = $3 AND key = $4 AND value #>> '{}' IS NOT NULL
+    UNION ALL
+    SELECT 3, $5::text, false WHERE $5::text IS NOT NULL
+) tiers
+ORDER BY priority
+LIMIT 1
 `
 
 type cachedValue struct {
 	value     string
+	encrypted bool
 	found     bool
 	expiresAt time.Time
 }
@@ -67,31 +74,36 @@ func NewResolver(store *Store, tenants *tenant.Store, reg *registry.ModuleRegist
 
 // Get resolves tenantID's effective value for key — already fully
 // namespaced ({module}.{key}), same convention Store's own doc comment
-// describes. found is false, with a nil error, when none of the three
-// sources has a value for key.
-func (r *Resolver) Get(ctx context.Context, tenantID, key string) (value string, found bool, err error) {
+// describes. encrypted reports whether value is ciphertext, which is true
+// only for a module_config row stored encrypted. found is false, with a
+// nil error, when none of the three sources has a value for key.
+func (r *Resolver) Get(ctx context.Context, tenantID, key string) (value string, encrypted, found bool, err error) {
 	cacheKey := configCacheKey(tenantID, key)
 	if cached, ok := r.cachedGet(cacheKey); ok {
-		return cached.value, cached.found, nil
+		return cached.value, cached.encrypted, cached.found, nil
 	}
 	gen := r.currentGeneration()
 
 	t, err := r.tenants.GetByID(ctx, tenantID)
 	if err != nil {
-		return "", false, fmt.Errorf("resolve tenant for config lookup: %w", err)
+		return "", false, false, fmt.Errorf("resolve tenant for config lookup: %w", err)
 	}
 
 	moduleName, subKey, _ := strings.Cut(key, ".")
 	query := fmt.Sprintf(resolveConfigQuery, tenantschema.Name(t.Slug))
 
-	var resolved sql.NullString
 	row := r.store.db.QueryRowContext(ctx, query, tenantID, key, moduleName, subKey, r.manifestDefault(moduleName, subKey))
-	if err := row.Scan(&resolved); err != nil {
-		return "", false, fmt.Errorf("resolve tenant config %q: %w", key, err)
+	switch err := row.Scan(&value, &encrypted); {
+	case errors.Is(err, sql.ErrNoRows):
+		value, encrypted, found = "", false, false
+	case err != nil:
+		return "", false, false, fmt.Errorf("resolve tenant config %q: %w", key, err)
+	default:
+		found = true
 	}
 
-	r.cacheSetIfFresh(cacheKey, resolved.String, resolved.Valid, gen)
-	return resolved.String, resolved.Valid, nil
+	r.cacheSetIfFresh(cacheKey, cachedValue{value: value, encrypted: encrypted, found: found}, gen)
+	return value, encrypted, found, nil
 }
 
 // manifestDefault returns moduleName's declared TenantConfigSeeds[subKey],
@@ -100,7 +112,7 @@ func (r *Resolver) Get(ctx context.Context, tenantID, key string) (value string,
 // everything else (number, bool, array, object) comes back as its JSON
 // text form — `#>>'{}'` only strips the surrounding quotes of a string
 // scalar, an array or object's brackets/braces stay put. Returns nil (SQL
-// NULL, the query's own lowest-priority COALESCE fallback) when the
+// NULL, which drops the query's lowest-priority tier) when the
 // module isn't loaded, failed to load, or declares no such key.
 func (r *Resolver) manifestDefault(moduleName, subKey string) any {
 	snap := r.registry.Snapshot()
@@ -148,19 +160,20 @@ func (r *Resolver) currentGeneration() uint64 {
 	return r.generation
 }
 
-// cacheSetIfFresh caches value/found under cacheKey, unless generation has
+// cacheSetIfFresh caches entry under cacheKey, unless generation has
 // advanced past gen — an Invalidate call landed while this read was still
 // in flight, meaning the value just read may already be stale. Skipping
 // the cache write in that case is safe: the next Get simply re-reads,
 // rather than risking caching a value Invalidate's own notification was
 // specifically trying to evict.
-func (r *Resolver) cacheSetIfFresh(cacheKey, value string, found bool, gen uint64) {
+func (r *Resolver) cacheSetIfFresh(cacheKey string, entry cachedValue, gen uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.generation != gen {
 		return
 	}
-	r.cache[cacheKey] = cachedValue{value: value, found: found, expiresAt: time.Now().Add(cacheTTL)}
+	entry.expiresAt = time.Now().Add(cacheTTL)
+	r.cache[cacheKey] = entry
 }
 
 // Invalidate drops tenantID/key's cached entry, if any, and advances the
