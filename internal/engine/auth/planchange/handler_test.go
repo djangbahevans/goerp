@@ -45,17 +45,32 @@ type spyAudit struct {
 	events []map[string]any
 }
 
-func (a *spyAudit) Emit(ctx context.Context, tenantSlug, eventName string, payload map[string]any) error {
+func (a *spyAudit) Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.events = append(a.events, map[string]any{"tenant": tenantSlug, "event": eventName, "payload": payload})
+	a.events = append(a.events, map[string]any{"tenant": tenantSlug, "event": eventName, "user_id": userID, "actor_user_id": actorUserID, "payload": payload})
 	return nil
 }
 
-func (a *spyAudit) called() bool {
+// assertLast checks the most recent event's subject and actor
+// (auth-internals.md §17 "Who an event is about, and who caused it") and
+// that its metadata never repeats the actor.
+func (a *spyAudit) assertLast(t *testing.T, eventName, userID, actorUserID string) {
+	t.Helper()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.events) > 0
+	if len(a.events) == 0 {
+		t.Fatalf("no audit events, want %s", eventName)
+	}
+	got := a.events[len(a.events)-1]
+	if got["event"] != eventName || got["user_id"] != userID || got["actor_user_id"] != actorUserID {
+		t.Errorf("last audit event = %v/%v/%v, want %s/%q/%q", got["event"], got["user_id"], got["actor_user_id"], eventName, userID, actorUserID)
+	}
+	if payload, _ := got["payload"].(map[string]any); payload != nil {
+		if _, ok := payload["performed_by"]; ok {
+			t.Errorf("audit payload %v contains performed_by", payload)
+		}
+	}
 }
 
 type fixture struct {
@@ -355,9 +370,7 @@ func TestServeHTTP_ChangesPlanInvalidatesCacheAndAudits(t *testing.T) {
 		t.Errorf("subscription plan_id = %q, want %q", planID, newPlan.ID)
 	}
 
-	if !f.audit.called() {
-		t.Error("audit emitter was never called")
-	}
+	f.audit.assertLast(t, "plan.changed", "", callerID)
 }
 
 func TestServeHTTP_UnknownPlanNameReturns400(t *testing.T) {

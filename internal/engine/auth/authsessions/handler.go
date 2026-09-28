@@ -222,16 +222,17 @@ func (h *Handler) ServeRevokeOthers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) recordSessionRevoked(r *http.Request, c caller, familyID, liveRowID string) {
-	metadata, _ := json.Marshal(map[string]any{"performed_by": c.auth.UserID, "family_id": familyID})
+	metadata, _ := json.Marshal(map[string]any{"family_id": familyID})
 	row := authaudit.Row{
-		EventType: "session.revoked",
-		TenantID:  c.tenant.TenantID,
-		UserID:    c.auth.UserID,
-		SessionID: liveRowID,
-		IPAddress: loginsession.ClientIP(r),
-		UserAgent: r.UserAgent(),
-		Success:   true,
-		Metadata:  metadata,
+		EventType:   "session.revoked",
+		TenantID:    c.tenant.TenantID,
+		UserID:      c.auth.UserID,
+		ActorUserID: c.auth.UserID,
+		SessionID:   liveRowID,
+		IPAddress:   loginsession.ClientIP(r),
+		UserAgent:   r.UserAgent(),
+		Success:     true,
+		Metadata:    metadata,
 	}
 	if err := h.audit.Insert(r.Context(), row); err != nil {
 		log.Warn().Err(err).Str("tenant", c.tenant.Slug).Msg("authsessions: session.revoked audit insert failed")

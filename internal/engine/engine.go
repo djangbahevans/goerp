@@ -695,7 +695,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
 	mfaEnrollHandlers := mfaenroll.NewHandlers(tenantResolver, authChecker, userStore, mfaStore, sessionStore, tokenIssuer, totpService, recoveryCodeService, authAuditStore)
 	mfaFactorHandlers := mfafactors.NewHandlers(tenantResolver, authChecker, mfaStore, mfaPolicyStore, totpService, recoveryCodeService, mfaLockout, revoke.NewService(mfaStore, sessionRevoker), sessionRevoker, authAuditStore)
-	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, nil, passwordHasher)
+	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	passwordResetRequestHandler := passwordreset.NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer, authAuditStore)
 	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, passwordPolicies, inviteMailer, authAuditStore, passwordHasher)
 	verifyEmailConfirmHandler := emailverify.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer)

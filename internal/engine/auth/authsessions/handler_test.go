@@ -19,6 +19,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit/audittest"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -381,6 +382,7 @@ func TestServeRevoke_EndsTheFamilyButNotTheCurrentSession(t *testing.T) {
 	if n := e.auditCount(t, ft, caller); n != 1 {
 		t.Errorf("session.revoked rows = %d, want 1", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "session.revoked", caller, caller)
 	if rec := e.revoke(ft, current.access, target.family); rec.Code != http.StatusNotFound {
 		t.Errorf("revoking an already-revoked family: status = %d, want 404", rec.Code)
 	}
@@ -435,6 +437,7 @@ func TestServeRevokeOthers_KeepsTheCallerAndThisTenantOnly(t *testing.T) {
 	if n := e.auditCount(t, ft, caller); n != 2 {
 		t.Errorf("session.revoked rows = %d, want 2", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "session.revoked", caller, caller)
 }
 
 func TestEveryRoute_RequiresAnAccessToken(t *testing.T) {

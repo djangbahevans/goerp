@@ -380,14 +380,15 @@ func (h *Handlers) recordAudit(r *http.Request, authCtx *authcheck.AuthContext, 
 		}
 	}
 	if err := h.audit.Insert(r.Context(), authaudit.Row{
-		EventType: eventType,
-		TenantID:  authCtx.TenantID,
-		UserID:    authCtx.UserID,
-		SessionID: authCtx.SessionID,
-		IPAddress: loginsession.ClientIP(r),
-		UserAgent: r.UserAgent(),
-		Success:   true,
-		Metadata:  raw,
+		EventType:   eventType,
+		TenantID:    authCtx.TenantID,
+		UserID:      authCtx.UserID,
+		ActorUserID: authCtx.UserID,
+		SessionID:   authCtx.SessionID,
+		IPAddress:   loginsession.ClientIP(r),
+		UserAgent:   r.UserAgent(),
+		Success:     true,
+		Metadata:    raw,
 	}); err != nil {
 		log.Warn().Err(err).Str("event", eventType).Msg("mfafactors: audit insert failed")
 	}

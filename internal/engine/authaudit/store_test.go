@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -167,6 +168,79 @@ func TestInsert_RoundTripsAllFields(t *testing.T) {
 	}
 }
 
+func TestInsert_ActorUserIDRoundTrips(t *testing.T) {
+	store, tenantStore, conn := openTestStore(t)
+	ctx := context.Background()
+	tt := createTenant(t, tenantStore, conn, uniqueSlug(t))
+	actor := uuid.New().String()
+
+	if err := store.Insert(ctx, Row{EventType: "role.created", TenantID: tt.ID, ActorUserID: actor, Success: true}); err != nil {
+		t.Fatalf("Insert() error: %v", err)
+	}
+
+	var gotUser, gotActor sql.NullString
+	err := conn.QueryRowContext(ctx, `
+		SELECT user_id, actor_user_id FROM system.auth_audit_log WHERE event_type = 'role.created' AND tenant_id = $1
+	`, tt.ID).Scan(&gotUser, &gotActor)
+	if err != nil {
+		t.Fatalf("query inserted row: %v", err)
+	}
+	if gotUser.Valid || gotActor.String != actor {
+		t.Errorf("user_id/actor_user_id = %v/%v, want NULL/%s", gotUser, gotActor, actor)
+	}
+}
+
+// TestPerUserQueries_UseIndexes checks the activity read's per-user
+// queries (auth-internals.md §17 "Tenant admin activity read API") are
+// served by idx_auth_audit_log_user and idx_auth_audit_log_actor. Seq
+// scans are disabled so the answer doesn't depend on how many rows the
+// shared dev database happens to hold.
+func TestPerUserQueries_UseIndexes(t *testing.T) {
+	_, _, conn := openTestStore(t)
+	ctx := context.Background()
+
+	for column, index := range map[string]string{"user_id": "idx_auth_audit_log_user", "actor_user_id": "idx_auth_audit_log_actor"} {
+		t.Run(column, func(t *testing.T) {
+			tx, err := conn.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("begin: %v", err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			if _, err := tx.ExecContext(ctx, "SET LOCAL enable_seqscan = off"); err != nil {
+				t.Fatalf("disable seqscan: %v", err)
+			}
+
+			var plan string
+			err = tx.QueryRowContext(ctx, fmt.Sprintf(`
+				EXPLAIN (FORMAT JSON) SELECT id FROM system.auth_audit_log
+				WHERE tenant_id = '%s' AND %s = '%s'
+				ORDER BY created_at DESC, id DESC LIMIT 50
+			`, uuid.New().String(), column, uuid.New().String())).Scan(&plan)
+			if err != nil {
+				t.Fatalf("explain: %v", err)
+			}
+
+			// Each partition carries its own copy of the parent index, so
+			// the plan names those; map them back to the parent.
+			var used bool
+			err = tx.QueryRowContext(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM pg_inherits i
+					JOIN pg_class child ON child.oid = i.inhrelid
+					JOIN pg_class parent ON parent.oid = i.inhparent
+					WHERE parent.relname = $1 AND strpos($2, '"' || child.relname || '"') > 0
+				) OR strpos($2, '"' || $1 || '"') > 0
+			`, index, plan).Scan(&used)
+			if err != nil {
+				t.Fatalf("match plan indexes: %v", err)
+			}
+			if !used {
+				t.Errorf("plan doesn't use %s:\n%s", index, plan)
+			}
+		})
+	}
+}
+
 func TestInsert_OptionalColumnsStoreAsNull(t *testing.T) {
 	store, tenantStore, conn := openTestStore(t)
 	ctx := context.Background()
@@ -197,7 +271,7 @@ func TestEmit_ResolvesTenantAndWritesRow(t *testing.T) {
 	slug := uniqueSlug(t)
 	tt := createTenant(t, tenantStore, conn, slug)
 
-	err := store.Emit(ctx, slug, "user.invited", map[string]any{"invitation_id": "abc-123", "email": "a@example.com"})
+	err := store.Emit(ctx, slug, "user.invited", "", "", map[string]any{"invitation_id": "abc-123", "email": "a@example.com"})
 	if err != nil {
 		t.Fatalf("Emit() error: %v", err)
 	}
@@ -229,10 +303,38 @@ func TestEmit_ResolvesTenantAndWritesRow(t *testing.T) {
 	}
 }
 
+func TestEmit_WritesSubjectAndActor(t *testing.T) {
+	store, tenantStore, conn := openTestStore(t)
+	ctx := context.Background()
+	slug := uniqueSlug(t)
+	tt := createTenant(t, tenantStore, conn, slug)
+	subject, actor := uuid.New().String(), uuid.New().String()
+
+	if err := store.Emit(ctx, slug, "mfa.admin_reset", subject, actor, nil); err != nil {
+		t.Fatalf("Emit() error: %v", err)
+	}
+
+	var gotUser, gotActor sql.NullString
+	var gotMetadata []byte
+	err := conn.QueryRowContext(ctx, `
+		SELECT user_id, actor_user_id, metadata FROM system.auth_audit_log
+		WHERE event_type = 'mfa.admin_reset' AND tenant_id = $1
+	`, tt.ID).Scan(&gotUser, &gotActor, &gotMetadata)
+	if err != nil {
+		t.Fatalf("query inserted row: %v", err)
+	}
+	if gotUser.String != subject || gotActor.String != actor {
+		t.Errorf("user_id/actor_user_id = %v/%v, want %s/%s", gotUser, gotActor, subject, actor)
+	}
+	if gotMetadata != nil {
+		t.Errorf("metadata = %s, want NULL for a nil payload", gotMetadata)
+	}
+}
+
 func TestEmit_UnknownTenantSlugFails(t *testing.T) {
 	store, _, _ := openTestStore(t)
 
-	err := store.Emit(context.Background(), "does-not-exist-"+uniqueSlug(t), "user.invited", nil)
+	err := store.Emit(context.Background(), "does-not-exist-"+uniqueSlug(t), "user.invited", "", "", nil)
 	if err == nil {
 		t.Fatal("expected an error resolving an unknown tenant slug, got nil")
 	}
@@ -253,7 +355,7 @@ func TestEventExists(t *testing.T) {
 		t.Fatal("expected EventExists() to be false before the event is emitted")
 	}
 
-	if err := store.Emit(ctx, slug, "user.invite_expired", map[string]any{"invitation_id": invitationID}); err != nil {
+	if err := store.Emit(ctx, slug, "user.invite_expired", "", "", map[string]any{"invitation_id": invitationID}); err != nil {
 		t.Fatalf("Emit() error: %v", err)
 	}
 

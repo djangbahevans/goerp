@@ -276,17 +276,16 @@ func (h *Handler) unknownPermissions(c caller, names, held []string) []string {
 }
 
 func (h *Handler) auditRow(r *http.Request, c caller, eventType string, metadata map[string]any) authaudit.Row {
-	metadata["performed_by"] = c.auth.UserID
 	raw, _ := json.Marshal(metadata)
 	return authaudit.Row{
-		EventType: eventType,
-		TenantID:  c.tenant.TenantID,
-		UserID:    c.auth.UserID,
-		SessionID: c.auth.SessionID,
-		IPAddress: loginsession.ClientIP(r),
-		UserAgent: r.UserAgent(),
-		Success:   true,
-		Metadata:  raw,
+		EventType:   eventType,
+		TenantID:    c.tenant.TenantID,
+		ActorUserID: c.auth.UserID,
+		SessionID:   c.auth.SessionID,
+		IPAddress:   loginsession.ClientIP(r),
+		UserAgent:   r.UserAgent(),
+		Success:     true,
+		Metadata:    raw,
 	}
 }
 

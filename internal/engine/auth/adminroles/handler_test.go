@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit/audittest"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -390,7 +391,8 @@ func TestServeList_BuiltInRolesAreImmutableWithUserCounts(t *testing.T) {
 func TestServeCreate(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
-	token := e.issue(t, ft, e.member(t, ft, "admin"))
+	admin := e.member(t, ft, "admin")
+	token := e.issue(t, ft, admin)
 
 	rec := e.create(t, ft, token, map[string]any{"name": "sales_rep", "description": "  Sells widgets ", "permissions": []string{permWrite, permRead, permRead}})
 	if rec.Code != http.StatusCreated {
@@ -403,6 +405,7 @@ func TestServeCreate(t *testing.T) {
 	if n := e.auditCount(t, ft, "role.created"); n != 1 {
 		t.Errorf("role.created rows = %d, want 1", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "role.created", "", admin)
 	if _, ok := e.perms.Lookup(created.ID); !ok {
 		t.Error("new role missing from the role permission map")
 	}
@@ -453,7 +456,8 @@ func TestServeGet(t *testing.T) {
 func TestServeUpdate_PermissionChangeReachesSignedInHolders(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
-	token := e.issue(t, ft, e.member(t, ft, "admin"))
+	admin := e.member(t, ft, "admin")
+	token := e.issue(t, ft, admin)
 	created := decode[roleDetailJSON](t, e.create(t, ft, token, map[string]any{"name": "clerk", "permissions": []string{permRead}}))
 	holder := e.member(t, ft, "clerk")
 	holderToken := e.issue(t, ft, holder)
@@ -475,6 +479,7 @@ func TestServeUpdate_PermissionChangeReachesSignedInHolders(t *testing.T) {
 	if n := e.auditCount(t, ft, "role.updated"); n != 1 {
 		t.Errorf("role.updated rows = %d, want 1", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "role.updated", "", admin)
 
 	rec = e.update(t, ft, token, created.ID, map[string]any{"description": "Handles the books"})
 	if got := decode[roleDetailJSON](t, rec); got.Description == nil || *got.Description != "Handles the books" || got.Name != "senior_clerk" || !slices.Equal(got.Permissions, []string{permWrite}) {
@@ -514,7 +519,8 @@ func TestServeUpdate_Rejections(t *testing.T) {
 func TestServeDelete(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
-	token := e.issue(t, ft, e.member(t, ft, "admin"))
+	admin := e.member(t, ft, "admin")
+	token := e.issue(t, ft, admin)
 	used := decode[roleDetailJSON](t, e.create(t, ft, token, map[string]any{"name": "used"}))
 	unused := decode[roleDetailJSON](t, e.create(t, ft, token, map[string]any{"name": "unused"}))
 	e.member(t, ft, "used")
@@ -546,6 +552,7 @@ func TestServeDelete(t *testing.T) {
 	if n := e.auditCount(t, ft, "role.deleted"); n != 1 {
 		t.Errorf("role.deleted rows = %d, want 1", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "role.deleted", "", admin)
 }
 
 func TestServeDelete_AnExpiredGrantDoesNotBlock(t *testing.T) {

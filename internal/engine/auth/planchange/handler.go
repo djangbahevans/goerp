@@ -39,11 +39,10 @@ const maxBodyBytes = 64 * 1024
 const adminRoleName = "admin"
 
 // AuditEmitter mirrors mfareset/roleassign's own minimal,
-// accept-an-interface-where-used convention. No concrete implementation
-// exists yet (nexus-docs backlog #298, unfiled) — a nil AuditEmitter is
-// expected and logged as a warning rather than failing the request.
+// accept-an-interface-where-used convention, satisfied by authaudit.Store.
+// A nil AuditEmitter is logged as a warning rather than failing the request.
 type AuditEmitter interface {
-	Emit(ctx context.Context, tenantSlug, eventName string, payload map[string]any) error
+	Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error
 }
 
 type Handler struct {
@@ -221,9 +220,8 @@ func (h *Handler) emitAudit(ctx context.Context, tenantSlug, performedBy, planNa
 		log.Warn().Str("tenant", tenantSlug).Str("event", "plan.changed").Msg("planchange: no audit emitter wired, event not recorded")
 		return
 	}
-	if err := h.audit.Emit(ctx, tenantSlug, "plan.changed", map[string]any{
-		"performed_by": performedBy,
-		"plan":         planName,
+	if err := h.audit.Emit(ctx, tenantSlug, "plan.changed", "", performedBy, map[string]any{
+		"plan": planName,
 	}); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantSlug).Str("event", "plan.changed").Msg("planchange: audit emit failed")
 	}

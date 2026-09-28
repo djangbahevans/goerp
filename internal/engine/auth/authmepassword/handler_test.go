@@ -327,7 +327,10 @@ func TestServeHTTP_ChangesPasswordAndRecordsPolicy(t *testing.T) {
 		t.Errorf("emails = %v, want one to %s", f.mailer.sent, f.email)
 	}
 	if len(f.audit.rows) != 1 || f.audit.rows[0].EventType != "password.changed" {
-		t.Errorf("audit rows = %+v, want one password.changed", f.audit.rows)
+		t.Fatalf("audit rows = %+v, want one password.changed", f.audit.rows)
+	}
+	if row := f.audit.rows[0]; row.UserID != f.userID || row.ActorUserID != f.userID {
+		t.Errorf("password.changed user_id/actor_user_id = %q/%q, want the user as both", row.UserID, row.ActorUserID)
 	}
 }
 

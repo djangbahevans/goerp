@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit/audittest"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
@@ -111,6 +112,7 @@ func TestLogin_PerTenantLimitDetectsWithoutBlocking(t *testing.T) {
 	if metadata != `{"limit": 100, "window_seconds": 60}` {
 		t.Errorf("metadata = %s, want limit 100 and window_seconds 60", metadata)
 	}
+	audittest.AssertLatest(t, f.conn, f.tenantID, "login.tenant_rate_exceeded", "", "")
 }
 
 func TestLogin_PerTenantLimitUnderThresholdWritesNoEvent(t *testing.T) {

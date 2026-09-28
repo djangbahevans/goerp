@@ -2,6 +2,7 @@ package adminusers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -101,18 +102,27 @@ func (e *env) cleanupUserByEmail(t *testing.T, email string) {
 	t.Cleanup(func() { _, _ = e.conn.Exec(`DELETE FROM system.users WHERE email = $1`, email) })
 }
 
-func (e *env) auditPerformer(t *testing.T, ft fixtureTenant, eventType, invitationID string) string {
+// assertInviteAudit checks an invitation event's row names the invitee's
+// account as its subject and the admin as its actor, with no performed_by
+// in its metadata (auth-internals.md §17).
+func (e *env) assertInviteAudit(t *testing.T, ft fixtureTenant, eventType, invitationID, wantUserID, wantActorUserID string) {
 	t.Helper()
-	var performer string
+	var userID, actorUserID sql.NullString
+	var hasPerformedBy bool
 	err := e.conn.QueryRow(`
-		SELECT metadata->>'performed_by' FROM system.auth_audit_log
+		SELECT user_id, actor_user_id, metadata ? 'performed_by' FROM system.auth_audit_log
 		WHERE tenant_id = $1 AND event_type = $2 AND metadata->>'invitation_id' = $3
 		ORDER BY created_at DESC LIMIT 1
-	`, ft.id, eventType, invitationID).Scan(&performer)
+	`, ft.id, eventType, invitationID).Scan(&userID, &actorUserID, &hasPerformedBy)
 	if err != nil {
 		t.Fatalf("read %s audit row: %v", eventType, err)
 	}
-	return performer
+	if userID.String != wantUserID || actorUserID.String != wantActorUserID {
+		t.Errorf("%s user_id/actor_user_id = %q/%q, want %q/%q", eventType, userID.String, actorUserID.String, wantUserID, wantActorUserID)
+	}
+	if hasPerformedBy {
+		t.Errorf("%s metadata contains performed_by", eventType)
+	}
 }
 
 func TestServeInvite_NewEmail(t *testing.T) {
@@ -140,9 +150,7 @@ func TestServeInvite_NewEmail(t *testing.T) {
 	if sent := e.mailer.last(t); sent.email != email || !sent.isNewUser {
 		t.Errorf("sent = %+v, want the new-account email to %s", sent, email)
 	}
-	if got := e.auditPerformer(t, ft, "user.invited", out.InvitationID); got != admin {
-		t.Errorf("user.invited performed_by = %q, want %s", got, admin)
-	}
+	e.assertInviteAudit(t, ft, "user.invited", out.InvitationID, invitee.ID, admin)
 	detail, err := e.handler.store.get(t.Context(), ft.slug, invitee.ID)
 	if err != nil || detail.Status != "invited" || detail.InvitationID == nil || *detail.InvitationID != out.InvitationID {
 		t.Errorf("directory entry = %+v, err = %v", detail, err)
@@ -246,6 +254,10 @@ func TestServeResendAndRevokeInvitation(t *testing.T) {
 	email := fmt.Sprintf("pending%d@example.com", time.Now().UnixNano())
 	e.cleanupUserByEmail(t, email)
 	_, inv, _ := e.invite(t, ft, token, map[string]string{"email": email, "role": "user"})
+	invitee, err := e.users.GetByEmail(t.Context(), email)
+	if err != nil {
+		t.Fatalf("GetByEmail() error: %v", err)
+	}
 	if _, err := e.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_invitations SET expires_at = NOW() - INTERVAL '1 day' WHERE id = $1`, tenantschema.Name(ft.slug)), inv.InvitationID); err != nil {
 		t.Fatalf("expire invitation: %v", err)
 	}
@@ -274,9 +286,7 @@ func TestServeResendAndRevokeInvitation(t *testing.T) {
 	if e.mailer.count() != sentBefore+1 || !e.mailer.last(t).isNewUser {
 		t.Errorf("resend sent %d emails (last %+v), want one new-account email", e.mailer.count()-sentBefore, e.mailer.last(t))
 	}
-	if got := e.auditPerformer(t, ft, "user.invite_resent", inv.InvitationID); got != admin {
-		t.Errorf("user.invite_resent performed_by = %q", got)
-	}
+	e.assertInviteAudit(t, ft, "user.invite_resent", inv.InvitationID, invitee.ID, admin)
 
 	if code := e.invitationAction(t, ft, token, "revoke", inv.InvitationID); code != http.StatusNoContent {
 		t.Fatalf("revoke status = %d", code)
@@ -284,9 +294,7 @@ func TestServeResendAndRevokeInvitation(t *testing.T) {
 	if !e.invitationRow(t, ft, inv.InvitationID).revoked {
 		t.Error("invitation not revoked")
 	}
-	if got := e.auditPerformer(t, ft, "user.invite_revoked", inv.InvitationID); got != admin {
-		t.Errorf("user.invite_revoked performed_by = %q", got)
-	}
+	e.assertInviteAudit(t, ft, "user.invite_revoked", inv.InvitationID, invitee.ID, admin)
 	for _, action := range []string{"resend", "revoke"} {
 		if code := e.invitationAction(t, ft, token, action, inv.InvitationID); code != http.StatusConflict {
 			t.Errorf("%s after revoke: status = %d, want 409", action, code)

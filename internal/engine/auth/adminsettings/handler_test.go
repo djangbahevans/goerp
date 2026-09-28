@@ -28,6 +28,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit/audittest"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -341,7 +342,7 @@ func TestAdminRoleRequired(t *testing.T) {
 func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
-	_, token := e.member(t, ft, "admin")
+	admin, token := e.member(t, ft, "admin")
 
 	rec := e.patch(t, ft, token, map[string]any{
 		"general": map[string]any{
@@ -400,6 +401,7 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 	if err := e.conn.QueryRow(`SELECT COUNT(*) FROM system.auth_audit_log WHERE tenant_id = $1 AND event_type = 'tenant.settings_updated'`, ft.id).Scan(&n); err != nil || n != 1 {
 		t.Errorf("tenant.settings_updated audit rows = %d, %v, want 1", n, err)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "tenant.settings_updated", "", admin)
 }
 
 func TestPatch_OmittedFieldsKeepTheirValues(t *testing.T) {
@@ -656,7 +658,7 @@ func (e *env) uploadLogo(t *testing.T, ft fixtureTenant, token, filename string,
 func TestLogo_UploadThenRemove(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
-	_, token := e.member(t, ft, "admin")
+	admin, token := e.member(t, ft, "admin")
 
 	rec := e.uploadLogo(t, ft, token, "logo.png", pngBytes(t))
 	if rec.Code != http.StatusOK {
@@ -698,6 +700,7 @@ func TestLogo_UploadThenRemove(t *testing.T) {
 		t.Errorf("GET logo_url after delete = %q, want nil", *got)
 	}
 	e.assertRetired(t, ft, secondKey)
+	audittest.AssertLatest(t, e.conn, ft.id, "tenant.settings_updated", "", admin)
 }
 
 func (e *env) assertRetired(t *testing.T, ft fixtureTenant, key string) {

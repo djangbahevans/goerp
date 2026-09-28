@@ -59,7 +59,7 @@ func NewStore(db *sql.DB, users UserResolver, roles RoleResolver, audit AuditEmi
 }
 
 type AuditEmitter interface {
-	Emit(ctx context.Context, tenantSlug, eventName string, payload map[string]any) error
+	Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error
 }
 
 type Mailer interface {
@@ -195,7 +195,7 @@ func (s *Store) Invite(ctx context.Context, tenantSlug, email, roleName, name st
 		return nil, fmt.Errorf("upsert invitation: %w", err)
 	}
 
-	s.emit(ctx, tenantSlug, "user.invited", withPerformer(map[string]any{"invitation_id": inv.ID, "email": email}, invitedBy))
+	s.emit(ctx, tenantSlug, "user.invited", userID, invitedBy, map[string]any{"invitation_id": inv.ID, "email": email})
 	s.sendInvite(ctx, email, tenantSlug, rawToken)
 
 	return inv, nil
@@ -227,7 +227,7 @@ func (s *Store) Resend(ctx context.Context, tenantSlug, invitationID string, per
 		return nil, fmt.Errorf("resend invitation: %w", err)
 	}
 
-	s.emit(ctx, tenantSlug, "user.invite_resent", withPerformer(map[string]any{"invitation_id": inv.ID}, performedBy))
+	s.emit(ctx, tenantSlug, "user.invite_resent", s.InviteeUserID(ctx, inv.Email), performedBy, map[string]any{"invitation_id": inv.ID})
 	s.sendInvite(ctx, inv.Email, tenantSlug, rawToken)
 
 	return inv, nil
@@ -242,21 +242,19 @@ func (s *Store) Revoke(ctx context.Context, tenantSlug, invitationID string, per
 		UPDATE %s.tenant_invitations
 		SET revoked_at = NOW()
 		WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+		RETURNING email
 	`, schema)
 
-	res, err := s.db.ExecContext(ctx, query, invitationID)
-	if err != nil {
-		return fmt.Errorf("revoke invitation: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("revoke invitation: %w", err)
-	}
-	if n == 0 {
+	var email string
+	err := s.db.QueryRowContext(ctx, query, invitationID).Scan(&email)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrInvitationNotLive
 	}
+	if err != nil {
+		return fmt.Errorf("revoke invitation: %w", err)
+	}
 
-	s.emit(ctx, tenantSlug, "user.invite_revoked", withPerformer(map[string]any{"invitation_id": invitationID}, performedBy))
+	s.emit(ctx, tenantSlug, "user.invite_revoked", s.InviteeUserID(ctx, email), performedBy, map[string]any{"invitation_id": invitationID})
 
 	return nil
 }
@@ -384,9 +382,8 @@ func (s *Store) Accept(ctx context.Context, tenantSlug, invitationID, userID str
 		return fmt.Errorf("commit accept invitation: %w", err)
 	}
 
-	s.emit(ctx, tenantSlug, "user.invite_accepted", map[string]any{
+	s.emit(ctx, tenantSlug, "user.invite_accepted", userID, nil, map[string]any{
 		"invitation_id": invitationID,
-		"user_id":       userID,
 	})
 	return nil
 }
@@ -436,23 +433,37 @@ func (s *Store) ResendInvite(ctx context.Context, tenantSlug, email string) erro
 	return err
 }
 
-func (s *Store) emit(ctx context.Context, tenantSlug, eventName string, payload map[string]any) {
+// emit records eventName about the invitee's account userID ("" when none
+// is known). performedBy is the acting admin, nil for the operator CLI or
+// a token-authenticated acceptance (auth-internals.md §17 "Who an event is
+// about, and who caused it").
+func (s *Store) emit(ctx context.Context, tenantSlug, eventName, userID string, performedBy *string, payload map[string]any) {
 	if s.audit == nil {
 		log.Warn().Str("tenant", tenantSlug).Str("event", eventName).Msg("invite: no audit emitter wired, event not recorded")
 		return
 	}
-	if err := s.audit.Emit(ctx, tenantSlug, eventName, payload); err != nil {
+	actor := ""
+	if performedBy != nil {
+		actor = *performedBy
+	}
+	if err := s.audit.Emit(ctx, tenantSlug, eventName, userID, actor, payload); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantSlug).Str("event", eventName).Msg("invite: audit emit failed")
 	}
 }
 
-// withPerformer adds performed_by to an audit payload when the action has
-// an acting user (a tenant admin, not the operator CLI).
-func withPerformer(payload map[string]any, performedBy *string) map[string]any {
-	if performedBy != nil {
-		payload["performed_by"] = *performedBy
+// InviteeUserID returns the id of the live system.users row for an
+// invitation's email, or "" when there is none (or the lookup fails,
+// logged): an audit row's subject, which is best-effort like the emit
+// itself.
+func (s *Store) InviteeUserID(ctx context.Context, email string) string {
+	var id string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id FROM system.users WHERE email = $1 AND deleted_at IS NULL
+	`, strings.ToLower(email)).Scan(&id)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		log.Warn().Err(err).Msg("invite: resolve invitee user id failed")
 	}
-	return payload
+	return id
 }
 
 // needsPassword reports whether email's account has no password yet, which

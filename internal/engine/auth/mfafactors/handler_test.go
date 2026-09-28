@@ -59,6 +59,19 @@ func (a *recordingAudit) Insert(_ context.Context, row authaudit.Row) error {
 	return nil
 }
 
+// assertSelf checks every recorded row names the user as both the account
+// it's about and its actor (auth-internals.md §17).
+func (a *recordingAudit) assertSelf(t *testing.T, userID string) {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, r := range a.rows {
+		if r.UserID != userID || r.ActorUserID != userID {
+			t.Errorf("%s user_id/actor_user_id = %q/%q, want %q as both", r.EventType, r.UserID, r.ActorUserID, userID)
+		}
+	}
+}
+
 func (a *recordingAudit) events() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -455,6 +468,7 @@ func TestRemove_LastFactorUnderOptionalPolicyRevokesCodesAndEverySession(t *test
 	if got := f.audit.events(); !slices.Equal(got, []string{"mfa.revoked"}) {
 		t.Errorf("audit events = %v, want [mfa.revoked]", got)
 	}
+	f.audit.assertSelf(t, f.userID)
 
 	fresh := f.login(t)
 	authCtx, err := f.checker.Authenticate(t.Context(), fresh, f.tenantID, f.tenantSlug, "203.0.113.7", nil, nil)
@@ -597,6 +611,7 @@ func TestRegenerate_ReplacesCodesAndRevokesOnlyOtherSessions(t *testing.T) {
 	if got := f.audit.events(); !slices.Equal(got, []string{"mfa.recovery_codes_regenerated"}) {
 		t.Errorf("audit events = %v, want [mfa.recovery_codes_regenerated]", got)
 	}
+	f.audit.assertSelf(t, f.userID)
 }
 
 func TestRegenerate_RecoveryCodeIsConsumed(t *testing.T) {

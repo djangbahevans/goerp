@@ -50,13 +50,17 @@ func (m *fakeMailer) SendInvite(_ context.Context, email, _, rawToken string, _ 
 
 type fakeAudit struct {
 	mu     sync.Mutex
-	events []string
+	events []auditEvent
 }
 
-func (a *fakeAudit) Emit(_ context.Context, _, eventName string, _ map[string]any) error {
+type auditEvent struct {
+	name, userID, actorUserID string
+}
+
+func (a *fakeAudit) Emit(_ context.Context, _, eventName, userID, actorUserID string, _ map[string]any) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.events = append(a.events, eventName)
+	a.events = append(a.events, auditEvent{eventName, userID, actorUserID})
 	return nil
 }
 
@@ -337,8 +341,10 @@ func TestAccept_NewInviteeSetsPasswordGrantsMembershipAndSignsIn(t *testing.T) {
 	if !f.isMember(t, userID) {
 		t.Error("invitee isn't a member after accepting")
 	}
-	if len(f.audit.events) == 0 || f.audit.events[len(f.audit.events)-1] != "user.invite_accepted" {
-		t.Errorf("audit events = %v, want user.invite_accepted last", f.audit.events)
+	// A token-authenticated acceptance has no signed-in actor
+	// (auth-internals.md §17), the same as password.reset_completed.
+	if want := (auditEvent{"user.invite_accepted", userID, ""}); len(f.audit.events) == 0 || f.audit.events[len(f.audit.events)-1] != want {
+		t.Errorf("audit events = %v, want %v last", f.audit.events, want)
 	}
 
 	if again := f.doAccept(t, token, newPassword); again.Code != http.StatusNotFound {
