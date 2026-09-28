@@ -159,6 +159,30 @@ describe("Select", () => {
   });
 });
 
+// A portaled panel on --z-dropdown would open behind the modal's own
+// --z-modal overlay (floating-panel.ts's useFloatingPanelLayer).
+describe("Select inside a modal", () => {
+  it("single-select's panel takes the modal's layer", async () => {
+    render(
+      <div role="dialog">
+        <Select options={OPTIONS} value="" onChange={vi.fn()} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("combobox"));
+    expect((await screen.findByRole("listbox")).className).toContain("z-(--z-modal)");
+  });
+
+  it("multi-select's panel takes the modal's layer", () => {
+    render(
+      <div role="dialog">
+        <Select options={OPTIONS} value={[]} onChange={vi.fn()} multiple />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("combobox"));
+    expect(screen.getByRole("listbox").className).toContain("z-(--z-modal)");
+  });
+});
+
 describe("Select inside a FieldWrapper", () => {
   it("is named by the wrapper's label", () => {
     render(

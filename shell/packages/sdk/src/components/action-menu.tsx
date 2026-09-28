@@ -6,7 +6,7 @@ import { useOptionalPermission } from "../auth/use-permission.js";
 import { AlertDialog, type AlertDialogInput } from "./alert-dialog.js";
 import { Button } from "./button.js";
 import { EscapeLayer } from "./escape-layer.js";
-import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
+import { useFloatingPanelLayer, useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { Icon, type IconNameLike } from "./icon.js";
 
 // manifest-spec.md's ConfirmDialog object, in AlertDialogProps' own
@@ -223,6 +223,7 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
   }, [open]);
 
   const position = useFloatingPanelPosition(open, triggerRef, panelRef, false);
+  const layerClassName = useFloatingPanelLayer(triggerRef);
   useOutsideClickClose(open, [triggerRef, panelRef], () => setOpen(false));
 
   const move = (direction: 1 | -1) => {
@@ -317,7 +318,7 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
                   ? { position: "fixed", top: position.top, left: position.left }
                   : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
               }
-              className="z-(--z-dropdown) max-h-80 min-w-40 max-w-70 overflow-y-auto rounded-structural border border-border bg-surface py-1 shadow-md"
+              className={`${layerClassName} max-h-80 min-w-40 max-w-70 overflow-y-auto rounded-structural border border-border bg-surface py-1 shadow-md`}
             >
               {items.map((item, index) => {
                 // items is a static prop array with no unique identifier

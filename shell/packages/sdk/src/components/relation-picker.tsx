@@ -10,6 +10,7 @@ import { EmptyState } from "./empty-state.js";
 import { EscapeLayer } from "./escape-layer.js";
 import {
   optionElementId,
+  useFloatingPanelLayer,
   useFloatingPanelPosition,
   useOutsideClickClose,
   useScrollHighlightedOptionIntoView,
@@ -293,6 +294,7 @@ export function RelationPicker({
   }
 
   const position = useFloatingPanelPosition(isOpen, containerRef, panelRef, true);
+  const layerClassName = useFloatingPanelLayer(containerRef);
   useOutsideClickClose(isOpen, [containerRef, panelRef], dismiss);
   useScrollHighlightedOptionIntoView(isOpen, listboxId, activeIndex, entries.length);
 
@@ -357,7 +359,7 @@ export function RelationPicker({
                   ? { position: "fixed", top: position.top, left: position.left, width: position.width }
                   : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
               }
-              className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
+              className={`${layerClassName} max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md`}
             >
               {status === "error" ? (
                 <EmptyState

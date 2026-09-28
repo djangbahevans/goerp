@@ -5,6 +5,7 @@ import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { EscapeLayer } from "./escape-layer.js";
 import {
   optionElementId,
+  useFloatingPanelLayer,
   useFloatingPanelPosition,
   useOutsideClickClose,
   useScrollHighlightedOptionIntoView,
@@ -142,6 +143,7 @@ export function CodeSelect({
   }
 
   const position = useFloatingPanelPosition(isOpen, containerRef, panelRef, true);
+  const layerClassName = useFloatingPanelLayer(containerRef);
   useOutsideClickClose(isOpen, [containerRef, panelRef], close);
 
   useScrollHighlightedOptionIntoView(isOpen, listboxId, activeIndex, matches.length);
@@ -258,7 +260,7 @@ export function CodeSelect({
                   ? { position: "fixed", top: position.top, left: position.left, width: position.width }
                   : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
               }
-              className="z-(--z-dropdown) max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md"
+              className={`${layerClassName} max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md`}
             >
               {matches.length === 0 ? (
                 <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">

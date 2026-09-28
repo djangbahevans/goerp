@@ -5,7 +5,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { EscapeLayer } from "./escape-layer.js";
-import { useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
+import { useFloatingPanelLayer, useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { Icon } from "./icon.js";
 import { TextInput } from "./text-input.js";
 
@@ -78,6 +78,7 @@ export function IconPicker({ id, value, onChange, placeholder, disabled = false 
   }
 
   const position = useFloatingPanelPosition(isOpen, containerRef, panelRef, false);
+  const layerClassName = useFloatingPanelLayer(containerRef);
 
   // Keeps the keyboard-highlighted cell's row scrolled into view — layout
   // effect, not a passive one, so the row mounts (and aria-activedescendant
@@ -197,7 +198,7 @@ export function IconPicker({ id, value, onChange, placeholder, disabled = false 
                   ? { position: "fixed", top: position.top, left: position.left }
                   : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
               }
-              className="z-(--z-dropdown) w-80 rounded-structural border border-border bg-surface p-2 shadow-md"
+              className={`${layerClassName} w-80 rounded-structural border border-border bg-surface p-2 shadow-md`}
             >
               {matches.length === 0 ? (
                 <span id={panelId} aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
