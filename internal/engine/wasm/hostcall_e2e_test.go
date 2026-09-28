@@ -68,6 +68,7 @@ func compileHostcallFixture(t *testing.T) []byte {
 type flowResult struct {
 	OK      bool   `msgpack:"ok"`
 	EventID string `msgpack:"event_id,omitempty"`
+	JobID   string `msgpack:"job_id,omitempty"`
 	Error   string `msgpack:"error,omitempty"`
 }
 
@@ -142,6 +143,29 @@ func TestHostcallFixture_EmitTxCommitFlow_ReachesEventDeliveryQueue(t *testing.T
 
 	if got := countEventDeliveryJobs(t, primaryDB, tenantID); got != 1 {
 		t.Fatalf("event_delivery job count = %d, want 1", got)
+	}
+}
+
+func TestHostcallFixture_EnqueueTxCommitFlow_InsertsWASMJob(t *testing.T) {
+	primaryDB := openTestPrimaryDB(t)
+	ctx := t.Context()
+	wasmBytes := compileHostcallFixture(t)
+
+	tenantID := uuid.New().String()
+	mc := NewModuleContext("req-1", "contacts", "user-1", "", nil, nil, tenantID, "hostcalltest", "trace-1", abi.CapDBWrite|abi.CapJobsEnqueue, nil, ModuleSnapshot{JobTypes: testJobTypes})
+
+	r := newHostcallTestRuntime(t, primaryDB, 10)
+
+	out := callHostcallFixture(t, ctx, r, wasmBytes, mc, "run_enqueue_tx_flow")
+	if !out.OK {
+		t.Fatalf("run_enqueue_tx_flow failed: %s", out.Error)
+	}
+	if out.JobID == "" {
+		t.Fatal("expected a non-empty job ID")
+	}
+
+	if got := countWASMJobs(t, primaryDB, tenantID); got != 1 {
+		t.Fatalf("wasm_job count = %d, want 1", got)
 	}
 }
 

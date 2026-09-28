@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"database/sql"
+	"slices"
 	"sync"
 	"time"
 
@@ -20,9 +21,9 @@ import (
 
 // ComputeTarget bundles what's needed to invoke a module's .Computed()
 // functions from outside that module's own request — its instance pool
-// to borrow a fresh WASM instance from, its own declared capabilities
-// (for any host.orm call the compute function itself makes), and its own
-// declared models (for resolveModel to succeed inside that nested call).
+// to borrow a fresh WASM instance from, and its own declared capabilities,
+// models, config_schema and job_types, so host.* calls made inside that
+// nested call resolve against the owning module's declarations.
 // One ComputeTarget exists per loaded module, not per calling module, so
 // a computed field's owning module is reachable regardless of which
 // module's write triggered the recompute (host_orm_write.go's
@@ -31,6 +32,8 @@ type ComputeTarget struct {
 	Pool         *InstancePool
 	Capabilities abi.CapabilitySet
 	ModelDecls   []model.ModelDeclaration
+	ConfigSchema []manifest.ConfigEntry
+	JobTypes     []manifest.JobType
 }
 
 // ModuleSnapshot bundles the pieces of a registry snapshot a host function
@@ -95,6 +98,11 @@ type ModuleSnapshot struct {
 	// resolve a "{module}.{key}" key's declared type and "encrypted" flag
 	// against this list, never against another module's config_schema.
 	ConfigSchema []manifest.ConfigEntry
+
+	// JobTypes is the calling module's own declared job_types
+	// (manifest-spec.md §15) — host.jobs.enqueue/enqueue_tx reject a job
+	// type not in this list.
+	JobTypes []manifest.JobType
 
 	// ORMBulkMaxRows caps create_batch/write_many/write_where/unlink at
 	// this many records/IDs per call. Zero defaults to
@@ -229,6 +237,15 @@ func (mc *ModuleContext) ConfigEntry(subKey string) (manifest.ConfigEntry, bool)
 		}
 	}
 	return manifest.ConfigEntry{}, false
+}
+
+// JobType returns the calling module's own declared job type named name.
+func (mc *ModuleContext) JobType(name string) (manifest.JobType, bool) {
+	i := slices.IndexFunc(mc.snapshot.JobTypes, func(jt manifest.JobType) bool { return jt.Name == name })
+	if i < 0 {
+		return manifest.JobType{}, false
+	}
+	return mc.snapshot.JobTypes[i], true
 }
 
 // defaultORMBulkMaxRows/defaultORMStatementTimeout mirror

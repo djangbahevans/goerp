@@ -33,6 +33,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.SecretsBackend != "env" {
 		t.Errorf("SecretsBackend = %q, want %q", cfg.SecretsBackend, "env")
 	}
+	if cfg.QueueBulkConcurrency >= cfg.QueueDefaultConcurrency {
+		t.Errorf("QueueBulkConcurrency = %d, want lower than QueueDefaultConcurrency %d", cfg.QueueBulkConcurrency, cfg.QueueDefaultConcurrency)
+	}
 }
 
 func TestLoadEnvOverride(t *testing.T) {

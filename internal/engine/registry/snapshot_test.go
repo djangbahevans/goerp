@@ -198,3 +198,29 @@ func TestRegistrySnapshot_ModelByName_ResolvesEitherDeclarationSpelling(t *testi
 		})
 	}
 }
+
+func TestComputeTargets_CarriesModuleDeclarations(t *testing.T) {
+	r := &ModuleRegistry{}
+	jobTypes := []manifest.JobType{{Name: "contacts_import", Queue: "bulk"}}
+	configSchema := []manifest.ConfigEntry{{Key: "default_country_code", Type: "string"}}
+	snap, err := r.Update(map[string]*module.LoadedModule{
+		"contacts": {
+			Status:   module.StatusReady,
+			Manifest: manifest.Manifest{Name: "contacts", Type: "standard", JobTypes: jobTypes, ConfigSchema: configSchema},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	target, ok := ComputeTargets(snap)["contacts"]
+	if !ok {
+		t.Fatal("no compute target for contacts")
+	}
+	if len(target.JobTypes) != 1 || target.JobTypes[0].Name != "contacts_import" {
+		t.Errorf("JobTypes = %+v, want %+v", target.JobTypes, jobTypes)
+	}
+	if len(target.ConfigSchema) != 1 || target.ConfigSchema[0].Key != "default_country_code" {
+		t.Errorf("ConfigSchema = %+v, want %+v", target.ConfigSchema, configSchema)
+	}
+}

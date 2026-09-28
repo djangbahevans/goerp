@@ -1287,6 +1287,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 		OwnedModels:         mod.Manifest.Schema.OwnedModels,
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
+		JobTypes:            mod.Manifest.JobTypes,
 		ORMBulkMaxRows:      e.wasmRuntime.ORMBulkMaxRows(),
 		ORMStatementTimeout: e.wasmRuntime.ORMStatementTimeout(),
 	})

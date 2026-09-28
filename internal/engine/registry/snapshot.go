@@ -169,6 +169,8 @@ func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
 			Pool:         m.Pool,
 			Capabilities: m.Capabilities,
 			ModelDecls:   m.ModelDecls,
+			ConfigSchema: m.Manifest.ConfigSchema,
+			JobTypes:     m.Manifest.JobTypes,
 		}
 	}
 	return targets

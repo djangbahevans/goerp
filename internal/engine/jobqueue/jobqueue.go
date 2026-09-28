@@ -180,7 +180,7 @@ func QueueConfig(cfg *config.Config) map[string]river.QueueConfig {
 	return map[string]river.QueueConfig{
 		QueueCritical: {MaxWorkers: withDefault(cfg.QueueCriticalConcurrency, 5)},
 		QueueDefault:  {MaxWorkers: withDefault(cfg.QueueDefaultConcurrency, 10)},
-		QueueBulk:     {MaxWorkers: withDefault(cfg.QueueBulkConcurrency, 20)},
+		QueueBulk:     {MaxWorkers: withDefault(cfg.QueueBulkConcurrency, 3)},
 		QueueSearch:   {MaxWorkers: withDefault(cfg.QueueSearchConcurrency, 5)},
 		QueueEmail:    {MaxWorkers: withDefault(cfg.QueueEmailConcurrency, 5)},
 		QueueAdmin:    {MaxWorkers: withDefault(cfg.QueueAdminConcurrency, 5)},

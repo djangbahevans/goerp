@@ -338,3 +338,10 @@ func TestQueue_EnforcesPerQueueConcurrencyLimit(t *testing.T) {
 		t.Errorf("max concurrent Work() calls = %d, want <= %d (queue concurrency limit)", got, cfg.QueueBulkConcurrency)
 	}
 }
+
+func TestQueueConfig_BulkRunsFewerWorkersThanDefault(t *testing.T) {
+	queues := jobqueue.QueueConfig(&config.Config{})
+	if bulk, def := queues[jobqueue.QueueBulk].MaxWorkers, queues[jobqueue.QueueDefault].MaxWorkers; bulk >= def {
+		t.Errorf("bulk MaxWorkers = %d, want lower than default's %d", bulk, def)
+	}
+}
