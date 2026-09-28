@@ -181,13 +181,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.recordAudit(ctx, authaudit.Row{
-		EventType: "password.changed",
-		TenantID:  tenantCtx.TenantID,
-		UserID:    u.ID,
-		SessionID: authCtx.SessionID,
-		IPAddress: loginsession.ClientIP(r),
-		UserAgent: r.UserAgent(),
-		Success:   true,
+		EventType:   "password.changed",
+		TenantID:    tenantCtx.TenantID,
+		UserID:      u.ID,
+		ActorUserID: u.ID,
+		SessionID:   authCtx.SessionID,
+		IPAddress:   loginsession.ClientIP(r),
+		UserAgent:   r.UserAgent(),
+		Success:     true,
 	})
 	h.notify(ctx, u.Email)
 

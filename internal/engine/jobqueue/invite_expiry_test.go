@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit/audittest"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -123,7 +125,18 @@ func TestWork_EmitsExpiredInviteExactlyOnceAcrossRuns(t *testing.T) {
 
 	tt := newExpiryTestTenant(t, tenantStore, roleStore, inviteStore, conn)
 
-	inv, err := inviteStore.Invite(ctx, tt.Slug, fmt.Sprintf("t%d@example.com", time.Now().UnixNano()), "admin", "Test User", nil)
+	// The fake UserResolver creates no system.users row, so make the
+	// invitee's account exist for the row's subject to resolve to.
+	email := fmt.Sprintf("t%d@example.com", time.Now().UnixNano())
+	inviteeID, err := user.NewStore(conn).FindOrCreateInvited(ctx, email)
+	if err != nil {
+		t.Fatalf("FindOrCreateInvited() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.ExecContext(context.Background(), "DELETE FROM system.users WHERE id = $1", inviteeID)
+	})
+
+	inv, err := inviteStore.Invite(ctx, tt.Slug, email, "admin", "Test User", nil)
 	if err != nil {
 		t.Fatalf("Invite() error: %v", err)
 	}
@@ -131,6 +144,7 @@ func TestWork_EmitsExpiredInviteExactlyOnceAcrossRuns(t *testing.T) {
 
 	runWork(t, w)
 	runWork(t, w)
+	audittest.AssertLatest(t, conn, tt.ID, "user.invite_expired", inviteeID, "")
 
 	var count int
 	err = conn.QueryRowContext(ctx,

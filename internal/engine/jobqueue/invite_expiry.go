@@ -80,7 +80,7 @@ func (w *InviteExpiryWorker) expireForTenant(ctx context.Context, slug string) e
 		}
 
 		payload := map[string]any{"invitation_id": inv.ID, "email": inv.Email}
-		if err := w.AuditStore.Emit(ctx, slug, "user.invite_expired", payload); err != nil {
+		if err := w.AuditStore.Emit(ctx, slug, "user.invite_expired", w.InviteStore.InviteeUserID(ctx, inv.Email), "", payload); err != nil {
 			return fmt.Errorf("emit invite_expired for %s: %w", inv.ID, err)
 		}
 	}

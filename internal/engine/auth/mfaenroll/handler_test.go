@@ -399,7 +399,7 @@ func TestConfirm_FirstFactorIssuesCodesAndSatisfiesEnforcement(t *testing.T) {
 		t.Errorf("MFASetupRequired() after confirm = %v, %v; want false", required, err)
 	}
 
-	if len(f.audit.rows) != 1 || f.audit.rows[0].EventType != "mfa.enrolled" || f.audit.rows[0].UserID != f.userID {
+	if len(f.audit.rows) != 1 || f.audit.rows[0].EventType != "mfa.enrolled" || f.audit.rows[0].UserID != f.userID || f.audit.rows[0].ActorUserID != f.userID {
 		t.Errorf("audit rows = %+v, want one mfa.enrolled for the user", f.audit.rows)
 	}
 }

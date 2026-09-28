@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS system.auth_audit_log (
     event_type      TEXT NOT NULL,
     tenant_id       UUID REFERENCES system.tenants(id),
     user_id         UUID,
+    actor_user_id   UUID,
     session_id      UUID,
     api_key_id      UUID,
     ip_address      INET,
@@ -50,6 +51,17 @@ CREATE TABLE IF NOT EXISTS system.auth_audit_log (
 // time-series data, same reasoning as those two tables.
 const createAuthAuditLogTimeIndex = `
 CREATE INDEX IF NOT EXISTS idx_auth_audit_log_time ON system.auth_audit_log USING BRIN (created_at)
+`
+
+// createAuthAuditLogUserIndex and createAuthAuditLogActorIndex serve the
+// per-user activity read (auth-internals.md §17 "Tenant admin activity
+// read API"): what was done to a user's account, and what they did.
+const createAuthAuditLogUserIndex = `
+CREATE INDEX IF NOT EXISTS idx_auth_audit_log_user ON system.auth_audit_log (tenant_id, user_id, created_at DESC, id DESC)
+`
+
+const createAuthAuditLogActorIndex = `
+CREATE INDEX IF NOT EXISTS idx_auth_audit_log_actor ON system.auth_audit_log (tenant_id, actor_user_id, created_at DESC, id DESC)
 `
 
 type Store struct {
@@ -90,18 +102,28 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, createAuthAuditLogTimeIndex); err != nil {
 			return fmt.Errorf("create auth_audit_log time index: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, createAuthAuditLogUserIndex); err != nil {
+			return fmt.Errorf("create auth_audit_log user index: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, createAuthAuditLogActorIndex); err != nil {
+			return fmt.Errorf("create auth_audit_log actor index: %w", err)
+		}
 		return db.RegisterPartition(ctx, tx, "system.auth_audit_log", "created_at")
 	})
 }
 
-// Row is one auth_audit_log entry. TenantID/UserID/SessionID/APIKeyID are
-// "" when not applicable to EventType — stored as SQL NULL, not an empty
-// UUID. Metadata is pre-marshaled JSON, nil when the event carries no
-// event-specific detail.
+// Row is one auth_audit_log entry. TenantID/UserID/ActorUserID/SessionID/
+// APIKeyID are "" when not applicable to EventType — stored as SQL NULL,
+// not an empty UUID. UserID is the account the event is about and
+// ActorUserID the signed-in user whose request caused it
+// (auth-internals.md §17 "Who an event is about, and who caused it"); the
+// actor is never repeated in Metadata. Metadata is pre-marshaled JSON, nil
+// when the event carries no event-specific detail.
 type Row struct {
 	EventType     string
 	TenantID      string
 	UserID        string
+	ActorUserID   string
 	SessionID     string
 	APIKeyID      string
 	IPAddress     string
@@ -130,9 +152,9 @@ func (s *Store) InsertTx(ctx context.Context, tx *sql.Tx, row Row) error {
 func insertRow(ctx context.Context, q db.Execer, row Row) error {
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO system.auth_audit_log
-			(event_type, tenant_id, user_id, session_id, api_key_id, ip_address, user_agent, country_code, success, failure_reason, metadata)
-		VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, '')::inet, NULLIF($7, ''), NULLIF($8, ''), $9, NULLIF($10, ''), $11)
-	`, row.EventType, row.TenantID, row.UserID, row.SessionID, row.APIKeyID, row.IPAddress, row.UserAgent, row.CountryCode, row.Success, row.FailureReason, row.Metadata)
+			(event_type, tenant_id, user_id, actor_user_id, session_id, api_key_id, ip_address, user_agent, country_code, success, failure_reason, metadata)
+		VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, '')::uuid, NULLIF($7, '')::inet, NULLIF($8, ''), NULLIF($9, ''), $10, NULLIF($11, ''), $12)
+	`, row.EventType, row.TenantID, row.UserID, row.ActorUserID, row.SessionID, row.APIKeyID, row.IPAddress, row.UserAgent, row.CountryCode, row.Success, row.FailureReason, row.Metadata)
 	if err != nil {
 		return fmt.Errorf("insert auth_audit_log row: %w", err)
 	}
@@ -144,23 +166,30 @@ func insertRow(ctx context.Context, q db.Execer, row Row) error {
 // (every invite event type this interface carries — user.invited,
 // user.invite_accepted, user.invite_resent, user.invite_revoked,
 // user.invite_expired — is an unconditional state transition, never a
-// pass/fail outcome the way login.failure or mfa.failed are).
-func (s *Store) Emit(ctx context.Context, tenantSlug, eventName string, payload map[string]any) error {
+// pass/fail outcome the way login.failure or mfa.failed are). userID is
+// the account the event is about and actorUserID the signed-in user who
+// caused it, either "" when there is none (auth-internals.md §17 "Who an
+// event is about, and who caused it").
+func (s *Store) Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error {
 	t, err := s.tenantStore.GetBySlug(ctx, tenantSlug)
 	if err != nil {
 		return fmt.Errorf("resolve tenant %s: %w", tenantSlug, err)
 	}
 
-	metadata, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
+	var metadata []byte
+	if payload != nil {
+		if metadata, err = json.Marshal(payload); err != nil {
+			return fmt.Errorf("marshal metadata: %w", err)
+		}
 	}
 
 	return s.Insert(ctx, Row{
-		EventType: eventName,
-		TenantID:  t.ID,
-		Success:   true,
-		Metadata:  metadata,
+		EventType:   eventName,
+		TenantID:    t.ID,
+		UserID:      userID,
+		ActorUserID: actorUserID,
+		Success:     true,
+		Metadata:    metadata,
 	})
 }
 

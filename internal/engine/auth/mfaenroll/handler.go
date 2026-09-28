@@ -306,14 +306,15 @@ func (h *Handlers) recordAudit(ctx context.Context, r *http.Request, authCtx *au
 		return
 	}
 	if err := h.audit.Insert(ctx, authaudit.Row{
-		EventType: "mfa.enrolled",
-		TenantID:  authCtx.TenantID,
-		UserID:    authCtx.UserID,
-		SessionID: authCtx.SessionID,
-		IPAddress: loginsession.ClientIP(r),
-		UserAgent: r.UserAgent(),
-		Success:   true,
-		Metadata:  metadata,
+		EventType:   "mfa.enrolled",
+		TenantID:    authCtx.TenantID,
+		UserID:      authCtx.UserID,
+		ActorUserID: authCtx.UserID,
+		SessionID:   authCtx.SessionID,
+		IPAddress:   loginsession.ClientIP(r),
+		UserAgent:   r.UserAgent(),
+		Success:     true,
+		Metadata:    metadata,
 	}); err != nil {
 		log.Warn().Err(err).Msg("mfaenroll: audit insert failed")
 	}

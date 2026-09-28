@@ -245,21 +245,20 @@ func (h *Handler) recordAudit(r *http.Request, c caller, eventType string, metad
 	if h.deps.Audit == nil {
 		return
 	}
-	metadata["performed_by"] = c.auth.UserID
 	raw, err := json.Marshal(metadata)
 	if err != nil {
 		log.Error().Err(err).Msg("adminsettings: encode audit metadata")
 		return
 	}
 	if err := h.deps.Audit.Insert(r.Context(), authaudit.Row{
-		EventType: eventType,
-		TenantID:  c.tenant.TenantID,
-		UserID:    c.auth.UserID,
-		SessionID: c.auth.SessionID,
-		IPAddress: loginsession.ClientIP(r),
-		UserAgent: r.UserAgent(),
-		Success:   true,
-		Metadata:  raw,
+		EventType:   eventType,
+		TenantID:    c.tenant.TenantID,
+		ActorUserID: c.auth.UserID,
+		SessionID:   c.auth.SessionID,
+		IPAddress:   loginsession.ClientIP(r),
+		UserAgent:   r.UserAgent(),
+		Success:     true,
+		Metadata:    raw,
 	}); err != nil {
 		log.Error().Err(err).Str("tenant_id", c.tenant.TenantID).Str("event", eventType).Msg("adminsettings: write audit row")
 	}

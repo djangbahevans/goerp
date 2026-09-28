@@ -244,13 +244,9 @@ func (s *Service) FinishLogin(ctx context.Context, userID, ceremonyID, accountNa
 		if revokeErr := s.store.Revoke(ctx, mfaID); revokeErr != nil {
 			return "", fmt.Errorf("revoke suspected-cloned webauthn credential: %w", revokeErr)
 		}
-		// auth-internals.md §8 calls emitAuditEvent("mfa.clone_suspected",
-		// user.ID, credential.ID) here. system.auth_audit_log (the doc's
-		// §17 audit trail table) doesn't exist yet — nexus-docs backlog
-		// #298, unfiled — so this logs structurally instead of writing a
-		// real audit row. Swap this for a real emit once that table
-		// lands; the revoke above is the actual security control and
-		// doesn't depend on it.
+		// auth-internals.md §8 records mfa.clone_suspected here. Service
+		// has no audit recorder wired yet, so this logs structurally; the
+		// revoke above is the actual security control.
 		log.Warn().
 			Str("event", "mfa.clone_suspected").
 			Str("user_id", userID).

@@ -61,14 +61,11 @@ type Mailer interface {
 }
 
 // AuditEmitter is the minimal interface this package needs for the
-// mfa.admin_reset event. No concrete implementation exists yet — the
-// real auth_audit_log table (auth-internals.md §17) isn't built
-// (nexus-docs backlog #298, unfiled) — so a nil AuditEmitter is expected
-// and handled the same way internal/engine/invite.Store's own optional
-// AuditEmitter is: logged as a warning rather than silently dropped or
-// failing the request.
+// mfa.admin_reset event, satisfied by authaudit.Store. A nil AuditEmitter
+// is logged as a warning rather than failing the request, the same way
+// internal/engine/invite.Store's own optional AuditEmitter is.
 type AuditEmitter interface {
-	Emit(ctx context.Context, tenantSlug, eventName string, payload map[string]any) error
+	Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error
 }
 
 type Handler struct {
@@ -248,10 +245,7 @@ func (h *Handler) emitAudit(ctx context.Context, tenantSlug, performedBy, target
 		log.Warn().Str("tenant", tenantSlug).Str("event", "mfa.admin_reset").Msg("mfareset: no audit emitter wired, event not recorded")
 		return
 	}
-	if err := h.audit.Emit(ctx, tenantSlug, "mfa.admin_reset", map[string]any{
-		"performed_by":   performedBy,
-		"target_user_id": targetUserID,
-	}); err != nil {
+	if err := h.audit.Emit(ctx, tenantSlug, "mfa.admin_reset", targetUserID, performedBy, nil); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantSlug).Str("event", "mfa.admin_reset").Msg("mfareset: audit emit failed")
 	}
 }

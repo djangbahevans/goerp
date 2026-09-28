@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/authaudit/audittest"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -593,6 +594,7 @@ func TestServeSuspendAndUnsuspend(t *testing.T) {
 	if n := e.auditCount(t, ft, "user.suspended", target); n != 1 {
 		t.Errorf("user.suspended rows = %d, want 1", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "user.suspended", target, admin)
 
 	if rec := unsuspend(); rec.Code != http.StatusNoContent {
 		t.Fatalf("unsuspend: status = %d, body = %s", rec.Code, rec.Body)
@@ -603,6 +605,7 @@ func TestServeSuspendAndUnsuspend(t *testing.T) {
 	if n := e.auditCount(t, ft, "user.unsuspended", target); n != 1 {
 		t.Errorf("user.unsuspended rows = %d, want 1", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "user.unsuspended", target, admin)
 	if !e.authenticates(t, ft, e.issue(t, ft, target)) {
 		t.Error("unsuspended user's new session doesn't authenticate")
 	}
@@ -632,6 +635,7 @@ func TestServeDelete(t *testing.T) {
 	if n := e.auditCount(t, ft, "user.deleted", target); n != 1 {
 		t.Errorf("user.deleted rows = %d, want 1", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "user.deleted", target, admin)
 	if slices.Contains(ids(e.list(t, ft, adminToken, "").Data), target) {
 		t.Error("deleted user is still listed")
 	}
@@ -719,6 +723,7 @@ func TestServeSessionsAndRevokeSession(t *testing.T) {
 	if n := e.auditCount(t, ft, "session.revoked", target); n != 1 {
 		t.Errorf("session.revoked rows = %d, want 1", n)
 	}
+	audittest.AssertLatest(t, e.conn, ft.id, "session.revoked", target, admin)
 	if rec := revoke(adminToken, families[0]); rec.Code != http.StatusNotFound {
 		t.Errorf("revoking an already-revoked family: status = %d, want 404", rec.Code)
 	}

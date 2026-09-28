@@ -310,15 +310,19 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) auditRow(r *http.Request, c caller, eventType, targetID string, metadata map[string]any) authaudit.Row {
-	raw, _ := json.Marshal(metadata)
+	var raw []byte
+	if metadata != nil {
+		raw, _ = json.Marshal(metadata)
+	}
 	return authaudit.Row{
-		EventType: eventType,
-		TenantID:  c.tenant.TenantID,
-		UserID:    targetID,
-		IPAddress: loginsession.ClientIP(r),
-		UserAgent: r.UserAgent(),
-		Success:   true,
-		Metadata:  raw,
+		EventType:   eventType,
+		TenantID:    c.tenant.TenantID,
+		UserID:      targetID,
+		ActorUserID: c.auth.UserID,
+		IPAddress:   loginsession.ClientIP(r),
+		UserAgent:   r.UserAgent(),
+		Success:     true,
+		Metadata:    raw,
 	}
 }
 
@@ -371,7 +375,7 @@ func (h *Handler) ServeSuspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row := h.auditRow(r, c, "user.suspended", target.ID, map[string]any{"performed_by": c.auth.UserID, "reason": strings.TrimSpace(body.Reason)})
+	row := h.auditRow(r, c, "user.suspended", target.ID, map[string]any{"reason": strings.TrimSpace(body.Reason)})
 	run := func() error { return h.store.suspend(r.Context(), target.ID, row) }
 	h.changeStatus(w, r, c, target.ID, run, "user_not_active", "admin_suspend")
 }
@@ -387,7 +391,7 @@ func (h *Handler) ServeUnsuspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row := h.auditRow(r, c, "user.unsuspended", target.ID, map[string]any{"performed_by": c.auth.UserID})
+	row := h.auditRow(r, c, "user.unsuspended", target.ID, nil)
 	run := func() error { return h.store.unsuspend(r.Context(), target.ID, row) }
 	h.changeStatus(w, r, c, target.ID, run, "user_not_suspended", "")
 }
@@ -403,7 +407,7 @@ func (h *Handler) ServeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row := h.auditRow(r, c, "user.deleted", target.ID, map[string]any{"performed_by": c.auth.UserID})
+	row := h.auditRow(r, c, "user.deleted", target.ID, nil)
 	run := func() error { return h.store.softDelete(r.Context(), target.ID, row) }
 	h.changeStatus(w, r, c, target.ID, run, "user_already_deleted", "admin_delete")
 }
@@ -516,7 +520,7 @@ func (h *Handler) ServeRevokeSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) recordSessionRevoked(r *http.Request, c caller, targetID string, family session.Family) {
-	row := h.auditRow(r, c, "session.revoked", targetID, map[string]any{"performed_by": c.auth.UserID, "family_id": family.ID})
+	row := h.auditRow(r, c, "session.revoked", targetID, map[string]any{"family_id": family.ID})
 	row.SessionID = family.LiveRowID
 	if err := h.store.audit.Insert(r.Context(), row); err != nil {
 		log.Warn().Err(err).Str("tenant", c.tenant.Slug).Msg("adminusers: session.revoked audit insert failed")

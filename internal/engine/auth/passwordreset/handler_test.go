@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -103,6 +104,20 @@ func (a *fakeAudit) Insert(_ context.Context, row authaudit.Row) error {
 	defer a.mu.Unlock()
 	a.rows = append(a.rows, row)
 	return nil
+}
+
+// assertNoActor checks every recorded row names userID as the account it's
+// about and has no actor: a reset is never caused by a signed-in user
+// (auth-internals.md §17).
+func (a *fakeAudit) assertNoActor(t *testing.T, userID string) {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, r := range a.rows {
+		if r.UserID != userID || r.ActorUserID != "" {
+			t.Errorf("%s user_id/actor_user_id = %q/%q, want %q/\"\"", r.EventType, r.UserID, r.ActorUserID, userID)
+		}
+	}
 }
 
 func (a *fakeAudit) eventTypes() []string {
@@ -399,6 +414,7 @@ func TestRequest_KnownEmail_StoresHashedTokenAndEmailsLink(t *testing.T) {
 	if got := f.audit.eventTypes(); len(got) != 1 || got[0] != "password.reset_requested" {
 		t.Errorf("audit events = %v, want [password.reset_requested]", got)
 	}
+	f.audit.assertNoActor(t, f.userID)
 }
 
 func TestRequest_UnknownEmail_SameResponseAsKnown(t *testing.T) {
@@ -476,6 +492,10 @@ func TestConfirm_ValidToken_ResetsPasswordRevokesSessionsAndSignsIn(t *testing.T
 	if len(f.mailer.confirmed) != 1 {
 		t.Errorf("confirmation emails = %v, want one", f.mailer.confirmed)
 	}
+	if got := f.audit.eventTypes(); !slices.Contains(got, "password.reset_completed") {
+		t.Errorf("audit events = %v, want password.reset_completed", got)
+	}
+	f.audit.assertNoActor(t, f.userID)
 
 	reuse := f.doConfirm(t, token, "yet another long passphrase")
 	if reuse.Code != http.StatusNotFound {
