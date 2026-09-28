@@ -58,6 +58,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authregister"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authsessions"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/connectorprimary"
 	"github.com/djangbahevans/goerp/internal/engine/auth/emailverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/handoff"
 	"github.com/djangbahevans/goerp/internal/engine/auth/ipallowlist"
@@ -113,6 +114,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/poolwarm"
+	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
@@ -898,6 +900,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["PATCH /admin/settings"] = http.HandlerFunc(adminSettingsHandler.ServePatch)
 	builtinRoutes["POST /admin/settings/logo"] = http.HandlerFunc(adminSettingsHandler.ServeUploadLogo)
 	builtinRoutes["DELETE /admin/settings/logo"] = http.HandlerFunc(adminSettingsHandler.ServeDeleteLogo)
+	connectorPrimaryHandler := connectorprimary.NewHandler(tenantResolver, authChecker, providerselect.NewStore(primaryPool), authAuditStore)
+	builtinRoutes["PATCH /admin/connectors/{name}/set-primary"] = http.HandlerFunc(connectorPrimaryHandler.ServeSetPrimary)
 	moduleInstallWorker := &moduleinstall.Worker{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,

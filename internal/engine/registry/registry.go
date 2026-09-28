@@ -521,9 +521,9 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 			PathTemplate: r[1],
 		})
 	}
-	// Tenant admin user, invite, role and settings endpoints (goerp#1097,
-	// goerp#1098, goerp#1099, goerp#1296), the same tenant-facing, EngineBuiltin posture as
-	// /admin/users/{id}/mfa/reset.
+	// Tenant admin user, invite, role, settings and connector endpoints
+	// (goerp#1097, goerp#1098, goerp#1099, goerp#1296, goerp#1290), the same
+	// tenant-facing, EngineBuiltin posture as /admin/users/{id}/mfa/reset.
 	for _, r := range [][2]string{
 		{"GET", "/admin/users"},
 		{"GET", "/admin/users/{id}"},
@@ -545,6 +545,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"PATCH", "/admin/settings"},
 		{"POST", "/admin/settings/logo"},
 		{"DELETE", "/admin/settings/logo"},
+		{"PATCH", "/admin/connectors/{name}/set-primary"},
 	} {
 		table.Register(r[0], r[1], &route.RouteEntry{
 			Manifest:     route.RouteManifest{EngineNative: true, EngineBuiltin: true},

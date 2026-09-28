@@ -156,6 +156,12 @@ const (
 	// outside 1-100, a negative delay or max_attempts, or delay_ms
 	// combined with scheduled_at.
 	ErrCodeJobsInvalidOptions = "jobs.invalid_options"
+	// ErrCodeJobsNoProviderSelected and ErrCodeJobsNoProviderInstalled are
+	// single-active provider resolution's two failures (connector-guide.md
+	// §7): more than one enabled module provides the category and none is
+	// the tenant's primary, or none provides it at all.
+	ErrCodeJobsNoProviderSelected  = "jobs.no_provider_selected"
+	ErrCodeJobsNoProviderInstalled = "jobs.no_provider_installed"
 )
 
 // host.search error codes (host-abi-reference.md §12 "host.search.query").

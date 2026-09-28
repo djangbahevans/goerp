@@ -18,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
+	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
@@ -36,6 +37,7 @@ func bootstrapSystemSchema(ctx context.Context, schemaPool *sql.DB, syncPool *sc
 		{"billing schema", billing.NewStore(schemaPool).Bootstrap},
 		{"checkpoint schema", checkpoint.NewStore(schemaPool).Bootstrap},
 		{"user identity store", user.NewStore(schemaPool).Bootstrap},
+		{"provider selections table", providerselect.NewStore(schemaPool).Bootstrap},
 		{"api key store", apikey.NewStore(schemaPool).Bootstrap},
 		{"mfa credential store", mfa.NewStore(schemaPool).Bootstrap},
 		{"row encryption keys table", rowcrypt.NewStore(schemaPool, nil).Bootstrap},
