@@ -163,7 +163,7 @@ func requireHostErrorCode(t *testing.T, env abiv1.Envelope, code string) {
 	}
 }
 
-func loadJobRow(t *testing.T, conn *sql.DB, jobID string) (jobqueue.WASMJobArgs, jobMetadata) {
+func loadJobRow(t *testing.T, conn *sql.DB, jobID string) (jobqueue.WASMJobArgs, jobqueue.JobMetadata) {
 	t.Helper()
 	id, err := jobqueue.DecodeJobID(jobID)
 	if err != nil {
@@ -177,7 +177,7 @@ func loadJobRow(t *testing.T, conn *sql.DB, jobID string) (jobqueue.WASMJobArgs,
 	if err := json.Unmarshal(argsRaw, &args); err != nil {
 		t.Fatalf("decode args: %v", err)
 	}
-	var metadata jobMetadata
+	var metadata jobqueue.JobMetadata
 	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
 		t.Fatalf("decode metadata: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestHostJobs_EnqueueProvider_ResolvesSoleProvider(t *testing.T) {
 	if args.Queue != jobqueue.QueueDefault || args.MaxAttempts != defaultJobMaxAttempts {
 		t.Errorf("queue/max_attempts = %s/%d, want engine defaults", args.Queue, args.MaxAttempts)
 	}
-	want := jobMetadata{TenantID: f.tenantID, ModuleName: "connector_twilio", TraceID: "trace-1", EnqueuedBy: "notifications"}
+	want := jobqueue.JobMetadata{TenantID: f.tenantID, ModuleName: "connector_twilio", TraceID: "trace-1", EnqueuedBy: "notifications"}
 	if metadata != want {
 		t.Errorf("metadata = %+v, want %+v", metadata, want)
 	}

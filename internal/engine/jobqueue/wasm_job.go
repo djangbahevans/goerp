@@ -62,3 +62,14 @@ func (a WASMJobArgs) InsertOpts() river.InsertOpts {
 	}
 	return river.InsertOpts{Queue: queue, MaxAttempts: a.MaxAttempts}
 }
+
+// JobMetadata is stamped onto every WASMJobArgs job's River metadata, so
+// the job's origin is visible without decoding its args. ModuleName is the
+// module whose handler runs the job; EnqueuedBy is set only for a
+// provider-category job, where that is not the enqueuing module.
+type JobMetadata struct {
+	TenantID   string `json:"tenant_id"`
+	ModuleName string `json:"module_name"`
+	TraceID    string `json:"trace_id,omitempty"`
+	EnqueuedBy string `json:"enqueued_by,omitempty"`
+}

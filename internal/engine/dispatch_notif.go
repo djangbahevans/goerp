@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/rs/zerolog/log"
 )
 
@@ -167,7 +168,9 @@ func (e *Engine) dispatchNotifDismissAllRoute(w http.ResponseWriter, r *http.Req
 }
 
 // notifUpdateOne applies update to the caller's notification named by the
-// {id} path parameter. Repeating it is a 204, since update keeps an
+// {id} path parameter, then tells the caller's other sessions in the
+// tenant with notification.read (notification-system.md §9, which uses it
+// for a dismissal too). Repeating it is a 204, since update keeps an
 // existing timestamp.
 func (e *Engine) notifUpdateOne(w http.ResponseWriter, r *http.Request, update func(ctx context.Context, tenantSlug, tenantID, userID, id string) error, failMsg string) {
 	authCtx, tenantCtx, ok := notifCaller(w, r)
@@ -191,9 +194,12 @@ func (e *Engine) notifUpdateOne(w http.ResponseWriter, r *http.Request, update f
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", failMsg)
 		return
 	}
+	e.notifBroadcast(r.Context(), tenantCtx.TenantID, authCtx.UserID, "notification.read", map[string]string{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// notifUpdateAll applies update to every notification of the caller's,
+// then tells their other sessions with notification.read_all.
 func (e *Engine) notifUpdateAll(w http.ResponseWriter, r *http.Request, update func(ctx context.Context, tenantSlug, tenantID, userID string) error, failMsg string) {
 	authCtx, tenantCtx, ok := notifCaller(w, r)
 	if !ok {
@@ -203,7 +209,18 @@ func (e *Engine) notifUpdateAll(w http.ResponseWriter, r *http.Request, update f
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", failMsg)
 		return
 	}
+	e.notifBroadcast(r.Context(), tenantCtx.TenantID, authCtx.UserID, "notification.read_all", nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// notifBroadcast sends msgType on userID's user channel to their sessions
+// in tenantID. The change is already stored, so a push that reaches no
+// session is not an error.
+func (e *Engine) notifBroadcast(ctx context.Context, tenantID, userID, msgType string, payload any) {
+	if e.wsHub == nil {
+		return
+	}
+	_, _ = e.wsHub.BroadcastUser(ctx, ws.NotificationsChannel, tenantID, userID, msgType, payload)
 }
 
 // notifDeviceTokenMaxLength bounds a registered token; FCM and APNs tokens

@@ -134,17 +134,6 @@ func writeJobInsertResult(ctx context.Context, m api.Module, allocate api.Functi
 	})
 }
 
-// jobMetadata is stamped onto every module-enqueued River job's metadata,
-// so the job's origin is visible without decoding its args. ModuleName is
-// the module whose handler runs the job; EnqueuedBy is set only for a
-// provider-category job, where that is not the enqueuing module.
-type jobMetadata struct {
-	TenantID   string `json:"tenant_id"`
-	ModuleName string `json:"module_name"`
-	TraceID    string `json:"trace_id,omitempty"`
-	EnqueuedBy string `json:"enqueued_by,omitempty"`
-}
-
 // buildJobInsert validates one host.jobs enqueue against the calling
 // module's own job_types and resolves its options, falling back from the
 // caller's opts to the job type's manifest declaration to the engine
@@ -209,7 +198,7 @@ func buildJobInsertFor(modCtx *ModuleContext, jt manifest.JobType, moduleName, p
 	if providerCategory != "" {
 		enqueuedBy = modCtx.ModuleName
 	}
-	metadata, err := json.Marshal(jobMetadata{TenantID: modCtx.TenantID, ModuleName: moduleName, TraceID: modCtx.TraceID, EnqueuedBy: enqueuedBy})
+	metadata, err := json.Marshal(jobqueue.JobMetadata{TenantID: modCtx.TenantID, ModuleName: moduleName, TraceID: modCtx.TraceID, EnqueuedBy: enqueuedBy})
 	if err != nil {
 		return jobqueue.WASMJobArgs{}, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}

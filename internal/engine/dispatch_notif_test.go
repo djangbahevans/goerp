@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"database/sql"
@@ -15,6 +16,8 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
 	"github.com/djangbahevans/goerp/internal/engine/billing"
@@ -23,6 +26,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/djangbahevans/goerp/internal/engine/ws"
 )
 
 // dispatchNotifFixture is a tenant schema with a bootstrapped
@@ -334,6 +338,9 @@ func (f *dispatchNotifFixture) deviceTokens(t *testing.T) []deviceTokenRow {
 			t.Fatalf("scan device token: %v", err)
 		}
 		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("select device tokens: %v", err)
 	}
 	return out
 }
@@ -859,5 +866,75 @@ func TestDispatchNotifUnsubscribeRoute_ChangesNothingForABadToken(t *testing.T) 
 	// A token that had wrongly passed would have written a row here.
 	if n := f.preferenceRows(t); n != 0 {
 		t.Errorf("%d preference rows, want none", n)
+	}
+}
+
+func TestDispatchNotifRoutes_BroadcastReadsToTheCallersSessions(t *testing.T) {
+	f := newDispatchNotifFixture(t)
+	hub := ws.NewHub()
+	f.e.wsHub = hub
+	a := f.insert(t, f.callerID, "a", false)
+	b := f.insert(t, f.callerID, "b", false)
+
+	e := &Engine{wsHub: hub}
+	url := wsTestServer(t, e, &authcheck.AuthContext{IsAuthenticated: true, UserID: f.callerID}, &tenantresolve.TenantContext{TenantID: f.tenantID})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	channel := ws.NotificationsChannel
+	if err := wsjson.Write(ctx, conn, map[string]string{"type": "subscribe", "channel": channel}); err != nil {
+		t.Fatalf("subscribe write: %v", err)
+	}
+	for {
+		if reached, _ := hub.Broadcast(ctx, channel, "probe", nil); reached > 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("subscription never registered")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	next := func() map[string]any {
+		t.Helper()
+		var env map[string]any
+		if err := wsjson.Read(ctx, conn, &env); err != nil {
+			t.Fatalf("read envelope: %v", err)
+		}
+		return env
+	}
+	if env := next(); env["type"] != "probe" {
+		t.Fatalf("first message = %v, want the probe", env)
+	}
+
+	steps := []struct {
+		handler  http.HandlerFunc
+		method   string
+		id       string
+		wantType string
+		wantID   string
+	}{
+		{f.e.dispatchNotifReadRoute, http.MethodPost, a, "notification.read", a},
+		{f.e.dispatchNotifDismissRoute, http.MethodDelete, b, "notification.read", b},
+		{f.e.dispatchNotifReadAllRoute, http.MethodPost, "", "notification.read_all", ""},
+		{f.e.dispatchNotifDismissAllRoute, http.MethodDelete, "", "notification.read_all", ""},
+	}
+	for _, s := range steps {
+		var params map[string]string
+		if s.id != "" {
+			params = map[string]string{"id": s.id}
+		}
+		if w := f.serve(s.handler, f.callerID, s.method, "/_notif/", params); w.Code != http.StatusNoContent {
+			t.Fatalf("%s status = %d, want 204", s.wantType, w.Code)
+		}
+		env := next()
+		payload, _ := env["payload"].(map[string]any)
+		if env["channel"] != channel || env["type"] != s.wantType || (s.wantID != "" && payload["id"] != s.wantID) {
+			t.Errorf("message = %v, want %s for %q", env, s.wantType, s.wantID)
+		}
 	}
 }

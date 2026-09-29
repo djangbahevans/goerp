@@ -51,6 +51,41 @@ func (s *Store) RegisterDeviceToken(ctx context.Context, tenantSlug, tenantID, u
 	return nil
 }
 
+// DeviceToken is one of a user's registered push device tokens.
+type DeviceToken struct {
+	Platform string
+	Token    string
+}
+
+// DeviceTokens returns userID's registered push device tokens, oldest
+// registration first.
+func (s *Store) DeviceTokens(ctx context.Context, tenantSlug, tenantID, userID string) ([]DeviceToken, error) {
+	query := fmt.Sprintf(`
+		SELECT platform, token FROM %s.user_device_tokens
+		WHERE tenant_id = $1 AND user_id = $2
+		ORDER BY registered_at, id
+	`, tenantschema.Name(tenantSlug))
+
+	rows, err := s.db.QueryContext(ctx, query, tenantID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list device tokens: %w", err)
+	}
+	defer rows.Close()
+
+	var tokens []DeviceToken
+	for rows.Next() {
+		var t DeviceToken
+		if err := rows.Scan(&t.Platform, &t.Token); err != nil {
+			return nil, fmt.Errorf("list device tokens: %w", err)
+		}
+		tokens = append(tokens, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list device tokens: %w", err)
+	}
+	return tokens, nil
+}
+
 // DeleteStaleDeviceTokens deletes the tenant's tokens last seen before
 // cutoff and returns how many it deleted.
 func (s *Store) DeleteStaleDeviceTokens(ctx context.Context, tenantSlug string, cutoff time.Time) (int64, error) {

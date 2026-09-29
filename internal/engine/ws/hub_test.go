@@ -18,13 +18,20 @@ import (
 // *websocket.Conn clients against it.
 func testServer(t *testing.T, hub *Hub) string {
 	t.Helper()
+	return testServerAs(t, hub, "tenant-1", "user-1")
+}
+
+// testServerAs is testServer with every connection registered as userID
+// under tenantID.
+func testServerAs(t *testing.T, hub *Hub, tenantID, userID string) string {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
-		_ = hub.Serve(r.Context(), conn, uuid.New().String(), "user-1", "tenant-1", "test-agent")
+		_ = hub.Serve(r.Context(), conn, uuid.New().String(), userID, tenantID, "test-agent")
 	}))
 	t.Cleanup(srv.Close)
 	return "ws://" + srv.Listener.Addr().String()
@@ -86,6 +93,40 @@ func TestHub_BroadcastDeliversToSubscriber(t *testing.T) {
 	env := readEnvelope(t, conn)
 	if env.Channel != "notifications" || env.Type != "notification.new" {
 		t.Errorf("got envelope %+v, want channel=notifications type=notification.new", env)
+	}
+}
+
+func TestHub_BroadcastUserReachesOnlyThatUsersSessionsInTheTenant(t *testing.T) {
+	hub := NewHub()
+	target := dial(t, testServerAs(t, hub, "tenant-a", "user-1"))
+	others := []*websocket.Conn{
+		dial(t, testServerAs(t, hub, "tenant-b", "user-1")),
+		dial(t, testServerAs(t, hub, "tenant-a", "user-2")),
+	}
+	subscribe(t, target, NotificationsChannel)
+	for _, c := range others {
+		subscribe(t, c, NotificationsChannel)
+	}
+	waitForSubscriberCount(t, hub, NotificationsChannel, 3)
+
+	n, err := hub.BroadcastUser(t.Context(), NotificationsChannel, "tenant-a", "user-1", "notification.new", map[string]string{"id": "n1"})
+	if err != nil {
+		t.Fatalf("BroadcastUser: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("reached %d sessions, want 1", n)
+	}
+	if env := readEnvelope(t, target); env.Channel != NotificationsChannel || env.Type != "notification.new" {
+		t.Errorf("target session got %+v, want notification.new on %s", env, NotificationsChannel)
+	}
+
+	for i, c := range others {
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		var env outboundEnvelope
+		if err := wsjson.Read(ctx, c, &env); err == nil {
+			t.Errorf("other session %d got %+v, want nothing", i, env)
+		}
+		cancel()
 	}
 }
 
