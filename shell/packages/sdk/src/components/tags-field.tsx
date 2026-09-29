@@ -1,8 +1,10 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { EscapeLayer } from "./escape-layer.js";
 import { fieldInputClassName } from "./field-input-styles.js";
 import { FieldError, FieldLabel, useSelfLabelledFieldControl } from "./field-wrapper.js";
+import { useOutsideClickClose } from "./floating-panel.js";
+import { useListboxNavigation } from "./listbox-navigation.js";
 import { requiredProps } from "./text-input.js";
 
 export interface TagValue {
@@ -66,9 +68,7 @@ export function TagsField({
   placeholder,
 }: TagsFieldProps): ReactNode {
   const [query, setQuery] = useState("");
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [closed, setClosed] = useState(false);
-  const listboxId = useId();
   const { id: fieldId, errorId, controlProps } = useSelfLabelledFieldControl(id, error);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const selectedIds = new Set(value.map((t) => t.id));
@@ -78,23 +78,21 @@ export function TagsField({
   const showCreate = creatable && normalizedQuery !== "" && !exactMatch;
   const optionCount = matches.length + (showCreate ? 1 : 0);
   const isOpen = query !== "" && !closed && optionCount > 0;
-  const activeIndex = Math.max(0, Math.min(highlightedIndex, optionCount - 1));
+  const nav = useListboxNavigation({
+    count: optionCount,
+    isOpen,
+    // The list only shows while a query is typed, so Home/End always move the caret.
+    homeEnd: false,
+    onChoose: (index) => {
+      const match = matches[index];
+      if (match) add(match);
+      else if (showCreate) void create();
+    },
+  });
 
-  // Unlike RelationPicker/CodeSelect, this listbox isn't absolutely
-  // positioned (so no portal/clipping concern) — but with no dismissal
-  // mechanism at all, a click outside the field left the suggestion list
-  // (and its typed query) open indefinitely. Mirrors Escape's own
-  // behavior (setClosed, not clearing the query) rather than inventing a
-  // second dismissal shape.
-  useEffect(() => {
-    if (!isOpen) return;
-    function handlePointerDown(event: MouseEvent): void {
-      if (containerRef.current?.contains(event.target as Node)) return;
-      setClosed(true);
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [isOpen]);
+  // The list sits in the page flow, so no portal is needed, but a press
+  // outside still dismisses it the way Escape does, keeping the query.
+  useOutsideClickClose(isOpen, [containerRef], () => setClosed(true));
 
   const add = (tag: TagValue) => {
     onChange([...value, tag]);
@@ -114,7 +112,7 @@ export function TagsField({
   const handleInputChange = (nextQuery: string) => {
     setQuery(nextQuery);
     setClosed(false);
-    setHighlightedIndex(0);
+    nav.setActiveIndex(0);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -135,47 +133,24 @@ export function TagsField({
       if (event.key === "ArrowDown" && query !== "" && optionCount > 0) {
         event.preventDefault();
         setClosed(false);
-        setHighlightedIndex(0);
+        nav.setActiveIndex(0);
       }
       return;
     }
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        setHighlightedIndex((activeIndex + 1) % optionCount);
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        setHighlightedIndex((activeIndex - 1 + optionCount) % optionCount);
-        break;
-      case "Enter":
-        event.preventDefault();
-        if (activeIndex < matches.length) {
-          const match = matches[activeIndex];
-          if (match) add(match);
-        } else if (showCreate) {
-          create();
-        }
-        break;
-      default:
-        break;
+    if (event.key === "Tab") {
+      setClosed(true);
+      return;
     }
+    nav.handleKeyDown(event);
   };
 
-  const renderOption = (index: number, key: string, content: ReactNode, onSelect: () => void) => (
-    // biome-ignore lint/a11y/useFocusableInteractive: the ARIA APG combobox-with-listbox pattern keeps focus on the input throughout — options are never independently focusable, only virtually "focused" via aria-activedescendant.
-    // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown (Enter/ArrowUp/ArrowDown), not a key handler on the option itself.
+  const renderOption = (index: number, key: string, content: ReactNode) => (
     <div
       key={key}
-      id={`${listboxId}-option-${index}`}
-      role="option"
-      aria-selected={index === activeIndex}
-      aria-disabled={disabled}
-      onMouseEnter={disabled ? undefined : () => setHighlightedIndex(index)}
-      onClick={disabled ? undefined : onSelect}
+      {...nav.getOptionProps(index, { disabled })}
       className={`rounded-control px-2 py-1 text-left text-sm text-text ${
         disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-      } ${index === activeIndex ? "bg-surface-hover" : ""}`}
+      } ${index === nav.activeIndex ? "bg-surface-hover" : ""}`}
     >
       {content}
     </div>
@@ -217,11 +192,7 @@ export function TagsField({
         {...controlProps}
         {...requiredProps("combobox", controlProps.required)}
         type="text"
-        role="combobox"
-        aria-expanded={isOpen}
-        aria-controls={listboxId}
-        aria-autocomplete="list"
-        aria-activedescendant={isOpen ? `${listboxId}-option-${activeIndex}` : undefined}
+        {...nav.inputProps}
         value={query}
         disabled={disabled}
         placeholder={placeholder ?? `Add ${label ?? "a tag"}…`}
@@ -232,12 +203,12 @@ export function TagsField({
       {isOpen && (
         <EscapeLayer onEscape={() => setClosed(true)}>
           <span
-            id={listboxId}
+            id={nav.listboxId}
             role="listbox"
             className="flex flex-col gap-1 rounded-structural border border-border bg-surface p-2 shadow-md"
           >
-            {matches.map((option, index) => renderOption(index, option.id, option.name, () => add(option)))}
-            {showCreate && renderOption(matches.length, "create", `Create "${query.trim()}"`, create)}
+            {matches.map((option, index) => renderOption(index, option.id, option.name))}
+            {showCreate && renderOption(matches.length, "create", `Create "${query.trim()}"`)}
           </span>
         </EscapeLayer>
       )}

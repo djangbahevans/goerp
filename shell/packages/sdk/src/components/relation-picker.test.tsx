@@ -222,7 +222,7 @@ describe("RelationPicker", () => {
     await waitFor(() => expect(document.querySelector("[data-skeleton='lines']")).toBeTruthy());
   });
 
-  it("shows a 'no results' row, announced via aria-live, when the query matches nothing", async () => {
+  it("shows a 'no results' row, announced by the status region, when the query matches nothing", async () => {
     render(
       <RelationPicker
         resource="contacts.contact"
@@ -234,8 +234,8 @@ describe("RelationPicker", () => {
       />,
     );
     fireEvent.focus(screen.getByRole("combobox"));
-    const empty = await screen.findByText('No results for ""');
-    expect(empty.getAttribute("aria-live")).toBe("polite");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe('No results for ""'));
+    expect(screen.getByRole("listbox").textContent).toBe('No results for ""');
   });
 
   it("shows an EmptyState when the target resource is unregistered", async () => {
@@ -447,5 +447,26 @@ describe("RelationPicker", () => {
     const listbox = await screen.findByRole("listbox");
     expect(container.contains(listbox)).toBe(false);
     expect(document.body.contains(listbox)).toBe(true);
+  });
+
+  it("Home/End jump the highlight to the ends of an unfiltered list", async () => {
+    render(
+      <RelationPicker
+        resource="contacts.contact"
+        labelField="display_name"
+        value={null}
+        onChange={vi.fn()}
+        client={fakeClient()}
+        registry={fakeRegistry()}
+      />,
+    );
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    await screen.findByText("Acme Industries");
+    fireEvent.keyDown(input, { key: "End" });
+    const active = () => document.getElementById(input.getAttribute("aria-activedescendant") ?? "")?.textContent;
+    expect(active()).toBe("Acme Industries");
+    fireEvent.keyDown(input, { key: "Home" });
+    expect(active()).toBe("Acme Corp");
   });
 });

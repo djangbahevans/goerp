@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageSelect } from "./language-select.js";
 
@@ -49,13 +49,13 @@ describe("LanguageSelect", () => {
     expect(input.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("shows a 'no results' row, announced via aria-live, when the query matches nothing", async () => {
+  it("shows a 'no results' row, announced by the status region, when the query matches nothing", async () => {
     render(<LanguageSelect value="" onChange={vi.fn()} />);
     const input = screen.getByRole("combobox");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "notalanguage" } });
-    const empty = await screen.findByText('No results for "notalanguage"');
-    expect(empty.getAttribute("aria-live")).toBe("polite");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe('No results for "notalanguage"'));
+    expect(screen.getByRole("listbox").textContent).toBe('No results for "notalanguage"');
   });
 
   it("a labeled clear button unsets the value", () => {

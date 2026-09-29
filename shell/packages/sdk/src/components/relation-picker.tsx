@@ -1,23 +1,12 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { APIClient } from "../http/index.js";
 import { apiClient } from "../http/index.js";
 import type { ResourceMetadataRegistry } from "../schema/index.js";
 import { resourceListPath, resourceMetadataRegistry } from "../schema/index.js";
-import { ComboboxClearButton } from "./combobox-clear-button.js";
+import { Combobox } from "./combobox.js";
 import { EmptyState } from "./empty-state.js";
-import { EscapeLayer } from "./escape-layer.js";
-import {
-  optionElementId,
-  useFloatingPanelLayer,
-  useFloatingPanelPosition,
-  useOutsideClickClose,
-  useScrollHighlightedOptionIntoView,
-} from "./floating-panel.js";
 import type { RelationValue } from "./relation-field.js";
-import { Skeleton } from "./skeleton.js";
-import { TextInput } from "./text-input.js";
 
 export type { RelationValue } from "./relation-field.js";
 
@@ -160,16 +149,7 @@ export function RelationPicker({
 }: RelationPickerProps): ReactNode {
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const listboxId = useId();
   const debouncedQuery = useDebouncedValue(query, DEBOUNCE_MS);
-
-  // Portaled to document.body, position: fixed — same reasoning as
-  // ActionMenu's own panel: an ancestor with overflow: hidden (SectionCard's
-  // own collapse-transition wrapper, e.g.) would otherwise clip the
-  // dropdown instead of letting it float above the page.
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const panelRef = useRef<HTMLSpanElement | null>(null);
 
   const selected: RelationValue[] = multiple ? (Array.isArray(value) ? value : []) : [];
   const singleValue: RelationValue | null = multiple ? null : ((value as RelationValue | null) ?? null);
@@ -185,6 +165,7 @@ export function RelationPicker({
     registry,
   );
 
+  const labelOf = (row: Row) => String(row[labelField] ?? row.id);
   const matches = rows.filter((row) => !selectedIds.has(row.id));
   const normalizedQuery = debouncedQuery.trim().toLowerCase();
   const exactMatch = rows.some((row) => String(row[labelField] ?? "").toLowerCase() === normalizedQuery);
@@ -193,214 +174,88 @@ export function RelationPicker({
     ...matches.map((row): Entry => ({ kind: "option", row })),
     ...(showCreate ? [{ kind: "create" } as const] : []),
   ];
-  const activeIndex = Math.max(0, Math.min(highlightedIndex, entries.length - 1));
 
-  function open(): void {
-    if (disabled) return;
-    setIsOpen(true);
-    setHighlightedIndex(0);
-  }
-
-  function close(): void {
-    setIsOpen(false);
-    setQuery("");
-  }
-
-  // Escape and an outside click both dismiss without committing anything —
-  // unlike close() (used only after a single-select commits), a multi-select
-  // query stays as typed rather than being wiped by an incidental dismissal.
-  function dismiss(): void {
-    setIsOpen(false);
-    if (!multiple) setQuery("");
-  }
-
-  function selectRow(row: Row): void {
-    const relationValue = toRelationValue(row, labelField);
-    if (multiple) {
-      onChange([...selected, relationValue]);
-      setQuery("");
-      setHighlightedIndex(0);
-    } else {
-      onChange(relationValue);
-      close();
-    }
+  function commit(next: RelationValue): void {
+    onChange(multiple ? [...selected, next] : next);
   }
 
   function removeSelected(id: string): void {
     onChange(selected.filter((v) => v.id !== id));
   }
 
-  async function createFromQuery(): Promise<void> {
-    if (!onCreate || normalizedQuery === "") return;
-    const created = await onCreate(query.trim());
-    if (multiple) {
-      onChange([...selected, created]);
-      setQuery("");
-      setHighlightedIndex(0);
-    } else {
-      onChange(created);
-      close();
-    }
-  }
-
-  function handleInputChange(next: string): void {
-    setQuery(next);
-    if (!isOpen) open();
-    else setHighlightedIndex(0);
-  }
-
-  function handleFocus(): void {
-    open();
+  async function createFrom(name: string): Promise<void> {
+    if (!onCreate || name === "") return;
+    commit(await onCreate(name));
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
     if (event.nativeEvent.isComposing || disabled) return;
-
     if (multiple && event.key === "Backspace" && query === "" && selected.length > 0) {
       event.preventDefault();
       const last = selected[selected.length - 1];
       if (last) removeSelected(last.id);
-      return;
-    }
-
-    if (!isOpen) {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        open();
-      }
-      return;
-    }
-
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        if (entries.length > 0) setHighlightedIndex((activeIndex + 1) % entries.length);
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        if (entries.length > 0) setHighlightedIndex((activeIndex - 1 + entries.length) % entries.length);
-        break;
-      case "Enter": {
-        event.preventDefault();
-        const entry = entries[activeIndex];
-        if (!entry) return;
-        if (entry.kind === "option") selectRow(entry.row);
-        else void createFromQuery();
-        break;
-      }
-      default:
-        break;
     }
   }
 
-  const position = useFloatingPanelPosition(isOpen, containerRef, panelRef, true);
-  const layerClassName = useFloatingPanelLayer(containerRef);
-  useOutsideClickClose(isOpen, [containerRef, panelRef], dismiss);
-  useScrollHighlightedOptionIntoView(isOpen, listboxId, activeIndex, entries.length);
-
-  const triggerValue = isOpen ? query : (singleValue?.display ?? query);
+  const createLabel = `Create "${query.trim()}"`;
 
   return (
-    <div ref={containerRef} className="relative flex flex-col gap-1">
-      {selected.length > 0 && (
-        <span className="flex flex-wrap gap-1">
-          {selected.map((item) => (
-            <span
-              key={item.id}
-              className="inline-flex max-w-60 items-center gap-1 rounded-control bg-bg-subtle px-2 py-1 text-sm text-text"
-            >
-              <span className="truncate" title={item.display}>
-                {item.display}
-              </span>
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => removeSelected(item.id)}
-                aria-label={`Remove ${item.display}`}
-                className="rounded-control p-1 transition-colors duration-(--duration-fast) ease-out hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
+    <Combobox<Entry>
+      id={id}
+      query={query}
+      onQueryChange={setQuery}
+      options={entries}
+      getOptionKey={(entry) => (entry.kind === "option" ? entry.row.id : "create")}
+      getOptionLabel={(entry) => (entry.kind === "option" ? labelOf(entry.row) : createLabel)}
+      onSelect={(entry) =>
+        entry.kind === "option" ? commit(toRelationValue(entry.row, labelField)) : createFrom(query.trim())
+      }
+      countsAsResult={(entry) => entry.kind === "option"}
+      status={status === "success" ? "ready" : status}
+      errorContent={
+        <EmptyState
+          title="Module not installed"
+          description={`The module providing "${resource}" isn't installed, so this field can't search it.`}
+        />
+      }
+      emptyContent={
+        <p className="px-2 py-1 text-sm text-text-secondary">No results for &quot;{debouncedQuery}&quot;</p>
+      }
+      selectedLabel={singleValue?.display}
+      // A single-select value has no pill row, so the clear button is the
+      // only way to unset it back to null.
+      onClear={singleValue ? () => onChange(null) : undefined}
+      above={
+        selected.length > 0 ? (
+          <span className="flex flex-wrap gap-1">
+            {selected.map((item) => (
+              <span
+                key={item.id}
+                className="inline-flex max-w-60 items-center gap-1 rounded-control bg-bg-subtle px-2 py-1 text-sm text-text"
               >
-                ×
-              </button>
-            </span>
-          ))}
-        </span>
-      )}
-      <TextInput
-        id={id}
-        role="combobox"
-        aria-expanded={isOpen}
-        aria-controls={listboxId}
-        aria-autocomplete="list"
-        aria-activedescendant={isOpen && entries.length > 0 ? optionElementId(listboxId, activeIndex) : undefined}
-        value={triggerValue}
-        title={!isOpen && singleValue ? singleValue.display : undefined}
-        disabled={disabled}
-        placeholder={placeholder}
-        onFocus={handleFocus}
-        onChange={handleInputChange}
-        onKeyDown={handleKeyDown}
-        // A single-select value has no pill row, so the clear button is the
-        // only way to unset it back to null.
-        end={
-          !multiple && singleValue && !isOpen ? (
-            <ComboboxClearButton label={singleValue.display} disabled={disabled} onClear={() => onChange(null)} />
-          ) : undefined
-        }
-      />
-      {isOpen &&
-        createPortal(
-          <EscapeLayer onEscape={dismiss}>
-            <span
-              ref={panelRef}
-              id={listboxId}
-              role="listbox"
-              style={
-                position
-                  ? { position: "fixed", top: position.top, left: position.left, width: position.width }
-                  : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
-              }
-              className={`${layerClassName} max-h-80 min-w-60 overflow-y-auto rounded-structural border border-border bg-surface p-2 shadow-md`}
-            >
-              {status === "error" ? (
-                <EmptyState
-                  title="Module not installed"
-                  description={`The module providing "${resource}" isn't installed, so this field can't search it.`}
-                />
-              ) : status === "loading" ? (
-                <Skeleton lines={3} />
-              ) : entries.length === 0 ? (
-                <span aria-live="polite" className="block px-2 py-1 text-sm text-text-secondary">
-                  No results for &quot;{debouncedQuery}&quot;
+                <span className="truncate" title={item.display}>
+                  {item.display}
                 </span>
-              ) : (
-                entries.map((entry, index) => (
-                  // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG combobox-with-listbox — options are never independently focusable, only virtually "focused" via aria-activedescendant.
-                  // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the input's own onKeyDown.
-                  <div
-                    key={entry.kind === "option" ? entry.row.id : "create"}
-                    id={optionElementId(listboxId, index)}
-                    role="option"
-                    aria-selected={index === activeIndex}
-                    aria-disabled={disabled}
-                    onMouseEnter={disabled ? undefined : () => setHighlightedIndex(index)}
-                    onClick={
-                      disabled ? undefined : () => (entry.kind === "option" ? selectRow(entry.row) : createFromQuery())
-                    }
-                    title={entry.kind === "option" ? String(entry.row[labelField] ?? entry.row.id) : undefined}
-                    className={`truncate rounded-control px-2 py-1 text-left text-sm text-text ${
-                      disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                    } ${index === activeIndex ? "bg-surface-hover" : ""}`}
-                  >
-                    {entry.kind === "option"
-                      ? String(entry.row[labelField] ?? entry.row.id)
-                      : `Create "${query.trim()}"`}
-                  </div>
-                ))
-              )}
-            </span>
-          </EscapeLayer>,
-          document.body,
-        )}
-    </div>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => removeSelected(item.id)}
+                  aria-label={`Remove ${item.display}`}
+                  className="rounded-control p-1 transition-colors duration-(--duration-fast) ease-out hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </span>
+        ) : undefined
+      }
+      closeOnSelect={!multiple}
+      keepQueryOnDismiss={multiple}
+      onOpenChange={setIsOpen}
+      onKeyDown={handleKeyDown}
+      disabled={disabled}
+      placeholder={placeholder}
+    />
   );
 }
