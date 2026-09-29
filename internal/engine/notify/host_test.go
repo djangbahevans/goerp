@@ -30,6 +30,8 @@ func TestHostSender_RejectsAnotherModulesType(t *testing.T) {
 	for _, typ := range []string{"billing.invoice_overdue", "engine.activity_due", "order_confirmed", "sales.undeclared"} {
 		_, err := host.SendBulk(t.Context(), hostRequest(env, typ, userID))
 		requireHostErrorCode(t, err, abiv1.ErrCodeNotifyUndeclaredType)
+		_, err = host.SendBulk(t.Context(), hostRequest(env, typ))
+		requireHostErrorCode(t, err, abiv1.ErrCodeNotifyUndeclaredType)
 	}
 	if n := env.notificationCount(t); n != 0 {
 		t.Errorf("notifications = %d, want 0", n)
@@ -62,7 +64,7 @@ func TestHostSender_MapsCallerErrors(t *testing.T) {
 	_, err = host.SendBulk(t.Context(), unrenderable)
 	requireHostErrorCode(t, err, abiv1.ErrCodeNotifyRenderFailed)
 
-	userIDs :=make([]string, MaxBulkRecipients+1)
+	userIDs := make([]string, MaxBulkRecipients+1)
 	for i := range userIDs {
 		userIDs[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i)
 	}
@@ -146,5 +148,37 @@ func TestHostSender_SendTxRollbackLeavesNothing(t *testing.T) {
 	_ = tx.Rollback()
 	if env.notificationCount(t) != 0 || env.deliveryCount(t) != 0 || env.jobCount(t) != 0 {
 		t.Error("a rolled-back SendTx() left a notification, delivery or job behind")
+	}
+}
+
+func TestSendTx_FailedWriteLeavesTheTransactionUsable(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t, "Ama Owusu", "")
+	schema := "tenant_" + env.tenant.Slug
+
+	tx, err := env.conn.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Fails the send after its notification row is written.
+	if _, err := tx.Exec(fmt.Sprintf(`ALTER TABLE %s.notification_deliveries RENAME TO notification_deliveries_hidden`, schema)); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = env.sender.SendTx(t.Context(), tx, env.tenant.ID, "sales", orderConfirmed, userID, nil, Options{})
+	if err == nil {
+		t.Fatal("SendTx() error = nil, want the deliveries insert to fail")
+	}
+	if errors.Is(err, ErrTxAborted) {
+		t.Fatalf("SendTx() error = %v, want the transaction restored", err)
+	}
+
+	var n int
+	if err := tx.QueryRow(fmt.Sprintf(`SELECT count(*) FROM %s.notifications`, schema)).Scan(&n); err != nil {
+		t.Fatalf("transaction unusable after a failed SendTx(): %v", err)
+	}
+	if n != 0 {
+		t.Errorf("notifications in the transaction = %d, want the failed send's row rolled back", n)
 	}
 }

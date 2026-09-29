@@ -22,7 +22,7 @@ const (
 
 // MaxBulkRecipients is the most users one SendBulk may name; batch a
 // larger audience through a background job (jobs.Enqueue).
-const MaxBulkRecipients = 1000
+const MaxBulkRecipients = abi.NotifyMaxBulkRecipients
 
 // NotifyOption configures Send/SendTx/SendBulk. An unset option leaves the
 // notification type's own defaults in place.

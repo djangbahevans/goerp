@@ -21,6 +21,7 @@ import (
 	"time"
 	"uuid"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
@@ -63,12 +64,15 @@ var (
 	// ErrRenderFailed: a template failed to render against the send's
 	// data, so resending the same data fails the same way.
 	ErrRenderFailed = errors.New("notification template could not be rendered")
+	// ErrTxAborted: SendTx could not restore the caller's transaction, which
+	// can no longer be used.
+	ErrTxAborted = errors.New("notification transaction is aborted")
 )
 
 // MaxBulkRecipients caps one SendBulk's recipients (host-abi-reference.md
 // §11 "host.notify.send_bulk"); a caller with more batches them through
 // background jobs.
-const MaxBulkRecipients = 1000
+const MaxBulkRecipients = abiv1.NotifyMaxBulkRecipients
 
 // Options are a send's call-site options (notification-system.md §7
 // "Notify options").
@@ -187,8 +191,10 @@ func (s *Sender) Send(ctx context.Context, tenantID, moduleName, notificationTyp
 }
 
 // SendTx is Send on the caller's transaction: nothing it writes, jobs
-// included, is visible unless tx commits. It does not push the new feed
-// entry; call Announce once tx has committed.
+// included, is visible unless tx commits. A failed SendTx rolls back to a
+// savepoint, leaving tx as it found it; only an error wrapping
+// ErrTxAborted means tx can no longer be used. It does not push the new
+// feed entry; call Announce once tx has committed.
 func (s *Sender) SendTx(ctx context.Context, tx *sql.Tx, tenantID, moduleName, notificationType, userID string, data map[string]any, opts Options) (*Result, error) {
 	spec, err := s.prepareSend(ctx, tenantID, moduleName, notificationType, opts)
 	if err != nil {
@@ -198,7 +204,21 @@ func (s *Sender) SendTx(ctx context.Context, tx *sql.Tx, tenantID, moduleName, n
 	if err != nil {
 		return nil, err
 	}
-	return s.write(ctx, tx, p)
+
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT notify_send"); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTxAborted, err)
+	}
+	res, err := s.write(ctx, tx, p)
+	if err != nil {
+		if _, rbErr := tx.ExecContext(context.WithoutCancel(ctx), "ROLLBACK TO SAVEPOINT notify_send"); rbErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("%w: %w", ErrTxAborted, rbErr))
+		}
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT notify_send"); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTxAborted, err)
+	}
+	return res, nil
 }
 
 // SendBulk is Send to each of userIDs, at most MaxBulkRecipients, with the
@@ -211,13 +231,12 @@ func (s *Sender) SendBulk(ctx context.Context, tenantID, moduleName, notificatio
 	if len(userIDs) > MaxBulkRecipients {
 		return nil, fmt.Errorf("%w: got %d", ErrTooManyRecipients, len(userIDs))
 	}
-	if len(userIDs) == 0 {
-		return nil, nil
-	}
-
 	spec, err := s.prepareSend(ctx, tenantID, moduleName, notificationType, opts)
 	if err != nil {
 		return nil, err
+	}
+	if len(userIDs) == 0 {
+		return nil, nil
 	}
 	prepared := make([]*preparedSend, len(userIDs))
 	for i, userID := range userIDs {
@@ -256,6 +275,10 @@ type sendSpec struct {
 	notificationType string
 	declared         manifest.NotificationType
 	priority         string
+
+	// providers memoizes resolveProvider by category: every recipient of a
+	// send shares its tenant's provider.
+	providers map[string]string
 }
 
 // preparedSend is everything one recipient's send writes, resolved before
@@ -300,6 +323,7 @@ func (s *Sender) prepareSend(ctx context.Context, tenantID, moduleName, notifica
 	return &sendSpec{
 		snapshot: snapshot, tenant: t, cfg: cfg,
 		moduleName: moduleName, notificationType: notificationType, declared: nt, priority: priority,
+		providers: make(map[string]string),
 	}, nil
 }
 
@@ -325,7 +349,7 @@ func (s *Sender) prepareRecipient(ctx context.Context, spec *sendSpec, userID st
 		force:            opts.ForceChannels,
 		additional:       opts.AdditionalChannels,
 	})
-	plan, err := s.planDeliveries(ctx, t, user, spec.cfg, routed)
+	plan, err := s.planDeliveries(ctx, spec, user, routed)
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +493,8 @@ type planRecipient struct {
 
 // planDeliveries is routing step 5: it keeps each routed channel that can
 // actually reach user, with its recipients, and drops the rest.
-func (s *Sender) planDeliveries(ctx context.Context, t *tenant.Tenant, user *recipient, cfg *notifconfig.Config, channels []string) ([]channelPlan, error) {
+func (s *Sender) planDeliveries(ctx context.Context, spec *sendSpec, user *recipient, channels []string) ([]channelPlan, error) {
+	t, cfg := spec.tenant, spec.cfg
 	var plan []channelPlan
 	for _, ch := range channels {
 		switch ch {
@@ -486,7 +511,7 @@ func (s *Sender) planDeliveries(ctx context.Context, t *tenant.Tenant, user *rec
 			if user.phone == "" {
 				continue
 			}
-			provider, err := s.resolveProvider(ctx, t.ID, providerselect.CategorySMS)
+			provider, err := s.resolveProvider(ctx, spec, providerselect.CategorySMS)
 			if err != nil {
 				return nil, err
 			}
@@ -496,7 +521,7 @@ func (s *Sender) planDeliveries(ctx context.Context, t *tenant.Tenant, user *rec
 			plan = append(plan, channelPlan{channel: ch, provider: provider, recipients: []planRecipient{{address: user.phone}}})
 
 		case notifications.ChannelPush:
-			provider, err := s.resolveProvider(ctx, t.ID, providerselect.CategoryPush)
+			provider, err := s.resolveProvider(ctx, spec, providerselect.CategoryPush)
 			if err != nil {
 				return nil, err
 			}
@@ -520,18 +545,22 @@ func (s *Sender) planDeliveries(ctx context.Context, t *tenant.Tenant, user *rec
 	return plan, nil
 }
 
-// resolveProvider returns the tenant's active provider for category, or ""
-// when there is none to deliver through.
-func (s *Sender) resolveProvider(ctx context.Context, tenantID, category string) (string, error) {
-	module, err := s.Providers.Resolve(ctx, tenantID, category)
+// resolveProvider returns spec's tenant's active provider for category, or
+// "" when there is none to deliver through.
+func (s *Sender) resolveProvider(ctx context.Context, spec *sendSpec, category string) (string, error) {
+	if module, ok := spec.providers[category]; ok {
+		return module, nil
+	}
+	module, err := s.Providers.Resolve(ctx, spec.tenant.ID, category)
 	switch {
 	case err == nil:
-		return module, nil
 	case errors.Is(err, providerselect.ErrNoProviderInstalled), errors.Is(err, providerselect.ErrNoProviderSelected):
-		return "", nil
+		module = ""
 	default:
 		return "", fmt.Errorf("resolve %s: %w", category, err)
 	}
+	spec.providers[category] = module
+	return module, nil
 }
 
 // emailConfigured reports whether the tenant's email adapter has what it

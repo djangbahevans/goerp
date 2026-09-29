@@ -343,7 +343,7 @@ func TestHostNotify_SendTx_PipelineErrorIsNotRetryable(t *testing.T) {
 	ctx := t.Context()
 
 	r := newHostDBTestRuntime(t, primaryDB, 10)
-	fake := &fakeNotifySender{err: errors.New("current transaction is aborted")}
+	fake := &fakeNotifySender{err: errors.New("could not serialize access due to concurrent update")}
 	r.SetNotifySender(fake)
 	mc := newNotifyTestModuleContext(abi.CapNotifySend | abi.CapDBWrite)
 	notifyInst := newHostNotifyCaller(t, ctx, r, mc)

@@ -1,5 +1,9 @@
 package abi
 
+// NotifyMaxBulkRecipients is the most distinct user_ids one
+// host.notify.send_bulk call may name.
+const NotifyMaxBulkRecipients = 1000
+
 // NotifySendOptions is the opts member of host.notify.send/send_tx/
 // send_bulk (notification-system.md §7 "Notify options"). Zero values
 // leave the notification type's own defaults in place.

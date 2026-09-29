@@ -34,8 +34,9 @@ type NotifySender interface {
 	// SendBulk sends req to each of its users, committing all of them
 	// together, and pushes each new notification to its recipient.
 	SendBulk(ctx context.Context, req NotifyRequest) ([]abiv1.NotifyRecipientResult, error)
-	// SendTx sends req to its one user on tx. announce pushes the new
-	// notification to its recipient, and must only run once tx commits.
+	// SendTx sends req to its one user on tx, leaving tx as it found it
+	// on failure. announce pushes the new notification to its recipient,
+	// and must only run once tx commits.
 	SendTx(ctx context.Context, tx *sql.Tx, req NotifyRequest) (res abiv1.NotifyRecipientResult, announce func(context.Context), err error)
 }
 
@@ -107,8 +108,8 @@ func makeNotifySendTx(r *Runtime) func(ctx context.Context, m api.Module, ptr, l
 		res, announce, err := r.notifySender.SendTx(ctx, tx, req)
 		if err != nil {
 			hostErr := notifyHostError(err)
-			// A failed write can leave tx aborted, so only a retry of the
-			// whole transaction can succeed, not of this call on it.
+			// A failure such as a serialization error recurs on every retry
+			// within tx; only retrying the whole transaction can succeed.
 			hostErr.Retry = false
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
