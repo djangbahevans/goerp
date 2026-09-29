@@ -1,0 +1,6 @@
+{{.AuthorName}} mentioned you on {{if .RecordName}}{{.RecordName}}{{else}}{{.ModelLabel}}{{end}}:
+
+{{.Body}}
+{{if .ActionURL}}
+View in {{.TenantName}}: {{.ActionURL}}
+{{end}}

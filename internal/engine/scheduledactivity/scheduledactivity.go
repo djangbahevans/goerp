@@ -74,6 +74,8 @@ type NewActivity struct {
 	CreatedBy  string
 }
 
+// Create inserts in and makes its assignee a follower of its record
+// (record-activity.md §8) in the same transaction.
 func (s *Store) Create(ctx context.Context, tenantSlug string, in NewActivity) (*Activity, error) {
 	query := fmt.Sprintf(`
 		INSERT INTO %s.scheduled_activities (model, record_id, type, summary, note, due_date, assignee_id, created_by)
@@ -81,11 +83,23 @@ func (s *Store) Create(ctx context.Context, tenantSlug string, in NewActivity) (
 		RETURNING %s
 	`, tenantschema.Name(tenantSlug), activityColumns)
 
-	a, err := scanActivity(s.db.QueryRowContext(ctx, query, in.Model, in.RecordID, in.Type, in.Summary, in.Note, in.DueDate, in.AssigneeID, in.CreatedBy))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create scheduled activity: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	a, err := scanActivity(tx.QueryRowContext(ctx, query, in.Model, in.RecordID, in.Type, in.Summary, in.Note, in.DueDate, in.AssigneeID, in.CreatedBy))
 	if isForeignKeyViolation(err) {
 		return nil, ErrUnknownType
 	}
 	if err != nil {
+		return nil, fmt.Errorf("create scheduled activity: %w", err)
+	}
+	if err := recordactivity.Follow(ctx, tx, tenantSlug, a.Model, a.RecordID, a.AssigneeID); err != nil {
+		return nil, fmt.Errorf("create scheduled activity: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("create scheduled activity: %w", err)
 	}
 	return a, nil
@@ -182,8 +196,10 @@ type Update struct {
 }
 
 // Update applies u to the open activity id. Changing the assignee clears
-// reminded_at, so the new assignee gets their own due-date reminder.
-// Returns ErrNotFound or ErrDone when there is no open activity to update.
+// reminded_at, so the new assignee gets their own due-date reminder, and
+// makes them a follower of the record (record-activity.md §8) in the same
+// transaction. Returns ErrNotFound or ErrDone when there is no open
+// activity to update.
 func (s *Store) Update(ctx context.Context, tenantSlug, id string, u Update) (*Activity, error) {
 	query := fmt.Sprintf(`
 		UPDATE %s.scheduled_activities SET
@@ -198,14 +214,35 @@ func (s *Store) Update(ctx context.Context, tenantSlug, id string, u Update) (*A
 		RETURNING %s
 	`, tenantschema.Name(tenantSlug), activityColumns)
 
-	a, err := scanActivity(s.db.QueryRowContext(ctx, query, id, u.Type, u.Summary, u.ClearNote, u.Note, u.DueDate, u.AssigneeID))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("update scheduled activity: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var previousAssignee string
+	lock := fmt.Sprintf(`SELECT assignee_id FROM %s.scheduled_activities WHERE id = $1 AND done_at IS NULL FOR UPDATE`, tenantschema.Name(tenantSlug))
+	err = tx.QueryRowContext(ctx, lock, id).Scan(&previousAssignee)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, s.notOpenError(ctx, tenantSlug, id)
 	}
+	if err != nil {
+		return nil, fmt.Errorf("update scheduled activity: %w", err)
+	}
+
+	a, err := scanActivity(tx.QueryRowContext(ctx, query, id, u.Type, u.Summary, u.ClearNote, u.Note, u.DueDate, u.AssigneeID))
 	if isForeignKeyViolation(err) {
 		return nil, ErrUnknownType
 	}
 	if err != nil {
+		return nil, fmt.Errorf("update scheduled activity: %w", err)
+	}
+	if a.AssigneeID != previousAssignee {
+		if err := recordactivity.Follow(ctx, tx, tenantSlug, a.Model, a.RecordID, a.AssigneeID); err != nil {
+			return nil, fmt.Errorf("update scheduled activity: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("update scheduled activity: %w", err)
 	}
 	return a, nil

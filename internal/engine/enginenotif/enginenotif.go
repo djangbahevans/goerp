@@ -48,8 +48,28 @@ var Types = []manifest.NotificationType{
 		DefaultChannels: []string{notifications.ChannelInApp}, AvailableChannels: assignableChannels,
 		Templates: map[string]string{notifications.ChannelInApp: "templates/activity_due/in_app.{locale}.json"},
 	},
-	{Name: RecordMention, Label: "Mentioned you in a comment", DefaultChannels: inAppAndEmail, AvailableChannels: assignableChannels},
-	{Name: RecordMessage, Label: "Message on a record you follow", DefaultChannels: inAppAndEmail, AvailableChannels: assignableChannels},
+	{
+		Name: RecordMention, Label: "Mentioned you in a comment",
+		Description:     "Sent when someone @mentions you in a comment on a record",
+		DefaultChannels: inAppAndEmail, AvailableChannels: assignableChannels,
+		Templates: commentTemplates(RecordMention),
+	},
+	{
+		Name: RecordMessage, Label: "Message on a record you follow",
+		Description:     "Sent when someone posts a message to the followers of a record you follow",
+		DefaultChannels: inAppAndEmail, AvailableChannels: assignableChannels,
+		Templates: commentTemplates(RecordMessage),
+	},
+}
+
+// commentTemplates are a comment notification type's template paths: an
+// in-app template carrying the comment's first characters, and an email
+// carrying all of it (record-activity.md §10 "Content").
+func commentTemplates(name string) map[string]string {
+	return map[string]string{
+		notifications.ChannelInApp: "templates/" + name + "/in_app.{locale}.json",
+		notifications.ChannelEmail: "templates/" + name + "/email.{locale}.html",
+	}
 }
 
 //go:embed templates

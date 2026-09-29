@@ -1,0 +1,3 @@
+{
+  "subject": "{{.AuthorName}} mentioned you on {{if .RecordName}}{{.RecordName}}{{else}}{{.ModelLabel}}{{end}}"
+}

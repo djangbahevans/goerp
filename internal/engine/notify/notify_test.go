@@ -544,7 +544,8 @@ func TestSend_EngineTypeSkipsManifestValidation(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t, "Adjoa", "")
 
-	res, err := env.sender.Send(t.Context(), env.tenant.ID, EngineModule, "engine.record_mention", userID, nil, Options{})
+	data := map[string]any{"AuthorName": "Kwame Mensah", "RecordName": "SO-0007", "Excerpt": "Can you confirm?"}
+	res, err := env.sender.Send(t.Context(), env.tenant.ID, EngineModule, "engine.record_mention", userID, data, Options{})
 	if err != nil {
 		t.Fatalf("Send() error: %v", err)
 	}
@@ -552,8 +553,8 @@ func TestSend_EngineTypeSkipsManifestValidation(t *testing.T) {
 	if err := env.conn.QueryRow(fmt.Sprintf(`SELECT title FROM %s.notifications WHERE id = $1`, tenantschema.Name(env.tenant.Slug)), res.NotificationID).Scan(&title); err != nil {
 		t.Fatal(err)
 	}
-	if title != "Mentioned you in a comment" {
-		t.Errorf("title = %q, want the type's label, since it has no template", title)
+	if title != "Kwame Mensah mentioned you on SO-0007" {
+		t.Errorf("title = %q, want the engine type's own template rendered", title)
 	}
 }
 

@@ -48,19 +48,22 @@ func NewStore(db *sql.DB) *Store {
 
 // Entry is one record_activity row.
 type Entry struct {
-	ID        string
-	Model     string
-	RecordID  string
-	Kind      string
-	Body      *string
-	Changes   jsontext.Value
-	Activity  jsontext.Value
-	AuthorID  *string
-	CreatedAt time.Time
-	DeletedAt *time.Time
+	ID       string
+	Model    string
+	RecordID string
+	Kind     string
+	Body     *string
+	// NotifyFollowers is set on a comment sent to the record's followers,
+	// a message rather than a note (record-activity.md §10).
+	NotifyFollowers bool
+	Changes         jsontext.Value
+	Activity        jsontext.Value
+	AuthorID        *string
+	CreatedAt       time.Time
+	DeletedAt       *time.Time
 }
 
-const entryColumns = `id, model, record_id, kind, body, changes, activity, author_id, created_at, deleted_at`
+const entryColumns = `id, model, record_id, kind, body, notify_followers, changes, activity, author_id, created_at, deleted_at`
 
 // List returns up to limit entries of (model, recordID)'s feed, newest
 // first, starting after the entry whose id is cursor ("" for the first
@@ -101,13 +104,24 @@ func (s *Store) List(ctx context.Context, tenantSlug, model, recordID, cursor st
 	return entries, false, nil
 }
 
-// CreateComment inserts a comment on (model, recordID) authored by
-// authorID and returns the stored row. The author follows the record in
-// the same transaction (record-activity.md §8).
-func (s *Store) CreateComment(ctx context.Context, tenantSlug, model, recordID, authorID, body, requestID, traceID string) (*Entry, error) {
+// NewComment is the input to CreateComment.
+type NewComment struct {
+	Model           string
+	RecordID        string
+	AuthorID        string
+	Body            string
+	NotifyFollowers bool
+	RequestID       string
+	TraceID         string
+}
+
+// CreateComment inserts c and returns the stored row. The author follows
+// the record (record-activity.md §8) and inserted, when non-nil, runs with
+// the new entry, all in the same transaction.
+func (s *Store) CreateComment(ctx context.Context, tenantSlug string, c NewComment, inserted func(tx *sql.Tx, e *Entry) error) (*Entry, error) {
 	query := fmt.Sprintf(`
-		INSERT INTO %s.record_activity (model, record_id, kind, body, author_id, request_id, trace_id)
-		VALUES ($1, $2, 'comment', $3, $4, NULLIF($5, ''), NULLIF($6, ''))
+		INSERT INTO %s.record_activity (model, record_id, kind, body, notify_followers, author_id, request_id, trace_id)
+		VALUES ($1, $2, 'comment', $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''))
 		RETURNING %s
 	`, tenantschema.Name(tenantSlug), entryColumns)
 
@@ -117,12 +131,17 @@ func (s *Store) CreateComment(ctx context.Context, tenantSlug, model, recordID, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	e, err := scanEntry(tx.QueryRowContext(ctx, query, model, recordID, body, authorID, requestID, traceID))
+	e, err := scanEntry(tx.QueryRowContext(ctx, query, c.Model, c.RecordID, c.Body, c.NotifyFollowers, c.AuthorID, c.RequestID, c.TraceID))
 	if err != nil {
 		return nil, fmt.Errorf("create comment: %w", err)
 	}
-	if err := Follow(ctx, tx, tenantSlug, model, recordID, authorID); err != nil {
+	if err := Follow(ctx, tx, tenantSlug, c.Model, c.RecordID, c.AuthorID); err != nil {
 		return nil, fmt.Errorf("create comment: %w", err)
+	}
+	if inserted != nil {
+		if err := inserted(tx, e); err != nil {
+			return nil, fmt.Errorf("create comment: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("create comment: %w", err)
@@ -267,7 +286,7 @@ type rowScanner interface {
 func scanEntry(sc rowScanner) (*Entry, error) {
 	var e Entry
 	var changes, activity []byte
-	if err := sc.Scan(&e.ID, &e.Model, &e.RecordID, &e.Kind, &e.Body, &changes, &activity, &e.AuthorID, &e.CreatedAt, &e.DeletedAt); err != nil {
+	if err := sc.Scan(&e.ID, &e.Model, &e.RecordID, &e.Kind, &e.Body, &e.NotifyFollowers, &changes, &activity, &e.AuthorID, &e.CreatedAt, &e.DeletedAt); err != nil {
 		return nil, err
 	}
 	e.Changes = jsontext.Value(changes)
@@ -293,6 +312,7 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 			    record_id   UUID NOT NULL,
 			    kind        TEXT NOT NULL CHECK (kind IN ('created', 'change', 'comment', 'activity_done')),
 			    body        TEXT,
+			    notify_followers BOOLEAN NOT NULL DEFAULT false,
 			    changes     JSONB,
 			    activity    JSONB,
 			    author_id   UUID,
@@ -302,7 +322,8 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 			    trace_id    TEXT,
 			    CHECK ((kind = 'change') = (changes IS NOT NULL)),
 			    CHECK ((kind = 'activity_done') = (activity IS NOT NULL)),
-			    CHECK (kind = 'comment' OR deleted_at IS NULL)
+			    CHECK (kind = 'comment' OR deleted_at IS NULL),
+			    CHECK (kind = 'comment' OR NOT notify_followers)
 			)
 		`, schema)
 		if _, err := tx.ExecContext(ctx, createTable); err != nil {

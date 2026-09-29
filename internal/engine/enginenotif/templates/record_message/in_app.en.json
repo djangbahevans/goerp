@@ -1,0 +1,5 @@
+{
+  "title": "{{.AuthorName}} on {{if .RecordName}}{{.RecordName}}{{else}}{{.ModelLabel}}{{end}}",
+  "body": "{{.Excerpt}}",
+  "icon": "message-square"
+}

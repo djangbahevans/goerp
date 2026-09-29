@@ -2,10 +2,13 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/authme"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
+	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/recordactivity"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -39,15 +43,26 @@ type activityAuthor struct {
 	AvatarURL *string `json:"avatar_url"`
 }
 
+// activityMention is one user a comment's mention tokens name, with
+// their current name and email: name is null for a user with no profile
+// name, and both are null for a user who no longer exists.
+type activityMention struct {
+	ID    string  `json:"id"`
+	Name  *string `json:"name"`
+	Email *string `json:"email"`
+}
+
 type activityEntryResponse struct {
-	ID        string          `json:"id"`
-	Kind      string          `json:"kind"`
-	Body      *string         `json:"body,omitempty"`
-	Deleted   *bool           `json:"deleted,omitempty"`
-	Changes   jsontext.Value  `json:"changes,omitzero"`
-	Activity  jsontext.Value  `json:"activity,omitzero"`
-	Author    *activityAuthor `json:"author"`
-	CreatedAt time.Time       `json:"created_at"`
+	ID              string            `json:"id"`
+	Kind            string            `json:"kind"`
+	Body            *string           `json:"body,omitempty"`
+	Mentions        []activityMention `json:"mentions,omitzero"`
+	NotifyFollowers *bool             `json:"notify_followers,omitempty"`
+	Deleted         *bool             `json:"deleted,omitempty"`
+	Changes         jsontext.Value    `json:"changes,omitzero"`
+	Activity        jsontext.Value    `json:"activity,omitzero"`
+	Author          *activityAuthor   `json:"author"`
+	CreatedAt       time.Time         `json:"created_at"`
 }
 
 type activityListMeta struct {
@@ -56,9 +71,10 @@ type activityListMeta struct {
 }
 
 type activityCreateRequest struct {
-	Model    string `json:"model"`
-	RecordID string `json:"record_id"`
-	Body     string `json:"body"`
+	Model           string `json:"model"`
+	RecordID        string `json:"record_id"`
+	Body            string `json:"body"`
+	NotifyFollowers bool   `json:"notify_followers"`
 }
 
 // activityTarget resolves and validates the (model, record_id) a GET or
@@ -145,6 +161,7 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 
 	readable := e.readableFieldFilter(authCtx, modelName)
 	authors := e.newActivityAuthorResolver(tenantCtx.Slug)
+	users := e.newActivityUserResolver()
 	out := make([]activityEntryResponse, 0, len(entries))
 	for i := range entries {
 		entry := &entries[i]
@@ -159,7 +176,7 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 			}
 			entry.Changes = changes
 		}
-		out = append(out, activityEntryToResponse(entry, authors.resolve(ctx, entry.AuthorID)))
+		out = append(out, activityEntryToResponse(ctx, entry, authors.resolve(ctx, entry.AuthorID), users))
 	}
 	meta := activityListMeta{HasMore: hasMore, Cursor: nextCursor}
 	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out, "meta": meta})
@@ -167,7 +184,9 @@ func (e *Engine) dispatchActivityListRoute(w http.ResponseWriter, r *http.Reques
 
 // dispatchActivityCreateRoute is POST /_meta/activity's handler — posts a
 // plain-text comment authored by the caller. Commenting needs only read
-// access to the record (record-activity.md §7).
+// access to the record (record-activity.md §7); every user the comment
+// mentions must be able to read it too (§9). A comment that can notify
+// anyone enqueues its notification job in the same transaction (§10).
 func (e *Engine) dispatchActivityCreateRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
@@ -186,9 +205,25 @@ func (e *Engine) dispatchActivityCreateRoute(w http.ResponseWriter, r *http.Requ
 		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "body must be 1 to 10000 characters")
 		return
 	}
+	mentions := recordactivity.MentionIDs(text)
+	if len(mentions) > recordactivity.MaxMentions {
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "a comment can mention at most 20 users")
+		return
+	}
 
 	ctx := r.Context()
 	if !e.activityTarget(ctx, w, authCtx, tenantCtx, body.Model, body.RecordID) {
+		return
+	}
+	unmentionable, err := e.unmentionableUsers(ctx, tenantCtx, body.Model, body.RecordID, authCtx.UserID, mentions)
+	if err != nil {
+		log.Error().Err(err).Str("tenant", tenantCtx.Slug).Msg("dispatch activity: mention check failed")
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "create comment failed")
+		return
+	}
+	if len(unmentionable) > 0 {
+		httperr.WriteDetails(r.Context(), w, http.StatusBadRequest, "invalid_mention",
+			"a mentioned user is not an active member who can read this record", map[string]any{"user_ids": unmentionable})
 		return
 	}
 
@@ -196,14 +231,26 @@ func (e *Engine) dispatchActivityCreateRoute(w http.ResponseWriter, r *http.Requ
 	if sc := trace.SpanFromContext(ctx).SpanContext(); sc.HasTraceID() {
 		traceID = sc.TraceID().String()
 	}
-	entry, err := e.recordActivityStore.CreateComment(ctx, tenantCtx.Slug, body.Model, body.RecordID, authCtx.UserID, text, requestIDFromContext(ctx), traceID)
+	comment := recordactivity.NewComment{
+		Model: body.Model, RecordID: body.RecordID, AuthorID: authCtx.UserID, Body: text,
+		NotifyFollowers: body.NotifyFollowers, RequestID: requestIDFromContext(ctx), TraceID: traceID,
+	}
+	var enqueue func(*sql.Tx, *recordactivity.Entry) error
+	if e.txJobs != nil && commentMayNotify(comment, mentions) {
+		enqueue = func(tx *sql.Tx, entry *recordactivity.Entry) error {
+			args := jobqueue.RecordCommentNotifyArgs{TenantID: tenantCtx.TenantID, TenantSlug: tenantCtx.Slug, EntryID: entry.ID}
+			_, err := e.txJobs.InsertTx(ctx, tx, args, nil)
+			return err
+		}
+	}
+	entry, err := e.recordActivityStore.CreateComment(ctx, tenantCtx.Slug, comment, enqueue)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "create comment failed")
 		return
 	}
 
 	authors := e.newActivityAuthorResolver(tenantCtx.Slug)
-	writeJSON(ctx, w, http.StatusCreated, activityEntryToResponse(entry, authors.resolve(ctx, entry.AuthorID)))
+	writeJSON(ctx, w, http.StatusCreated, activityEntryToResponse(ctx, entry, authors.resolve(ctx, entry.AuthorID), e.newActivityUserResolver()))
 }
 
 // dispatchActivityDeleteRoute is DELETE /_meta/activity/{id}'s handler —
@@ -349,7 +396,33 @@ func (e *Engine) dispatchActivityFollowChange(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func activityEntryToResponse(entry *recordactivity.Entry, author *activityAuthor) activityEntryResponse {
+// unmentionableUsers returns the ids in mentions, other than the author's
+// own, of users who can't be mentioned on the record: anyone who isn't an
+// active tenant member able to read it (record-activity.md §9).
+func (e *Engine) unmentionableUsers(ctx context.Context, tenantCtx *tenantresolve.TenantContext, modelName, recordID, authorID string, mentions []string) ([]string, error) {
+	var denied []string
+	for _, id := range mentions {
+		if id == authorID {
+			continue
+		}
+		ok, err := e.userCanReadRecord(ctx, tenantCtx, id, modelName, recordID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			denied = append(denied, id)
+		}
+	}
+	return denied, nil
+}
+
+// commentMayNotify reports whether c can notify anyone: it is a message
+// to followers, or mentions someone other than its author.
+func commentMayNotify(c recordactivity.NewComment, mentions []string) bool {
+	return c.NotifyFollowers || slices.ContainsFunc(mentions, func(id string) bool { return id != c.AuthorID })
+}
+
+func activityEntryToResponse(ctx context.Context, entry *recordactivity.Entry, author *activityAuthor, users *activityUserResolver) activityEntryResponse {
 	resp := activityEntryResponse{
 		ID:        entry.ID,
 		Kind:      entry.Kind,
@@ -360,8 +433,13 @@ func activityEntryToResponse(entry *recordactivity.Entry, author *activityAuthor
 	}
 	if entry.Kind == recordactivity.KindComment {
 		resp.Deleted = new(entry.DeletedAt != nil)
-		if entry.DeletedAt == nil {
+		resp.NotifyFollowers = new(entry.NotifyFollowers)
+		resp.Mentions = []activityMention{}
+		if entry.DeletedAt == nil && entry.Body != nil {
 			resp.Body = entry.Body
+			for _, id := range recordactivity.MentionIDs(*entry.Body) {
+				resp.Mentions = append(resp.Mentions, users.mention(ctx, id))
+			}
 		}
 	}
 	return resp
@@ -402,6 +480,72 @@ func (a *activityAuthorResolver) resolve(ctx context.Context, authorID *string) 
 	}
 	a.seen[*authorID] = author
 	return author
+}
+
+// activityUserResolver looks up the users mention tokens name, each
+// distinct user once.
+type activityUserResolver struct {
+	e    *Engine
+	seen map[string]activityMention
+}
+
+func (e *Engine) newActivityUserResolver() *activityUserResolver {
+	return &activityUserResolver{e: e, seen: map[string]activityMention{}}
+}
+
+// lookup returns userID's current name and email; both are nil for a
+// user who no longer exists. A failed lookup is an error and isn't
+// remembered, so a later call tries again.
+func (u *activityUserResolver) lookup(ctx context.Context, userID string) (activityMention, error) {
+	if m, ok := u.seen[userID]; ok {
+		return m, nil
+	}
+	m := activityMention{ID: userID}
+	usr, err := u.e.userStore.GetByID(ctx, userID)
+	switch {
+	case errors.Is(err, user.ErrUserNotFound):
+	case err != nil:
+		return m, fmt.Errorf("load mentioned user: %w", err)
+	case usr.Status != user.StatusDeleted:
+		m.Email = &usr.Email
+		profile, err := u.e.userStore.GetProfile(ctx, userID)
+		switch {
+		case err == nil:
+			m.Name = profile.DisplayName()
+		case !errors.Is(err, user.ErrProfileNotFound):
+			return m, fmt.Errorf("load mentioned user's profile: %w", err)
+		}
+	}
+	u.seen[userID] = m
+	return m, nil
+}
+
+// mention is lookup for a feed response, which degrades a failed lookup
+// to null fields rather than failing the page.
+func (u *activityUserResolver) mention(ctx context.Context, userID string) activityMention {
+	m, err := u.lookup(ctx, userID)
+	if err != nil {
+		log.Warn().Err(err).Str("user_id", userID).Msg("dispatch activity: mentioned user lookup failed, omitting name/email")
+	}
+	return m
+}
+
+// label is how a mention of userID reads in text after its "@": their
+// name, else their email's local part, else "Unknown user" for a user who
+// no longer exists (record-activity.md §9).
+func (u *activityUserResolver) label(ctx context.Context, userID string) (string, error) {
+	m, err := u.lookup(ctx, userID)
+	switch {
+	case err != nil:
+		return "", err
+	case m.Name != nil:
+		return *m.Name, nil
+	case m.Email != nil:
+		local, _, _ := strings.Cut(*m.Email, "@")
+		return local, nil
+	default:
+		return "Unknown user", nil
+	}
 }
 
 // readableFieldFilter reports whether authCtx's caller can read a field of
