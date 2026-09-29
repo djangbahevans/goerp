@@ -51,6 +51,11 @@ type WASMJobArgs struct {
 	// EnqueuedBy is set only on a provider job, so two modules' idempotency
 	// keys never collide on the same provider.
 	EnqueuedBy string `json:"enqueued_by,omitempty" river:"unique"`
+	// NotificationID is set only on an sms_send or push_send job the
+	// notification pipeline enqueued: the job delivers that notification's
+	// deliveries on its channel, and jobdispatch.Worker records each
+	// attempt's outcome on them. host.jobs.enqueue_provider never sets it.
+	NotificationID string `json:"notification_id,omitempty"`
 }
 
 func (WASMJobArgs) Kind() string { return "wasm_job" }

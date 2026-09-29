@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"cmp"
 	"encoding/json/v2"
 	"fmt"
 	"strings"
@@ -88,4 +89,71 @@ func jsonEscaped(v any) any {
 	default:
 		return v
 	}
+}
+
+// providerContent is the rendered text of a send's sms and push
+// deliveries, empty for a channel the send does not go to. A channel whose
+// template failed to render has its error instead: only the in_app
+// template failing fails the send, so that channel's deliveries fail
+// alone, as an email delivery's would.
+type providerContent struct {
+	smsBody   string
+	pushTitle string
+	pushBody  string
+	failed    map[string]error
+}
+
+// renderProviderChannels renders the sms and push templates of the
+// channels in plan (notification-system.md §5). A channel whose type has
+// no template of its own sends the in_app title and body instead.
+func renderProviderChannels(snapshot *registry.RegistrySnapshot, moduleName, notificationName, locale string, plan []channelPlan, inApp inAppContent, vars map[string]any) providerContent {
+	c := providerContent{failed: map[string]error{}}
+	resolve := func(channel string) (string, *notiftemplate.Template, bool) {
+		if snapshot == nil {
+			return "", nil, false
+		}
+		return snapshot.NotifTemplate(moduleName, notificationName, channel, locale)
+	}
+
+	for _, cp := range plan {
+		switch cp.channel {
+		case notifications.ChannelSMS:
+			c.smsBody = strings.Join(nonBlank(inApp.Title, inApp.Body), "\n")
+			if matched, tmpl, ok := resolve(notifications.ChannelSMS); ok {
+				rendered, err := notiftemplate.Render(tmpl, matched, vars)
+				if err != nil {
+					c.failed[cp.channel] = fmt.Errorf("%w: sms: %w", ErrRenderFailed, err)
+					continue
+				}
+				c.smsBody = strings.TrimSpace(rendered)
+			}
+
+		case notifications.ChannelPush:
+			c.pushTitle, c.pushBody = inApp.Title, inApp.Body
+			if matched, tmpl, ok := resolve(notifications.ChannelPush); ok {
+				title, body, err := renderPush(tmpl, matched, vars)
+				if err != nil {
+					c.failed[cp.channel] = err
+					continue
+				}
+				c.pushTitle, c.pushBody = cmp.Or(title, inApp.Title), body
+			}
+		}
+	}
+	return c
+}
+
+func renderPush(tmpl *notiftemplate.Template, locale string, vars map[string]any) (title, body string, err error) {
+	rendered, err := notiftemplate.Render(tmpl, locale, jsonEscapedStrings(vars))
+	if err != nil {
+		return "", "", fmt.Errorf("%w: push: %w", ErrRenderFailed, err)
+	}
+	var push struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(rendered), &push); err != nil {
+		return "", "", fmt.Errorf("%w: push output is not a JSON object: %w", ErrRenderFailed, err)
+	}
+	return push.Title, push.Body, nil
 }

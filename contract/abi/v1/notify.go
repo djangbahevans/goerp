@@ -82,3 +82,55 @@ type NotifyRecipientResult struct {
 type NotifySendBulkOutput struct {
 	Notifications []NotifyRecipientResult `msgpack:"notifications"`
 }
+
+// Provider-category delivery job types the notification pipeline
+// enqueues through host.jobs.enqueue_provider (connector-guide.md §8, §9).
+// A provider connector handles them with engine.OnJob.
+const (
+	JobTypeSMSSend  = "sms_send"
+	JobTypePushSend = "push_send"
+)
+
+// ProviderPayloadSchemaVersion is the schema_version of SMSSendPayload
+// and PushSendPayload. A field added within a version is optional to
+// read; a breaking change is a new job type, not a new version of this
+// one.
+const ProviderPayloadSchemaVersion = 1
+
+// SMSSendPayload is an sms_send job's payload: one rendered SMS to one
+// phone number. From is the tenant's sender ID, empty for the provider's
+// default. IdempotencyKey is the delivery's provider-neutral key
+// ("{notification_id}:sms:{to}"), for a provider with native idempotency.
+type SMSSendPayload struct {
+	SchemaVersion  int    `msgpack:"schema_version"`
+	TenantID       string `msgpack:"tenant_id"`
+	NotificationID string `msgpack:"notification_id"`
+	To             string `msgpack:"to"`
+	From           string `msgpack:"from"`
+	Body           string `msgpack:"body"`
+	IdempotencyKey string `msgpack:"idempotency_key"`
+}
+
+// PushSendPayload is a push_send job's payload: one rendered push
+// notification to each of a user's device tokens. Each token is its own
+// delivery, with its own idempotency key. ActionURL is the browser path
+// the app opens on tap; Data carries the notification's ID and type for
+// the app.
+type PushSendPayload struct {
+	SchemaVersion  int               `msgpack:"schema_version"`
+	TenantID       string            `msgpack:"tenant_id"`
+	NotificationID string            `msgpack:"notification_id"`
+	Tokens         []PushDeviceToken `msgpack:"tokens"`
+	Title          string            `msgpack:"title"`
+	Body           string            `msgpack:"body"`
+	ActionURL      string            `msgpack:"action_url"`
+	Data           map[string]string `msgpack:"data"`
+}
+
+// PushDeviceToken is one device a push_send job delivers to. Platform is
+// "ios", "android" or "web".
+type PushDeviceToken struct {
+	Platform       string `msgpack:"platform"`
+	Token          string `msgpack:"token"`
+	IdempotencyKey string `msgpack:"idempotency_key"`
+}

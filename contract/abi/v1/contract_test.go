@@ -487,3 +487,24 @@ func TestVirtualOpWireFields(t *testing.T) {
 		})
 	}
 }
+
+// A provider connector decodes these by field name, so they are the
+// connector-facing contract of sms_send and push_send.
+func TestProviderDeliveryPayloadWireFields(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want []string
+	}{
+		{"SMSSendPayload", SMSSendPayload{},
+			[]string{"schema_version", "tenant_id", "notification_id", "to", "from", "body", "idempotency_key"}},
+		{"PushSendPayload", PushSendPayload{},
+			[]string{"schema_version", "tenant_id", "notification_id", "tokens", "title", "body", "action_url", "data"}},
+		{"PushDeviceToken", PushDeviceToken{}, []string{"platform", "token", "idempotency_key"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireKeys(t, wireKeys(t, tt.v), tt.want...)
+		})
+	}
+}
