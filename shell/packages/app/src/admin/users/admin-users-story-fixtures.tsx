@@ -4,6 +4,7 @@ import type { Decorator } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import {
+  type FakeActivity,
   type FakeBackendOptions,
   type FakeSession,
   type FakeUser,
@@ -108,10 +109,65 @@ export const STORY_SESSIONS: Record<string, FakeSession[]> = {
   ],
 };
 
+function activity(id: string, hours: number, overrides: Partial<FakeActivity>): FakeActivity {
+  return {
+    id,
+    source: "auth",
+    occurred_at: ago(hours),
+    action: "login.success",
+    success: true,
+    failure_reason: null,
+    actor: { id: "u-bola", name: "Bola Mensah" },
+    user: { id: "u-bola", name: "Bola Mensah" },
+    record: null,
+    changed_fields: null,
+    ip_address: "41.66.18.2",
+    user_agent: "Safari",
+    metadata: null,
+    ...overrides,
+  };
+}
+
+const RECORD_CHANGE = { source: "data", user: null, ip_address: null, user_agent: null } as const;
+
+export const STORY_ACTIVITY: Record<string, FakeActivity[]> = {
+  "u-bola": [
+    activity("a1", 0.5, {
+      ...RECORD_CHANGE,
+      action: "record.updated",
+      record: { model: "sales.Invoice", id: "0192f1c4-7a2e-7c3d-9b1a-5e8f2d4c6a10" },
+      changed_fields: ["due_date", "notes", "status"],
+    }),
+    activity("a2", 1, {
+      ...RECORD_CHANGE,
+      action: "record.created",
+      record: { model: "sales.Invoice", id: "0192f1c4-7a2e-7c3d-9b1a-5e8f2d4c6a10" },
+    }),
+    activity("a3", 1.2, {}),
+    activity("a4", 1.3, { action: "login.failure", success: false, failure_reason: "bad_password", actor: null }),
+    activity("a5", 26, {
+      action: "role.granted",
+      actor: { id: "me", name: "Ada Admin" },
+      metadata: { role: "portal" },
+    }),
+    activity("a6", 50, {
+      ...RECORD_CHANGE,
+      action: "record.deleted",
+      record: { model: null, id: "0192f0aa-11b2-7d4e-8c5f-6a7b8c9d0e1f" },
+    }),
+    activity("a7", 72, { action: "password.changed" }),
+  ],
+};
+
 // A story's beforeEach: installs the in-memory backend and returns its cleanup.
 export function fakeBackend(options: Partial<FakeBackendOptions> = {}) {
   return () => {
-    const backend = installFakeAdminUsersBackend({ users: STORY_USERS, sessions: STORY_SESSIONS, ...options });
+    const backend = installFakeAdminUsersBackend({
+      users: STORY_USERS,
+      sessions: STORY_SESSIONS,
+      activity: STORY_ACTIVITY,
+      ...options,
+    });
     return backend.restore;
   };
 }

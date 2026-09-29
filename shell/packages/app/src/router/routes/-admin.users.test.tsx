@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  type FakeActivity,
   type FakeBackend,
   type FakeBackendOptions,
   type FakeUser,
@@ -412,5 +413,109 @@ describe("/admin/users/$userId", () => {
   it("shows a not-found state for an unknown user", async () => {
     await renderAt("/admin/users/nobody");
     expect(await screen.findByText("User not found")).toBeTruthy();
+  });
+});
+
+function activity(id: string, overrides: Partial<FakeActivity>): FakeActivity {
+  return {
+    id,
+    source: "auth",
+    occurred_at: HOUR_AGO,
+    action: "login.success",
+    success: true,
+    failure_reason: null,
+    actor: { id: "u-bola", name: "Bola Active" },
+    user: { id: "u-bola", name: "Bola Active" },
+    record: null,
+    changed_fields: null,
+    ip_address: "41.66.1.2",
+    user_agent: "Chrome",
+    metadata: null,
+    ...overrides,
+  };
+}
+
+const BOLA_ACTIVITY: FakeActivity[] = [
+  activity("a1", {
+    action: "user.suspended",
+    actor: { id: "me", name: "Ada Admin" },
+    metadata: { reason: "Left the company" },
+  }),
+  activity("a2", {
+    source: "data",
+    action: "record.updated",
+    user: null,
+    record: { model: "inventory.Widget", id: "rec-1" },
+    changed_fields: ["name", "qty"],
+    ip_address: null,
+    user_agent: null,
+  }),
+  activity("a3", { action: "login.failure", success: false, failure_reason: "bad_password", actor: null }),
+  activity("a4", {
+    action: "role.granted",
+    user: { id: "u-chidi", name: "Chidi Suspended" },
+    metadata: { role: "portal" },
+  }),
+];
+
+describe("/admin/users/$userId activity", () => {
+  async function renderActivity(options: Partial<FakeBackendOptions> = {}) {
+    await renderAt("/admin/users/u-bola", { activity: { "u-bola": BOLA_ACTIVITY }, ...options });
+    await screen.findByRole("heading", { level: 1 });
+    return screen
+      .findByRole("heading", { name: "Activity" })
+      .then((heading) => heading.closest("section") ?? document.body);
+  }
+
+  it("shows the user's recent actions newest first, with who did it when it wasn't them", async () => {
+    const section = await renderActivity();
+    const items = await within(section).findAllByRole("listitem");
+    expect(items.map((item) => item.querySelector("p")?.textContent)).toEqual([
+      "Account suspended",
+      "Widget updated",
+      "Sign-in failed",
+      "Role added: Portal",
+    ]);
+    expect(within(items[0] as HTMLElement).getByText("Ada Admin")).toBeTruthy();
+    expect(within(items[1] as HTMLElement).getByText("Changed name, qty")).toBeTruthy();
+    expect(within(items[1] as HTMLElement).getByText("rec-1")).toBeTruthy();
+    expect(within(items[1] as HTMLElement).queryByText("Bola Active")).toBeNull();
+    expect(within(items[2] as HTMLElement).getByText("Reason: Bad password")).toBeTruthy();
+    expect(within(items[3] as HTMLElement).getByText("Chidi Suspended's account")).toBeTruthy();
+  });
+
+  it("filters by source and pages with Load more", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => activity(`s${i}`, { action: "session.logout" }));
+    const section = await renderActivity({ activity: { "u-bola": [...BOLA_ACTIVITY, ...many] } });
+    expect(await within(section).findAllByRole("listitem")).toHaveLength(20);
+
+    fireEvent.click(within(section).getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(within(section).getAllByRole("listitem")).toHaveLength(29));
+    expect(within(section).queryByRole("button", { name: "Load more" })).toBeNull();
+
+    fireEvent.click(within(section).getByRole("radio", { name: "Records" }));
+    await waitFor(() => expect(within(section).getAllByRole("listitem")).toHaveLength(1));
+    expect(within(section).getByText("Widget updated")).toBeTruthy();
+    expect(backend?.requests).toContain("GET /admin/users/u-bola/activity");
+  });
+
+  it("shows an empty state for a filter with no entries", async () => {
+    const section = await renderActivity({ activity: { "u-bola": [BOLA_ACTIVITY[0] as FakeActivity] } });
+    await within(section).findByText("Account suspended");
+    fireEvent.click(within(section).getByRole("radio", { name: "Records" }));
+    expect(await within(section).findByText("No activity yet")).toBeTruthy();
+    expect(within(section).getByText("Changes this user makes to records show up here.")).toBeTruthy();
+  });
+
+  it("shows an error with a retry when the activity can't load", async () => {
+    const section = await renderActivity({ failActivity: true });
+    const alert = await within(section).findByRole("alert");
+    expect(within(alert).getByText("Couldn't load activity.")).toBeTruthy();
+    expect(screen.getByText("bola@acme.test")).toBeTruthy();
+    const before = backend?.requests.filter((request) => request.endsWith("/activity")).length ?? 0;
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(backend?.requests.filter((request) => request.endsWith("/activity")).length).toBe(before + 1),
+    );
   });
 });

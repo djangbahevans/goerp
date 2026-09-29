@@ -27,9 +27,30 @@ export interface FakeSession {
   current?: boolean;
 }
 
+// One GET /admin/users/{id}/activity entry, in its wire shape, newest first
+// in the list given to the backend.
+export interface FakeActivity {
+  id: string;
+  source: "auth" | "data";
+  occurred_at: string;
+  action: string;
+  success: boolean;
+  failure_reason: string | null;
+  actor: { id: string; name: string | null } | null;
+  user: { id: string; name: string | null } | null;
+  record: { model: string | null; id: string } | null;
+  changed_fields: string[] | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
 export interface FakeBackendOptions {
   users: FakeUser[];
   sessions?: Record<string, FakeSession[]>;
+  activity?: Record<string, FakeActivity[]>;
+  // Only GET /admin/users/{id}/activity fails, with a 500.
+  failActivity?: boolean;
   // Emails with a GoERP account in another tenant (existing_account: true).
   otherTenantAccounts?: string[];
   // Every request fails with a 500.
@@ -110,6 +131,22 @@ export function installFakeAdminUsersBackend(options: FakeBackendOptions): FakeB
         data: page.map(userWire),
         meta: { total: matching.length, cursor: page.length === limit && last ? btoa(last.email) : null },
       };
+    }
+    const activityMatch = path.match(/^\/admin\/users\/([^/]+)\/activity$/);
+    if (activityMatch?.[1]) {
+      find(activityMatch[1]);
+      if (options.failActivity) {
+        throw new AppError({ code: "internal_error", message: "request failed", httpStatus: 500 });
+      }
+      const source = params.source as string | undefined;
+      const limit = Number(params.limit ?? 50);
+      const matching = (options.activity?.[activityMatch[1]] ?? []).filter(
+        (entry) => !source || entry.source === source,
+      );
+      const start = params.cursor ? Number(atob(String(params.cursor))) : 0;
+      const page = matching.slice(start, start + limit);
+      const next = start + page.length;
+      return { data: page, meta: { cursor: next < matching.length ? btoa(String(next)) : null } };
     }
     const sessionsMatch = path.match(/^\/admin\/users\/([^/]+)\/sessions$/);
     if (sessionsMatch?.[1]) {

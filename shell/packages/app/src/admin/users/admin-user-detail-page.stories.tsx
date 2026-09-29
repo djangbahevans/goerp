@@ -22,6 +22,35 @@ export const ActiveMember: Story = {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByText("Safari on macOS")).toBeInTheDocument());
     expect(canvas.getByText("Chrome on Android")).toBeInTheDocument();
+    await waitFor(() => expect(canvas.getByText("Invoice updated")).toBeInTheDocument());
+  },
+};
+
+export const ActivityRecordsFilter: Story = {
+  name: "activity, records filter",
+  beforeEach: fakeBackend(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("radio", { name: "Records" }));
+    await waitFor(() => expect(canvas.queryByText("Signed in")).not.toBeInTheDocument());
+    expect(canvas.getByText("Changed due_date, notes, status")).toBeInTheDocument();
+  },
+};
+
+export const ActivityEmpty: Story = {
+  name: "activity, empty",
+  args: { userId: "u-chidi" },
+  beforeEach: fakeBackend(),
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(within(canvasElement).getByText("No activity yet")).toBeInTheDocument());
+  },
+};
+
+export const ActivityError: Story = {
+  name: "activity, failed to load",
+  beforeEach: fakeBackend({ failActivity: true }),
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(within(canvasElement).getByText("Couldn't load activity.")).toBeInTheDocument());
   },
 };
 
