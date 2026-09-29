@@ -89,9 +89,8 @@ export function CommandPalette(): ReactNode {
   useEffect(() => {
     if (open) {
       triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      // biome-ignore lint/nursery/useReactCompiler: each open starts from an empty query, the same reset AlertDialog's open effect does.
+      // biome-ignore lint/nursery/useReactCompiler: each open starts from an empty query and the first result highlighted, the same reset AlertDialog's open effect does.
       setQuery("");
-      // biome-ignore lint/nursery/useReactCompiler: each open starts with the first result highlighted.
       nav.setActiveIndex(0);
     }
   }, [open, nav.setActiveIndex]);
