@@ -1,6 +1,6 @@
 // Command migrationfixture is a real Go module compiled to wasip1 WASM
 // for internal/engine/jobdispatch's own tests — it exercises the SDK's
-// actual engine.OnDataMigration/engine.DispatchDataMigration dispatch and
+// actual engine.OnDataMigration/engine.DispatchJob dispatch and
 // model.MigrationContext through a real wazero-loaded binary, rather than
 // a hand-assembled bytecode stand-in (matching internal/engine/loader/
 // testdata/realfixture's own established convention and its doc
@@ -34,7 +34,7 @@ func init() {
 
 //go:wasmexport handle_job
 func handleJob(ptr, length uint32) uint32 {
-	return engine.DispatchDataMigration(ptr, length)
+	return engine.DispatchJob(ptr, length)
 }
 
 //go:wasmexport allocate

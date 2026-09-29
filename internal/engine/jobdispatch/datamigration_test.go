@@ -80,11 +80,10 @@ func newTestRiverClient(t *testing.T) *river.Client[pgx.Tx] {
 }
 
 // newDataMigrationModule builds a real StatusReady *module.LoadedModule
-// backed by handleJobEchoModule (zero status on an empty payload,
-// non-zero on any other length) — this package's own tests that call
-// Work() against it construct their own WASMJobArgs by hand with Payload
-// left at its zero value, rather than reading back what
-// EnqueueApplicableDataMigration actually inserted (which does now carry
+// backed by a handle_job that always returns status 0 — this package's
+// own tests that call Work() against it construct their own WASMJobArgs
+// by hand with Payload left at its zero value, rather than reading back
+// what EnqueueApplicableDataMigration actually inserted (which does now carry
 // a real msgpack-encoded model.MigrationJobPayload, never nil — see
 // realfixture_test.go for tests that exercise that real payload, against
 // the real compiled fixture that can actually decode it). Declares
@@ -97,7 +96,7 @@ func newDataMigrationModule(t *testing.T, migrations []model.DataMigration, vers
 
 	rt := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	compiled, err := rt.CompileModule(ctx, handleJobEchoModule)
+	compiled, err := rt.CompileModule(ctx, buildHandleJobConstStatusModule(0))
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
@@ -260,8 +259,43 @@ func TestEnqueueApplicableDataMigration_EnqueuesOnlyFirstApplicable(t *testing.T
 	}
 }
 
+// TestEnqueueApplicableDataMigration_CancelledHandlerIsNotReenqueued: a
+// handler that failed with jobs.PermanentError leaves its job cancelled,
+// and a later trigger must not run it again.
+func TestEnqueueApplicableDataMigration_CancelledHandlerIsNotReenqueued(t *testing.T) {
+	conn, syncPool := openTestSchemaSyncPool(t)
+	riverClient := newTestRiverClient(t)
+	jobsConn := openJobsConn(t)
+
+	tenantID := uuid.New().String()
+	cleanupRiverJobsForTenant(t, jobsConn, tenantID)
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
+	})
+	mod := newDataMigrationModule(t, []model.DataMigration{
+		{FromVersion: "< 1.4.0", ToVersion: ">= 1.4.0", Handler: "backfill_a"},
+	}, "1.4.0")
+	seedSyncedRow(t, syncPool, tenantID, migrationTestModuleName, "1.4.0")
+
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
+		t.Fatalf("EnqueueApplicableDataMigration() error: %v", err)
+	}
+	if _, err := jobsConn.Exec(
+		`UPDATE system.river_job SET state = 'cancelled', finalized_at = now() WHERE kind = 'wasm_job' AND args->>'tenant_id' = $1`, tenantID,
+	); err != nil {
+		t.Fatalf("cancel migration job: %v", err)
+	}
+
+	if err := EnqueueApplicableDataMigration(t.Context(), riverClient, syncPool, tenantID, mod); err != nil {
+		t.Fatalf("second EnqueueApplicableDataMigration() error: %v", err)
+	}
+	if got := countRiverJobsForHandler(t, jobsConn, migrationTestModuleName, "backfill_a", tenantID); got != 1 {
+		t.Errorf("backfill_a jobs = %d, want 1 (the cancelled job, not a re-enqueued one)", got)
+	}
+}
+
 // TestEnqueueApplicableDataMigration_PayloadCarriesVersionBoundsAndHandler
-// guards the wire contract engine.DispatchDataMigration decodes on the
+// guards the data migration payload engine.DispatchJob decodes on the
 // module's own side (sdk/go/model.MigrationJobPayload) — a regression
 // here would silently break every real handler's MigrationContext
 // without failing any WASM-side dispatch test, since those construct

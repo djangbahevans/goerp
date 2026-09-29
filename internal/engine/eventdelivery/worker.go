@@ -84,8 +84,8 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.EventDelivery
 			// ByState uses jobqueue.UniqueAcrossAllJobStates, not River's
 			// "active"-only default, so a redelivery of the same event
 			// (the same EventID/ModuleName/HandlerName) after the
-			// original subscriber job already completed or was
-			// discarded still dedupes against it instead of invoking the
+			// original subscriber job already completed, was discarded,
+			// or was cancelled by a permanent failure still dedupes against it instead of invoking the
 			// handler's side effects a second time — the guarantee the
 			// subscription-level idempotency_key_field: "event_id" case
 			// (event-system.md §5) exists to provide.

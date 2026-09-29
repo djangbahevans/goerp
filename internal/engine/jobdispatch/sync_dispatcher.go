@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -36,11 +37,23 @@ func (d *SyncDispatcher) DispatchJobSync(ctx context.Context, req wasm.SyncJobRe
 		return 0, nil, fmt.Errorf("%w: %w", wasm.ErrSyncJobTargetUnavailable, err)
 	}
 
-	return invokeHandleJob(ctx, d.Runtime, snap, mod, jobqueue.WASMJobArgs{
+	args := jobqueue.WASMJobArgs{
 		ModuleName: req.ModuleName,
 		JobType:    req.JobType,
 		Payload:    req.Payload,
 		TenantID:   req.TenantID,
 		TraceID:    req.TraceID,
-	}, req.TenantSlug, true)
+	}
+	// No River job exists, so the envelope has no job ID and a single
+	// attempt.
+	env := abiv1.JobEnvelope{
+		JobType:     req.JobType,
+		TenantID:    req.TenantID,
+		ModuleName:  req.ModuleName,
+		TraceID:     req.TraceID,
+		Attempt:     1,
+		MaxAttempts: 1,
+		Payload:     req.Payload,
+	}
+	return invokeHandleJob(ctx, d.Runtime, snap, mod, args, req.TenantSlug, env, true)
 }

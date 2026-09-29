@@ -197,6 +197,10 @@ func TestInvocationWireFields(t *testing.T) {
 		{"ActivityResult", ActivityResult{Output: []byte("o"), Error: "e", ErrorType: "t", ErrorDetails: map[string]any{"k": 1}}, []string{
 			"output", "error", "non_retryable", "error_type", "error_details"}},
 		{"ActivityResult omits empty members", ActivityResult{}, []string{"non_retryable"}},
+		{"JobEnvelope", JobEnvelope{TraceID: "t", IsDataMigration: true}, []string{
+			"job_id", "job_type", "tenant_id", "module_name", "trace_id", "attempt", "max_attempts", "is_data_migration", "payload"}},
+		{"JobEnvelope omits empty trace and ordinary-job discriminator", JobEnvelope{}, []string{
+			"job_id", "job_type", "tenant_id", "module_name", "attempt", "max_attempts", "payload"}},
 		{"MigrationJobPayload", MigrationJobPayload{}, []string{"handler", "tenant_id", "from_version", "to_version"}},
 		{"RouteDeclaration", RouteDeclaration{
 			RateLimit: &RateLimitDecl{}, Model: "m", Name: "n", Scope: "record", CRUDAction: "list",

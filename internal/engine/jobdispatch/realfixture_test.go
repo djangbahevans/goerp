@@ -24,20 +24,20 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// compileMigrationFixture compiles testdata/migrationfixture — a real Go
-// module using the actual sdk/go/engine.OnDataMigration/DispatchDataMigration
-// and sdk/go/model.MigrationContext, not a hand-assembled bytecode
+// compileFixture compiles testdata/<name> — a real Go module built on
+// the actual sdk/go/engine dispatch (engine.DispatchJob with
+// OnDataMigration or OnJob handlers), not a hand-assembled bytecode
 // stand-in — to wasip1 WASM, mirroring internal/engine/loader's own
 // compileRealFixture (goerp#234's established convention for this class
 // of test).
-func compileMigrationFixture(t *testing.T) []byte {
+func compileFixture(t *testing.T, name string) []byte {
 	t.Helper()
 
-	wasmPath := filepath.Join(t.TempDir(), "migrationfixture.wasm")
-	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/migrationfixture")
+	wasmPath := filepath.Join(t.TempDir(), name+".wasm")
+	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/"+name)
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("compile testdata/migrationfixture: %v\n%s", err, out)
+		t.Fatalf("compile testdata/%s: %v\n%s", name, err, out)
 	}
 
 	data, err := os.ReadFile(wasmPath)
@@ -136,13 +136,13 @@ func loadWASMJobArgs(t *testing.T, jobsConn *sql.DB, moduleName, handler, tenant
 // counterpart to internal/engine/loader's own
 // TestLoadModule_RealCompiledModule_RoundTripsSDKDeclaredData, but for
 // this package's own boundary: a real Go module built on the actual SDK
-// (engine.OnDataMigration, engine.DispatchDataMigration,
+// (engine.OnDataMigration, engine.DispatchJob,
 // model.MigrationContext.Log/RecordProgress) compiles to wasip1 WASM,
 // loads through a real wasm.Runtime with every host function registered,
 // and Worker.Work dispatches a real jobqueue.WASMJobArgs job into it —
 // exercising the actual msgpack wire contract
 // (jobdispatch.EnqueueApplicableDataMigration's engine-side encode
-// against engine.DispatchDataMigration's SDK-side decode) and the actual
+// against engine.DispatchJob's SDK-side decode) and the actual
 // WASI stdout path Log/RecordProgress write through, neither of which
 // the package's other, hand-assembled-bytecode-fixture tests can verify.
 func TestWork_RealCompiledFixture_DataMigrationSucceeds(t *testing.T) {
@@ -158,7 +158,7 @@ func TestWork_RealCompiledFixture_DataMigrationSucceeds(t *testing.T) {
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
 	})
 
-	wasmBytes := compileMigrationFixture(t)
+	wasmBytes := compileFixture(t, "migrationfixture")
 	migrations := []model.DataMigration{
 		{FromVersion: "< 1.0.0", ToVersion: ">= 1.0.0", Handler: "backfill_test"},
 	}
@@ -205,7 +205,7 @@ func TestWork_RealCompiledFixture_DataMigrationHandlerErrorReturnsError(t *testi
 		_, _ = conn.Exec(`DELETE FROM system.module_schema_versions WHERE tenant_id = $1 AND module_name = $2`, tenantID, migrationTestModuleName)
 	})
 
-	wasmBytes := compileMigrationFixture(t)
+	wasmBytes := compileFixture(t, "migrationfixture")
 	migrations := []model.DataMigration{
 		{FromVersion: "< 1.0.0", ToVersion: ">= 1.0.0", Handler: "failing_test"},
 	}
@@ -264,7 +264,7 @@ func TestWork_RealCompiledFixture_DataMigrationDropColumnSucceeds(t *testing.T) 
 		t.Fatalf("create fixture widget table: %v", err)
 	}
 
-	wasmBytes := compileMigrationFixture(t)
+	wasmBytes := compileFixture(t, "migrationfixture")
 	migrations := []model.DataMigration{
 		{FromVersion: "< 1.0.0", ToVersion: ">= 1.0.0", Handler: "drop_column_test"},
 	}
