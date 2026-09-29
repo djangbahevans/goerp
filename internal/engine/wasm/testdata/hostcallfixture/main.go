@@ -5,8 +5,7 @@
 // (db.Begin/events.EmitTx/tx.Commit, events.Emit(..., events.WithSync()),
 // tx.Lock/tx.TryLock, jobs.EnqueueTx, jobs.EnqueueProviderTx,
 // jobs.DispatchProviderSync, notify.SendTx, notify.SendBulk), rather than
-// a hand-assembled
-// bytecode stand-in.
+// a hand-assembled bytecode stand-in.
 //
 // Must be built with:
 //

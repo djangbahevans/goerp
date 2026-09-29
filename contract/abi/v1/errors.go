@@ -218,4 +218,8 @@ const (
 	// distinct user_ids; a caller with more batches them through
 	// host.jobs.enqueue.
 	ErrCodeNotifyTooManyRecipients = "notify.too_many_recipients"
+	// ErrCodeNotifyRenderFailed rejects data the notification type's
+	// in_app template cannot render against; resending the same data
+	// fails the same way.
+	ErrCodeNotifyRenderFailed = "notify.render_failed"
 )

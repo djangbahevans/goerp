@@ -34,11 +34,11 @@ func renderInApp(snapshot *registry.RegistrySnapshot, moduleName, notificationNa
 
 	rendered, err := notiftemplate.Render(tmpl, matched, jsonEscapedStrings(vars))
 	if err != nil {
-		return inAppContent{}, fmt.Errorf("render in_app template: %w", err)
+		return inAppContent{}, fmt.Errorf("%w: in_app: %w", ErrRenderFailed, err)
 	}
 	var content inAppContent
 	if err := json.Unmarshal([]byte(rendered), &content); err != nil {
-		return inAppContent{}, fmt.Errorf("rendered in_app template is not a JSON object: %w", err)
+		return inAppContent{}, fmt.Errorf("%w: in_app output is not a JSON object: %w", ErrRenderFailed, err)
 	}
 	if content.Title == "" {
 		content.Title = label

@@ -55,7 +55,14 @@ func TestHostSender_MapsCallerErrors(t *testing.T) {
 	_, err = host.SendBulk(t.Context(), badChannel)
 	requireHostErrorCode(t, err, abiv1.ErrCodeNotifyInvalidOptions)
 
-	userIDs := make([]string, MaxBulkRecipients+1)
+	// A map key is printed unescaped, so this data renders the in_app
+	// template to invalid JSON.
+	unrenderable := hostRequest(env, orderConfirmed, userID)
+	unrenderable.Data = map[string]any{"OrderReference": map[string]any{`a"b`: 1}}
+	_, err = host.SendBulk(t.Context(), unrenderable)
+	requireHostErrorCode(t, err, abiv1.ErrCodeNotifyRenderFailed)
+
+	userIDs :=make([]string, MaxBulkRecipients+1)
 	for i := range userIDs {
 		userIDs[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i)
 	}

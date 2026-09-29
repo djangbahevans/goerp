@@ -60,6 +60,9 @@ var (
 	// ErrTooManyRecipients: a SendBulk names more than MaxBulkRecipients
 	// users.
 	ErrTooManyRecipients = fmt.Errorf("a bulk notification goes to at most %d users", MaxBulkRecipients)
+	// ErrRenderFailed: a template failed to render against the send's
+	// data, so resending the same data fails the same way.
+	ErrRenderFailed = errors.New("notification template could not be rendered")
 )
 
 // MaxBulkRecipients caps one SendBulk's recipients (host-abi-reference.md

@@ -75,6 +75,8 @@ func hostError(err error) error {
 		code = abiv1.ErrCodeNotifyInvalidOptions
 	case errors.Is(err, ErrTooManyRecipients):
 		code = abiv1.ErrCodeNotifyTooManyRecipients
+	case errors.Is(err, ErrRenderFailed):
+		code = abiv1.ErrCodeNotifyRenderFailed
 	default:
 		return err
 	}
