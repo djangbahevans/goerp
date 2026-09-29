@@ -8,6 +8,7 @@ const sdkSrc = fileURLToPath(new URL("../../sdk/src", import.meta.url));
 const config: StorybookConfig = {
   stories: ["../../*/src/**/*.stories.tsx"],
   framework: "@storybook/react-vite",
+
   viteFinal: async (viteConfig) => {
     viteConfig.plugins = [...(viteConfig.plugins ?? []), react(), tailwindcss()];
     // maplibre-gl loads its tile-decoding worker via a URL Vite's dep
@@ -37,6 +38,8 @@ const config: StorybookConfig = {
     };
     return viteConfig;
   },
+
+  addons: ["@storybook/addon-vitest", "@storybook/addon-a11y", "@chromatic-com/storybook", "@storybook/addon-docs"],
 };
 
 export default config;

@@ -82,6 +82,7 @@ const preview: Preview = {
     contrast: "standard",
   },
   decorators: [withTheme, withPermissions],
+  tags: ["autodocs"],
 };
 
 export default preview;
