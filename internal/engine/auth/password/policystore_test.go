@@ -234,3 +234,19 @@ func TestSave_ValidatesAndStampsChangedAt(t *testing.T) {
 		t.Errorf("Tenant() = %+v, want the saved settings with ChangedAt", got)
 	}
 }
+
+func TestSave_GraceDaysOnlyAtDefaultsDoesNotStampChangedAt(t *testing.T) {
+	env := newPolicyEnv(t)
+	tt := env.createTenant(t)
+
+	if err := env.store.Save(t.Context(), tt.ID, TenantPolicy{MinLength: Global.MinLength, Enforcement: EnforcementNudge, GraceDays: 30}); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	got, err := env.store.Tenant(t.Context(), tt.ID)
+	if err != nil {
+		t.Fatalf("Tenant() error: %v", err)
+	}
+	if got.GraceDays != 30 || got.ChangedAt != nil {
+		t.Errorf("Tenant() = %+v, want GraceDays 30 and no ChangedAt", got)
+	}
+}

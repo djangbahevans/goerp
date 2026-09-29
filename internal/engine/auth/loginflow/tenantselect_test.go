@@ -214,6 +214,26 @@ func TestServeSelectTenant_AppliesThePickedTenantsPasswordPolicyResult(t *testin
 	}
 }
 
+func TestServeSelectTenant_TenantJoinedSinceLoginIsForbidden(t *testing.T) {
+	f := newFixture(t)
+	f.activateTenant(t, f.tenantSlug)
+	f.addMembership(t, "Second Co")
+	_, token := tenantRequired(t, f.loginTenantless(t, sharedHost))
+
+	// Joined after the login, so the token holds no sign-in password check
+	// result for it.
+	third := f.addMembership(t, "Third Co")
+	rec := f.selectTenant(t, sharedHost, token, third)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s, want 403", rec.Code, rec.Body.String())
+	}
+	errBody, _ := decodeBody(t, rec)["error"].(map[string]any)
+	if errBody["code"] != "tenant_membership_required" {
+		t.Errorf("error.code = %v, want tenant_membership_required", errBody["code"])
+	}
+}
+
 func TestServeSelectTenant_MembershipRevokedSinceLoginIsForbidden(t *testing.T) {
 	f := newFixture(t)
 	f.activateTenant(t, f.tenantSlug)

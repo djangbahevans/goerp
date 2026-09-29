@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
@@ -110,13 +112,12 @@ func (h *Handlers) Info(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The password a new account sets is checked against the combined
-	// minimum, including this tenant (auth-internals.md §3 "Password
-	// strength validation").
+	// Degrades to this tenant's own minimum; Accept checks the combined
+	// one and reports it if it's higher.
 	minLength, err := h.policies.CombinedMinLength(ctx, u.ID, t.ID)
 	if err != nil {
-		writeInternal(w, r)
-		return
+		log.Warn().Err(err).Str("user_id", u.ID).Msg("acceptinvite: combined password minimum lookup failed, reporting the tenant's")
+		minLength = h.policies.MinLength(ctx, t.ID)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

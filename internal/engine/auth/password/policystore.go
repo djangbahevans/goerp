@@ -214,18 +214,31 @@ func ValidateEnforcement(e Enforcement) error {
 	return nil
 }
 
-// Save writes p's MinLength, Enforcement and GraceDays as tenantID's
-// settings in one transaction; tenantconfig.Store stamps KeyChangedAt if
-// MinLength or Enforcement changed. ChangedAt is ignored.
+// Save writes whichever of p's MinLength, Enforcement and GraceDays
+// differ from tenantID's current settings, in one transaction;
+// tenantconfig.Store stamps KeyChangedAt if MinLength or Enforcement is
+// among them. Comparing against the effective values, not the stored
+// ones, keeps an unset key at its default from counting as a change.
+// ChangedAt is ignored.
 func (s *PolicyStore) Save(ctx context.Context, tenantID string, p TenantPolicy) error {
 	if err := errors.Join(ValidateMinLength(p.MinLength), ValidateEnforcement(p.Enforcement), ValidateGraceDays(p.GraceDays)); err != nil {
 		return err
 	}
-	if err := s.config.SetMany(ctx, tenantID, map[string]string{
-		KeyMinLength:   strconv.Itoa(p.MinLength),
-		KeyEnforcement: string(p.Enforcement),
-		KeyGraceDays:   strconv.Itoa(p.GraceDays),
-	}); err != nil {
+	current, err := s.Tenant(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	values := map[string]string{}
+	if p.MinLength != current.MinLength {
+		values[KeyMinLength] = strconv.Itoa(p.MinLength)
+	}
+	if p.Enforcement != current.Enforcement {
+		values[KeyEnforcement] = string(p.Enforcement)
+	}
+	if p.GraceDays != current.GraceDays {
+		values[KeyGraceDays] = strconv.Itoa(p.GraceDays)
+	}
+	if err := s.config.SetMany(ctx, tenantID, values); err != nil {
 		return fmt.Errorf("save password policy: %w", err)
 	}
 	return nil

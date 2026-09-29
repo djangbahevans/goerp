@@ -563,6 +563,35 @@ func TestAuthenticate_MissingRequiredPermissionIsRejected(t *testing.T) {
 	}
 }
 
+func TestAuthenticate_PasswordChangeRequiredSessionIsRestricted(t *testing.T) {
+	f := newFixture(t)
+	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+		UserID:     f.userID,
+		TenantSlug: f.tenantSlug,
+		DeviceID:   "11111111-1111-1111-1111-111111111111",
+
+		PasswordChangeRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	// Reported ahead of a missing permission, so the caller is sent to
+	// change the password rather than told it lacks access.
+	_, err = f.checker.Authenticate(context.Background(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, []string{"widgets.delete"})
+	if !errors.Is(err, ErrPasswordChangeRequired) {
+		t.Errorf("Authenticate() error = %v, want ErrPasswordChangeRequired", err)
+	}
+
+	authCtx, err := f.checker.AuthenticateAllowingPasswordChange(context.Background(), tokens.AccessToken, f.tenantID, f.tenantSlug, "203.0.113.1", f.permissions, nil)
+	if err != nil {
+		t.Fatalf("AuthenticateAllowingPasswordChange() error: %v", err)
+	}
+	if !authCtx.IsAuthenticated || !authCtx.PasswordChangeRequired {
+		t.Errorf("AuthenticateAllowingPasswordChange() = %+v, want authenticated with PasswordChangeRequired", authCtx)
+	}
+}
+
 func TestAuthenticate_GrantedRequiredPermissionSucceeds(t *testing.T) {
 	f := newFixture(t)
 	token := f.issueToken(t, "")

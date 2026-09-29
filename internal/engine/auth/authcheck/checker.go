@@ -183,14 +183,7 @@ func NewChecker(
 // ErrPasswordChangeRequired; only the password-fix routes accept one,
 // through AuthenticateAllowingPasswordChange.
 func (c *Checker) Authenticate(ctx context.Context, rawToken, tenantID, tenantSlug, remoteIP string, permissions *permission.PermissionRegistry, requiredPermissions []string) (*AuthContext, error) {
-	authCtx, err := c.authenticate(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions)
-	if err != nil {
-		return nil, err
-	}
-	if authCtx.PasswordChangeRequired {
-		return nil, ErrPasswordChangeRequired
-	}
-	return authCtx, nil
+	return c.authenticate(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions, false)
 }
 
 // AuthenticateAllowingPasswordChange is Authenticate for the routes a
@@ -200,10 +193,10 @@ func (c *Checker) Authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 // step 9 exempts. The returned context reports the restriction in
 // PasswordChangeRequired.
 func (c *Checker) AuthenticateAllowingPasswordChange(ctx context.Context, rawToken, tenantID, tenantSlug, remoteIP string, permissions *permission.PermissionRegistry, requiredPermissions []string) (*AuthContext, error) {
-	return c.authenticate(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions)
+	return c.authenticate(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions, true)
 }
 
-func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSlug, remoteIP string, permissions *permission.PermissionRegistry, requiredPermissions []string) (*AuthContext, error) {
+func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSlug, remoteIP string, permissions *permission.PermissionRegistry, requiredPermissions []string, allowPasswordChange bool) (*AuthContext, error) {
 	if rawToken == "" {
 		return &AuthContext{IsAuthenticated: false}, nil
 	}
@@ -252,6 +245,11 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 	}
 	if !isMember {
 		return nil, ErrNotTenantMember
+	}
+	// Ahead of the permission check, so a restricted session is sent to the
+	// change-password page rather than told it lacks a permission.
+	if claims.PasswordChangeRequired && !allowPasswordChange {
+		return nil, ErrPasswordChangeRequired
 	}
 
 	rolesLive, err := c.roles.RoleNamesForUser(ctx, tenantSlug, claims.Subject)

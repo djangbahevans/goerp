@@ -557,7 +557,15 @@ func (h *Handler) ServeSelectTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.signIn(w, r, u, t, grant.DeviceID, grant.Remember, grant.PasswordPolicyResults[t.ID])
+	// Only a listed tenant has a sign-in password check result; one joined
+	// since the login would otherwise skip it.
+	policy, listed := grant.PasswordPolicyResults[t.ID]
+	if !listed {
+		httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_membership_required", "not a member of this tenant")
+		return
+	}
+
+	h.signIn(w, r, u, t, grant.DeviceID, grant.Remember, policy)
 }
 
 // completeLogin is login steps 10-11: an mfa_required challenge when the

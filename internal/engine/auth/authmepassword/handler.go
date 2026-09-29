@@ -204,17 +204,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // whether it wrote the response. The password has already changed, so a
 // failure is only logged and the caller answers a plain 200.
 func (h *Handler) liftRestriction(w http.ResponseWriter, r *http.Request, authCtx *authcheck.AuthContext) bool {
-	persistent, sessionEnd, err := h.sessionStore.ClearPasswordChangeRequired(r.Context(), authCtx.SessionID)
+	state, err := h.sessionStore.ClearPasswordChangeRequired(r.Context(), authCtx.SessionID)
 	if err != nil {
 		log.Error().Err(err).Str("session_id", authCtx.SessionID).Msg("authmepassword: clearing password_change_required failed")
 		return false
 	}
-	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, mfaMethod(authCtx.AMR), authCtx.MFAVerifiedAt, false, sessionEnd)
+	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, mfaMethod(authCtx.AMR), authCtx.MFAVerifiedAt, false, state.ExpiresAt)
 	if err != nil {
 		log.Error().Err(err).Str("session_id", authCtx.SessionID).Msg("authmepassword: reissuing the access token failed")
 		return false
 	}
-	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, persistent, map[string]any{"status": "ok"})
+	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, state.Persistent, map[string]any{"status": "ok"})
 	return true
 }
 
