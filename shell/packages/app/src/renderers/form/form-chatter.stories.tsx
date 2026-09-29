@@ -88,13 +88,75 @@ const SEED: WireEntry[] = [
 
 const PAGE_SIZE = 5;
 
-function fakeBackend(seed: WireEntry[], options: { failLoad?: boolean; failPost?: boolean } = {}) {
+interface WirePlanned {
+  id: string;
+  model: string;
+  record_id: string;
+  type: string;
+  summary: string;
+  note: string | null;
+  due_date: string;
+  assignee: { id: string; name: string | null; avatar_url: string | null };
+  created_by: { id: string; name: string | null; avatar_url: string | null };
+  created_at: string;
+  done_at: string | null;
+  done_by: null;
+  feedback: string | null;
+}
+
+const ISO_DAY = 86_400_000;
+const dayFromToday = (offset: number) => new Date(Date.now() + offset * ISO_DAY).toISOString().slice(0, 10);
+
+function planned(id: string, overrides: Partial<WirePlanned>): WirePlanned {
+  return {
+    id,
+    model: "sales.order",
+    record_id: "o1",
+    type: "call",
+    summary: "",
+    note: null,
+    due_date: dayFromToday(0),
+    assignee: AMA,
+    created_by: KWAME,
+    created_at: "2026-09-23T16:02:00Z",
+    done_at: null,
+    done_by: null,
+    feedback: null,
+    ...overrides,
+  };
+}
+
+const PLANNED_SEED: WirePlanned[] = [
+  planned("p1", { summary: "Chase the signed delivery note", type: "todo", due_date: dayFromToday(-2) }),
+  planned("p2", {
+    summary: "Confirm Friday delivery",
+    note: "They asked for a morning slot.",
+    due_date: dayFromToday(0),
+  }),
+  planned("p3", { summary: "Send the revised quote", type: "email", assignee: KWAME, due_date: dayFromToday(3) }),
+];
+
+const READERS = [
+  { id: "u1", name: "Ama Owusu", email: "ama@acme.example", avatar_url: null },
+  { id: "u2", name: "Kwame Mensah", email: "kwame@acme.example", avatar_url: null },
+];
+
+function fakeBackend(
+  seed: WireEntry[],
+  options: { failLoad?: boolean; failPost?: boolean; planned?: WirePlanned[] } = {},
+) {
   return () => {
-    const original = { get: apiClient.get, post: apiClient.post, delete: apiClient.delete };
+    const original = { get: apiClient.get, post: apiClient.post, patch: apiClient.patch, delete: apiClient.delete };
     let entries = [...seed];
+    let plannedRows = [...(options.planned ?? [])];
     let nextId = 100;
     const fake = apiClient as unknown as Record<string, unknown>;
-    fake.get = async (_path: string, config?: { params?: { cursor?: string } }) => {
+    fake.get = async (path: string, config?: { params?: { cursor?: string; q?: string } }) => {
+      if (path === "/_meta/scheduled-activities") return { data: plannedRows };
+      if (path === "/_meta/record-readers") {
+        const q = (config?.params?.q ?? "").toLowerCase();
+        return { data: READERS.filter((r) => q === "" || r.name.toLowerCase().includes(q)) };
+      }
       if (options.failLoad) {
         throw new AppError({
           code: "internal_error",
@@ -107,7 +169,46 @@ function fakeBackend(seed: WireEntry[], options: { failLoad?: boolean; failPost?
       const hasMore = start + PAGE_SIZE < entries.length;
       return { data: page, meta: { cursor: hasMore ? String(start + PAGE_SIZE) : "", has_more: hasMore } };
     };
-    fake.post = async (_path: string, body: { body: string }) => {
+    fake.post = async (path: string, body: Record<string, unknown>) => {
+      if (path === "/_meta/scheduled-activities") {
+        const assignee = READERS.find((r) => r.id === (body.assignee_id ?? "u1")) ?? READERS[0];
+        const created = planned(`p${nextId++}`, {
+          type: String(body.type),
+          summary: String(body.summary),
+          note: (body.note as string | undefined) ?? null,
+          due_date: String(body.due_date),
+          assignee: { id: assignee?.id ?? "u1", name: assignee?.name ?? null, avatar_url: null },
+          created_by: AMA,
+        });
+        plannedRows = [...plannedRows, created].sort((a, b) => a.due_date.localeCompare(b.due_date));
+        return created;
+      }
+      if (path.endsWith("/done")) {
+        const id = path.split("/").at(-2);
+        const done = plannedRows.find((row) => row.id === id);
+        plannedRows = plannedRows.filter((row) => row.id !== id);
+        if (done) {
+          const feedback = (body.feedback as string | undefined) ?? null;
+          entries = [
+            {
+              id: `e${nextId++}`,
+              kind: "activity_done",
+              activity: {
+                activity_id: done.id,
+                type: done.type,
+                summary: done.summary,
+                due_date: done.due_date,
+                feedback,
+              },
+              author: AMA,
+              created_at: new Date().toISOString(),
+            },
+            ...entries,
+          ];
+          return { ...done, done_at: new Date().toISOString(), feedback };
+        }
+        throw new AppError({ code: "not_found", message: "Not found", httpStatus: 404 });
+      }
       if (options.failPost) {
         throw new AppError({
           code: "internal_error",
@@ -118,7 +219,7 @@ function fakeBackend(seed: WireEntry[], options: { failLoad?: boolean; failPost?
       const created: WireEntry = {
         id: `e${nextId++}`,
         kind: "comment",
-        body: body.body.trim(),
+        body: String(body.body).trim(),
         deleted: false,
         author: AMA,
         created_at: new Date().toISOString(),
@@ -126,8 +227,28 @@ function fakeBackend(seed: WireEntry[], options: { failLoad?: boolean; failPost?
       entries = [created, ...entries];
       return created;
     };
+    fake.patch = async (path: string, body: Record<string, unknown>) => {
+      const id = path.split("/").pop();
+      let updated: WirePlanned | undefined;
+      plannedRows = plannedRows.map((row) => {
+        if (row.id !== id) return row;
+        updated = {
+          ...row,
+          ...(body.type !== undefined ? { type: String(body.type) } : {}),
+          ...(body.summary !== undefined ? { summary: String(body.summary) } : {}),
+          ...(body.due_date !== undefined ? { due_date: String(body.due_date) } : {}),
+          ...(body.note !== undefined ? { note: body.note as string | null } : {}),
+        };
+        return updated;
+      });
+      return updated;
+    };
     fake.delete = async (path: string) => {
       const id = path.split("/").pop();
+      if (path.startsWith("/_meta/scheduled-activities/")) {
+        plannedRows = plannedRows.filter((row) => row.id !== id);
+        return;
+      }
       entries = entries.map((entry) => {
         if (entry.id !== id) return entry;
         const { body: _body, ...rest } = entry;
@@ -279,5 +400,49 @@ export const PostError: Story = {
     await userEvent.click(canvas.getByRole("button", { name: "Comment" }));
     await waitFor(() => expect(canvas.getByRole("alert")).toHaveTextContent("Couldn't reach the server. Try again."));
     expect(canvas.getByLabelText("Add a comment")).toHaveValue("This will fail");
+  },
+};
+
+export const PlannedActivities: Story = {
+  name: "planned activities: overdue marked, mark one done into the feed",
+  beforeEach: fakeBackend(SEED, { planned: PLANNED_SEED }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const section = await waitFor(() => canvas.getByRole("region", { name: "Planned activities" }));
+    await waitFor(() => expect(within(section).getByText("Chase the signed delivery note")).toBeInTheDocument());
+    expect(within(section).getByText(/^Overdue · /)).toBeInTheDocument();
+    // Kwame's quote is assigned to him and made by him, so the viewer (Ama) gets no actions on it.
+    expect(within(section).queryByRole("button", { name: 'Mark "Send the revised quote" done' })).toBeNull();
+
+    await userEvent.click(within(section).getByRole("button", { name: 'Mark "Confirm Friday delivery" done' }));
+    await userEvent.type(
+      within(section).getByRole("textbox", { name: /^Feedback for/ }),
+      "Morning slot booked.{Enter}",
+    );
+    await waitFor(() => expect(within(section).queryByText("Confirm Friday delivery")).toBeNull());
+    await waitFor(() => expect(canvas.getByText("Completed call: Confirm Friday delivery")).toBeInTheDocument());
+  },
+};
+
+export const PlannedActivitiesSchedule: Story = {
+  name: "planned activities: schedule one",
+  beforeEach: fakeBackend(SEED, { planned: PLANNED_SEED }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const section = await waitFor(() => canvas.getByRole("region", { name: "Planned activities" }));
+    await userEvent.click(within(section).getByRole("button", { name: "Schedule activity" }));
+    await userEvent.type(within(section).getByRole("textbox", { name: /Summary/ }), "Book the delivery van");
+    await userEvent.click(within(section).getByRole("button", { name: "Schedule" }));
+    await waitFor(() => expect(within(section).getByText("Book the delivery van")).toBeInTheDocument());
+  },
+};
+
+export const PlannedActivitiesEmpty: Story = {
+  name: "planned activities: nothing planned, form open",
+  beforeEach: fakeBackend(SEED),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByText("Nothing planned.")).toBeInTheDocument());
+    await userEvent.click(canvas.getByRole("button", { name: "Schedule activity" }));
   },
 };

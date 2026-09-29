@@ -202,4 +202,13 @@ describe("Select inside a FieldWrapper", () => {
     );
     expect(screen.getByRole("combobox", { name: "Role" })).toBeTruthy();
   });
+
+  it("offers no clear button when the field is required", () => {
+    render(
+      <FieldWrapper label="Role" required>
+        <Select options={[{ value: "user", label: "User" }]} value="user" onChange={() => {}} />
+      </FieldWrapper>,
+    );
+    expect(screen.queryByRole("button", { name: "Clear User" })).toBeNull();
+  });
 });
