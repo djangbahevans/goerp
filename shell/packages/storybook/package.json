@@ -27,8 +27,8 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
-    "@vitest/browser": "^4.1.11",
-    "@vitest/browser-playwright": "^4.1.11",
+    "@vitest/browser": "^5.0.2",
+    "@vitest/browser-playwright": "^5.0.2",
     "maplibre-gl": "^6.10.0",
     "playwright": "^1.63.0",
     "react": "^19.2.8",
@@ -37,6 +37,6 @@
     "tailwindcss": "^4.3.3",
     "typescript": "7.0.2",
     "vite": "^8.2.1",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.2"
   }
 }

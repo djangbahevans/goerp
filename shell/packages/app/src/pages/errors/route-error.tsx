@@ -18,7 +18,9 @@ export function RouteError({ error, reset }: ErrorComponentProps): ReactNode {
       <div role="alert" className="flex flex-col items-center gap-2 py-6 text-center">
         <Icon name="circle-alert" size={20} className="text-danger" aria-hidden="true" />
         <p className="text-text">Couldn't load this page.</p>
-        <p className="text-sm text-text-secondary">{error.message}</p>
+        <p className="text-sm text-text-secondary">
+          {error instanceof Error ? error.message : "Something went wrong."}
+        </p>
         <ActionButton variant="secondary" onClick={reset}>
           Retry
         </ActionButton>
