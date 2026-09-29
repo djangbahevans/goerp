@@ -100,7 +100,7 @@ func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authch
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
 	}
-	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	authCtx, err := h.auth.AuthenticateAllowingPasswordChange(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated || authCtx.AuthMethod != "jwt" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
@@ -209,8 +209,7 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 	// any, not []string: json/v2 writes a nil slice as [], and the response
 	// uses null for "the user already had recovery codes".
 	var issued any
-	var persistent bool
-	var sessionEnd time.Time
+	var state session.ReissueState
 	err = h.mfa.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := h.mfa.LockUserTx(ctx, tx, authCtx.UserID); err != nil {
 			return err
@@ -232,7 +231,7 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 			issued = codes.Codes
 		}
 
-		persistent, sessionEnd, err = h.sessions.UpdateMFAAssuranceTx(ctx, tx, authCtx.SessionID, string(mfa.CredentialTOTP), now, credentialID)
+		state, err = h.sessions.UpdateMFAAssuranceTx(ctx, tx, authCtx.SessionID, string(mfa.CredentialTOTP), now, credentialID)
 		if err != nil {
 			return err
 		}
@@ -252,7 +251,7 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, string(mfa.CredentialTOTP), &now, sessionEnd)
+	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, string(mfa.CredentialTOTP), &now, state.PasswordChangeRequired, state.ExpiresAt)
 	if err != nil {
 		writeInternal(w, r)
 		return
@@ -260,7 +259,7 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 
 	h.recordAudit(ctx, r, authCtx, credentialID)
 
-	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, persistent, map[string]any{
+	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, state.Persistent, map[string]any{
 		"recovery_codes": issued,
 	})
 }

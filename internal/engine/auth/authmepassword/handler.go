@@ -1,6 +1,9 @@
 // Package authmepassword implements POST /auth/me/change-password —
 // auth-internals.md §3 "Password change": a signed-in user replacing their
-// own password. Same tenant/auth resolution pattern as authme.Handler.
+// own password. Same tenant/auth resolution pattern as authme.Handler. A
+// session restricted by password_change_required reaches this route, and
+// a successful change lifts the restriction and reissues its access
+// token.
 //
 // Out of scope: the global Argon2 concurrency limit (goerp#1032).
 package authmepassword
@@ -16,8 +19,10 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
+	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
@@ -41,18 +46,20 @@ type AuditRecorder interface {
 }
 
 type Handler struct {
-	tenants  *tenantresolve.Resolver
-	auth     *authcheck.Checker
-	users    *user.Store
-	policies *password.PolicyStore
-	sessions *sessionrevoke.Revoker
-	mailer   Mailer
-	audit    AuditRecorder
-	hasher   *password.Hasher
+	tenants      *tenantresolve.Resolver
+	auth         *authcheck.Checker
+	users        *user.Store
+	policies     *password.PolicyStore
+	sessions     *sessionrevoke.Revoker
+	sessionStore *session.Store
+	issuer       *authtoken.Issuer
+	mailer       Mailer
+	audit        AuditRecorder
+	hasher       *password.Hasher
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, policies *password.PolicyStore, sessions *sessionrevoke.Revoker, mailer Mailer, audit AuditRecorder, hasher *password.Hasher) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, policies: policies, sessions: sessions, mailer: mailer, audit: audit, hasher: hasher}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, policies *password.PolicyStore, sessions *sessionrevoke.Revoker, sessionStore *session.Store, issuer *authtoken.Issuer, mailer Mailer, audit AuditRecorder, hasher *password.Hasher) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, policies: policies, sessions: sessions, sessionStore: sessionStore, issuer: issuer, mailer: mailer, audit: audit, hasher: hasher}
 }
 
 type changeRequest struct {
@@ -96,7 +103,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
-	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	authCtx, err := h.auth.AuthenticateAllowingPasswordChange(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	// An API key has no session to keep and no user password to confirm.
 	if err != nil || !authCtx.IsAuthenticated || authCtx.AuthMethod != "jwt" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
@@ -122,8 +129,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeInvalidPassword(w, r)
 		return
 	}
-	// Looked up before taking a slot, so the slot covers only hashing.
-	policy, policyVersion, err := h.policies.Effective(ctx, tenantCtx.TenantID)
+	// Looked up before taking a slot, so the slot covers only hashing. The
+	// password serves every tenant the account belongs to, so it's checked
+	// against their combined minimum, not just this tenant's.
+	minLength, err := h.policies.CombinedMinLength(ctx, u.ID, "")
 	if err != nil {
 		writeInternal(w, r)
 		return
@@ -144,8 +153,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := policy.Validate(req.NewPassword, u.Email); err != nil {
-		password.WriteTooWeak(r.Context(), w, err, policy)
+	if err := password.WithMinLength(minLength).Validate(req.NewPassword, u.Email); err != nil {
+		password.WriteTooWeak(r.Context(), w, err, minLength)
 		return
 	}
 
@@ -163,7 +172,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r)
 		return
 	}
-	if err := h.users.SetPassword(ctx, u.ID, hash, tenantCtx.TenantID, policyVersion); err != nil {
+	if err := h.users.SetPassword(ctx, u.ID, hash); err != nil {
 		writeInternal(w, r)
 		return
 	}
@@ -183,8 +192,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	h.notify(ctx, u.Email)
 
+	if authCtx.PasswordChangeRequired && h.liftRestriction(w, r, authCtx) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]any{"status": "ok"})
+}
+
+// liftRestriction clears the session's password_change_required and
+// answers with an access token reissued without the pcr claim, reporting
+// whether it wrote the response. The password has already changed, so a
+// failure is only logged and the caller answers a plain 200.
+func (h *Handler) liftRestriction(w http.ResponseWriter, r *http.Request, authCtx *authcheck.AuthContext) bool {
+	state, err := h.sessionStore.ClearPasswordChangeRequired(r.Context(), authCtx.SessionID)
+	if err != nil {
+		log.Error().Err(err).Str("session_id", authCtx.SessionID).Msg("authmepassword: clearing password_change_required failed")
+		return false
+	}
+	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, mfaMethod(authCtx.AMR), authCtx.MFAVerifiedAt, false, state.ExpiresAt)
+	if err != nil {
+		log.Error().Err(err).Str("session_id", authCtx.SessionID).Msg("authmepassword: reissuing the access token failed")
+		return false
+	}
+	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, state.Persistent, map[string]any{"status": "ok"})
+	return true
+}
+
+// mfaMethod is the MFA factor amr records after "pwd", or "".
+func mfaMethod(amr []string) string {
+	for _, m := range amr {
+		if m != "pwd" {
+			return m
+		}
+	}
+	return ""
 }
 
 func writeInvalidPassword(w http.ResponseWriter, r *http.Request) {

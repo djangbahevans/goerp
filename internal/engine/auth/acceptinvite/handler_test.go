@@ -114,6 +114,9 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("LoadOrGenerate() error: %v", err)
 	}
 	roleStore := role.NewStore(conn)
+	if err := roleStore.BootstrapMembershipIndex(ctx); err != nil {
+		t.Fatalf("BootstrapMembershipIndex() error: %v", err)
+	}
 
 	slug := fmt.Sprintf("acceptinvitetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Accept Invite Test Co")
@@ -141,7 +144,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 
 	issuer := authtoken.NewIssuer(&keySet.Active, tenantStore, roleStore, sessionStore)
-	handlers := NewHandlers(tenantStore, invites, userStore, password.NewPolicyStore(configStore), password.NewHasher(256, time.Second), issuer)
+	handlers := NewHandlers(tenantStore, invites, userStore, password.NewPolicyStore(configStore, role.NewStore(conn)), password.NewHasher(256, time.Second), issuer)
 
 	return &fixture{
 		handlers:   handlers,
@@ -335,9 +338,6 @@ func TestAccept_NewInviteeSetsPasswordGrantsMembershipAndSignsIn(t *testing.T) {
 	if ok, err := argon2id.ComparePasswordAndHash(newPassword, *u.PasswordHash); err != nil || !ok {
 		t.Errorf("stored hash doesn't match the chosen password (err %v)", err)
 	}
-	if u.PasswordSetAtPolicyTenantID == nil || *u.PasswordSetAtPolicyTenantID != f.tenantID || u.PasswordSetAtPolicyVersion != 1 {
-		t.Errorf("policy tenant/version = %v/%d, want %s/1", u.PasswordSetAtPolicyTenantID, u.PasswordSetAtPolicyVersion, f.tenantID)
-	}
 	if !f.isMember(t, userID) {
 		t.Error("invitee isn't a member after accepting")
 	}
@@ -442,21 +442,21 @@ func minLengthDetail(t *testing.T, rec *httptest.ResponseRecorder) any {
 
 func TestInfoAndAccept_UseTheTenantsMinimumLength(t *testing.T) {
 	f := newFixture(t)
-	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "30"); err != nil {
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "20"); err != nil {
 		t.Fatalf("Set() policy error: %v", err)
 	}
 	_, token := f.invite(t, f.newEmail())
 
 	info := f.doInfo(t, f.tenantSlug, token)
-	if got := decodeBody(t, info)["password_min_length"]; got != float64(30) {
-		t.Errorf("info password_min_length = %v, want the tenant's 30", got)
+	if got := decodeBody(t, info)["password_min_length"]; got != float64(20) {
+		t.Errorf("info password_min_length = %v, want the tenant's 20", got)
 	}
 
-	rec := f.doAccept(t, token, newPassword)
+	rec := f.doAccept(t, token, "sixteen chars ok")
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, body = %s, want 422 for a password under the tenant's minimum", rec.Code, rec.Body.String())
 	}
-	if got := minLengthDetail(t, rec); got != float64(30) {
-		t.Errorf("details.min_length = %v, want 30", got)
+	if got := minLengthDetail(t, rec); got != float64(20) {
+		t.Errorf("details.min_length = %v, want 20", got)
 	}
 }

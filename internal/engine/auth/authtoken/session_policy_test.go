@@ -143,7 +143,7 @@ func TestReissueAccessToken_CappedAtTheSessionEnd(t *testing.T) {
 	now := time.Now()
 	f.issuer.now = func() time.Time { return now }
 
-	_, expiresIn, err := f.issuer.ReissueAccessToken("session", "tenant", f.userID, nil, "totp", &now, now.Add(5*time.Minute))
+	_, expiresIn, err := f.issuer.ReissueAccessToken("session", "tenant", f.userID, nil, "totp", &now, false, now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatalf("ReissueAccessToken() error: %v", err)
 	}

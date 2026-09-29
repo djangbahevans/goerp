@@ -188,51 +188,57 @@ func TestSet_UnknownTenantFails(t *testing.T) {
 	}
 }
 
-func (e *testEnv) version(t *testing.T, tenantID string) string {
+func (e *testEnv) changedAt(t *testing.T, tenantID string) string {
 	t.Helper()
-	v, _, err := e.store.Get(t.Context(), tenantID, PasswordPolicyVersionKey)
+	v, _, err := e.store.Get(t.Context(), tenantID, PasswordPolicyChangedAtKey)
 	if err != nil {
-		t.Fatalf("Get(version) error: %v", err)
+		t.Fatalf("Get(changed_at) error: %v", err)
 	}
 	return v
 }
 
-func TestSet_PasswordPolicyChangeBumpsVersionOnlyOnRealChange(t *testing.T) {
+func TestSet_PasswordPolicyChangeStampsChangedAtOnlyOnRealChange(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 	ctx := t.Context()
-	key := PasswordPolicyPrefix + "min_length"
 
-	if v := env.version(t, tt.ID); v != "" {
-		t.Fatalf("version before any change = %q, want unset", v)
+	if v := env.changedAt(t, tt.ID); v != "" {
+		t.Fatalf("changed_at before any change = %q, want unset", v)
 	}
-	if err := env.store.Set(ctx, tt.ID, key, "14"); err != nil {
+	if err := env.store.Set(ctx, tt.ID, PasswordPolicyMinLengthKey, "14"); err != nil {
 		t.Fatalf("Set() error: %v", err)
 	}
-	if v := env.version(t, tt.ID); v != "1" {
-		t.Errorf("version after first change = %q, want 1", v)
+	first := env.changedAt(t, tt.ID)
+	if _, err := time.Parse(time.RFC3339Nano, first); err != nil {
+		t.Fatalf("changed_at after first change = %q, want an RFC 3339 time: %v", first, err)
 	}
-	if err := env.store.Set(ctx, tt.ID, key, "14"); err != nil {
+	if err := env.store.Set(ctx, tt.ID, PasswordPolicyMinLengthKey, "14"); err != nil {
 		t.Fatalf("Set() same value error: %v", err)
 	}
-	if v := env.version(t, tt.ID); v != "1" {
-		t.Errorf("version after rewriting the same value = %q, want 1", v)
+	if v := env.changedAt(t, tt.ID); v != first {
+		t.Errorf("changed_at after rewriting the same value = %q, want %q", v, first)
 	}
-	if err := env.store.Set(ctx, tt.ID, PasswordPolicyPrefix+"require_digit", "true"); err != nil {
-		t.Fatalf("Set() second field error: %v", err)
+	if err := env.store.Set(ctx, tt.ID, PasswordPolicyGraceDaysKey, "30"); err != nil {
+		t.Fatalf("Set() grace_days error: %v", err)
 	}
-	if v := env.version(t, tt.ID); v != "2" {
-		t.Errorf("version after a second field change = %q, want 2", v)
+	if v := env.changedAt(t, tt.ID); v != first {
+		t.Errorf("changed_at after a grace_days change = %q, want %q", v, first)
 	}
 	if err := env.store.Set(ctx, tt.ID, "engine.mfa_mode", "required"); err != nil {
 		t.Fatalf("Set() unrelated key error: %v", err)
 	}
-	if v := env.version(t, tt.ID); v != "2" {
-		t.Errorf("version after an unrelated key = %q, want 2", v)
+	if v := env.changedAt(t, tt.ID); v != first {
+		t.Errorf("changed_at after an unrelated key = %q, want %q", v, first)
+	}
+	if err := env.store.Set(ctx, tt.ID, PasswordPolicyEnforcementKey, "require"); err != nil {
+		t.Fatalf("Set() enforcement error: %v", err)
+	}
+	if v := env.changedAt(t, tt.ID); v <= first {
+		t.Errorf("changed_at after an enforcement change = %q, want later than %q", v, first)
 	}
 }
 
-func TestSet_ConcurrentPolicyChangesEachBump(t *testing.T) {
+func TestSet_ConcurrentPolicyChangesAllLand(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
@@ -241,7 +247,11 @@ func TestSet_ConcurrentPolicyChangesEachBump(t *testing.T) {
 	errs := make(chan error, n)
 	for i := range n {
 		wg.Go(func() {
-			errs <- env.store.Set(t.Context(), tt.ID, fmt.Sprintf("%sfield_%d", PasswordPolicyPrefix, i), "true")
+			key := PasswordPolicyMinLengthKey
+			if i%2 == 1 {
+				key = PasswordPolicyEnforcementKey
+			}
+			errs <- env.store.Set(t.Context(), tt.ID, key, fmt.Sprint(i))
 		})
 	}
 	wg.Wait()
@@ -251,17 +261,17 @@ func TestSet_ConcurrentPolicyChangesEachBump(t *testing.T) {
 			t.Fatalf("Set() error: %v", err)
 		}
 	}
-	if v := env.version(t, tt.ID); v != fmt.Sprint(n) {
-		t.Errorf("version = %q, want %d", v, n)
+	if v := env.changedAt(t, tt.ID); v == "" {
+		t.Error("changed_at unset after concurrent changes")
 	}
 }
 
-func TestSet_VersionCounterIsReadOnly(t *testing.T) {
+func TestSet_ChangedAtIsReadOnly(t *testing.T) {
 	env := openTestEnv(t)
 	tt := env.createTenant(t)
 
-	if err := env.store.Set(t.Context(), tt.ID, PasswordPolicyVersionKey, "99"); !errors.Is(err, ErrReadOnlyKey) {
-		t.Errorf("Set(version) error = %v, want ErrReadOnlyKey", err)
+	if err := env.store.Set(t.Context(), tt.ID, PasswordPolicyChangedAtKey, "2020-01-01T00:00:00Z"); !errors.Is(err, ErrReadOnlyKey) {
+		t.Errorf("Set(changed_at) error = %v, want ErrReadOnlyKey", err)
 	}
 }
 
@@ -271,21 +281,20 @@ func TestGetPrefix_ReturnsOnlyMatchingKeys(t *testing.T) {
 	ctx := t.Context()
 
 	for k, v := range map[string]string{
-		PasswordPolicyPrefix + "min_length": "14",
-		"engine.mfa_mode":                   "required",
+		PasswordPolicyMinLengthKey: "14",
+		"engine.mfa_mode":          "required",
 	} {
 		if err := env.store.Set(ctx, tt.ID, k, v); err != nil {
 			t.Fatalf("Set(%q) error: %v", k, err)
 		}
 	}
 
-	got, err := env.store.GetPrefix(ctx, tt.ID, "auth.password_policy")
+	got, err := env.store.GetPrefix(ctx, tt.ID, PasswordPolicyPrefix)
 	if err != nil {
 		t.Fatalf("GetPrefix() error: %v", err)
 	}
-	want := map[string]string{PasswordPolicyPrefix + "min_length": "14", PasswordPolicyVersionKey: "1"}
-	if len(got) != len(want) || got[PasswordPolicyPrefix+"min_length"] != "14" || got[PasswordPolicyVersionKey] != "1" {
-		t.Errorf("GetPrefix() = %v, want %v", got, want)
+	if len(got) != 2 || got[PasswordPolicyMinLengthKey] != "14" || got[PasswordPolicyChangedAtKey] == "" {
+		t.Errorf("GetPrefix() = %v, want min_length 14 and changed_at", got)
 	}
 }
 

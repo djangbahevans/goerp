@@ -28,7 +28,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
@@ -102,36 +101,30 @@ func (s *Store) Get(ctx context.Context, tenantID, key string) (value string, ok
 	return value, true, nil
 }
 
-// Password policy keys (auth-internals.md §3 "Password policy
-// versioning"): every PasswordPolicyPrefix field lives under it, and any
-// write that changes one bumps PasswordPolicyVersionKey in the same
-// transaction, so the version can't drift from the fields it versions.
+// Password policy keys (auth-internals.md §3 "Password policy at
+// sign-in"): a write that changes a key in changeTracked stamps its
+// timestamp key with the time of the change in the same transaction, so
+// the timestamp can't drift from the values it dates.
 const (
-	PasswordPolicyPrefix     = "auth.password_policy."
-	PasswordPolicyVersionKey = "auth.password_policy_version"
+	PasswordPolicyPrefix         = "auth.password_policy."
+	PasswordPolicyMinLengthKey   = PasswordPolicyPrefix + "min_length"
+	PasswordPolicyEnforcementKey = PasswordPolicyPrefix + "enforcement"
+	PasswordPolicyGraceDaysKey   = PasswordPolicyPrefix + "grace_days"
+	PasswordPolicyChangedAtKey   = PasswordPolicyPrefix + "changed_at"
 )
 
-// versionedPrefixes maps a key prefix to the counter a change under it
-// increments.
-var versionedPrefixes = map[string]string{
-	PasswordPolicyPrefix: PasswordPolicyVersionKey,
+// changeTracked maps a key to the timestamp key a change to it stamps.
+var changeTracked = map[string]string{
+	PasswordPolicyMinLengthKey:   PasswordPolicyChangedAtKey,
+	PasswordPolicyEnforcementKey: PasswordPolicyChangedAtKey,
 }
 
-// ErrReadOnlyKey rejects a direct write to a version counter.
+// ErrReadOnlyKey rejects a direct write to a key the engine maintains.
 var ErrReadOnlyKey = errors.New("config key is maintained by the engine and cannot be set directly")
 
-func versionCounterFor(key string) (string, bool) {
-	for prefix, counter := range versionedPrefixes {
-		if strings.HasPrefix(key, prefix) {
-			return counter, true
-		}
-	}
-	return "", false
-}
-
-func isVersionCounter(key string) bool {
-	for _, counter := range versionedPrefixes {
-		if key == counter {
+func isReadOnly(key string) bool {
+	for _, stamp := range changeTracked {
+		if key == stamp {
 			return true
 		}
 	}
@@ -167,22 +160,22 @@ func (s *Store) GetPrefix(ctx context.Context, tenantID, prefix string) (map[str
 // so every engine instance's Resolver cache drops its now-stale entry —
 // Postgres defers a transactional NOTIFY's delivery until COMMIT (and
 // drops it on rollback), so a failed upsert never broadcasts a change
-// that didn't actually happen. A key under a versioned prefix bumps its
-// counter only when the value actually changes.
+// that didn't actually happen. A change-tracked key stamps its
+// timestamp only when the value actually changes.
 func (s *Store) Set(ctx context.Context, tenantID, key, value string) error {
 	return s.SetMany(ctx, tenantID, map[string]string{key: value})
 }
 
 // SetMany is Set for several keys in one transaction: every value lands,
-// or none does, and a versioned prefix's counter bumps at most once
-// however many of its keys change.
+// or none does, and a timestamp is stamped at most once however many of
+// its keys change.
 func (s *Store) SetMany(ctx context.Context, tenantID string, values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
 	keys := make([]string, 0, len(values))
 	for key := range values {
-		if isVersionCounter(key) {
+		if isReadOnly(key) {
 			return ErrReadOnlyKey
 		}
 		keys = append(keys, key)
@@ -197,28 +190,28 @@ func (s *Store) SetMany(ctx context.Context, tenantID string, values map[string]
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	bump := map[string]bool{}
+	stamp := map[string]bool{}
 	for _, key := range keys {
-		counter, versioned := versionCounterFor(key)
-		if !versioned {
+		stampKey, tracked := changeTracked[key]
+		if !tracked {
 			continue
 		}
-		if _, locked := bump[counter]; !locked {
-			// Serializes writers of this tenant's versioned keys, so the
+		if _, locked := stamp[stampKey]; !locked {
+			// Serializes writers of this tenant's tracked keys, so the
 			// read below sees the committed value and every real change
-			// bumps.
-			lockKey := db.AdvisoryLockKey("tenantconfig.version:" + tenantID + ":" + counter)
+			// stamps.
+			lockKey := db.AdvisoryLockKey("tenantconfig.stamp:" + tenantID + ":" + stampKey)
 			if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
-				return fmt.Errorf("lock tenant config version %s: %w", counter, err)
+				return fmt.Errorf("lock tenant config %s: %w", stampKey, err)
 			}
-			bump[counter] = false
+			stamp[stampKey] = false
 		}
 		previous, ok, err := getTx(ctx, tx, tenantID, key)
 		if err != nil {
 			return err
 		}
 		if !ok || previous != values[key] {
-			bump[counter] = true
+			stamp[stampKey] = true
 		}
 	}
 
@@ -233,19 +226,20 @@ func (s *Store) SetMany(ctx context.Context, tenantID string, values map[string]
 		}
 	}
 
-	for counter, changedUnder := range bump {
+	for stampKey, changedUnder := range stamp {
 		if !changedUnder {
 			continue
 		}
+		// The database clock, like tenant_members.joined_at, which the
+		// password policy deadline compares this against.
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO system.tenant_config_overrides (tenant_id, key, value)
-			VALUES ($1, $2, '1')
-			ON CONFLICT (tenant_id, key) DO UPDATE
-			SET value = (system.tenant_config_overrides.value::bigint + 1)::text, updated_at = NOW()
-		`, tenantID, counter); err != nil {
-			return fmt.Errorf("bump tenant config version %s: %w", counter, err)
+			VALUES ($1, $2, to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+			ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+		`, tenantID, stampKey); err != nil {
+			return fmt.Errorf("stamp tenant config %s: %w", stampKey, err)
 		}
-		changed = append(changed, counter)
+		changed = append(changed, stampKey)
 	}
 
 	for _, k := range changed {

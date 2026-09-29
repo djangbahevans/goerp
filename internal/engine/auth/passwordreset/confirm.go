@@ -75,19 +75,16 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "password reset failed")
 		return
 	}
-	// Only a tenant the user belongs to can apply its policy. Any other
-	// confirm records the global policy, so a stricter tenant still nudges.
-	policy, policyTenantID, policyVersion := password.Global, "", int64(0)
-	if member {
-		policyTenantID = t.ID
-		if policy, policyVersion, err = h.policies.Effective(ctx, t.ID); err != nil {
-			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "password reset failed")
-			return
-		}
+	// The password serves every tenant the account belongs to, so it's
+	// checked against their combined minimum whichever tenant the link
+	// named, if any.
+	minLength, err := h.policies.CombinedMinLength(ctx, u.ID, "")
+	if err != nil {
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "password reset failed")
+		return
 	}
-
-	if err := policy.Validate(req.NewPassword, u.Email); err != nil {
-		password.WriteTooWeak(r.Context(), w, err, policy)
+	if err := password.WithMinLength(minLength).Validate(req.NewPassword, u.Email); err != nil {
+		password.WriteTooWeak(r.Context(), w, err, minLength)
 		return
 	}
 
@@ -113,7 +110,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// The token can be consumed by a concurrent confirm between the
 	// lookup above and here; the conditional update is the real check.
-	if _, err := h.users.ConsumePasswordResetToken(ctx, tokenHash, hash, policyTenantID, policyVersion); err != nil {
+	if _, err := h.users.ConsumePasswordResetToken(ctx, tokenHash, hash); err != nil {
 		if errors.Is(err, user.ErrResetTokenInvalid) {
 			writeInvalidToken(w, r)
 			return
@@ -175,7 +172,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, false)
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, password.Result{})
 }
 
 // resolveTenant returns the named tenant (nil if it doesn't exist) and

@@ -95,7 +95,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
-	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	authCtx, err := h.auth.AuthenticateAllowingPasswordChange(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
@@ -142,12 +142,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// fresh access token carrying the updated amr/mfa_verified_at claims
 	// — same session, refresh token unchanged.
 	now := time.Now()
-	persistent, sessionEnd, err := h.sessions.UpdateMFAAssurance(ctx, authCtx.SessionID, req.Type, now, credentialID)
+	state, err := h.sessions.UpdateMFAAssurance(ctx, authCtx.SessionID, req.Type, now, credentialID)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
-	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, req.Type, &now, sessionEnd)
+	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, req.Type, &now, state.PasswordChangeRequired, state.ExpiresAt)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
@@ -158,5 +158,5 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, persistent, nil)
+	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, state.Persistent, nil)
 }

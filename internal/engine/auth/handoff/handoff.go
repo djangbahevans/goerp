@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
@@ -33,10 +34,13 @@ var ErrInvalidCode = errors.New("handoff: invalid code")
 // Grant is what a code stands for: a password verified moments ago for
 // one user signing in to one tenant.
 type Grant struct {
-	UserID                    string `json:"user_id"`
-	TenantID                  string `json:"tenant_id"`
-	Remember                  bool   `json:"remember"`
-	PasswordUpdateRecommended bool   `json:"password_update_recommended"`
+	UserID   string `json:"user_id"`
+	TenantID string `json:"tenant_id"`
+	Remember bool   `json:"remember"`
+	// PasswordPolicyResult is login step 8a's result, applied when the
+	// session is issued (auth-internals.md §3 "Password policy at
+	// sign-in").
+	PasswordPolicyResult password.Result `json:"password_policy_result,omitzero"`
 }
 
 // Response is the handoff body a sign-in on another host answers with.

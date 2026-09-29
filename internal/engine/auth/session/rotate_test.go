@@ -412,3 +412,47 @@ func TestRotate_FamilyStartIsTheLoginAcrossRotations(t *testing.T) {
 		t.Errorf("familyStart = %v, want the login row's created_at %v", gotStart, created)
 	}
 }
+
+func TestClearPasswordChangeRequired_ClearsTheWholeFamily(t *testing.T) {
+	f := newRotateFixture(t)
+	ctx := context.Background()
+	if _, err := f.conn.Exec(`UPDATE system.sessions SET password_change_required = TRUE WHERE id = $1`, f.firstID); err != nil {
+		t.Fatalf("restrict fixture session: %v", err)
+	}
+
+	newID := uuid.New().String()
+	rotated, err := f.store.Rotate(ctx, f.refreshHash, newID, "hash-"+uuid.New().String(), f.deviceID, time.Now(), thirtyDays, "", "", "")
+	if err != nil {
+		t.Fatalf("Rotate() error: %v", err)
+	}
+	if !rotated.PasswordChangeRequired {
+		t.Fatal("Rotate() PasswordChangeRequired = false, want it carried forward")
+	}
+	state, err := f.store.UpdateMFAAssurance(ctx, newID, "totp", time.Now(), uuid.New().String())
+	if err != nil {
+		t.Fatalf("UpdateMFAAssurance() error: %v", err)
+	}
+	if !state.PasswordChangeRequired {
+		t.Error("UpdateMFAAssurance() PasswordChangeRequired = false before the clear, want true")
+	}
+
+	// Cleared through the older row, as an access token minted before the
+	// rotation would.
+	if _, err := f.store.ClearPasswordChangeRequired(ctx, f.firstID); err != nil {
+		t.Fatalf("ClearPasswordChangeRequired() error: %v", err)
+	}
+	var restricted int
+	if err := f.conn.QueryRow(`SELECT count(*) FROM system.sessions WHERE family_id = $1 AND password_change_required`, f.familyID).Scan(&restricted); err != nil {
+		t.Fatalf("count restricted rows: %v", err)
+	}
+	if restricted != 0 {
+		t.Errorf("%d rows still restricted, want 0", restricted)
+	}
+	state, err = f.store.UpdateMFAAssurance(ctx, newID, "totp", time.Now(), uuid.New().String())
+	if err != nil {
+		t.Fatalf("UpdateMFAAssurance() error: %v", err)
+	}
+	if state.PasswordChangeRequired {
+		t.Error("UpdateMFAAssurance() PasswordChangeRequired = true after the clear, want false")
+	}
+}

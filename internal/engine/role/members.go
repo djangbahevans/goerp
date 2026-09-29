@@ -214,6 +214,21 @@ func (s *Store) HasMemberRow(ctx context.Context, tenantSlug, userID string) (bo
 	return ok, nil
 }
 
+// JoinedAt returns when userID's tenant_members row was created, or
+// ErrNotMember.
+func (s *Store) JoinedAt(ctx context.Context, tenantSlug, userID string) (time.Time, error) {
+	query := fmt.Sprintf(`SELECT joined_at FROM %s.tenant_members WHERE user_id = $1`, tenantschema.Name(tenantSlug))
+	var joinedAt time.Time
+	err := s.db.QueryRowContext(ctx, query, userID).Scan(&joinedAt)
+	if errors.Is(err, sql.ErrNoRows) || isUndefinedTable(err) {
+		return time.Time{}, ErrNotMember
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get member join time: %w", err)
+	}
+	return joinedAt, nil
+}
+
 // MemberProfile is the per-tenant part of a person's profile.
 type MemberProfile struct {
 	ContactID *string

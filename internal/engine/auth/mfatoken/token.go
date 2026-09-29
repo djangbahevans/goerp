@@ -6,6 +6,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -28,9 +29,9 @@ var ErrInvalidToken = errors.New("invalid or expired mfa_token")
 
 // Claims is the mfa_token's JSON shape, auth-internals.md §8's
 // {sub, tid, txn, purpose, origin, rmb, iat, exp} claim set — sub/iat/exp
-// come from jwt.RegisteredClaims. Remember and PasswordUpdateRecommended
-// carry the password step's "remember this device" choice and §3's
-// password-policy nudge through to the session /auth/mfa/verify issues.
+// come from jwt.RegisteredClaims. Remember and the pwp/pdl claims carry
+// the password step's "remember this device" choice and §3's sign-in
+// password check through to the session /auth/mfa/verify issues.
 type Claims struct {
 	jwt.RegisteredClaims
 	TenantID string `json:"tid"`
@@ -38,14 +39,27 @@ type Claims struct {
 	Purpose  string `json:"purpose"`
 	Origin   string `json:"origin"`
 	Remember bool   `json:"rmb,omitzero"`
-	// PasswordUpdateRecommended is carried under "puc".
-	PasswordUpdateRecommended bool `json:"puc,omitzero"`
+	// PasswordPolicy is login step 8a's outcome, omitted when the password
+	// passed; PasswordDeadline is its deadline as a Unix time, only with a
+	// recommended change under "require" enforcement.
+	PasswordPolicy   password.Outcome `json:"pwp,omitzero"`
+	PasswordDeadline int64            `json:"pdl,omitzero"`
+}
+
+// PasswordPolicyResult is the login step 8a result the token carries.
+func (c *Claims) PasswordPolicyResult() password.Result {
+	result := password.Result{Outcome: c.PasswordPolicy}
+	if c.PasswordDeadline != 0 {
+		deadline := time.Unix(c.PasswordDeadline, 0).UTC()
+		result.Deadline = &deadline
+	}
+	return result
 }
 
 // IssueOptions carries the password step's outcome into the token.
 type IssueOptions struct {
-	Remember                  bool
-	PasswordUpdateRecommended bool
+	Remember       bool
+	PasswordPolicy password.Result
 }
 
 // Codec issues and verifies mfa_tokens against a single HMAC-SHA256 key.
@@ -79,7 +93,10 @@ func (c *Codec) Issue(userID, tenantID, origin string, opts IssueOptions) (token
 		Origin:    origin,
 		Remember:  opts.Remember,
 
-		PasswordUpdateRecommended: opts.PasswordUpdateRecommended,
+		PasswordPolicy: opts.PasswordPolicy.Outcome,
+	}
+	if opts.PasswordPolicy.Deadline != nil {
+		claims.PasswordDeadline = opts.PasswordPolicy.Deadline.Unix()
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

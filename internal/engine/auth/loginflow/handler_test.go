@@ -205,7 +205,7 @@ func newFixture(t *testing.T) *fixture {
 
 	allowlists := ipallowlist.NewStore(configStore)
 	issuer.SetIPAllowlists(allowlists)
-	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore), password.NewHasher(1024, time.Second), cacheClient, auditStore, resolver, handoffs, tenantselect.NewStore(cacheClient), allowlists)
+	handler := NewHandler(userStore, tenantStore, roleStore, mfaStore, issuer, mfaTokens, password.NewPolicyStore(configStore, role.NewStore(conn)), password.NewHasher(1024, time.Second), cacheClient, auditStore, resolver, handoffs, tenantselect.NewStore(cacheClient), allowlists)
 
 	return &fixture{
 		handler:    handler,
@@ -697,35 +697,52 @@ func fixtureEmail(f *fixture) string {
 	return f.tenantSlug + "@example.com"
 }
 
-func TestServeHTTP_PolicyVersionBehind_RecommendsUpdateWithoutBlocking(t *testing.T) {
-	f := newFixture(t)
-	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "16"); err != nil {
-		t.Fatalf("Set() policy error: %v", err)
-	}
+// shortPassword meets the platform minimum but not a raised one of 16.
+const shortPassword = "qzvkplmwxtrb"
 
-	rec := f.doLogin(t, map[string]any{
-		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug,
-	}, map[string]string{"X-Client-Type": "cli"})
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+// useShortPassword sets the fixture user's password to shortPassword and
+// raises the tenant's minimum to 16 with the given enforcement and grace
+// period.
+func (f *fixture) useShortPassword(t *testing.T, enforcement, graceDays string) {
+	t.Helper()
+	hash, err := argon2id.CreateHash(shortPassword, password.ArgonParams)
+	if err != nil {
+		t.Fatalf("CreateHash() error: %v", err)
 	}
-	body := decodeBody(t, rec)
-	if body["password_update_recommended"] != true {
-		t.Errorf("password_update_recommended = %v, want true", body["password_update_recommended"])
+	if _, err := f.conn.Exec(`UPDATE system.users SET password_hash = $2 WHERE id = $1`, f.userID, hash); err != nil {
+		t.Fatalf("set fixture password: %v", err)
 	}
-	if body["access_token"] == nil {
-		t.Error("access_token missing — the nudge must not block login")
+	if err := f.config.SetMany(t.Context(), f.tenantID, map[string]string{
+		password.KeyMinLength: "16", password.KeyEnforcement: enforcement, password.KeyGraceDays: graceDays,
+	}); err != nil {
+		t.Fatalf("SetMany() policy error: %v", err)
 	}
 }
 
-func TestServeHTTP_PolicyVersionCurrent_NoRecommendation(t *testing.T) {
+func (f *fixture) loginShort(t *testing.T) map[string]any {
+	t.Helper()
+	rec := f.doLogin(t, map[string]any{
+		"email": fixtureEmail(f), "password": shortPassword, "tenant": f.tenantSlug,
+	}, map[string]string{"X-Client-Type": "cli"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200: the policy never refuses a login", rec.Code, rec.Body.String())
+	}
+	return decodeBody(t, rec)
+}
+
+func (f *fixture) sessionRestricted(t *testing.T) bool {
+	t.Helper()
+	var restricted bool
+	if err := f.conn.QueryRow(`SELECT password_change_required FROM system.sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, f.userID).Scan(&restricted); err != nil {
+		t.Fatalf("read session: %v", err)
+	}
+	return restricted
+}
+
+func TestServeHTTP_PasswordMeetingPolicy_NoRecommendation(t *testing.T) {
 	f := newFixture(t)
 	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "16"); err != nil {
 		t.Fatalf("Set() policy error: %v", err)
-	}
-	if _, err := f.conn.Exec(`UPDATE system.users SET password_set_at_policy_tenant_id = $2, password_set_at_policy_version = 1 WHERE id = $1`, f.userID, f.tenantID); err != nil {
-		t.Fatalf("set user policy version: %v", err)
 	}
 
 	rec := f.doLogin(t, map[string]any{
@@ -735,22 +752,90 @@ func TestServeHTTP_PolicyVersionCurrent_NoRecommendation(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
 	}
-	if _, ok := decodeBody(t, rec)["password_update_recommended"]; ok {
-		t.Error("password_update_recommended present, want it omitted when the user is current")
+	body := decodeBody(t, rec)
+	for _, key := range []string{"password_update_recommended", "password_update_deadline", "password_change_required"} {
+		if _, ok := body[key]; ok {
+			t.Errorf("%s present, want it omitted for a password meeting the policy", key)
+		}
 	}
 }
 
-func TestServeHTTP_MFAEnrolledPolicyVersionBehind_TokenCarriesRecommendation(t *testing.T) {
+func TestServeHTTP_ShortPasswordUnderNudge_RecommendsUpdate(t *testing.T) {
 	f := newFixture(t)
-	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "16"); err != nil {
-		t.Fatalf("Set() policy error: %v", err)
+	f.useShortPassword(t, "nudge", "14")
+
+	body := f.loginShort(t)
+	if body["password_update_recommended"] != true || body["password_update_deadline"] != nil {
+		t.Errorf("body = %v, want password_update_recommended without a deadline", body)
 	}
+	if body["access_token"] == nil || f.sessionRestricted(t) {
+		t.Error("want a normal session: the nudge must not block login")
+	}
+}
+
+func TestServeHTTP_ShortPasswordUnderRequire_WithinGrace_RecommendsWithDeadline(t *testing.T) {
+	f := newFixture(t)
+	// Joined before the change, so the grace period applies.
+	if _, err := f.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_members SET joined_at = NOW() - interval '1 day' WHERE user_id = $1`, tenantschema.Name(f.tenantSlug)), f.userID); err != nil {
+		t.Fatalf("backdate join: %v", err)
+	}
+	f.useShortPassword(t, "require", "14")
+
+	body := f.loginShort(t)
+	deadline, _ := body["password_update_deadline"].(string)
+	parsed, err := time.Parse(time.RFC3339, deadline)
+	if body["password_update_recommended"] != true || err != nil {
+		t.Fatalf("body = %v, want password_update_recommended with an RFC 3339 deadline", body)
+	}
+	if until := time.Until(parsed); until < 13*24*time.Hour || until > 14*24*time.Hour {
+		t.Errorf("deadline = %s, want 14 days after the policy change", deadline)
+	}
+	if f.sessionRestricted(t) {
+		t.Error("session restricted within the grace period")
+	}
+}
+
+func TestServeHTTP_ShortPasswordUnderRequire_GraceOver_RestrictsSession(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_members SET joined_at = NOW() - interval '1 day' WHERE user_id = $1`, tenantschema.Name(f.tenantSlug)), f.userID); err != nil {
+		t.Fatalf("backdate join: %v", err)
+	}
+	f.useShortPassword(t, "require", "0")
+
+	body := f.loginShort(t)
+	if body["password_change_required"] != true || body["access_token"] == nil {
+		t.Errorf("body = %v, want a session with password_change_required", body)
+	}
+	if !f.sessionRestricted(t) {
+		t.Error("session not restricted after the grace period")
+	}
+}
+
+func TestServeHTTP_ShortPasswordUnderRequire_JoinedAfterChange_RestrictsAtOnce(t *testing.T) {
+	f := newFixture(t)
+	f.useShortPassword(t, "require", "14")
+	if _, err := f.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_members SET joined_at = NOW() + interval '1 minute' WHERE user_id = $1`, tenantschema.Name(f.tenantSlug)), f.userID); err != nil {
+		t.Fatalf("move join after the change: %v", err)
+	}
+
+	body := f.loginShort(t)
+	if body["password_change_required"] != true {
+		t.Errorf("body = %v, want password_change_required for a member who joined after the change", body)
+	}
+}
+
+func TestServeHTTP_MFAEnrolled_TokenCarriesPolicyResult(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_members SET joined_at = NOW() - interval '1 day' WHERE user_id = $1`, tenantschema.Name(f.tenantSlug)), f.userID); err != nil {
+		t.Fatalf("backdate join: %v", err)
+	}
+	f.useShortPassword(t, "require", "14")
 	if _, err := f.mfaStore.Insert(t.Context(), f.userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
 		t.Fatalf("Insert() mfa credential error: %v", err)
 	}
 
 	rec := f.doLogin(t, map[string]any{
-		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug,
+		"email": fixtureEmail(f), "password": shortPassword, "tenant": f.tenantSlug,
 	}, nil)
 
 	token, _ := decodeBody(t, rec)["mfa_token"].(string)
@@ -758,27 +843,9 @@ func TestServeHTTP_MFAEnrolledPolicyVersionBehind_TokenCarriesRecommendation(t *
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
-	if !claims.PasswordUpdateRecommended {
-		t.Error("mfa_token PasswordUpdateRecommended = false, want true")
-	}
-}
-
-func TestServeHTTP_PasswordValidatedInAnotherTenant_RecommendsUpdate(t *testing.T) {
-	f := newFixture(t)
-	if err := f.config.Set(t.Context(), f.tenantID, password.KeyRequireSymbol, "true"); err != nil {
-		t.Fatalf("Set() policy error: %v", err)
-	}
-	// A higher version recorded against a different tenant must not count.
-	if _, err := f.conn.Exec(`UPDATE system.users SET password_set_at_policy_tenant_id = gen_random_uuid(), password_set_at_policy_version = 5 WHERE id = $1`, f.userID); err != nil {
-		t.Fatalf("set user policy version: %v", err)
-	}
-
-	rec := f.doLogin(t, map[string]any{
-		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug,
-	}, nil)
-
-	if rec.Code != http.StatusOK || decodeBody(t, rec)["password_update_recommended"] != true {
-		t.Errorf("status = %d, body = %s, want 200 with password_update_recommended", rec.Code, rec.Body.String())
+	result := claims.PasswordPolicyResult()
+	if result.Outcome != password.UpdateRecommended || result.Deadline == nil {
+		t.Errorf("mfa_token policy result = %+v, want recommended with a deadline", result)
 	}
 }
 

@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS system.sessions (
     mfa_verified_at   TIMESTAMPTZ,
     mfa_method        TEXT,
     mfa_credential_id UUID,
-    persistent        BOOLEAN NOT NULL DEFAULT TRUE
+    persistent        BOOLEAN NOT NULL DEFAULT TRUE,
+    password_change_required BOOLEAN NOT NULL DEFAULT FALSE
 )
 `
 
@@ -127,6 +128,11 @@ type Row struct {
 	MFAMethod       string
 	MFAVerifiedAt   *time.Time
 	MFACredentialID string
+
+	// PasswordChangeRequired restricts the session until the password is
+	// changed (auth-internals.md §3 "Password policy at sign-in"); every
+	// rotation carries it forward.
+	PasswordChangeRequired bool
 }
 
 // Insert creates a new session row. UserAgent, IPAddress, CountryCode, and
@@ -135,9 +141,9 @@ type Row struct {
 func (s *Store) Insert(ctx context.Context, row Row) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO system.sessions
-			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at, mfa_verified_at, mfa_method, mfa_credential_id, persistent)
-		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, '')::uuid, $13)
-	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt, row.MFAVerifiedAt, row.MFAMethod, row.MFACredentialID, row.Persistent)
+			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at, mfa_verified_at, mfa_method, mfa_credential_id, persistent, password_change_required)
+		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, '')::uuid, $13, $14)
+	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt, row.MFAVerifiedAt, row.MFAMethod, row.MFACredentialID, row.Persistent, row.PasswordChangeRequired)
 	if err != nil {
 		return fmt.Errorf("insert session row: %w", err)
 	}
@@ -165,36 +171,85 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 	return nil
 }
 
+// ClearPasswordChangeRequired lifts the restriction from id's session
+// family (auth-internals.md §3 "Password change" step 5) and returns id's
+// ReissueState, or ErrSessionNotFound. Locking every live row of the family first waits out
+// a Rotate in flight on any of them, and the UPDATE, a later statement,
+// then also sees the row that Rotate inserted.
+func (s *Store) ClearPasswordChangeRequired(ctx context.Context, id string) (ReissueState, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ReissueState{}, fmt.Errorf("begin clear password_change_required: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var familyID string
+	var state ReissueState
+	err = tx.QueryRowContext(ctx, `
+		SELECT family_id, persistent, expires_at FROM system.sessions
+		WHERE id = $1 AND revoked_at IS NULL
+	`, id).Scan(&familyID, &state.Persistent, &state.ExpiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ReissueState{}, ErrSessionNotFound
+	}
+	if err != nil {
+		return ReissueState{}, fmt.Errorf("look up session: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		SELECT 1 FROM system.sessions WHERE family_id = $1 AND revoked_at IS NULL FOR UPDATE
+	`, familyID); err != nil {
+		return ReissueState{}, fmt.Errorf("lock session family: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE system.sessions SET password_change_required = FALSE
+		WHERE family_id = $1 AND revoked_at IS NULL
+	`, familyID); err != nil {
+		return ReissueState{}, fmt.Errorf("clear session password_change_required: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return ReissueState{}, fmt.Errorf("commit clear password_change_required: %w", err)
+	}
+	return state, nil
+}
+
+// ReissueState is what an access token reissued for an existing session
+// takes from its row.
+type ReissueState struct {
+	Persistent             bool
+	ExpiresAt              time.Time
+	PasswordChangeRequired bool
+}
+
 // UpdateMFAAssurance sets id's mfa_verified_at/mfa_method/mfa_credential_id
 // columns — auth-internals.md §8 "Step-up re-verification" step 2,
 // refreshing a session's MFA assurance in place without creating a new
-// session row — and returns the row's persistent flag and expires_at,
-// which the caller needs to scope and cap the reissued access token. Returns
+// session row — and returns the row's ReissueState. Returns
 // ErrSessionNotFound if id doesn't match any non-revoked row.
-func (s *Store) UpdateMFAAssurance(ctx context.Context, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, expiresAt time.Time, err error) {
+func (s *Store) UpdateMFAAssurance(ctx context.Context, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (ReissueState, error) {
 	return updateMFAAssurance(ctx, s.db, id, mfaMethod, mfaVerifiedAt, mfaCredentialID)
 }
 
 // UpdateMFAAssuranceTx is UpdateMFAAssurance inside the caller's
 // transaction.
-func (s *Store) UpdateMFAAssuranceTx(ctx context.Context, tx *sql.Tx, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, expiresAt time.Time, err error) {
+func (s *Store) UpdateMFAAssuranceTx(ctx context.Context, tx *sql.Tx, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (ReissueState, error) {
 	return updateMFAAssurance(ctx, tx, id, mfaMethod, mfaVerifiedAt, mfaCredentialID)
 }
 
-func updateMFAAssurance(ctx context.Context, q db.Execer, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (persistent bool, expiresAt time.Time, err error) {
-	err = q.QueryRowContext(ctx, `
+func updateMFAAssurance(ctx context.Context, q db.Execer, id, mfaMethod string, mfaVerifiedAt time.Time, mfaCredentialID string) (ReissueState, error) {
+	var state ReissueState
+	err := q.QueryRowContext(ctx, `
 		UPDATE system.sessions
 		SET mfa_verified_at = $2, mfa_method = $3, mfa_credential_id = NULLIF($4, '')::uuid
 		WHERE id = $1 AND revoked_at IS NULL
-		RETURNING persistent, expires_at
-	`, id, mfaVerifiedAt, mfaMethod, mfaCredentialID).Scan(&persistent, &expiresAt)
+		RETURNING persistent, expires_at, password_change_required
+	`, id, mfaVerifiedAt, mfaMethod, mfaCredentialID).Scan(&state.Persistent, &state.ExpiresAt, &state.PasswordChangeRequired)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, time.Time{}, ErrSessionNotFound
+		return ReissueState{}, ErrSessionNotFound
 	}
 	if err != nil {
-		return false, time.Time{}, fmt.Errorf("update session mfa assurance: %w", err)
+		return ReissueState{}, fmt.Errorf("update session mfa assurance: %w", err)
 	}
-	return persistent, expiresAt, nil
+	return state, nil
 }
 
 // NonRevokedIDsForUser returns the ids of every session row for userID

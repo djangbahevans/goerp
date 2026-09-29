@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 )
 
@@ -32,6 +33,10 @@ type Grant struct {
 	UserID   string `json:"user_id"`
 	Remember bool   `json:"remember"`
 	DeviceID string `json:"device_id,omitempty"`
+	// PasswordPolicyResults is login step 8a's result for each tenant the
+	// user may pick, by tenant ID (auth-internals.md §3 "Password policy
+	// at sign-in").
+	PasswordPolicyResults map[string]password.Result `json:"password_policy_results,omitempty"`
 }
 
 type Store struct {

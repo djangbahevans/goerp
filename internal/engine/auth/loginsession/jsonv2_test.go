@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 )
 
 // encoding/json/v2's MarshalWrite doesn't escape HTML/JS-unsafe characters
@@ -18,7 +19,7 @@ func TestWriteResponse_NonBrowser_EscapesHTMLUnsafeCharacters(t *testing.T) {
 	req.Header.Set("X-Client-Type", "cli")
 
 	tokens := &authtoken.Tokens{AccessToken: "<script>&</script>", RefreshToken: "r", ExpiresIn: 900}
-	WriteResponse(w, tokens, "device-1", true, IsNonBrowser(req), false)
+	WriteResponse(w, tokens, "device-1", true, IsNonBrowser(req), password.Result{})
 
 	body := w.Body.String()
 	wantEscaped := "\\u003cscript\\u003e\\u0026\\u003c/script\\u003e"

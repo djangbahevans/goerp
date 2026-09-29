@@ -585,6 +585,7 @@ func TestAuthenticateErrorResponse(t *testing.T) {
 	}{
 		{authcheck.ErrPermissionDenied, http.StatusForbidden, "permission_denied"},
 		{fmt.Errorf("authenticate: %w", authcheck.ErrNotTenantMember), http.StatusForbidden, "tenant_membership_required"},
+		{authcheck.ErrPasswordChangeRequired, http.StatusForbidden, "password_change_required"},
 		{authcheck.ErrUserNotActive, http.StatusUnauthorized, "unauthenticated"},
 		{errors.New("token expired"), http.StatusUnauthorized, "unauthenticated"},
 	}

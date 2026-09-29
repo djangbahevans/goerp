@@ -183,6 +183,57 @@ func TestServeSelectTenant_SeveralTenantsPickOneOnce(t *testing.T) {
 	}
 }
 
+func TestServeSelectTenant_AppliesThePickedTenantsPasswordPolicyResult(t *testing.T) {
+	f := newFixture(t)
+	f.activateTenant(t, f.tenantSlug)
+	second := f.addMembership(t, "Second Co")
+	// The fixture tenant asks for 16 characters; the second keeps the
+	// platform minimum.
+	f.useShortPassword(t, "nudge", "14")
+
+	for _, tc := range []struct {
+		slug, host  string
+		recommended bool
+	}{
+		{second, second + "." + testPlatformDomain, false},
+		{f.tenantSlug, f.host, true},
+	} {
+		rec := f.doLogin(t, map[string]any{"email": fixtureEmail(f), "password": shortPassword}, map[string]string{"Host": sharedHost})
+		_, token := tenantRequired(t, rec)
+		host, code := handoffFrom(t, f.selectTenant(t, sharedHost, token, tc.slug))
+		if host != tc.host {
+			t.Fatalf("handoff host = %q, want %q", host, tc.host)
+		}
+		exchanged := f.exchange(t, host, code)
+		if exchanged.Code != http.StatusOK {
+			t.Fatalf("exchange status = %d, body = %s, want 200", exchanged.Code, exchanged.Body.String())
+		}
+		if got := decodeBody(t, exchanged)["password_update_recommended"] == true; got != tc.recommended {
+			t.Errorf("tenant %s: password_update_recommended = %v, want %v", tc.slug, got, tc.recommended)
+		}
+	}
+}
+
+func TestServeSelectTenant_TenantJoinedSinceLoginIsForbidden(t *testing.T) {
+	f := newFixture(t)
+	f.activateTenant(t, f.tenantSlug)
+	f.addMembership(t, "Second Co")
+	_, token := tenantRequired(t, f.loginTenantless(t, sharedHost))
+
+	// Joined after the login, so the token holds no sign-in password check
+	// result for it.
+	third := f.addMembership(t, "Third Co")
+	rec := f.selectTenant(t, sharedHost, token, third)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s, want 403", rec.Code, rec.Body.String())
+	}
+	errBody, _ := decodeBody(t, rec)["error"].(map[string]any)
+	if errBody["code"] != "tenant_membership_required" {
+		t.Errorf("error.code = %v, want tenant_membership_required", errBody["code"])
+	}
+}
+
 func TestServeSelectTenant_MembershipRevokedSinceLoginIsForbidden(t *testing.T) {
 	f := newFixture(t)
 	f.activateTenant(t, f.tenantSlug)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -84,7 +85,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Error().Err(err).Str("user_id", u.ID).Msg("emailverify: updating login state failed")
 	}
 
-	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, false)
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, password.Result{})
 }
 
 // signInTenant returns the named tenant when the confirm may sign u

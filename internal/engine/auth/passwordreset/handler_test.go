@@ -189,6 +189,9 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("LoadOrGenerate() error: %v", err)
 	}
 	roleStore := role.NewStore(conn)
+	if err := roleStore.BootstrapMembershipIndex(ctx); err != nil {
+		t.Fatalf("BootstrapMembershipIndex() error: %v", err)
+	}
 
 	slug := fmt.Sprintf("pwresettest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Password Reset Test Co")
@@ -253,7 +256,7 @@ func newFixture(t *testing.T) *fixture {
 
 	return &fixture{
 		request:    NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, mailer, audit),
-		confirm:    NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, revoker, issuer, password.NewPolicyStore(configStore), mailer, audit, password.NewHasher(1024, time.Second)),
+		confirm:    NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, revoker, issuer, password.NewPolicyStore(configStore, role.NewStore(conn)), mailer, audit, password.NewHasher(1024, time.Second)),
 		mailer:     mailer,
 		audit:      audit,
 		issuer:     issuer,
@@ -320,24 +323,6 @@ func (f *fixture) doConfirmIn(t *testing.T, tenantSlug, token, newPw string) *ht
 	return do(t, f.confirm, "/auth/password-reset/confirm", map[string]any{
 		"token": token, "new_password": newPw, "tenant": tenantSlug,
 	}, map[string]string{"X-Client-Type": "cli"})
-}
-
-func (f *fixture) storedPolicyTenantID(t *testing.T) *string {
-	t.Helper()
-	u, err := f.users.GetByID(t.Context(), f.userID)
-	if err != nil {
-		t.Fatalf("GetByID() error: %v", err)
-	}
-	return u.PasswordSetAtPolicyTenantID
-}
-
-func (f *fixture) storedPolicyVersion(t *testing.T) int64 {
-	t.Helper()
-	u, err := f.users.GetByID(t.Context(), f.userID)
-	if err != nil {
-		t.Fatalf("GetByID() error: %v", err)
-	}
-	return u.PasswordSetAtPolicyVersion
 }
 
 // issueToken runs a real request and returns the emailed raw token.
@@ -610,50 +595,52 @@ func TestConfirm_SuspendedUser_ResetsWithoutSigningInOrChangingStatus(t *testing
 	}
 }
 
-func TestConfirm_TenantPolicyEnforcedAndVersionRecorded(t *testing.T) {
-	f := newFixture(t)
-	if err := f.config.Set(t.Context(), f.tenantID, password.KeyRequireDigit, "true"); err != nil {
-		t.Fatalf("Set() policy error: %v", err)
-	}
-	token := f.issueToken(t)
-
-	rec := f.doConfirm(t, token, newPassword)
-	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "auth.password_too_weak" {
-		t.Fatalf("status = %d, body = %s, want 422 for a password without a digit", rec.Code, rec.Body.String())
-	}
-
-	if rec := f.doConfirm(t, token, newPassword+" 7"); rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
-	}
-	if v := f.storedPolicyVersion(t); v != 1 {
-		t.Errorf("password_set_at_policy_version = %d, want 1", v)
-	}
-	if id := f.storedPolicyTenantID(t); id == nil || *id != f.tenantID {
-		t.Errorf("password_set_at_policy_tenant_id = %v, want %s", id, f.tenantID)
-	}
-}
-
-func TestConfirm_NonMemberTenant_GlobalPolicyAndVersionZero(t *testing.T) {
-	f := newFixture(t)
+// otherTenant creates another tenant whose minimum is minLength, making
+// the fixture user a member of it in the membership index when member.
+func (f *fixture) otherTenant(t *testing.T, minLength string, member bool) *tenant.Tenant {
+	t.Helper()
 	other, err := f.tenants.CreateTenant(t.Context(), fmt.Sprintf("pwresetother%d", time.Now().UnixNano()), "Other Co")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
 	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, other.ID) })
-	if err := f.config.Set(t.Context(), other.ID, password.KeyRequireDigit, "true"); err != nil {
+	if err := f.config.Set(t.Context(), other.ID, password.KeyMinLength, minLength); err != nil {
 		t.Fatalf("Set() policy error: %v", err)
 	}
+	if member {
+		if _, err := f.conn.Exec(`INSERT INTO system.tenant_memberships (user_id, tenant_id) VALUES ($1, $2)`, f.userID, other.ID); err != nil {
+			t.Fatalf("index membership: %v", err)
+		}
+	}
+	return other
+}
+
+func TestConfirm_ChecksTheCombinedMinimumOfEveryTenant(t *testing.T) {
+	f := newFixture(t)
+	f.otherTenant(t, "18", true)
 	token := f.issueToken(t)
 
-	rec := f.doConfirmIn(t, other.Slug, token, newPassword)
+	// 16 characters: enough for this tenant, too short for the other.
+	rec := f.doConfirm(t, token, "sixteen chars ok")
+	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "auth.password_too_weak" {
+		t.Fatalf("status = %d, body = %s, want 422 under the other tenant's minimum", rec.Code, rec.Body.String())
+	}
+	if got := minLengthDetail(t, rec); got != float64(18) {
+		t.Errorf("details.min_length = %v, want 18", got)
+	}
+	if rec := f.doConfirm(t, token, newPassword); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+}
+
+func TestConfirm_NonMemberTenantsMinimumDoesNotApply(t *testing.T) {
+	f := newFixture(t)
+	other := f.otherTenant(t, "20", false)
+	token := f.issueToken(t)
+
+	rec := f.doConfirmIn(t, other.Slug, token, "sixteen chars ok")
 	if rec.Code != http.StatusOK || decodeBody(t, rec)["login_required"] != true {
 		t.Fatalf("status = %d, body = %s, want 200 login_required", rec.Code, rec.Body.String())
-	}
-	if v := f.storedPolicyVersion(t); v != 0 {
-		t.Errorf("password_set_at_policy_version = %d, want 0", v)
-	}
-	if id := f.storedPolicyTenantID(t); id != nil {
-		t.Errorf("password_set_at_policy_tenant_id = %s, want NULL (global policy only)", *id)
 	}
 }
 

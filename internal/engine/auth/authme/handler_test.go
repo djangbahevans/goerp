@@ -86,6 +86,9 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("session Bootstrap() error: %v", err)
 	}
 	roleStore := role.NewStore(conn)
+	if err := roleStore.BootstrapMembershipIndex(ctx); err != nil {
+		t.Fatalf("BootstrapMembershipIndex() error: %v", err)
+	}
 	apiKeys := apikey.NewStore(conn)
 	if err := apiKeys.Bootstrap(ctx); err != nil {
 		t.Fatalf("apikey Bootstrap() error: %v", err)
@@ -126,7 +129,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	filesStore := files.NewStore(conn)
 
-	handler := NewHandler(tenantResolver, authChecker, userStore, role.NewStore(conn), filesStore, backend, tenantl10n.NewStore(configStore, testAvailableLocales), password.NewPolicyStore(configStore))
+	handler := NewHandler(tenantResolver, authChecker, userStore, role.NewStore(conn), filesStore, backend, tenantl10n.NewStore(configStore, testAvailableLocales), password.NewPolicyStore(configStore, role.NewStore(conn)))
 
 	slug := fmt.Sprintf("authmetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Test Co")
@@ -777,5 +780,42 @@ func TestServeHTTP_ReportsTheEffectivePasswordMinLength(t *testing.T) {
 	}
 	if got := me(); got != 14 {
 		t.Errorf("tenant.password_min_length = %d, want the tenant's 14", got)
+	}
+}
+
+func TestServeHTTP_ReportsPasswordChangeRequiredAndCombinedMinimum(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "14"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	other, err := f.tenantStore.CreateTenant(t.Context(), fmt.Sprintf("authmeother%d", time.Now().UnixNano()), "Other Co")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, other.ID) })
+	if err := f.config.Set(t.Context(), other.ID, password.KeyMinLength, "18"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	if _, err := f.conn.Exec(`INSERT INTO system.tenant_memberships (user_id, tenant_id) VALUES ($1, $2)`, f.userID, other.ID); err != nil {
+		t.Fatalf("index membership: %v", err)
+	}
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{UserID: f.userID, TenantSlug: f.tenantSlug, PasswordChangeRequired: true})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+
+	rec := f.doMe(t, f.domain, tokens.AccessToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200 for a restricted session", rec.Code, rec.Body.String())
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !resp.User.PasswordChangeRequired {
+		t.Error("user.password_change_required = false, want true")
+	}
+	if resp.User.PasswordMinLength != 18 || resp.Tenant.PasswordMinLength != 14 {
+		t.Errorf("user/tenant password_min_length = %d/%d, want the combined 18 and the tenant's 14", resp.User.PasswordMinLength, resp.Tenant.PasswordMinLength)
 	}
 }

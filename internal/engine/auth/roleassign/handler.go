@@ -119,6 +119,9 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (resolved, boo
 		return resolved{}, false
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	if authcheck.WritePasswordChangeRequired(r.Context(), w, err) {
+		return resolved{}, false
+	}
 	if err != nil || !authCtx.IsAuthenticated {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return resolved{}, false

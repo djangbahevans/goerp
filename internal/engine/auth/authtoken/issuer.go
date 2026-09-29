@@ -56,6 +56,9 @@ type Claims struct {
 	Scope         []string `json:"scp"`
 	AMR           []string `json:"amr"`
 	MFAVerifiedAt *int64   `json:"mfa_verified_at"`
+	// PasswordChangeRequired mirrors sessions.password_change_required
+	// (auth-internals.md §3 "Password policy at sign-in").
+	PasswordChangeRequired bool `json:"pcr,omitempty"`
 }
 
 // ErrIPNotAllowed rejects an Issue whose IPAddress the tenant's login IP
@@ -138,6 +141,11 @@ type LoginParams struct {
 	MFAMethod       string
 	MFAVerifiedAt   *time.Time
 	MFACredentialID string
+
+	// PasswordChangeRequired issues a session restricted until the
+	// password is changed (auth-internals.md §3 "Password policy at
+	// sign-in").
+	PasswordChangeRequired bool
 }
 
 // RefreshParams describes the rotating request Refresh is minting a new
@@ -218,11 +226,13 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 		MFAMethod:       p.MFAMethod,
 		MFAVerifiedAt:   p.MFAVerifiedAt,
 		MFACredentialID: p.MFACredentialID,
+
+		PasswordChangeRequired: p.PasswordChangeRequired,
 	}); err != nil {
 		return nil, fmt.Errorf("record session: %w", err)
 	}
 
-	accessToken, expiresIn, err := i.signAccessToken(sessionID, t.ID, p.UserID, roleNames, p.MFAMethod, p.MFAVerifiedAt, now, expiresAt)
+	accessToken, expiresIn, err := i.signAccessToken(sessionID, t.ID, p.UserID, roleNames, p.MFAMethod, p.MFAVerifiedAt, p.PasswordChangeRequired, now, expiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("sign access token: %w", err)
 	}
@@ -252,9 +262,10 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 // mfa_credential_id columns first (session.Store.UpdateMFAAssurance) —
 // this method only signs the token, it doesn't touch the database.
 // sessionEnd is the session row's expires_at, which the token can't
-// outlive.
-func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, sessionEnd time.Time) (accessToken string, expiresIn int, err error) {
-	accessToken, expiresIn, err = i.signAccessToken(sessionID, tenantID, userID, roleNames, mfaMethod, mfaVerifiedAt, i.now(), sessionEnd)
+// outlive. passwordChangeRequired is the session's
+// password_change_required flag, which the token mirrors.
+func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, passwordChangeRequired bool, sessionEnd time.Time) (accessToken string, expiresIn int, err error) {
+	accessToken, expiresIn, err = i.signAccessToken(sessionID, tenantID, userID, roleNames, mfaMethod, mfaVerifiedAt, passwordChangeRequired, i.now(), sessionEnd)
 	if err != nil {
 		return "", 0, fmt.Errorf("sign access token: %w", err)
 	}
@@ -268,7 +279,7 @@ func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleName
 // accessTokenTTL after now, or at sessionEnd if that's sooner (zero for
 // none), so it can't outlive its session; expiresIn is its lifetime in
 // seconds.
-func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, now, sessionEnd time.Time) (token string, expiresIn int, err error) {
+func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames []string, mfaMethod string, mfaVerifiedAt *time.Time, passwordChangeRequired bool, now, sessionEnd time.Time) (token string, expiresIn int, err error) {
 	exp := now.Add(accessTokenTTL)
 	if !sessionEnd.IsZero() && sessionEnd.Before(exp) {
 		exp = sessionEnd
@@ -296,6 +307,8 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 		Scope:         []string{"api"},
 		AMR:           amr,
 		MFAVerifiedAt: mfaVerifiedAtClaim,
+
+		PasswordChangeRequired: passwordChangeRequired,
 	}
 
 	unsigned := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -388,7 +401,7 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 		return nil, 0, fmt.Errorf("look up roles for user %s: %w", result.UserID, err)
 	}
 
-	accessToken, expiresIn, err := i.signAccessToken(newSessionID, result.TenantID, result.UserID, roleNames, result.MFAMethod, result.MFAVerifiedAt, now, result.ExpiresAt)
+	accessToken, expiresIn, err := i.signAccessToken(newSessionID, result.TenantID, result.UserID, roleNames, result.MFAMethod, result.MFAVerifiedAt, result.PasswordChangeRequired, now, result.ExpiresAt)
 	if err != nil {
 		return nil, 0, fmt.Errorf("sign access token: %w", err)
 	}

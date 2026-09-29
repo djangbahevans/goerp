@@ -21,8 +21,6 @@ CREATE TABLE IF NOT EXISTS system.users (
     password_reset_token   TEXT,
     password_reset_expiry  TIMESTAMPTZ,
     password_hash          TEXT,
-    password_set_at_policy_version BIGINT NOT NULL DEFAULT 0,
-    password_set_at_policy_tenant_id UUID,
     status                 TEXT NOT NULL DEFAULT 'active'
                                CHECK (status IN ('active','invited','suspended','pending_verification','deleted')),
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -59,52 +57,6 @@ CREATE TABLE IF NOT EXISTS system.user_profiles (
                         CHECK (date_format IN ('day_first', 'month_first', 'iso')),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
-`
-
-// migrateAvatarURLColumn renames a pre-goerp#819 deployment's
-// avatar_url TEXT (goerp#817's original column name, live on main before
-// this ticket) to avatar_file_id UUID. CREATE TABLE IF NOT EXISTS above
-// is a no-op against an already-bootstrapped table, so without this an
-// already-running environment (the shared dev Postgres included — hit
-// firsthand while building this ticket) keeps the old column forever and
-// every GetProfile/SetProfile call starts failing with "column
-// avatar_file_id does not exist". No shipped code path ever wrote a real
-// value to avatar_url, but the USING clause still guards the cast with a
-// UUID-shape check rather than casting unconditionally: an environment
-// where something wrote non-UUID data into the column out of band (a
-// manual edit, a one-off script) gets that value silently dropped to
-// NULL instead of failing the cast — and since this runs inside
-// Bootstrap's transaction, a cast failure here would otherwise fail the
-// entire engine startup, not just the profile feature.
-const migrateAvatarURLColumn = `
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'system' AND table_name = 'user_profiles' AND column_name = 'avatar_url'
-    ) THEN
-        ALTER TABLE system.user_profiles RENAME COLUMN avatar_url TO avatar_file_id;
-        ALTER TABLE system.user_profiles ALTER COLUMN avatar_file_id TYPE UUID USING (
-            CASE
-                WHEN avatar_file_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                THEN avatar_file_id::uuid
-                ELSE NULL
-            END
-        );
-    END IF;
-END $$;
-`
-
-// addContrastColumn brings a pre-existing system.user_profiles up to
-// createUserProfilesTable's contrast column (shell-visual-design.md §4
-// "High-contrast mode") — CREATE TABLE IF NOT EXISTS above is a no-op
-// against an already-bootstrapped table, same reason as
-// migrateAvatarURLColumn. Existing rows take the 'system' default, so a
-// user whose OS asks for more contrast gets it without opting in.
-const addContrastColumn = `
-ALTER TABLE system.user_profiles
-    ADD COLUMN IF NOT EXISTS contrast TEXT NOT NULL DEFAULT 'system'
-        CHECK (contrast IN ('standard', 'high', 'system'));
 `
 
 // failedLoginLockThreshold/lockDuration are the minimal single-tier
@@ -145,11 +97,6 @@ type User struct {
 	UpdatedAt        time.Time
 	LockedUntil      *time.Time
 	FailedLoginCount int
-	// PasswordSetAtPolicyTenantID/Version identify the tenant policy the
-	// password was last validated against (auth-internals.md §3 "Password
-	// policy versioning"); a nil tenant means the global policy only.
-	PasswordSetAtPolicyTenantID *string
-	PasswordSetAtPolicyVersion  int64
 }
 
 type Store struct {
@@ -178,18 +125,12 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, createUserProfilesTable); err != nil {
 			return fmt.Errorf("create user_profiles table: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, migrateAvatarURLColumn); err != nil {
-			return fmt.Errorf("migrate user_profiles avatar column: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, addContrastColumn); err != nil {
-			return fmt.Errorf("add user_profiles contrast column: %w", err)
-		}
 
 		return nil
 	})
 }
 
-const userColumns = `id, email, status, password_hash, created_at, updated_at, locked_until, failed_login_count, password_set_at_policy_tenant_id::text, password_set_at_policy_version`
+const userColumns = `id, email, status, password_hash, created_at, updated_at, locked_until, failed_login_count`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -197,7 +138,7 @@ type rowScanner interface {
 
 func scanUser(sc rowScanner) (*User, error) {
 	var u User
-	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount, &u.PasswordSetAtPolicyTenantID, &u.PasswordSetAtPolicyVersion); err != nil {
+	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -355,17 +296,14 @@ func (s *Store) GetByPasswordResetToken(ctx context.Context, tokenHash string) (
 	return u, nil
 }
 
-// ConsumePasswordResetToken sets the new password hash and the tenant
-// policy it was validated against (policyTenantID "" for the global
-// policy), clears the token, and lifts any login lockout in one
-// conditional UPDATE, so of two concurrent confirms with the same token
-// exactly one succeeds. Never touches status.
-func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwordHash, policyTenantID string, policyVersion int64) (string, error) {
+// ConsumePasswordResetToken sets the new password hash, clears the
+// token, and lifts any login lockout in one conditional UPDATE, so of two
+// concurrent confirms with the same token exactly one succeeds. Never
+// touches status.
+func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwordHash string) (string, error) {
 	row := s.db.QueryRowContext(ctx, `
 		UPDATE system.users
 		SET password_hash = $2,
-		    password_set_at_policy_tenant_id = NULLIF($3, '')::uuid,
-		    password_set_at_policy_version = $4,
 		    password_reset_token = NULL,
 		    password_reset_expiry = NULL,
 		    failed_login_count = 0,
@@ -373,7 +311,7 @@ func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwo
 		    updated_at = NOW()
 		WHERE password_reset_token = $1 AND password_reset_expiry > NOW() AND deleted_at IS NULL
 		RETURNING id
-	`, tokenHash, passwordHash, policyTenantID, policyVersion)
+	`, tokenHash, passwordHash)
 
 	var id string
 	if err := row.Scan(&id); err != nil {
@@ -386,19 +324,15 @@ func (s *Store) ConsumePasswordResetToken(ctx context.Context, tokenHash, passwo
 	return id, nil
 }
 
-// SetPassword stores a new password hash with the tenant policy it was
-// validated against (policyTenantID "" for the global policy) —
-// auth-internals.md §3 "Password change". Never touches status or the
-// login lockout.
-func (s *Store) SetPassword(ctx context.Context, id, passwordHash, policyTenantID string, policyVersion int64) error {
+// SetPassword stores a new password hash — auth-internals.md §3
+// "Password change". Never touches status or the login lockout.
+func (s *Store) SetPassword(ctx context.Context, id, passwordHash string) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE system.users
 		SET password_hash = $2,
-		    password_set_at_policy_tenant_id = NULLIF($3, '')::uuid,
-		    password_set_at_policy_version = $4,
 		    updated_at = NOW()
 		WHERE id = $1
-	`, id, passwordHash, policyTenantID, policyVersion)
+	`, id, passwordHash)
 	if err != nil {
 		return fmt.Errorf("set password: %w", err)
 	}
@@ -416,16 +350,14 @@ var ErrNotActivatable = errors.New("user is no longer an invited account without
 // inside tx — auth-internals.md §3 "Invite acceptance" step 4. Only an
 // invited user with no password yet is touched, so this can never
 // reactivate a suspended account.
-func (s *Store) ActivateWithPasswordTx(ctx context.Context, tx *sql.Tx, id, passwordHash, policyTenantID string, policyVersion int64) error {
+func (s *Store) ActivateWithPasswordTx(ctx context.Context, tx *sql.Tx, id, passwordHash string) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE system.users
 		SET password_hash = $2,
 		    status = 'active',
-		    password_set_at_policy_tenant_id = NULLIF($3, '')::uuid,
-		    password_set_at_policy_version = $4,
 		    updated_at = NOW()
 		WHERE id = $1 AND password_hash IS NULL AND status = 'invited'
-	`, id, passwordHash, policyTenantID, policyVersion)
+	`, id, passwordHash)
 	if err != nil {
 		return fmt.Errorf("activate user with password: %w", err)
 	}

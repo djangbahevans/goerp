@@ -4,12 +4,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPolicyValidate(t *testing.T) {
-	strict := Global
-	strict.RequireUppercase, strict.RequireDigit, strict.RequireSymbol = true, true, true
-
 	cases := []struct {
 		name     string
 		policy   Policy
@@ -25,12 +23,8 @@ func TestPolicyValidate(t *testing.T) {
 		{"rejects the email username, any case", Global, "my-KWAME-password", "Kwame@example.com", ErrContainsEmail},
 		{"ignores a very short email username", Global, "ab-long-passphrase", "ab@example.com", nil},
 		{"rejects a common password, any case", Global, "Schmetterling", "kwame@example.com", ErrCommon},
-		{"common list off allows it", Policy{MinLength: 12, MaxLength: 128}, "schmetterling", "kwame@example.com", nil},
-		{"requires an uppercase letter", strict, "long passphrase 1!", "kwame@example.com", ErrMissingUppercase},
-		{"requires a digit", strict, "Long passphrase !", "kwame@example.com", ErrMissingDigit},
-		{"requires a symbol", strict, "Long passphrase 1", "kwame@example.com", ErrMissingSymbol},
-		{"space isn't a symbol", strict, "Long passphrase 1 ", "kwame@example.com", ErrMissingSymbol},
-		{"meets every requirement", strict, "Long passphrase 1!", "kwame@example.com", nil},
+		{"needs no composition", Global, "all lowercase words", "kwame@example.com", nil},
+		{"applies a raised minimum", WithMinLength(16), "qzvkplmwxtrbqzv", "kwame@example.com", ErrTooShort},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,17 +35,12 @@ func TestPolicyValidate(t *testing.T) {
 	}
 }
 
-func TestPolicyStrictest_KeepsTighterOfEachField(t *testing.T) {
-	tenant := Policy{MinLength: 16, MaxLength: 64, RequireDigit: true}
-	got := Global.Strictest(tenant)
-	want := Policy{MinLength: 16, MaxLength: 64, RequireDigit: true, BlockCommonList: true, BlockUserInfo: true}
-	if got != want {
-		t.Errorf("Strictest() = %+v, want %+v", got, want)
+func TestWithMinLength_NeverBelowGlobal(t *testing.T) {
+	if got := WithMinLength(8); got != Global {
+		t.Errorf("WithMinLength(8) = %+v, want Global %+v", got, Global)
 	}
-
-	loose := Policy{MinLength: 8, MaxLength: 256}
-	if got := Global.Strictest(loose); got != Global {
-		t.Errorf("Strictest(looser) = %+v, want Global %+v", got, Global)
+	if got := WithMinLength(16); got.MinLength != 16 || got.MaxLength != Global.MaxLength {
+		t.Errorf("WithMinLength(16) = %+v, want MinLength 16 and the global MaxLength", got)
 	}
 }
 
@@ -69,27 +58,53 @@ func TestCommonPasswords_OnlyHoldsEntriesLongEnoughToMatter(t *testing.T) {
 	}
 }
 
-func TestUpdateRecommended(t *testing.T) {
-	tenantA, tenantB := "tenant-a", "tenant-b"
+func TestTenantPolicyCheckSignIn(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	changed := now.AddDate(0, 0, -5)
+	before := changed.AddDate(0, -1, 0)
+	after := changed.Add(time.Hour)
+	const email = "kwame@example.com"
+	const short = "qzvkplmwxtrb" // 12 characters: meets Global, not 16
+
+	nudge := TenantPolicy{MinLength: 16, Enforcement: EnforcementNudge, GraceDays: 14, ChangedAt: &changed}
+	require := TenantPolicy{MinLength: 16, Enforcement: EnforcementRequire, GraceDays: 14, ChangedAt: &changed}
+	expired := require
+	expired.GraceDays = 3
+	unstamped := require
+	unstamped.ChangedAt = nil
+	deadline := changed.AddDate(0, 0, 14)
+
 	cases := []struct {
-		name           string
-		setTenantID    *string
-		setVersion     int64
-		currentVersion int64
-		want           bool
+		name     string
+		policy   TenantPolicy
+		password string
+		joinedAt time.Time
+		want     Result
 	}{
-		{"tenant never changed its policy", nil, 0, 0, false},
-		{"global-only password, tenant tightened", nil, 0, 1, true},
-		{"validated here at the current version", &tenantA, 2, 2, false},
-		{"validated here at an older version", &tenantA, 1, 2, true},
-		{"validated in another tenant at a higher version", &tenantB, 5, 2, true},
-		{"validated in another tenant, this one unchanged", &tenantB, 5, 0, false},
+		{"passes the tenant's minimum", require, "qzvkplmwxtrbqzvk", before, Result{}},
+		{"platform policy only", TenantPolicy{MinLength: 12, Enforcement: EnforcementRequire}, short, before, Result{}},
+		{"short under nudge", nudge, short, before, Result{Outcome: UpdateRecommended}},
+		{"short under require, within grace", require, short, before, Result{Outcome: UpdateRecommended, Deadline: &deadline}},
+		{"short under require, grace over", expired, short, before, Result{Outcome: ChangeRequired}},
+		{"short under require, joined after the change", require, short, after, Result{Outcome: ChangeRequired}},
+		{"short under require, join time unknown", require, short, time.Time{}, Result{Outcome: UpdateRecommended, Deadline: &deadline}},
+		{"short under require without a change time", unstamped, short, before, Result{Outcome: UpdateRecommended}},
+		{"common password is only a nudge", expired, "Schmetterling", after, Result{Outcome: UpdateRecommended}},
+		{"below the platform minimum is only a nudge", expired, "short-pw", after, Result{Outcome: UpdateRecommended}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := UpdateRecommended(tc.setTenantID, tc.setVersion, tenantA, tc.currentVersion); got != tc.want {
-				t.Errorf("UpdateRecommended() = %v, want %v", got, tc.want)
+			got := tc.policy.CheckSignIn(tc.password, email, tc.joinedAt, now)
+			if got.Outcome != tc.want.Outcome || !equalTimes(got.Deadline, tc.want.Deadline) {
+				t.Errorf("CheckSignIn() = %+v (deadline %v), want %+v (deadline %v)", got, got.Deadline, tc.want, tc.want.Deadline)
 			}
 		})
 	}
+}
+
+func equalTimes(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }

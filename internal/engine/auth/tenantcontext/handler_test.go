@@ -14,6 +14,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/billing"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
@@ -80,7 +81,7 @@ func newFixture(t *testing.T) *fixture {
 	if err := configStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
 	}
-	policies := password.NewPolicyStore(configStore)
+	policies := password.NewPolicyStore(configStore, role.NewStore(conn))
 	sharedHost := "shared-" + slug + ".goerp.test"
 	appBaseURL := "https://" + sharedHost
 	return &fixture{

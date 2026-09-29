@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -71,6 +72,8 @@ func (a *fakeAudit) Insert(_ context.Context, row authaudit.Row) error {
 type fixture struct {
 	handler    *Handler
 	issuer     *authtoken.Issuer
+	checker    *authcheck.Checker
+	tenants    *tenant.Store
 	users      *user.Store
 	config     *tenantconfig.Store
 	mailer     *fakeMailer
@@ -113,6 +116,9 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("session Bootstrap() error: %v", err)
 	}
 	roleStore := role.NewStore(conn)
+	if err := roleStore.BootstrapMembershipIndex(ctx); err != nil {
+		t.Fatalf("BootstrapMembershipIndex() error: %v", err)
+	}
 	apiKeys := apikey.NewStore(conn)
 	if err := apiKeys.Bootstrap(ctx); err != nil {
 		t.Fatalf("apikey Bootstrap() error: %v", err)
@@ -140,7 +146,7 @@ func newFixture(t *testing.T) *fixture {
 	authChecker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, permcache.NewRoleCache(cacheClient), permcache.NewRolePermissionMap(), apiKeys, false, nil, nil, nil)
 	mailer := &fakeMailer{}
 	audit := &fakeAudit{}
-	handler := NewHandler(tenantResolver, authChecker, userStore, password.NewPolicyStore(configStore), revoker, mailer, audit, password.NewHasher(1024, time.Second))
+	handler := NewHandler(tenantResolver, authChecker, userStore, password.NewPolicyStore(configStore, role.NewStore(conn)), revoker, sessionStore, issuer, mailer, audit, password.NewHasher(1024, time.Second))
 
 	slug := fmt.Sprintf("authmepwtest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Password Test Co")
@@ -193,6 +199,8 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{
 		handler:    handler,
 		issuer:     issuer,
+		checker:    authChecker,
+		tenants:    tenantStore,
 		users:      userStore,
 		config:     configStore,
 		mailer:     mailer,
@@ -302,7 +310,7 @@ func refreshHash(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func TestServeHTTP_ChangesPasswordAndRecordsPolicy(t *testing.T) {
+func TestServeHTTP_ChangesPassword(t *testing.T) {
 	f := newFixture(t)
 	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "14"); err != nil {
 		t.Fatalf("Set() policy error: %v", err)
@@ -315,13 +323,6 @@ func TestServeHTTP_ChangesPasswordAndRecordsPolicy(t *testing.T) {
 	}
 	if !f.passwordMatches(t, newPassword) || f.passwordMatches(t, oldPassword) {
 		t.Error("stored hash should match only the new password")
-	}
-	u, err := f.users.GetByID(t.Context(), f.userID)
-	if err != nil {
-		t.Fatalf("GetByID() error: %v", err)
-	}
-	if u.PasswordSetAtPolicyTenantID == nil || *u.PasswordSetAtPolicyTenantID != f.tenantID || u.PasswordSetAtPolicyVersion != 1 {
-		t.Errorf("policy tenant/version = %v/%d, want %s/1", u.PasswordSetAtPolicyTenantID, u.PasswordSetAtPolicyVersion, f.tenantID)
 	}
 	if len(f.mailer.sent) != 1 || f.mailer.sent[0] != f.email {
 		t.Errorf("emails = %v, want one to %s", f.mailer.sent, f.email)
@@ -415,12 +416,9 @@ func TestServeHTTP_WrongCurrentPasswordLeavesEverythingAlone(t *testing.T) {
 
 func TestServeHTTP_WeakPasswordReturns422(t *testing.T) {
 	f := newFixture(t)
-	if err := f.config.Set(t.Context(), f.tenantID, password.KeyRequireDigit, "true"); err != nil {
-		t.Fatalf("Set() policy error: %v", err)
-	}
 	tokens := f.signIn(t)
 
-	rec := f.doChange(t, tokens.AccessToken, oldPassword, newPassword)
+	rec := f.doChange(t, tokens.AccessToken, oldPassword, "password1234")
 	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "auth.password_too_weak" {
 		t.Fatalf("status = %d, body = %s, want 422 auth.password_too_weak", rec.Code, rec.Body.String())
 	}
@@ -428,8 +426,129 @@ func TestServeHTTP_WeakPasswordReturns422(t *testing.T) {
 		t.Errorf("details.min_length = %v, want %d", got, password.Global.MinLength)
 	}
 	if !f.passwordMatches(t, oldPassword) {
-		t.Error("password changed despite failing the tenant policy")
+		t.Error("password changed despite failing the policy")
 	}
+}
+
+// addOtherTenant makes the fixture user a member, in the membership
+// index, of another tenant whose minimum is minLength.
+func (f *fixture) addOtherTenant(t *testing.T, minLength string) {
+	t.Helper()
+	other, err := f.tenants.CreateTenant(t.Context(), fmt.Sprintf("authmepwother%d", time.Now().UnixNano()), "Other Co")
+	if err != nil {
+		t.Fatalf("CreateTenant() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, other.ID) })
+	if err := f.config.Set(t.Context(), other.ID, password.KeyMinLength, minLength); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	if _, err := f.conn.Exec(`INSERT INTO system.tenant_memberships (user_id, tenant_id) VALUES ($1, $2)`, f.userID, other.ID); err != nil {
+		t.Fatalf("index membership: %v", err)
+	}
+}
+
+func TestServeHTTP_ChecksTheCombinedMinimumOfEveryTenant(t *testing.T) {
+	f := newFixture(t)
+	if err := f.config.Set(t.Context(), f.tenantID, password.KeyMinLength, "14"); err != nil {
+		t.Fatalf("Set() policy error: %v", err)
+	}
+	f.addOtherTenant(t, "18")
+	tokens := f.signIn(t)
+
+	// 16 characters: enough for this tenant, too short for the other.
+	rec := f.doChange(t, tokens.AccessToken, oldPassword, "sixteen chars ok")
+	if rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != "auth.password_too_weak" {
+		t.Fatalf("status = %d, body = %s, want 422 auth.password_too_weak", rec.Code, rec.Body.String())
+	}
+	if got := minLengthDetail(t, rec); got != float64(18) {
+		t.Errorf("details.min_length = %v, want the other tenant's 18", got)
+	}
+	if rec := f.doChange(t, tokens.AccessToken, oldPassword, newPassword); rec.Code != http.StatusOK {
+		t.Errorf("status = %d, body = %s, want 200 for a password meeting both", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServeHTTP_LiftsPasswordChangeRestriction(t *testing.T) {
+	f := newFixture(t)
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{UserID: f.userID, TenantSlug: f.tenantSlug, PasswordChangeRequired: true})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+	if _, err := f.checker.Authenticate(t.Context(), tokens.AccessToken, f.tenantID, f.tenantSlug, "", nil, nil); !errors.Is(err, authcheck.ErrPasswordChangeRequired) {
+		t.Fatalf("Authenticate(restricted) error = %v, want ErrPasswordChangeRequired", err)
+	}
+
+	rec := f.doChange(t, tokens.AccessToken, oldPassword, newPassword)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	reissued := accessTokenCookie(rec)
+	if reissued == "" {
+		t.Fatalf("headers = %v, want a reissued access token cookie", rec.Header())
+	}
+	authCtx, err := f.checker.Authenticate(t.Context(), reissued, f.tenantID, f.tenantSlug, "", nil, nil)
+	if err != nil {
+		t.Fatalf("Authenticate(reissued) error: %v", err)
+	}
+	if authCtx.PasswordChangeRequired {
+		t.Error("reissued token still carries pcr")
+	}
+
+	// The restriction is off the session row, so a refresh stays clear.
+	refreshed, _, err := f.issuer.Refresh(t.Context(), tokens.RefreshToken, authtoken.RefreshParams{})
+	if err != nil || refreshed == nil {
+		t.Fatalf("Refresh() = %v, %v", refreshed, err)
+	}
+	if _, err := f.checker.Authenticate(t.Context(), refreshed.AccessToken, f.tenantID, f.tenantSlug, "", nil, nil); err != nil {
+		t.Errorf("Authenticate(refreshed) error = %v, want an unrestricted session", err)
+	}
+}
+
+func TestServeHTTP_LiftsRestrictionAcrossARotatedFamily(t *testing.T) {
+	f := newFixture(t)
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{UserID: f.userID, TenantSlug: f.tenantSlug, PasswordChangeRequired: true})
+	if err != nil {
+		t.Fatalf("Issue() error: %v", err)
+	}
+	// A refresh lands before the change, from the access token's old row.
+	rotated, _, err := f.issuer.Refresh(t.Context(), tokens.RefreshToken, authtoken.RefreshParams{})
+	if err != nil || rotated == nil {
+		t.Fatalf("Refresh() = %v, %v", rotated, err)
+	}
+
+	if rec := f.doChange(t, tokens.AccessToken, oldPassword, newPassword); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+
+	refreshed, _, err := f.issuer.Refresh(t.Context(), rotated.RefreshToken, authtoken.RefreshParams{})
+	if err != nil || refreshed == nil {
+		t.Fatalf("Refresh() = %v, %v", refreshed, err)
+	}
+	if _, err := f.checker.Authenticate(t.Context(), refreshed.AccessToken, f.tenantID, f.tenantSlug, "", nil, nil); err != nil {
+		t.Errorf("Authenticate(refreshed) error = %v, want the rotated row cleared too", err)
+	}
+}
+
+func TestServeHTTP_UnrestrictedChangeKeepsTheAccessToken(t *testing.T) {
+	f := newFixture(t)
+	tokens := f.signIn(t)
+
+	rec := f.doChange(t, tokens.AccessToken, oldPassword, newPassword)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if got := accessTokenCookie(rec); got != "" {
+		t.Error("access token reissued for an unrestricted session, want it left alone")
+	}
+}
+
+func accessTokenCookie(rec *httptest.ResponseRecorder) string {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "__Host-access_token" {
+			return c.Value
+		}
+	}
+	return ""
 }
 
 func TestServeHTTP_NoTokenRejected(t *testing.T) {
