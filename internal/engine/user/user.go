@@ -59,52 +59,6 @@ CREATE TABLE IF NOT EXISTS system.user_profiles (
 )
 `
 
-// migrateAvatarURLColumn renames a pre-goerp#819 deployment's
-// avatar_url TEXT (goerp#817's original column name, live on main before
-// this ticket) to avatar_file_id UUID. CREATE TABLE IF NOT EXISTS above
-// is a no-op against an already-bootstrapped table, so without this an
-// already-running environment (the shared dev Postgres included — hit
-// firsthand while building this ticket) keeps the old column forever and
-// every GetProfile/SetProfile call starts failing with "column
-// avatar_file_id does not exist". No shipped code path ever wrote a real
-// value to avatar_url, but the USING clause still guards the cast with a
-// UUID-shape check rather than casting unconditionally: an environment
-// where something wrote non-UUID data into the column out of band (a
-// manual edit, a one-off script) gets that value silently dropped to
-// NULL instead of failing the cast — and since this runs inside
-// Bootstrap's transaction, a cast failure here would otherwise fail the
-// entire engine startup, not just the profile feature.
-const migrateAvatarURLColumn = `
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'system' AND table_name = 'user_profiles' AND column_name = 'avatar_url'
-    ) THEN
-        ALTER TABLE system.user_profiles RENAME COLUMN avatar_url TO avatar_file_id;
-        ALTER TABLE system.user_profiles ALTER COLUMN avatar_file_id TYPE UUID USING (
-            CASE
-                WHEN avatar_file_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                THEN avatar_file_id::uuid
-                ELSE NULL
-            END
-        );
-    END IF;
-END $$;
-`
-
-// addContrastColumn brings a pre-existing system.user_profiles up to
-// createUserProfilesTable's contrast column (shell-visual-design.md §4
-// "High-contrast mode") — CREATE TABLE IF NOT EXISTS above is a no-op
-// against an already-bootstrapped table, same reason as
-// migrateAvatarURLColumn. Existing rows take the 'system' default, so a
-// user whose OS asks for more contrast gets it without opting in.
-const addContrastColumn = `
-ALTER TABLE system.user_profiles
-    ADD COLUMN IF NOT EXISTS contrast TEXT NOT NULL DEFAULT 'system'
-        CHECK (contrast IN ('standard', 'high', 'system'));
-`
-
 // failedLoginLockThreshold/lockDuration are the minimal single-tier
 // lockout auth-internals.md §3 step 5/§15's login flow requires
 // ("brute force counters ... reject if locked"). The full escalating
@@ -170,12 +124,6 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, createUserProfilesTable); err != nil {
 			return fmt.Errorf("create user_profiles table: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, migrateAvatarURLColumn); err != nil {
-			return fmt.Errorf("migrate user_profiles avatar column: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, addContrastColumn); err != nil {
-			return fmt.Errorf("add user_profiles contrast column: %w", err)
 		}
 
 		return nil
