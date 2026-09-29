@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { type ReactNode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Combobox, type ComboboxProps } from "./combobox.js";
+import { FieldWrapper } from "./field-wrapper.js";
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -188,6 +189,15 @@ describe("Combobox", () => {
     fireEvent.focus(input());
     expect(screen.queryByRole("button", { name: "Clear Apple" })).toBeNull();
     expect(screen.queryByTestId("flag")).toBeNull();
+  });
+
+  it("offers no clear button inside a required field", () => {
+    render(
+      <FieldWrapper label="Fruit" required>
+        <Harness selectedLabel="Apple" onClear={vi.fn()} />
+      </FieldWrapper>,
+    );
+    expect(screen.queryByRole("button", { name: "Clear Apple" })).toBeNull();
   });
 
   it("renders `above` inside the field, and presses on it don't dismiss", () => {

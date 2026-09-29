@@ -103,7 +103,9 @@ function SelectSingle({
   emptyValue = "",
 }: Omit<SelectProps, "multiple">) {
   const selected = options.find((option) => option.value === value);
-  const clearable = selected !== undefined && value !== emptyValue;
+  // A required field has no empty state to clear back to.
+  const required = useFieldControl()?.required ?? false;
+  const clearable = selected !== undefined && value !== emptyValue && !required;
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const layerClassName = useFloatingPanelLayer(triggerRef);
   return (

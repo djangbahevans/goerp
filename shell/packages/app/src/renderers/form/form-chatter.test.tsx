@@ -25,6 +25,19 @@ vi.mock("@goerp/sdk/react", async (importOriginal) => {
     useRecordActivity: useRecordActivityMock,
     useConfirm: () => ({ confirm: confirmMock }),
     useRelationLabels: () => new Map([["contacts.contact|", { c2: "Acme Corp" }]]),
+    useScheduledActivities: () => ({
+      activities: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      schedule: vi.fn(),
+      isScheduling: false,
+      update: vi.fn(),
+      markDone: vi.fn(),
+      cancel: vi.fn(),
+      pendingIds: [],
+    }),
   };
 });
 vi.mock("@goerp/sdk/schema", async (importOriginal) => {
@@ -131,6 +144,18 @@ describe("FormChatter", () => {
     );
     const { container } = renderChatter();
     expect(container.textContent).toBe("");
+  });
+
+  it("puts Planned activities above the composer", () => {
+    renderChatter();
+    const section = screen.getByRole("region", { name: "Planned activities" });
+    const composer = screen.getByLabelText("Add a comment");
+    expect(section.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows no Planned activities on an unsaved record", () => {
+    renderChatter(null);
+    expect(screen.queryByRole("region", { name: "Planned activities" })).toBeNull();
   });
 
   it("shows a loading skeleton with the composer already usable", () => {

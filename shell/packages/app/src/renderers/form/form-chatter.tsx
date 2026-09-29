@@ -21,6 +21,7 @@ import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { IS_MAC } from "../../shortcuts/shortcut.js";
 import { type ChangeLabelContext, changeRelationSpecs, collectFormFields, entryDisplay } from "./chatter-entries.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
+import { PlannedActivities } from "./planned-activities.js";
 
 // docs/components/form-chatter.md.
 export interface FormChatterProps {
@@ -234,6 +235,12 @@ function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId:
   return (
     <SectionCard title="Activity">
       <div className="space-y-4">
+        <PlannedActivities
+          model={view.resource}
+          recordId={recordId}
+          // A live region only speaks when its text changes, so a repeated message gets a trailing no-break space.
+          announce={(text) => setAnnouncement((previous) => (previous === text ? `${text} ` : text))}
+        />
         <ChatterComposer
           isPosting={activity.isPosting}
           onPost={async (body) => {

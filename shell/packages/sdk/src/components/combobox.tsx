@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ComboboxClearButton } from "./combobox-clear-button.js";
 import { EscapeLayer } from "./escape-layer.js";
+import { useFieldControl } from "./field-wrapper.js";
 import { useFloatingPanelLayer, useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { useListboxNavigation } from "./listbox-navigation.js";
 import { Skeleton } from "./skeleton.js";
@@ -162,6 +163,9 @@ export function Combobox<T>({
   }, [isOpen, status, shown.length, resultTotal, query]);
 
   const hasSelection = !isOpen && selectedLabel !== undefined;
+  // A required field has no empty state to clear back to.
+  const required = useFieldControl()?.required ?? false;
+  const clearable = onClear !== undefined && !required;
 
   function renderPanelContent(): ReactNode {
     if (shown.length === 0) {
@@ -219,7 +223,7 @@ export function Combobox<T>({
           ) : undefined
         }
         end={
-          hasSelection && onClear ? (
+          hasSelection && clearable && onClear ? (
             <ComboboxClearButton label={selectedLabel} disabled={disabled} onClear={onClear} />
           ) : undefined
         }
