@@ -47,7 +47,7 @@ func TestCreateAll_SeedsTheEngineTypesDefaultTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Errorf("engine default templates = %d, want 2 (activity_assigned and activity_due in_app, once each)", n)
+	if n != 6 {
+		t.Errorf("engine default templates = %d, want 6 (four in_app and the two comment types' email, once each)", n)
 	}
 }

@@ -364,3 +364,45 @@ func TestCancel_DeletesTheRowAndWritesNoFeedEntry(t *testing.T) {
 		t.Errorf("feed has %d entries after cancel, want 0", n)
 	}
 }
+
+func followerIDs(t *testing.T, conn *sql.DB, slug string) []string {
+	t.Helper()
+	followers, err := recordactivity.NewStore(conn).ListFollowers(t.Context(), slug, testModel, testRecordID)
+	if err != nil {
+		t.Fatalf("ListFollowers() error: %v", err)
+	}
+	ids := make([]string, len(followers))
+	for i, f := range followers {
+		ids[i] = f.UserID
+	}
+	return ids
+}
+
+func TestCreateAndReassign_MakeTheAssigneeAFollower(t *testing.T) {
+	store, conn, slug := openTestStore(t)
+	ctx := t.Context()
+
+	a := create(t, store, slug, "2026-09-25")
+	if got := followerIDs(t, conn, slug); len(got) != 1 || got[0] != testAssignee {
+		t.Fatalf("after Create, followers = %v, want the assignee", got)
+	}
+
+	// An assignee who unfollowed follows again only when assigned again.
+	followers := recordactivity.NewStore(conn)
+	if err := followers.Unfollow(ctx, slug, testModel, testRecordID, testAssignee); err != nil {
+		t.Fatalf("Unfollow() error: %v", err)
+	}
+	if _, err := store.Update(ctx, slug, a.ID, Update{Summary: new("Reconfirm"), AssigneeID: new(testAssignee)}); err != nil {
+		t.Fatalf("Update() keeping the assignee error: %v", err)
+	}
+	if got := followerIDs(t, conn, slug); len(got) != 0 {
+		t.Errorf("an edit keeping the assignee made followers %v, want none", got)
+	}
+
+	if _, err := store.Update(ctx, slug, a.ID, Update{AssigneeID: new(testCreator)}); err != nil {
+		t.Fatalf("Update() reassigning error: %v", err)
+	}
+	if got := followerIDs(t, conn, slug); len(got) != 1 || got[0] != testCreator {
+		t.Errorf("after reassigning, followers = %v, want the new assignee", got)
+	}
+}

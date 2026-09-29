@@ -1,0 +1,3 @@
+<p><strong>{{.AuthorName}}</strong> mentioned you on <strong>{{if .RecordName}}{{.RecordName}}{{else}}{{.ModelLabel}}{{end}}</strong>:</p>
+<p style="white-space: pre-wrap">{{.Body}}</p>
+{{if .ActionURL}}<p><a href="{{.ActionURL}}">View in {{.TenantName}}</a></p>{{end}}

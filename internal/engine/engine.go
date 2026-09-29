@@ -189,6 +189,10 @@ type Engine struct {
 	// notifier is the notification delivery pipeline (notify.Send) the
 	// engine's own engine.* sends and host.notify.send go through.
 	notifier engineNotifier
+	// txJobs inserts the engine's own jobs inside a database/sql
+	// transaction, such as a comment's notification job
+	// (record-activity.md §10). Nil in tests that enqueue nothing.
+	txJobs txJobInserter
 	// unsubscribeCodec verifies /_notif/unsubscribe's tokens.
 	unsubscribeCodec *notifications.UnsubscribeCodec
 	// tenantLocales resolves a tenant's default locale and timezone, for
@@ -938,6 +942,10 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
 	activityDue := &activityDueWorker{}
 	river.AddWorker(jobWorkers, activityDue)
+	commentNotify := &recordCommentNotifyWorker{}
+	river.AddWorker(jobWorkers, commentNotify)
+	commentRecipient := &recordCommentRecipientWorker{}
+	river.AddWorker(jobWorkers, commentRecipient)
 	river.AddWorker(jobWorkers, &jobqueue.DeviceTokenCleanupWorker{TenantStore: tenantStore, NotificationStore: notificationStore})
 	unsubscribeCodec := notifications.NewUnsubscribeCodec(signingKeySet)
 	river.AddWorker(jobWorkers, notify.NewEmailWorker(notify.EmailDeps{
@@ -1117,6 +1125,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		notificationStore:      notificationStore,
 		notificationConfig:     notificationConfig,
 		notifier:               notifier,
+		txJobs:                 runtime.EventInsertClient(),
 		unsubscribeCodec:       unsubscribeCodec,
 		tenantLocales:          tenantLocales,
 		scheduledActivityStore: scheduledActivityStore,
@@ -1143,6 +1152,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	// Registered with River before e existed; River only starts working
 	// jobs once the engine starts.
 	activityDue.engine = e
+	commentNotify.engine = e
+	commentRecipient.engine = e
 
 	// GET /_meta/permissions (goerp#417) is added here rather than to the
 	// builtinRoutes literal above for the same reason dispatchORMRoute

@@ -67,6 +67,7 @@ func TestBootstrap_CheckConstraintsRejectInconsistentRows(t *testing.T) {
 		"activity_done without it": `INSERT INTO %s.record_activity (model, record_id, kind) VALUES ('m', gen_random_uuid(), 'activity_done')`,
 		"activity on a created":    `INSERT INTO %s.record_activity (model, record_id, kind, activity) VALUES ('m', gen_random_uuid(), 'created', '{}')`,
 		"deleted non-comment":      `INSERT INTO %s.record_activity (model, record_id, kind, deleted_at) VALUES ('m', gen_random_uuid(), 'created', NOW())`,
+		"message non-comment":      `INSERT INTO %s.record_activity (model, record_id, kind, notify_followers) VALUES ('m', gen_random_uuid(), 'created', true)`,
 	}
 	for name, stmt := range cases {
 		if _, err := conn.ExecContext(t.Context(), fmt.Sprintf(stmt, schema)); err == nil {
@@ -78,7 +79,7 @@ func TestBootstrap_CheckConstraintsRejectInconsistentRows(t *testing.T) {
 func TestCreateComment_ReturnsTheStoredRow(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	e, err := store.CreateComment(t.Context(), slug, testModel, testRecordID, testAuthorID, "Move delivery to Friday.", "req-1", "")
+	e, err := store.CreateComment(t.Context(), slug, NewComment{Model: testModel, RecordID: testRecordID, AuthorID: testAuthorID, Body: "Move delivery to Friday.", RequestID: "req-1"}, nil)
 	if err != nil {
 		t.Fatalf("CreateComment() error: %v", err)
 	}
@@ -102,13 +103,13 @@ func TestList_PagesNewestFirstReturningEveryEntryOnce(t *testing.T) {
 	const total = 7
 	created := make([]string, total)
 	for i := range total {
-		e, err := store.CreateComment(t.Context(), slug, testModel, testRecordID, testAuthorID, fmt.Sprintf("comment %d", i), "", "")
+		e, err := store.CreateComment(t.Context(), slug, NewComment{Model: testModel, RecordID: testRecordID, AuthorID: testAuthorID, Body: fmt.Sprintf("comment %d", i)}, nil)
 		if err != nil {
 			t.Fatalf("CreateComment() error: %v", err)
 		}
 		created[i] = e.ID
 	}
-	if _, err := store.CreateComment(t.Context(), slug, testModel, "22222222-2222-2222-2222-222222222222", testAuthorID, "other record", "", ""); err != nil {
+	if _, err := store.CreateComment(t.Context(), slug, NewComment{Model: testModel, RecordID: "22222222-2222-2222-2222-222222222222", AuthorID: testAuthorID, Body: "other record"}, nil); err != nil {
 		t.Fatalf("CreateComment() error: %v", err)
 	}
 
@@ -147,7 +148,7 @@ func TestList_ExactlyFullPageReportsNoMore(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
 	for i := range 2 {
-		if _, err := store.CreateComment(t.Context(), slug, testModel, testRecordID, testAuthorID, fmt.Sprintf("c%d", i), "", ""); err != nil {
+		if _, err := store.CreateComment(t.Context(), slug, NewComment{Model: testModel, RecordID: testRecordID, AuthorID: testAuthorID, Body: fmt.Sprintf("c%d", i)}, nil); err != nil {
 			t.Fatalf("CreateComment() error: %v", err)
 		}
 	}
@@ -163,7 +164,7 @@ func TestList_ExactlyFullPageReportsNoMore(t *testing.T) {
 func TestDeleteComment_ClearsBodyAndIsIdempotent(t *testing.T) {
 	store, _, slug := openTestStore(t)
 
-	e, err := store.CreateComment(t.Context(), slug, testModel, testRecordID, testAuthorID, "oops", "", "")
+	e, err := store.CreateComment(t.Context(), slug, NewComment{Model: testModel, RecordID: testRecordID, AuthorID: testAuthorID, Body: "oops"}, nil)
 	if err != nil {
 		t.Fatalf("CreateComment() error: %v", err)
 	}
@@ -271,12 +272,49 @@ func TestCreateComment_FollowsTheAuthorOnce(t *testing.T) {
 	ctx := t.Context()
 
 	for _, body := range []string{"first", "second"} {
-		if _, err := store.CreateComment(ctx, slug, testModel, testRecordID, testAuthorID, body, "", ""); err != nil {
+		if _, err := store.CreateComment(ctx, slug, NewComment{Model: testModel, RecordID: testRecordID, AuthorID: testAuthorID, Body: body}, nil); err != nil {
 			t.Fatalf("CreateComment() error: %v", err)
 		}
 	}
 
 	if got := followerIDs(t, store, slug, testRecordID); !slices.Equal(got, []string{testAuthorID}) {
 		t.Errorf("followers = %v, want the author once", got)
+	}
+}
+
+func TestCreateComment_StoresNotifyFollowersAndRunsInsertedInItsTransaction(t *testing.T) {
+	store, _, slug := openTestStore(t)
+	ctx := t.Context()
+
+	var seen string
+	e, err := store.CreateComment(ctx, slug, NewComment{Model: testModel, RecordID: testRecordID, AuthorID: testAuthorID, Body: "Heads up", NotifyFollowers: true},
+		func(tx *sql.Tx, e *Entry) error {
+			seen = e.ID
+			var n int
+			err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT count(*) FROM %s.record_activity WHERE id = $1`, tenantschema.Name(slug)), e.ID).Scan(&n)
+			if err == nil && n != 1 {
+				err = fmt.Errorf("entry not visible in the transaction")
+			}
+			return err
+		})
+	if err != nil {
+		t.Fatalf("CreateComment() error: %v", err)
+	}
+	if seen != e.ID || !e.NotifyFollowers {
+		t.Errorf("inserted saw %q, entry %+v; want the new entry with notify_followers", seen, e)
+	}
+
+	failed := errors.New("enqueue failed")
+	_, err = store.CreateComment(ctx, slug, NewComment{Model: testModel, RecordID: testRecordID, AuthorID: testAuthorID, Body: "rolled back"},
+		func(*sql.Tx, *Entry) error { return failed })
+	if !errors.Is(err, failed) {
+		t.Fatalf("CreateComment() with a failing hook error = %v, want %v", err, failed)
+	}
+	entries, _, err := store.List(ctx, slug, testModel, testRecordID, "", 10)
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("List() = %d entries, want only the committed one", len(entries))
 	}
 }
