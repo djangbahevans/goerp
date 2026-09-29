@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	testPostgresDSN = "postgres://goerp:dev@localhost:55432/goerp"
+	testPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 	testRedisAddr   = "localhost:6379"
 )
 

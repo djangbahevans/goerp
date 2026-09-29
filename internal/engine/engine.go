@@ -110,6 +110,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/modulereload"
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
+	"github.com/djangbahevans/goerp/internal/engine/notify"
 	"github.com/djangbahevans/goerp/internal/engine/operatorcert"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -185,6 +186,9 @@ type Engine struct {
 	// notificationConfig resolves the tenant notification configuration
 	// channel routing consumes.
 	notificationConfig *notifconfig.Service
+	// notifier is the notification delivery pipeline (notify.Send) the
+	// engine's own engine.* sends and host.notify.send go through.
+	notifier *notify.Sender
 	// unsubscribeCodec verifies /_notif/unsubscribe's tokens.
 	unsubscribeCodec *notifications.UnsubscribeCodec
 	// scheduledActivityStore backs /_meta/scheduled-activities.
@@ -1052,6 +1056,18 @@ func New(cfg *config.Config) (*Engine, error) {
 		Config:  tenantConfigStore,
 	})
 
+	notifier := notify.NewSender(notify.Deps{
+		DB:        primaryPool,
+		Store:     notificationStore,
+		Registry:  moduleRegistry,
+		Config:    notificationConfig,
+		Providers: providerselect.NewStore(primaryPool),
+		Tenants:   tenantStore,
+		Members:   roleStore,
+		Jobs:      runtime.EventInsertClient(),
+		Hub:       wsHub,
+	})
+
 	e = &Engine{
 		cfg:                    cfg,
 		wasmRuntime:            runtime,
@@ -1076,6 +1092,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		recordActivityStore:    recordActivityStore,
 		notificationStore:      notificationStore,
 		notificationConfig:     notificationConfig,
+		notifier:               notifier,
 		unsubscribeCodec:       notifications.NewUnsubscribeCodec(signingKeySet),
 		scheduledActivityStore: scheduledActivityStore,
 		activityTypeStore:      activityTypeStore,

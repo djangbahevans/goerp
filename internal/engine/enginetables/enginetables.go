@@ -52,8 +52,8 @@ type Group struct {
 }
 
 // Groups is in creation order: tenant_invitations has a foreign key to
-// roles, so the roles group comes first, and scheduled_activities has one
-// to activity_types.
+// roles, so the roles group comes first, scheduled_activities has one
+// to activity_types, and notification_deliveries has one to notifications.
 var Groups = []Group{
 	{
 		Tables: []Table{{Name: "roles"}, {Name: "role_permissions"}, {Name: "user_roles"}},
@@ -93,6 +93,12 @@ var Groups = []Group{
 		Tables: []Table{{Name: notifications.FeedTable}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return notifications.NewStore(pool).BootstrapFeed(ctx, slug)
+		},
+	},
+	{
+		Tables: []Table{{Name: notifications.DeliveriesTable}},
+		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
+			return notifications.NewStore(pool).BootstrapDeliveries(ctx, slug)
 		},
 	},
 	{

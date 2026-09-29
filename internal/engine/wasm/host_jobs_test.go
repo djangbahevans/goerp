@@ -319,11 +319,11 @@ func TestHostJobs_Enqueue_StampsMetadataAndArgs(t *testing.T) {
 		t.Errorf("queue/max_attempts = %s/%d, want bulk/7", queue, maxAttempts)
 	}
 
-	var metadata jobMetadata
+	var metadata jobqueue.JobMetadata
 	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
 		t.Fatalf("decode metadata: %v", err)
 	}
-	if want := (jobMetadata{TenantID: tenantID, ModuleName: "contacts", TraceID: "trace-1"}); metadata != want {
+	if want := (jobqueue.JobMetadata{TenantID: tenantID, ModuleName: "contacts", TraceID: "trace-1"}); metadata != want {
 		t.Errorf("metadata = %+v, want %+v", metadata, want)
 	}
 

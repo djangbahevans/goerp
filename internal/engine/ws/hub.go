@@ -19,6 +19,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -168,6 +169,15 @@ func TenantChannel(tenantID string) string {
 	return "tenant:" + tenantID
 }
 
+// NotificationsChannel is the channel the shell's notification feed
+// subscribes to (notification-system.md §9). Every session subscribes to
+// it under this one name, so its messages go out with BroadcastUser.
+const NotificationsChannel = "notifications"
+
+// broadcastWriteTimeout bounds one connection's write, so a half-open
+// connection can't hold a broadcast, and a request that sends one, open.
+const broadcastWriteTimeout = 5 * time.Second
+
 // UserChannel is shell-architecture.md §12's own ui:user:{id} channel —
 // every currently-connected client belonging to userID, regardless of
 // tenant. Used by internal/engine/auth/roleassign's role-change broadcast
@@ -190,8 +200,25 @@ func UserChannel(userID string) string {
 // delivery to others either; that connection's own Serve loop will
 // observe the same failure on its next read and unregister itself.
 func (h *Hub) Broadcast(ctx context.Context, channel, msgType string, payload any) (int, error) {
+	return h.broadcast(ctx, channel, msgType, payload, func(*Conn) bool { return true })
+}
+
+// BroadcastUser is Broadcast restricted to the channel's subscribers
+// connected as userID under tenantID, for a message carrying one user's
+// data in one tenant on a channel every session subscribes to under the
+// same name, such as NotificationsChannel.
+func (h *Hub) BroadcastUser(ctx context.Context, channel, tenantID, userID, msgType string, payload any) (int, error) {
+	return h.broadcast(ctx, channel, msgType, payload, func(c *Conn) bool { return c.TenantID == tenantID && c.UserID == userID })
+}
+
+func (h *Hub) broadcast(ctx context.Context, channel, msgType string, payload any, include func(*Conn) bool) (int, error) {
 	h.mu.RLock()
-	targets := slices.Collect(maps.Values(h.subscribers[channel]))
+	var targets []*Conn
+	for _, c := range h.subscribers[channel] {
+		if include(c) {
+			targets = append(targets, c)
+		}
+	}
 	h.mu.RUnlock()
 
 	env := outboundEnvelope{Channel: channel, Type: msgType, Payload: payload}
@@ -199,6 +226,8 @@ func (h *Hub) Broadcast(ctx context.Context, channel, msgType string, payload an
 	var wg sync.WaitGroup
 	for _, c := range targets {
 		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(ctx, broadcastWriteTimeout)
+			defer cancel()
 			if err := wsjson.Write(ctx, c.ws, env); err == nil {
 				reached.Add(1)
 			}
