@@ -336,3 +336,83 @@ func TestLoadFS_ResolvesAndRendersFromAnFS(t *testing.T) {
 		t.Errorf("Render() = %s, want %s", got, want)
 	}
 }
+
+func TestRows_SplitsEachChannelIntoItsColumns(t *testing.T) {
+	fsys := fstest.MapFS{
+		"in_app.en.json":  {Data: []byte(`{"title": "Order {{.Ref}}", "body": "B", "action_url": "/_m/o/{{.ID}}", "icon": "cart"}`)},
+		"email.en.html":   {Data: []byte(`<p>{{.Ref}}</p>`)},
+		"email.en.json":   {Data: []byte(`{"subject": "S {{.Ref}}"}`)},
+		"email.en.txt":    {Data: []byte(`text {{.Ref}}`)},
+		"email.fr.html":   {Data: []byte(`<p>fr</p>`)},
+		"sms.en.txt":      {Data: []byte(`sms {{.Ref}}`)},
+		"push.en.json":    {Data: []byte(`{"title": "PT", "body": "PB"}`)},
+		"in_app.fr.json":  {Data: []byte(`{"title": "Commande"}`)},
+		"unused/x.en.txt": {Data: []byte(`ignored`)},
+	}
+	types := orderConfirmedType(map[string]string{
+		"in_app": "in_app.{locale}.json", "email": "email.{locale}.html", "sms": "sms.{locale}.txt", "push": "push.{locale}.json",
+	})
+	mt, err := LoadFS(types, fsys)
+	if err != nil {
+		t.Fatalf("LoadFS() error: %v", err)
+	}
+	rows, err := mt.Rows("sales")
+	if err != nil {
+		t.Fatalf("Rows() error: %v", err)
+	}
+
+	got := map[string]map[string]string{}
+	for _, r := range rows {
+		if r.TemplateKey != "sales.order_confirmed" {
+			t.Errorf("TemplateKey = %q, want sales.order_confirmed", r.TemplateKey)
+		}
+		got[r.Channel+"/"+r.Locale] = r.Fields
+	}
+	want := map[string]map[string]string{
+		"in_app/en": {ColTitle: "Order {{.Ref}}", ColBody: "B", ColActionURL: "/_m/o/{{.ID}}", ColIcon: "cart"},
+		"in_app/fr": {ColTitle: "Commande"},
+		"email/en":  {ColHTML: "<p>{{.Ref}}</p>", ColSubject: "S {{.Ref}}", ColText: "text {{.Ref}}"},
+		"email/fr":  {ColHTML: "<p>fr</p>"},
+		"sms/en":    {ColSMS: "sms {{.Ref}}"},
+		"push/en":   {ColPushTitle: "PT", ColPushBody: "PB"},
+	}
+	if len(got) != len(want) {
+		t.Errorf("Rows() = %d rows, want %d: %v", len(got), len(want), got)
+	}
+	for id, fields := range want {
+		for col, v := range fields {
+			if got[id][col] != v {
+				t.Errorf("%s %s = %q, want %q", id, col, got[id][col], v)
+			}
+		}
+		if len(got[id]) != len(fields) {
+			t.Errorf("%s has fields %v, want only %v", id, got[id], fields)
+		}
+	}
+}
+
+func TestRows_NilTemplatesHaveNoRows(t *testing.T) {
+	var mt *ModuleTemplates
+	rows, err := mt.Rows("sales")
+	if rows != nil || err != nil {
+		t.Errorf("Rows() = (%v, %v), want (nil, nil)", rows, err)
+	}
+}
+
+func TestRows_IgnoresExtraJSONKeysAndReportsAnUnusableVariant(t *testing.T) {
+	fsys := fstest.MapFS{
+		"in_app.en.json": {Data: []byte(`{"title": "T", "meta": {"a": 1}}`)},
+		"in_app.fr.json": {Data: []byte(`{"title": 5}`)},
+	}
+	mt, err := LoadFS(orderConfirmedType(map[string]string{"in_app": "in_app.{locale}.json"}), fsys)
+	if err != nil {
+		t.Fatalf("LoadFS() error: %v", err)
+	}
+	rows, err := mt.Rows("sales")
+	if err == nil {
+		t.Error("Rows() error = nil, want one for the variant whose title is not a string")
+	}
+	if len(rows) != 1 || rows[0].Locale != "en" || rows[0].Fields[ColTitle] != "T" {
+		t.Errorf("Rows() = %+v, want only the en variant", rows)
+	}
+}

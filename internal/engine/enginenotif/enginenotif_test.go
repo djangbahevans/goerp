@@ -77,3 +77,22 @@ type inApp struct {
 	Body  string `json:"body"`
 	Icon  string `json:"icon"`
 }
+
+func TestDefaultRows_HaveOneInAppRowPerShippedTemplate(t *testing.T) {
+	rows, err := DefaultRows()
+	if err != nil {
+		t.Fatalf("DefaultRows() error: %v", err)
+	}
+	got := map[string]string{}
+	for _, r := range rows {
+		got[r.TemplateKey+"/"+r.Channel+"/"+r.Locale] = r.Fields["title_template"]
+	}
+	for _, key := range []string{"engine.activity_assigned/in_app/en", "engine.activity_due/in_app/en"} {
+		if got[key] == "" {
+			t.Errorf("DefaultRows() has no title for %s: %v", key, got)
+		}
+	}
+	if len(rows) != 2 {
+		t.Errorf("DefaultRows() = %d rows, want 2", len(rows))
+	}
+}

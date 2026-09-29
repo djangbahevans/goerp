@@ -69,3 +69,9 @@ var Templates = sync.OnceValue(func() *notiftemplate.ModuleTemplates {
 func loadTemplates(fsys fs.FS) (*notiftemplate.ModuleTemplates, error) {
 	return notiftemplate.LoadFS(Types, fsys)
 }
+
+// DefaultRows are the engine types' default templates as
+// notification_templates rows, keyed "engine.{name}".
+func DefaultRows() ([]notiftemplate.Row, error) {
+	return Templates().Rows(Module)
+}
