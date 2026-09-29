@@ -158,6 +158,7 @@ func makeDBCommit(r *Runtime) func(ctx context.Context, m api.Module, ptr, lengt
 			})
 		}
 
+		afterCommit := modCtx.afterCommitHooks(input.TxID)
 		start := time.Now()
 		err = tx.Commit()
 		modCtx.RemoveTransaction(input.TxID)
@@ -175,8 +176,12 @@ func makeDBCommit(r *Runtime) func(ctx context.Context, m api.Module, ptr, lengt
 			}
 			return abi.EncodeHostError(ctx, m, allocate, hostErr)
 		}
+		duration := time.Since(start)
 
-		return abi.WriteToModule(ctx, m, allocate, abiv1.DBDurationOutput{DurationMs: float64(time.Since(start).Microseconds()) / 1000})
+		for _, fn := range afterCommit {
+			fn(ctx)
+		}
+		return abi.WriteToModule(ctx, m, allocate, abiv1.DBDurationOutput{DurationMs: float64(duration.Microseconds()) / 1000})
 	}
 }
 

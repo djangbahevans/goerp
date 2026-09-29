@@ -4,8 +4,8 @@
 // sdk/go/db, sdk/go/events and sdk/go/jobs packages
 // (db.Begin/events.EmitTx/tx.Commit, events.Emit(..., events.WithSync()),
 // tx.Lock/tx.TryLock, jobs.EnqueueTx, jobs.EnqueueProviderTx,
-// jobs.DispatchProviderSync), rather than a hand-assembled
-// bytecode stand-in.
+// jobs.DispatchProviderSync, notify.SendTx, notify.SendBulk), rather than
+// a hand-assembled bytecode stand-in.
 //
 // Must be built with:
 //
@@ -17,6 +17,7 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/events"
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
+	"github.com/djangbahevans/goerp/sdk/go/notify"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -147,6 +148,45 @@ func runLockFlow() uint64 {
 
 	if err := tx.Commit(); err != nil {
 		return writeResult(flowResult{Error: "commit: " + err.Error()})
+	}
+	return writeResult(flowResult{OK: true})
+}
+
+// orderConfirmed is template data sent as a struct, to show it reaches
+// the engine as a map keyed by field name.
+type orderConfirmed struct {
+	OrderReference string
+	AmountTotal    int
+}
+
+//go:wasmexport run_notify_send_tx_flow
+func runNotifySendTxFlow() uint64 {
+	tx, err := db.Begin()
+	if err != nil {
+		return writeResult(flowResult{Error: "begin: " + err.Error()})
+	}
+
+	err = notify.SendTx(tx, "user-2", "sales.order_confirmed", "sales.order_confirmed",
+		orderConfirmed{OrderReference: "ORD-1", AmountTotal: 42},
+		notify.HighPriority(), notify.ForceChannel(notify.ChannelSMS), notify.AdditionalChannel(notify.ChannelPush),
+		notify.WithIdempotencyKey("order-confirmed:ORD-1"), notify.WithActionURL("/_m/sales/orders/ORD-1"))
+	if err != nil {
+		_ = tx.Rollback()
+		return writeResult(flowResult{Error: "send_tx: " + err.Error()})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return writeResult(flowResult{Error: "commit: " + err.Error()})
+	}
+
+	return writeResult(flowResult{OK: true})
+}
+
+//go:wasmexport run_notify_send_bulk_flow
+func runNotifySendBulkFlow() uint64 {
+	err := notify.SendBulk([]string{"user-2", "user-3"}, "sales.order_shipped", "sales.order_shipped", map[string]any{"TrackingNumber": "TRK-1"})
+	if err != nil {
+		return writeResult(flowResult{Error: err.Error()})
 	}
 	return writeResult(flowResult{OK: true})
 }

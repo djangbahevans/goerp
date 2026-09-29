@@ -49,6 +49,9 @@ type Runtime struct {
 	configResolver ConfigResolver
 	configStore    ConfigStore
 
+	// notifySender backs host.notify (host_notify.go).
+	notifySender NotifySender
+
 	// rowCryptKeys encrypts/decrypts an "encrypted": true config_schema
 	// entry's value (host-abi-reference.md §14), reusing the engine's
 	// existing row-encryption key set.
@@ -253,6 +256,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := registerHostConfig(ctx, rt, r); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.config: %w", err)
+	}
+
+	if err := registerHostNotify(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.notify: %w", err)
 	}
 
 	stdout := log.With().Str("component", "wasm").Str("stream", "stdout").Logger()
