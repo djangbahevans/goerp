@@ -66,9 +66,41 @@ type Worker struct {
 	// inside a job handler needs.
 	Runtime     *wasm.Runtime
 	TenantStore *tenant.Store
+	// Deliveries tracks a notification delivery job — one whose
+	// NotificationID is set — on its notification's deliveries.
+	Deliveries DeliveryTracker
+}
+
+// DeliveryTracker records a notification's sms_send or push_send job on
+// its notification_deliveries rows — satisfied by
+// *notify.ProviderDeliveries. Begin returns the payload the handler runs
+// with, or ok false when nothing is left to send; Finish records the
+// attempt's result, a failed Begin included, and returns the error Work
+// reports.
+type DeliveryTracker interface {
+	Begin(ctx context.Context, args jobqueue.WASMJobArgs) (payload []byte, ok bool, err error)
+	Finish(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs], workErr error) error
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs]) error {
+	if job.Args.NotificationID == "" {
+		return w.work(ctx, job, job.Args.Payload)
+	}
+	if w.Deliveries == nil {
+		return fmt.Errorf("notification delivery job %s/%s: no delivery tracker", job.Args.ModuleName, job.Args.JobType)
+	}
+	payload, ok, err := w.Deliveries.Begin(ctx, job.Args)
+	if err != nil {
+		return w.Deliveries.Finish(ctx, job, err)
+	}
+	if !ok {
+		return nil
+	}
+	return w.Deliveries.Finish(ctx, job, w.work(ctx, job, payload))
+}
+
+// work runs job's handler with payload in place of the job's own.
+func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs], payload []byte) error {
 	args := job.Args
 
 	snap := w.ModuleRegistry.Snapshot()
@@ -123,7 +155,9 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 		return fmt.Errorf("resolve tenant %s: %w", args.TenantID, err)
 	}
 
-	status, _, err := invokeHandleJob(ctx, w.Runtime, snap, mod, args, t.Slug, newJobEnvelope(job), false)
+	env := newJobEnvelope(job)
+	env.Payload = payload
+	status, _, err := invokeHandleJob(ctx, w.Runtime, snap, mod, args, t.Slug, env, false)
 	if err != nil {
 		return err
 	}

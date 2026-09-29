@@ -46,11 +46,14 @@ type NewNotification struct {
 
 // NewDelivery is one notification_deliveries row to insert: one channel
 // to one recipient (a user ID, email address, phone number or push device
-// token). Provider is empty when there is none (in_app).
+// token). Provider is empty when there is none (in_app). FailureReason,
+// when set, inserts the row already failed: the send was over before any
+// job could attempt it.
 type NewDelivery struct {
-	Channel   string
-	Recipient string
-	Provider  string
+	Channel       string
+	Recipient     string
+	Provider      string
+	FailureReason string
 }
 
 // Delivery is one inserted notification_deliveries row.
@@ -131,27 +134,32 @@ func DeliveryChannelsTx(ctx context.Context, tx *sql.Tx, tenantSlug, notificatio
 }
 
 // CreateDeliveriesTx inserts one row per delivery for notificationID on
-// tx, in order. An in_app row is inserted delivered; every other channel's
-// is pending until its delivery job reports back.
+// tx, in order. An in_app row is inserted delivered, one with a
+// FailureReason failed, and every other is pending until its delivery job
+// reports back.
 func CreateDeliveriesTx(ctx context.Context, tx *sql.Tx, tenantSlug, tenantID, notificationID string, deliveries []NewDelivery) ([]Delivery, error) {
 	query := fmt.Sprintf(`
 		INSERT INTO %s.notification_deliveries
-		    (notification_id, tenant_id, channel, recipient, status, provider, idempotency_key, attempted_at, delivered_at)
+		    (notification_id, tenant_id, channel, recipient, status, provider, idempotency_key, attempted_at, delivered_at, failure_reason)
 		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7,
 		        CASE WHEN $5 = 'delivered' THEN NOW() END,
-		        CASE WHEN $5 = 'delivered' THEN NOW() END)
+		        CASE WHEN $5 = 'delivered' THEN NOW() END,
+		        NULLIF($8, ''))
 		RETURNING id
 	`, tenantschema.Name(tenantSlug))
 
 	out := make([]Delivery, 0, len(deliveries))
 	for _, d := range deliveries {
 		status := DeliveryPending
-		if d.Channel == ChannelInApp {
+		switch {
+		case d.Channel == ChannelInApp:
 			status = DeliveryDelivered
+		case d.FailureReason != "":
+			status = DeliveryFailed
 		}
 		key := DeliveryIdempotencyKey(notificationID, d.Channel, d.Recipient)
 		var id string
-		if err := tx.QueryRowContext(ctx, query, notificationID, tenantID, d.Channel, d.Recipient, status, d.Provider, key).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, query, notificationID, tenantID, d.Channel, d.Recipient, status, d.Provider, key, d.FailureReason).Scan(&id); err != nil {
 			return nil, fmt.Errorf("create %s notification delivery: %w", d.Channel, err)
 		}
 		out = append(out, Delivery{ID: id, Channel: d.Channel, Recipient: d.Recipient, Status: status, IdempotencyKey: key})

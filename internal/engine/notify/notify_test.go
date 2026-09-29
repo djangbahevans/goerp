@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -43,7 +45,11 @@ var salesTypes = []manifest.NotificationType{
 		Label:             "Order Confirmed",
 		DefaultChannels:   []string{inApp, email, push},
 		AvailableChannels: []string{inApp, email, sms, push},
-		Templates:         map[string]string{inApp: "notifications/order_confirmed/in_app.{locale}.json"},
+		Templates: map[string]string{
+			inApp: "notifications/order_confirmed/in_app.{locale}.json",
+			sms:   "notifications/order_confirmed/sms.{locale}.txt",
+			push:  "notifications/order_confirmed/push.{locale}.json",
+		},
 	},
 }
 
@@ -169,18 +175,23 @@ func openTestEnv(t *testing.T) *testEnv {
 	return &testEnv{conn: conn, roleID: roleID, tenant: tt, store: store, config: cfg, hub: hub, sender: sender}
 }
 
-// salesRegistry holds a "sales" module declaring salesTypes, with an
-// in_app template.
+// salesRegistry holds a "sales" module declaring salesTypes, with in_app,
+// sms and push templates.
 func salesRegistry(t *testing.T) *registry.ModuleRegistry {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "notifications", "order_confirmed", "in_app.en.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	base := filepath.Join(dir, "notifications", "order_confirmed")
+	if err := os.MkdirAll(base, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	template := `{"title": "Order {{.OrderReference}} confirmed", "body": "Hi {{.UserFirstName}}, {{.TenantName}} confirmed it.", "action_url": "/_m/sales/orders/{{.OrderID}}", "icon": "shopping-cart"}`
-	if err := os.WriteFile(path, []byte(template), 0o644); err != nil {
-		t.Fatal(err)
+	for name, template := range map[string]string{
+		"in_app.en.json": `{"title": "Order {{.OrderReference}} confirmed", "body": "Hi {{.UserFirstName}}, {{.TenantName}} confirmed it.", "action_url": "/_m/sales/orders/{{.OrderID}}", "icon": "shopping-cart"}`,
+		"sms.en.txt":     "{{.TenantName}}: order {{.OrderReference}} confirmed.{{if .BreakSMS}}{{index .BreakSMS 9}}{{end}}\n",
+		"push.en.json":   `{"title": "Order {{.OrderReference}}", "body": "Confirmed by {{.TenantName}}"}`,
+	} {
+		if err := os.WriteFile(filepath.Join(base, name), []byte(template), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	templates, err := notiftemplate.Load(salesTypes, dir)
 	if err != nil {
@@ -290,17 +301,13 @@ func TestSend_CreatesNotificationDeliveriesAndJobs(t *testing.T) {
 	env.registerDevice(t, userID, "android", "tok-a")
 	env.registerDevice(t, userID, "ios", "tok-b")
 
-	res, err := env.sender.Send(t.Context(), env.tenant.ID, "sales", orderConfirmed, userID,
-		map[string]any{"OrderReference": `ORD "42"`, "OrderID": "o-42"}, Options{TraceID: "trace-1"})
-	if err != nil {
-		t.Fatalf("Send() error: %v", err)
-	}
+	res := env.sendParked(t, userID, map[string]any{"OrderReference": `ORD "42"`, "OrderID": "o-42"}, Options{TraceID: "trace-1"})
 	if want := []string{inApp, email, push}; !slices.Equal(res.ChannelsUsed, want) {
 		t.Errorf("ChannelsUsed = %v, want %v", res.ChannelsUsed, want)
 	}
 
 	var title, body, actionURL, icon, typ, mod string
-	err = env.conn.QueryRow(fmt.Sprintf(`SELECT title, body, action_url, icon, type, module FROM %s.notifications WHERE id = $1`, tenantschema.Name(env.tenant.Slug)), res.NotificationID).
+	err := env.conn.QueryRow(fmt.Sprintf(`SELECT title, body, action_url, icon, type, module FROM %s.notifications WHERE id = $1`, tenantschema.Name(env.tenant.Slug)), res.NotificationID).
 		Scan(&title, &body, &actionURL, &icon, &typ, &mod)
 	if err != nil {
 		t.Fatalf("load notification: %v", err)
@@ -352,13 +359,24 @@ func TestSend_CreatesNotificationDeliveriesAndJobs(t *testing.T) {
 		pushArgs.EnqueuedBy != "sales" || pushArgs.TraceID != "trace-1" {
 		t.Errorf("push_send job = %+v", pushArgs)
 	}
-	var payload pushSendPayload
+	if pushArgs.NotificationID != res.NotificationID {
+		t.Errorf("push_send NotificationID = %q, want %q", pushArgs.NotificationID, res.NotificationID)
+	}
+	var payload abiv1.PushSendPayload
 	if err := msgpack.Unmarshal(pushArgs.Payload, &payload); err != nil {
 		t.Fatalf("decode push_send payload: %v", err)
 	}
-	if payload.NotificationID != res.NotificationID || len(payload.Tokens) != 2 ||
-		payload.Tokens[0] != (pushToken{Platform: "android", Token: "tok-a", IdempotencyKey: res.NotificationID + ":push:tok-a"}) {
-		t.Errorf("push_send payload = %+v", payload)
+	wantPush := abiv1.PushSendPayload{
+		SchemaVersion: abiv1.ProviderPayloadSchemaVersion, TenantID: env.tenant.ID, NotificationID: res.NotificationID,
+		Tokens: []abiv1.PushDeviceToken{
+			{Platform: "android", Token: "tok-a", IdempotencyKey: res.NotificationID + ":push:tok-a"},
+			{Platform: "ios", Token: "tok-b", IdempotencyKey: res.NotificationID + ":push:tok-b"},
+		},
+		Title: `Order ORD "42"`, Body: "Confirmed by Notify Test Co", ActionURL: "/_m/sales/orders/o-42",
+		Data: map[string]string{"notification_id": res.NotificationID, "type": orderConfirmed},
+	}
+	if !reflect.DeepEqual(payload, wantPush) {
+		t.Errorf("push_send payload = %+v\nwant %+v", payload, wantPush)
 	}
 	if n := env.jobCount(t); n != 2 {
 		t.Errorf("%d jobs enqueued, want 2", n)
@@ -379,7 +397,8 @@ func TestSend_SMSGoesToTheProfilePhoneThroughTheSMSProvider(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t, "Kofi Mensah", "+233501234567")
 
-	res, err := env.sender.Send(t.Context(), env.tenant.ID, "sales", orderConfirmed, userID, nil, Options{ForceChannels: []string{sms}})
+	res, err := env.sender.Send(t.Context(), env.tenant.ID, "sales", orderConfirmed, userID,
+		map[string]any{"OrderReference": "ORD-7"}, Options{ForceChannels: []string{sms}})
 	if err != nil {
 		t.Fatalf("Send() error: %v", err)
 	}
@@ -395,13 +414,20 @@ func TestSend_SMSGoesToTheProfilePhoneThroughTheSMSProvider(t *testing.T) {
 	if err := json.Unmarshal(raw, &args); err != nil {
 		t.Fatal(err)
 	}
-	var payload smsSendPayload
+	var payload abiv1.SMSSendPayload
 	if err := msgpack.Unmarshal(args.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if args.ModuleName != "connector_africastalking" || payload.To != "+233501234567" || payload.From != "ACME" ||
-		payload.IdempotencyKey != res.NotificationID+":sms:+233501234567" || payload.SchemaVersion != providerPayloadSchemaVersion {
-		t.Errorf("sms_send job = %+v, payload %+v", args, payload)
+	if args.ModuleName != "connector_africastalking" || args.ProviderCategory != providerselect.CategorySMS || args.NotificationID != res.NotificationID {
+		t.Errorf("sms_send job = %+v", args)
+	}
+	want := abiv1.SMSSendPayload{
+		SchemaVersion: abiv1.ProviderPayloadSchemaVersion, TenantID: env.tenant.ID, NotificationID: res.NotificationID,
+		To: "+233501234567", From: "ACME", Body: "Notify Test Co: order ORD-7 confirmed.",
+		IdempotencyKey: res.NotificationID + ":sms:+233501234567",
+	}
+	if payload != want {
+		t.Errorf("sms_send payload = %+v\nwant %+v", payload, want)
 	}
 }
 

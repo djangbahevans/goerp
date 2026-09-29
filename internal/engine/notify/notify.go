@@ -44,13 +44,9 @@ const (
 // Delivery job types a provider connector handles (connector-guide.md §8,
 // §9).
 const (
-	JobTypeSMSSend  = "sms_send"
-	JobTypePushSend = "push_send"
+	JobTypeSMSSend  = abiv1.JobTypeSMSSend
+	JobTypePushSend = abiv1.JobTypePushSend
 )
-
-// providerPayloadSchemaVersion is the schema_version every provider
-// category payload carries (host-abi-reference.md §10).
-const providerPayloadSchemaVersion = 1
 
 var (
 	// ErrUnknownUser: the recipient is not a live user who belongs to the
@@ -289,6 +285,7 @@ type preparedSend struct {
 	data           map[string]any
 	plan           []channelPlan
 	content        inAppContent
+	provider       providerContent
 	traceID        string
 	idempotencyKey string
 }
@@ -354,16 +351,18 @@ func (s *Sender) prepareRecipient(ctx context.Context, spec *sendSpec, userID st
 		return nil, err
 	}
 
-	content, err := renderInApp(spec.snapshot, spec.moduleName, spec.declared.Name, spec.declared.Label, user.locale, templateVars(data, t, user, opts))
+	vars := templateVars(data, t, user, opts)
+	content, err := renderInApp(spec.snapshot, spec.moduleName, spec.declared.Name, spec.declared.Label, user.locale, vars)
 	if err != nil {
 		return nil, err
 	}
 	if opts.ActionURL != "" {
 		content.ActionURL = opts.ActionURL
 	}
+	provider := renderProviderChannels(spec.snapshot, spec.moduleName, spec.declared.Name, user.locale, plan, content, vars)
 
 	return &preparedSend{
-		sendSpec: spec, userID: userID, data: data, plan: plan, content: content,
+		sendSpec: spec, userID: userID, data: data, plan: plan, content: content, provider: provider,
 		traceID: opts.TraceID, idempotencyKey: opts.IdempotencyKey,
 	}, nil
 }
@@ -398,15 +397,19 @@ func (s *Sender) write(ctx context.Context, tx *sql.Tx, p *preparedSend) (*Resul
 
 	var rows []notifications.NewDelivery
 	for _, cp := range p.plan {
+		var reason string
+		if err := p.provider.failed[cp.channel]; err != nil {
+			reason = err.Error()
+		}
 		for _, r := range cp.recipients {
-			rows = append(rows, notifications.NewDelivery{Channel: cp.channel, Recipient: r.address, Provider: cp.provider})
+			rows = append(rows, notifications.NewDelivery{Channel: cp.channel, Recipient: r.address, Provider: cp.provider, FailureReason: reason})
 		}
 	}
 	deliveries, err := notifications.CreateDeliveriesTx(ctx, tx, t.Slug, t.ID, n.ID, rows)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.enqueueTx(ctx, tx, t, p.moduleName, n.ID, p.cfg, p.plan, deliveries, p.priority, p.traceID); err != nil {
+	if err := s.enqueueTx(ctx, tx, p, n.ID, deliveries); err != nil {
 		return nil, err
 	}
 
@@ -576,39 +579,14 @@ func emailConfigured(c notifconfig.EmailConfig) bool {
 	}
 }
 
-// smsSendPayload is the sms_send job's payload. The connector-facing
-// contract, rendered body included, is goerp#1287's.
-type smsSendPayload struct {
-	SchemaVersion  int    `msgpack:"schema_version"`
-	TenantID       string `msgpack:"tenant_id"`
-	NotificationID string `msgpack:"notification_id"`
-	To             string `msgpack:"to"`
-	From           string `msgpack:"from"`
-	IdempotencyKey string `msgpack:"idempotency_key"`
-}
-
-// pushSendPayload is the push_send job's payload: every device token the
-// user has, each its own delivery. The connector-facing contract, rendered
-// title and body included, is goerp#1287's.
-type pushSendPayload struct {
-	SchemaVersion  int         `msgpack:"schema_version"`
-	TenantID       string      `msgpack:"tenant_id"`
-	NotificationID string      `msgpack:"notification_id"`
-	Tokens         []pushToken `msgpack:"tokens"`
-}
-
-type pushToken struct {
-	Platform       string `msgpack:"platform"`
-	Token          string `msgpack:"token"`
-	IdempotencyKey string `msgpack:"idempotency_key"`
-}
-
-// enqueueTx inserts each non-in_app channel's delivery job on tx: an
-// email_send per email delivery, and one provider-category job per sms or
-// push channel, dispatched to the provider planDeliveries resolved.
-func (s *Sender) enqueueTx(ctx context.Context, tx *sql.Tx, t *tenant.Tenant, moduleName, notificationID string, cfg *notifconfig.Config, plan []channelPlan, deliveries []notifications.Delivery, priority, traceID string) error {
+// enqueueTx inserts each non-in_app channel's delivery job for p's
+// notification on tx: an email_send per email delivery, and one
+// provider-category job per sms or push channel, dispatched to the
+// provider planDeliveries resolved.
+func (s *Sender) enqueueTx(ctx context.Context, tx *sql.Tx, p *preparedSend, notificationID string, deliveries []notifications.Delivery) error {
+	t := p.tenant
 	riverPriority := 3
-	if priority == PriorityHigh {
+	if p.priority == PriorityHigh {
 		riverPriority = 1
 	}
 
@@ -617,9 +595,14 @@ func (s *Sender) enqueueTx(ctx context.Context, tx *sql.Tx, t *tenant.Tenant, mo
 		byChannel[d.Channel] = append(byChannel[d.Channel], d)
 	}
 
-	for _, p := range plan {
-		ds := byChannel[p.channel]
-		switch p.channel {
+	for _, cp := range p.plan {
+		if err := p.provider.failed[cp.channel]; err != nil {
+			log.Warn().Err(err).Str("tenant_id", t.ID).Str("notification_id", notificationID).Str("channel", cp.channel).
+				Msg("notify: template did not render, channel's deliveries failed")
+			continue
+		}
+		ds := byChannel[cp.channel]
+		switch cp.channel {
 		case notifications.ChannelEmail:
 			for _, d := range ds {
 				args := jobqueue.EmailSendArgs{
@@ -633,20 +616,24 @@ func (s *Sender) enqueueTx(ctx context.Context, tx *sql.Tx, t *tenant.Tenant, mo
 
 		case notifications.ChannelSMS:
 			d := ds[0]
-			payload := smsSendPayload{
-				SchemaVersion: providerPayloadSchemaVersion, TenantID: t.ID, NotificationID: notificationID,
-				To: d.Recipient, From: cfg.SMS.SenderID, IdempotencyKey: d.IdempotencyKey,
+			payload := abiv1.SMSSendPayload{
+				SchemaVersion: abiv1.ProviderPayloadSchemaVersion, TenantID: t.ID, NotificationID: notificationID,
+				To: d.Recipient, From: p.cfg.SMS.SenderID, Body: p.provider.smsBody, IdempotencyKey: d.IdempotencyKey,
 			}
-			if err := s.insertProviderJob(ctx, tx, t.ID, moduleName, providerselect.CategorySMS, JobTypeSMSSend, p.provider, payload, riverPriority, traceID); err != nil {
+			if err := s.insertProviderJob(ctx, tx, p, notificationID, providerselect.CategorySMS, JobTypeSMSSend, cp.provider, payload, riverPriority); err != nil {
 				return err
 			}
 
 		case notifications.ChannelPush:
-			payload := pushSendPayload{SchemaVersion: providerPayloadSchemaVersion, TenantID: t.ID, NotificationID: notificationID}
-			for i, d := range ds {
-				payload.Tokens = append(payload.Tokens, pushToken{Platform: p.recipients[i].platform, Token: d.Recipient, IdempotencyKey: d.IdempotencyKey})
+			payload := abiv1.PushSendPayload{
+				SchemaVersion: abiv1.ProviderPayloadSchemaVersion, TenantID: t.ID, NotificationID: notificationID,
+				Title: p.provider.pushTitle, Body: p.provider.pushBody, ActionURL: p.content.ActionURL,
+				Data: map[string]string{"notification_id": notificationID, "type": p.notificationType},
 			}
-			if err := s.insertProviderJob(ctx, tx, t.ID, moduleName, providerselect.CategoryPush, JobTypePushSend, p.provider, payload, riverPriority, traceID); err != nil {
+			for i, d := range ds {
+				payload.Tokens = append(payload.Tokens, abiv1.PushDeviceToken{Platform: cp.recipients[i].platform, Token: d.Recipient, IdempotencyKey: d.IdempotencyKey})
+			}
+			if err := s.insertProviderJob(ctx, tx, p, notificationID, providerselect.CategoryPush, JobTypePushSend, cp.provider, payload, riverPriority); err != nil {
 				return err
 			}
 		}
@@ -655,8 +642,11 @@ func (s *Sender) enqueueTx(ctx context.Context, tx *sql.Tx, t *tenant.Tenant, mo
 }
 
 // insertProviderJob inserts a provider-category job for providerModule the
-// way host.jobs.enqueue_provider_tx does, on behalf of the emitting module.
-func (s *Sender) insertProviderJob(ctx context.Context, tx *sql.Tx, tenantID, moduleName, category, jobType, providerModule string, payload any, riverPriority int, traceID string) error {
+// way host.jobs.enqueue_provider_tx does, on behalf of p's emitting module.
+// Its NotificationID is what has jobdispatch.Worker record the job's
+// outcome on the notification's deliveries.
+func (s *Sender) insertProviderJob(ctx context.Context, tx *sql.Tx, p *preparedSend, notificationID, category, jobType, providerModule string, payload any, riverPriority int) error {
+	tenantID, moduleName, traceID := p.tenant.ID, p.moduleName, p.traceID
 	encoded, err := msgpack.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode %s payload: %w", jobType, err)
@@ -675,6 +665,7 @@ func (s *Sender) insertProviderJob(ctx context.Context, tx *sql.Tx, tenantID, mo
 		TraceID:          traceID,
 		ProviderCategory: category,
 		EnqueuedBy:       moduleName,
+		NotificationID:   notificationID,
 	}
 	opts := &river.InsertOpts{
 		Queue:       jobqueue.QueueDefault,

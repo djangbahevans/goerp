@@ -937,7 +937,10 @@ func New(cfg *config.Config) (*Engine, error) {
 		AppBaseURL:     cfg.AppBaseURL,
 		PlatformDomain: cfg.PlatformDomain,
 	}))
-	river.AddWorker(jobWorkers, &jobdispatch.Worker{ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool, Runtime: runtime, TenantStore: tenantStore})
+	river.AddWorker(jobWorkers, &jobdispatch.Worker{
+		ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool, Runtime: runtime, TenantStore: tenantStore,
+		Deliveries: &notify.ProviderDeliveries{DB: primaryPool, Tenants: tenantStore},
+	})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
 		closeOnFailure()
