@@ -29,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
+	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -465,12 +466,15 @@ func (s *Sender) loadRecipient(ctx context.Context, tenantSlug, userID string) (
 		return nil, fmt.Errorf("%w: %q", ErrUnknownUser, userID)
 	}
 	u := &recipient{id: userID}
-	err = s.DB.QueryRowContext(ctx, `
-		SELECT u.email, COALESCE(p.name, ''), COALESCE(p.locale, ''), COALESCE(p.phone, '')
+	// The phone is the number the member gave this tenant (auth-internals.md
+	// §2 "Tenant members"), never one given to another.
+	err = s.DB.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT u.email, COALESCE(p.name, ''), COALESCE(p.locale, ''), COALESCE(tm.phone, '')
 		FROM system.users u
 		LEFT JOIN system.user_profiles p ON p.user_id = u.id
+		LEFT JOIN %s.tenant_members tm ON tm.user_id = u.id
 		WHERE u.id = $1 AND u.deleted_at IS NULL
-	`, userID).Scan(&u.email, &u.name, &u.locale, &u.phone)
+	`, tenantschema.Name(tenantSlug)), userID).Scan(&u.email, &u.name, &u.locale, &u.phone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownUser, userID)
 	}

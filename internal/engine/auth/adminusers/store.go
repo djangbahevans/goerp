@@ -10,28 +10,30 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
 
-var (
-	errUserNotFound = errors.New("user not found")
-	errStateChanged = errors.New("user status does not allow this transition")
-)
+var errUserNotFound = errors.New("user not found")
 
-// entry is one row of a tenant's user directory: a member (a live
-// user_roles grant) or an invitee (a pending tenant_invitations row and no
-// membership yet). Status is "invited" for an invitee and users.status for
-// a member.
+// entry is one row of a tenant's user directory: a member (a
+// tenant_members row, active or suspended) or an invitee (a pending
+// tenant_invitations row and no member row yet). Status is "invited" for
+// an invitee and tenant_members.status for a member; AccountSuspended
+// reports a platform operator's suspension of the whole account. The
+// last sign-in, phone and job title are this tenant's own.
 type entry struct {
-	ID           string
-	Email        string
-	Status       string
-	LastLoginAt  *time.Time
-	InvitationID *string
-	Name         *string
-	AvatarFileID *string
-	Phone        *string
-	Roles        []string
+	ID               string
+	Email            string
+	Status           string
+	AccountSuspended bool
+	LastLoginAt      *time.Time
+	InvitationID     *string
+	Name             *string
+	AvatarFileID     *string
+	Phone            *string
+	JobTitle         *string
+	Roles            []string
 }
 
 type invitation struct {
@@ -64,29 +66,27 @@ func NewStore(db *sql.DB, audit AuditRecorder) *Store {
 	return &Store{db: db, audit: audit}
 }
 
-// directoryCTE defines `entries` for a tenant schema. A user is a member
-// while any grant is unexpired, the same rule role.Store.IsMember applies.
+// directoryCTE defines `entries` for a tenant schema.
 func directoryCTE(schema string) string {
 	return fmt.Sprintf(`
-	WITH members AS (
-		SELECT DISTINCT user_id FROM %[1]s.user_roles
-		WHERE expires_at IS NULL OR expires_at > NOW()
-	), entries AS (
-		SELECT u.id, u.email, u.status, u.last_login_at, NULL::uuid AS invitation_id
-		FROM system.users u JOIN members m ON m.user_id = u.id
+	WITH entries AS (
+		SELECT u.id, u.email, tm.status, u.status = 'suspended' AS account_suspended,
+		       tm.last_login_at, NULL::uuid AS invitation_id, tm.phone, tm.job_title
+		FROM %[1]s.tenant_members tm JOIN system.users u ON u.id = tm.user_id
 		WHERE u.deleted_at IS NULL
 		UNION ALL
-		SELECT u.id, u.email, 'invited', u.last_login_at, ti.id
+		SELECT u.id, u.email, 'invited', u.status = 'suspended', NULL, ti.id, NULL, NULL
 		FROM %[1]s.tenant_invitations ti
 		JOIN system.users u ON u.email = ti.email AND u.deleted_at IS NULL
 		WHERE ti.accepted_at IS NULL AND ti.revoked_at IS NULL
-		  AND NOT EXISTS (SELECT 1 FROM members m WHERE m.user_id = u.id)
+		  AND NOT EXISTS (SELECT 1 FROM %[1]s.tenant_members tm WHERE tm.user_id = u.id)
 	)`, schema)
 }
 
 func entryColumns(schema string) string {
 	return fmt.Sprintf(`
-		e.id, e.email, e.status, e.last_login_at, e.invitation_id, p.name, p.avatar_file_id, p.phone,
+		e.id, e.email, e.status, e.account_suspended, e.last_login_at, e.invitation_id,
+		p.name, p.avatar_file_id, e.phone, e.job_title,
 		COALESCE((
 			SELECT json_agg(r.name ORDER BY r.name)
 			FROM %[1]s.user_roles ur JOIN %[1]s.roles r ON r.id = ur.role_id
@@ -97,7 +97,7 @@ func entryColumns(schema string) string {
 func scanEntry(sc interface{ Scan(dest ...any) error }) (entry, error) {
 	var e entry
 	var roles []byte
-	if err := sc.Scan(&e.ID, &e.Email, &e.Status, &e.LastLoginAt, &e.InvitationID, &e.Name, &e.AvatarFileID, &e.Phone, &roles); err != nil {
+	if err := sc.Scan(&e.ID, &e.Email, &e.Status, &e.AccountSuspended, &e.LastLoginAt, &e.InvitationID, &e.Name, &e.AvatarFileID, &e.Phone, &e.JobTitle, &roles); err != nil {
 		return entry{}, err
 	}
 	if err := json.Unmarshal(roles, &e.Roles); err != nil {
@@ -193,46 +193,51 @@ func (s *Store) liveInvitation(ctx context.Context, tenantSlug, email string) (*
 	return &inv, nil
 }
 
-// transition runs one users.status change and its audit row in a single
-// transaction (auth-internals.md §2 "Transactional audit"). The UPDATE is
-// guarded by condition; errStateChanged means it matched no row.
-func (s *Store) transition(ctx context.Context, userID, set, condition string, audit authaudit.Row) error {
+// transition runs one member lifecycle change and its audit row in a
+// single transaction (auth-internals.md §2 "Transactional audit"). When
+// guardAdmin is set, removing the tenant's last active admin is refused
+// with role.ErrLastAdmin first.
+func (s *Store) transition(ctx context.Context, tenantSlug, userID string, guardAdmin bool, change func(*sql.Tx) error, audit authaudit.Row) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin status transition: %w", err)
+		return fmt.Errorf("begin member transition: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.ExecContext(ctx, `UPDATE system.users SET `+set+`, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL AND `+condition, userID)
-	if err != nil {
-		return fmt.Errorf("update user status: %w", err)
+	if guardAdmin {
+		if err := role.GuardLastAdminTx(ctx, tx, tenantSlug, userID); err != nil {
+			return err
+		}
 	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("update user status: %w", err)
-	}
-	if n == 0 {
-		return errStateChanged
+	if err := change(tx); err != nil {
+		return err
 	}
 	if err := s.audit.InsertTx(ctx, tx, audit); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit status transition: %w", err)
+		return fmt.Errorf("commit member transition: %w", err)
 	}
 	return nil
 }
 
-// suspend only applies to an active user, so unsuspend's return to active
-// can't skip invite acceptance or email verification.
-func (s *Store) suspend(ctx context.Context, userID string, audit authaudit.Row) error {
-	return s.transition(ctx, userID, "status = 'suspended'", "status = 'active'", audit)
+// suspend suspends an active member in this tenant only; the account and
+// its other memberships are untouched.
+func (s *Store) suspend(ctx context.Context, tenantSlug, userID, suspendedBy, reason string, audit authaudit.Row) error {
+	return s.transition(ctx, tenantSlug, userID, true, func(tx *sql.Tx) error {
+		return role.SuspendMemberTx(ctx, tx, tenantSlug, userID, suspendedBy, reason)
+	}, audit)
 }
 
-func (s *Store) unsuspend(ctx context.Context, userID string, audit authaudit.Row) error {
-	return s.transition(ctx, userID, "status = 'active'", "status = 'suspended'", audit)
+func (s *Store) unsuspend(ctx context.Context, tenantSlug, userID string, audit authaudit.Row) error {
+	return s.transition(ctx, tenantSlug, userID, false, func(tx *sql.Tx) error {
+		return role.UnsuspendMemberTx(ctx, tx, tenantSlug, userID)
+	}, audit)
 }
 
-func (s *Store) softDelete(ctx context.Context, userID string, audit authaudit.Row) error {
-	return s.transition(ctx, userID, "status = 'deleted', deleted_at = NOW()", "TRUE", audit)
+// remove deletes the member's role grants and member row in this tenant.
+func (s *Store) remove(ctx context.Context, tenantSlug, userID string, audit authaudit.Row) error {
+	return s.transition(ctx, tenantSlug, userID, true, func(tx *sql.Tx) error {
+		return role.RemoveMemberTx(ctx, tx, tenantSlug, userID)
+	}, audit)
 }

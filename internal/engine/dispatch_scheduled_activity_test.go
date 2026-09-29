@@ -84,6 +84,9 @@ func (f *scheduledActivityFixture) newUser(t *testing.T, status user.Status, mem
 	}
 	t.Cleanup(func() { _, _ = f.admin.Exec(`DELETE FROM system.users WHERE id = $1`, id) })
 	if member {
+		if err := f.e.roleStore.AddMember(t.Context(), f.slug, id); err != nil {
+			t.Fatalf("AddMember() error: %v", err)
+		}
 		if err := f.e.roleStore.AssignRole(t.Context(), f.slug, id, f.userRoleID, ""); err != nil {
 			t.Fatalf("AssignRole() error: %v", err)
 		}

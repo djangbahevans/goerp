@@ -27,6 +27,9 @@ func newReadersFixture(t *testing.T) *scheduledActivityFixture {
 	if _, err := f.admin.ExecContext(t.Context(), `UPDATE system.users SET status = 'active' WHERE id = $1`, f.callerID); err != nil {
 		t.Fatalf("activate caller: %v", err)
 	}
+	if err := f.e.roleStore.AddMember(t.Context(), f.slug, f.callerID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := f.e.roleStore.AssignRole(t.Context(), f.slug, f.callerID, f.userRoleID, ""); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)
 	}
@@ -52,6 +55,9 @@ func (f *scheduledActivityFixture) newNamedUser(t *testing.T, localPart, name st
 		}
 	}
 	if member {
+		if err := f.e.roleStore.AddMember(t.Context(), f.slug, id); err != nil {
+			t.Fatalf("AddMember() error: %v", err)
+		}
 		if err := f.e.roleStore.AssignRole(t.Context(), f.slug, id, f.userRoleID, ""); err != nil {
 			t.Fatalf("AssignRole() error: %v", err)
 		}

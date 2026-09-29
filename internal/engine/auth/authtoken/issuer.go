@@ -23,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -224,6 +225,13 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 	accessToken, expiresIn, err := i.signAccessToken(sessionID, t.ID, p.UserID, roleNames, p.MFAMethod, p.MFAVerifiedAt, now, expiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("sign access token: %w", err)
+	}
+
+	// Every new session is a sign-in to this tenant, whichever flow issued
+	// it (auth-internals.md §3 step 11). A display field, so a failure
+	// doesn't fail the sign-in.
+	if err := i.roles.RecordLogin(ctx, p.TenantSlug, p.UserID, p.IPAddress); err != nil {
+		log.Warn().Err(err).Str("user_id", p.UserID).Str("tenant", p.TenantSlug).Msg("authtoken: recording last sign-in failed")
 	}
 
 	return &Tokens{

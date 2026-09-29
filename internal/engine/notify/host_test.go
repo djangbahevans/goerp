@@ -43,7 +43,7 @@ func TestHostSender_MapsCallerErrors(t *testing.T) {
 	userID := env.createUser(t, "Ama Owusu", "")
 	host := HostSender{env.sender}
 
-	outsider := hostRequest(env, orderConfirmed, env.createOutsider(t, "Yaw Boateng", ""))
+	outsider := hostRequest(env, orderConfirmed, env.createOutsider(t, "Yaw Boateng"))
 	_, err := host.SendBulk(t.Context(), outsider)
 	requireHostErrorCode(t, err, abiv1.ErrCodeNotifyUnknownRecipient)
 

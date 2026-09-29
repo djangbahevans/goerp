@@ -267,7 +267,7 @@ func (f *fixture) createMember(t *testing.T) string {
 	if _, err := f.conn.Exec(`UPDATE system.users SET status = 'active' WHERE id = $1`, userID); err != nil {
 		t.Fatalf("activate user: %v", err)
 	}
-	if _, err := f.conn.Exec(fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", f.schema), userID, f.adminRole); err != nil {
+	if _, err := f.conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", f.schema), userID, f.adminRole); err != nil {
 		t.Fatalf("grant admin role: %v", err)
 	}
 	return userID

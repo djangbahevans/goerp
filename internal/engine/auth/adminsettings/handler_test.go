@@ -241,6 +241,9 @@ func (e *env) member(t *testing.T, ft fixtureTenant, roleName string) (userID, t
 	if err != nil {
 		t.Fatalf("GetRoleByName(%q) error: %v", roleName, err)
 	}
+	if err := e.roles.AddMember(ctx, ft.slug, id); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := e.roles.AssignRole(ctx, ft.slug, id, roleID, ""); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)
 	}

@@ -235,7 +235,7 @@ func (f *fixture) createUserWithRole(t *testing.T, roleName string) (userID stri
 		t.Fatalf("GetRoleByName(%q) error: %v", roleName, err)
 	}
 	schema := tenantschema.Name(f.tenantSlug)
-	if _, err := f.conn.Exec(fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
+	if _, err := f.conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
 		t.Fatalf("grant role %q: %v", roleName, err)
 	}
 

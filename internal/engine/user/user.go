@@ -25,12 +25,9 @@ CREATE TABLE IF NOT EXISTS system.users (
     password_set_at_policy_tenant_id UUID,
     status                 TEXT NOT NULL DEFAULT 'active'
                                CHECK (status IN ('active','invited','suspended','pending_verification','deleted')),
-    contact_id             UUID,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at             TIMESTAMPTZ,
-    last_login_at          TIMESTAMPTZ,
-    last_login_ip          INET,
     locked_until           TIMESTAMPTZ,
     locked_by              TEXT,
     failed_login_count     INTEGER NOT NULL DEFAULT 0
@@ -60,7 +57,6 @@ CREATE TABLE IF NOT EXISTS system.user_profiles (
                         CHECK (contrast IN ('standard', 'high', 'system')),
     date_format     TEXT
                         CHECK (date_format IN ('day_first', 'month_first', 'iso')),
-    phone           TEXT,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 `
@@ -145,7 +141,6 @@ type User struct {
 	Email            string
 	Status           Status
 	PasswordHash     *string
-	ContactID        *string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	LockedUntil      *time.Time
@@ -194,7 +189,7 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	})
 }
 
-const userColumns = `id, email, status, password_hash, contact_id::text, created_at, updated_at, locked_until, failed_login_count, password_set_at_policy_tenant_id::text, password_set_at_policy_version`
+const userColumns = `id, email, status, password_hash, created_at, updated_at, locked_until, failed_login_count, password_set_at_policy_tenant_id::text, password_set_at_policy_version`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -202,7 +197,7 @@ type rowScanner interface {
 
 func scanUser(sc rowScanner) (*User, error) {
 	var u User
-	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.ContactID, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount, &u.PasswordSetAtPolicyTenantID, &u.PasswordSetAtPolicyVersion); err != nil {
+	if err := sc.Scan(&u.ID, &u.Email, &u.Status, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt, &u.LockedUntil, &u.FailedLoginCount, &u.PasswordSetAtPolicyTenantID, &u.PasswordSetAtPolicyVersion); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -299,20 +294,16 @@ func (s *Store) IncrementFailedLogins(ctx context.Context, id string) error {
 	return nil
 }
 
-// ResetLoginState clears id's failure counter and lock, and records a
-// successful login's timestamp/IP — auth-internals.md §3 step 11's
-// "Reset brute force counter" and "Update last_login_at and
-// last_login_ip", done together since both only ever happen on the same
-// successful-login path. ip stores as SQL NULL when empty.
-func (s *Store) ResetLoginState(ctx context.Context, id, ip string) error {
+// ResetLoginState clears id's failure counter and lock — auth-internals.md
+// §3 step 11's "Reset brute force counter". The last sign-in is per tenant,
+// recorded on the member row (role.Store.RecordLogin).
+func (s *Store) ResetLoginState(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE system.users
 		SET failed_login_count = 0,
-		    locked_until = NULL,
-		    last_login_at = NOW(),
-		    last_login_ip = NULLIF($2, '')::inet
+		    locked_until = NULL
 		WHERE id = $1
-	`, id, ip)
+	`, id)
 	if err != nil {
 		return fmt.Errorf("reset login state: %w", err)
 	}

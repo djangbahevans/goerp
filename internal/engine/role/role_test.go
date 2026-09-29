@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -216,7 +215,7 @@ func TestRolePermissionsAndUserRoles_TablesAcceptRows(t *testing.T) {
 
 	fakeUserID := "00000000-0000-0000-0000-000000000001"
 	if _, err := conn.ExecContext(ctx,
-		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema),
+		fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema),
 		fakeUserID, adminID,
 	); err != nil {
 		t.Fatalf("insert user_roles row: %v", err)
@@ -264,7 +263,7 @@ func TestCountUsers_CountsDistinctUsersAcrossRoles(t *testing.T) {
 	}
 	for _, r := range rows {
 		if _, err := conn.ExecContext(ctx,
-			fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema),
+			fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema),
 			r.userID, r.roleID,
 		); err != nil {
 			t.Fatalf("insert user_roles row: %v", err)
@@ -306,7 +305,7 @@ func TestIsMember_TrueForGrantedUser(t *testing.T) {
 	}
 	userID := "00000000-0000-0000-0000-000000000002"
 	if _, err := conn.ExecContext(ctx,
-		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID,
+		fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID,
 	); err != nil {
 		t.Fatalf("insert user_roles row: %v", err)
 	}
@@ -399,7 +398,7 @@ func TestPermissionNamesForUser_ReturnsDistinctGrantedPermissions(t *testing.T) 
 	}
 	userID := "00000000-0000-0000-0000-000000000006"
 	if _, err := conn.ExecContext(ctx,
-		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID,
+		fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID,
 	); err != nil {
 		t.Fatalf("insert user_roles row: %v", err)
 	}
@@ -504,7 +503,7 @@ func TestRoleIDsForUser_ReturnsUnexpiredRoleIDs(t *testing.T) {
 
 	grantee := "00000000-0000-0000-0000-000000000008"
 	if _, err := conn.ExecContext(ctx,
-		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), grantee, adminID,
+		fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), grantee, adminID,
 	); err != nil {
 		t.Fatalf("insert unexpired grant: %v", err)
 	}
@@ -665,6 +664,9 @@ func TestAssignRole_GrantsAndIsReflectedInMembership(t *testing.T) {
 	userID := "00000000-0000-0000-0000-000000000010"
 	grantedBy := "00000000-0000-0000-0000-000000000011"
 
+	if err := store.AddMember(ctx, slug, userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := store.AssignRole(ctx, slug, userID, roleID, grantedBy); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)
 	}
@@ -698,8 +700,14 @@ func TestAssignRole_AlreadyGrantedIsANoOpNotAnError(t *testing.T) {
 	}
 	userID := "00000000-0000-0000-0000-000000000012"
 
+	if err := store.AddMember(ctx, slug, userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
 		t.Fatalf("first AssignRole() error: %v", err)
+	}
+	if err := store.AddMember(ctx, slug, userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
 	}
 	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
 		t.Fatalf("second AssignRole() (already granted) error: %v", err)
@@ -737,6 +745,9 @@ func TestAssignRole_ReactivatesAPreviouslyExpiredGrant(t *testing.T) {
 		t.Fatalf("insert expired user_roles row: %v", err)
 	}
 
+	if err := store.AddMember(ctx, slug, userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
 		t.Fatalf("AssignRole() on an expired grant error: %v", err)
 	}
@@ -762,6 +773,9 @@ func TestRevokeRole_RemovesGrant(t *testing.T) {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
 	userID := "00000000-0000-0000-0000-000000000013"
+	if err := store.AddMember(ctx, slug, userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := store.AssignRole(ctx, slug, userID, roleID, "00000000-0000-0000-0000-000000000099"); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)
 	}
@@ -793,84 +807,5 @@ func TestRevokeRole_UngrantedIsANoOpNotAnError(t *testing.T) {
 
 	if err := store.RevokeRole(ctx, slug, "00000000-0000-0000-0000-000000000014", roleID); err != nil {
 		t.Errorf("RevokeRole() on an ungranted role error: %v, want nil", err)
-	}
-}
-
-// grantRole gives userID the "user" role in slug's schema, expired when
-// expired is set.
-func grantRole(t *testing.T, store *Store, conn *sql.DB, slug, userID string, expired bool) {
-	t.Helper()
-	ctx := context.Background()
-	if err := store.SeedBuiltinRoles(ctx, slug); err != nil {
-		t.Fatalf("SeedBuiltinRoles() error: %v", err)
-	}
-	roleID, err := store.GetRoleByName(ctx, slug, "user")
-	if err != nil {
-		t.Fatalf("GetRoleByName() error: %v", err)
-	}
-	expiresAt := "NULL"
-	if expired {
-		expiresAt = "NOW() - interval '1 hour'"
-	}
-	if _, err := conn.ExecContext(ctx,
-		fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id, expires_at) VALUES ($1, $2, %s)", tenantschema.Name(slug), expiresAt), userID, roleID,
-	); err != nil {
-		t.Fatalf("insert user_roles row: %v", err)
-	}
-}
-
-func TestMemberOf_ReturnsLiveMembershipsInOrder(t *testing.T) {
-	store, conn, first := openTestStore(t)
-	_, _, second := openTestStore(t)
-	_, _, expired := openTestStore(t)
-	_, _, none := openTestStore(t)
-	userID := "00000000-0000-0000-0000-000000000011"
-	grantRole(t, store, conn, first, userID, false)
-	grantRole(t, store, conn, second, userID, false)
-	grantRole(t, store, conn, expired, userID, true)
-
-	got, err := store.MemberOf(context.Background(), []string{second, none, expired, first}, userID)
-	if err != nil {
-		t.Fatalf("MemberOf() error: %v", err)
-	}
-	if want := []string{second, first}; !slices.Equal(got, want) {
-		t.Errorf("MemberOf() = %v, want %v", got, want)
-	}
-}
-
-func TestMemberOf_TenantWithoutUserRolesTableCountsAsNoMembership(t *testing.T) {
-	store, conn, member := openTestStore(t)
-	userID := "00000000-0000-0000-0000-000000000012"
-	grantRole(t, store, conn, member, userID, false)
-	unprovisioned := fmt.Sprintf("roletest-unprovisioned-%d", time.Now().UnixNano())
-
-	got, err := store.MemberOf(context.Background(), []string{unprovisioned, member}, userID)
-	if err != nil {
-		t.Fatalf("MemberOf() error: %v", err)
-	}
-	if want := []string{member}; !slices.Equal(got, want) {
-		t.Errorf("MemberOf() = %v, want %v", got, want)
-	}
-}
-
-func TestMemberOf_KeepsOrderAcrossBatches(t *testing.T) {
-	store, conn, first := openTestStore(t)
-	_, _, last := openTestStore(t)
-	userID := "00000000-0000-0000-0000-000000000013"
-	grantRole(t, store, conn, first, userID, false)
-	grantRole(t, store, conn, last, userID, false)
-
-	slugs := []string{first}
-	for i := range memberOfBatchSize + 5 {
-		slugs = append(slugs, fmt.Sprintf("roletest-unprovisioned-%d-%d", time.Now().UnixNano(), i))
-	}
-	slugs = append(slugs, last)
-
-	got, err := store.MemberOf(context.Background(), slugs, userID)
-	if err != nil {
-		t.Fatalf("MemberOf() error: %v", err)
-	}
-	if want := []string{first, last}; !slices.Equal(got, want) {
-		t.Errorf("MemberOf() = %v, want %v", got, want)
 	}
 }

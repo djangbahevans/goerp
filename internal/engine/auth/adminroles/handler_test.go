@@ -230,6 +230,9 @@ func (e *env) grant(t *testing.T, ft fixtureTenant, userID, roleName string) {
 	if err != nil {
 		t.Fatalf("GetRoleByName(%q) error: %v", roleName, err)
 	}
+	if err := e.roles.AddMember(t.Context(), ft.slug, userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := e.roles.AssignRole(t.Context(), ft.slug, userID, roleID, ""); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)
 	}

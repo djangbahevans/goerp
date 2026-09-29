@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -41,7 +40,7 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates roles/role_permissions/user_roles in the given
+// Bootstrap creates roles/role_permissions/user_roles/tenant_members in the given
 // tenant's schema if they don't already exist. Does not create the schema
 // itself — assumes tenant_{slug} already exists (production: tenant
 // provisioning's job; this package's own tests create a fixture schema
@@ -108,6 +107,10 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 			return fmt.Errorf("create user_roles table: %w", err)
 		}
 
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(createTenantMembers, schema)); err != nil {
+			return fmt.Errorf("create tenant_members table: %w", err)
+		}
+
 		return nil
 	})
 }
@@ -151,14 +154,14 @@ func (s *Store) GetRoleByName(ctx context.Context, tenantSlug, name string) (str
 	return id, nil
 }
 
-// CountUsers returns the number of distinct users holding any role grant
-// in the tenant's schema — the Users column cli-reference.md §5 documents
+// CountUsers returns the number of the tenant's members (tenant_members
+// rows, suspended ones included) — the Users column cli-reference.md §5 documents
 // for `goerp tenant list`. Returns 0, not an error, for a tenant whose
 // schema hasn't been provisioned yet, the same count a real
 // freshly-provisioned tenant with no grants yet would report.
 func (s *Store) CountUsers(ctx context.Context, tenantSlug string) (int, error) {
 	schema := tenantschema.Name(tenantSlug)
-	query := fmt.Sprintf(`SELECT COUNT(DISTINCT user_id) FROM %s.user_roles`, schema)
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s.tenant_members`, schema)
 
 	var count int
 	if err := s.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
@@ -198,17 +201,19 @@ func (s *Store) AdminUserID(ctx context.Context, tenantSlug string) (string, err
 
 // RoleNamesForUser returns the names of every unexpired role userID holds
 // in the tenant's schema (expires_at IS NULL or still in the future) — a
-// lapsed grant shouldn't appear in a JWT's roles claim. Returns an empty,
-// non-nil slice for a user with no grants or an unprovisioned tenant.
+// lapsed grant shouldn't appear in a JWT's roles claim. A suspended member
+// holds none. Returns an empty, non-nil slice for a user with no grants or
+// an unprovisioned tenant.
 func (s *Store) RoleNamesForUser(ctx context.Context, tenantSlug, userID string) ([]string, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
 		SELECT r.name
-		FROM %s.user_roles ur
-		JOIN %s.roles r ON r.id = ur.role_id
+		FROM %[1]s.user_roles ur
+		JOIN %[1]s.roles r ON r.id = ur.role_id
+		JOIN %[1]s.tenant_members tm ON tm.user_id = ur.user_id AND tm.status = 'active'
 		WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
 		ORDER BY r.name
-	`, schema, schema)
+	`, schema)
 
 	rows, err := s.db.QueryContext(ctx, query, userID)
 	if err != nil {
@@ -275,15 +280,17 @@ func (s *Store) RevokeRole(ctx context.Context, tenantSlug, userID, roleID strin
 	return nil
 }
 
-// IsMember reports whether userID holds any unexpired role grant in the
-// tenant's schema — tenant membership, distinct from RoleNamesForUser's
-// concern of *which* roles.
+// IsMember is the membership check (auth-internals.md §2 "Tenant
+// members"): userID holds an unexpired role grant in the tenant and their
+// tenant_members row is active. Every place that asks whether someone
+// belongs to a tenant asks this.
 func (s *Store) IsMember(ctx context.Context, tenantSlug, userID string) (bool, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
 		SELECT EXISTS (
-			SELECT 1 FROM %s.user_roles
-			WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
+			SELECT 1 FROM %[1]s.user_roles ur
+			JOIN %[1]s.tenant_members tm ON tm.user_id = ur.user_id AND tm.status = 'active'
+			WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
 		)
 	`, schema)
 
@@ -308,7 +315,7 @@ type Member struct {
 }
 
 // SearchMembers returns up to limit active members of the tenant — an
-// active, non-deleted user holding an unexpired role grant — ordered by
+// active, non-deleted user passing IsMember's check — ordered by
 // name, then email, with nameless users last. A non-empty query matches
 // the start of any word of the name or the start of the email,
 // case-insensitively; excludeUserID, when non-empty, is left out.
@@ -320,7 +327,8 @@ func (s *Store) SearchMembers(ctx context.Context, tenantSlug, query, excludeUse
 		LEFT JOIN system.user_profiles p ON p.user_id = u.id
 		WHERE u.deleted_at IS NULL AND u.status = 'active'
 		  AND EXISTS (
-			SELECT 1 FROM %s.user_roles ur
+			SELECT 1 FROM %[1]s.user_roles ur
+			JOIN %[1]s.tenant_members tm ON tm.user_id = ur.user_id AND tm.status = 'active'
 			WHERE ur.user_id = u.id AND (ur.expires_at IS NULL OR ur.expires_at > NOW()))
 		  AND ($1 = '' OR u.email LIKE $2 ESCAPE '\' OR p.name ~* $3)
 		  AND ($4 = '' OR u.id::text <> $4)
@@ -354,96 +362,18 @@ func (s *Store) SearchMembers(ctx context.Context, tenantSlug, query, excludeUse
 	return members, nil
 }
 
-// memberOfBatchSize bounds how many tenant schemas one MemberOf query reads.
-// Each one locks that tenant's user_roles and its indexes for the query,
-// so an unbounded UNION over thousands of tenants would outgrow Postgres's
-// shared lock table (max_locks_per_transaction × max_connections).
-const memberOfBatchSize = 100
-
-// MemberOf returns the slugs, in tenantSlugs order, of the tenants where
-// userID holds any unexpired role grant — IsMember across many tenants,
-// memberOfBatchSize tenants per query. tenantSlugs must come from real
-// system.tenants rows, since each is interpolated into a schema name. A
-// tenant whose schema has no user_roles table yet (mid-provisioning)
-// counts as no membership.
-func (s *Store) MemberOf(ctx context.Context, tenantSlugs []string, userID string) ([]string, error) {
-	var slugs []string
-	for batch := range slices.Chunk(tenantSlugs, memberOfBatchSize) {
-		found, err := s.memberOfBatch(ctx, batch, userID)
-		if err != nil {
-			return nil, err
-		}
-		slugs = append(slugs, found...)
-	}
-	return slugs, nil
-}
-
-func (s *Store) memberOfBatch(ctx context.Context, tenantSlugs []string, userID string) ([]string, error) {
-	var query strings.Builder
-	args := make([]any, 0, len(tenantSlugs)+1)
-	args = append(args, userID)
-	for i, slug := range tenantSlugs {
-		if i > 0 {
-			query.WriteString(" UNION ALL ")
-		}
-		args = append(args, slug)
-		fmt.Fprintf(&query, `SELECT $%d::text WHERE EXISTS (
-			SELECT 1 FROM %s.user_roles
-			WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
-		)`, len(args), tenantschema.Name(slug))
-	}
-
-	rows, err := s.db.QueryContext(ctx, query.String(), args...)
-	if isUndefinedTable(err) {
-		return s.memberOfOneByOne(ctx, tenantSlugs, userID)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list tenant memberships: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	member := make(map[string]bool)
-	for rows.Next() {
-		var slug string
-		if err := rows.Scan(&slug); err != nil {
-			return nil, fmt.Errorf("scan tenant membership: %w", err)
-		}
-		member[slug] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list tenant memberships: %w", err)
-	}
-	return slices.DeleteFunc(slices.Clone(tenantSlugs), func(slug string) bool { return !member[slug] }), nil
-}
-
-// memberOfOneByOne is memberOfBatch's fallback when one tenant's
-// user_roles table is missing, which fails the whole UNION; IsMember
-// treats that tenant alone as no membership.
-func (s *Store) memberOfOneByOne(ctx context.Context, tenantSlugs []string, userID string) ([]string, error) {
-	var slugs []string
-	for _, slug := range tenantSlugs {
-		ok, err := s.IsMember(ctx, slug, userID)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			slugs = append(slugs, slug)
-		}
-	}
-	return slugs, nil
-}
-
 // PermissionNamesForUser returns the distinct permission names granted by
 // every unexpired role userID holds in the tenant's schema.
 func (s *Store) PermissionNamesForUser(ctx context.Context, tenantSlug, userID string) ([]string, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
 		SELECT DISTINCT rp.permission_name
-		FROM %s.user_roles ur
-		JOIN %s.role_permissions rp ON rp.role_id = ur.role_id
+		FROM %[1]s.user_roles ur
+		JOIN %[1]s.role_permissions rp ON rp.role_id = ur.role_id
+		JOIN %[1]s.tenant_members tm ON tm.user_id = ur.user_id AND tm.status = 'active'
 		WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
 		ORDER BY rp.permission_name
-	`, schema, schema)
+	`, schema)
 
 	rows, err := s.db.QueryContext(ctx, query, userID)
 	if err != nil {
@@ -471,15 +401,16 @@ func (s *Store) PermissionNamesForUser(ctx context.Context, tenantSlug, userID s
 
 // RoleIDsForUser returns the role_id of every unexpired role userID holds
 // in the tenant's schema — same predicate RoleNamesForUser uses, without
-// the join to roles.name. Populates permcache's Redis role-assignment
+// the join to roles.name, so a suspended member gets an empty set. Populates permcache's Redis role-assignment
 // cache (auth-internals.md §14 layer 2).
 func (s *Store) RoleIDsForUser(ctx context.Context, tenantSlug, userID string) ([]string, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
-		SELECT role_id
-		FROM %s.user_roles
-		WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
-		ORDER BY role_id
+		SELECT ur.role_id
+		FROM %[1]s.user_roles ur
+		JOIN %[1]s.tenant_members tm ON tm.user_id = ur.user_id AND tm.status = 'active'
+		WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+		ORDER BY ur.role_id
 	`, schema)
 
 	rows, err := s.db.QueryContext(ctx, query, userID)

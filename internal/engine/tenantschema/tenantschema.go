@@ -60,20 +60,47 @@ func Create(ctx context.Context, pool *sql.DB, slug string) error {
 }
 
 // Drop removes the tenant's pg_partman registrations and templates, schema
-// and role, attempting every step even if one fails. Idempotent; pool is
-// the schema-sync pool.
+// and role, attempting every step even if one fails. The schema drop also
+// removes the tenant's system.tenant_memberships rows, in the same
+// transaction. Idempotent; pool is the schema-sync pool.
 func Drop(ctx context.Context, pool *sql.DB, slug string) error {
 	var errs []error
 	if err := dropPartitionRegistrations(ctx, pool, slug); err != nil {
 		errs = append(errs, fmt.Errorf("remove tenant partition registrations: %w", err))
 	}
-	if _, err := pool.ExecContext(ctx, "DROP SCHEMA IF EXISTS "+Name(slug)+" CASCADE"); err != nil {
+	if err := dropSchema(ctx, pool, slug); err != nil {
 		errs = append(errs, fmt.Errorf("drop tenant schema: %w", err))
 	}
 	if _, err := pool.ExecContext(ctx, "SELECT system.drop_tenant_role($1)", slug); err != nil {
 		errs = append(errs, fmt.Errorf("drop tenant role: %w", err))
 	}
 	return errors.Join(errs...)
+}
+
+// dropSchema drops the tenant's schema. Dropping a table fires no row
+// triggers, so the tenant's tenant_members rows are deleted first, in the
+// same transaction: their trigger removes the tenant's
+// system.tenant_memberships rows (auth-internals.md §2 "Membership
+// index").
+func dropSchema(ctx context.Context, pool *sql.DB, slug string) error {
+	tx, err := pool.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var hasMembers bool
+	if err := tx.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, Name(slug)+".tenant_members").Scan(&hasMembers); err != nil {
+		return err
+	}
+	if hasMembers {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+Name(slug)+".tenant_members"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "DROP SCHEMA IF EXISTS "+Name(slug)+" CASCADE"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // dropPartitionRegistrations deletes the tenant's part_config rows and the
