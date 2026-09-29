@@ -1,8 +1,8 @@
 // Package mailer is the minimum SMTP sender goerp#148's invite flow needs
 // (auth-internals.md §3, template auth.user_invited) — one hardcoded
 // template, one SMTP adapter, no tenant-configurable provider selection.
-// The general notification system (notification-system.md §10) is
-// separate, larger, unbuilt scope.
+// Notification emails (notification-system.md §10) go through
+// notify.EmailWorker and internal/engine/emailprovider instead.
 package mailer
 
 import (
@@ -38,14 +38,19 @@ func New(cfg Config) *SMTPMailer {
 	return &SMTPMailer{cfg: cfg}
 }
 
-// tenantBaseURL is cfg.BaseURL with its host replaced by tenantSlug's
-// default domain, keeping the scheme, any port and any path.
 func (m *SMTPMailer) tenantBaseURL(tenantSlug string) string {
-	u, err := url.Parse(m.cfg.BaseURL)
+	return TenantBaseURL(m.cfg.BaseURL, m.cfg.PlatformDomain, tenantSlug)
+}
+
+// TenantBaseURL is baseURL with its host replaced by tenantSlug's default
+// domain, {slug}.{platformDomain}, keeping the scheme, any port and any
+// path.
+func TenantBaseURL(baseURL, platformDomain, tenantSlug string) string {
+	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" {
-		return m.cfg.BaseURL
+		return baseURL
 	}
-	host := tenantSlug + "." + m.cfg.PlatformDomain
+	host := tenantSlug + "." + platformDomain
 	if port := u.Port(); port != "" {
 		host = net.JoinHostPort(host, port)
 	}

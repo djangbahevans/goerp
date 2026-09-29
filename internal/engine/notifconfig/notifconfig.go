@@ -36,6 +36,7 @@ const (
 	KeyEmailFromName = "notifications.email.from_name"
 	KeyEmailFromAddr = "notifications.email.from_addr"
 	KeyEmailReplyTo  = "notifications.email.reply_to"
+	KeyEmailLayout   = "notifications.email.layout_template"
 
 	KeySMTPHost     = "notifications.email.smtp.host"
 	KeySMTPPort     = "notifications.email.smtp.port"
@@ -71,6 +72,7 @@ var Schema = []manifest.ConfigEntry{
 	{Key: KeyEmailFromName, Type: "string"},
 	{Key: KeyEmailFromAddr, Type: "string"},
 	{Key: KeyEmailReplyTo, Type: "string"},
+	{Key: KeyEmailLayout, Type: "string"},
 
 	{Key: KeySMTPHost, Type: "string"},
 	{Key: KeySMTPPort, Type: "integer", Default: 587},
@@ -122,7 +124,11 @@ type EmailConfig struct {
 	FromName string
 	FromAddr string
 	ReplyTo  string
-	SMTP     SMTPConfig
+	// LayoutTemplate, when set, replaces the default email layout:
+	// "{theme_module}/{path}", a file inside an installed theme module's
+	// package.
+	LayoutTemplate string
+	SMTP           SMTPConfig
 }
 
 type SMTPConfig struct {
@@ -206,11 +212,12 @@ func (s *Service) Load(ctx context.Context, tenantID string) (*Config, error) {
 		SMSEnabled:   boolean(KeySMSEnabled),
 		PushEnabled:  boolean(KeyPushEnabled),
 		Email: EmailConfig{
-			Provider: str(KeyEmailProvider),
-			APIKey:   str(KeyEmailAPIKey),
-			FromName: str(KeyEmailFromName),
-			FromAddr: str(KeyEmailFromAddr),
-			ReplyTo:  str(KeyEmailReplyTo),
+			Provider:       str(KeyEmailProvider),
+			APIKey:         str(KeyEmailAPIKey),
+			FromName:       str(KeyEmailFromName),
+			FromAddr:       str(KeyEmailFromAddr),
+			ReplyTo:        str(KeyEmailReplyTo),
+			LayoutTemplate: str(KeyEmailLayout),
 			SMTP: SMTPConfig{
 				Host:     str(KeySMTPHost),
 				Port:     port,

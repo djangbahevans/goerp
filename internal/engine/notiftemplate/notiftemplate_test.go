@@ -257,3 +257,59 @@ func TestLoad_SMSLengthCountsRunesNotBytes(t *testing.T) {
 		t.Errorf("log output = %q, want no SMS-length warning for exactly 160 runes (320 bytes)", buf.String())
 	}
 }
+
+func TestLoad_EmailSiblingsResolveBesideTheHTMLTemplate(t *testing.T) {
+	root := t.TempDir()
+	writeDirFixture(t, root, map[string]string{
+		"notifications/order_confirmed/email.en.html": "<p>{{.OrderReference}}</p>",
+		"notifications/order_confirmed/email.en.json": `{"subject": "Order {{.OrderReference}}"}`,
+		"notifications/order_confirmed/email.en.txt":  "Order {{.OrderReference}} & more",
+	})
+	mt, err := Load(orderConfirmedType(map[string]string{"email": "notifications/order_confirmed/email.{locale}.html"}), root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	for channel, want := range map[string]string{
+		ChannelEmailSubject: `{"subject": "Order ORD-1"}`,
+		ChannelEmailText:    "Order ORD-1 & more",
+	} {
+		locale, tmpl, ok := mt.Resolve("order_confirmed", channel, "fr")
+		if !ok || locale != "en" {
+			t.Fatalf("Resolve(%s, fr) = %q, %v, want the en fallback", channel, locale, ok)
+		}
+		got, err := Render(tmpl, locale, map[string]any{"OrderReference": "ORD-1"})
+		if err != nil || got != want {
+			t.Errorf("Render(%s) = %q, %v, want %q unescaped", channel, got, err, want)
+		}
+	}
+}
+
+func TestLoad_EmailSiblingsAreOptionalButNeedEn(t *testing.T) {
+	root := t.TempDir()
+	writeDirFixture(t, root, map[string]string{"notifications/order_confirmed/email.en.html": "<p>hi</p>"})
+	templates := orderConfirmedType(map[string]string{"email": "notifications/order_confirmed/email.{locale}.html"})
+	mt, err := Load(templates, root)
+	if err != nil {
+		t.Fatalf("Load without siblings: %v", err)
+	}
+	if _, _, ok := mt.Resolve("order_confirmed", ChannelEmailText, "en"); ok {
+		t.Error("Resolve(email_text) ok with no .txt in the package")
+	}
+
+	writeDirFixture(t, root, map[string]string{"notifications/order_confirmed/email.fr.txt": "salut"})
+	if _, err := Load(templates, root); err == nil || !strings.Contains(err.Error(), `"en"`) {
+		t.Errorf("Load with a fr-only text sibling = %v, want a missing-en error", err)
+	}
+}
+
+func TestReadPackageFile_RejectsPathsOutsideThePackage(t *testing.T) {
+	root := t.TempDir()
+	writeDirFixture(t, root, map[string]string{"emails/layout.html": "ok"})
+	if got, err := ReadPackageFile(root, "emails/layout.html"); err != nil || string(got) != "ok" {
+		t.Errorf("ReadPackageFile = %q, %v", got, err)
+	}
+	if _, err := ReadPackageFile(root, "../outside.html"); err == nil {
+		t.Error("ReadPackageFile(../outside.html) error = nil")
+	}
+}

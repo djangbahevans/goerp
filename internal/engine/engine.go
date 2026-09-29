@@ -818,8 +818,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, err
 	}
 
-	// Baseline liveness-check job type; real ones (email_send, ...) add
-	// their own river.AddWorker call here as they land.
 	jobWorkers := river.NewWorkers()
 	river.AddWorker(jobWorkers, &jobqueue.ProbeWorker{})
 	river.AddWorker(jobWorkers, &schema.ValidateConstraintWorker{Pool: schemaPool})
@@ -929,6 +927,16 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
 	river.AddWorker(jobWorkers, &jobqueue.DeviceTokenCleanupWorker{TenantStore: tenantStore, NotificationStore: notificationStore})
+	unsubscribeCodec := notifications.NewUnsubscribeCodec(signingKeySet)
+	river.AddWorker(jobWorkers, notify.NewEmailWorker(notify.EmailDeps{
+		DB:             primaryPool,
+		Registry:       moduleRegistry,
+		Config:         notificationConfig,
+		Tenants:        tenantStore,
+		Unsubscribe:    unsubscribeCodec,
+		AppBaseURL:     cfg.AppBaseURL,
+		PlatformDomain: cfg.PlatformDomain,
+	}))
 	river.AddWorker(jobWorkers, &jobdispatch.Worker{ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool, Runtime: runtime, TenantStore: tenantStore})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {
@@ -1094,7 +1102,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		notificationStore:      notificationStore,
 		notificationConfig:     notificationConfig,
 		notifier:               notifier,
-		unsubscribeCodec:       notifications.NewUnsubscribeCodec(signingKeySet),
+		unsubscribeCodec:       unsubscribeCodec,
 		scheduledActivityStore: scheduledActivityStore,
 		activityTypeStore:      activityTypeStore,
 		roleStore:              roleStore,
