@@ -106,6 +106,16 @@ describe("Select", () => {
       expect(trigger.getAttribute("aria-expanded")).toBe("true");
     });
 
+    it("closes on Tab, and reports each option's checked state rather than the highlight", async () => {
+      render(<Select options={OPTIONS} value={["confirmed"]} onChange={vi.fn()} multiple />);
+      const trigger = screen.getByRole("combobox");
+      fireEvent.click(trigger);
+      expect((await screen.findByRole("option", { name: "Draft" })).getAttribute("aria-selected")).toBe("false");
+      expect(screen.getByRole("option", { name: "Confirmed" }).getAttribute("aria-selected")).toBe("true");
+      fireEvent.keyDown(trigger, { key: "Tab" });
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    });
+
     it("toggling an already-selected option removes it", async () => {
       const onChange = vi.fn();
       render(<Select options={OPTIONS} value={["draft"]} onChange={onChange} multiple />);

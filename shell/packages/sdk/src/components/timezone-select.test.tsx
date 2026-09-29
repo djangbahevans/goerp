@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PAGE_JUMP } from "./code-select.js";
+import { LISTBOX_PAGE_JUMP as PAGE_JUMP } from "./listbox-navigation.js";
 import { TimezoneSelect } from "./timezone-select.js";
 
 function nth(options: HTMLElement[], index: number): HTMLElement {
@@ -67,13 +67,13 @@ describe("TimezoneSelect", () => {
     expect(input.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("shows a 'no results' row, announced via aria-live, when the query matches nothing", async () => {
+  it("shows a 'no results' row, announced by the status region, when the query matches nothing", async () => {
     render(<TimezoneSelect value="" onChange={vi.fn()} />);
     const input = screen.getByRole("combobox");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "zzzznotatimezone" } });
-    const empty = await screen.findByText('No results for "zzzznotatimezone"');
-    expect(empty.getAttribute("aria-live")).toBe("polite");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe('No results for "zzzznotatimezone"'));
+    expect(screen.getByRole("listbox").textContent).toBe('No results for "zzzznotatimezone"');
   });
 
   it("a labeled clear button unsets the value", () => {

@@ -1,6 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TagsField } from "./tags-field.js";
+
+// jsdom doesn't implement scrollIntoView, which keeps the highlighted suggestion in view.
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 afterEach(cleanup);
 
@@ -196,5 +201,14 @@ describe("TagsField", () => {
     );
     expect(screen.getByText("Dark").className).toContain("text-white");
     expect(screen.getByText("Light").className).toContain("text-black");
+  });
+
+  it("closes the suggestion list on Tab without clearing the input", () => {
+    render(<TagsField value={[]} onChange={vi.fn()} options={options} />);
+    const input = screen.getByRole("combobox") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "VIP" } });
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(input.value).toBe("VIP");
   });
 });

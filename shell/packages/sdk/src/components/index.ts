@@ -21,6 +21,8 @@ export type { CodeFieldProps } from "./code-field.js";
 export { CodeField } from "./code-field.js";
 export type { ColorPickerProps } from "./color-picker.js";
 export { ColorPicker } from "./color-picker.js";
+export type { ComboboxProps, ComboboxStatus } from "./combobox.js";
+export { Combobox } from "./combobox.js";
 export type { ConfirmDialogHostProps } from "./confirm-dialog-host.js";
 export { ConfirmDialogHost } from "./confirm-dialog-host.js";
 export type { CountdownProps } from "./countdown.js";
@@ -58,6 +60,13 @@ export type { IconPickerProps } from "./icon-picker.js";
 export { IconPicker } from "./icon-picker.js";
 export type { LanguageSelectProps } from "./language-select.js";
 export { LanguageSelect } from "./language-select.js";
+export type {
+  ListboxInputProps,
+  ListboxNavigation,
+  ListboxNavigationOptions,
+  ListboxOptionProps,
+} from "./listbox-navigation.js";
+export { LISTBOX_PAGE_JUMP, useListboxNavigation } from "./listbox-navigation.js";
 export type { LoadingOverlayProps } from "./loading-overlay.js";
 export { LoadingOverlay } from "./loading-overlay.js";
 export type { LocationFieldProps, LocationValue } from "./location-field.js";

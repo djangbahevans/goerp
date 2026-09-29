@@ -620,7 +620,8 @@ export const AutosaveSaving: Story = {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByDisplayValue("Acme Corp")).toBeInTheDocument());
     await userEvent.type(canvas.getByLabelText("Phone"), "9");
-    await waitFor(() => expect(canvas.getByRole("status")).toHaveTextContent("Saving…"));
+    // Each combobox on the form has its own status region, so the save status is one of several.
+    await waitFor(() => expect(canvas.getAllByRole("status").map((status) => status.textContent)).toContain("Saving…"));
   },
 };
 

@@ -1,21 +1,16 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Badge, type BadgeColor } from "./badge.js";
 import { EscapeLayer } from "./escape-layer.js";
 import { fieldInputClassName } from "./field-input-styles.js";
 import { useFieldControl } from "./field-wrapper.js";
-import {
-  optionElementId,
-  useFloatingPanelLayer,
-  useFloatingPanelPosition,
-  useOutsideClickClose,
-  useScrollHighlightedOptionIntoView,
-} from "./floating-panel.js";
+import { useFloatingPanelLayer, useFloatingPanelPosition, useOutsideClickClose } from "./floating-panel.js";
 import { Icon, type IconNameLike } from "./icon.js";
 import { IconButton } from "./icon-button.js";
+import { useListboxNavigation } from "./listbox-navigation.js";
 
 // manifest-spec.md's FieldOption object (§10), redefined locally since
 // packages/sdk must not depend on packages/app.
@@ -174,12 +169,17 @@ function SelectMultiple({
   const selectedSet = new Set(selectedValues);
   const selectedOptions = options.filter((option) => selectedSet.has(option.value));
   const [isOpen, setIsOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const listboxId = useId();
-  const activeIndex = Math.max(0, Math.min(highlightedIndex, options.length - 1));
+  const nav = useListboxNavigation({
+    count: options.length,
+    isOpen,
+    onChoose: (index) => {
+      const option = options[index];
+      if (option) toggle(option);
+    },
+  });
 
   // Portaled to document.body, position: fixed — same reasoning as
-  // ActionMenu's/RelationPicker's own panels: an ancestor with overflow:
+  // ActionMenu's and Combobox's panels: an ancestor with overflow:
   // hidden (SectionCard's own collapse-transition wrapper, e.g.) would
   // otherwise clip the dropdown instead of letting it float above the page.
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -188,7 +188,7 @@ function SelectMultiple({
   function open(): void {
     if (disabled) return;
     setIsOpen(true);
-    setHighlightedIndex(
+    nav.setActiveIndex(
       Math.max(
         0,
         options.findIndex((option) => !option.disabled),
@@ -205,7 +205,6 @@ function SelectMultiple({
   const position = useFloatingPanelPosition(isOpen, triggerRef, panelRef, false);
   const layerClassName = useFloatingPanelLayer(triggerRef);
   useOutsideClickClose(isOpen, [triggerRef, panelRef], close);
-  useScrollHighlightedOptionIntoView(isOpen, listboxId, activeIndex, options.length);
 
   function toggle(option: SelectOption): void {
     if (option.disabled) return;
@@ -225,25 +224,17 @@ function SelectMultiple({
       }
       return;
     }
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        if (options.length > 0) setHighlightedIndex((activeIndex + 1) % options.length);
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        if (options.length > 0) setHighlightedIndex((activeIndex - 1 + options.length) % options.length);
-        break;
-      case "Enter":
-      case " ": {
-        event.preventDefault();
-        const option = options[activeIndex];
-        if (option) toggle(option);
-        break;
-      }
-      default:
-        break;
+    if (event.key === "Tab") {
+      close();
+      return;
     }
+    if (event.key === " ") {
+      event.preventDefault();
+      const option = options[nav.activeIndex];
+      if (option) toggle(option);
+      return;
+    }
+    nav.handleKeyDown(event);
   }
 
   const triggerContent =
@@ -264,17 +255,15 @@ function SelectMultiple({
 
   return (
     <div className="relative">
+      {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role="combobox" comes from nav.inputProps. */}
       <button
         ref={triggerRef}
         id={id}
         type="button"
         disabled={disabled}
-        role="combobox"
+        {...nav.inputProps}
         aria-autocomplete="none"
         aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        aria-controls={listboxId}
-        aria-activedescendant={isOpen && options.length > 0 ? optionElementId(listboxId, activeIndex) : undefined}
         onClick={() => (isOpen ? close() : open())}
         onKeyDown={handleKeyDown}
         className={TRIGGER_CLASSES}
@@ -287,7 +276,7 @@ function SelectMultiple({
           <EscapeLayer onEscape={close}>
             <span
               ref={panelRef}
-              id={listboxId}
+              id={nav.listboxId}
               role="listbox"
               aria-multiselectable="true"
               style={
@@ -298,18 +287,14 @@ function SelectMultiple({
               className={`${layerClassName} ${MULTI_PANEL_CLASSES}`}
             >
               {options.map((option, index) => (
-                // biome-ignore lint/a11y/useFocusableInteractive: ARIA APG listbox-button pattern — options are never independently focusable, only virtually "focused" via aria-activedescendant on the trigger button.
-                // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection is handled by the trigger button's own onKeyDown.
                 <div
                   key={option.value}
-                  id={optionElementId(listboxId, index)}
-                  role="option"
-                  aria-selected={selectedSet.has(option.value)}
-                  aria-disabled={option.disabled}
-                  onMouseEnter={option.disabled ? undefined : () => setHighlightedIndex(index)}
-                  onClick={option.disabled ? undefined : () => toggle(option)}
+                  {...nav.getOptionProps(index, {
+                    disabled: option.disabled,
+                    selected: selectedSet.has(option.value),
+                  })}
                   className={`${ROW_CLASSES} ${option.disabled ? "cursor-not-allowed opacity-50" : ""} ${
-                    index === activeIndex ? "bg-surface-hover" : ""
+                    index === nav.activeIndex ? "bg-surface-hover" : ""
                   }`}
                 >
                   {selectedSet.has(option.value) ? (

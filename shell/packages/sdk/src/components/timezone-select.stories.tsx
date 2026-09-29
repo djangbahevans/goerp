@@ -65,7 +65,7 @@ export const NoResults: Story = {
     const input = canvas.getByRole("combobox");
     await userEvent.click(input);
     await userEvent.type(input, "zzzznotatimezone");
-    await waitFor(() => expect(screen.getByText('No results for "zzzznotatimezone"')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("listbox")).toHaveTextContent('No results for "zzzznotatimezone"'));
   },
 };
 

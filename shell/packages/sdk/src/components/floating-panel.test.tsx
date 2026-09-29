@@ -1,7 +1,7 @@
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import type { MutableRefObject, ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useFloatingPanelLayer, useFloatingPanelPosition } from "./floating-panel.js";
 
 afterEach(cleanup);
@@ -94,6 +94,33 @@ describe("useFloatingPanelPosition", () => {
     // Below: 370 + 4 + 100 = 474 > 400 - 8 = 392, doesn't fit — flips above:
     // max(8, 350 - 4 - 100) = 246.
     expect(renderAndCapture(true)?.top).toBe(246);
+  });
+
+  it("re-places the panel when the trigger resizes while open", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+    let notify: () => void = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          notify = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    stubRectsByTestId({ container: { top: 100, bottom: 120, left: 10, width: 300 }, panel: { height: 100 } });
+    const capturedRef: MutableRefObject<Position> = { current: null };
+    const { rerender } = render(<Harness matchTriggerWidth capturedRef={capturedRef} />);
+    expect(capturedRef.current?.top).toBe(124);
+
+    // A pill row above the input grows the trigger by 32px.
+    stubRectsByTestId({ container: { top: 100, bottom: 152, left: 10, width: 300 }, panel: { height: 100 } });
+    act(() => notify());
+    rerender(<Harness matchTriggerWidth capturedRef={capturedRef} />);
+    expect(capturedRef.current?.top).toBe(156);
+    vi.unstubAllGlobals();
   });
 });
 

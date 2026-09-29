@@ -1,9 +1,9 @@
 import { PermissionContext } from "@goerp/sdk/auth";
-import { MODAL_OVERLAY_CLASSES } from "@goerp/sdk/components";
+import { MODAL_OVERLAY_CLASSES, useListboxNavigation } from "@goerp/sdk/components";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useLocation } from "@tanstack/react-router";
-import type { KeyboardEvent, ReactNode } from "react";
-import { useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { formatShortcutText } from "../shortcuts/shortcut.js";
 import { useBuiltInCommands } from "./built-in-commands.js";
 import { onCommandPaletteOpenRequest } from "./command-palette-control.js";
@@ -40,22 +40,10 @@ function toRows(commands: Command[]): Row[] {
   });
 }
 
-interface InputState {
-  query: string;
-  highlightedIndex: number;
-}
-
-const INITIAL_INPUT_STATE: InputState = { query: "", highlightedIndex: 0 };
-
 export function CommandPalette(): ReactNode {
   const [open, setOpen] = useState(false);
-  // query and highlightedIndex change together everywhere they change (a
-  // fresh query always resets the highlight) — one state atom instead of
-  // two separate setState calls per update site.
-  const [{ query, highlightedIndex }, setInputState] = useState<InputState>(INITIAL_INPUT_STATE);
+  const [query, setQuery] = useState("");
   const triggerRef = useRef<HTMLElement | null>(null);
-  const highlightedRef = useRef<HTMLDivElement | null>(null);
-  const listboxId = useId();
 
   const runCommand = useCommandRunner();
   const permissions = useContext(PermissionContext);
@@ -79,48 +67,34 @@ export function CommandPalette(): ReactNode {
 
   const results = query.trim() === "" ? recentCommands : searchCommands([...visibleCommands, ...recentCommands], query);
   const rows = toRows(results);
-  const activeIndex = Math.max(0, Math.min(highlightedIndex, results.length - 1));
+
+  const execute = (command: Command) => {
+    if (runCommand(command)) setOpen(false);
+  };
+
+  // command-palette.md: the highlight clamps at either end rather than wrapping.
+  const nav = useListboxNavigation({
+    count: results.length,
+    isOpen: open,
+    wrap: false,
+    homeEnd: query === "",
+    onChoose: (index) => {
+      const command = results[index];
+      if (command) execute(command);
+    },
+  });
 
   useEffect(() => onCommandPaletteOpenRequest(() => setOpen(true)), []);
 
   useEffect(() => {
     if (open) {
       triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      // biome-ignore lint/nursery/useReactCompiler: resetting to the initial input state on reopen — same reset-on-reopen shape as AlertDialog's own (already-shipped) triggerRef/setState effect.
-      setInputState(INITIAL_INPUT_STATE);
+      // biome-ignore lint/nursery/useReactCompiler: each open starts from an empty query, the same reset AlertDialog's open effect does.
+      setQuery("");
+      // biome-ignore lint/nursery/useReactCompiler: each open starts with the first result highlighted.
+      nav.setActiveIndex(0);
     }
-  }, [open]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: activeIndex is a deliberate change-trigger, not read inside the effect — it drives which row highlightedRef currently points at.
-  useEffect(() => {
-    highlightedRef.current?.scrollIntoView({ block: "nearest" });
-    // biome-ignore lint/nursery/useReactCompiler: scrollIntoView is a DOM side effect keyed on activeIndex, not a state update.
-  }, [activeIndex]);
-
-  const execute = (command: Command) => {
-    if (runCommand(command)) setOpen(false);
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        setInputState((s) => ({ ...s, highlightedIndex: Math.min(s.highlightedIndex + 1, results.length - 1) }));
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        setInputState((s) => ({ ...s, highlightedIndex: Math.max(s.highlightedIndex - 1, 0) }));
-        break;
-      case "Enter": {
-        event.preventDefault();
-        const command = results[activeIndex];
-        if (command) execute(command);
-        break;
-      }
-      default:
-        break;
-    }
-  };
+  }, [open, nav.setActiveIndex]);
 
   return (
     <DialogPrimitive.Root
@@ -142,18 +116,17 @@ export function CommandPalette(): ReactNode {
           <div className="flex max-h-[70vh] w-full max-w-[min(560px,calc(100vw-32px))] flex-col rounded-structural border border-border bg-surface shadow-lg">
             <input
               type="text"
-              role="combobox"
-              aria-expanded={open}
-              aria-controls={listboxId}
-              aria-autocomplete="list"
-              aria-activedescendant={results.length > 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+              {...nav.inputProps}
               value={query}
-              onChange={(event) => setInputState({ query: event.target.value, highlightedIndex: 0 })}
-              onKeyDown={handleKeyDown}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                nav.setActiveIndex(0);
+              }}
+              onKeyDown={nav.handleKeyDown}
               placeholder="Type a command or search…"
               className="border-border border-b bg-transparent px-4 py-3 text-base text-text placeholder:text-text-secondary focus:outline-none"
             />
-            <div id={listboxId} role="listbox" aria-live="polite" className="flex-1 overflow-y-auto p-2">
+            <div id={nav.listboxId} role="listbox" aria-live="polite" className="flex-1 overflow-y-auto p-2">
               {results.length === 0 && query.trim() !== "" ? (
                 <p className="px-2 py-3 text-sm text-text-secondary">No results for "{query}"</p>
               ) : results.length === 0 ? (
@@ -166,18 +139,11 @@ export function CommandPalette(): ReactNode {
                     {showGroupHeader && (
                       <p className="px-2 pt-2 pb-1 text-text-secondary text-xs">{groupOf(command)}</p>
                     )}
-                    {/* biome-ignore lint/a11y/useFocusableInteractive: ARIA combobox-with-listbox — options are never independently focusable, only virtually tracked via aria-activedescendant. */}
-                    {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard selection goes through the input's own onKeyDown (ArrowUp/ArrowDown/Enter). */}
                     <div
-                      id={`${listboxId}-option-${index}`}
-                      role="option"
-                      aria-selected={index === activeIndex}
-                      ref={index === activeIndex ? highlightedRef : undefined}
-                      onMouseEnter={() => setInputState((s) => ({ ...s, highlightedIndex: index }))}
-                      onClick={() => execute(command)}
+                      {...nav.getOptionProps(index)}
                       data-icon={command.icon}
                       className={`flex cursor-pointer items-center justify-between gap-3 rounded-control px-2 py-2 ${
-                        index === activeIndex ? "bg-surface-hover" : ""
+                        index === nav.activeIndex ? "bg-surface-hover" : ""
                       }`}
                     >
                       <span className="flex min-w-0 flex-col">

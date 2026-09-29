@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CountrySelect } from "./country-select.js";
 
@@ -60,13 +60,13 @@ describe("CountrySelect", () => {
     expect(input.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("shows a 'no results' row, announced via aria-live, when the query matches nothing", async () => {
+  it("shows a 'no results' row, announced by the status region, when the query matches nothing", async () => {
     render(<CountrySelect value="" onChange={vi.fn()} />);
     const input = screen.getByRole("combobox");
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "zzzznotacountry" } });
-    const empty = await screen.findByText('No results for "zzzznotacountry"');
-    expect(empty.getAttribute("aria-live")).toBe("polite");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe('No results for "zzzznotacountry"'));
+    expect(screen.getByRole("listbox").textContent).toBe('No results for "zzzznotacountry"');
   });
 
   it("a labeled clear button unsets the value", () => {

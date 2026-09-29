@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export interface FloatingPanelPosition {
   top: number;
@@ -8,8 +8,8 @@ export interface FloatingPanelPosition {
 }
 
 // Shared positioning mechanics behind every anchored combobox/menu/grid
-// panel in this library (CodeSelect, IconPicker, ActionMenu, SelectMultiple,
-// RelationPicker) — floats a portaled panel below its trigger, flipping
+// panel in this library (Combobox, IconPicker, ActionMenu, SelectMultiple)
+// — floats a portaled panel below its trigger, flipping
 // above when it wouldn't fit, clamping left so the panel can't overflow the
 // viewport's right edge either.
 export function useFloatingPanelPosition(
@@ -17,7 +17,7 @@ export function useFloatingPanelPosition(
   containerRef: RefObject<HTMLElement | null>,
   panelRef: RefObject<HTMLElement | null>,
   // Whether the caller pins the panel's own width to its trigger's width
-  // (CodeSelect, RelationPicker do, via this hook's own `width` return
+  // (Combobox does, via this hook's own `width` return
   // value) — if so, this first layout pass measures the panel *before* that
   // width style has been applied (it renders hidden/unstyled for one frame
   // first), so its natural shrink-to-fit measurement can't be trusted as
@@ -28,15 +28,7 @@ export function useFloatingPanelPosition(
 ): FloatingPanelPosition | null {
   const [position, setPosition] = useState<FloatingPanelPosition | null>(null);
 
-  // Runs before paint, positioned once on open — not re-tracked on
-  // scroll/resize, since the panel closes on Escape/selection/outside-click
-  // well before either would matter.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: containerRef/panelRef/matchTriggerWidth are stable across a given caller's lifetime, not reactive values — only isOpen should retrigger this.
-  useLayoutEffect(() => {
-    if (!isOpen) {
-      setPosition(null);
-      return;
-    }
+  function measure(): void {
     const containerEl = containerRef.current;
     if (!containerEl) return;
     const containerRect = containerEl.getBoundingClientRect();
@@ -48,7 +40,34 @@ export function useFloatingPanelPosition(
     const top = fitsBelow ? containerRect.bottom + 4 : Math.max(8, containerRect.top - 4 - panelHeight);
     const maxLeft = window.innerWidth - panelWidth - 8;
     const left = Math.max(8, Math.min(containerRect.left, maxLeft));
-    setPosition({ top, left, width: containerRect.width });
+    const width = containerRect.width;
+    setPosition((prev) =>
+      prev && prev.top === top && prev.left === left && prev.width === width ? prev : { top, left, width },
+    );
+  }
+
+  // Runs before paint on open. Scroll and window resize aren't tracked,
+  // since the panel closes on Escape/selection/outside-click well before
+  // either would matter.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: containerRef/panelRef/matchTriggerWidth are stable across a given caller's lifetime, not reactive values — only isOpen should retrigger this.
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPosition(null);
+      return;
+    }
+    measure();
+  }, [isOpen]);
+
+  // The trigger itself can change size while open — a multi-select's pill
+  // row grows with each pick and pushes the input down — so the panel is
+  // re-placed to stay below it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: same stable refs as above.
+  useEffect(() => {
+    const containerEl = containerRef.current;
+    if (!isOpen || !containerEl || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(containerEl);
+    return () => observer.disconnect();
   }, [isOpen]);
 
   return position;
@@ -85,13 +104,17 @@ export function useOutsideClickClose(
   boundaryRefs: RefObject<HTMLElement | null>[],
   close: () => void,
 ): void {
-  // biome-ignore lint/correctness/useExhaustiveDependencies: close is a plain function recreated every render, not a reactive dependency — only isOpen should re-arm this listener.
+  // The listener outlives renders, so it calls the latest close, which may
+  // read state (a typed query) that changed after the panel opened.
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: boundaryRefs are stable refs; only isOpen should re-arm this listener.
   useEffect(() => {
     if (!isOpen) return;
     function handlePointerDown(event: MouseEvent): void {
       const target = event.target as Node;
       if (boundaryRefs.some((ref) => ref.current?.contains(target))) return;
-      close();
+      closeRef.current();
     }
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
