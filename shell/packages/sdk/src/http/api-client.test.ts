@@ -104,6 +104,22 @@ describe("FetchAPIClient basic requests", () => {
     expect(result).toBeUndefined();
   });
 
+  it("sends DELETE with no body unless one is given", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => emptyResponse(204));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FetchAPIClient();
+
+    await client.delete("/contacts/1");
+    await client.delete("/_meta/activity/followers", { body: { model: "sales.order", record_id: "r1" } });
+
+    const [, bare] = fetchMock.mock.calls[0]!;
+    expect(bare.body).toBeUndefined();
+    const [, withBody] = fetchMock.mock.calls[1]!;
+    expect(withBody.method).toBe("DELETE");
+    expect(withBody.body).toBe(JSON.stringify({ model: "sales.order", record_id: "r1" }));
+    expect((withBody.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+  });
+
   it("getBlob returns a Blob without JSON parsing", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { data: "x" }));
     vi.stubGlobal("fetch", fetchMock);

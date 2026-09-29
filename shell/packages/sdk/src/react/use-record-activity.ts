@@ -11,11 +11,13 @@ import type { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
+import { recordFollowersQueryKey } from "./use-record-followers.js";
 
 // typescript-sdk-reference.md's useRecordActivity — one record's activity
 // feed, backed by the built-in /_meta/activity endpoint (record-activity.md
 // §6), not a module route. Failures reject with an AppError carrying the
-// server's code and show no toast.
+// server's code and show no toast; invalid_mention carries the rejected
+// user ids in details.user_ids.
 export type ActivityKind = "created" | "change" | "comment" | "activity_done";
 
 export interface ActivityAuthor {
@@ -29,6 +31,15 @@ export interface ActivityFieldChange {
   field: string;
   old: unknown;
   new: unknown;
+}
+
+// A user a comment's mention tokens name, with their current name and
+// email: name is null when they have no profile name, and both are null
+// when they no longer exist.
+export interface ActivityMention {
+  id: string;
+  name: string | null;
+  email: string | null;
 }
 
 export interface CompletedActivity {
@@ -49,11 +60,25 @@ interface ActivityEntryBase {
 export type ActivityEntry =
   | (ActivityEntryBase & { kind: "created" })
   | (ActivityEntryBase & { kind: "change"; changes: ActivityFieldChange[] })
-  | (ActivityEntryBase & { kind: "comment"; body: string | null; deleted: boolean })
+  | (ActivityEntryBase & {
+      kind: "comment";
+      // null once deleted; mentions are encoded in it as <@user-id>
+      // (record-activity.md §9).
+      body: string | null;
+      mentions: ActivityMention[];
+      notifyFollowers: boolean;
+      deleted: boolean;
+    })
   | (ActivityEntryBase & { kind: "activity_done"; activity: CompletedActivity });
 
 export interface UseRecordActivityOptions {
   limit?: number;
+}
+
+export interface PostCommentOptions {
+  // true sends the comment to the record's followers (a message); the
+  // default, false, is a note (record-activity.md §10).
+  notifyFollowers?: boolean;
 }
 
 export interface UseRecordActivityResult {
@@ -65,7 +90,7 @@ export interface UseRecordActivityResult {
   fetchMore: () => void;
   isFetchingNextPage: boolean;
   refetch: () => void;
-  postComment: (body: string) => Promise<ActivityEntry>;
+  postComment: (body: string, options?: PostCommentOptions) => Promise<ActivityEntry>;
   isPosting: boolean;
   deleteComment: (id: string) => Promise<void>;
   // Every comment with a delete in flight; concurrent deletes are each tracked.
@@ -82,6 +107,8 @@ interface ActivityEntryWire {
   id: string;
   kind: ActivityKind;
   body?: string;
+  mentions?: ActivityMention[];
+  notify_followers?: boolean;
   deleted?: boolean;
   changes?: ActivityFieldChange[];
   activity?: { activity_id: string; type: string; summary: string; due_date: string; feedback: string | null };
@@ -99,7 +126,14 @@ function toActivityEntry(wire: ActivityEntryWire): ActivityEntry {
     case "change":
       return { ...base, kind: "change", changes: wire.changes ?? [] };
     case "comment":
-      return { ...base, kind: "comment", body: wire.body ?? null, deleted: wire.deleted ?? false };
+      return {
+        ...base,
+        kind: "comment",
+        body: wire.body ?? null,
+        mentions: wire.mentions ?? [],
+        notifyFollowers: wire.notify_followers ?? false,
+        deleted: wire.deleted ?? false,
+      };
     case "activity_done": {
       const a = wire.activity;
       return {
@@ -162,9 +196,21 @@ export function createPostCommentMutationOptions(
   client: Pick<APIClient, "post"> = apiClient,
 ) {
   return {
-    mutationFn: async (body: string): Promise<ActivityEntry> =>
-      toActivityEntry(await client.post<ActivityEntryWire>("/_meta/activity", { model, record_id: recordId, body })),
-    onSuccess: () => refetchFeed(queryClient, model, recordId),
+    mutationFn: async ({ body, notifyFollowers }: { body: string } & PostCommentOptions): Promise<ActivityEntry> =>
+      toActivityEntry(
+        await client.post<ActivityEntryWire>("/_meta/activity", {
+          model,
+          record_id: recordId,
+          body,
+          ...(notifyFollowers !== undefined ? { notify_followers: notifyFollowers } : {}),
+        }),
+      ),
+    // Posting makes the author a follower (record-activity.md §8).
+    onSuccess: () =>
+      Promise.all([
+        refetchFeed(queryClient, model, recordId),
+        queryClient.invalidateQueries({ queryKey: recordFollowersQueryKey(model, recordId) }),
+      ]),
   };
 }
 
@@ -208,7 +254,7 @@ export function useRecordActivity(
     },
     isFetchingNextPage: query.isFetchingNextPage,
     refetch: () => void query.refetch(),
-    postComment: (body) => postMutation.mutateAsync(body),
+    postComment: (body, postOptions = {}) => postMutation.mutateAsync({ body, ...postOptions }),
     isPosting: postMutation.isPending,
     deleteComment: async (id) => {
       setDeletingIds((current) => [...current, id]);

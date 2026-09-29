@@ -4,6 +4,7 @@ import { AppError } from "../error/app-error.js";
 import type {
   APIClient,
   APIClientConfig,
+  DeleteOptions,
   RefreshedTokens,
   RefreshOutcome,
   RequestOptions,
@@ -127,8 +128,8 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
     return this.requestJSON<T>("PATCH", path, body, options);
   }
 
-  delete<T>(path: string, options?: RequestOptions): Promise<T> {
-    return this.requestJSON<T>("DELETE", path, undefined, options);
+  delete<T>(path: string, options?: DeleteOptions): Promise<T> {
+    return this.requestJSON<T>("DELETE", path, options?.body, options);
   }
 
   async getBlob(path: string, options?: RequestOptions): Promise<Blob> {

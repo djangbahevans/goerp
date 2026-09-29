@@ -4,12 +4,18 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+// A DELETE that names its target in a JSON body rather than the path,
+// such as DELETE /_meta/activity/followers (record-activity.md §6).
+export interface DeleteOptions extends RequestOptions {
+  body?: unknown;
+}
+
 export interface APIClient {
   get<T>(path: string, options?: RequestOptions): Promise<T>;
   post<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
   put<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
   patch<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
-  delete<T>(path: string, options?: RequestOptions): Promise<T>;
+  delete<T>(path: string, options?: DeleteOptions): Promise<T>;
   getBlob(path: string, options?: RequestOptions): Promise<Blob>;
   // Same as getBlob, but also hands back the response headers — needed
   // where pagination state rides on headers instead of a JSON envelope

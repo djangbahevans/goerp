@@ -9,6 +9,7 @@ export { toPagedResponse } from "./paged-response.js";
 export type {
   APIClient,
   APIClientConfig,
+  DeleteOptions,
   PagedResponse,
   RefreshedTokens,
   RefreshOutcome,
