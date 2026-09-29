@@ -113,6 +113,8 @@ const comment = (overrides: Partial<Extract<ActivityEntry, { kind: "comment" }>>
   id: "c1",
   kind: "comment",
   body: "Customer asked to move delivery to Friday.",
+  mentions: [],
+  notifyFollowers: false,
   deleted: false,
   author: ama,
   createdAt: "2026-09-23T16:02:00Z",

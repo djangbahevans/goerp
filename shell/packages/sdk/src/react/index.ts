@@ -29,7 +29,9 @@ export type {
   ActivityEntry,
   ActivityFieldChange,
   ActivityKind,
+  ActivityMention,
   CompletedActivity,
+  PostCommentOptions,
   UseRecordActivityOptions,
   UseRecordActivityResult,
 } from "./use-record-activity.js";
@@ -40,6 +42,13 @@ export {
   recordActivityQueryKey,
   useRecordActivity,
 } from "./use-record-activity.js";
+export type { RecordFollower, RecordFollowers, UseRecordFollowersResult } from "./use-record-followers.js";
+export {
+  createFollowMutationOptions,
+  createRecordFollowersQueryOptions,
+  recordFollowersQueryKey,
+  useRecordFollowers,
+} from "./use-record-followers.js";
 export type { RecordReader, UseRecordReadersOptions, UseRecordReadersResult } from "./use-record-readers.js";
 export { createRecordReadersQueryOptions, recordReadersQueryKey, useRecordReaders } from "./use-record-readers.js";
 export type { RelationBatchSpec } from "./use-relation-labels.js";

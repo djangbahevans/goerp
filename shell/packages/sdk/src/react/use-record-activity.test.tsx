@@ -6,6 +6,7 @@ import { AppError } from "../error/app-error.js";
 import { apiClient } from "../http/index.js";
 import type { RequestOptions } from "../http/types.js";
 import { createRecordActivityQueryOptions, useRecordActivity } from "./use-record-activity.js";
+import { useRecordFollowers } from "./use-record-followers.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -89,7 +90,25 @@ describe("createRecordActivityQueryOptions", () => {
           author: null,
           created_at: "2026-09-25T11:00:00Z",
         },
-        { id: "a2", kind: "comment", deleted: true, author, created_at: "2026-09-25T10:30:00Z" },
+        {
+          id: "a5",
+          kind: "comment",
+          body: "<@u2> can you confirm?",
+          mentions: [{ id: "u2", name: null, email: "kofi@acme.example" }],
+          notify_followers: true,
+          deleted: false,
+          author,
+          created_at: "2026-09-25T10:45:00Z",
+        },
+        {
+          id: "a2",
+          kind: "comment",
+          mentions: [],
+          notify_followers: false,
+          deleted: true,
+          author,
+          created_at: "2026-09-25T10:30:00Z",
+        },
         { id: "a1", kind: "created", author, created_at: "2026-09-25T10:00:00Z" },
       ],
       meta: { cursor: "a1", has_more: true },
@@ -120,9 +139,21 @@ describe("createRecordActivityQueryOptions", () => {
           createdAt: "2026-09-25T11:00:00Z",
         },
         {
+          id: "a5",
+          kind: "comment",
+          body: "<@u2> can you confirm?",
+          mentions: [{ id: "u2", name: null, email: "kofi@acme.example" }],
+          notifyFollowers: true,
+          deleted: false,
+          author: { id: "u1", name: "Ama Owusu", avatarUrl: null },
+          createdAt: "2026-09-25T10:45:00Z",
+        },
+        {
           id: "a2",
           kind: "comment",
           body: null,
+          mentions: [],
+          notifyFollowers: false,
           deleted: true,
           author: { id: "u1", name: "Ama Owusu", avatarUrl: null },
           createdAt: "2026-09-25T10:30:00Z",
@@ -184,6 +215,50 @@ describe("useRecordActivity", () => {
     const ids = result.current.entries.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.slice(0, 4)).toEqual(["e0005", "e0004", "e0003", "e0002"]);
+  });
+
+  it("posts a message with notify_followers and refreshes the record's followers", async () => {
+    const { post } = fakeServer(0);
+    const followersGet = vi.fn(async () => ({ data: [], meta: { following: false } }));
+    const get = vi.mocked(apiClient.get);
+    const feedGet = get.getMockImplementation()!;
+    get.mockImplementation(async (path: string, options?: RequestOptions) =>
+      path === "/_meta/activity/followers" ? (followersGet() as never) : feedGet(path, options),
+    );
+    const { result } = renderHook(
+      () => ({ activity: useRecordActivity("sales.order", "o1"), followers: useRecordFollowers("sales.order", "o1") }),
+      { wrapper: wrapper() },
+    );
+    await waitFor(() => expect(followersGet).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.activity.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.activity.postComment("Delivery moved to Friday.", { notifyFollowers: true });
+    });
+
+    expect(post).toHaveBeenCalledWith("/_meta/activity", {
+      model: "sales.order",
+      record_id: "o1",
+      body: "Delivery moved to Friday.",
+      notify_followers: true,
+    });
+    await waitFor(() => expect(followersGet).toHaveBeenCalledTimes(2));
+  });
+
+  it("rejects a post naming an unmentionable user with invalid_mention and its user ids", async () => {
+    fakeServer(0);
+    const failure = new AppError({
+      code: "invalid_mention",
+      message: "a mentioned user can't read this record",
+      httpStatus: 400,
+      details: { user_ids: ["u9"] },
+    });
+    vi.spyOn(apiClient, "post").mockRejectedValue(failure);
+    const { result } = renderHook(() => useRecordActivity("sales.order", "o1"), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    const rejection = act(() => result.current.postComment("<@u9> look"));
+    await expect(rejection).rejects.toMatchObject({ code: "invalid_mention", details: { user_ids: ["u9"] } });
   });
 
   it("deleting a comment refetches the feed and tracks the delete in flight", async () => {
