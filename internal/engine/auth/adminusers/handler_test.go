@@ -114,7 +114,7 @@ func newEnv(t *testing.T) *env {
 		sessions: sessionStore,
 		issuer:   authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore),
 		checker:  checker,
-		handler:  NewHandler(resolver, checker, NewStore(conn, auditStore), roleStore, sessionStore, revoker, inviteStore, userStore, nil, nil),
+		handler:  NewHandler(resolver, checker, NewStore(conn, auditStore), roleStore, sessionStore, revoker, inviteStore, userStore, nil, nil, modelForTable),
 		roleMap:  roleMap,
 		mailer:   mailer,
 	}
@@ -348,6 +348,7 @@ func userRoutes(h *Handler, id string) []request {
 		{serve: h.ServeUnsuspend, method: http.MethodPost, path: "/admin/users/" + id + "/unsuspend", params: idParams},
 		{serve: h.ServeDelete, method: http.MethodDelete, path: "/admin/users/" + id, params: idParams},
 		{serve: h.ServeSessions, method: http.MethodGet, path: "/admin/users/" + id + "/sessions", params: idParams},
+		{serve: h.ServeActivity, method: http.MethodGet, path: "/admin/users/" + id + "/activity", params: idParams},
 		{
 			serve: h.ServeRevokeSession, method: http.MethodDelete, path: "/admin/users/" + id + "/sessions/" + id,
 			params: map[string]string{"id": id, "family_id": id},

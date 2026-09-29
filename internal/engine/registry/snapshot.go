@@ -31,6 +31,7 @@ type RegistrySnapshot struct {
 	schemaRegistry   *SchemaRegistry
 	computedIndex    *computed.Index
 	dataAuditReg     *dataaudit.Registry
+	modelsByTable    map[string]string
 }
 
 // Modules returns this snapshot's backing map, successful and
@@ -148,6 +149,13 @@ func (s *RegistrySnapshot) ModelByName(qualified string) (moduleName string, mod
 		}
 	}
 	return "", nil, model.ModelDeclaration{}, false
+}
+
+// ModelForTable returns the qualified name of the loaded model whose table
+// is table, the mapping audit_log.table_name needs.
+func (s *RegistrySnapshot) ModelForTable(table string) (string, bool) {
+	qualified, ok := s.modelsByTable[table]
+	return qualified, ok
 }
 
 // ComputeTargets builds one wasm.ComputeTarget per loaded, non-failed

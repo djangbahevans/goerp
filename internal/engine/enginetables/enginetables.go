@@ -144,7 +144,7 @@ var Groups = []Group{
 	},
 	{
 		Tables: []Table{{Name: "audit_log", Partitioned: true, AppendOnly: true}},
-		Create: createPartitioned("audit_log", "changed_at", createAuditLogTable, createAuditLogTimeIndex),
+		Create: createPartitioned("audit_log", "changed_at", createAuditLogTable, createAuditLogTimeIndex, createAuditLogChangedByIndex),
 	},
 	{
 		Tables: []Table{{Name: "event_log", Partitioned: true}},
@@ -348,6 +348,13 @@ CREATE TABLE IF NOT EXISTS %s.audit_log (
 
 const createAuditLogTimeIndex = `
 CREATE INDEX IF NOT EXISTS idx_audit_log_time ON %s.audit_log USING BRIN (changed_at)
+`
+
+// createAuditLogChangedByIndex serves one user's changes, newest first, for
+// the admin activity feed (auth-internals.md §17 "Tenant admin activity
+// read API").
+const createAuditLogChangedByIndex = `
+CREATE INDEX IF NOT EXISTS idx_audit_log_changed_by ON %s.audit_log (changed_by, changed_at DESC, id DESC)
 `
 
 // createEventLogTable mirrors multitenancy-internals.md's event_log

@@ -224,3 +224,35 @@ func TestComputeTargets_CarriesModuleDeclarations(t *testing.T) {
 		t.Errorf("ConfigSchema = %+v, want %+v", target.ConfigSchema, configSchema)
 	}
 }
+
+func TestRegistrySnapshot_ModelForTable(t *testing.T) {
+	r := &ModuleRegistry{}
+	lineItem := *model.Define("OrderLine")
+	renamed := *model.Define("gadget", model.Table("legacy_gadgets"))
+	snap, err := r.Update(map[string]*module.LoadedModule{
+		"sales": {
+			Status:     module.StatusReady,
+			Manifest:   manifest.Manifest{Type: "standard"},
+			ModelDecls: []model.ModelDeclaration{lineItem, renamed},
+		},
+		"broken": {
+			Status:     module.StatusFailed,
+			Manifest:   manifest.Manifest{Type: "standard"},
+			ModelDecls: []model.ModelDeclaration{*model.Define("thing")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	for table, want := range map[string]string{"order_line": "sales.OrderLine", "legacy_gadgets": "sales.gadget"} {
+		if got, ok := snap.ModelForTable(table); !ok || got != want {
+			t.Errorf("ModelForTable(%q) = %q, %v, want %q, true", table, got, ok, want)
+		}
+	}
+	for _, table := range []string{"thing", "gadget", "unknown"} {
+		if got, ok := snap.ModelForTable(table); ok {
+			t.Errorf("ModelForTable(%q) = %q, true, want not found", table, got)
+		}
+	}
+}
