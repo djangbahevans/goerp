@@ -32,7 +32,6 @@ export function CalendarView({
   // setter, so a fresh closure each render shouldn't re-run this effect.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above.
   useEffect(() => {
-    // biome-ignore lint/nursery/useReactCompiler: see above.
     onVisibleRangeChange?.(visibleRange(focusedDate, activeView));
   }, [focusedDate, activeView]);
 
