@@ -539,4 +539,40 @@ describe("buildViewRegistry — notificationTypes", () => {
       },
     ]);
   });
+
+  it("leads with the engine's own types as a General group", () => {
+    const registry = buildViewRegistry({
+      engine_version: "test",
+      schema_hash: "abc",
+      engine_notification_types: [
+        {
+          name: "activity_assigned",
+          label: "Activity assigned to you",
+          description: "Sent when someone assigns you a scheduled activity",
+          available_channels: ["in_app", "email", "push"],
+        },
+      ],
+      modules: {
+        accounting: moduleSchema({
+          name: "accounting",
+          display_name: "Accounting",
+          notification_types: [{ name: "invoice_overdue", label: "Invoice Overdue", available_channels: ["in_app"] }],
+        }),
+      },
+    });
+
+    expect(registry.notificationTypes.map((g) => g.module)).toEqual(["engine", "accounting"]);
+    expect(registry.notificationTypes[0]).toEqual({
+      module: "engine",
+      displayName: "General",
+      types: [
+        {
+          type: "engine.activity_assigned",
+          label: "Activity assigned to you",
+          description: "Sent when someone assigns you a scheduled activity",
+          availableChannels: ["in_app", "email", "push"],
+        },
+      ],
+    });
+  });
 });

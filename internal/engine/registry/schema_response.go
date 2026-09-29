@@ -2,6 +2,7 @@ package registry
 
 import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -23,9 +24,13 @@ const schemaEngineVersion = "dev"
 // rather than per request (goerp#591) — it's a pure function of the
 // snapshot's modules and route table, invariant until the next reload.
 type SchemaResponse struct {
-	Modules       map[string]*SchemaModule `json:"modules"`
-	EngineVersion string                   `json:"engine_version"`
-	SchemaHash    string                   `json:"schema_hash"`
+	Modules map[string]*SchemaModule `json:"modules"`
+	// EngineNotificationTypes are the engine's own notification types
+	// (notification-system.md §6 "Engine-declared notification types"),
+	// listed apart from Modules because "engine" is no module's name.
+	EngineNotificationTypes []SchemaNotificationType `json:"engine_notification_types"`
+	EngineVersion           string                   `json:"engine_version"`
+	SchemaHash              string                   `json:"schema_hash"`
 }
 
 type SchemaModule struct {
@@ -294,9 +299,10 @@ func buildSchemaResponse(modules map[string]*module.LoadedModule, routeTable *ro
 	}
 
 	return &SchemaResponse{
-		Modules:       schemaModules,
-		EngineVersion: schemaEngineVersion,
-		SchemaHash:    schemaHash,
+		Modules:                 schemaModules,
+		EngineNotificationTypes: schemaNotificationTypesFrom(enginenotif.Types),
+		EngineVersion:           schemaEngineVersion,
+		SchemaHash:              schemaHash,
 	}
 }
 

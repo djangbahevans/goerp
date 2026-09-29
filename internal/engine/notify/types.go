@@ -6,16 +6,18 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
+	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 )
 
 // EngineModule is the reserved module name the engine's own notification
 // types are declared under (notification-system.md §6 "Engine-declared
 // notification types").
-const EngineModule = manifest.ReservedEngineName
+const EngineModule = enginenotif.Module
 
 var (
 	// ErrUndeclaredType: the notification type is not one the emitting
@@ -25,20 +27,8 @@ var (
 	ErrUnknownChannel = errors.New("unknown notification channel")
 )
 
-var (
-	engineAssignableChannels = []string{notifications.ChannelInApp, notifications.ChannelEmail, notifications.ChannelPush}
-	inAppAndEmail            = []string{notifications.ChannelInApp, notifications.ChannelEmail}
-)
-
-// EngineTypes are the notification types the engine sends itself, with the
-// same fields a manifest's notification_types entry has. Their full type
-// strings are "engine.{name}".
-var EngineTypes = []manifest.NotificationType{
-	{Name: "activity_assigned", Label: "Activity assigned to you", DefaultChannels: inAppAndEmail, AvailableChannels: engineAssignableChannels},
-	{Name: "activity_due", Label: "Activity due today", DefaultChannels: []string{notifications.ChannelInApp}, AvailableChannels: engineAssignableChannels},
-	{Name: "record_mention", Label: "Mentioned you in a comment", DefaultChannels: inAppAndEmail, AvailableChannels: engineAssignableChannels},
-	{Name: "record_message", Label: "Message on a record you follow", DefaultChannels: inAppAndEmail, AvailableChannels: engineAssignableChannels},
-}
+// EngineTypes are the notification types the engine sends itself.
+var EngineTypes = enginenotif.Types
 
 // lookupType is routing's step 0: the declaration of notificationType
 // ("{module}.{name}") as moduleName emits it. An engine type is looked up
@@ -76,4 +66,17 @@ func validateChannels(channels []string) error {
 		}
 	}
 	return nil
+}
+
+// resolveTemplate resolves moduleName's notificationName/channel template
+// for locale: an engine type's from the templates embedded in the binary,
+// any other from its module's package in snapshot.
+func resolveTemplate(snapshot *registry.RegistrySnapshot, moduleName, notificationName, channel, locale string) (string, *notiftemplate.Template, bool) {
+	if moduleName == EngineModule {
+		return enginenotif.Templates().Resolve(notificationName, channel, locale)
+	}
+	if snapshot == nil {
+		return "", nil, false
+	}
+	return snapshot.NotifTemplate(moduleName, notificationName, channel, locale)
 }

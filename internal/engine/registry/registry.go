@@ -12,6 +12,7 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/computed"
 	"github.com/djangbahevans/goerp/internal/engine/dataaudit"
+	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
@@ -394,7 +395,13 @@ func computeSchemaHash(modules map[string]*module.LoadedModule, routeTable *rout
 		hashModules[r.Entry.ModuleName] = hm
 	}
 
-	data, err := json.Marshal(hashModules, json.Deterministic(true))
+	// The engine's own notification types are part of the response too,
+	// and change with the binary, so an engine upgrade that changes them
+	// changes the hash even when no module does.
+	data, err := json.Marshal(struct {
+		Modules                 map[string]schemaHashModule
+		EngineNotificationTypes []SchemaNotificationType
+	}{hashModules, schemaNotificationTypesFrom(enginenotif.Types)}, json.Deterministic(true))
 	if err != nil {
 		// hashModules contains only strings, bools, slices, and maps of
 		// those — never a channel, func, or cyclic value — so

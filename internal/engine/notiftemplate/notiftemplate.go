@@ -73,7 +73,20 @@ func Load(notifTypes []manifest.NotificationType, packagePath string) (*ModuleTe
 		return nil, err
 	}
 	defer closeSrc()
+	return load(notifTypes, src)
+}
 
+// LoadFS is Load for templates in fsys rather than a module package — the
+// engine's own, which ship embedded in its binary (notification-system.md
+// §6 "Engine-declared notification types").
+func LoadFS(notifTypes []manifest.NotificationType, fsys fs.FS) (*ModuleTemplates, error) {
+	if len(notifTypes) == 0 {
+		return nil, nil
+	}
+	return load(notifTypes, fsSource{fsys})
+}
+
+func load(notifTypes []manifest.NotificationType, src fileSource) (*ModuleTemplates, error) {
 	names, err := src.list()
 	if err != nil {
 		return nil, fmt.Errorf("list package contents: %w", err)
@@ -342,4 +355,26 @@ func (d *dirSource) list() ([]string, error) {
 
 func (d *dirSource) read(name string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(d.root, filepath.FromSlash(name)))
+}
+
+type fsSource struct {
+	fsys fs.FS
+}
+
+func (f fsSource) list() ([]string, error) {
+	var names []string
+	err := fs.WalkDir(f.fsys, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			names = append(names, path)
+		}
+		return nil
+	})
+	return names, err
+}
+
+func (f fsSource) read(name string) ([]byte, error) {
+	return fs.ReadFile(f.fsys, name)
 }

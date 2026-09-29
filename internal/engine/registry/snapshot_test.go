@@ -256,3 +256,32 @@ func TestRegistrySnapshot_ModelForTable(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistrySnapshot_RecordFormPath(t *testing.T) {
+	snap := &RegistrySnapshot{schemaResponse: &SchemaResponse{Modules: map[string]*SchemaModule{
+		"sales": {Routes: []SchemaRoute{
+			{Method: "GET", Path: "/sales/orders", Model: "sales.order", CrudAction: "list", View: "order_list"},
+			{Method: "PATCH", Path: "/sales/orders/{id}", Model: "sales.order", CrudAction: "update", View: "order_form"},
+			{Method: "GET", Path: "/sales/orders/{id}", Model: "sales.order", CrudAction: "get", View: "order_form"},
+			{Method: "GET", Path: "/sales/lines/{id}", Model: "sales.line", CrudAction: "get"},
+		}},
+	}}}
+
+	tests := []struct {
+		model, recordID, want string
+	}{
+		{"sales.order", "01j8", "/_m/sales/orders/01j8"},
+		{"sales.line", "01j9", ""},      // no form view
+		{"sales.invoice", "01ja", ""},   // no route
+		{"contacts.person", "01jb", ""}, // no such module
+		{"unqualified", "01jc", ""},
+	}
+	for _, tt := range tests {
+		if got := snap.RecordFormPath(tt.model, tt.recordID); got != tt.want {
+			t.Errorf("RecordFormPath(%q, %q) = %q, want %q", tt.model, tt.recordID, got, tt.want)
+		}
+	}
+	if got := (&RegistrySnapshot{}).RecordFormPath("sales.order", "01j8"); got != "" {
+		t.Errorf("RecordFormPath without a schema response = %q, want \"\"", got)
+	}
+}

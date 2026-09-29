@@ -146,6 +146,16 @@ func New(pool *pgxpool.Pool, cfg *config.Config, workers *river.Workers) (*river
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),
+			// Platform-wide, fanning out across active tenants like
+			// InviteExpiryArgs above. RunOnStart: an engine restarted more
+			// often than every 15 minutes would otherwise never send one.
+			river.NewPeriodicJob(
+				river.PeriodicInterval(ActivityDueInterval),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return ActivityDueArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
 			river.NewPeriodicJob(
 				river.PeriodicInterval(24*time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {

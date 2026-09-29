@@ -220,13 +220,26 @@ func (e *Engine) memberPermissionSet(ctx context.Context, tenantSlug, userID str
 // record shares decide which come back. fields nil reads every field. ok
 // is false on an unresolvable model or any host error.
 func (e *Engine) readRecordsAs(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID string, permSet permission.PermissionBitfield, modelName string, ids, fields []string) (records []map[string]any, ok bool) {
+	records, err := e.readRecordsAsErr(ctx, tenantCtx, userID, permSet, modelName, ids, fields)
+	return records, err == nil
+}
+
+// errReadModelNotFound: the model a record read names isn't a registered
+// model of a loaded module.
+var errReadModelNotFound = errors.New("model not found")
+
+// readRecordsAsErr is readRecordsAs reporting why a read failed: an error
+// wrapping errReadModelNotFound for a model no loaded module declares,
+// any other for a registry not yet loaded or a host error. A record the
+// reader can't see is left out of records, not an error.
+func (e *Engine) readRecordsAsErr(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID string, permSet permission.PermissionBitfield, modelName string, ids, fields []string) ([]map[string]any, error) {
 	snap := e.moduleRegistry.Snapshot()
 	if snap == nil {
-		return nil, false
+		return nil, errors.New("module registry not loaded")
 	}
 	_, mod, _, found := snap.ModelByName(modelName)
 	if !found {
-		return nil, false
+		return nil, fmt.Errorf("%w: %q", errReadModelNotFound, modelName)
 	}
 
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
@@ -246,9 +259,12 @@ func (e *Engine) readRecordsAs(ctx context.Context, tenantCtx *tenantresolve.Ten
 		Fields: fields,
 	})
 	if hostErr != nil {
-		return nil, false
+		if hostErr.Code == abiv1.ErrCodeModelNotFound {
+			return nil, fmt.Errorf("%w: %s", errReadModelNotFound, hostErr.Message)
+		}
+		return nil, fmt.Errorf("read %s: %s: %s", modelName, hostErr.Code, hostErr.Message)
 	}
-	return readOut.Records, true
+	return readOut.Records, nil
 }
 
 // dispatchSharesCreateRoute is POST /_meta/shares' handler (goerp#475) —

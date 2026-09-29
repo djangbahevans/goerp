@@ -535,7 +535,7 @@ func TestSend_EngineTypeSkipsManifestValidation(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t, "Adjoa", "")
 
-	res, err := env.sender.Send(t.Context(), env.tenant.ID, EngineModule, "engine.activity_due", userID, nil, Options{})
+	res, err := env.sender.Send(t.Context(), env.tenant.ID, EngineModule, "engine.record_mention", userID, nil, Options{})
 	if err != nil {
 		t.Fatalf("Send() error: %v", err)
 	}
@@ -543,8 +543,26 @@ func TestSend_EngineTypeSkipsManifestValidation(t *testing.T) {
 	if err := env.conn.QueryRow(fmt.Sprintf(`SELECT title FROM %s.notifications WHERE id = $1`, tenantschema.Name(env.tenant.Slug)), res.NotificationID).Scan(&title); err != nil {
 		t.Fatal(err)
 	}
-	if title != "Activity due today" {
-		t.Errorf("title = %q, want the type's label", title)
+	if title != "Mentioned you in a comment" {
+		t.Errorf("title = %q, want the type's label, since it has no template", title)
+	}
+}
+
+func TestSend_EngineTypeRendersItsEmbeddedTemplate(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t, "Adwoa", "")
+
+	data := map[string]any{"Summary": "Call back", "TypeLabel": "Call", "TypeIcon": "phone", "RecordName": "SO-0007", "DueDate": "2026-09-25", "Overdue": false}
+	res, err := env.sender.Send(t.Context(), env.tenant.ID, EngineModule, "engine.activity_due", userID, data, Options{ActionURL: "/_m/sales/orders/o7"})
+	if err != nil {
+		t.Fatalf("Send() error: %v", err)
+	}
+	var title, body, actionURL, icon string
+	if err := env.conn.QueryRow(fmt.Sprintf(`SELECT title, body, action_url, icon FROM %s.notifications WHERE id = $1`, tenantschema.Name(env.tenant.Slug)), res.NotificationID).Scan(&title, &body, &actionURL, &icon); err != nil {
+		t.Fatal(err)
+	}
+	if title != "Due today: Call back" || body != "Call on SO-0007, due 2026-09-25" || actionURL != "/_m/sales/orders/o7" || icon != "phone" {
+		t.Errorf("notification = (%q, %q, %q, %q), want the rendered activity_due template", title, body, actionURL, icon)
 	}
 }
 

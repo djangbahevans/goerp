@@ -156,6 +156,10 @@ export type ModuleSchema = v.InferOutput<typeof ModuleSchemaSchema>;
 
 export const MetaSchemaSchema = v.looseObject({
   modules: v.record(v.string(), ModuleSchemaSchema),
+  // The engine's own notification types (notification-system.md §6),
+  // outside modules since "engine" is no module's name. Optional so a
+  // schema from an engine that predates them still parses.
+  engine_notification_types: v.optional(v.array(NotificationTypeSchemaSchema)),
   engine_version: v.string(),
   schema_hash: v.string(),
 });
