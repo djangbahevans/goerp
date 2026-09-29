@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
@@ -30,6 +31,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/rs/zerolog/log"
@@ -39,14 +41,58 @@ type Handler struct {
 	tenants *tenantresolve.Resolver
 	auth    *authcheck.Checker
 	users   *user.Store
+	members *role.Store
 	files   *files.Store
 	// locales supplies the tenant's available locales, the only ones a
 	// user may pick as their locale.
 	locales *tenantl10n.Store
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, locales *tenantl10n.Store) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, locales: locales}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, members *role.Store, filesStore *files.Store, locales *tenantl10n.Store) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, members: members, files: filesStore, locales: locales}
+}
+
+// Longest phone and title parseMemberUpdate accepts.
+const (
+	maxPhoneLen = 64
+	maxTitleLen = 200
+)
+
+// parseMemberUpdate reads phone and title, the per-tenant fields saved on
+// the caller's member row in this tenant (shell-ux.md §4.1 "Shared and
+// per-organisation fields"). null or a blank string clears one.
+func parseMemberUpdate(body map[string]jsontext.Value) (role.MemberProfileUpdate, error) {
+	var update role.MemberProfileUpdate
+	var err error
+	if update.SetPhone, update.Phone, err = optionalText(body, "phone", maxPhoneLen); err != nil {
+		return update, err
+	}
+	if update.SetJobTitle, update.JobTitle, err = optionalText(body, "title", maxTitleLen); err != nil {
+		return update, err
+	}
+	return update, nil
+}
+
+func optionalText(body map[string]jsontext.Value, field string, maxLen int) (bool, *string, error) {
+	raw, ok := body[field]
+	if !ok {
+		return false, nil, nil
+	}
+	if raw.Kind() == 'n' {
+		return true, nil, nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, nil, &requestError{message: fmt.Sprintf("%q must be a string or null", field)}
+	}
+	value = strings.TrimSpace(value)
+	if utf8.RuneCountInString(value) > maxLen {
+		return false, nil, &requestError{message: fmt.Sprintf("%q must be at most %d characters", field, maxLen)}
+	}
+	if value == "" {
+		return true, nil, nil
+	}
+	return true, &value, nil
 }
 
 func writeUnauthenticated(w http.ResponseWriter, r *http.Request) {
@@ -196,6 +242,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	update, err := parseUpdate(body, l10nSettings.AvailableLocales)
+	var memberUpdate role.MemberProfileUpdate
+	if err == nil {
+		memberUpdate, err = parseMemberUpdate(body)
+	}
 	if err != nil {
 		if reqErr, ok := errors.AsType[*requestError](err); ok && reqErr.field != "" {
 			writeInvalidPreference(w, r, reqErr.field, reqErr.message)
@@ -233,6 +283,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	oldAvatarID, err := h.users.UpdateProfile(ctx, authCtx.UserID, update)
 	if err != nil {
+		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update failed")
+		return
+	}
+	if err := h.members.UpdateMemberProfile(ctx, tenantCtx.Slug, authCtx.UserID, memberUpdate); err != nil {
+		log.Error().Err(err).Str("user_id", authCtx.UserID).Msg("authmeupdate: member profile update failed")
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "update failed")
 		return
 	}

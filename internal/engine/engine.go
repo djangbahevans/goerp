@@ -715,8 +715,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	// need it before builtinRoutes is built.
 	filesStore := files.NewStore(primaryPool)
 	tenantLocales := tenantl10n.NewStore(tenantConfigStore, cfg.AvailableLocales)
-	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, filesStore, storageBackend, tenantLocales, passwordPolicies)
-	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, filesStore, tenantLocales)
+	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, storageBackend, tenantLocales, passwordPolicies)
+	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, tenantLocales)
 	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
@@ -866,7 +866,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
-	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminusers.NewStore(primaryPool, authAuditStore), roleStore, sessionStore, sessionRevoker, inviteStore, userStore, filesStore, storageBackend, func(table string) (string, bool) {
+	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminusers.NewStore(primaryPool, authAuditStore), roleStore, roleCache, sessionStore, sessionRevoker, inviteStore, userStore, filesStore, storageBackend, func(table string) (string, bool) {
 		snap := moduleRegistry.Snapshot()
 		if snap == nil {
 			return "", false

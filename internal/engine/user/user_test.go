@@ -321,7 +321,7 @@ func TestIncrementFailedLogins_LocksAtThreshold(t *testing.T) {
 	}
 }
 
-func TestResetLoginState_ClearsCounterAndLockAndSetsLastLogin(t *testing.T) {
+func TestResetLoginState_ClearsCounterAndLock(t *testing.T) {
 	store, conn := openTestStore(t)
 	id, err := store.FindOrCreateInvited(context.Background(), uniqueEmail(t))
 	if err != nil {
@@ -335,7 +335,7 @@ func TestResetLoginState_ClearsCounterAndLockAndSetsLastLogin(t *testing.T) {
 		}
 	}
 
-	if err := store.ResetLoginState(context.Background(), id, "203.0.113.5"); err != nil {
+	if err := store.ResetLoginState(t.Context(), id); err != nil {
 		t.Fatalf("ResetLoginState() error: %v", err)
 	}
 
@@ -350,19 +350,6 @@ func TestResetLoginState_ClearsCounterAndLockAndSetsLastLogin(t *testing.T) {
 		t.Errorf("LockedUntil = %v, want nil", got.LockedUntil)
 	}
 
-	var lastLoginAt sql.NullTime
-	var lastLoginIP sql.NullString
-	if err := conn.QueryRowContext(context.Background(),
-		"SELECT last_login_at, last_login_ip FROM system.users WHERE id = $1", id,
-	).Scan(&lastLoginAt, &lastLoginIP); err != nil {
-		t.Fatalf("query last_login fields: %v", err)
-	}
-	if !lastLoginAt.Valid {
-		t.Error("last_login_at is NULL, want set")
-	}
-	if lastLoginIP.String != "203.0.113.5" {
-		t.Errorf("last_login_ip = %q, want %q", lastLoginIP.String, "203.0.113.5")
-	}
 }
 
 func TestUpdatePasswordHash_OverwritesHash(t *testing.T) {

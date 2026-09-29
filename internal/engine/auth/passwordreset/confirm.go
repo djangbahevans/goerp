@@ -170,7 +170,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "password reset failed")
 		return
 	}
-	if err := h.users.ResetLoginState(ctx, u.ID, loginsession.ClientIP(r)); err != nil {
+	if err := h.users.ResetLoginState(ctx, u.ID); err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "password reset failed")
 		return
 	}

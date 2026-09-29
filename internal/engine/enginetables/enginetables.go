@@ -57,9 +57,13 @@ type Group struct {
 // to activity_types, and notification_deliveries has one to notifications.
 var Groups = []Group{
 	{
-		Tables: []Table{{Name: "roles"}, {Name: "role_permissions"}, {Name: "user_roles"}},
+		Tables: []Table{{Name: "roles"}, {Name: "role_permissions"}, {Name: "user_roles"}, {Name: "tenant_members"}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
-			return role.NewStore(pool).Bootstrap(ctx, slug)
+			store := role.NewStore(pool)
+			if err := store.Bootstrap(ctx, slug); err != nil {
+				return err
+			}
+			return store.AttachMembershipTrigger(ctx, slug)
 		},
 	},
 	{

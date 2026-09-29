@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -114,7 +115,7 @@ func newEnv(t *testing.T) *env {
 		sessions: sessionStore,
 		issuer:   authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore),
 		checker:  checker,
-		handler:  NewHandler(resolver, checker, NewStore(conn, auditStore), roleStore, sessionStore, revoker, inviteStore, userStore, nil, nil, modelForTable),
+		handler:  NewHandler(resolver, checker, NewStore(conn, auditStore), roleStore, permcache.NewRoleCache(cacheClient), sessionStore, revoker, inviteStore, userStore, nil, nil, modelForTable),
 		roleMap:  roleMap,
 		mailer:   mailer,
 	}
@@ -207,6 +208,9 @@ func (e *env) grant(t *testing.T, ft fixtureTenant, userID, roleName string) {
 	if err != nil {
 		t.Fatalf("GetRoleByName(%q) error: %v", roleName, err)
 	}
+	if err := e.roles.AddMember(t.Context(), ft.slug, userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := e.roles.AssignRole(t.Context(), ft.slug, userID, roleID, ""); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)
 	}
@@ -280,6 +284,28 @@ func (e *env) userStatus(t *testing.T, userID string) (status string, deleted bo
 		t.Fatalf("read user status: %v", err)
 	}
 	return status, deletedAt != nil
+}
+
+// memberStatus returns userID's tenant_members status in ft, or "" when
+// they have no member row there.
+func (e *env) memberStatus(t *testing.T, ft fixtureTenant, userID string) string {
+	t.Helper()
+	var status string
+	err := e.conn.QueryRow(fmt.Sprintf(`SELECT status FROM %s.tenant_members WHERE user_id = $1`, tenantschema.Name(ft.slug)), userID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read member status: %v", err)
+	}
+	return status
+}
+
+func (e *env) setMemberStatus(t *testing.T, ft fixtureTenant, userID, status string) {
+	t.Helper()
+	if _, err := e.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_members SET status = $2 WHERE user_id = $1`, tenantschema.Name(ft.slug)), userID, status); err != nil {
+		t.Fatalf("set member status: %v", err)
+	}
 }
 
 type request struct {
@@ -415,11 +441,14 @@ func TestServeList_MembersInviteesFiltersAndPagination(t *testing.T) {
 	active := e.createUser(t, fmt.Sprintf("b-active%d@example.com", stamp), "Bola Active")
 	e.grant(t, ft, active, "user")
 	e.grant(t, ft, active, "portal")
+	accountSuspended := e.createUser(t, fmt.Sprintf("bb-account%d@example.com", stamp), "Bisi Account")
+	e.grant(t, ft, accountSuspended, "user")
+	if _, err := e.conn.Exec(`UPDATE system.users SET status = 'suspended' WHERE id = $1`, accountSuspended); err != nil {
+		t.Fatalf("suspend fixture account: %v", err)
+	}
 	suspended := e.createUser(t, fmt.Sprintf("c-suspended%d@example.com", stamp), "Chidi Suspended")
 	e.grant(t, ft, suspended, "user")
-	if _, err := e.conn.Exec(`UPDATE system.users SET status = 'suspended' WHERE id = $1`, suspended); err != nil {
-		t.Fatalf("suspend fixture: %v", err)
-	}
+	e.setMemberStatus(t, ft, suspended, "suspended")
 	deleted := e.createUser(t, fmt.Sprintf("d-deleted%d@example.com", stamp), "Dele Deleted")
 	e.grant(t, ft, deleted, "user")
 	if _, err := e.conn.Exec(`UPDATE system.users SET status = 'deleted', deleted_at = NOW() WHERE id = $1`, deleted); err != nil {
@@ -438,8 +467,8 @@ func TestServeList_MembersInviteesFiltersAndPagination(t *testing.T) {
 	token := e.issue(t, ft, admin)
 
 	all := e.list(t, ft, token, "")
-	if want := []string{admin, active, suspended, invitee.ID}; !slices.Equal(ids(all.Data), want) || all.Meta.Total != 4 {
-		t.Fatalf("list = %v (total %d), want %v (total 4)", ids(all.Data), all.Meta.Total, want)
+	if want := []string{admin, active, accountSuspended, suspended, invitee.ID}; !slices.Equal(ids(all.Data), want) || all.Meta.Total != 5 {
+		t.Fatalf("list = %v (total %d), want %v (total 5)", ids(all.Data), all.Meta.Total, want)
 	}
 	if all.Meta.Cursor != nil {
 		t.Errorf("single-page cursor = %q, want null", *all.Meta.Cursor)
@@ -451,8 +480,11 @@ func TestServeList_MembersInviteesFiltersAndPagination(t *testing.T) {
 	if got := byID[active]; got.Status != "active" || !slices.Equal(got.Roles, []string{"portal", "user"}) || got.Name == nil || *got.Name != "Bola Active" {
 		t.Errorf("active row = %+v", got)
 	}
-	if got := byID[suspended]; got.Status != "suspended" {
-		t.Errorf("suspended row status = %q", got.Status)
+	if got := byID[suspended]; got.Status != "suspended" || got.AccountSuspended {
+		t.Errorf("suspended row = %+v, want member status suspended, account not suspended", got)
+	}
+	if got := byID[accountSuspended]; got.Status != "active" || !got.AccountSuspended {
+		t.Errorf("account-suspended row = %+v, want member status active with account_suspended", got)
 	}
 	if got := byID[invitee.ID]; got.Status != "invited" || got.InvitationID == nil || *got.InvitationID != inv.ID || len(got.Roles) != 0 {
 		t.Errorf("invitee row = %+v, want invited with invitation_id %s", got, inv.ID)
@@ -461,13 +493,13 @@ func TestServeList_MembersInviteesFiltersAndPagination(t *testing.T) {
 	for query, want := range map[string][]string{
 		"?status=invited":          {invitee.ID},
 		"?status=suspended":        {suspended},
-		"?status=active":           {admin, active},
+		"?status=active":           {admin, active, accountSuspended},
 		"?q=bola":                  {active},
 		"?q=C-SUSPENDED":           {suspended},
 		"?q=%25":                   {},
 		"?role=portal":             {active},
-		"?role=user":               {active, suspended},
-		"?role=user&status=active": {active},
+		"?role=user":               {active, accountSuspended, suspended},
+		"?role=user&status=active": {active, accountSuspended},
 		"?role=nosuch":             {},
 	} {
 		got := e.list(t, ft, token, query)
@@ -480,8 +512,8 @@ func TestServeList_MembersInviteesFiltersAndPagination(t *testing.T) {
 	query := "?limit=3"
 	for range 3 {
 		page := e.list(t, ft, token, query)
-		if page.Meta.Total != 4 {
-			t.Errorf("paged total = %d, want 4", page.Meta.Total)
+		if page.Meta.Total != 5 {
+			t.Errorf("paged total = %d, want 5", page.Meta.Total)
 		}
 		paged = append(paged, ids(page.Data)...)
 		if page.Meta.Cursor == nil {
@@ -507,8 +539,8 @@ func TestServeGet_MemberAndInviteeDetail(t *testing.T) {
 	ctx := t.Context()
 	admin := e.member(t, ft, "admin", "Admin", "admin")
 	target := e.member(t, ft, "target", "Target Person", "user")
-	if _, err := e.conn.Exec(`UPDATE system.user_profiles SET phone = '+233200000000' WHERE user_id = $1`, target); err != nil {
-		t.Fatalf("set phone: %v", err)
+	if _, err := e.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_members SET phone = '+233200000000', job_title = 'Bookkeeper' WHERE user_id = $1`, tenantschema.Name(ft.slug)), target); err != nil {
+		t.Fatalf("set phone and job title: %v", err)
 	}
 	inviteeEmail := fmt.Sprintf("invitee%d@example.com", time.Now().UnixNano())
 	inv, err := e.invites.Invite(ctx, ft.slug, inviteeEmail, "portal", "", nil)
@@ -534,7 +566,7 @@ func TestServeGet_MemberAndInviteeDetail(t *testing.T) {
 	}
 
 	rec, got := get(target)
-	if rec.Code != http.StatusOK || got.Phone == nil || *got.Phone != "+233200000000" || got.Status != "active" || got.Invitation != nil || !slices.Equal(got.Roles, []string{"user"}) {
+	if rec.Code != http.StatusOK || got.Phone == nil || *got.Phone != "+233200000000" || got.JobTitle == nil || *got.JobTitle != "Bookkeeper" || got.Status != "active" || got.Invitation != nil || !slices.Equal(got.Roles, []string{"user"}) {
 		t.Errorf("member detail = %d %+v", rec.Code, got)
 	}
 	rec, got = get(invitee.ID)
@@ -569,15 +601,18 @@ func TestServeSuspendAndUnsuspend(t *testing.T) {
 	if rec := unsuspend(); rec.Code != http.StatusConflict {
 		t.Errorf("unsuspend of an active user: status = %d, want 409", rec.Code)
 	}
-	if status, _ := e.userStatus(t, target); status != "active" {
-		t.Fatalf("status = %q, want active", status)
+	if status := e.memberStatus(t, ft, target); status != "active" {
+		t.Fatalf("member status = %q, want active", status)
 	}
 
 	if rec := suspend(map[string]string{"reason": "left the company"}); rec.Code != http.StatusNoContent {
 		t.Fatalf("suspend: status = %d, body = %s", rec.Code, rec.Body)
 	}
-	if status, _ := e.userStatus(t, target); status != "suspended" {
-		t.Errorf("status = %q, want suspended", status)
+	if status := e.memberStatus(t, ft, target); status != "suspended" {
+		t.Errorf("member status = %q, want suspended", status)
+	}
+	if status, _ := e.userStatus(t, target); status != "active" {
+		t.Errorf("account status = %q, want active: a tenant admin never changes it", status)
 	}
 	if e.authenticates(t, ft, targetToken) {
 		t.Error("suspended user's access token still authenticates")
@@ -600,19 +635,23 @@ func TestServeSuspendAndUnsuspend(t *testing.T) {
 	if rec := unsuspend(); rec.Code != http.StatusNoContent {
 		t.Fatalf("unsuspend: status = %d, body = %s", rec.Code, rec.Body)
 	}
-	if status, _ := e.userStatus(t, target); status != "active" {
-		t.Errorf("status = %q, want active", status)
+	if status := e.memberStatus(t, ft, target); status != "active" {
+		t.Errorf("member status = %q, want active", status)
 	}
 	if n := e.auditCount(t, ft, "user.unsuspended", target); n != 1 {
 		t.Errorf("user.unsuspended rows = %d, want 1", n)
 	}
 	audittest.AssertLatest(t, e.conn, ft.id, "user.unsuspended", target, admin)
-	if !e.authenticates(t, ft, e.issue(t, ft, target)) {
+	unsuspendedToken := e.issue(t, ft, target)
+	if !e.authenticates(t, ft, unsuspendedToken) {
 		t.Error("unsuspended user's new session doesn't authenticate")
+	}
+	if roles, err := e.roles.RoleNamesForUser(t.Context(), ft.slug, target); err != nil || !slices.Equal(roles, []string{"user"}) {
+		t.Errorf("roles after unsuspend = %v (err %v), want the same [user]", roles, err)
 	}
 }
 
-func TestServeDelete(t *testing.T) {
+func TestServeDelete_RemovesTheMembership(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
 	admin := e.member(t, ft, "admin", "Admin", "admin")
@@ -624,25 +663,108 @@ func TestServeDelete(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: status = %d, body = %s", rec.Code, rec.Body)
 	}
-	if status, deleted := e.userStatus(t, target); status != "deleted" || !deleted {
-		t.Errorf("status = %q, deleted_at set = %v, want deleted and set", status, deleted)
+	if status := e.memberStatus(t, ft, target); status != "" {
+		t.Errorf("member status = %q after removal, want no member row", status)
+	}
+	if roles, err := e.roles.RoleNamesForUser(t.Context(), ft.slug, target); err != nil || len(roles) != 0 {
+		t.Errorf("roles after removal = %v (err %v), want none", roles, err)
+	}
+	if status, deleted := e.userStatus(t, target); status != "active" || deleted {
+		t.Errorf("account status = %q, deleted = %v, want active and not deleted", status, deleted)
 	}
 	if e.authenticates(t, ft, targetToken) {
-		t.Error("deleted user's access token still authenticates")
+		t.Error("removed member's access token still authenticates")
 	}
 	if n := e.unrevokedSessions(t, ft, target); n != 0 {
-		t.Errorf("deleted user has %d unrevoked sessions, want 0", n)
+		t.Errorf("removed member has %d unrevoked sessions, want 0", n)
 	}
-	if n := e.auditCount(t, ft, "user.deleted", target); n != 1 {
-		t.Errorf("user.deleted rows = %d, want 1", n)
+	if n := e.auditCount(t, ft, "user.removed", target); n != 1 {
+		t.Errorf("user.removed rows = %d, want 1", n)
 	}
-	audittest.AssertLatest(t, e.conn, ft.id, "user.deleted", target, admin)
+	audittest.AssertLatest(t, e.conn, ft.id, "user.removed", target, admin)
 	if slices.Contains(ids(e.list(t, ft, adminToken, "").Data), target) {
-		t.Error("deleted user is still listed")
+		t.Error("removed member is still listed")
 	}
 	rec = do(t, ft, adminToken, request{serve: e.handler.ServeDelete, method: http.MethodDelete, path: "/admin/users/" + target, params: map[string]string{"id": target}})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("second delete: status = %d, want 404", rec.Code)
+	}
+}
+
+// TestMemberActions_LeaveTheAccountsOtherTenantAlone covers a two-tenant
+// account: suspending or removing it in one tenant changes nothing about
+// the account or its access to the other.
+func TestMemberActions_LeaveTheAccountsOtherTenantAlone(t *testing.T) {
+	e := newEnv(t)
+	a := e.newTenant(t)
+	b := e.newTenant(t)
+	adminA := e.member(t, a, "admina", "Admin A", "admin")
+	shared := e.member(t, a, "shared", "Shared Bookkeeper", "user")
+	e.grant(t, b, shared, "user")
+	tokenA := e.issue(t, a, adminA)
+	tokenB := e.issue(t, b, shared)
+	params := map[string]string{"id": shared}
+
+	rec := do(t, a, tokenA, request{serve: e.handler.ServeSuspend, method: http.MethodPost, path: "/admin/users/" + shared + "/suspend", params: params, body: map[string]string{"reason": "contract ended"}})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("suspend in A: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if isMember, err := e.roles.IsMember(t.Context(), a.slug, shared); err != nil || isMember {
+		t.Errorf("IsMember(A) after suspension = %v (err %v), want false", isMember, err)
+	}
+	e.assertUntouchedIn(t, b, shared, tokenB)
+
+	rec = do(t, a, tokenA, request{serve: e.handler.ServeDelete, method: http.MethodDelete, path: "/admin/users/" + shared, params: params})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("remove from A: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	e.assertUntouchedIn(t, b, shared, tokenB)
+}
+
+func (e *env) assertUntouchedIn(t *testing.T, ft fixtureTenant, userID, token string) {
+	t.Helper()
+	if status, deleted := e.userStatus(t, userID); status != "active" || deleted {
+		t.Errorf("account status = %q, deleted = %v, want active", status, deleted)
+	}
+	if status := e.memberStatus(t, ft, userID); status != "active" {
+		t.Errorf("member status in the other tenant = %q, want active", status)
+	}
+	if n := e.unrevokedSessions(t, ft, userID); n != 1 {
+		t.Errorf("sessions in the other tenant = %d, want 1", n)
+	}
+	if !e.authenticates(t, ft, token) {
+		t.Error("session in the other tenant stopped authenticating")
+	}
+}
+
+// TestStore_RefusesToSuspendOrRemoveTheLastActiveAdmin reaches the guard
+// directly: through the handler the caller is always an active admin
+// other than the target, so only a concurrent change can leave the target
+// the last one.
+func TestStore_RefusesToSuspendOrRemoveTheLastActiveAdmin(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	ctx := t.Context()
+	onlyAdmin := e.member(t, ft, "admin", "Admin", "admin")
+	store := e.handler.store
+	row := authaudit.Row{EventType: "user.suspended", TenantID: ft.id, UserID: onlyAdmin, Success: true}
+
+	if err := store.suspend(ctx, ft.slug, onlyAdmin, "", "x", row); !errors.Is(err, role.ErrLastAdmin) {
+		t.Errorf("suspend() error = %v, want ErrLastAdmin", err)
+	}
+	if err := store.remove(ctx, ft.slug, onlyAdmin, row); !errors.Is(err, role.ErrLastAdmin) {
+		t.Errorf("remove() error = %v, want ErrLastAdmin", err)
+	}
+	if status := e.memberStatus(t, ft, onlyAdmin); status != "active" {
+		t.Errorf("member status = %q, want active", status)
+	}
+
+	second := e.member(t, ft, "second", "Second", "admin")
+	if err := store.suspend(ctx, ft.slug, onlyAdmin, second, "x", row); err != nil {
+		t.Errorf("suspend() with another active admin error = %v, want nil", err)
+	}
+	if err := store.remove(ctx, ft.slug, second, row); !errors.Is(err, role.ErrLastAdmin) {
+		t.Errorf("remove() of the admin left after a suspension error = %v, want ErrLastAdmin", err)
 	}
 }
 
@@ -831,7 +953,7 @@ func TestServeSessions_CurrentFollowsTheCallersFamilyAfterRotation(t *testing.T)
 	}
 }
 
-func TestServeSuspend_OnlyAppliesToActiveUsers(t *testing.T) {
+func TestServeSuspend_LeavesAPendingAccountPending(t *testing.T) {
 	e := newEnv(t)
 	ft := e.newTenant(t)
 	admin := e.member(t, ft, "admin", "Admin", "admin")
@@ -840,15 +962,48 @@ func TestServeSuspend_OnlyAppliesToActiveUsers(t *testing.T) {
 		t.Fatalf("set pending_verification: %v", err)
 	}
 	token := e.issue(t, ft, admin)
+	params := map[string]string{"id": target}
 
 	rec := do(t, ft, token, request{
 		serve: e.handler.ServeSuspend, method: http.MethodPost, path: "/admin/users/" + target + "/suspend",
-		params: map[string]string{"id": target}, body: map[string]string{"reason": "x"},
+		params: params, body: map[string]string{"reason": "x"},
 	})
-	if rec.Code != http.StatusConflict {
-		t.Errorf("suspend of a pending_verification user: status = %d, want 409", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("suspend: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	rec = do(t, ft, token, request{serve: e.handler.ServeUnsuspend, method: http.MethodPost, path: "/admin/users/" + target + "/unsuspend", params: params})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("unsuspend: status = %d, body = %s", rec.Code, rec.Body)
 	}
 	if status, _ := e.userStatus(t, target); status != "pending_verification" {
-		t.Errorf("status = %q, want pending_verification", status)
+		t.Errorf("account status = %q, want pending_verification", status)
+	}
+}
+
+func TestLastLoginAt_IsTheSignInToThisTenant(t *testing.T) {
+	e := newEnv(t)
+	a := e.newTenant(t)
+	b := e.newTenant(t)
+	adminA := e.member(t, a, "admina", "Admin A", "admin")
+	shared := e.member(t, a, "shared", "Shared", "user")
+	e.grant(t, b, shared, "user")
+	token := e.issue(t, a, adminA)
+
+	detail := func() userDetailJSON {
+		rec := do(t, a, token, request{serve: e.handler.ServeGet, method: http.MethodGet, path: "/admin/users/" + shared, params: map[string]string{"id": shared}})
+		var out userDetailJSON
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode detail: %v (status %d)", err, rec.Code)
+		}
+		return out
+	}
+
+	e.issue(t, b, shared)
+	if got := detail(); got.LastLoginAt != nil {
+		t.Errorf("last_login_at in A after signing in to B = %v, want nil", got.LastLoginAt)
+	}
+	e.issue(t, a, shared)
+	if got := detail(); got.LastLoginAt == nil {
+		t.Error("last_login_at in A after signing in to A = nil, want set")
 	}
 }

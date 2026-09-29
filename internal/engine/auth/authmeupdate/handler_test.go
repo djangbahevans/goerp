@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,7 +111,7 @@ func newFixture(t *testing.T) *fixture {
 	if err := tenantConfig.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
 	}
-	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, tenantl10n.NewStore(tenantConfig, testAvailableLocales))
+	handler := NewHandler(tenantResolver, authChecker, userStore, role.NewStore(conn), filesStore, tenantl10n.NewStore(tenantConfig, testAvailableLocales))
 
 	slug := fmt.Sprintf("authmeupdatetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Update Test Co")
@@ -157,7 +158,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
-	if _, err := conn.Exec(fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
+	if _, err := conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
 		t.Fatalf("grant admin role: %v", err)
 	}
 
@@ -586,5 +587,41 @@ func TestServeHTTP_NullNameRejected(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestServeHTTP_PhoneAndTitleSaveOnTheMemberRowOnly(t *testing.T) {
+	f := newFixture(t)
+	token := f.issueAccessToken(t)
+	members := role.NewStore(f.conn)
+
+	rec := f.doPatch(t, f.domain, token, `{"phone": " +233200000000 ", "title": "Bookkeeper"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
+	}
+	got, err := members.GetMemberProfile(t.Context(), f.tenantSlug, f.userID)
+	if err != nil {
+		t.Fatalf("GetMemberProfile() error: %v", err)
+	}
+	if got.Phone == nil || *got.Phone != "+233200000000" || got.JobTitle == nil || *got.JobTitle != "Bookkeeper" {
+		t.Errorf("member profile = phone %v, title %v, want +233200000000 and Bookkeeper", got.Phone, got.JobTitle)
+	}
+
+	rec = f.doPatch(t, f.domain, token, `{"phone": null, "name": "Ama"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rec.Code, rec.Body.String())
+	}
+	got, err = members.GetMemberProfile(t.Context(), f.tenantSlug, f.userID)
+	if err != nil {
+		t.Fatalf("GetMemberProfile() error: %v", err)
+	}
+	if got.Phone != nil || got.JobTitle == nil || *got.JobTitle != "Bookkeeper" {
+		t.Errorf("after clearing phone = %v, title %v, want nil and Bookkeeper", got.Phone, got.JobTitle)
+	}
+
+	for _, body := range []string{`{"phone": 5}`, `{"title": "` + strings.Repeat("x", 201) + `"}`} {
+		if rec := f.doPatch(t, f.domain, token, body); rec.Code != http.StatusBadRequest {
+			t.Errorf("PATCH %s status = %d, want 400", body, rec.Code)
+		}
 	}
 }

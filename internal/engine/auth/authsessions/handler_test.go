@@ -203,6 +203,9 @@ func (e *env) join(t *testing.T, ft fixtureTenant, userID string) {
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
+	if err := e.roles.AddMember(t.Context(), ft.slug, userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := e.roles.AssignRole(t.Context(), ft.slug, userID, roleID, ""); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)
 	}

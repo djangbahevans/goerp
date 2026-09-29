@@ -76,6 +76,9 @@ func (p *fakeProvisioner) ProvisionForRegistration(ctx context.Context, slug, na
 	if err != nil {
 		return err
 	}
+	if err := p.roles.AddMember(ctx, slug, userID); err != nil {
+		return err
+	}
 	if err := p.roles.AssignRole(ctx, slug, userID, roleID, ""); err != nil {
 		return err
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantprovision "github.com/djangbahevans/goerp/internal/engine/tenant/provision"
@@ -190,6 +191,12 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 		}
 	}
 
+	// Indexes whatever tenant_members holds after the load
+	// (auth-internals.md §2 "Membership index"); idempotent, so rows the
+	// trigger already wrote are harmless.
+	if err := role.NewStore(w.RawDB).ReindexMemberships(ctx, t.ID, t.Slug); err != nil {
+		return Result{}, err
+	}
 	if err := w.Provision.ActivateTenant(ctx, t.Slug); err != nil {
 		return Result{}, fmt.Errorf("activate tenant: %w", err)
 	}

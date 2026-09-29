@@ -609,7 +609,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
-	if err := h.users.ResetLoginState(ctx, userID, loginsession.ClientIP(r)); err != nil {
+	if err := h.users.ResetLoginState(ctx, userID); err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}

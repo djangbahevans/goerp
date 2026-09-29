@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/rs/zerolog/log"
 )
@@ -335,9 +336,10 @@ func (s *Store) GetLiveByToken(ctx context.Context, tenantSlug, rawToken string)
 
 // Accept is auth-internals.md §3 "Invite acceptance" steps 4-6 in one
 // transaction: activate (when non-nil, e.g. setting a new user's first
-// password), the single membership-creation point, and accepted_at. The
-// invitation row is locked and re-checked live first, so of two concurrent
-// accepts exactly one succeeds.
+// password), the single membership-creation point (the tenant_members row,
+// whose trigger adds the membership index row, and the role grant), and
+// accepted_at. The invitation row is locked and re-checked live first, so
+// of two concurrent accepts exactly one succeeds.
 func (s *Store) Accept(ctx context.Context, tenantSlug, invitationID, userID string, activate func(*sql.Tx) error) error {
 	schema := tenantschema.Name(tenantSlug)
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -366,6 +368,9 @@ func (s *Store) Accept(ctx context.Context, tenantSlug, invitationID, userID str
 		}
 	}
 
+	if err := role.AddMemberTx(ctx, tx, tenantSlug, userID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s.user_roles (user_id, role_id, granted_by)
 		VALUES ($1, $2, $3)

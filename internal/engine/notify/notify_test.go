@@ -215,16 +215,25 @@ func salesRegistry(t *testing.T) *registry.ModuleRegistry {
 // ID.
 func (e *testEnv) createUser(t *testing.T, name, phone string) string {
 	t.Helper()
-	id := e.createOutsider(t, name, phone)
+	id := e.createOutsider(t, name)
+	if err := role.NewStore(e.conn).AddMember(t.Context(), e.tenant.Slug, id); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
+	}
 	if err := role.NewStore(e.conn).AssignRole(t.Context(), e.tenant.Slug, id, e.roleID, ""); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)
+	}
+	if phone != "" {
+		if err := role.NewStore(e.conn).UpdateMemberProfile(t.Context(), e.tenant.Slug, id, role.MemberProfileUpdate{SetPhone: true, Phone: &phone}); err != nil {
+			t.Fatalf("UpdateMemberProfile() error: %v", err)
+		}
 	}
 	return id
 }
 
 // createOutsider inserts a user with a profile who is not a member of the
-// tenant, returning its ID.
-func (e *testEnv) createOutsider(t *testing.T, name, phone string) string {
+// tenant, returning its ID. A phone belongs to a membership, so an outsider
+// has none.
+func (e *testEnv) createOutsider(t *testing.T, name string) string {
 	t.Helper()
 	var id string
 	addr := fmt.Sprintf("notify%d@example.test", time.Now().UnixNano())
@@ -232,7 +241,7 @@ func (e *testEnv) createOutsider(t *testing.T, name, phone string) string {
 		t.Fatalf("insert user: %v", err)
 	}
 	t.Cleanup(func() { _, _ = e.conn.Exec("DELETE FROM system.users WHERE id = $1", id) })
-	if _, err := e.conn.Exec(`INSERT INTO system.user_profiles (user_id, name, phone) VALUES ($1, $2, NULLIF($3, ''))`, id, name, phone); err != nil {
+	if _, err := e.conn.Exec(`INSERT INTO system.user_profiles (user_id, name) VALUES ($1, $2)`, id, name); err != nil {
 		t.Fatalf("insert user profile: %v", err)
 	}
 	return id
@@ -569,7 +578,7 @@ func TestSend_EngineTypeRendersItsEmbeddedTemplate(t *testing.T) {
 func TestSend_RejectsBadRequestsWithoutWriting(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t, "Akua", "")
-	outsiderID := env.createOutsider(t, "Nana", "")
+	outsiderID := env.createOutsider(t, "Nana")
 
 	tests := []struct {
 		name             string
@@ -679,7 +688,7 @@ func TestSendBulk_SendsToEachUserOnce(t *testing.T) {
 func TestSendBulk_OneBadRecipientSendsNothing(t *testing.T) {
 	env := openTestEnv(t)
 	ama := env.createUser(t, "Ama Owusu", "")
-	outsider := env.createOutsider(t, "Yaw Boateng", "")
+	outsider := env.createOutsider(t, "Yaw Boateng")
 
 	_, err := env.sender.SendBulk(t.Context(), env.tenant.ID, "sales", orderConfirmed, []string{ama, outsider}, nil, Options{})
 	if !errors.Is(err, ErrUnknownUser) {

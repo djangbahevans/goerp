@@ -75,7 +75,9 @@ func (h *Handler) ServeInvite(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err, "invitee lookup failed")
 		return
 	default:
-		member, err := h.roles.IsMember(ctx, c.tenant.Slug, existing.ID)
+		// A suspended member counts: the admin unsuspends them instead,
+		// since an invitation can't lift a suspension.
+		member, err := h.roles.HasMemberRow(ctx, c.tenant.Slug, existing.ID)
 		if err != nil {
 			writeInternalError(w, r, err, "membership check failed")
 			return

@@ -29,6 +29,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/l10n"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
@@ -45,14 +46,15 @@ type Handler struct {
 	tenants  *tenantresolve.Resolver
 	auth     *authcheck.Checker
 	users    *user.Store
+	members  *role.Store
 	files    *files.Store
 	backend  storage.Backend
 	locales  *tenantl10n.Store
 	policies *password.PolicyStore
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, filesStore *files.Store, backend storage.Backend, locales *tenantl10n.Store, policies *password.PolicyStore) *Handler {
-	return &Handler{tenants: tenants, auth: auth, users: users, files: filesStore, backend: backend, locales: locales, policies: policies}
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, members *role.Store, filesStore *files.Store, backend storage.Backend, locales *tenantl10n.Store, policies *password.PolicyStore) *Handler {
+	return &Handler{tenants: tenants, auth: auth, users: users, members: members, files: filesStore, backend: backend, locales: locales, policies: policies}
 }
 
 // writeJSON matches encoding/json v1's Encoder defaults, which
@@ -79,11 +81,15 @@ type meResponse struct {
 // one. AvatarURL is a freshly-generated signed URL (goerp#819), resolved
 // from Profile.AvatarFileID on every request — never persisted, since
 // signed URLs expire. A nil Locale/Timezone/DateFormat inherits the
-// tenant default.
+// tenant default. ContactID, Phone and Title are this tenant's own values,
+// from the caller's tenant_members row (auth-internals.md §2 "Tenant
+// members").
 type meUser struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
 	ContactID     *string    `json:"contact_id"`
+	Phone         *string    `json:"phone"`
+	Title         *string    `json:"title"`
 	Name          *string    `json:"name"`
 	AvatarURL     *string    `json:"avatar_url"`
 	Roles         []string   `json:"roles"`
@@ -174,6 +180,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: profile lookup failed, omitting name/avatar")
 	}
 
+	// Cosmetic like the profile above, so a failure degrades to nil.
+	member, err := h.members.GetMemberProfile(ctx, tenantCtx.Slug, authCtx.UserID)
+	if err != nil && !errors.Is(err, role.ErrNotMember) {
+		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: member profile lookup failed, omitting phone/title")
+	}
+
 	// Degrades to false: step 9 still rejects module routes with
 	// mfa_setup_required, which the shell also routes to the wizard.
 	setupRequired, err := h.auth.MFASetupRequired(ctx, tenantCtx.TenantID, authCtx)
@@ -196,7 +208,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		User: meUser{
 			ID:               authCtx.UserID,
 			Email:            u.Email,
-			ContactID:        u.ContactID,
+			ContactID:        member.ContactID,
+			Phone:            member.Phone,
+			Title:            member.JobTitle,
 			Name:             name,
 			AvatarURL:        avatarURL,
 			Roles:            authCtx.RolesLive,

@@ -138,8 +138,10 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (resolved, boo
 	// A target user id is a global users.id, not scoped to this tenant —
 	// membership must be checked explicitly before touching anything, or a
 	// tenant admin could grant/revoke roles for a user who isn't even a
-	// member here (mirrors mfareset's own identical check).
-	isMember, err := h.roles.IsMember(ctx, tenantCtx.Slug, targetID)
+	// member here. A role is granted only to someone with a member row
+	// (auth-internals.md §2 "Tenant members"); a suspended member keeps
+	// theirs, so their roles can still be managed.
+	isMember, err := h.roles.HasMemberRow(ctx, tenantCtx.Slug, targetID)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return resolved{}, false
@@ -213,7 +215,15 @@ func (h *Handler) ServeRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.roles.RevokeRole(ctx, req.tenantCtx.Slug, req.targetID, roleID); err != nil {
+	revoke := h.roles.RevokeRole
+	if roleName == adminRoleName {
+		revoke = h.roles.RevokeAdminRole
+	}
+	if err := revoke(ctx, req.tenantCtx.Slug, req.targetID, roleID); err != nil {
+		if errors.Is(err, role.ErrLastAdmin) {
+			httperr.Write(r.Context(), w, http.StatusConflict, "last_admin", "the organisation needs at least one active admin")
+			return
+		}
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 		return
 	}

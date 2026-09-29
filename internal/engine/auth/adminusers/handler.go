@@ -1,6 +1,7 @@
 // Package adminusers implements the tenant admin user endpoints
-// (shell-ux.md §5.1): the user directory and detail, suspend, unsuspend
-// and soft-delete (auth-internals.md §2 "User status lifecycle"), one
+// (shell-ux.md §5.1): the user directory and detail, suspending,
+// unsuspending and removing a member of the admin's own tenant
+// (auth-internals.md §2 "User status lifecycle"), one
 // user's session list and revoke (auth-internals.md §4 "Session
 // management endpoints"), one user's activity feed (auth-internals.md §17
 // "Tenant admin activity read API"), and inviting users (auth-internals.md
@@ -36,6 +37,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
+	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -57,6 +59,7 @@ type Handler struct {
 	auth     *authcheck.Checker
 	store    *Store
 	roles    *role.Store
+	cache    *permcache.RoleCache
 	sessions *session.Store
 	revoker  *sessionrevoke.Revoker
 	invites  *invite.Store
@@ -67,12 +70,13 @@ type Handler struct {
 	modelForTable ModelForTable
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store *Store, roles *role.Store, sessions *session.Store, revoker *sessionrevoke.Revoker, invites *invite.Store, users *user.Store, filesStore *files.Store, backend storage.Backend, modelForTable ModelForTable) *Handler {
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store *Store, roles *role.Store, roleCache *permcache.RoleCache, sessions *session.Store, revoker *sessionrevoke.Revoker, invites *invite.Store, users *user.Store, filesStore *files.Store, backend storage.Backend, modelForTable ModelForTable) *Handler {
 	return &Handler{
 		tenants:  tenants,
 		auth:     auth,
 		store:    store,
 		roles:    roles,
+		cache:    roleCache,
 		sessions: sessions,
 		revoker:  revoker,
 		invites:  invites,
@@ -85,14 +89,15 @@ func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store 
 }
 
 type userJSON struct {
-	ID           string     `json:"id"`
-	Name         *string    `json:"name"`
-	AvatarURL    *string    `json:"avatar_url"`
-	Email        string     `json:"email"`
-	Roles        []string   `json:"roles"`
-	Status       string     `json:"status"`
-	LastLoginAt  *time.Time `json:"last_login_at"`
-	InvitationID *string    `json:"invitation_id"`
+	ID               string     `json:"id"`
+	Name             *string    `json:"name"`
+	AvatarURL        *string    `json:"avatar_url"`
+	Email            string     `json:"email"`
+	Roles            []string   `json:"roles"`
+	Status           string     `json:"status"`
+	AccountSuspended bool       `json:"account_suspended"`
+	LastLoginAt      *time.Time `json:"last_login_at"`
+	InvitationID     *string    `json:"invitation_id"`
 }
 
 type invitationJSON struct {
@@ -105,6 +110,7 @@ type invitationJSON struct {
 type userDetailJSON struct {
 	userJSON
 	Phone      *string         `json:"phone"`
+	JobTitle   *string         `json:"job_title"`
 	Invitation *invitationJSON `json:"invitation"`
 }
 
@@ -188,9 +194,10 @@ func targetID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return id, true
 }
 
-// member returns the {id} path parameter when it names a non-deleted
-// member of the caller's tenant. users.id is global, so membership is
-// checked before anything reads or changes the target.
+// member returns the {id} path parameter when it names a user with a
+// tenant_members row in the caller's tenant, active or suspended, whose
+// account isn't deleted. users.id is global, so membership is checked
+// before anything reads or changes the target.
 func (h *Handler) member(w http.ResponseWriter, r *http.Request, c caller) (entry, bool) {
 	id, ok := targetID(w, r)
 	if !ok {
@@ -214,14 +221,15 @@ func (h *Handler) toJSON(r *http.Request, tenantSlug string, e entry) userJSON {
 		avatarURL = authme.AvatarURL(r.Context(), h.files, h.backend, tenantSlug, e.ID, *e.AvatarFileID)
 	}
 	return userJSON{
-		ID:           e.ID,
-		Name:         e.Name,
-		AvatarURL:    avatarURL,
-		Email:        e.Email,
-		Roles:        e.Roles,
-		Status:       e.Status,
-		LastLoginAt:  e.LastLoginAt,
-		InvitationID: e.InvitationID,
+		ID:               e.ID,
+		Name:             e.Name,
+		AvatarURL:        avatarURL,
+		Email:            e.Email,
+		Roles:            e.Roles,
+		Status:           e.Status,
+		AccountSuspended: e.AccountSuspended,
+		LastLoginAt:      e.LastLoginAt,
+		InvitationID:     e.InvitationID,
 	}
 }
 
@@ -302,7 +310,7 @@ func (h *Handler) ServeGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detail := userDetailJSON{userJSON: h.toJSON(r, c.tenant.Slug, e), Phone: e.Phone}
+	detail := userDetailJSON{userJSON: h.toJSON(r, c.tenant.Slug, e), Phone: e.Phone, JobTitle: e.JobTitle}
 	if inv != nil {
 		detail.Invitation = &invitationJSON{ID: inv.ID, Role: inv.Role, ExpiresAt: inv.ExpiresAt, CreatedAt: inv.CreatedAt}
 	}
@@ -326,11 +334,14 @@ func (h *Handler) auditRow(r *http.Request, c caller, eventType, targetID string
 	}
 }
 
-// changeStatus is the shared body of suspend, unsuspend and delete: the
-// guarded status change and its audit row commit together. When
-// revokeReason is set, the target's sessions in this tenant are revoked
-// first, so a revocation failure leaves the status unchanged and the
-// request retryable.
+// changeStatus is the shared body of suspend, unsuspend and remove: the
+// member change and its audit row commit together. When revokeReason is
+// set, the target's sessions in this tenant are revoked first, so a
+// revocation failure leaves the member unchanged and the request
+// retryable. The target's cached roles are cleared afterwards, so the next
+// request re-reads them. conflictCode answers a change the member's
+// current status doesn't allow; "" answers it 404, for a member removed
+// concurrently.
 func (h *Handler) changeStatus(w http.ResponseWriter, r *http.Request, c caller, targetID string, run func() error, conflictCode, revokeReason string) {
 	if revokeReason != "" {
 		if err := h.revoker.RevokeAllForUserInTenant(r.Context(), targetID, c.tenant.TenantID, revokeReason); err != nil {
@@ -339,12 +350,20 @@ func (h *Handler) changeStatus(w http.ResponseWriter, r *http.Request, c caller,
 		}
 	}
 	if err := run(); err != nil {
-		if errors.Is(err, errStateChanged) {
-			httperr.Write(r.Context(), w, http.StatusConflict, conflictCode, "the user's status doesn't allow this change")
-			return
+		switch {
+		case errors.Is(err, role.ErrLastAdmin):
+			httperr.Write(r.Context(), w, http.StatusConflict, "last_admin", "the organisation needs at least one active admin")
+		case errors.Is(err, role.ErrMemberStateChanged) && conflictCode == "":
+			httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
+		case errors.Is(err, role.ErrMemberStateChanged):
+			httperr.Write(r.Context(), w, http.StatusConflict, conflictCode, "the member's status doesn't allow this change")
+		default:
+			writeInternalError(w, r, err, "status change failed")
 		}
-		writeInternalError(w, r, err, "status change failed")
 		return
+	}
+	if err := h.cache.Invalidate(r.Context(), c.tenant.TenantID, targetID); err != nil {
+		log.Warn().Err(err).Str("tenant", c.tenant.Slug).Str("user", targetID).Msg("adminusers: role cache invalidation failed")
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -353,11 +372,12 @@ func rejectSelf(w http.ResponseWriter, r *http.Request, c caller, target entry) 
 	if target.ID != c.auth.UserID {
 		return false
 	}
-	httperr.Write(r.Context(), w, http.StatusBadRequest, "cannot_modify_self", "an admin can't suspend or delete their own account")
+	httperr.Write(r.Context(), w, http.StatusBadRequest, "cannot_modify_self", "an admin can't suspend or remove their own membership")
 	return true
 }
 
-// ServeSuspend is POST /admin/users/{id}/suspend.
+// ServeSuspend is POST /admin/users/{id}/suspend. It suspends the member
+// in this tenant only.
 func (h *Handler) ServeSuspend(w http.ResponseWriter, r *http.Request) {
 	c, ok := h.authorize(w, r)
 	if !ok {
@@ -370,13 +390,19 @@ func (h *Handler) ServeSuspend(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body suspendRequest
-	if err := json.UnmarshalRead(r.Body, &body); err != nil || strings.TrimSpace(body.Reason) == "" {
+	reason := ""
+	if err := json.UnmarshalRead(r.Body, &body); err == nil {
+		reason = strings.TrimSpace(body.Reason)
+	}
+	if reason == "" {
 		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "a reason is required")
 		return
 	}
 
-	row := h.auditRow(r, c, "user.suspended", target.ID, map[string]any{"reason": strings.TrimSpace(body.Reason)})
-	run := func() error { return h.store.suspend(r.Context(), target.ID, row) }
+	row := h.auditRow(r, c, "user.suspended", target.ID, map[string]any{"reason": reason})
+	run := func() error {
+		return h.store.suspend(r.Context(), c.tenant.Slug, target.ID, c.auth.UserID, reason, row)
+	}
 	h.changeStatus(w, r, c, target.ID, run, "user_not_active", "admin_suspend")
 }
 
@@ -392,11 +418,12 @@ func (h *Handler) ServeUnsuspend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.auditRow(r, c, "user.unsuspended", target.ID, nil)
-	run := func() error { return h.store.unsuspend(r.Context(), target.ID, row) }
+	run := func() error { return h.store.unsuspend(r.Context(), c.tenant.Slug, target.ID, row) }
 	h.changeStatus(w, r, c, target.ID, run, "user_not_suspended", "")
 }
 
-// ServeDelete is DELETE /admin/users/{id}.
+// ServeDelete is DELETE /admin/users/{id}: it removes the member from
+// this tenant, leaving the account and its other memberships alone.
 func (h *Handler) ServeDelete(w http.ResponseWriter, r *http.Request) {
 	c, ok := h.authorize(w, r)
 	if !ok {
@@ -407,9 +434,9 @@ func (h *Handler) ServeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row := h.auditRow(r, c, "user.deleted", target.ID, nil)
-	run := func() error { return h.store.softDelete(r.Context(), target.ID, row) }
-	h.changeStatus(w, r, c, target.ID, run, "user_already_deleted", "admin_delete")
+	row := h.auditRow(r, c, "user.removed", target.ID, nil)
+	run := func() error { return h.store.remove(r.Context(), c.tenant.Slug, target.ID, row) }
+	h.changeStatus(w, r, c, target.ID, run, "", "admin_remove")
 }
 
 // ServeSessions is GET /admin/users/{id}/sessions.

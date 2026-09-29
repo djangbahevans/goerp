@@ -353,11 +353,16 @@ func (a *Activities) CreateAdminUser(ctx context.Context, slug, adminEmail, admi
 
 // AssignAdminRole grants the admin role to an already-registered user —
 // the self-service path's step 7 (multitenancy-internals.md §6), in place
-// of CreateAdminUser's invite. Idempotent, so a retried activity is safe.
+// of CreateAdminUser's invite — creating their tenant_members row first,
+// since a role is granted only to a member. Idempotent, so a retried
+// activity is safe.
 func (a *Activities) AssignAdminRole(ctx context.Context, slug, userID string) error {
 	roleID, err := a.roleStore.GetRoleByName(ctx, slug, "admin")
 	if err != nil {
 		return fmt.Errorf("look up admin role: %w", err)
+	}
+	if err := a.roleStore.AddMember(ctx, slug, userID); err != nil {
+		return err
 	}
 	if err := a.roleStore.AssignRole(ctx, slug, userID, roleID, ""); err != nil {
 		return fmt.Errorf("assign admin role: %w", err)

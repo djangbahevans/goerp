@@ -147,6 +147,12 @@ func newFixture(t *testing.T) *fixture {
 	if err := roleStore.Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
+	if err := roleStore.BootstrapMembershipIndex(ctx); err != nil {
+		t.Fatalf("BootstrapMembershipIndex() error: %v", err)
+	}
+	if err := roleStore.AttachMembershipTrigger(ctx, slug); err != nil {
+		t.Fatalf("AttachMembershipTrigger() error: %v", err)
+	}
 	if err := roleStore.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
@@ -154,7 +160,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
-	if _, err := conn.Exec(fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
+	if _, err := conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
 		t.Fatalf("grant admin role: %v", err)
 	}
 
@@ -511,6 +517,21 @@ func TestServeHTTP_SuspendedStatus_ReturnsInvalidCredentials(t *testing.T) {
 	f := newFixture(t)
 	if _, err := f.conn.Exec(`UPDATE system.users SET status = 'suspended' WHERE id = $1`, f.userID); err != nil {
 		t.Fatalf("suspend fixture user: %v", err)
+	}
+
+	rec := f.doLogin(t, map[string]any{
+		"email": fixtureEmail(f), "password": testPassword, "tenant": f.tenantSlug,
+	}, nil)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s, want 401", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServeHTTP_SuspendedMember_ReturnsInvalidCredentials(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_members SET status = 'suspended' WHERE user_id = $1`, tenantschema.Name(f.tenantSlug)), f.userID); err != nil {
+		t.Fatalf("suspend fixture member: %v", err)
 	}
 
 	rec := f.doLogin(t, map[string]any{

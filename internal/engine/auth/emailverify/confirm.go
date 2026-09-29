@@ -80,7 +80,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "email verification failed")
 		return
 	}
-	if err := h.users.ResetLoginState(ctx, u.ID, loginsession.ClientIP(r)); err != nil {
+	if err := h.users.ResetLoginState(ctx, u.ID); err != nil {
 		log.Error().Err(err).Str("user_id", u.ID).Msg("emailverify: updating login state failed")
 	}
 

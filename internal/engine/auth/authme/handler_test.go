@@ -126,7 +126,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	filesStore := files.NewStore(conn)
 
-	handler := NewHandler(tenantResolver, authChecker, userStore, filesStore, backend, tenantl10n.NewStore(configStore, testAvailableLocales), password.NewPolicyStore(configStore))
+	handler := NewHandler(tenantResolver, authChecker, userStore, role.NewStore(conn), filesStore, backend, tenantl10n.NewStore(configStore, testAvailableLocales), password.NewPolicyStore(configStore))
 
 	slug := fmt.Sprintf("authmetest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "Auth Me Test Co")
@@ -172,7 +172,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
-	if _, err := conn.Exec(fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
+	if _, err := conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
 		t.Fatalf("grant admin role: %v", err)
 	}
 
@@ -342,8 +342,8 @@ func TestServeHTTP_MFASetupRequiredFollowsPolicyAndEnrollment(t *testing.T) {
 func TestServeHTTP_ReturnsContactIDWhenUserIsLinkedToContact(t *testing.T) {
 	f := newFixture(t)
 	const contactID = "0198a3c2-7d4e-7c1a-9f3b-5e2d1a4b6c80"
-	if _, err := f.conn.Exec(`UPDATE system.users SET contact_id = $1 WHERE id = $2`, contactID, f.userID); err != nil {
-		t.Fatalf("link fixture user to contact: %v", err)
+	if err := role.NewStore(f.conn).SetMemberContact(t.Context(), f.tenantSlug, f.userID, contactID); err != nil {
+		t.Fatalf("link fixture member to contact: %v", err)
 	}
 	accessToken := f.issueAccessToken(t)
 

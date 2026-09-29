@@ -194,6 +194,12 @@ func TestServeInvite_Rejections(t *testing.T) {
 	if err := e.conn.QueryRow(`SELECT email FROM system.users WHERE id = $1`, member).Scan(&memberEmail); err != nil {
 		t.Fatalf("read email: %v", err)
 	}
+	suspended := e.member(t, ft, "suspended", "Suspended", "user")
+	e.setMemberStatus(t, ft, suspended, "suspended")
+	var suspendedEmail string
+	if err := e.conn.QueryRow(`SELECT email FROM system.users WHERE id = $1`, suspended).Scan(&suspendedEmail); err != nil {
+		t.Fatalf("read email: %v", err)
+	}
 	token := e.issue(t, ft, admin)
 	fresh := fmt.Sprintf("fresh%d@example.com", time.Now().UnixNano())
 	e.cleanupUserByEmail(t, fresh)
@@ -204,6 +210,7 @@ func TestServeInvite_Rejections(t *testing.T) {
 		wantCode   string
 	}{
 		{map[string]string{"email": memberEmail, "role": "user"}, http.StatusConflict, "already_member"},
+		{map[string]string{"email": suspendedEmail, "role": "user"}, http.StatusConflict, "already_member"},
 		{map[string]string{"email": fresh, "role": "no-such-role"}, http.StatusBadRequest, "invalid_role"},
 		{map[string]string{"email": fresh}, http.StatusBadRequest, "invalid_role"},
 		{map[string]string{"email": "not-an-email", "role": "user"}, http.StatusBadRequest, "invalid_email"},

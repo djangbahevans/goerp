@@ -50,12 +50,21 @@ func (f *fixture) addMembership(t *testing.T, name string) string {
 	if err := roles.Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
+	if err := roles.BootstrapMembershipIndex(ctx); err != nil {
+		t.Fatalf("BootstrapMembershipIndex() error: %v", err)
+	}
+	if err := roles.AttachMembershipTrigger(ctx, slug); err != nil {
+		t.Fatalf("AttachMembershipTrigger() error: %v", err)
+	}
 	if err := roles.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
 	roleID, err := roles.GetRoleByName(ctx, slug, "admin")
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
+	}
+	if err := roles.AddMember(ctx, slug, f.userID); err != nil {
+		t.Fatalf("AddMember() error: %v", err)
 	}
 	if err := roles.AssignRole(ctx, slug, f.userID, roleID, ""); err != nil {
 		t.Fatalf("AssignRole() error: %v", err)

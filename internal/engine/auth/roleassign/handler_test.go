@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -239,7 +241,7 @@ func (f *fixture) createUserWithRole(t *testing.T, roleName string) (userID stri
 		t.Fatalf("GetRoleByName(%q) error: %v", roleName, err)
 	}
 	schema := tenantschema.Name(f.tenantSlug)
-	if _, err := f.conn.Exec(fmt.Sprintf("INSERT INTO %s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
+	if _, err := f.conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
 		t.Fatalf("grant role %q: %v", roleName, err)
 	}
 
@@ -414,6 +416,39 @@ func TestServeAssign_NonMemberTargetReturns404(t *testing.T) {
 	rec := f.doAssign(t, callerToken, outsiderID, map[string]any{"role": "admin"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServeAssign_SuspendedMemberCanStillBeGranted(t *testing.T) {
+	f := newFixture(t)
+	callerID := f.createUserWithRole(t, "admin")
+	callerToken := f.issueAccessToken(t, callerID)
+	targetID := f.createUserWithRole(t, "user")
+	if _, err := f.conn.Exec(fmt.Sprintf(`UPDATE %s.tenant_members SET status = 'suspended' WHERE user_id = $1`, tenantschema.Name(f.tenantSlug)), targetID); err != nil {
+		t.Fatalf("suspend member: %v", err)
+	}
+
+	if rec := f.doAssign(t, callerToken, targetID, map[string]any{"role": "portal"}); rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServeRevoke_LastActiveAdminKeepsTheAdminRole(t *testing.T) {
+	f := newFixture(t)
+	adminID := f.createUserWithRole(t, "admin")
+	token := f.issueAccessToken(t, adminID)
+
+	rec := f.doRevoke(t, token, adminID, "admin")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"last_admin"`) {
+		t.Fatalf("revoking the last admin's admin role: status = %d, body = %s, want 409 last_admin", rec.Code, rec.Body)
+	}
+	if names, err := f.roles.RoleNamesForUser(t.Context(), f.tenantSlug, adminID); err != nil || !slices.Contains(names, "admin") {
+		t.Errorf("roles = %v (err %v), want admin kept", names, err)
+	}
+
+	second := f.createUserWithRole(t, "admin")
+	if rec := f.doRevoke(t, token, second, "admin"); rec.Code != http.StatusOK {
+		t.Errorf("revoking one of two admins: status = %d, body = %s, want 200", rec.Code, rec.Body)
 	}
 }
 
