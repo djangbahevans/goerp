@@ -17,6 +17,8 @@ interface WireEntry {
   id: string;
   kind: "created" | "change" | "comment" | "activity_done";
   body?: string;
+  mentions?: { id: string; name: string | null; email: string | null }[];
+  notify_followers?: boolean;
   deleted?: boolean;
   changes?: { field: string; old: unknown; new: unknown }[];
   activity?: { activity_id: string; type: string; summary: string; due_date: string; feedback: string | null };
@@ -24,8 +26,13 @@ interface WireEntry {
   created_at: string;
 }
 
-const AMA = { id: "u1", name: "Ama Owusu", avatar_url: null };
-const KWAME = { id: "u2", name: "Kwame Mensah", avatar_url: null };
+// Real UUIDs, since only a UUID forms a <@id> mention token.
+const AMA_ID = "0196f3a2-0000-7000-8000-000000000001";
+const KWAME_ID = "0196f3a2-0000-7000-8000-000000000002";
+const EFUA_ID = "0196f3a2-0000-7000-8000-000000000003";
+const AMA = { id: AMA_ID, name: "Ama Owusu", avatar_url: null };
+const KWAME = { id: KWAME_ID, name: "Kwame Mensah", avatar_url: null };
+const EFUA = { id: EFUA_ID, name: "Efua Asante", avatar_url: null };
 
 const SEED: WireEntry[] = [
   {
@@ -46,7 +53,9 @@ const SEED: WireEntry[] = [
   {
     id: "e6",
     kind: "comment",
-    body: "Is the discount approved?",
+    body: `<@${AMA_ID}> is the discount approved?`,
+    mentions: [{ id: AMA_ID, name: "Ama Owusu", email: "ama@acme.example" }],
+    notify_followers: true,
     deleted: false,
     author: KWAME,
     created_at: "2026-09-23T15:00:00Z",
@@ -137,25 +146,66 @@ const PLANNED_SEED: WirePlanned[] = [
 ];
 
 const READERS = [
-  { id: "u1", name: "Ama Owusu", email: "ama@acme.example", avatar_url: null },
-  { id: "u2", name: "Kwame Mensah", email: "kwame@acme.example", avatar_url: null },
+  { id: AMA_ID, name: "Ama Owusu", email: "ama@acme.example", avatar_url: null },
+  { id: KWAME_ID, name: "Kwame Mensah", email: "kwame@acme.example", avatar_url: null },
+  { id: EFUA_ID, name: "Efua Asante", email: "efua@acme.example", avatar_url: null },
 ];
+
+const MENTION_TOKEN = /<@([0-9a-f-]{36})>/g;
 
 function fakeBackend(
   seed: WireEntry[],
-  options: { failLoad?: boolean; failPost?: boolean; planned?: WirePlanned[] } = {},
+  options: {
+    failLoad?: boolean;
+    failPost?: boolean;
+    planned?: WirePlanned[];
+    // Who follows the record; the viewer is Ama.
+    followers?: { id: string; name: string | null; avatar_url: string | null }[];
+    failFollowers?: boolean;
+    // Readers the mention list offers but who can no longer read the record.
+    unreadable?: string[];
+  } = {},
 ) {
   return () => {
-    const original = { get: apiClient.get, post: apiClient.post, patch: apiClient.patch, delete: apiClient.delete };
+    const original = {
+      get: apiClient.get,
+      post: apiClient.post,
+      put: apiClient.put,
+      patch: apiClient.patch,
+      delete: apiClient.delete,
+    };
     let entries = [...seed];
     let plannedRows = [...(options.planned ?? [])];
+    let followers = [...(options.followers ?? [KWAME, EFUA])];
     let nextId = 100;
+    const follow = (user: typeof AMA) => {
+      if (!followers.some((f) => f.id === user.id)) followers = [...followers, user];
+    };
     const fake = apiClient as unknown as Record<string, unknown>;
-    fake.get = async (path: string, config?: { params?: { cursor?: string; q?: string } }) => {
+    fake.get = async (path: string, config?: { params?: { cursor?: string; q?: string; exclude_self?: boolean } }) => {
       if (path === "/_meta/scheduled-activities") return { data: plannedRows };
       if (path === "/_meta/record-readers") {
         const q = (config?.params?.q ?? "").toLowerCase();
-        return { data: READERS.filter((r) => q === "" || r.name.toLowerCase().includes(q)) };
+        return {
+          data: READERS.filter(
+            (r) =>
+              (q === "" ||
+                r.name
+                  .toLowerCase()
+                  .split(" ")
+                  .some((word) => word.startsWith(q))) &&
+              !(config?.params?.exclude_self && r.id === AMA_ID),
+          ),
+        };
+      }
+      if (path === "/_meta/activity/followers") {
+        if (options.failFollowers) {
+          throw new AppError({ code: "internal_error", message: "Followers are unavailable.", httpStatus: 500 });
+        }
+        return {
+          data: followers.map((user) => ({ user, created_at: "2026-09-23T16:02:00Z" })),
+          meta: { following: followers.some((f) => f.id === AMA_ID) },
+        };
       }
       if (options.failLoad) {
         throw new AppError({
@@ -171,13 +221,13 @@ function fakeBackend(
     };
     fake.post = async (path: string, body: Record<string, unknown>) => {
       if (path === "/_meta/scheduled-activities") {
-        const assignee = READERS.find((r) => r.id === (body.assignee_id ?? "u1")) ?? READERS[0];
+        const assignee = READERS.find((r) => r.id === (body.assignee_id ?? AMA_ID)) ?? READERS[0];
         const created = planned(`p${nextId++}`, {
           type: String(body.type),
           summary: String(body.summary),
           note: (body.note as string | undefined) ?? null,
           due_date: String(body.due_date),
-          assignee: { id: assignee?.id ?? "u1", name: assignee?.name ?? null, avatar_url: null },
+          assignee: { id: assignee?.id ?? AMA_ID, name: assignee?.name ?? null, avatar_url: null },
           created_by: AMA,
         });
         plannedRows = [...plannedRows, created].sort((a, b) => a.due_date.localeCompare(b.due_date));
@@ -216,16 +266,36 @@ function fakeBackend(
           httpStatus: 503,
         });
       }
+      const text = String(body.body).trim();
+      const mentioned = [...new Set([...text.matchAll(MENTION_TOKEN)].map((m) => m[1] ?? ""))];
+      const rejected = mentioned.filter((id) => options.unreadable?.includes(id));
+      if (rejected.length > 0) {
+        throw new AppError({
+          code: "invalid_mention",
+          message: "A mentioned user can't read this record.",
+          httpStatus: 400,
+          details: { user_ids: rejected },
+        });
+      }
       const created: WireEntry = {
         id: `e${nextId++}`,
         kind: "comment",
-        body: String(body.body).trim(),
+        body: text,
+        mentions: mentioned.map((id) => {
+          const reader = READERS.find((r) => r.id === id);
+          return { id, name: reader?.name ?? null, email: reader?.email ?? null };
+        }),
+        notify_followers: body.notify_followers === true,
         deleted: false,
         author: AMA,
         created_at: new Date().toISOString(),
       };
       entries = [created, ...entries];
+      follow(AMA);
       return created;
+    };
+    fake.put = async (path: string) => {
+      if (path === "/_meta/activity/followers") follow(AMA);
     };
     fake.patch = async (path: string, body: Record<string, unknown>) => {
       const id = path.split("/").pop();
@@ -244,6 +314,10 @@ function fakeBackend(
       return updated;
     };
     fake.delete = async (path: string) => {
+      if (path === "/_meta/activity/followers") {
+        followers = followers.filter((f) => f.id !== AMA_ID);
+        return;
+      }
       const id = path.split("/").pop();
       if (path.startsWith("/_meta/scheduled-activities/")) {
         plannedRows = plannedRows.filter((row) => row.id !== id);
@@ -283,7 +357,7 @@ const view: FormViewDeclaration = {
   ],
 };
 
-const auth = { user: { id: "u1" } } as unknown as AuthContextValue;
+const auth = { user: { id: AMA_ID } } as unknown as AuthContextValue;
 
 // A fresh QueryClient per story so one story's cached feed can't leak into the next.
 const withChatterFrame: Decorator = (Story) => {
@@ -444,5 +518,91 @@ export const PlannedActivitiesEmpty: Story = {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getByText("Nothing planned.")).toBeInTheDocument());
     await userEvent.click(canvas.getByRole("button", { name: "Schedule activity" }));
+  },
+};
+
+export const FollowAndFollowers: Story = {
+  name: "follow bar: follow, then list the followers",
+  beforeEach: fakeBackend(SEED),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await canvas.findByRole("button", { name: "Follow" }));
+    await waitFor(() => expect(canvas.getByRole("button", { name: "Unfollow" })).toBeInTheDocument());
+    expect(canvas.getByRole("status")).toHaveTextContent("You're following this record.");
+
+    await userEvent.click(canvas.getByRole("button", { name: "Followers · 3" }));
+    const dialog = await page.findByRole("dialog", { name: "Followers" });
+    await expect(dialog).toHaveTextContent("Ama Owusu (you)");
+  },
+};
+
+export const FollowersLoadError: Story = {
+  name: "follow bar: followers failed to load, composer still usable",
+  beforeEach: fakeBackend(SEED, { failFollowers: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByRole("checkbox", { name: "Notify followers" })).toBeDisabled());
+    expect(canvas.queryByRole("button", { name: "Follow" })).toBeNull();
+    expect(canvas.getByLabelText("Add a comment")).not.toHaveAttribute("readonly");
+  },
+};
+
+export const MentionAndMessage: Story = {
+  name: "composer: mention someone and message the followers",
+  beforeEach: fakeBackend(SEED),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const box = canvas.getByLabelText("Add a comment");
+    await waitFor(() => expect(canvas.getByRole("checkbox", { name: "Notify followers (2)" })).toBeEnabled());
+
+    await userEvent.type(box, "Heads up @kw");
+    await waitFor(() =>
+      expect(page.getByRole("option", { name: "Kwame Mensah, kwame@acme.example" })).toBeInTheDocument(),
+    );
+    await userEvent.keyboard("{Enter}");
+    await expect(box).toHaveValue("Heads up @Kwame Mensah ");
+    await userEvent.type(box, "the van is booked.");
+    await userEvent.click(canvas.getByRole("checkbox", { name: "Notify followers (2)" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Comment" }));
+
+    await waitFor(() =>
+      expect(canvas.getByText("the van is booked.", { exact: false })).toHaveTextContent(
+        "Heads up @Kwame Mensah the van is booked.",
+      ),
+    );
+    expect(canvas.getAllByText("Messaged followers").length).toBeGreaterThan(0);
+    expect(canvas.getByRole("checkbox", { name: "Notify followers (2)" })).not.toBeChecked();
+  },
+};
+
+export const MentionNoOneFound: Story = {
+  name: "composer: no one found to mention",
+  beforeEach: fakeBackend(SEED),
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.type(within(canvasElement).getByLabelText("Add a comment"), "@zz");
+    await waitFor(() => expect(page.getByRole("listbox")).toHaveTextContent("No one found who can see this record."));
+  },
+};
+
+export const InvalidMention: Story = {
+  name: "composer: a mentioned user lost access",
+  beforeEach: fakeBackend(SEED, { unreadable: [EFUA_ID] }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const box = canvas.getByLabelText("Add a comment");
+    await userEvent.type(box, "@ef");
+    await waitFor(() => expect(page.getByRole("option", { name: /^Efua Asante/ })).toBeInTheDocument());
+    await userEvent.keyboard("{Enter}");
+    await userEvent.click(canvas.getByRole("button", { name: "Comment" }));
+    await waitFor(() =>
+      expect(canvas.getByRole("alert")).toHaveTextContent(
+        "Efua Asante can't see this record, so they can't be mentioned. Remove the mention and post again.",
+      ),
+    );
+    await expect(box).toHaveValue("@Efua Asante ");
   },
 };

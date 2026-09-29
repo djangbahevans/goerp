@@ -1,25 +1,24 @@
 import { AuthContext } from "@goerp/sdk/auth";
 import {
   ActionButton,
-  Button,
   EmptyState,
   formatFieldValue,
   Icon,
   IconButton,
   SectionCard,
   Skeleton,
-  TextArea,
   Timeline,
   TimelineItem,
 } from "@goerp/sdk/components";
 import type { ActivityEntry } from "@goerp/sdk/react";
-import { useConfirm, useRecordActivity, useRelationLabels } from "@goerp/sdk/react";
+import { useConfirm, useRecordActivity, useRecordFollowers, useRelationLabels } from "@goerp/sdk/react";
 import type { FieldDef } from "@goerp/sdk/schema";
 import { modelRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
-import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { IS_MAC } from "../../shortcuts/shortcut.js";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { ChatterComposer } from "./chatter-composer.js";
 import { type ChangeLabelContext, changeRelationSpecs, collectFormFields, entryDisplay } from "./chatter-entries.js";
+import { ChatterFollowBar } from "./chatter-follow-bar.js";
 import type { FormViewDeclaration } from "./form-view-types.js";
 import { PlannedActivities } from "./planned-activities.js";
 
@@ -58,6 +57,7 @@ function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId:
   const activity = useRecordActivity(view.resource, recordId);
   const { entries, isLoading, isError, error, hasMore, isFetchingNextPage } = activity;
   const labelContext = useChangeLabelContext(view, entries);
+  const followers = useRecordFollowers(view.resource, recordId);
   const currentUserId = useContext(AuthContext)?.user?.id;
   const { confirm } = useConfirm();
 
@@ -158,7 +158,7 @@ function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId:
       <>
         <Timeline>
           {entries.map((entry) => {
-            const display = entryDisplay(entry, labelContext);
+            const display = entryDisplay(entry, labelContext, currentUserId);
             const ownComment =
               entry.kind === "comment" &&
               !entry.deleted &&
@@ -232,21 +232,28 @@ function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId:
     );
   }
 
+  // A live region only speaks when its text changes, so a repeated message gets a trailing no-break space.
+  const announce = (text: string) => setAnnouncement((previous) => (previous === text ? `${text} ` : text));
+  const otherFollowers =
+    followers.isLoading || followers.isError
+      ? null
+      : followers.followers.filter((f) => f.user.id !== currentUserId).length;
+
   return (
     <SectionCard title="Activity">
-      <div className="space-y-4">
-        <PlannedActivities
+      <ChatterFollowBar followers={followers} viewerId={currentUserId} announce={announce} />
+      <div className="mt-3 space-y-4">
+        <PlannedActivities model={view.resource} recordId={recordId} announce={announce} />
+        <ChatterComposer
           model={view.resource}
           recordId={recordId}
-          // A live region only speaks when its text changes, so a repeated message gets a trailing no-break space.
-          announce={(text) => setAnnouncement((previous) => (previous === text ? `${text} ` : text))}
-        />
-        <ChatterComposer
           isPosting={activity.isPosting}
-          onPost={async (body) => {
-            await activity.postComment(body);
-            setAnnouncement("Comment posted");
+          otherFollowers={otherFollowers}
+          onPost={async (body, notifyFollowers) => {
+            await activity.postComment(body, { notifyFollowers });
+            announce("Comment posted");
           }}
+          announce={announce}
         />
         <div>{renderFeed()}</div>
       </div>
@@ -262,68 +269,4 @@ function withoutId(ids: ReadonlySet<string>, id: string): ReadonlySet<string> {
   const next = new Set(ids);
   next.delete(id);
   return next;
-}
-
-const POST_SHORTCUT_HINT = IS_MAC ? "⌘ Enter to post" : "Ctrl + Enter to post";
-
-function ChatterComposer({ isPosting, onPost }: { isPosting: boolean; onPost: (body: string) => Promise<void> }) {
-  const [text, setText] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const id = useId();
-  const hintId = `${id}-hint`;
-  const errorId = `${id}-error`;
-  const canPost = text.trim() !== "" && !isPosting;
-
-  async function submit() {
-    if (!canPost) return;
-    setError(null);
-    try {
-      await onPost(text);
-      setText("");
-    } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : "Couldn't post the comment.");
-    }
-  }
-
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
-      <TextArea
-        value={text}
-        onChange={(value) => {
-          setText(value);
-          setError(null);
-        }}
-        rows={3}
-        maxLength={10000}
-        placeholder="Add a comment…"
-        aria-label="Add a comment"
-        aria-describedby={error ? `${hintId} ${errorId}` : hintId}
-        invalid={error !== null}
-        readOnly={isPosting}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" || !(IS_MAC ? event.metaKey : event.ctrlKey)) return;
-          event.preventDefault();
-          void submit();
-        }}
-      />
-      {error && (
-        <p id={errorId} role="alert" className="mt-1 text-sm text-danger">
-          {error}
-        </p>
-      )}
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span id={hintId} className="text-text-secondary text-xs">
-          {POST_SHORTCUT_HINT}
-        </span>
-        <Button type="submit" variant="primary" size="sm" loading={isPosting} disabled={!canPost}>
-          Comment
-        </Button>
-      </div>
-    </form>
-  );
 }

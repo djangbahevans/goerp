@@ -3,6 +3,7 @@ import type { ActivityEntry, ActivityFieldChange, RelationBatchSpec } from "@goe
 import type { FieldDef } from "@goerp/sdk/schema";
 import type { ReactNode } from "react";
 import { titleCaseWords } from "../../chrome/title-case-words.js";
+import { renderCommentBody } from "./chatter-mentions.js";
 import type { FormField, FormViewDeclaration } from "./form-view-types.js";
 
 const EMPTY_VALUE = "—";
@@ -115,7 +116,7 @@ export interface EntryDisplay {
 function ChangeLines({ changes, context }: { changes: ActivityFieldChange[]; context: ChangeLabelContext }) {
   const single = changes.length === 1;
   return (
-    <ul className="space-y-1 text-sm text-text-secondary [overflow-wrap:anywhere]">
+    <ul className="space-y-1 text-sm text-text-secondary wrap-anywhere">
       {changes.map((change) => (
         <li key={change.field}>
           {!single && `${fieldLabel(change.field, context.formFields.get(change.field))}: `}
@@ -127,7 +128,7 @@ function ChangeLines({ changes, context }: { changes: ActivityFieldChange[]; con
   );
 }
 
-export function entryDisplay(entry: ActivityEntry, context: ChangeLabelContext): EntryDisplay {
+export function entryDisplay(entry: ActivityEntry, context: ChangeLabelContext, viewerId?: string): EntryDisplay {
   const bySystem = entry.author === null ? " by the system" : "";
   switch (entry.kind) {
     case "created":
@@ -147,10 +148,12 @@ export function entryDisplay(entry: ActivityEntry, context: ChangeLabelContext):
     case "comment":
       if (entry.deleted) return { icon: "message-square-off", title: "Comment deleted" };
       return {
-        icon: "message-square",
-        title: "Commented",
+        icon: entry.notifyFollowers ? "send" : "message-square",
+        title: entry.notifyFollowers ? "Messaged followers" : "Commented",
         body: (
-          <p className="max-w-[80ch] whitespace-pre-wrap text-sm text-text [overflow-wrap:anywhere]">{entry.body}</p>
+          <p className="max-w-[80ch] whitespace-pre-wrap text-sm text-text wrap-anywhere">
+            {renderCommentBody(entry.body ?? "", entry.mentions, viewerId)}
+          </p>
         ),
       };
     case "activity_done": {
@@ -162,9 +165,7 @@ export function entryDisplay(entry: ActivityEntry, context: ChangeLabelContext):
           <div className="text-sm text-text-secondary">
             <p>Due {formatFieldValue(entry.activity.dueDate, "date", undefined, EMPTY_VALUE)}</p>
             {entry.activity.feedback && (
-              <p className="max-w-[80ch] whitespace-pre-wrap text-text [overflow-wrap:anywhere]">
-                {entry.activity.feedback}
-              </p>
+              <p className="max-w-[80ch] whitespace-pre-wrap text-text wrap-anywhere">{entry.activity.feedback}</p>
             )}
           </div>
         ),
