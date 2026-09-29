@@ -2,8 +2,9 @@
 // (shell-ux.md §5.1): the user directory and detail, suspend, unsuspend
 // and soft-delete (auth-internals.md §2 "User status lifecycle"), one
 // user's session list and revoke (auth-internals.md §4 "Session
-// management endpoints"), and inviting users (auth-internals.md §3
-// "Invite flow").
+// management endpoints"), one user's activity feed (auth-internals.md §17
+// "Tenant admin activity read API"), and inviting users (auth-internals.md
+// §3 "Invite flow").
 //
 // Like internal/engine/auth/mfareset, these are Class A tenant-facing
 // routes, under "/admin/" or "/users/": Host-header tenant resolution,
@@ -62,9 +63,11 @@ type Handler struct {
 	users    *user.Store
 	files    *files.Store
 	backend  storage.Backend
+
+	modelForTable ModelForTable
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store *Store, roles *role.Store, sessions *session.Store, revoker *sessionrevoke.Revoker, invites *invite.Store, users *user.Store, filesStore *files.Store, backend storage.Backend) *Handler {
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store *Store, roles *role.Store, sessions *session.Store, revoker *sessionrevoke.Revoker, invites *invite.Store, users *user.Store, filesStore *files.Store, backend storage.Backend, modelForTable ModelForTable) *Handler {
 	return &Handler{
 		tenants:  tenants,
 		auth:     auth,
@@ -76,6 +79,8 @@ func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, store 
 		users:    users,
 		files:    filesStore,
 		backend:  backend,
+
+		modelForTable: modelForTable,
 	}
 }
 

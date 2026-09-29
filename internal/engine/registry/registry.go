@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/fieldsec"
 	"github.com/djangbahevans/goerp/internal/engine/job"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/modeltable"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
@@ -146,6 +147,7 @@ func (r *ModuleRegistry) UpdateWithLocked(mutate func(current map[string]*module
 		jobRegistry:      jobRegistry,
 		computedIndex:    buildComputedIndex(modules),
 		dataAuditReg:     buildDataAuditRegistry(modules),
+		modelsByTable:    buildModelsByTable(modules),
 	}
 	if old != nil {
 		newSnap.cronRegistry = old.cronRegistry
@@ -237,6 +239,21 @@ func buildDataAuditRegistry(modules map[string]*module.LoadedModule) *dataaudit.
 		reg.Register(name, m.Manifest.AuditedTables, m.ModelDecls)
 	}
 	return reg
+}
+
+// buildModelsByTable maps each non-failed module's model tables to their
+// qualified model names.
+func buildModelsByTable(modules map[string]*module.LoadedModule) map[string]string {
+	out := make(map[string]string)
+	for name, m := range modules {
+		if m.Status == module.StatusFailed {
+			continue
+		}
+		for _, decl := range m.ModelDecls {
+			out[modeltable.Name(decl)] = decl.QualifiedName(name)
+		}
+	}
+	return out
 }
 
 // computeSchemaHash returns a stable hex digest that changes if and only
@@ -522,8 +539,9 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		})
 	}
 	// Tenant admin user, invite, role, settings and connector endpoints
-	// (goerp#1097, goerp#1098, goerp#1099, goerp#1296, goerp#1290), the same
-	// tenant-facing, EngineBuiltin posture as /admin/users/{id}/mfa/reset.
+	// (goerp#1097, goerp#1098, goerp#1099, goerp#1153, goerp#1296,
+	// goerp#1290), the same tenant-facing, EngineBuiltin posture as
+	// /admin/users/{id}/mfa/reset.
 	for _, r := range [][2]string{
 		{"GET", "/admin/users"},
 		{"GET", "/admin/users/{id}"},
@@ -531,6 +549,7 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"POST", "/admin/users/{id}/suspend"},
 		{"POST", "/admin/users/{id}/unsuspend"},
 		{"GET", "/admin/users/{id}/sessions"},
+		{"GET", "/admin/users/{id}/activity"},
 		{"DELETE", "/admin/users/{id}/sessions/{family_id}"},
 		{"POST", "/users/invite"},
 		{"POST", "/users/invitations/{id}/resend"},

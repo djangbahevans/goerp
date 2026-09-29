@@ -863,13 +863,20 @@ func New(cfg *config.Config) (*Engine, error) {
 	roleAssignHandler := roleassign.NewHandler(tenantResolver, authChecker, roleStore, roleCache, sessionRevoker, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/users/{id}/roles"] = http.HandlerFunc(roleAssignHandler.ServeAssign)
 	builtinRoutes["DELETE /admin/users/{id}/roles/{role}"] = http.HandlerFunc(roleAssignHandler.ServeRevoke)
-	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminusers.NewStore(primaryPool, authAuditStore), roleStore, sessionStore, sessionRevoker, inviteStore, userStore, filesStore, storageBackend)
+	adminUsersHandler := adminusers.NewHandler(tenantResolver, authChecker, adminusers.NewStore(primaryPool, authAuditStore), roleStore, sessionStore, sessionRevoker, inviteStore, userStore, filesStore, storageBackend, func(table string) (string, bool) {
+		snap := moduleRegistry.Snapshot()
+		if snap == nil {
+			return "", false
+		}
+		return snap.ModelForTable(table)
+	})
 	builtinRoutes["GET /admin/users"] = http.HandlerFunc(adminUsersHandler.ServeList)
 	builtinRoutes["GET /admin/users/{id}"] = http.HandlerFunc(adminUsersHandler.ServeGet)
 	builtinRoutes["DELETE /admin/users/{id}"] = http.HandlerFunc(adminUsersHandler.ServeDelete)
 	builtinRoutes["POST /admin/users/{id}/suspend"] = http.HandlerFunc(adminUsersHandler.ServeSuspend)
 	builtinRoutes["POST /admin/users/{id}/unsuspend"] = http.HandlerFunc(adminUsersHandler.ServeUnsuspend)
 	builtinRoutes["GET /admin/users/{id}/sessions"] = http.HandlerFunc(adminUsersHandler.ServeSessions)
+	builtinRoutes["GET /admin/users/{id}/activity"] = http.HandlerFunc(adminUsersHandler.ServeActivity)
 	builtinRoutes["DELETE /admin/users/{id}/sessions/{family_id}"] = http.HandlerFunc(adminUsersHandler.ServeRevokeSession)
 	builtinRoutes["POST /users/invite"] = http.HandlerFunc(adminUsersHandler.ServeInvite)
 	builtinRoutes["POST /users/invitations/{id}/resend"] = http.HandlerFunc(adminUsersHandler.ServeResendInvitation)
