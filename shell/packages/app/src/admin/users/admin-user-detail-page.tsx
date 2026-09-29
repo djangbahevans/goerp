@@ -32,6 +32,7 @@ import {
 } from "./admin-users-api.js";
 import { displayName } from "./admin-users-page.js";
 import { roleLabel, useAssignableRoles } from "./roles.js";
+import { UserActivitySection } from "./user-activity-section.js";
 import { UserStatusBadge } from "./user-status-badge.js";
 
 // auth-internals.md §2: users.status is platform-level, so both confirmations
@@ -48,7 +49,7 @@ export interface AdminUserDetailPageProps {
   onBackToList: () => void;
 }
 
-// shell-ux.md §5.1 "User detail page". The activity log section is goerp#1103.
+// shell-ux.md §5.1 "User detail page".
 export function AdminUserDetailPage({ userId, onBackToList }: AdminUserDetailPageProps): ReactNode {
   const query = useAdminUser(userId);
 
@@ -196,6 +197,7 @@ function UserDetail({ user, onDeleted }: { user: AdminUserDetail; onDeleted: () 
 
         {isMember ? <RolesSection user={user} isSelf={isSelf} /> : <InvitationSection user={user} />}
         {isMember && <SessionsSection userId={user.id} />}
+        <UserActivitySection userId={user.id} />
       </div>
 
       <AlertDialog

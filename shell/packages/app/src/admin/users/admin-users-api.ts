@@ -2,8 +2,8 @@ import { apiClient } from "@goerp/sdk";
 import { type InfiniteData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 // The tenant admin user endpoints (auth-internals.md §2, §3 "Invite flow",
-// §4 "Session management endpoints"), mapped from their snake_case wire
-// shapes.
+// §4 "Session management endpoints", §17 "Tenant admin activity read API"),
+// mapped from their snake_case wire shapes.
 
 export type AdminUserStatus = "active" | "invited" | "suspended" | "pending_verification";
 export type AdminUserStatusFilter = "all" | "active" | "invited" | "suspended";
@@ -40,6 +40,33 @@ export interface AdminUserSession {
   lastActiveAt: string;
   persistent: boolean;
   current: boolean;
+}
+
+export type AdminActivitySource = "auth" | "data";
+export type AdminActivityFilter = "all" | AdminActivitySource;
+
+export interface AdminActivityPerson {
+  id: string;
+  name: string | null;
+}
+
+export interface AdminActivityEntry {
+  id: string;
+  source: AdminActivitySource;
+  occurredAt: string;
+  action: string;
+  success: boolean;
+  failureReason: string | null;
+  actor: AdminActivityPerson | null;
+  user: AdminActivityPerson | null;
+  record: { model: string | null; id: string } | null;
+  changedFields: string[] | null;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface AdminActivityPage {
+  entries: AdminActivityEntry[];
+  cursor: string | null;
 }
 
 export interface AdminUsersPage {
@@ -86,6 +113,20 @@ interface SessionWire {
   current: boolean;
 }
 
+interface ActivityWire {
+  id: string;
+  source: AdminActivitySource;
+  occurred_at: string;
+  action: string;
+  success: boolean;
+  failure_reason: string | null;
+  actor: AdminActivityPerson | null;
+  user: AdminActivityPerson | null;
+  record: { model: string | null; id: string } | null;
+  changed_fields: string[] | null;
+  metadata: Record<string, unknown> | null;
+}
+
 function toUser(wire: UserWire): AdminUser {
   return {
     id: wire.id,
@@ -125,7 +166,24 @@ function toSession(wire: SessionWire): AdminUserSession {
   };
 }
 
+function toActivity(wire: ActivityWire): AdminActivityEntry {
+  return {
+    id: wire.id,
+    source: wire.source,
+    occurredAt: wire.occurred_at,
+    action: wire.action,
+    success: wire.success,
+    failureReason: wire.failure_reason,
+    actor: wire.actor,
+    user: wire.user,
+    record: wire.record,
+    changedFields: wire.changed_fields,
+    metadata: wire.metadata,
+  };
+}
+
 export const ADMIN_USERS_PAGE_SIZE = 50;
+export const ADMIN_ACTIVITY_PAGE_SIZE = 20;
 
 const adminUsersKey = ["admin-users"] as const;
 
@@ -135,6 +193,7 @@ export const adminUserKeys = {
     [...adminUsersKey, "list", { search, status, role }] as const,
   detail: (id: string) => [...adminUsersKey, "detail", id] as const,
   sessions: (id: string) => [...adminUsersKey, "sessions", id] as const,
+  activity: (id: string, filter: AdminActivityFilter) => [...adminUsersKey, "activity", id, filter] as const,
 };
 
 export function useAdminUsers(search: string, status: AdminUserStatusFilter, role: string) {
@@ -177,6 +236,30 @@ export function useAdminUserSessions(id: string, enabled: boolean) {
       return sessions.map(toSession);
     },
   });
+}
+
+export function useAdminUserActivity(id: string, filter: AdminActivityFilter) {
+  return useInfiniteQuery<AdminActivityPage, Error, InfiniteData<AdminActivityPage>, readonly unknown[], string | null>(
+    {
+      queryKey: adminUserKeys.activity(id, filter),
+      initialPageParam: null,
+      queryFn: async ({ pageParam, signal }) => {
+        const { data, meta } = await apiClient.get<{ data: ActivityWire[]; meta: { cursor: string | null } }>(
+          `/admin/users/${id}/activity`,
+          {
+            params: {
+              limit: ADMIN_ACTIVITY_PAGE_SIZE,
+              ...(filter !== "all" ? { source: filter } : {}),
+              ...(pageParam ? { cursor: pageParam } : {}),
+            },
+            signal,
+          },
+        );
+        return { entries: data.map(toActivity), cursor: meta.cursor };
+      },
+      getNextPageParam: (last) => last.cursor,
+    },
+  );
 }
 
 // Every mutation refreshes all admin-user queries: a status or role change
