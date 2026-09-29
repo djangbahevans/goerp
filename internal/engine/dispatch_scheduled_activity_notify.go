@@ -44,6 +44,8 @@ const (
 	// activityReminderPage is how many candidates the reminder job reads
 	// from a tenant at a time.
 	activityReminderPage = 500
+	// activityDueTimeout bounds one run of the reminder job.
+	activityDueTimeout = 10 * time.Minute
 )
 
 // notifyActivityAssigned sends engine.activity_assigned to a's assignee,
@@ -165,6 +167,12 @@ func (e *Engine) tenantL10n(ctx context.Context, tenantID string) (tenantl10n.Se
 type activityDueWorker struct {
 	river.WorkerDefaults[jobqueue.ActivityDueArgs]
 	engine *Engine
+}
+
+// Timeout overrides River's one-minute default, which a pass over many
+// tenants' reminders can exceed.
+func (w *activityDueWorker) Timeout(*river.Job[jobqueue.ActivityDueArgs]) time.Duration {
+	return activityDueTimeout
 }
 
 // Work sends each active tenant's due reminders independently, logging
