@@ -898,26 +898,38 @@ func New(cfg *config.Config) (*Engine, error) {
 	planChangeHandler := planchange.NewHandler(tenantResolver, authChecker, billingStore, tenantStore, cacheClient, wsHub, authAuditStore)
 	builtinRoutes["POST /admin/tenant/plan"] = http.HandlerFunc(planChangeHandler.ServeHTTP)
 	adminSettingsHandler := adminsettings.NewHandler(adminsettings.Deps{
-		Tenants:      tenantResolver,
-		Auth:         authChecker,
-		TenantStore:  tenantStore,
-		Cache:        cacheClient,
-		Roles:        roleStore,
-		Config:       tenantConfigStore,
-		MFA:          mfaPolicyStore,
-		Passwords:    passwordPolicies,
-		Sessions:     sessionPolicies,
-		IPAllowlists: ipAllowlists,
-		Locales:      tenantLocales,
-		Audit:        authAuditStore,
-		Storage:      storageBackend,
-		Files:        filesStore,
-		MaxLogoBytes: min(cfg.StorageMaxFileBytes, adminsettings.MaxLogoBytes),
+		Tenants:       tenantResolver,
+		Auth:          authChecker,
+		TenantStore:   tenantStore,
+		Cache:         cacheClient,
+		Roles:         roleStore,
+		Config:        tenantConfigStore,
+		MFA:           mfaPolicyStore,
+		Passwords:     passwordPolicies,
+		Sessions:      sessionPolicies,
+		IPAllowlists:  ipAllowlists,
+		Locales:       tenantLocales,
+		Audit:         authAuditStore,
+		Storage:       storageBackend,
+		Files:         filesStore,
+		MaxLogoBytes:  min(cfg.StorageMaxFileBytes, adminsettings.MaxLogoBytes),
+		Notifications: notificationConfig,
+		Registry:      moduleRegistry,
+		Users:         userStore,
+		TestEmail: &notify.EmailTester{
+			Registry:       moduleRegistry,
+			Tenants:        tenantStore,
+			AppBaseURL:     cfg.AppBaseURL,
+			PlatformDomain: cfg.PlatformDomain,
+		},
 	})
 	builtinRoutes["GET /admin/settings"] = http.HandlerFunc(adminSettingsHandler.ServeGet)
 	builtinRoutes["PATCH /admin/settings"] = http.HandlerFunc(adminSettingsHandler.ServePatch)
 	builtinRoutes["POST /admin/settings/logo"] = http.HandlerFunc(adminSettingsHandler.ServeUploadLogo)
 	builtinRoutes["DELETE /admin/settings/logo"] = http.HandlerFunc(adminSettingsHandler.ServeDeleteLogo)
+	builtinRoutes["GET /admin/settings/notification-delivery"] = http.HandlerFunc(adminSettingsHandler.ServeGetNotificationDelivery)
+	builtinRoutes["PATCH /admin/settings/notification-delivery"] = http.HandlerFunc(adminSettingsHandler.ServePatchNotificationDelivery)
+	builtinRoutes["POST /admin/settings/notification-delivery/test-email"] = http.HandlerFunc(adminSettingsHandler.ServeTestEmail)
 	connectorPrimaryHandler := connectorprimary.NewHandler(tenantResolver, authChecker, providerselect.NewStore(primaryPool), authAuditStore)
 	builtinRoutes["PATCH /admin/connectors/{name}/set-primary"] = http.HandlerFunc(connectorPrimaryHandler.ServeSetPrimary)
 	moduleInstallWorker := &moduleinstall.Worker{

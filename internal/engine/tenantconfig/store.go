@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
@@ -265,30 +266,59 @@ ON CONFLICT (module_name, key) DO UPDATE SET
     value = $3, value_type = $4, encrypted = $5, updated_by = NULLIF($6, '')::uuid, updated_at = NOW()
 `
 
+const deleteModuleConfigValue = `DELETE FROM %s.module_config WHERE module_name = $1 AND key = $2`
+
+// ModuleConfigValue is one module_config write. Value is already the
+// caller's chosen on-disk encoding; a nil Value deletes the row, so the
+// key falls back to the lower tiers.
+type ModuleConfigValue struct {
+	Key       string
+	Value     []byte
+	Type      string
+	Encrypted bool
+}
+
 // SetModuleConfig upserts moduleName.key's value into tenantSchema's own
 // module_config table (the tenant-admin tier, distinct from Store.Set's
 // operator-override tier) and broadcasts configChangedChannel so every
-// Resolver drops its now-stale cache entry. value is already the
-// caller's chosen on-disk encoding; this package stays ignorant of
-// config_schema types and encryption. updatedBy empty stores SQL NULL.
+// Resolver drops its now-stale cache entry. This package stays ignorant
+// of config_schema types and encryption. updatedBy empty stores SQL NULL.
 func (s *Store) SetModuleConfig(ctx context.Context, tenantID, tenantSchema, moduleName, key string, value []byte, valueType string, encrypted bool, updatedBy string) error {
+	return s.SetModuleConfigMany(ctx, tenantID, tenantSchema, moduleName, []ModuleConfigValue{{Key: key, Value: value, Type: valueType, Encrypted: encrypted}}, updatedBy)
+}
+
+// SetModuleConfigMany is SetModuleConfig for several keys in one
+// transaction: every write lands, or none does.
+func (s *Store) SetModuleConfigMany(ctx context.Context, tenantID, tenantSchema, moduleName string, values []ModuleConfigValue, updatedBy string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	values = slices.SortedFunc(slices.Values(values), func(a, b ModuleConfigValue) int { return strings.Compare(a.Key, b.Key) })
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin set module config value: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	query := fmt.Sprintf(upsertModuleConfigValue, tenantSchema)
-	if _, err := tx.ExecContext(ctx, query, moduleName, key, value, valueType, encrypted, updatedBy); err != nil {
-		return fmt.Errorf("set module config value: %w", err)
-	}
+	upsert := fmt.Sprintf(upsertModuleConfigValue, tenantSchema)
+	del := fmt.Sprintf(deleteModuleConfigValue, tenantSchema)
+	for _, v := range values {
+		if v.Value == nil {
+			if _, err := tx.ExecContext(ctx, del, moduleName, v.Key); err != nil {
+				return fmt.Errorf("delete module config value %s: %w", v.Key, err)
+			}
+		} else if _, err := tx.ExecContext(ctx, upsert, moduleName, v.Key, v.Value, v.Type, v.Encrypted, updatedBy); err != nil {
+			return fmt.Errorf("set module config value %s: %w", v.Key, err)
+		}
 
-	payload, err := json.Marshal(configChangedPayload{TenantID: tenantID, Key: moduleName + "." + key})
-	if err != nil {
-		return fmt.Errorf("encode config changed payload: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, "SELECT pg_notify($1, $2)", configChangedChannel, string(payload)); err != nil {
-		return fmt.Errorf("notify config changed: %w", err)
+		payload, err := json.Marshal(configChangedPayload{TenantID: tenantID, Key: moduleName + "." + v.Key})
+		if err != nil {
+			return fmt.Errorf("encode config changed payload: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "SELECT pg_notify($1, $2)", configChangedChannel, string(payload)); err != nil {
+			return fmt.Errorf("notify config changed: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

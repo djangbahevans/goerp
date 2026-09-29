@@ -21,6 +21,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
+	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/riverqueue/river"
@@ -242,7 +243,7 @@ func (w *EmailWorker) prepare(ctx context.Context, args jobqueue.EmailSendArgs, 
 	if err != nil {
 		return nil, msg, fmt.Errorf("load notification config: %w", err)
 	}
-	sender, err := w.provider(cfg.Email)
+	sender, err := emailSender(cfg.Email, w.ResendBaseURL, w.HTTPClient)
 	if err != nil {
 		return nil, msg, err
 	}
@@ -278,7 +279,7 @@ func (w *EmailWorker) prepare(ctx context.Context, args jobqueue.EmailSendArgs, 
 	if err != nil {
 		return sender, msg, fmt.Errorf("%w: %w", errEmailPermanent, err)
 	}
-	layout, err := w.layout(cfg.Email.LayoutTemplate)
+	layout, err := ResolveEmailLayout(w.Registry.Snapshot(), cfg.Email.LayoutTemplate)
 	if err != nil {
 		return sender, msg, fmt.Errorf("%w: %w", errEmailPermanent, err)
 	}
@@ -318,9 +319,9 @@ func (w *EmailWorker) prepare(ctx context.Context, args jobqueue.EmailSendArgs, 
 	return sender, msg, nil
 }
 
-// provider builds the adapter cfg selects, reading its credentials from
-// cfg as it is now: a provider switch applies to the next send.
-func (w *EmailWorker) provider(cfg notifconfig.EmailConfig) (emailprovider.Sender, error) {
+// emailSender builds the adapter cfg selects, reading its credentials
+// from cfg as it is now: a provider switch applies to the next send.
+func emailSender(cfg notifconfig.EmailConfig, resendBaseURL string, client *http.Client) (emailprovider.Sender, error) {
 	if cfg.FromAddr == "" {
 		return nil, fmt.Errorf("%w: notifications.email.from_addr is not set", errEmailPermanent)
 	}
@@ -329,7 +330,7 @@ func (w *EmailWorker) provider(cfg notifconfig.EmailConfig) (emailprovider.Sende
 		if cfg.APIKey == "" {
 			return nil, fmt.Errorf("%w: notifications.email.api_key is not set", errEmailPermanent)
 		}
-		return &emailprovider.Resend{APIKey: cfg.APIKey, BaseURL: w.ResendBaseURL, Client: w.HTTPClient}, nil
+		return &emailprovider.Resend{APIKey: cfg.APIKey, BaseURL: resendBaseURL, Client: client}, nil
 	case notifconfig.ProviderSMTP:
 		if cfg.SMTP.Host == "" {
 			return nil, fmt.Errorf("%w: notifications.email.smtp.host is not set", errEmailPermanent)
@@ -416,9 +417,10 @@ func (w *EmailWorker) render(d *emailDelivery, locale string, vars map[string]an
 	return c, nil
 }
 
-// layout is the tenant's configured layout_template, "{theme_module}/{path}"
-// inside an installed theme module's package, or the engine's default.
-func (w *EmailWorker) layout(ref string) (*htmltemplate.Template, error) {
+// ResolveEmailLayout parses ref, a layout_template of the form
+// "{theme_module}/{path}" inside an installed theme module's package in
+// snapshot, or returns the engine's default layout for "".
+func ResolveEmailLayout(snapshot *registry.RegistrySnapshot, ref string) (*htmltemplate.Template, error) {
 	if ref == "" {
 		return defaultLayout, nil
 	}
@@ -426,7 +428,6 @@ func (w *EmailWorker) layout(ref string) (*htmltemplate.Template, error) {
 	if !ok || path == "" {
 		return nil, fmt.Errorf("layout_template %q is not {theme_module}/{path}", ref)
 	}
-	snapshot := w.Registry.Snapshot()
 	if snapshot == nil {
 		return nil, fmt.Errorf("layout_template %q: no module registry", ref)
 	}

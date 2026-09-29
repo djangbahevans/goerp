@@ -290,21 +290,53 @@ func decodeDefaults(v any) (map[string][]string, error) {
 // Set writes key's tenant-admin value for the tenant, encrypting an
 // "encrypted" key before it reaches module_config. updatedBy may be empty.
 func (s *Service) Set(ctx context.Context, tenantID, tenantSlug, key string, value any, updatedBy string) error {
-	entry, ok := entryFor(key)
-	if !ok {
-		return fmt.Errorf("%w: %q", ErrUnknownKey, key)
+	return s.SetMany(ctx, tenantID, tenantSlug, map[string]any{key: value}, updatedBy)
+}
+
+// SetMany is Set for several keys in one transaction: every value is
+// validated before anything is written, and every write lands or none
+// does. A nil value removes the tenant's value, so the key falls back to
+// its default.
+func (s *Service) SetMany(ctx context.Context, tenantID, tenantSlug string, values map[string]any, updatedBy string) error {
+	writes := make([]tenantconfig.ModuleConfigValue, 0, len(values))
+	for key, value := range values {
+		entry, ok := entryFor(key)
+		if !ok {
+			return fmt.Errorf("%w: %q", ErrUnknownKey, key)
+		}
+		if value == nil {
+			writes = append(writes, tenantconfig.ModuleConfigValue{Key: key})
+			continue
+		}
+		data, err := s.encode(entry, value)
+		if err != nil {
+			return err
+		}
+		writes = append(writes, tenantconfig.ModuleConfigValue{Key: key, Value: data, Type: entry.Type, Encrypted: entry.Encrypted})
 	}
-	if err := validate(entry, value); err != nil {
+
+	if err := s.store.SetModuleConfigMany(ctx, tenantID, tenantschema.Name(tenantSlug), Namespace, writes, updatedBy); err != nil {
 		return err
+	}
+	for key := range values {
+		s.resolver.Invalidate(tenantID, Namespace+"."+key)
+	}
+	return nil
+}
+
+// encode validates value and renders it as module_config's JSONB value.
+func (s *Service) encode(entry manifest.ConfigEntry, value any) ([]byte, error) {
+	if err := validate(entry, value); err != nil {
+		return nil, err
 	}
 
 	if entry.Encrypted {
 		if s.rowKeys == nil {
-			return ErrNoRowKeys
+			return nil, ErrNoRowKeys
 		}
 		ciphertext, err := s.rowKeys.Encrypt([]byte(value.(string)))
 		if err != nil {
-			return fmt.Errorf("encrypt %s: %w", key, err)
+			return nil, fmt.Errorf("encrypt %s: %w", entry.Key, err)
 		}
 		value = string(ciphertext)
 	}
@@ -315,13 +347,25 @@ func (s *Service) Set(ctx context.Context, tenantID, tenantSlug, key string, val
 
 	data, err := json.Marshal(value, json.Deterministic(true))
 	if err != nil {
-		return fmt.Errorf("encode %s: %w", key, err)
+		return nil, fmt.Errorf("encode %s: %w", entry.Key, err)
 	}
-	if err := s.store.SetModuleConfig(ctx, tenantID, tenantschema.Name(tenantSlug), Namespace, key, data, entry.Type, entry.Encrypted, updatedBy); err != nil {
-		return err
+	return data, nil
+}
+
+// Locked returns the keys an operator override in
+// tenant_config_overrides fixes for the tenant, read uncached.
+func (s *Service) Locked(ctx context.Context, tenantID string) ([]string, error) {
+	overridden, err := s.store.GetPrefix(ctx, tenantID, Namespace+".")
+	if err != nil {
+		return nil, err
 	}
-	s.resolver.Invalidate(tenantID, Namespace+"."+key)
-	return nil
+	var locked []string
+	for _, entry := range Schema {
+		if _, ok := overridden[Namespace+"."+entry.Key]; ok {
+			locked = append(locked, entry.Key)
+		}
+	}
+	return locked, nil
 }
 
 func validate(entry manifest.ConfigEntry, value any) error {

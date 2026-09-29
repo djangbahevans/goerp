@@ -1,9 +1,10 @@
 // Package adminsettings implements the tenant settings API behind the
 // shell's /admin/settings page (shell-ux.md §5.5): GET and PATCH
 // /admin/settings for the General, Security and Localisation sections,
-// and POST/DELETE /admin/settings/logo for the company logo. The Email
-// section's settings are their own concern (goerp#1284/#1293), and
-// allowed OAuth providers wait on OAuth login itself.
+// POST/DELETE /admin/settings/logo for the company logo, and
+// /admin/settings/notification-delivery for the Email and Notification
+// delivery sections (notifdelivery.go). Allowed OAuth providers wait on
+// OAuth login itself.
 //
 // The company profile lives in system.tenants' columns; everything else
 // in tenantconfig, through the stores that enforce or serve it:
@@ -12,6 +13,8 @@
 // maximum), ipallowlist.Store (the login IP allowlist) and
 // tenantl10n.Store (default locale and timezone, and Localisation). Each
 // is read uncached on use, so a change applies from the very next request.
+// Notification delivery settings are the engine's module_config keys,
+// read and written through notifconfig.Service.
 //
 // Like internal/engine/auth/adminroles, these are Class A tenant-facing
 // routes despite the "/admin/" prefix: Host-header tenant resolution,
@@ -40,11 +43,14 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
+	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
+	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantconfig"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
 const (
@@ -71,6 +77,13 @@ type Deps struct {
 	IPAllowlists *ipallowlist.Store
 	Locales      *tenantl10n.Store
 	Audit        AuditRecorder
+
+	// Notifications, Registry, Users and TestEmail back the notification
+	// delivery routes.
+	Notifications *notifconfig.Service
+	Registry      *registry.ModuleRegistry
+	Users         *user.Store
+	TestEmail     TestEmailSender
 
 	// Storage and Files back the logo upload; Storage may be nil when no
 	// backend is configured, which fails only the upload.
