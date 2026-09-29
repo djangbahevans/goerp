@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -552,5 +553,106 @@ func TestSend_RejectsBadRequestsWithoutWriting(t *testing.T) {
 	}
 	if n := env.notificationCount(t); n != 0 {
 		t.Errorf("%d notifications written, want 0", n)
+	}
+}
+
+func TestSend_IdempotencyKeySendsOncePerUser(t *testing.T) {
+	env := openTestEnv(t)
+	ama := env.createUser(t, "Ama Owusu", "")
+	kofi := env.createUser(t, "Kofi Mensah", "")
+	opts := Options{IdempotencyKey: "order-confirmed:o-1"}
+
+	first, err := env.sender.Send(t.Context(), env.tenant.ID, "sales", orderConfirmed, ama, nil, opts)
+	if err != nil {
+		t.Fatalf("first Send() error: %v", err)
+	}
+	feedRows, deliveries, jobs, pushes := env.notificationCount(t), env.deliveryCount(t), env.jobCount(t), len(env.hub.sent)
+
+	again, err := env.sender.Send(t.Context(), env.tenant.ID, "sales", orderConfirmed, ama, nil, opts)
+	if err != nil {
+		t.Fatalf("repeated Send() error: %v", err)
+	}
+	if !again.Deduplicated || again.NotificationID != first.NotificationID || !slices.Equal(again.ChannelsUsed, first.ChannelsUsed) {
+		t.Errorf("repeated Send() = %+v, want the first send's notification %s %v deduplicated", again, first.NotificationID, first.ChannelsUsed)
+	}
+	if env.notificationCount(t) != feedRows || env.deliveryCount(t) != deliveries || env.jobCount(t) != jobs || len(env.hub.sent) != pushes {
+		t.Error("a deduplicated Send() wrote a notification, delivery or job, or pushed notification.new")
+	}
+
+	other, err := env.sender.Send(t.Context(), env.tenant.ID, "sales", orderConfirmed, kofi, nil, opts)
+	if err != nil {
+		t.Fatalf("Send() to another user error: %v", err)
+	}
+	if other.Deduplicated {
+		t.Error("the same idempotency key deduplicated a send to a different user")
+	}
+}
+
+func TestSendTx_IdempotencyKeyFromARolledBackSendIsFree(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t, "Ama Owusu", "")
+	opts := Options{IdempotencyKey: "k"}
+
+	tx, err := env.conn.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.sender.SendTx(t.Context(), tx, env.tenant.ID, "sales", orderConfirmed, userID, nil, opts); err != nil {
+		t.Fatalf("SendTx() error: %v", err)
+	}
+	_ = tx.Rollback()
+
+	res, err := env.sender.Send(t.Context(), env.tenant.ID, "sales", orderConfirmed, userID, nil, opts)
+	if err != nil {
+		t.Fatalf("Send() error: %v", err)
+	}
+	if res.Deduplicated {
+		t.Error("a key used only by a rolled-back send deduplicated a later send")
+	}
+}
+
+func TestSendBulk_SendsToEachUserOnce(t *testing.T) {
+	env := openTestEnv(t)
+	ama := env.createUser(t, "Ama Owusu", "")
+	kofi := env.createUser(t, "Kofi Mensah", "")
+
+	results, err := env.sender.SendBulk(t.Context(), env.tenant.ID, "sales", orderConfirmed, []string{ama, kofi, strings.ToUpper(ama)},
+		map[string]any{"OrderReference": "ORD-7"}, Options{})
+	if err != nil {
+		t.Fatalf("SendBulk() error: %v", err)
+	}
+	if len(results) != 2 || results[0].UserID != ama || results[1].UserID != kofi {
+		t.Fatalf("SendBulk() results = %+v, want one each for %s and %s in order", results, ama, kofi)
+	}
+	if n := env.notificationCount(t); n != 2 {
+		t.Errorf("notifications = %d, want 2", n)
+	}
+	if n := len(env.hub.sent); n != 2 {
+		t.Errorf("notification.new pushes = %d, want 2", n)
+	}
+}
+
+func TestSendBulk_OneBadRecipientSendsNothing(t *testing.T) {
+	env := openTestEnv(t)
+	ama := env.createUser(t, "Ama Owusu", "")
+	outsider := env.createOutsider(t, "Yaw Boateng", "")
+
+	_, err := env.sender.SendBulk(t.Context(), env.tenant.ID, "sales", orderConfirmed, []string{ama, outsider}, nil, Options{})
+	if !errors.Is(err, ErrUnknownUser) {
+		t.Fatalf("SendBulk() error = %v, want ErrUnknownUser", err)
+	}
+	if n := env.notificationCount(t); n != 0 {
+		t.Errorf("notifications = %d, want 0", n)
+	}
+}
+
+func TestSendBulk_RejectsTooManyRecipients(t *testing.T) {
+	env := openTestEnv(t)
+	userIDs := make([]string, MaxBulkRecipients+1)
+	for i := range userIDs {
+		userIDs[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i)
+	}
+	if _, err := env.sender.SendBulk(t.Context(), env.tenant.ID, "sales", orderConfirmed, userIDs, nil, Options{}); !errors.Is(err, ErrTooManyRecipients) {
+		t.Fatalf("SendBulk() error = %v, want ErrTooManyRecipients", err)
 	}
 }

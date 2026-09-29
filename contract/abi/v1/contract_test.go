@@ -442,6 +442,15 @@ func TestStorageSearchAuthzEventWireFields(t *testing.T) {
 		{"JobsDispatchProviderSyncOutput omits an unset result", JobsDispatchProviderSyncOutput{}, nil},
 		{"JobsSetResultInput", JobsSetResultInput{}, []string{"value"}},
 		{"JobsSetResultOutput", JobsSetResultOutput{}, nil},
+		{"NotifySendOptions", NotifySendOptions{Priority: "high", ChannelOverride: "sms", AdditionalChannels: []string{"push"}, ActionURL: "/a", IdempotencyKey: "k"},
+			[]string{"priority", "channel_override", "additional_channels", "action_url", "idempotency_key"}},
+		{"NotifySendOptions omits empty members", NotifySendOptions{}, nil},
+		{"NotifySendInput", NotifySendInput{}, []string{"user_id", "type", "template_key", "data", "opts"}},
+		{"NotifySendTxInput", NotifySendTxInput{}, []string{"tx_id", "user_id", "type", "template_key", "data", "opts"}},
+		{"NotifySendOutput", NotifySendOutput{}, []string{"notification_id", "channels_used", "deduplicated"}},
+		{"NotifySendBulkInput", NotifySendBulkInput{}, []string{"user_ids", "type", "template_key", "data", "opts"}},
+		{"NotifyRecipientResult", NotifyRecipientResult{}, []string{"user_id", "notification_id", "channels_used", "deduplicated"}},
+		{"NotifySendBulkOutput", NotifySendBulkOutput{}, []string{"notifications"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

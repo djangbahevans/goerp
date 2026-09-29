@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -27,7 +28,8 @@ const (
 )
 
 // NewNotification is one feed row to insert. Data is the raw template
-// data, kept for re-rendering.
+// data, kept for re-rendering. IdempotencyKey, when set, makes the insert
+// happen at most once per (user, module, key).
 type NewNotification struct {
 	TenantID  string
 	UserID    string
@@ -38,6 +40,8 @@ type NewNotification struct {
 	ActionURL *string
 	Icon      *string
 	Data      map[string]any
+
+	IdempotencyKey string
 }
 
 // NewDelivery is one notification_deliveries row to insert: one channel
@@ -65,24 +69,65 @@ func DeliveryIdempotencyKey(notificationID, channel, recipient string) string {
 	return notificationID + ":" + channel + ":" + recipient
 }
 
-// CreateTx inserts n on tx and returns the stored row.
-func CreateTx(ctx context.Context, tx *sql.Tx, tenantSlug string, n NewNotification) (*Notification, error) {
+// CreateTx inserts n on tx and returns the stored row, and whether it
+// was inserted. When n carries an IdempotencyKey its user and module
+// already have a notification under, nothing is inserted and that
+// notification is returned instead.
+func CreateTx(ctx context.Context, tx *sql.Tx, tenantSlug string, n NewNotification) (*Notification, bool, error) {
 	data, err := json.Marshal(n.Data)
 	if err != nil {
-		return nil, fmt.Errorf("encode notification data: %w", err)
+		return nil, false, fmt.Errorf("encode notification data: %w", err)
 	}
+	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
-		INSERT INTO %s.notifications (tenant_id, user_id, type, module, title, body, action_url, icon, data)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO %s.notifications (tenant_id, user_id, type, module, title, body, action_url, icon, data, idempotency_key)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''))
+		ON CONFLICT (tenant_id, user_id, module, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 		RETURNING %s
-	`, tenantschema.Name(tenantSlug), notificationColumns)
+	`, schema, notificationColumns)
 
-	row := tx.QueryRowContext(ctx, query, n.TenantID, n.UserID, n.Type, n.Module, n.Title, n.Body, n.ActionURL, n.Icon, data)
+	row := tx.QueryRowContext(ctx, query, n.TenantID, n.UserID, n.Type, n.Module, n.Title, n.Body, n.ActionURL, n.Icon, data, n.IdempotencyKey)
 	created, err := scanNotification(row)
-	if err != nil {
-		return nil, fmt.Errorf("create notification: %w", err)
+	if err == nil {
+		return created, true, nil
 	}
-	return created, nil
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, fmt.Errorf("create notification: %w", err)
+	}
+
+	existing, err := scanNotification(tx.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM %s.notifications
+		WHERE tenant_id = $1 AND user_id = $2 AND module = $3 AND idempotency_key = $4
+	`, notificationColumns, schema), n.TenantID, n.UserID, n.Module, n.IdempotencyKey))
+	if err != nil {
+		return nil, false, fmt.Errorf("load notification with idempotency key %q: %w", n.IdempotencyKey, err)
+	}
+	return existing, false, nil
+}
+
+// DeliveryChannelsTx returns every channel notificationID has a delivery
+// on, in_app first and the rest in email, sms, push order.
+func DeliveryChannelsTx(ctx context.Context, tx *sql.Tx, tenantSlug, notificationID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
+		SELECT channel FROM %s.notification_deliveries
+		WHERE notification_id = $1
+		GROUP BY channel
+		ORDER BY array_position(ARRAY['in_app', 'email', 'sms', 'push'], channel)
+	`, tenantschema.Name(tenantSlug)), notificationID)
+	if err != nil {
+		return nil, fmt.Errorf("list notification delivery channels: %w", err)
+	}
+	defer rows.Close()
+
+	var channels []string
+	for rows.Next() {
+		var ch string
+		if err := rows.Scan(&ch); err != nil {
+			return nil, fmt.Errorf("list notification delivery channels: %w", err)
+		}
+		channels = append(channels, ch)
+	}
+	return channels, rows.Err()
 }
 
 // CreateDeliveriesTx inserts one row per delivery for notificationID on

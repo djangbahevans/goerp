@@ -22,6 +22,7 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
+	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/providerselect"
@@ -56,7 +57,15 @@ var (
 	ErrUnknownUser = errors.New("notification recipient is not a user of this tenant")
 	// ErrInvalidPriority: Options.Priority is neither normal nor high.
 	ErrInvalidPriority = errors.New("notification priority must be normal or high")
+	// ErrTooManyRecipients: a SendBulk names more than MaxBulkRecipients
+	// users.
+	ErrTooManyRecipients = fmt.Errorf("a bulk notification goes to at most %d users", MaxBulkRecipients)
 )
+
+// MaxBulkRecipients caps one SendBulk's recipients (host-abi-reference.md
+// §11 "host.notify.send_bulk"); a caller with more batches them through
+// background jobs.
+const MaxBulkRecipients = 1000
 
 // Options are a send's call-site options (notification-system.md §7
 // "Notify options").
@@ -71,16 +80,24 @@ type Options struct {
 	Priority string
 	// TraceID is stamped onto the delivery jobs.
 	TraceID string
+	// IdempotencyKey, when set, makes the send happen at most once per
+	// recipient: a later send from the same module to the same user with
+	// the same key creates nothing and reports the first one's
+	// notification.
+	IdempotencyKey string
 }
 
 // Result is what a send reports back: the feed row's ID and every channel
-// a delivery was created for, in_app first.
+// a delivery was created for, in_app first. Deduplicated is set when the
+// send's IdempotencyKey matched an earlier notification, which is the one
+// reported.
 type Result struct {
+	UserID         string
 	NotificationID string
 	ChannelsUsed   []string
+	Deduplicated   bool
 
 	tenantID string
-	userID   string
 	event    feedEvent
 }
 
@@ -159,9 +176,51 @@ func NewSender(d Deps) *Sender {
 // commits together or not at all; once committed, the new feed entry is
 // pushed to the user's open sessions.
 func (s *Sender) Send(ctx context.Context, tenantID, moduleName, notificationType, userID string, data map[string]any, opts Options) (*Result, error) {
-	p, err := s.prepare(ctx, tenantID, moduleName, notificationType, userID, data, opts)
+	results, err := s.SendBulk(ctx, tenantID, moduleName, notificationType, []string{userID}, data, opts)
 	if err != nil {
 		return nil, err
+	}
+	return results[0], nil
+}
+
+// SendTx is Send on the caller's transaction: nothing it writes, jobs
+// included, is visible unless tx commits. It does not push the new feed
+// entry; call Announce once tx has committed.
+func (s *Sender) SendTx(ctx context.Context, tx *sql.Tx, tenantID, moduleName, notificationType, userID string, data map[string]any, opts Options) (*Result, error) {
+	spec, err := s.prepareSend(ctx, tenantID, moduleName, notificationType, opts)
+	if err != nil {
+		return nil, err
+	}
+	p, err := s.prepareRecipient(ctx, spec, userID, data, opts)
+	if err != nil {
+		return nil, err
+	}
+	return s.write(ctx, tx, p)
+}
+
+// SendBulk is Send to each of userIDs, at most MaxBulkRecipients, with the
+// same data for every one. A user listed twice is sent to once. Every
+// recipient is validated and routed before anything is written, and every
+// notification commits together or not at all; the results are in
+// userIDs' order.
+func (s *Sender) SendBulk(ctx context.Context, tenantID, moduleName, notificationType string, userIDs []string, data map[string]any, opts Options) ([]*Result, error) {
+	userIDs = uniqueUsers(userIDs)
+	if len(userIDs) > MaxBulkRecipients {
+		return nil, fmt.Errorf("%w: got %d", ErrTooManyRecipients, len(userIDs))
+	}
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+
+	spec, err := s.prepareSend(ctx, tenantID, moduleName, notificationType, opts)
+	if err != nil {
+		return nil, err
+	}
+	prepared := make([]*preparedSend, len(userIDs))
+	for i, userID := range userIDs {
+		if prepared[i], err = s.prepareRecipient(ctx, spec, userID, data, opts); err != nil {
+			return nil, err
+		}
 	}
 
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -170,46 +229,47 @@ func (s *Sender) Send(ctx context.Context, tenantID, moduleName, notificationTyp
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	res, err := s.write(ctx, tx, p)
-	if err != nil {
-		return nil, err
+	results := make([]*Result, len(prepared))
+	for i, p := range prepared {
+		if results[i], err = s.write(ctx, tx, p); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("send notification: %w", err)
 	}
-	s.Announce(ctx, res)
-	return res, nil
-}
-
-// SendTx is Send on the caller's transaction: nothing it writes, jobs
-// included, is visible unless tx commits. It does not push the new feed
-// entry; call Announce once tx has committed.
-func (s *Sender) SendTx(ctx context.Context, tx *sql.Tx, tenantID, moduleName, notificationType, userID string, data map[string]any, opts Options) (*Result, error) {
-	p, err := s.prepare(ctx, tenantID, moduleName, notificationType, userID, data, opts)
-	if err != nil {
-		return nil, err
+	for _, res := range results {
+		s.Announce(ctx, res)
 	}
-	return s.write(ctx, tx, p)
+	return results, nil
 }
 
-// preparedSend is everything a send writes, resolved before its
-// transaction opens.
-type preparedSend struct {
+// sendSpec is what a send resolves once, whoever it goes to.
+type sendSpec struct {
+	snapshot         *registry.RegistrySnapshot
 	tenant           *tenant.Tenant
-	userID           string
+	cfg              *notifconfig.Config
 	moduleName       string
 	notificationType string
-	data             map[string]any
-	cfg              *notifconfig.Config
-	plan             []channelPlan
-	content          inAppContent
+	declared         manifest.NotificationType
 	priority         string
-	traceID          string
 }
 
-// prepare validates a send, routes it and renders its in_app content. It
-// only reads, so Send runs it outside the transaction.
-func (s *Sender) prepare(ctx context.Context, tenantID, moduleName, notificationType, userID string, data map[string]any, opts Options) (*preparedSend, error) {
+// preparedSend is everything one recipient's send writes, resolved before
+// its transaction opens.
+type preparedSend struct {
+	*sendSpec
+	userID         string
+	data           map[string]any
+	plan           []channelPlan
+	content        inAppContent
+	traceID        string
+	idempotencyKey string
+}
+
+// prepareSend validates a send's type and options and loads its tenant
+// and the tenant's notification configuration.
+func (s *Sender) prepareSend(ctx context.Context, tenantID, moduleName, notificationType string, opts Options) (*sendSpec, error) {
 	if err := validateChannels(opts.ForceChannels); err != nil {
 		return nil, err
 	}
@@ -230,34 +290,44 @@ func (s *Sender) prepare(ctx context.Context, tenantID, moduleName, notification
 	if err != nil {
 		return nil, fmt.Errorf("load tenant: %w", err)
 	}
-	user, err := s.loadRecipient(ctx, t.Slug, userID)
-	if err != nil {
-		return nil, err
-	}
 	cfg, err := s.Config.Load(ctx, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("load notification config: %w", err)
 	}
-	prefs, err := s.Store.Preferences(ctx, t.Slug, tenantID, userID)
+	return &sendSpec{
+		snapshot: snapshot, tenant: t, cfg: cfg,
+		moduleName: moduleName, notificationType: notificationType, declared: nt, priority: priority,
+	}, nil
+}
+
+// prepareRecipient routes spec's send to userID and renders its in_app
+// content. It only reads, so a send runs it outside the transaction.
+func (s *Sender) prepareRecipient(ctx context.Context, spec *sendSpec, userID string, data map[string]any, opts Options) (*preparedSend, error) {
+	t := spec.tenant
+	user, err := s.loadRecipient(ctx, t.Slug, userID)
+	if err != nil {
+		return nil, err
+	}
+	prefs, err := s.Store.Preferences(ctx, t.Slug, t.ID, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	routed := route(routeInput{
-		notificationType: notificationType,
-		manifestDefaults: nt.DefaultChannels,
-		available:        nt.AvailableChannels,
+		notificationType: spec.notificationType,
+		manifestDefaults: spec.declared.DefaultChannels,
+		available:        spec.declared.AvailableChannels,
 		prefs:            prefs,
-		config:           cfg,
+		config:           spec.cfg,
 		force:            opts.ForceChannels,
 		additional:       opts.AdditionalChannels,
 	})
-	plan, err := s.planDeliveries(ctx, t, user, cfg, routed)
+	plan, err := s.planDeliveries(ctx, t, user, spec.cfg, routed)
 	if err != nil {
 		return nil, err
 	}
 
-	content, err := renderInApp(snapshot, moduleName, nt.Name, nt.Label, user.locale, templateVars(data, t, user, opts))
+	content, err := renderInApp(spec.snapshot, spec.moduleName, spec.declared.Name, spec.declared.Label, user.locale, templateVars(data, t, user, opts))
 	if err != nil {
 		return nil, err
 	}
@@ -266,8 +336,8 @@ func (s *Sender) prepare(ctx context.Context, tenantID, moduleName, notification
 	}
 
 	return &preparedSend{
-		tenant: t, userID: userID, moduleName: moduleName, notificationType: notificationType, data: data,
-		cfg: cfg, plan: plan, content: content, priority: priority, traceID: opts.TraceID,
+		sendSpec: spec, userID: userID, data: data, plan: plan, content: content,
+		traceID: opts.TraceID, idempotencyKey: opts.IdempotencyKey,
 	}, nil
 }
 
@@ -275,7 +345,7 @@ func (s *Sender) prepare(ctx context.Context, tenantID, moduleName, notification
 // tx.
 func (s *Sender) write(ctx context.Context, tx *sql.Tx, p *preparedSend) (*Result, error) {
 	t := p.tenant
-	n, err := notifications.CreateTx(ctx, tx, t.Slug, notifications.NewNotification{
+	n, created, err := notifications.CreateTx(ctx, tx, t.Slug, notifications.NewNotification{
 		TenantID:  t.ID,
 		UserID:    p.userID,
 		Type:      p.notificationType,
@@ -285,9 +355,18 @@ func (s *Sender) write(ctx context.Context, tx *sql.Tx, p *preparedSend) (*Resul
 		ActionURL: nonEmpty(p.content.ActionURL),
 		Icon:      nonEmpty(p.content.Icon),
 		Data:      p.data,
+
+		IdempotencyKey: p.idempotencyKey,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !created {
+		used, err := notifications.DeliveryChannelsTx(ctx, tx, t.Slug, n.ID)
+		if err != nil {
+			return nil, err
+		}
+		return &Result{UserID: p.userID, NotificationID: n.ID, ChannelsUsed: used, Deduplicated: true}, nil
 	}
 
 	var rows []notifications.NewDelivery
@@ -309,10 +388,10 @@ func (s *Sender) write(ctx context.Context, tx *sql.Tx, p *preparedSend) (*Resul
 		used[i] = cp.channel
 	}
 	return &Result{
+		UserID:         p.userID,
 		NotificationID: n.ID,
 		ChannelsUsed:   used,
 		tenantID:       t.ID,
-		userID:         p.userID,
 		event: feedEvent{
 			ID: n.ID, Type: n.Type, Module: n.Module, Title: n.Title,
 			Body: n.Body, ActionURL: n.ActionURL, Icon: n.Icon, CreatedAt: n.CreatedAt,
@@ -322,12 +401,13 @@ func (s *Sender) write(ctx context.Context, tx *sql.Tx, p *preparedSend) (*Resul
 
 // Announce pushes res's new feed entry to its recipient's open sessions in
 // its tenant as notification.new. A session that misses it still finds
-// the notification in its feed, so a failed push is only logged.
+// the notification in its feed, so a failed push is only logged. A
+// deduplicated send created nothing new and pushes nothing.
 func (s *Sender) Announce(ctx context.Context, res *Result) {
-	if s.Hub == nil || res == nil {
+	if s.Hub == nil || res == nil || res.Deduplicated {
 		return
 	}
-	if _, err := s.Hub.BroadcastUser(ctx, ws.NotificationsChannel, res.tenantID, res.userID, "notification.new", res.event); err != nil {
+	if _, err := s.Hub.BroadcastUser(ctx, ws.NotificationsChannel, res.tenantID, res.UserID, "notification.new", res.event); err != nil {
 		log.Debug().Err(err).Str("notification_id", res.NotificationID).Msg("notify: notification.new push reached no session")
 	}
 }
@@ -592,6 +672,24 @@ func templateVars(data map[string]any, t *tenant.Tenant, user *recipient, opts O
 		vars["ActionURL"] = opts.ActionURL
 	}
 	return vars
+}
+
+// uniqueUsers returns userIDs without its repeats, in first-seen order,
+// each valid UUID in its canonical form so that two spellings of one user
+// are one recipient.
+func uniqueUsers(userIDs []string) []string {
+	seen := make(map[string]bool, len(userIDs))
+	out := make([]string, 0, len(userIDs))
+	for _, id := range userIDs {
+		if u, err := uuid.Parse(id); err == nil {
+			id = u.String()
+		}
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func nonEmpty(s string) *string {

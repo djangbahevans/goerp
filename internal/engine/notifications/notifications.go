@@ -241,7 +241,8 @@ func (s *Store) BootstrapFeed(ctx context.Context, tenantSlug string) error {
 			    data          JSONB NOT NULL DEFAULT '{}',
 			    read_at       TIMESTAMPTZ,
 			    dismissed_at  TIMESTAMPTZ,
-			    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			    idempotency_key TEXT
 			)
 		`, schema),
 		fmt.Sprintf(`
@@ -253,6 +254,11 @@ func (s *Store) BootstrapFeed(ctx context.Context, tenantSlug string) error {
 			CREATE INDEX IF NOT EXISTS idx_notifications_unread
 			    ON %s.notifications (tenant_id, user_id)
 			    WHERE read_at IS NULL AND dismissed_at IS NULL
+		`, schema),
+		fmt.Sprintf(`
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_idempotency
+			    ON %s.notifications (tenant_id, user_id, module, idempotency_key)
+			    WHERE idempotency_key IS NOT NULL
 		`, schema),
 	})
 }

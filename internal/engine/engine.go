@@ -1067,6 +1067,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Jobs:      runtime.EventInsertClient(),
 		Hub:       wsHub,
 	})
+	runtime.SetNotifySender(notify.HostSender{Sender: notifier})
 
 	e = &Engine{
 		cfg:                    cfg,

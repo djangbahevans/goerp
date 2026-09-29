@@ -200,3 +200,22 @@ const (
 	// get, or an encrypt failure on set.
 	ErrCodeConfigEncryptionError = "config.encryption_error"
 )
+
+// host.notify error codes (host-abi-reference.md §11 "host.notify.send"/
+// "host.notify.send_bulk").
+const (
+	// ErrCodeNotifyUndeclaredType rejects a type that isn't
+	// "{caller's own module}.{a name in its own notification_types}" — a
+	// module can never send another module's type.
+	ErrCodeNotifyUndeclaredType = "notify.undeclared_type"
+	// ErrCodeNotifyUnknownRecipient rejects a user_id that isn't a live
+	// user who belongs to the tenant.
+	ErrCodeNotifyUnknownRecipient = "notify.unknown_recipient"
+	// ErrCodeNotifyInvalidOptions rejects a priority other than normal or
+	// high, or an option naming something that isn't a channel.
+	ErrCodeNotifyInvalidOptions = "notify.invalid_options"
+	// ErrCodeNotifyTooManyRecipients rejects a send_bulk over 1000
+	// distinct user_ids; a caller with more batches them through
+	// host.jobs.enqueue.
+	ErrCodeNotifyTooManyRecipients = "notify.too_many_recipients"
+)

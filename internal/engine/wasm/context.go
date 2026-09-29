@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"context"
 	"database/sql"
 	"slices"
 	"sync"
@@ -358,6 +359,10 @@ func (mc *ModuleContext) HasOpenTransaction() bool {
 type openTransaction struct {
 	conn *sql.Conn
 	tx   *sql.Tx
+
+	// afterCommit runs, in order, once host.db.commit has committed tx
+	// (AfterCommit); a rollback drops it.
+	afterCommit []func(context.Context)
 }
 
 // RegisterTransaction records a transaction host.db.begin opened — conn is
@@ -426,6 +431,29 @@ func (mc *ModuleContext) RemoveTransaction(txID string) {
 			log.Warn().Err(err).Str("tx_id", txID).Msg("could not release connection pinned by a finished transaction")
 		}
 	}
+}
+
+// AfterCommit schedules fn to run once txID's transaction commits through
+// host.db.commit, for work that must only happen after its writes are
+// visible, such as pushing a notification written inside it. A rollback
+// drops fn unrun. It reports false when txID is not open.
+func (mc *ModuleContext) AfterCommit(txID string, fn func(context.Context)) bool {
+	mc.txMu.Lock()
+	defer mc.txMu.Unlock()
+
+	ot, ok := mc.transactions[txID]
+	if !ok {
+		return false
+	}
+	ot.afterCommit = append(ot.afterCommit, fn)
+	mc.transactions[txID] = ot
+	return true
+}
+
+// afterCommitHooks returns what AfterCommit scheduled for txID.
+func (mc *ModuleContext) afterCommitHooks(txID string) []func(context.Context) {
+	ot, _ := mc.transactionEntry(txID)
+	return ot.afterCommit
 }
 
 // TransactionIDs returns the tx_ids of every transaction still open in this
