@@ -304,3 +304,53 @@ func TestSet_UnknownKeyRejected(t *testing.T) {
 		t.Errorf("Set() error = %v, want ErrUnknownKey", err)
 	}
 }
+
+func TestSetMany_InvalidValueWritesNothing(t *testing.T) {
+	env := openTestEnv(t)
+	err := env.service.SetMany(t.Context(), env.tenant.ID, env.tenant.Slug, map[string]any{
+		KeyEmailFromName: "Acme",
+		KeySMTPPort:      "not a port",
+	}, "")
+	if !errors.Is(err, ErrInvalidValue) {
+		t.Fatalf("SetMany() error = %v, want ErrInvalidValue", err)
+	}
+	if got := env.load(t).Email.FromName; got != "" {
+		t.Errorf("FromName = %q after a rejected SetMany, want nothing written", got)
+	}
+}
+
+func TestSetMany_NilRemovesTheTenantValue(t *testing.T) {
+	env := openTestEnv(t)
+	env.set(t, KeyEmailAPIKey, "key-1")
+	env.set(t, KeySMTPPort, 2525)
+
+	if err := env.service.SetMany(t.Context(), env.tenant.ID, env.tenant.Slug, map[string]any{
+		KeyEmailAPIKey:   nil,
+		KeySMTPPort:      nil,
+		KeyEmailFromAddr: "noreply@acme.test",
+	}, ""); err != nil {
+		t.Fatalf("SetMany() error: %v", err)
+	}
+	cfg := env.load(t)
+	if cfg.Email.APIKey != "" || cfg.Email.SMTP.Port != 587 || cfg.Email.FromAddr != "noreply@acme.test" {
+		t.Errorf("Email = %+v, want api_key cleared, port back to its default and from_addr set", cfg.Email)
+	}
+}
+
+func TestLocked_NamesOverriddenKeysOnly(t *testing.T) {
+	env := openTestEnv(t)
+	env.set(t, KeyPushEnabled, false)
+	for _, key := range []string{Namespace + "." + KeySMSEnabled, Namespace + "." + KeyDefaults, "engine.mfa_mode"} {
+		if err := env.store.Set(t.Context(), env.tenant.ID, key, "false"); err != nil {
+			t.Fatalf("operator override Set(%s) error: %v", key, err)
+		}
+	}
+
+	locked, err := env.service.Locked(t.Context(), env.tenant.ID)
+	if err != nil {
+		t.Fatalf("Locked() error: %v", err)
+	}
+	if want := []string{KeySMSEnabled, KeyDefaults}; !slices.Equal(locked, want) {
+		t.Errorf("Locked() = %v, want %v", locked, want)
+	}
+}

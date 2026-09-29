@@ -23,6 +23,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/ipallowlist"
 	"github.com/djangbahevans/goerp/internal/engine/auth/password"
+	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionpolicy"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
@@ -36,8 +37,11 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
+	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
+	"github.com/djangbahevans/goerp/internal/engine/notify"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
+	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -66,6 +70,10 @@ type env struct {
 	perms    *permcache.RolePermissionMap
 	handler  *Handler
 	sessions *sessionpolicy.Store
+	billing  *billing.Store
+	config   *tenantconfig.Store
+	modules  *registry.ModuleRegistry
+	notif    *notifconfig.Service
 }
 
 type fixtureTenant struct {
@@ -130,6 +138,9 @@ func newEnv(t *testing.T) *env {
 	checker := authcheck.NewChecker(&signingKeySet.Active, revoker, userStore, roleStore, permcache.NewRoleCache(cacheClient), perms, apiKeys, false, nil, mfaStore, mfaPolicies)
 	sessions := sessionpolicy.NewStore(configStore)
 	filesStore := files.NewStore(conn)
+	modules := &registry.ModuleRegistry{}
+	rowKeys := &rowcrypt.RowKeySet{Active: rowcrypt.RowKey{KeyID: "test-key", Key: make([]byte, 32)}}
+	notif := notifconfig.NewService(tenantconfig.NewResolver(configStore, tenantStore, modules), configStore, rowKeys)
 
 	return &env{
 		conn:     conn,
@@ -141,6 +152,10 @@ func newEnv(t *testing.T) *env {
 		checker:  checker,
 		perms:    perms,
 		sessions: sessions,
+		billing:  billingStore,
+		config:   configStore,
+		modules:  modules,
+		notif:    notif,
 		handler: NewHandler(Deps{
 			Tenants:      tenantresolve.NewResolver(tenantStore, cacheClient, billingStore),
 			Auth:         checker,
@@ -157,6 +172,11 @@ func newEnv(t *testing.T) *env {
 			Storage:      backend,
 			Files:        filesStore,
 			MaxLogoBytes: MaxLogoBytes,
+
+			Notifications: notif,
+			Registry:      modules,
+			Users:         userStore,
+			TestEmail:     &notify.EmailTester{Registry: modules, Tenants: tenantStore, AppBaseURL: "http://localhost:5173", PlatformDomain: "goerp.test"},
 		}),
 	}
 }
@@ -210,6 +230,19 @@ func (e *env) newTenant(t *testing.T) fixtureTenant {
 	}
 	if err := e.roles.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
+	}
+	if _, err := e.conn.Exec(`
+		CREATE TABLE ` + schema + `.module_config (
+		    module_name TEXT NOT NULL,
+		    key         TEXT NOT NULL,
+		    value       JSONB NOT NULL,
+		    value_type  TEXT NOT NULL,
+		    encrypted   BOOLEAN NOT NULL DEFAULT FALSE,
+		    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		    updated_by  UUID,
+		    PRIMARY KEY (module_name, key)
+		)`); err != nil {
+		t.Fatalf("create module_config table: %v", err)
 	}
 	if err := e.files.Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("files Bootstrap() error: %v", err)

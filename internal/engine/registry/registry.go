@@ -571,6 +571,9 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"PATCH", "/admin/settings"},
 		{"POST", "/admin/settings/logo"},
 		{"DELETE", "/admin/settings/logo"},
+		{"GET", "/admin/settings/notification-delivery"},
+		{"PATCH", "/admin/settings/notification-delivery"},
+		{"POST", "/admin/settings/notification-delivery/test-email"},
 		{"PATCH", "/admin/connectors/{name}/set-primary"},
 	} {
 		table.Register(r[0], r[1], &route.RouteEntry{
