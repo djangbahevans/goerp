@@ -199,6 +199,32 @@ func TestBuildSchemaResponse_NotificationTypes(t *testing.T) {
 	}
 }
 
+func TestBuildSchemaResponse_EngineNotificationTypes(t *testing.T) {
+	table, err := buildRouteTable(map[string]*module.LoadedModule{})
+	if err != nil {
+		t.Fatalf("buildRouteTable() error = %v", err)
+	}
+	resp := buildSchemaResponse(map[string]*module.LoadedModule{}, table, "")
+
+	var names []string
+	for _, nt := range resp.EngineNotificationTypes {
+		names = append(names, nt.Name)
+	}
+	want := []string{"activity_assigned", "activity_due", "record_mention", "record_message"}
+	if !slices.Equal(names, want) {
+		t.Errorf("engine_notification_types names = %v, want %v", names, want)
+	}
+
+	out, err := json.Marshal(resp.EngineNotificationTypes[0])
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	wantJSON := `{"name":"activity_assigned","label":"Activity assigned to you","description":"Sent when someone assigns you a scheduled activity","available_channels":["in_app","email","push"]}`
+	if string(out) != wantJSON {
+		t.Errorf("engine_notification_types[0] = %s, want %s", out, wantJSON)
+	}
+}
+
 func TestComputeSchemaHash_NotificationTypes(t *testing.T) {
 	hash := func(nt manifest.NotificationType) string {
 		modules := map[string]*module.LoadedModule{"sales": {

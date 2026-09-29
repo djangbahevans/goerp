@@ -22,13 +22,10 @@ type inAppContent struct {
 
 // renderInApp renders moduleName's in_app template for notificationName
 // (the type's name without its module prefix) in the closest of locale's
-// variants. A type with no in_app template — every engine type, for now —
-// gets its label as title and nothing else.
+// variants. A type with no in_app template gets its label as title and
+// nothing else.
 func renderInApp(snapshot *registry.RegistrySnapshot, moduleName, notificationName, label, locale string, vars map[string]any) (inAppContent, error) {
-	if snapshot == nil {
-		return inAppContent{Title: label}, nil
-	}
-	matched, tmpl, ok := snapshot.NotifTemplate(moduleName, notificationName, notifications.ChannelInApp, locale)
+	matched, tmpl, ok := resolveTemplate(snapshot, moduleName, notificationName, notifications.ChannelInApp, locale)
 	if !ok {
 		return inAppContent{Title: label}, nil
 	}
@@ -109,10 +106,7 @@ type providerContent struct {
 func renderProviderChannels(snapshot *registry.RegistrySnapshot, moduleName, notificationName, locale string, plan []channelPlan, inApp inAppContent, vars map[string]any) providerContent {
 	c := providerContent{failed: map[string]error{}}
 	resolve := func(channel string) (string, *notiftemplate.Template, bool) {
-		if snapshot == nil {
-			return "", nil, false
-		}
-		return snapshot.NotifTemplate(moduleName, notificationName, channel, locale)
+		return resolveTemplate(snapshot, moduleName, notificationName, channel, locale)
 	}
 
 	for _, cp := range plan {

@@ -188,9 +188,12 @@ type Engine struct {
 	notificationConfig *notifconfig.Service
 	// notifier is the notification delivery pipeline (notify.Send) the
 	// engine's own engine.* sends and host.notify.send go through.
-	notifier *notify.Sender
+	notifier engineNotifier
 	// unsubscribeCodec verifies /_notif/unsubscribe's tokens.
 	unsubscribeCodec *notifications.UnsubscribeCodec
+	// tenantLocales resolves a tenant's default locale and timezone, for
+	// work outside a request such as due-date reminders.
+	tenantLocales *tenantl10n.Store
 	// scheduledActivityStore backs /_meta/scheduled-activities.
 	scheduledActivityStore *scheduledactivity.Store
 	// activityTypeStore backs /_meta/activity-types and
@@ -933,6 +936,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})
+	activityDue := &activityDueWorker{}
+	river.AddWorker(jobWorkers, activityDue)
 	river.AddWorker(jobWorkers, &jobqueue.DeviceTokenCleanupWorker{TenantStore: tenantStore, NotificationStore: notificationStore})
 	unsubscribeCodec := notifications.NewUnsubscribeCodec(signingKeySet)
 	river.AddWorker(jobWorkers, notify.NewEmailWorker(notify.EmailDeps{
@@ -1113,6 +1118,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		notificationConfig:     notificationConfig,
 		notifier:               notifier,
 		unsubscribeCodec:       unsubscribeCodec,
+		tenantLocales:          tenantLocales,
 		scheduledActivityStore: scheduledActivityStore,
 		activityTypeStore:      activityTypeStore,
 		roleStore:              roleStore,
@@ -1134,6 +1140,9 @@ func New(cfg *config.Config) (*Engine, error) {
 		tenantConfigListener: tenantConfigListener,
 		rolesListener:        rolesListener,
 	}
+	// Registered with River before e existed; River only starts working
+	// jobs once the engine starts.
+	activityDue.engine = e
 
 	// GET /_meta/permissions (goerp#417) is added here rather than to the
 	// builtinRoutes literal above for the same reason dispatchORMRoute

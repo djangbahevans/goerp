@@ -211,6 +211,94 @@ func (s *Store) Update(ctx context.Context, tenantSlug, id string, u Update) (*A
 	return a, nil
 }
 
+// ReminderCandidate is an open, unreminded activity the due-date reminder
+// job (scheduled-activities.md §7) considers, with its assignee's own
+// timezone — nil when they haven't chosen one.
+type ReminderCandidate struct {
+	Activity
+	AssigneeTimezone *string
+}
+
+// ListReminderCandidates returns up to limit open activities with no
+// reminder sent yet that fall due on or before dueBy ("YYYY-MM-DD"),
+// ordered by (due_date, id) and starting after cursor (nil for the
+// first page). Whether one is due yet depends on its assignee's
+// timezone, which the caller decides.
+func (s *Store) ListReminderCandidates(ctx context.Context, tenantSlug, dueBy string, cursor *Cursor, limit int) ([]ReminderCandidate, error) {
+	var cursorDate, cursorID any
+	if cursor != nil {
+		cursorDate, cursorID = cursor.DueDate, cursor.ID
+	}
+	query := fmt.Sprintf(`
+		SELECT %s, (SELECT p.timezone FROM system.user_profiles p WHERE p.user_id = assignee_id)
+		FROM %s.scheduled_activities
+		WHERE done_at IS NULL AND reminded_at IS NULL AND due_date <= $1::date
+		  AND ($2::date IS NULL OR (due_date, id) > ($2::date, $3::uuid))
+		ORDER BY due_date, id
+		LIMIT $4
+	`, activityColumns, tenantschema.Name(tenantSlug))
+
+	rows, err := s.db.QueryContext(ctx, query, dueBy, cursorDate, cursorID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list reminder candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ReminderCandidate
+	for rows.Next() {
+		var c ReminderCandidate
+		if err := rows.Scan(activityFields(&c.Activity, &c.AssigneeTimezone)...); err != nil {
+			return nil, fmt.Errorf("list reminder candidates: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list reminder candidates: %w", err)
+	}
+	return out, nil
+}
+
+// Remind sends the activity id's due-date reminder: in one transaction it
+// locks the activity, calls send with the transaction and the activity as
+// it now is, and — when send reports it reminded — sets reminded_at, so
+// the reminder commits together with whatever send wrote. It returns
+// ErrNotFound, without calling send, when the activity is no longer open
+// and unreminded, or when another transaction holds its lock and is
+// already reminding it; so overlapping runs never both remind. send
+// returning false or an error leaves the activity as it was.
+func (s *Store) Remind(ctx context.Context, tenantSlug, id string, send func(tx *sql.Tx, a *Activity) (reminded bool, err error)) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("remind scheduled activity: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	schema := tenantschema.Name(tenantSlug)
+	a, err := scanActivity(tx.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM %s.scheduled_activities
+		WHERE id = $1 AND done_at IS NULL AND reminded_at IS NULL
+		FOR UPDATE SKIP LOCKED
+	`, activityColumns, schema), id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("remind scheduled activity: %w", err)
+	}
+
+	reminded, err := send(tx, a)
+	if err != nil || !reminded {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s.scheduled_activities SET reminded_at = NOW() WHERE id = $1`, schema), id); err != nil {
+		return fmt.Errorf("remind scheduled activity: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("remind scheduled activity: %w", err)
+	}
+	return nil
+}
+
 // feedSnapshot is an activity_done feed entry's activity object
 // (record-activity.md §1, §6).
 type feedSnapshot struct {
@@ -299,11 +387,17 @@ type rowScanner interface {
 
 func scanActivity(sc rowScanner) (*Activity, error) {
 	var a Activity
-	if err := sc.Scan(&a.ID, &a.Model, &a.RecordID, &a.Type, &a.Summary, &a.Note, &a.DueDate, &a.AssigneeID, &a.CreatedBy,
-		&a.CreatedAt, &a.UpdatedAt, &a.DoneAt, &a.DoneBy, &a.Feedback, &a.RemindedAt); err != nil {
+	if err := sc.Scan(activityFields(&a)...); err != nil {
 		return nil, err
 	}
 	return &a, nil
+}
+
+// activityFields are the scan destinations for activityColumns into a,
+// followed by extra.
+func activityFields(a *Activity, extra ...any) []any {
+	return append([]any{&a.ID, &a.Model, &a.RecordID, &a.Type, &a.Summary, &a.Note, &a.DueDate, &a.AssigneeID, &a.CreatedBy,
+		&a.CreatedAt, &a.UpdatedAt, &a.DoneAt, &a.DoneBy, &a.Feedback, &a.RemindedAt}, extra...)
 }
 
 // Bootstrap creates scheduled_activities and its partial indexes in the
@@ -348,6 +442,8 @@ func (s *Store) Bootstrap(ctx context.Context, tenantSlug string) error {
 			    ON %s.scheduled_activities (model, record_id, due_date) WHERE done_at IS NULL`,
 			`CREATE INDEX IF NOT EXISTS idx_scheduled_activities_assignee
 			    ON %s.scheduled_activities (assignee_id, due_date, id) WHERE done_at IS NULL`,
+			`CREATE INDEX IF NOT EXISTS idx_scheduled_activities_reminder
+			    ON %s.scheduled_activities (due_date, id) WHERE done_at IS NULL AND reminded_at IS NULL`,
 		}
 		for _, idx := range indexes {
 			if _, err := tx.ExecContext(ctx, fmt.Sprintf(idx, schema)); err != nil {

@@ -1,0 +1,5 @@
+{
+  "title": "{{if .Overdue}}Overdue{{else}}Due today{{end}}: {{.Summary}}",
+  "body": "{{.TypeLabel}}{{if .RecordName}} on {{.RecordName}}{{end}}, due {{.DueDate}}",
+  "icon": "{{.TypeIcon}}"
+}

@@ -4,7 +4,7 @@ import { optionalNullable as opt } from "./optional-nullable.js";
 import { resolveViewDeclaration, type ViewDeclaration } from "./resolve-view-declaration.js";
 import { buildResourceRegistry, type ResourceRegistryEntry } from "./resource-registry.js";
 import { summarizeIssues } from "./summarize-issues.js";
-import type { MetaSchema, ModelDef } from "./types.js";
+import type { MetaSchema, ModelDef, NotificationTypeSchema } from "./types.js";
 
 // shell-architecture.md §9's ResolvedView — a browser path resolved all
 // the way through to the view declaration that serves it. `recordId` is
@@ -296,20 +296,39 @@ export function buildViewRegistry(schema: MetaSchema): ViewRegistry {
   };
 }
 
+// The module name engine-declared notification types are qualified with.
+const ENGINE_NOTIFICATION_MODULE = "engine";
+
 function buildNotificationTypeGroups(schema: MetaSchema): NotificationTypeGroup[] {
-  return Object.entries(schema.modules)
+  const toEntries = (moduleName: string, types: NotificationTypeSchema[]): NotificationTypeEntry[] =>
+    types.map((nt) => ({
+      type: `${moduleName}.${nt.name}`,
+      label: nt.label,
+      description: nt.description ?? null,
+      availableChannels: nt.available_channels,
+    }));
+
+  const moduleGroups = Object.entries(schema.modules)
     .filter(([, m]) => m.notification_types.length > 0)
     .map(([moduleName, m]) => ({
       module: moduleName,
       displayName: m.display_name || moduleName,
-      types: m.notification_types.map((nt) => ({
-        type: `${moduleName}.${nt.name}`,
-        label: nt.label,
-        description: nt.description ?? null,
-        availableChannels: nt.available_channels,
-      })),
+      types: toEntries(moduleName, m.notification_types),
     }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+  // The engine's own types (activities, mentions, messages) belong to no
+  // module, so they lead as their own group.
+  const engineTypes = schema.engine_notification_types ?? [];
+  if (engineTypes.length === 0) return moduleGroups;
+  return [
+    {
+      module: ENGINE_NOTIFICATION_MODULE,
+      displayName: "General",
+      types: toEntries(ENGINE_NOTIFICATION_MODULE, engineTypes),
+    },
+    ...moduleGroups,
+  ];
 }
 
 // buildEmptyViewRegistry is the ViewRegistryProvider's default value before

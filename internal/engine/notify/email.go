@@ -370,10 +370,7 @@ func (w *EmailWorker) render(d *emailDelivery, locale string, vars map[string]an
 	name := strings.TrimPrefix(d.typ, d.module+".")
 	snapshot := w.Registry.Snapshot()
 	resolve := func(channel string) (string, *notiftemplate.Template, bool) {
-		if snapshot == nil {
-			return "", nil, false
-		}
-		return snapshot.NotifTemplate(d.module, name, channel, locale)
+		return resolveTemplate(snapshot, d.module, name, channel, locale)
 	}
 
 	if matched, tmpl, ok := resolve(notiftemplate.ChannelEmailSubject); ok {

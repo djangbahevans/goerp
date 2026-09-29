@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
+	"github.com/djangbahevans/goerp/internal/engine/permission"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/djangbahevans/goerp/internal/engine/scheduledactivity"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
@@ -243,6 +244,7 @@ func (e *Engine) dispatchScheduledActivityCreateRoute(w http.ResponseWriter, r *
 		writeScheduledActivityStoreError(ctx, w, err, "create scheduled activity failed")
 		return
 	}
+	e.notifyActivityAssigned(ctx, tenantCtx, a, authCtx.UserID)
 	writeJSON(ctx, w, http.StatusCreated, scheduledActivityToResponse(ctx, a, e.newActivityAuthorResolver(tenantCtx.Slug)))
 }
 
@@ -321,6 +323,9 @@ func (e *Engine) dispatchScheduledActivityUpdateRoute(w http.ResponseWriter, r *
 	if err != nil {
 		writeScheduledActivityStoreError(ctx, w, err, "update scheduled activity failed")
 		return
+	}
+	if updated.AssigneeID != a.AssigneeID {
+		e.notifyActivityAssigned(ctx, tenantCtx, updated, authCtx.UserID)
 	}
 	writeJSON(ctx, w, http.StatusOK, scheduledActivityToResponse(ctx, updated, e.newActivityAuthorResolver(tenantCtx.Slug)))
 }
@@ -487,19 +492,39 @@ func writeScheduledActivityStoreError(ctx context.Context, w http.ResponseWriter
 // return is absent; a model that isn't a registered Postgres-backed one
 // returns no ids.
 func (e *Engine) readableRecordNames(ctx context.Context, authCtx *authcheck.AuthContext, tenantCtx *tenantresolve.TenantContext, modelName string, ids []string) map[string]*string {
+	return e.readableRecordNamesAs(ctx, tenantCtx, authCtx.UserID, authCtx.PermissionSet, modelName, ids)
+}
+
+// readableRecordNamesAs is readableRecordNames read as userID holding
+// permSet.
+func (e *Engine) readableRecordNamesAs(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID string, permSet permission.PermissionBitfield, modelName string, ids []string) map[string]*string {
+	names, err := e.recordNamesAs(ctx, tenantCtx, userID, permSet, modelName, ids)
+	if err != nil {
+		return map[string]*string{}
+	}
+	return names
+}
+
+// recordNamesAs is readableRecordNamesAs reporting a failed read as
+// readRecordsAsErr does. A model that isn't Postgres-backed has no
+// readable records.
+func (e *Engine) recordNamesAs(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID string, permSet permission.PermissionBitfield, modelName string, ids []string) (map[string]*string, error) {
 	names := map[string]*string{}
 	snap := e.moduleRegistry.Snapshot()
 	if snap == nil {
-		return names
+		return nil, errors.New("module registry not loaded")
 	}
 	_, mod, md, ok := snap.ModelByName(modelName)
-	if !ok || md.Backend != "" {
-		return names
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", errReadModelNotFound, modelName)
+	}
+	if md.Backend != "" {
+		return names, nil
 	}
 	pk, label := recordLabelFields(md, modelName, mod.Manifest.Views)
-	records, ok := e.readRecordsAs(ctx, tenantCtx, authCtx.UserID, authCtx.PermissionSet, modelName, ids, []string{pk, label})
-	if !ok {
-		return names
+	records, err := e.readRecordsAsErr(ctx, tenantCtx, userID, permSet, modelName, ids, []string{pk, label})
+	if err != nil {
+		return nil, err
 	}
 	for _, rec := range records {
 		var name *string
@@ -508,7 +533,7 @@ func (e *Engine) readableRecordNames(ctx context.Context, authCtx *authcheck.Aut
 		}
 		names[fmt.Sprint(rec[pk])] = name
 	}
-	return names
+	return names, nil
 }
 
 // recordLabelFields returns md's primary key field and the field holding

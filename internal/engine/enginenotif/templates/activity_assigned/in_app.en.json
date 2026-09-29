@@ -1,0 +1,5 @@
+{
+  "title": "{{if .AssignedByName}}{{.AssignedByName}} assigned you{{else}}Assigned to you{{end}}: {{.Summary}}",
+  "body": "{{.TypeLabel}}{{if .RecordName}} on {{.RecordName}}{{end}}, due {{.DueDate}}",
+  "icon": "{{.TypeIcon}}"
+}

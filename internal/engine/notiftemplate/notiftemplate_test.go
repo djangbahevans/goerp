@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/rs/zerolog"
@@ -311,5 +312,27 @@ func TestReadPackageFile_RejectsPathsOutsideThePackage(t *testing.T) {
 	}
 	if _, err := ReadPackageFile(root, "../outside.html"); err == nil {
 		t.Error("ReadPackageFile(../outside.html) error = nil")
+	}
+}
+
+func TestLoadFS_ResolvesAndRendersFromAnFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"t/order_confirmed/in_app.en.json": {Data: []byte(`{"title": "Order {{.OrderReference}}"}`)},
+		"t/order_confirmed/in_app.fr.json": {Data: []byte(`{"title": "Commande {{.OrderReference}}"}`)},
+	}
+	mt, err := LoadFS(orderConfirmedType(map[string]string{"in_app": "t/order_confirmed/in_app.{locale}.json"}), fsys)
+	if err != nil {
+		t.Fatalf("LoadFS() error: %v", err)
+	}
+	locale, tmpl, ok := mt.Resolve("order_confirmed", "in_app", "fr-CI")
+	if !ok || locale != "fr" {
+		t.Fatalf("Resolve(fr-CI) = (%q, %v), want (\"fr\", true)", locale, ok)
+	}
+	got, err := Render(tmpl, locale, map[string]any{"OrderReference": "SO-1"})
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+	if want := `{"title": "Commande SO-1"}`; got != want {
+		t.Errorf("Render() = %s, want %s", got, want)
 	}
 }

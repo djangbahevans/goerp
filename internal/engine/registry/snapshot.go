@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/djangbahevans/goerp/internal/engine/computed"
@@ -54,6 +55,28 @@ func (s *RegistrySnapshot) SchemaHash() string {
 // called from UpdateWithLocked) rather than rebuilt on every request.
 func (s *RegistrySnapshot) SchemaResponse() *SchemaResponse {
 	return s.schemaResponse
+}
+
+// RecordFormPath is the browser path of recordID's form view — the GET
+// route that serves modelName's (qualified) form view, with the record's
+// ID in place of {id}, under the shell's /_m prefix — or "" when the model
+// has no form view to open. It resolves the path the shell's record links
+// do (resolveRecordViewPath).
+func (s *RegistrySnapshot) RecordFormPath(modelName, recordID string) string {
+	if s.schemaResponse == nil {
+		return ""
+	}
+	moduleName, _, _ := strings.Cut(modelName, ".")
+	mod := s.schemaResponse.Modules[moduleName]
+	if mod == nil {
+		return ""
+	}
+	for _, rt := range mod.Routes {
+		if rt.Method == "GET" && rt.Model == modelName && rt.CrudAction == "get" && rt.View != "" && strings.Contains(rt.Path, "{id}") {
+			return "/_m" + strings.Replace(rt.Path, "{id}", url.PathEscape(recordID), 1)
+		}
+	}
+	return ""
 }
 
 // RouteTable returns this snapshot's route table — module-declared routes
