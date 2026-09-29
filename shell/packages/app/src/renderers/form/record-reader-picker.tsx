@@ -32,11 +32,6 @@ export function RecordReaderPicker({
   const viewerId = useContext(AuthContext)?.user?.id;
   const { readers, isLoading, isError } = useRecordReaders(model, recordId, open ? query : null, { excludeSelf });
 
-  const displayName = (reader: RecordReader) => {
-    const name = reader.name ?? reader.email;
-    return reader.id === viewerId ? `${name} (you)` : name;
-  };
-
   return (
     <Combobox<RecordReader>
       id={id}
@@ -44,19 +39,8 @@ export function RecordReaderPicker({
       onQueryChange={setQuery}
       options={readers}
       getOptionKey={(reader) => reader.id}
-      getOptionLabel={(reader) => (reader.name ? `${displayName(reader)}, ${reader.email}` : displayName(reader))}
-      renderOption={(reader) => (
-        <span className="flex min-w-0 items-center gap-2">
-          <UserAvatar userId={reader.id} name={reader.name ?? reader.email} avatarUrl={reader.avatarUrl} size="xs" />
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate text-sm text-text">
-              {reader.name ?? reader.email}
-              {reader.id === viewerId && <span className="text-text-secondary"> (you)</span>}
-            </span>
-            {reader.name && <span className="truncate text-text-secondary text-xs">{reader.email}</span>}
-          </span>
-        </span>
-      )}
+      getOptionLabel={(reader) => recordReaderOptionLabel(reader, viewerId)}
+      renderOption={(reader) => <RecordReaderOption reader={reader} viewerId={viewerId} />}
       onSelect={onChange}
       status={isError ? "error" : isLoading ? "loading" : "ready"}
       errorContent={<p className="px-2 py-1 text-danger text-sm">Couldn't load people.</p>}
@@ -67,5 +51,30 @@ export function RecordReaderPicker({
       disabled={disabled}
       placeholder={placeholder}
     />
+  );
+}
+
+// A reader's accessible option name: "{name}, {email}", or their email
+// alone when they have no name, marked "(you)" for the viewer.
+export function recordReaderOptionLabel(reader: RecordReader, viewerId: string | undefined): string {
+  const name = reader.name ?? reader.email;
+  const shown = reader.id === viewerId ? `${name} (you)` : name;
+  return reader.name ? `${shown}, ${reader.email}` : shown;
+}
+
+// One reader's option row: avatar, name, and the email that tells two
+// people with the same name apart. The mention list uses it too.
+export function RecordReaderOption({ reader, viewerId }: { reader: RecordReader; viewerId: string | undefined }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <UserAvatar userId={reader.id} name={reader.name ?? reader.email} avatarUrl={reader.avatarUrl} size="xs" />
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate text-sm text-text">
+          {reader.name ?? reader.email}
+          {reader.id === viewerId && <span className="text-text-secondary"> (you)</span>}
+        </span>
+        {reader.name && <span className="truncate text-text-secondary text-xs">{reader.email}</span>}
+      </span>
+    </span>
   );
 }
