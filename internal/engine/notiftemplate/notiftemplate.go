@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	texttemplate "text/template"
 	"unicode/utf8"
@@ -39,6 +40,15 @@ type Template struct {
 	Ext     string
 	Locales map[string]executor
 }
+
+// Email sibling templates: an email channel's declared .html template may
+// have a .json subject ({"subject": "..."}) and a .txt plain-text body
+// next to it (notification-system.md §5 "Template format"), resolved
+// under these pseudo-channels.
+const (
+	ChannelEmailSubject = "email_subject"
+	ChannelEmailText    = "email_text"
+)
 
 // ModuleTemplates holds one module's resolved notification templates,
 // keyed "{notificationType}.{channel}".
@@ -77,6 +87,20 @@ func Load(notifTypes []manifest.NotificationType, packagePath string) (*ModuleTe
 				return nil, fmt.Errorf("notification type %q, channel %q: %w", nt.Name, channel, err)
 			}
 			templates[nt.Name+"."+channel] = tmpl
+
+			if channel != "email" || !strings.HasSuffix(declared, ".html") {
+				continue
+			}
+			base := strings.TrimSuffix(declared, ".html")
+			for sibling, path := range map[string]string{ChannelEmailSubject: base + ".json", ChannelEmailText: base + ".txt"} {
+				tmpl, err := resolveOptionalChannel(src, names, sibling, path)
+				if err != nil {
+					return nil, fmt.Errorf("notification type %q, channel %q: %w", nt.Name, sibling, err)
+				}
+				if tmpl != nil {
+					templates[nt.Name+"."+sibling] = tmpl
+				}
+			}
 		}
 	}
 
@@ -135,6 +159,35 @@ func Render(tmpl *Template, locale string, vars map[string]any) (string, error) 
 		return "", fmt.Errorf("execute template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// resolveOptionalChannel is resolveChannel for a template the package may
+// leave out entirely: it returns nil when no locale variant of declared
+// exists, and still requires "en" when any does.
+func resolveOptionalChannel(src fileSource, names []string, channel, declared string) (*Template, error) {
+	re, err := compileLocalePattern(declared)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(names, re.MatchString) {
+		return nil, nil
+	}
+	return resolveChannel(src, names, channel, declared)
+}
+
+// ReadPackageFile reads the member name, a slash-separated path, from the
+// module package at packagePath (a .erp package file or a loose module
+// directory).
+func ReadPackageFile(packagePath, name string) ([]byte, error) {
+	if !fs.ValidPath(name) {
+		return nil, fmt.Errorf("invalid package path %q", name)
+	}
+	src, closeSrc, err := openSource(packagePath)
+	if err != nil {
+		return nil, err
+	}
+	defer closeSrc()
+	return src.read(name)
 }
 
 // resolveChannel discovers every locale variant of declared (a path

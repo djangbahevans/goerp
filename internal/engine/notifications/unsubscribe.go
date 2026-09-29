@@ -51,7 +51,12 @@ func NewUnsubscribeCodec(keys *signingkey.SigningKeySet) *UnsubscribeCodec {
 // Issue mints a token that turns off userID's email for notificationType
 // in tenantID.
 func (c *UnsubscribeCodec) Issue(userID, tenantID, notificationType string) (string, error) {
-	now := time.Now()
+	return c.IssueAt(userID, tenantID, notificationType, time.Now())
+}
+
+// IssueAt is Issue as of now: the same arguments under the same signing
+// key always mint the same token, so a retried email renders identically.
+func (c *UnsubscribeCodec) IssueAt(userID, tenantID, notificationType string, now time.Time) (string, error) {
 	claims := UnsubscribeClaims{
 		Issuer:           unsubscribeIssuer,
 		Subject:          userID,

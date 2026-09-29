@@ -11,8 +11,8 @@ const NotificationDeliveryMaxAttempts = 5
 // (internal/engine/notify) enqueues for each routed email delivery: one
 // notification_deliveries row, identified by its notification and
 // recipient address. Email is an engine-owned adapter rather than a
-// provider category, so this is its own job kind, not a WASMJobArgs.
-// Nothing works it yet: the email_send worker is goerp#1286.
+// provider category, so this is its own job kind, not a WASMJobArgs;
+// notify.EmailWorker works it.
 type EmailSendArgs struct {
 	TenantID       string `json:"tenant_id"`
 	TenantSlug     string `json:"tenant_slug"`

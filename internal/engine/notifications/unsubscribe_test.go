@@ -132,3 +132,19 @@ func TestUnsubscribeCodec_TokenIsNotAnAccessToken(t *testing.T) {
 		t.Fatal("an unsubscribe token parsed as an access token")
 	}
 }
+
+func TestUnsubscribeCodec_IssueAtIsDeterministic(t *testing.T) {
+	c := NewUnsubscribeCodec(&signingkey.SigningKeySet{Active: newTestSigningKey(t, "k1")})
+	at := time.Now().Add(-time.Hour).Truncate(time.Second)
+	a, err := c.IssueAt("user-1", "tenant-1", "sales.order_confirmed", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := c.IssueAt("user-1", "tenant-1", "sales.order_confirmed", at)
+	if a != b {
+		t.Error("IssueAt minted two different tokens for the same arguments")
+	}
+	if _, err := c.Verify(a); err != nil {
+		t.Errorf("Verify(IssueAt token) error: %v", err)
+	}
+}
