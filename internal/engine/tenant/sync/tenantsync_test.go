@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
+	"github.com/djangbahevans/goerp/internal/engine/notifications"
+	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/sdk/go/model"
@@ -441,4 +444,62 @@ func TestSyncOne_CreatesTable(t *testing.T) {
 	if !tableExists(t, env.conn, "tenant_"+slug, "widgets") {
 		t.Error("expected the widgets table to have been created")
 	}
+}
+
+func TestSyncOne_SeedsDefaultNotificationTemplatesAndKeepsOverrides(t *testing.T) {
+	env := newTestEnv(t)
+	slug := uniqueSlug(t)
+	tt := env.activeTenant(t, slug)
+	tt.Status = tenant.StatusProvisioning
+	ctx := context.Background()
+
+	store := notifications.NewStore(env.conn)
+	if err := store.BootstrapTemplates(ctx, slug); err != nil {
+		t.Fatalf("BootstrapTemplates() error: %v", err)
+	}
+
+	name := "widgets_" + slug
+	mod := loadedModule(t, name, widgetModel())
+	mod.NotifTemplates = shippedTemplates(t, "Widget v1")
+	if err := SyncOne(ctx, env.pool, env.diffEngine, tt, mod, nil); err != nil {
+		t.Fatalf("SyncOne() error: %v", err)
+	}
+
+	key := name + ".widget_made"
+	got, err := store.Template(ctx, slug, key, "in_app", "en")
+	if err != nil || got.IsOverride || got.Fields[notiftemplate.ColTitle] != "Widget v1" {
+		t.Fatalf("Template() after install = (%+v, %v), want the shipped default", got, err)
+	}
+
+	override := notiftemplate.Row{TemplateKey: key, Channel: "in_app", Locale: "en", Fields: map[string]string{notiftemplate.ColTitle: "Mine"}}
+	if err := store.SaveTemplateOverride(ctx, slug, override); err != nil {
+		t.Fatal(err)
+	}
+
+	mod.Manifest.Version = "1.1.0"
+	mod.NotifTemplates = shippedTemplates(t, "Widget v2")
+	if err := SyncOne(ctx, env.pool, env.diffEngine, tt, mod, nil); err != nil {
+		t.Fatalf("SyncOne() upgrade error: %v", err)
+	}
+	if got, _ := store.Template(ctx, slug, key, "in_app", "en"); got == nil || !got.IsOverride || got.Fields[notiftemplate.ColTitle] != "Mine" {
+		t.Errorf("Template() after upgrade = %+v, want the tenant's override untouched", got)
+	}
+	if err := store.ResetTemplate(ctx, slug, key, "in_app", "en"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.Template(ctx, slug, key, "in_app", "en"); got == nil || got.Fields[notiftemplate.ColTitle] != "Widget v2" {
+		t.Errorf("default after upgrade = %+v, want the refreshed Widget v2", got)
+	}
+}
+
+func shippedTemplates(t *testing.T, title string) *notiftemplate.ModuleTemplates {
+	t.Helper()
+	mt, err := notiftemplate.LoadFS([]manifest.NotificationType{{
+		Name: "widget_made", Label: "Widget made", DefaultChannels: []string{"in_app"}, AvailableChannels: []string{"in_app"},
+		Templates: map[string]string{"in_app": "in_app.{locale}.json"},
+	}}, fstest.MapFS{"in_app.en.json": {Data: []byte(`{"title": "` + title + `"}`)}})
+	if err != nil {
+		t.Fatalf("LoadFS() error: %v", err)
+	}
+	return mt
 }

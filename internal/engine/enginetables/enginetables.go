@@ -18,6 +18,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/activitytype"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
 	"github.com/djangbahevans/goerp/internal/engine/files"
 	"github.com/djangbahevans/goerp/internal/engine/invite"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
@@ -111,6 +112,19 @@ var Groups = []Group{
 		Tables: []Table{{Name: notifications.PreferencesTable}},
 		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
 			return notifications.NewStore(pool).BootstrapPreferences(ctx, slug)
+		},
+	},
+	{
+		Tables: []Table{{Name: notifications.TemplatesTable}},
+		Create: func(ctx context.Context, pool *sql.DB, slug string) error {
+			return notifications.NewStore(pool).BootstrapTemplates(ctx, slug)
+		},
+		Seed: func(ctx context.Context, pool *sql.DB, slug string, _ []string) error {
+			rows, err := enginenotif.DefaultRows()
+			if err != nil {
+				return err
+			}
+			return notifications.NewStore(pool).SeedDefaultTemplates(ctx, slug, enginenotif.Module, rows)
 		},
 	},
 	{

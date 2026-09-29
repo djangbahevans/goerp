@@ -39,6 +39,9 @@ type executor interface {
 type Template struct {
 	Ext     string
 	Locales map[string]executor
+	// Sources holds each locale variant's raw file content, as stored in
+	// notification_templates' default rows.
+	Sources map[string][]byte
 }
 
 // Email sibling templates: an email channel's declared .html template may
@@ -253,7 +256,7 @@ func resolveChannel(src fileSource, names []string, channel, declared string) (*
 		parsed[locale] = exec
 	}
 
-	return &Template{Ext: ext, Locales: parsed}, nil
+	return &Template{Ext: ext, Locales: parsed, Sources: locales}, nil
 }
 
 // compileLocalePattern turns a manifest-declared path containing exactly
