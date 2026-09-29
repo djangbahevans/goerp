@@ -1,6 +1,7 @@
 package adminsettings
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -55,7 +57,28 @@ type Security struct {
 	PasswordPolicy PasswordPolicy `json:"password_policy"`
 	Session        Session        `json:"session"`
 	// IPAllowlist is comma-separated CIDR ranges; "" allows every address.
-	IPAllowlist string `json:"ip_allowlist"`
+	IPAllowlist       string            `json:"ip_allowlist"`
+	EmailVerification EmailVerification `json:"email_verification"`
+}
+
+// Email verification policies (auth-internals.md §3 "Email verification
+// policy"), GOERP_REQUIRE_EMAIL_VERIFICATION's values.
+const (
+	VerificationRequired     = "required"
+	VerificationTenantChoice = "tenant_choice"
+	VerificationOff          = "off"
+)
+
+// requireEmailVerificationKey is the tenant's own choice, read only under
+// the tenant_choice policy.
+const requireEmailVerificationKey = "auth.require_email_verification"
+
+// EmailVerification is the "require email verification on registration"
+// setting. Policy is the platform's; Required is editable only under
+// tenant_choice, and otherwise follows the policy.
+type EmailVerification struct {
+	Policy   string `json:"policy"`
+	Required bool   `json:"required"`
 }
 
 type MFA struct {
@@ -80,7 +103,10 @@ type Session struct {
 	AbsoluteMaxMinutes int `json:"absolute_max_minutes"`
 }
 
+// Localisation's PlatformLocales is read-only: the locales the platform
+// offers (GOERP_AVAILABLE_LOCALES), which AvailableLocales picks from.
 type Localisation struct {
+	PlatformLocales  []string `json:"platform_locales"`
 	AvailableLocales []string `json:"available_locales"`
 	FirstDayOfWeek   string   `json:"first_day_of_week"`
 	NumberFormat     string   `json:"number_format"`
@@ -105,10 +131,15 @@ type generalPatch struct {
 }
 
 type securityPatch struct {
-	MFA            *mfaPatch      `json:"mfa"`
-	PasswordPolicy *passwordPatch `json:"password_policy"`
-	Session        *sessionPatch  `json:"session"`
-	IPAllowlist    *string        `json:"ip_allowlist"`
+	MFA               *mfaPatch               `json:"mfa"`
+	PasswordPolicy    *passwordPatch          `json:"password_policy"`
+	Session           *sessionPatch           `json:"session"`
+	IPAllowlist       *string                 `json:"ip_allowlist"`
+	EmailVerification *emailVerificationPatch `json:"email_verification"`
+}
+
+type emailVerificationPatch struct {
+	Required *bool `json:"required"`
 }
 
 type mfaPatch struct {
@@ -169,6 +200,11 @@ func (h *Handler) load(ctx context.Context, tc *tenantresolve.TenantContext) (*S
 		return nil, fmt.Errorf("load ip allowlist: %w", err)
 	}
 
+	verification, err := h.emailVerification(ctx, tc.TenantID)
+	if err != nil {
+		return nil, err
+	}
+
 	l10n, err := h.deps.Locales.Load(ctx, tc.TenantID)
 	if err != nil {
 		return nil, err
@@ -196,9 +232,11 @@ func (h *Handler) load(ctx context.Context, tc *tenantresolve.TenantContext) (*S
 				IdleTimeoutMinutes: int(sessions.IdleTimeout / time.Minute),
 				AbsoluteMaxMinutes: int(sessions.AbsoluteMax / time.Minute),
 			},
-			IPAllowlist: allowlist,
+			IPAllowlist:       allowlist,
+			EmailVerification: verification,
 		},
 		Localisation: Localisation{
+			PlatformLocales:  h.deps.Locales.PlatformLocales(),
 			AvailableLocales: l10n.AvailableLocales,
 			FirstDayOfWeek:   l10n.FirstDayOfWeek,
 			NumberFormat:     l10n.NumberFormat,
@@ -214,8 +252,10 @@ type patchPlan struct {
 	password  *password.TenantPolicy
 	session   *sessionpolicy.Policy
 	allowlist *[]netip.Prefix
-	l10n      map[string]string
-	changed   []string
+	// requireVerification is the tenant's new email verification choice.
+	requireVerification *bool
+	l10n                map[string]string
+	changed             []string
 }
 
 // plan validates body against current, the settings it patches. A
@@ -246,6 +286,11 @@ func (h *Handler) plan(ctx context.Context, c caller, clientIP string, current *
 		}
 		if s.IPAllowlist != nil {
 			if ferr := p.planAllowlist(current.Security.IPAllowlist, *s.IPAllowlist, clientIP); ferr != nil {
+				return nil, ferr, nil
+			}
+		}
+		if s.EmailVerification != nil && s.EmailVerification.Required != nil {
+			if ferr := p.planEmailVerification(current.Security.EmailVerification, *s.EmailVerification.Required); ferr != nil {
 				return nil, ferr, nil
 			}
 		}
@@ -448,6 +493,44 @@ func (p *patchPlan) planAllowlist(current, value, clientIP string) *fieldError {
 	return nil
 }
 
+// planEmailVerification accepts a change only under the tenant_choice
+// policy; the other policies fix the value, so resending it is a no-op.
+func (p *patchPlan) planEmailVerification(current EmailVerification, required bool) *fieldError {
+	if required == current.Required {
+		return nil
+	}
+	if current.Policy != VerificationTenantChoice {
+		return invalid("security.email_verification", "email verification is set by your platform configuration")
+	}
+	p.requireVerification = &required
+	p.changed = append(p.changed, "security.email_verification")
+	return nil
+}
+
+// emailVerification resolves the setting as the page shows it. Under
+// tenant_choice an unset tenant value is true, the same outcome
+// registration uses for a tenant with no choice of its own.
+func (h *Handler) emailVerification(ctx context.Context, tenantID string) (EmailVerification, error) {
+	policy := cmp.Or(h.deps.EmailVerificationPolicy, VerificationTenantChoice)
+	switch policy {
+	case VerificationRequired:
+		return EmailVerification{Policy: policy, Required: true}, nil
+	case VerificationOff:
+		return EmailVerification{Policy: policy, Required: false}, nil
+	}
+	raw, ok, err := h.deps.Config.Get(ctx, tenantID, requireEmailVerificationKey)
+	if err != nil {
+		return EmailVerification{}, fmt.Errorf("load email verification setting: %w", err)
+	}
+	required := true
+	if ok {
+		if required, err = strconv.ParseBool(raw); err != nil {
+			return EmailVerification{}, fmt.Errorf("parse %s %q: %w", requireEmailVerificationKey, raw, err)
+		}
+	}
+	return EmailVerification{Policy: policy, Required: required}, nil
+}
+
 // planLocalisation plans every tenantl10n key: Localisation's fields and
 // General's default locale and timezone. The default locale must stay one
 // of the available locales, whichever of the two a request changes.
@@ -548,6 +631,12 @@ func (h *Handler) apply(ctx context.Context, tc *tenantresolve.TenantContext, p 
 			func(f string) bool { return f == "security.session" }},
 		{p.allowlist != nil, func() error { return h.deps.IPAllowlists.Save(ctx, tc.TenantID, *p.allowlist) },
 			func(f string) bool { return f == "security.ip_allowlist" }},
+		{p.requireVerification != nil, func() error {
+			if err := h.deps.Config.Set(ctx, tc.TenantID, requireEmailVerificationKey, strconv.FormatBool(*p.requireVerification)); err != nil {
+				return fmt.Errorf("save email verification setting: %w", err)
+			}
+			return nil
+		}, func(f string) bool { return f == "security.email_verification" }},
 		{p.l10n != nil, func() error {
 			if err := h.deps.Config.SetMany(ctx, tc.TenantID, p.l10n); err != nil {
 				return fmt.Errorf("save localisation settings: %w", err)
