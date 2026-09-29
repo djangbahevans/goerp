@@ -143,6 +143,9 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) (caller, boo
 		return caller{}, false
 	}
 	authCtx, err := h.deps.Auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	if authcheck.WritePasswordChangeRequired(r.Context(), w, err) {
+		return caller{}, false
+	}
 	if err != nil || !authCtx.IsAuthenticated {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return caller{}, false
@@ -182,6 +185,10 @@ func (h *Handler) ServePatch(w http.ResponseWriter, r *http.Request) {
 	var body patchRequest
 	if err := json.UnmarshalRead(r.Body, &body, json.RejectUnknownMembers(true)); err != nil {
 		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		return
+	}
+	if body.Security != nil && body.Security.PasswordPolicy != nil && len(body.Security.PasswordPolicy.ChangedAt) > 0 {
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "read_only_key", "security.password_policy.changed_at is maintained by the engine and cannot be set")
 		return
 	}
 

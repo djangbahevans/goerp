@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS system.sessions (
     mfa_verified_at   TIMESTAMPTZ,
     mfa_method        TEXT,
     mfa_credential_id UUID,
-    persistent        BOOLEAN NOT NULL DEFAULT TRUE
+    persistent        BOOLEAN NOT NULL DEFAULT TRUE,
+    password_change_required BOOLEAN NOT NULL DEFAULT FALSE
 )
 `
 
@@ -127,6 +128,11 @@ type Row struct {
 	MFAMethod       string
 	MFAVerifiedAt   *time.Time
 	MFACredentialID string
+
+	// PasswordChangeRequired restricts the session until the password is
+	// changed (auth-internals.md §3 "Password policy at sign-in"); every
+	// rotation carries it forward.
+	PasswordChangeRequired bool
 }
 
 // Insert creates a new session row. UserAgent, IPAddress, CountryCode, and
@@ -135,9 +141,9 @@ type Row struct {
 func (s *Store) Insert(ctx context.Context, row Row) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO system.sessions
-			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at, mfa_verified_at, mfa_method, mfa_credential_id, persistent)
-		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, '')::uuid, $13)
-	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt, row.MFAVerifiedAt, row.MFAMethod, row.MFACredentialID, row.Persistent)
+			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at, mfa_verified_at, mfa_method, mfa_credential_id, persistent, password_change_required)
+		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, '')::uuid, $13, $14)
+	`, row.ID, row.UserID, row.TenantID, row.DeviceID, row.RefreshHash, row.UserAgent, row.IPAddress, row.CountryCode, row.ExpiresAt, row.MFAVerifiedAt, row.MFAMethod, row.MFACredentialID, row.Persistent, row.PasswordChangeRequired)
 	if err != nil {
 		return fmt.Errorf("insert session row: %w", err)
 	}
@@ -163,6 +169,41 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 		return ErrSessionNotFound
 	}
 	return nil
+}
+
+// ClearPasswordChangeRequired lifts the restriction from id's session
+// family (auth-internals.md §3 "Password change" step 5) and returns id's
+// persistent flag and expires_at for the reissued access token, or
+// ErrSessionNotFound. It clears the whole family, after locking id, so a
+// concurrent Rotate can't carry the flag into the row it inserts.
+func (s *Store) ClearPasswordChangeRequired(ctx context.Context, id string) (persistent bool, expiresAt time.Time, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("begin clear password_change_required: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var familyID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT family_id, persistent, expires_at FROM system.sessions
+		WHERE id = $1 AND revoked_at IS NULL FOR UPDATE
+	`, id).Scan(&familyID, &persistent, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, time.Time{}, ErrSessionNotFound
+	}
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("lock session: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE system.sessions SET password_change_required = FALSE
+		WHERE family_id = $1 AND revoked_at IS NULL
+	`, familyID); err != nil {
+		return false, time.Time{}, fmt.Errorf("clear session password_change_required: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, time.Time{}, fmt.Errorf("commit clear password_change_required: %w", err)
+	}
+	return persistent, expiresAt, nil
 }
 
 // UpdateMFAAssurance sets id's mfa_verified_at/mfa_method/mfa_credential_id

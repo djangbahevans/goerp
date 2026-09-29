@@ -2,6 +2,7 @@ package adminsettings
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -63,16 +64,14 @@ type MFA struct {
 	MaxAssuranceAgeHours int      `json:"max_assurance_age_hours"`
 }
 
-// PasswordPolicy is the effective policy: the tenant's, never looser than
-// the platform's.
+// PasswordPolicy is the tenant's password settings (auth-internals.md §3
+// "Password strength validation" and "Password policy at sign-in").
+// ChangedAt is maintained by the engine and read-only.
 type PasswordPolicy struct {
-	MinLength        int  `json:"min_length"`
-	MaxLength        int  `json:"max_length"`
-	RequireUppercase bool `json:"require_uppercase"`
-	RequireDigit     bool `json:"require_digit"`
-	RequireSymbol    bool `json:"require_symbol"`
-	BlockCommonList  bool `json:"block_common_list"`
-	BlockUserInfo    bool `json:"block_user_info"`
+	MinLength   int        `json:"min_length"`
+	Enforcement string     `json:"enforcement"`
+	GraceDays   int        `json:"grace_days"`
+	ChangedAt   *time.Time `json:"changed_at"`
 }
 
 // Session bounds are whole minutes; 0 is off.
@@ -119,13 +118,11 @@ type mfaPatch struct {
 }
 
 type passwordPatch struct {
-	MinLength        *int  `json:"min_length"`
-	MaxLength        *int  `json:"max_length"`
-	RequireUppercase *bool `json:"require_uppercase"`
-	RequireDigit     *bool `json:"require_digit"`
-	RequireSymbol    *bool `json:"require_symbol"`
-	BlockCommonList  *bool `json:"block_common_list"`
-	BlockUserInfo    *bool `json:"block_user_info"`
+	MinLength   *int    `json:"min_length"`
+	Enforcement *string `json:"enforcement"`
+	GraceDays   *int    `json:"grace_days"`
+	// ChangedAt is decoded only to refuse it with read_only_key.
+	ChangedAt jsontext.Value `json:"changed_at"`
 }
 
 type sessionPatch struct {
@@ -155,7 +152,7 @@ func (h *Handler) load(ctx context.Context, tc *tenantresolve.TenantContext) (*S
 		requiredRoles = []string{}
 	}
 
-	pw, _, err := h.deps.Passwords.Effective(ctx, tc.TenantID)
+	pw, err := h.deps.Passwords.Tenant(ctx, tc.TenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +186,12 @@ func (h *Handler) load(ctx context.Context, tc *tenantresolve.TenantContext) (*S
 				RequiredRoles:        requiredRoles,
 				MaxAssuranceAgeHours: int(mfaPolicy.MaxAssuranceAge / time.Hour),
 			},
-			PasswordPolicy: PasswordPolicy(pw),
+			PasswordPolicy: PasswordPolicy{
+				MinLength:   pw.MinLength,
+				Enforcement: string(pw.Enforcement),
+				GraceDays:   pw.GraceDays,
+				ChangedAt:   pw.ChangedAt,
+			},
 			Session: Session{
 				IdleTimeoutMinutes: int(sessions.IdleTimeout / time.Minute),
 				AbsoluteMaxMinutes: int(sessions.AbsoluteMax / time.Minute),
@@ -209,7 +211,7 @@ func (h *Handler) load(ctx context.Context, tc *tenantresolve.TenantContext) (*S
 type patchPlan struct {
 	profile   *tenant.ProfileUpdate
 	mfa       *enforce.Policy
-	password  *password.Policy
+	password  *password.TenantPolicy
 	session   *sessionpolicy.Policy
 	allowlist *[]netip.Prefix
 	l10n      map[string]string
@@ -379,23 +381,26 @@ func (h *Handler) planMFA(ctx context.Context, c caller, p *patchPlan, current M
 }
 
 func (p *patchPlan) planPassword(current PasswordPolicy, pp *passwordPatch) *fieldError {
-	next := current
+	next := password.TenantPolicy{MinLength: current.MinLength, Enforcement: password.Enforcement(current.Enforcement), GraceDays: current.GraceDays}
 	setInt(&next.MinLength, pp.MinLength)
-	setInt(&next.MaxLength, pp.MaxLength)
-	setBool(&next.RequireUppercase, pp.RequireUppercase)
-	setBool(&next.RequireDigit, pp.RequireDigit)
-	setBool(&next.RequireSymbol, pp.RequireSymbol)
-	setBool(&next.BlockCommonList, pp.BlockCommonList)
-	setBool(&next.BlockUserInfo, pp.BlockUserInfo)
-
-	if err := password.ValidateTenant(password.Policy(next)); err != nil {
-		return invalid("security.password_policy", "%s", err.Error())
+	if pp.Enforcement != nil {
+		next.Enforcement = password.Enforcement(*pp.Enforcement)
 	}
-	if next == current {
+	setInt(&next.GraceDays, pp.GraceDays)
+
+	if err := password.ValidateMinLength(next.MinLength); err != nil {
+		return invalid("security.password_policy.min_length", "%s", err.Error())
+	}
+	if err := password.ValidateEnforcement(next.Enforcement); err != nil {
+		return invalid("security.password_policy.enforcement", "%s", err.Error())
+	}
+	if err := password.ValidateGraceDays(next.GraceDays); err != nil {
+		return invalid("security.password_policy.grace_days", "%s", err.Error())
+	}
+	if next.MinLength == current.MinLength && string(next.Enforcement) == current.Enforcement && next.GraceDays == current.GraceDays {
 		return nil
 	}
-	policy := password.Policy(next)
-	p.password = &policy
+	p.password = &next
 	p.changed = append(p.changed, "security.password_policy")
 	return nil
 }
@@ -567,12 +572,6 @@ func (h *Handler) apply(ctx context.Context, tc *tenantresolve.TenantContext, p 
 }
 
 func setInt(dst *int, v *int) {
-	if v != nil {
-		*dst = *v
-	}
-}
-
-func setBool(dst *bool, v *bool) {
 	if v != nil {
 		*dst = *v
 	}

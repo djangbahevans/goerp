@@ -687,7 +687,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		return report, failed
 	})
 
-	passwordPolicies := password.NewPolicyStore(tenantConfigStore)
+	passwordPolicies := password.NewPolicyStore(tenantConfigStore, roleStore)
 	passwordHasher := password.NewHasher(cfg.Argon2MemoryBudgetMB, cfg.Argon2AcquireTimeout)
 	handoffStore := handoff.NewStore(cacheClient, tenantResolver, cfg.PlatformDomain)
 	registerHandlers := authregister.NewHandlers(
@@ -721,7 +721,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	tenantLocales := tenantl10n.NewStore(tenantConfigStore, cfg.AvailableLocales)
 	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, storageBackend, tenantLocales, passwordPolicies)
 	authMeUpdateHandler := authmeupdate.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, tenantLocales)
-	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
+	authMePasswordHandler := authmepassword.NewHandler(tenantResolver, authChecker, userStore, passwordPolicies, sessionRevoker, sessionStore, tokenIssuer, inviteMailer, authAuditStore, passwordHasher)
 	authRefreshHandler := authrefresh.NewHandler(tokenIssuer)
 	authLogoutHandler := authlogout.NewHandler(tenantResolver, authChecker, sessionRevoker)
 	authSessionsHandler := authsessions.NewHandler(tenantResolver, authChecker, sessionStore, sessionRevoker, authAuditStore)

@@ -146,11 +146,13 @@ func authMiddleware(checker *authcheck.Checker) func(http.Handler) http.Handler 
 }
 
 // authenticateErrorResponse maps a Checker.Authenticate error to a status
-// code and error code. Two causes have a distinct documented status: a
+// code and error code. Three causes have a distinct documented status: a
 // missing declared permission (auth-internals.md §9 step 11, 403
-// permission_denied) and a valid credential for an account with no live
+// permission_denied), a valid credential for an account with no live
 // role in this tenant (§3 "Tenant membership check in the auth
-// middleware", 403 tenant_membership_required). Every other rejection
+// middleware", 403 tenant_membership_required), and a session restricted
+// until its password is changed (§3 "Password policy at sign-in", 403
+// password_change_required). Every other rejection
 // (invalid/expired/blocklisted token, inactive user) collapses to a single
 // generic 401 rather than leaking which specific check failed.
 func authenticateErrorResponse(err error) (int, string) {
@@ -159,6 +161,8 @@ func authenticateErrorResponse(err error) (int, string) {
 		return http.StatusForbidden, "permission_denied"
 	case errors.Is(err, authcheck.ErrNotTenantMember):
 		return http.StatusForbidden, "tenant_membership_required"
+	case errors.Is(err, authcheck.ErrPasswordChangeRequired):
+		return http.StatusForbidden, "password_change_required"
 	}
 	return http.StatusUnauthorized, "unauthenticated"
 }

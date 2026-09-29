@@ -97,12 +97,20 @@ type meUser struct {
 	MFAVerifiedAt *time.Time `json:"mfa_verified_at"`
 	// MFASetupRequired drives the shell's forced-enrollment redirect
 	// (auth-internals.md §8 "MFA enrollment").
-	MFASetupRequired bool    `json:"mfa_setup_required"`
-	Theme            string  `json:"theme"`
-	Contrast         string  `json:"contrast"`
-	Locale           *string `json:"locale"`
-	Timezone         *string `json:"timezone"`
-	DateFormat       *string `json:"date_format"`
+	MFASetupRequired bool `json:"mfa_setup_required"`
+	// PasswordChangeRequired reports a session restricted until the
+	// password is changed, which the shell routes to the change-password
+	// page (auth-internals.md §3 "Password policy at sign-in").
+	PasswordChangeRequired bool `json:"password_change_required"`
+	// PasswordMinLength is the account's combined minimum, the one a new
+	// password must meet (auth-internals.md §3 "Password strength
+	// validation").
+	PasswordMinLength int     `json:"password_min_length"`
+	Theme             string  `json:"theme"`
+	Contrast          string  `json:"contrast"`
+	Locale            *string `json:"locale"`
+	Timezone          *string `json:"timezone"`
+	DateFormat        *string `json:"date_format"`
 }
 
 // meTenant is CurrentTenant on the wire, its locale fields the tenant's
@@ -115,7 +123,7 @@ type meTenant struct {
 	DefaultLocale    string   `json:"default_locale"`
 	DefaultTimezone  string   `json:"default_timezone"`
 	AvailableLocales []string `json:"available_locales"`
-	// PasswordMinLength is the effective minimum password length
+	// PasswordMinLength is the tenant's own minimum password length
 	// (auth-internals.md §3 "Password strength validation").
 	PasswordMinLength int `json:"password_min_length"`
 }
@@ -143,7 +151,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeUnauthenticated(w, r)
 		return
 	}
-	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	authCtx, err := h.auth.AuthenticateAllowingPasswordChange(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
 		writeUnauthenticated(w, r)
 		return
@@ -193,6 +201,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: mfa setup check failed, reporting false")
 	}
 
+	// Degrades to this tenant's own minimum; the change-password answer
+	// reports the minimum actually applied if it's higher.
+	combinedMin, err := h.policies.CombinedMinLength(ctx, authCtx.UserID, tenantCtx.TenantID)
+	if err != nil {
+		log.Warn().Err(err).Str("user_id", authCtx.UserID).Msg("authme: combined password minimum lookup failed, reporting the tenant's")
+		combinedMin = h.policies.MinLength(ctx, tenantCtx.TenantID)
+	}
+
 	l10nSettings, err := h.locales.Load(ctx, tenantCtx.TenantID)
 	if err != nil {
 		log.Warn().Err(err).Str("tenant_id", tenantCtx.TenantID).Msg("authme: tenant locale settings lookup failed, reporting platform defaults")
@@ -217,11 +233,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			AMR:              authCtx.AMR,
 			MFAVerifiedAt:    authCtx.MFAVerifiedAt,
 			MFASetupRequired: setupRequired,
-			Theme:            prefs.Theme,
-			Contrast:         prefs.Contrast,
-			Locale:           prefs.Locale,
-			Timezone:         prefs.Timezone,
-			DateFormat:       prefs.DateFormat,
+
+			PasswordChangeRequired: authCtx.PasswordChangeRequired,
+			PasswordMinLength:      combinedMin,
+
+			Theme:      prefs.Theme,
+			Contrast:   prefs.Contrast,
+			Locale:     prefs.Locale,
+			Timezone:   prefs.Timezone,
+			DateFormat: prefs.DateFormat,
 		},
 		Tenant: meTenant{
 			ID:                tenantCtx.TenantID,

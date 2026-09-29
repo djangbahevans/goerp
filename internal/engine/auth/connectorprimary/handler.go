@@ -85,6 +85,9 @@ func (h *Handler) ServeSetPrimary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	if authcheck.WritePasswordChangeRequired(r.Context(), w, err) {
+		return
+	}
 	if err != nil || !authCtx.IsAuthenticated {
 		writeJSONError(w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return

@@ -13,9 +13,11 @@ import (
 	"encoding/json/v2"
 	"net"
 	"net/http"
+	"time"
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 )
 
 // ResolveDeviceID returns the effective device_id and whether it was
@@ -69,12 +71,22 @@ func writeJSON(w http.ResponseWriter, v any) {
 // WriteResponse writes the final success response for a completed login:
 // a JSON body carrying the tokens directly for a non-browser client, or
 // __Host-access_token/refresh_token/device_id cookies plus a minimal JSON
-// body for a browser client. passwordUpdateRecommended adds
-// auth-internals.md §3's "password_update_recommended" nudge.
-func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh, nonBrowser, passwordUpdateRecommended bool) {
+// body for a browser client. policy is the login's sign-in password
+// check (auth-internals.md §3 "Password policy at sign-in"): a
+// recommended change adds "password_update_recommended" (and
+// "password_update_deadline" when enforcement will start), and a
+// required one reports "password_change_required", the session having
+// been issued restricted.
+func WriteResponse(w http.ResponseWriter, tokens *authtoken.Tokens, deviceID string, deviceIDIsFresh, nonBrowser bool, policy password.Result) {
 	body := map[string]any{}
-	if passwordUpdateRecommended {
+	switch policy.Outcome {
+	case password.UpdateRecommended:
 		body["password_update_recommended"] = true
+		if policy.Deadline != nil {
+			body["password_update_deadline"] = policy.Deadline.UTC().Format(time.RFC3339)
+		}
+	case password.ChangeRequired:
+		body["password_change_required"] = true
 	}
 	write(w, http.StatusOK, tokens, deviceID, deviceIDIsFresh, nonBrowser, body)
 }

@@ -112,6 +112,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	if authcheck.WritePasswordChangeRequired(r.Context(), w, err) {
+		return
+	}
 	if err != nil || !authCtx.IsAuthenticated {
 		writeUnauthenticated(w, r)
 		return

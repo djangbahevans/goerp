@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
@@ -164,6 +165,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	nonBrowser := loginsession.IsNonBrowser(r)
 	deviceID, deviceIDIsFresh := loginsession.ResolveDeviceID(r, req.DeviceID, nonBrowser)
 	now := time.Now()
+	passwordPolicy := claims.PasswordPolicyResult()
 
 	tokens, err := h.issuer.Issue(ctx, authtoken.LoginParams{
 		UserID:          claims.Subject,
@@ -175,6 +177,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		MFAMethod:       req.Type,
 		MFAVerifiedAt:   &now,
 		MFACredentialID: credentialID,
+
+		PasswordChangeRequired: passwordPolicy.Outcome == password.ChangeRequired,
 	})
 	if errors.Is(err, authtoken.ErrIPNotAllowed) {
 		httperr.Write(r.Context(), w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
@@ -192,7 +196,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, claims.PasswordUpdateRecommended)
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, passwordPolicy)
 }
 
 // VerifyCode dispatches to whichever Service matches mfaType. totp and

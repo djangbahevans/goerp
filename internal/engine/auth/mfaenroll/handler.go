@@ -100,7 +100,7 @@ func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authch
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
 	}
-	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	authCtx, err := h.auth.AuthenticateAllowingPasswordChange(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated || authCtx.AuthMethod != "jwt" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
@@ -252,7 +252,7 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, string(mfa.CredentialTOTP), &now, sessionEnd)
+	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, string(mfa.CredentialTOTP), &now, authCtx.PasswordChangeRequired, sessionEnd)
 	if err != nil {
 		writeInternal(w, r)
 		return

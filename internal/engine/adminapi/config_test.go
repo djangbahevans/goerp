@@ -136,11 +136,11 @@ func TestSetConfigRoute_UpdatesExistingValue(t *testing.T) {
 	}
 }
 
-func TestSetConfigRoute_VersionCounterReturnsBadRequest(t *testing.T) {
+func TestSetConfigRoute_ReadOnlyKeyReturnsBadRequest(t *testing.T) {
 	env := newTestConfigMux(t)
 	tt := env.createTenant(t)
 
-	body := `{"key":"` + tenantconfig.PasswordPolicyVersionKey + `","value":"99"}`
+	body := `{"key":"` + tenantconfig.PasswordPolicyChangedAtKey + `","value":"2020-01-01T00:00:00Z"}`
 	req := httptest.NewRequest(http.MethodPatch, "/admin/tenants/"+tt.Slug+"/config", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	env.mux.ServeHTTP(w, req)

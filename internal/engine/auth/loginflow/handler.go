@@ -403,12 +403,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case 1:
 			t = &memberships[0]
 		default:
-			h.writeTenantRequired(w, r, u.ID, memberships, req)
+			// Step 8a for each tenant the user may pick: the pick that
+			// follows no longer has the password.
+			results := make(map[string]password.Result, len(memberships))
+			for _, m := range memberships {
+				results[m.ID] = h.policies.CheckSignIn(ctx, m.ID, m.Slug, u.ID, req.Password, u.Email)
+			}
+			h.writeTenantRequired(w, r, u.ID, memberships, results, req)
 			return
 		}
 	}
 
-	h.signIn(w, r, u, t, req.DeviceID, req.Remember)
+	// Step 8a: check the password against this tenant's current rules
+	// (auth-internals.md §3 "Password policy at sign-in"). Never a reason
+	// to refuse the login; the result is applied when the session is
+	// issued.
+	policy := h.policies.CheckSignIn(ctx, t.ID, t.Slug, u.ID, req.Password, u.Email)
+
+	h.signIn(w, r, u, t, req.DeviceID, req.Remember, policy)
 }
 
 type tenantChoice struct {
@@ -418,8 +430,8 @@ type tenantChoice struct {
 
 // writeTenantRequired answers a tenantless login whose account belongs to
 // several tenants with a selection_token for POST /auth/select-tenant.
-func (h *Handler) writeTenantRequired(w http.ResponseWriter, r *http.Request, userID string, memberships []tenant.Tenant, req loginRequest) {
-	token, err := h.selections.Issue(r.Context(), tenantselect.Grant{UserID: userID, Remember: req.Remember, DeviceID: req.DeviceID})
+func (h *Handler) writeTenantRequired(w http.ResponseWriter, r *http.Request, userID string, memberships []tenant.Tenant, results map[string]password.Result, req loginRequest) {
+	token, err := h.selections.Issue(r.Context(), tenantselect.Grant{UserID: userID, Remember: req.Remember, DeviceID: req.DeviceID, PasswordPolicyResults: results})
 	if err != nil {
 		log.Error().Err(err).Str("user_id", userID).Msg("loginflow: issue selection token")
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
@@ -433,8 +445,9 @@ func (h *Handler) writeTenantRequired(w http.ResponseWriter, r *http.Request, us
 }
 
 // signIn is login step 10 onward for a verified user signing in to t: a
-// handoff on another host, otherwise completeLogin.
-func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, u *user.User, t *tenant.Tenant, deviceID string, remember bool) {
+// handoff on another host, otherwise completeLogin. policy is step 8a's
+// result for t.
+func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, u *user.User, t *tenant.Tenant, deviceID string, remember bool, policy password.Result) {
 	ctx := r.Context()
 
 	// Only after the password check, so the response can't be used to
@@ -443,23 +456,14 @@ func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, u *user.User, t
 		return
 	}
 
-	// auth-internals.md §3 "Password policy versioning": a nudge only,
-	// never a reason to refuse the login.
-	var updateRecommended bool
-	if _, policyVersion, err := h.policies.Effective(ctx, t.ID); err != nil {
-		log.Warn().Err(err).Str("tenant_id", t.ID).Msg("loginflow: password policy version lookup failed")
-	} else {
-		updateRecommended = password.UpdateRecommended(u.PasswordSetAtPolicyTenantID, u.PasswordSetAtPolicyVersion, t.ID, policyVersion)
-	}
-
 	// Step 10, shared-domain host: the session is issued on the tenant's
 	// own host instead (auth-internals.md §3 "Shared-domain handoff").
 	if h.handoffs.Needed(ctx, r, t.ID) {
 		resp, err := h.handoffs.Issue(ctx, handoff.Grant{
-			UserID:                    u.ID,
-			TenantID:                  t.ID,
-			Remember:                  remember,
-			PasswordUpdateRecommended: updateRecommended,
+			UserID:               u.ID,
+			TenantID:             t.ID,
+			Remember:             remember,
+			PasswordPolicyResult: policy,
 		}, t.Slug)
 		if err != nil {
 			log.Error().Err(err).Str("user_id", u.ID).Msg("loginflow: issue handoff")
@@ -471,7 +475,7 @@ func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, u *user.User, t
 		return
 	}
 
-	h.completeLogin(w, r, u.ID, t.ID, t.Slug, deviceID, remember, updateRecommended)
+	h.completeLogin(w, r, u.ID, t.ID, t.Slug, deviceID, remember, policy)
 }
 
 type selectTenantRequest struct {
@@ -553,12 +557,13 @@ func (h *Handler) ServeSelectTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.signIn(w, r, u, t, grant.DeviceID, grant.Remember)
+	h.signIn(w, r, u, t, grant.DeviceID, grant.Remember, grant.PasswordPolicyResults[t.ID])
 }
 
 // completeLogin is login steps 10-11: an mfa_required challenge when the
-// user has a factor enrolled, otherwise the session.
-func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, tenantID, tenantSlug, bodyDeviceID string, remember, updateRecommended bool) {
+// user has a factor enrolled, otherwise the session, with policy (step
+// 8a's result) applied.
+func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, tenantID, tenantSlug, bodyDeviceID string, remember bool, policy password.Result) {
 	ctx := r.Context()
 
 	// Step 10: MFA gating. Whether MFA is enrolled is the only signal
@@ -572,8 +577,8 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	}
 	if len(factors) > 0 {
 		mfaToken, _, err := h.mfaTokens.Issue(userID, tenantID, r.Header.Get("Origin"), mfatoken.IssueOptions{
-			Remember:                  remember,
-			PasswordUpdateRecommended: updateRecommended,
+			Remember:       remember,
+			PasswordPolicy: policy,
 		})
 		if err != nil {
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
@@ -600,6 +605,8 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		IPAddress:   loginsession.ClientIP(r),
 		CountryCode: "",
 		Persistent:  nonBrowser || remember,
+
+		PasswordChangeRequired: policy.Outcome == password.ChangeRequired,
 	})
 	if errors.Is(err, authtoken.ErrIPNotAllowed) {
 		httperr.Write(r.Context(), w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
@@ -614,7 +621,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		return
 	}
 
-	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, updateRecommended)
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, policy)
 }
 
 type handoffRequest struct {
@@ -694,7 +701,7 @@ func (h *Handler) ServeHandoff(w http.ResponseWriter, r *http.Request) {
 	}
 	// completeLogin's Issue re-checks the IP allowlist against this
 	// request, which can come from another network than the login did.
-	h.completeLogin(w, r, u.ID, tc.TenantID, tc.Slug, "", grant.Remember, grant.PasswordUpdateRecommended)
+	h.completeLogin(w, r, u.ID, tc.TenantID, tc.Slug, "", grant.Remember, grant.PasswordPolicyResult)
 }
 
 // enrolledMethods returns the distinct set of credential types among

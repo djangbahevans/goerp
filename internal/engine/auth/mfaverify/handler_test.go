@@ -16,6 +16,7 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authtoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
+	"github.com/djangbahevans/goerp/internal/engine/auth/password"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
@@ -442,12 +443,23 @@ func TestServeHTTP_MalformedMFATokenRejected(t *testing.T) {
 	}
 }
 
-func TestServeHTTP_TokenPasswordUpdateRecommendedReachesResponse(t *testing.T) {
-	for _, recommended := range []bool{true, false} {
-		t.Run(fmt.Sprintf("recommended=%v", recommended), func(t *testing.T) {
+func TestServeHTTP_TokenPasswordPolicyResultReachesSession(t *testing.T) {
+	deadline := time.Now().Add(72 * time.Hour).Truncate(time.Second).UTC()
+	cases := []struct {
+		name           string
+		policy         password.Result
+		wantKey        string
+		wantRestricted bool
+	}{
+		{"passed", password.Result{}, "", false},
+		{"recommended", password.Result{Outcome: password.UpdateRecommended, Deadline: &deadline}, "password_update_deadline", false},
+		{"required", password.Result{Outcome: password.ChangeRequired}, "password_change_required", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
 			code := f.enrollTOTP(t)
-			token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, testOrigin, mfatoken.IssueOptions{PasswordUpdateRecommended: recommended})
+			token, _, err := f.mfaTokens.Issue(f.userID, f.tenantID, testOrigin, mfatoken.IssueOptions{PasswordPolicy: tc.policy})
 			if err != nil {
 				t.Fatalf("Issue() error: %v", err)
 			}
@@ -462,8 +474,20 @@ func TestServeHTTP_TokenPasswordUpdateRecommendedReachesResponse(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatalf("decode body: %v", err)
 			}
-			if _, got := body["password_update_recommended"]; got != recommended {
-				t.Errorf("password_update_recommended present = %v, want %v; body = %s", got, recommended, rec.Body.String())
+			for _, key := range []string{"password_update_deadline", "password_change_required"} {
+				if _, got := body[key]; got != (key == tc.wantKey) {
+					t.Errorf("%s present = %v, want %v; body = %s", key, got, key == tc.wantKey, rec.Body.String())
+				}
+			}
+			if tc.wantKey == "password_update_deadline" && body[tc.wantKey] != deadline.Format(time.RFC3339) {
+				t.Errorf("password_update_deadline = %v, want %s", body[tc.wantKey], deadline.Format(time.RFC3339))
+			}
+			var restricted bool
+			if err := f.conn.QueryRow(`SELECT password_change_required FROM system.sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, f.userID).Scan(&restricted); err != nil {
+				t.Fatalf("read session: %v", err)
+			}
+			if restricted != tc.wantRestricted {
+				t.Errorf("session password_change_required = %v, want %v", restricted, tc.wantRestricted)
 			}
 		})
 	}

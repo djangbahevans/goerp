@@ -33,6 +33,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfatoken"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/auth/signingkey"
+	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
@@ -53,6 +54,10 @@ var (
 	ErrAPIKeyInvalid      = errors.New("invalid api key")
 	ErrAPIKeyExpired      = errors.New("api key expired")
 	ErrAPIKeyIPNotAllowed = errors.New("api key not allowed from this ip")
+	// ErrPasswordChangeRequired rejects a session restricted until its
+	// password is changed (auth-internals.md §3 "Password policy at
+	// sign-in") on a route that isn't one of the password-fix routes.
+	ErrPasswordChangeRequired = errors.New("password change required")
 )
 
 // ErrMFATokenTenantMismatch mirrors ErrTenantMismatch for the mfa_token
@@ -101,6 +106,10 @@ type AuthContext struct {
 	// mfa_token — the caller is mid-login, not yet a fully authenticated
 	// principal (IsAuthenticated stays false in that case).
 	MFAPending bool
+	// PasswordChangeRequired is the session's pcr claim. Only
+	// AuthenticateAllowingPasswordChange returns a context with it set;
+	// Authenticate refuses such a session.
+	PasswordChangeRequired bool
 }
 
 type Checker struct {
@@ -169,7 +178,32 @@ func NewChecker(
 // inactive user, non-member, missing permission) returns one of this
 // package's sentinel errors, distinct from Anonymous, since presenting a
 // bad token isn't the same as presenting none.
+//
+// A session restricted by password_change_required is refused with
+// ErrPasswordChangeRequired; only the password-fix routes accept one,
+// through AuthenticateAllowingPasswordChange.
 func (c *Checker) Authenticate(ctx context.Context, rawToken, tenantID, tenantSlug, remoteIP string, permissions *permission.PermissionRegistry, requiredPermissions []string) (*AuthContext, error) {
+	authCtx, err := c.authenticate(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions)
+	if err != nil {
+		return nil, err
+	}
+	if authCtx.PasswordChangeRequired {
+		return nil, ErrPasswordChangeRequired
+	}
+	return authCtx, nil
+}
+
+// AuthenticateAllowingPasswordChange is Authenticate for the routes a
+// session restricted by password_change_required may still reach
+// (auth-internals.md §3 "Password policy at sign-in"): GET /auth/me,
+// POST /auth/me/change-password, POST /auth/logout and the MFA routes §9
+// step 9 exempts. The returned context reports the restriction in
+// PasswordChangeRequired.
+func (c *Checker) AuthenticateAllowingPasswordChange(ctx context.Context, rawToken, tenantID, tenantSlug, remoteIP string, permissions *permission.PermissionRegistry, requiredPermissions []string) (*AuthContext, error) {
+	return c.authenticate(ctx, rawToken, tenantID, tenantSlug, remoteIP, permissions, requiredPermissions)
+}
+
+func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSlug, remoteIP string, permissions *permission.PermissionRegistry, requiredPermissions []string) (*AuthContext, error) {
 	if rawToken == "" {
 		return &AuthContext{IsAuthenticated: false}, nil
 	}
@@ -256,6 +290,8 @@ func (c *Checker) Authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		RolesLive:       rolesLive,
 		PermissionSet:   permSet,
 		AuthMethod:      "jwt",
+
+		PasswordChangeRequired: claims.PasswordChangeRequired,
 	}, nil
 }
 
@@ -597,4 +633,16 @@ func (c *Checker) keyFunc(token *jwt.Token) (any, error) {
 		return nil, fmt.Errorf("unrecognized signing key kid %v", token.Header["kid"])
 	}
 	return c.signingKey.Public, nil
+}
+
+// WritePasswordChangeRequired writes 403 password_change_required and
+// reports true when err is ErrPasswordChangeRequired, so a handler that
+// answers every other Authenticate error with 401 can send a restricted
+// session to the change-password page instead of signing it out.
+func WritePasswordChangeRequired(ctx context.Context, w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, ErrPasswordChangeRequired) {
+		return false
+	}
+	httperr.Write(ctx, w, http.StatusForbidden, "password_change_required", "change your password to continue")
+	return true
 }

@@ -55,6 +55,8 @@ type RotateResult struct {
 	MFAVerifiedAt   *time.Time
 	MFACredentialID string
 	Persistent      bool
+	// PasswordChangeRequired is carried forward from the rotated row.
+	PasswordChangeRequired bool
 	// ExpiresAt is the new row's expires_at.
 	ExpiresAt time.Time
 }
@@ -94,18 +96,18 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 		id, familyID, deviceID, userID, tenantID string
 		revokedAt, rotatedAt, mfaVerifiedAt      sql.NullTime
 		mfaMethod, mfaCredentialID               sql.NullString
-		persistent                               bool
+		persistent, passwordChangeRequired       bool
 		expiresAt, familyStart                   time.Time
 	)
 	// A family's first row has id = family_id, so its created_at is the
 	// login time; COALESCE covers a first row already aged out.
 	err = tx.QueryRowContext(ctx, `
 		SELECT s.id, s.family_id, s.device_id, s.user_id, s.tenant_id, s.revoked_at, s.rotated_at,
-		       s.mfa_verified_at, s.mfa_method, s.mfa_credential_id, s.persistent, s.expires_at,
+		       s.mfa_verified_at, s.mfa_method, s.mfa_credential_id, s.persistent, s.password_change_required, s.expires_at,
 		       COALESCE((SELECT f.created_at FROM system.sessions f WHERE f.id = s.family_id), s.created_at)
 		FROM system.sessions s WHERE s.refresh_hash = $1 FOR UPDATE OF s
 	`, presentedHash).Scan(&id, &familyID, &deviceID, &userID, &tenantID, &revokedAt, &rotatedAt,
-		&mfaVerifiedAt, &mfaMethod, &mfaCredentialID, &persistent, &expiresAt, &familyStart)
+		&mfaVerifiedAt, &mfaMethod, &mfaCredentialID, &persistent, &passwordChangeRequired, &expiresAt, &familyStart)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RotateResult{Outcome: RotateNotFound}, nil
 	}
@@ -150,10 +152,10 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO system.sessions
 			(id, user_id, tenant_id, family_id, device_id, refresh_hash, expires_at,
-			 user_agent, ip_address, country_code, mfa_verified_at, mfa_method, mfa_credential_id, persistent)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NULLIF($9, '')::inet, NULLIF($10, ''), $11, NULLIF($12, ''), NULLIF($13, '')::uuid, $14)
+			 user_agent, ip_address, country_code, mfa_verified_at, mfa_method, mfa_credential_id, persistent, password_change_required)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NULLIF($9, '')::inet, NULLIF($10, ''), $11, NULLIF($12, ''), NULLIF($13, '')::uuid, $14, $15)
 	`, newSessionID, userID, tenantID, familyID, newDeviceID, newHash, newExpiry,
-		userAgent, ipAddress, countryCode, mfaVerifiedAt, mfaMethod, mfaCredentialID, persistent); err != nil {
+		userAgent, ipAddress, countryCode, mfaVerifiedAt, mfaMethod, mfaCredentialID, persistent, passwordChangeRequired); err != nil {
 		return RotateResult{Outcome: rotateUnset}, fmt.Errorf("insert rotated row: %w", err)
 	}
 
@@ -167,6 +169,8 @@ func (s *Store) Rotate(ctx context.Context, presentedHash, newSessionID, newHash
 		TenantID:   tenantID,
 		Persistent: persistent,
 		ExpiresAt:  newExpiry,
+
+		PasswordChangeRequired: passwordChangeRequired,
 	}
 	if mfaMethod.Valid {
 		result.MFAMethod = mfaMethod.String

@@ -110,13 +110,22 @@ func (h *Handlers) Info(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The password a new account sets is checked against the combined
+	// minimum, including this tenant (auth-internals.md §3 "Password
+	// strength validation").
+	minLength, err := h.policies.CombinedMinLength(ctx, u.ID, t.ID)
+	if err != nil {
+		writeInternal(w, r)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]any{
 		"tenant_name":         t.Name,
 		"email":               u.Email,
 		"name":                name,
 		"password_required":   u.PasswordHash == nil,
-		"password_min_length": h.policies.MinLength(ctx, t.ID),
+		"password_min_length": minLength,
 	})
 }
 
@@ -150,13 +159,13 @@ func (h *Handlers) Accept(w http.ResponseWriter, r *http.Request) {
 	newUser := u.PasswordHash == nil
 	var activate func(*sql.Tx) error
 	if newUser {
-		policy, policyVersion, err := h.policies.Effective(ctx, t.ID)
+		minLength, err := h.policies.CombinedMinLength(ctx, u.ID, t.ID)
 		if err != nil {
 			writeInternal(w, r)
 			return
 		}
-		if err := policy.Validate(req.Password, u.Email); err != nil {
-			password.WriteTooWeak(r.Context(), w, err, policy)
+		if err := password.WithMinLength(minLength).Validate(req.Password, u.Email); err != nil {
+			password.WriteTooWeak(r.Context(), w, err, minLength)
 			return
 		}
 		slot, err := h.hasher.Acquire(ctx)
@@ -172,7 +181,7 @@ func (h *Handlers) Accept(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		activate = func(tx *sql.Tx) error {
-			return h.users.ActivateWithPasswordTx(ctx, tx, u.ID, hash, t.ID, policyVersion)
+			return h.users.ActivateWithPasswordTx(ctx, tx, u.ID, hash)
 		}
 	}
 
@@ -214,5 +223,5 @@ func (h *Handlers) Accept(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"login_required": true})
 		return
 	}
-	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, false)
+	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, password.Result{})
 }

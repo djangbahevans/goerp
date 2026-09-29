@@ -114,6 +114,9 @@ func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authch
 		return nil, false
 	}
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
+	if authcheck.WritePasswordChangeRequired(r.Context(), w, err) {
+		return nil, false
+	}
 	if err != nil || !authCtx.IsAuthenticated || authCtx.AuthMethod != "jwt" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false

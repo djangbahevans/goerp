@@ -149,7 +149,7 @@ func newEnv(t *testing.T) *env {
 			Roles:        roleStore,
 			Config:       configStore,
 			MFA:          mfaPolicies,
-			Passwords:    password.NewPolicyStore(configStore),
+			Passwords:    password.NewPolicyStore(configStore, role.NewStore(conn)),
 			Sessions:     sessions,
 			IPAllowlists: ipallowlist.NewStore(configStore),
 			Locales:      tenantl10n.NewStore(configStore, platformLocales),
@@ -315,7 +315,7 @@ func TestGet_Defaults(t *testing.T) {
 		General: General{Profile: tenant.Profile{Name: "Settings Test Co"}, DefaultLocale: "en", DefaultTimezone: "UTC"},
 		Security: Security{
 			MFA:            MFA{Mode: "optional", RequiredRoles: []string{}, MaxAssuranceAgeHours: 24},
-			PasswordPolicy: PasswordPolicy(password.Global),
+			PasswordPolicy: PasswordPolicy{MinLength: password.Global.MinLength, Enforcement: "nudge", GraceDays: password.DefaultGraceDays},
 		},
 		Localisation: Localisation{AvailableLocales: platformLocales, FirstDayOfWeek: "monday", NumberFormat: "1,234.56"},
 	}
@@ -353,13 +353,10 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 			"country": "gh", "default_currency": "GHS", "default_locale": "fr", "default_timezone": "Africa/Accra",
 		},
 		"security": map[string]any{
-			"mfa": map[string]any{"mode": "required_for_roles", "required_roles": []string{"admin"}, "max_assurance_age_hours": 8},
-			"password_policy": map[string]any{
-				"min_length": 16, "max_length": 100, "require_uppercase": true, "require_digit": true,
-				"require_symbol": true, "block_common_list": true, "block_user_info": true,
-			},
-			"session":      map[string]any{"idle_timeout_minutes": 30, "absolute_max_minutes": 720},
-			"ip_allowlist": "203.0.113.0/24, 2001:db8::/32",
+			"mfa":             map[string]any{"mode": "required_for_roles", "required_roles": []string{"admin"}, "max_assurance_age_hours": 8},
+			"password_policy": map[string]any{"min_length": 16, "enforcement": "require", "grace_days": 30},
+			"session":         map[string]any{"idle_timeout_minutes": 30, "absolute_max_minutes": 720},
+			"ip_allowlist":    "203.0.113.0/24, 2001:db8::/32",
 		},
 		"localisation": map[string]any{"available_locales": []string{"fr", "en"}, "first_day_of_week": "sunday", "number_format": "1.234,56"},
 	})
@@ -367,6 +364,10 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 		t.Fatalf("PATCH status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	patched := decode[Settings](t, rec)
+	changedAt := patched.Security.PasswordPolicy.ChangedAt
+	if changedAt == nil || time.Since(*changedAt) > time.Minute {
+		t.Errorf("password_policy.changed_at = %v, want the time of this PATCH", changedAt)
+	}
 
 	want := Settings{
 		General: General{
@@ -377,13 +378,10 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 			DefaultLocale: "fr", DefaultTimezone: "Africa/Accra",
 		},
 		Security: Security{
-			MFA: MFA{Mode: "required_for_roles", RequiredRoles: []string{"admin"}, MaxAssuranceAgeHours: 8},
-			PasswordPolicy: PasswordPolicy{
-				MinLength: 16, MaxLength: 100, RequireUppercase: true, RequireDigit: true,
-				RequireSymbol: true, BlockCommonList: true, BlockUserInfo: true,
-			},
-			Session:     Session{IdleTimeoutMinutes: 30, AbsoluteMaxMinutes: 720},
-			IPAllowlist: "203.0.113.0/24,2001:db8::/32",
+			MFA:            MFA{Mode: "required_for_roles", RequiredRoles: []string{"admin"}, MaxAssuranceAgeHours: 8},
+			PasswordPolicy: PasswordPolicy{MinLength: 16, Enforcement: "require", GraceDays: 30, ChangedAt: changedAt},
+			Session:        Session{IdleTimeoutMinutes: 30, AbsoluteMaxMinutes: 720},
+			IPAllowlist:    "203.0.113.0/24,2001:db8::/32",
 		},
 		Localisation: Localisation{AvailableLocales: []string{"fr", "en"}, FirstDayOfWeek: "sunday", NumberFormat: "1.234,56"},
 	}
@@ -420,7 +418,7 @@ func TestPatch_OmittedFieldsKeepTheirValues(t *testing.T) {
 	}
 	rec := e.patch(t, ft, token, map[string]any{
 		"general":  map[string]any{"website": ""},
-		"security": map[string]any{"password_policy": map[string]any{"require_digit": true}},
+		"security": map[string]any{"password_policy": map[string]any{"grace_days": 30}},
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("second PATCH status = %d, body = %s", rec.Code, rec.Body.String())
@@ -432,8 +430,8 @@ func TestPatch_OmittedFieldsKeepTheirValues(t *testing.T) {
 	if got.General.DefaultCurrency == nil || *got.General.DefaultCurrency != "USD" {
 		t.Errorf("default_currency = %v, want USD kept", got.General.DefaultCurrency)
 	}
-	if got.Security.PasswordPolicy.MinLength != 14 || !got.Security.PasswordPolicy.RequireDigit {
-		t.Errorf("password_policy = %+v, want min_length 14 kept and require_digit set", got.Security.PasswordPolicy)
+	if pp := got.Security.PasswordPolicy; pp.MinLength != 14 || pp.Enforcement != "nudge" || pp.GraceDays != 30 {
+		t.Errorf("password_policy = %+v, want min_length 14 and enforcement kept, grace_days set", pp)
 	}
 }
 
@@ -455,8 +453,10 @@ func TestPatch_RejectsInvalidValues(t *testing.T) {
 		{"unknown role", map[string]any{"security": map[string]any{"mfa": map[string]any{"mode": "required_for_roles", "required_roles": []string{"nope"}}}}, "security.mfa.required_roles"},
 		{"no roles", map[string]any{"security": map[string]any{"mfa": map[string]any{"mode": "required_for_roles"}}}, "security.mfa.required_roles"},
 		{"roles without the mode", map[string]any{"security": map[string]any{"mfa": map[string]any{"mode": "required", "required_roles": []string{"admin"}}}}, "security.mfa.required_roles"},
-		{"looser password", map[string]any{"security": map[string]any{"password_policy": map[string]any{"min_length": 6}}}, "security.password_policy"},
-		{"platform rule off", map[string]any{"security": map[string]any{"password_policy": map[string]any{"block_common_list": false}}}, "security.password_policy"},
+		{"min length below the platform", map[string]any{"security": map[string]any{"password_policy": map[string]any{"min_length": 6}}}, "security.password_policy.min_length"},
+		{"min length above the tenant maximum", map[string]any{"security": map[string]any{"password_policy": map[string]any{"min_length": 21}}}, "security.password_policy.min_length"},
+		{"enforcement", map[string]any{"security": map[string]any{"password_policy": map[string]any{"enforcement": "block"}}}, "security.password_policy.enforcement"},
+		{"grace days", map[string]any{"security": map[string]any{"password_policy": map[string]any{"grace_days": 91}}}, "security.password_policy.grace_days"},
 		{"idle too short", map[string]any{"security": map[string]any{"session": map[string]any{"idle_timeout_minutes": 5}}}, "security.session"},
 		{"absolute below idle", map[string]any{"security": map[string]any{"session": map[string]any{"idle_timeout_minutes": 120, "absolute_max_minutes": 60}}}, "security.session"},
 		{"bad cidr", map[string]any{"security": map[string]any{"ip_allowlist": "10.0.0.0/33"}}, "security.ip_allowlist"},
@@ -493,6 +493,14 @@ func TestPatch_RejectsInvalidValues(t *testing.T) {
 
 	if rec := e.patch(t, ft, token, map[string]any{"general": map[string]any{"logo_url": "https://evil.example/x.png"}}); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown field status = %d, want 400", rec.Code)
+	}
+	// The composition rules are gone, not ignored.
+	if rec := e.patch(t, ft, token, map[string]any{"security": map[string]any{"password_policy": map[string]any{"require_digit": true}}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("removed password rule status = %d, want 400", rec.Code)
+	}
+	rec := e.patch(t, ft, token, map[string]any{"security": map[string]any{"password_policy": map[string]any{"changed_at": "2020-01-01T00:00:00Z"}}})
+	if rec.Code != http.StatusBadRequest || decode[errorBody](t, rec).Error.Code != "read_only_key" {
+		t.Errorf("changed_at status = %d, body = %s, want 400 read_only_key", rec.Code, rec.Body.String())
 	}
 }
 
@@ -752,9 +760,9 @@ func TestApply_ReportsFieldsCommittedBeforeAFailure(t *testing.T) {
 
 	committed, err := e.handler.apply(t.Context(), &tenantresolve.TenantContext{TenantID: ft.id}, &patchPlan{
 		profile: &tenant.ProfileUpdate{Name: new("Committed Co")},
-		// A version counter is read-only, so this write fails after the
-		// profile has committed.
-		l10n:    map[string]string{tenantconfig.PasswordPolicyVersionKey: "9"},
+		// changed_at is read-only, so this write fails after the profile
+		// has committed.
+		l10n:    map[string]string{tenantconfig.PasswordPolicyChangedAtKey: "2020-01-01T00:00:00Z"},
 		changed: []string{"general.name", "localisation.number_format"},
 	})
 	if err == nil {
