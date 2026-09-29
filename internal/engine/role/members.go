@@ -48,14 +48,19 @@ CREATE INDEX IF NOT EXISTS tenant_memberships_tenant_idx ON system.tenant_member
 // createSyncFunction keeps system.tenant_memberships in step with every
 // tenant's tenant_members. SECURITY DEFINER, owned by the schema-sync role
 // that creates it, so it can write the system schema from a write made by
-// any role. A schema with no system.tenants row (a test fixture) is
-// skipped: the index can only name registered tenants.
+// any role. A write is skipped when the index table doesn't exist yet or
+// the schema has no system.tenants row: test harnesses create tenant
+// tables without the system bootstrap, and the index can only name
+// registered tenants.
 const createSyncFunction = `
-CREATE FUNCTION system.sync_tenant_membership() RETURNS trigger
+CREATE OR REPLACE FUNCTION system.sync_tenant_membership() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
     tid uuid;
 BEGIN
+    IF to_regclass('system.tenant_memberships') IS NULL THEN
+        RETURN NULL;
+    END IF;
     SELECT id INTO tid FROM system.tenants WHERE 'tenant_' || slug = TG_TABLE_SCHEMA;
     IF tid IS NULL THEN
         RETURN NULL;
@@ -79,15 +84,20 @@ CREATE OR REPLACE TRIGGER sync_tenant_membership
 
 var syncFunctionLockKey = db.AdvisoryLockKey("role.sync_tenant_membership")
 
-// ensureSyncFunction creates system.sync_tenant_membership() unless it
-// exists. Never replaced: whoever created it first owns it, and only its
-// owner could replace it.
+// ensureSyncFunction creates system.sync_tenant_membership(), or replaces
+// it when the current role owns it. Only the owner may replace a function,
+// so a role that didn't create it leaves it as it is.
 func ensureSyncFunction(ctx context.Context, tx *sql.Tx) error {
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `SELECT to_regprocedure('system.sync_tenant_membership()') IS NOT NULL`).Scan(&exists); err != nil {
+	var foreign bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE((
+			SELECT NOT pg_has_role(current_user, p.proowner, 'USAGE')
+			FROM pg_proc p WHERE p.oid = to_regprocedure('system.sync_tenant_membership()')
+		), false)
+	`).Scan(&foreign); err != nil {
 		return fmt.Errorf("look up membership sync function: %w", err)
 	}
-	if exists {
+	if foreign {
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, createSyncFunction); err != nil {

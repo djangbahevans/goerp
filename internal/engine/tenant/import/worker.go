@@ -191,9 +191,9 @@ func (w *Worker) provisionAndLoad(ctx context.Context, job *river.Job[Args], t *
 		}
 	}
 
-	// The restore writes tenant_members in bulk, so the membership index
-	// is rebuilt from it here rather than trusted to the row trigger
-	// (auth-internals.md §2 "Membership index").
+	// Indexes whatever tenant_members holds after the load
+	// (auth-internals.md §2 "Membership index"); idempotent, so rows the
+	// trigger already wrote are harmless.
 	if err := role.NewStore(w.RawDB).ReindexMemberships(ctx, t.ID, t.Slug); err != nil {
 		return Result{}, err
 	}

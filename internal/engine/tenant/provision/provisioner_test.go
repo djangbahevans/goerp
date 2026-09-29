@@ -11,6 +11,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
+	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
 // TestStartProvisioning_NilTemporalClientDoesNotPanic guards against
@@ -120,7 +121,11 @@ func TestProvisionForRegistration_GrantsTheExistingUserAdminWithoutAnInvite(t *t
 		_, _ = env.conn.Exec("DELETE FROM system.tenants WHERE slug = $1", slug)
 		_ = tenantschema.Drop(context.Background(), env.conn, slug)
 	})
-	userID := uuid.New().String()
+	userID, err := user.NewStore(env.conn).FindOrCreateInvited(t.Context(), slug+"@example.com")
+	if err != nil {
+		t.Fatalf("FindOrCreateInvited() error: %v", err)
+	}
+	t.Cleanup(func() { _, _ = env.conn.Exec("DELETE FROM system.users WHERE id = $1", userID) })
 
 	p := NewProvisioner(env.temporalClient, env.taskQueue)
 	if err := p.ProvisionForRegistration(t.Context(), slug, "Acme Corp", userID); err != nil {

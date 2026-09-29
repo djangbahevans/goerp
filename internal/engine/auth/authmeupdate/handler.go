@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/authcheck"
 	"github.com/djangbahevans/goerp/internal/engine/auth/loginsession"
@@ -85,7 +86,7 @@ func optionalText(body map[string]jsontext.Value, field string, maxLen int) (boo
 		return false, nil, &requestError{message: fmt.Sprintf("%q must be a string or null", field)}
 	}
 	value = strings.TrimSpace(value)
-	if len([]rune(value)) > maxLen {
+	if utf8.RuneCountInString(value) > maxLen {
 		return false, nil, &requestError{message: fmt.Sprintf("%q must be at most %d characters", field, maxLen)}
 	}
 	if value == "" {

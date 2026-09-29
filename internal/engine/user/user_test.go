@@ -335,7 +335,7 @@ func TestResetLoginState_ClearsCounterAndLock(t *testing.T) {
 		}
 	}
 
-	if err := store.ResetLoginState(context.Background(), id); err != nil {
+	if err := store.ResetLoginState(t.Context(), id); err != nil {
 		t.Fatalf("ResetLoginState() error: %v", err)
 	}
 

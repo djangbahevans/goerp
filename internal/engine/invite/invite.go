@@ -338,9 +338,8 @@ func (s *Store) GetLiveByToken(ctx context.Context, tenantSlug, rawToken string)
 // transaction: activate (when non-nil, e.g. setting a new user's first
 // password), the single membership-creation point (the tenant_members row,
 // whose trigger adds the membership index row, and the role grant), and
-// accepted_at. The
-// invitation row is locked and re-checked live first, so of two concurrent
-// accepts exactly one succeeds.
+// accepted_at. The invitation row is locked and re-checked live first, so
+// of two concurrent accepts exactly one succeeds.
 func (s *Store) Accept(ctx context.Context, tenantSlug, invitationID, userID string, activate func(*sql.Tx) error) error {
 	schema := tenantschema.Name(tenantSlug)
 	tx, err := s.db.BeginTx(ctx, nil)

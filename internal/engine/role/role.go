@@ -40,8 +40,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates roles/role_permissions/user_roles/tenant_members in the given
-// tenant's schema if they don't already exist. Does not create the schema
+// Bootstrap creates roles/role_permissions/user_roles/tenant_members in
+// the given tenant's schema if they don't already exist. Does not create the schema
 // itself — assumes tenant_{slug} already exists (production: tenant
 // provisioning's job; this package's own tests create a fixture schema
 // directly).
@@ -155,10 +155,9 @@ func (s *Store) GetRoleByName(ctx context.Context, tenantSlug, name string) (str
 }
 
 // CountUsers returns the number of the tenant's members (tenant_members
-// rows, suspended ones included) — the Users column cli-reference.md §5 documents
-// for `goerp tenant list`. Returns 0, not an error, for a tenant whose
-// schema hasn't been provisioned yet, the same count a real
-// freshly-provisioned tenant with no grants yet would report.
+// rows, suspended ones included) — the Users column cli-reference.md §5
+// documents for `goerp tenant list`. Returns 0, not an error, for a tenant
+// whose schema hasn't been provisioned yet.
 func (s *Store) CountUsers(ctx context.Context, tenantSlug string) (int, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s.tenant_members`, schema)
@@ -401,8 +400,8 @@ func (s *Store) PermissionNamesForUser(ctx context.Context, tenantSlug, userID s
 
 // RoleIDsForUser returns the role_id of every unexpired role userID holds
 // in the tenant's schema — same predicate RoleNamesForUser uses, without
-// the join to roles.name, so a suspended member gets an empty set. Populates permcache's Redis role-assignment
-// cache (auth-internals.md §14 layer 2).
+// the join to roles.name, so a suspended member gets an empty set.
+// Populates permcache's Redis role-assignment cache (auth-internals.md §14 layer 2).
 func (s *Store) RoleIDsForUser(ctx context.Context, tenantSlug, userID string) ([]string, error) {
 	schema := tenantschema.Name(tenantSlug)
 	query := fmt.Sprintf(`
