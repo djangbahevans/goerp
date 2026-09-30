@@ -13,6 +13,7 @@ const { useSavedFiltersMock } = vi.hoisted(() => ({
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     }),
   ),
 }));
@@ -43,6 +44,7 @@ afterEach(() => {
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   }));
 });
 
@@ -61,6 +63,7 @@ describe("SavedFiltersChip", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
     render(<SavedFiltersChip viewName="contacts_list" listState={fakeListState()} />);
     fireEvent.click(screen.getByRole("button", { name: "Saved filters" }));
@@ -95,6 +98,7 @@ describe("SavedFiltersChip", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
     render(<SavedFiltersChip viewName="contacts_list" listState={fakeListState()} />);
     fireEvent.click(screen.getByRole("button", { name: "Saved filters" }));
@@ -122,6 +126,7 @@ describe("SavedFiltersChip", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
     const listState = fakeListState({ filter: { type: "person" }, sort: "-created_at", groupBy: "region" });
     render(<SavedFiltersChip viewName="contacts_list" listState={listState} />);
@@ -148,6 +153,7 @@ describe("SavedFiltersChip", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
     const listState = fakeListState({ sort: "-created_at", groupBy: "region" });
     render(<SavedFiltersChip viewName="contacts_list" listState={listState} />);
@@ -173,6 +179,7 @@ describe("SavedFiltersChip", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
     render(<SavedFiltersChip viewName="contacts_list" listState={fakeListState()} />);
     const trigger = screen.getByRole("button", { name: "Saved filters" });
@@ -210,6 +217,7 @@ describe("SavedFiltersChip", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault,
+      rename: vi.fn(),
     });
     render(<SavedFiltersChip viewName="contacts_list" listState={fakeListState()} />);
     fireEvent.click(screen.getByRole("button", { name: "Saved filters" }));
@@ -234,6 +242,7 @@ describe("SavedFiltersChip", () => {
       save: vi.fn(),
       remove,
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
     render(<SavedFiltersChip viewName="contacts_list" listState={fakeListState()} />);
     fireEvent.click(screen.getByRole("button", { name: "Saved filters" }));
@@ -245,7 +254,14 @@ describe("SavedFiltersChip", () => {
   it("saving the current filter opens the AlertDialog, calls save with the entered name, and toasts on success", async () => {
     const save = vi.fn(async () => {});
     const toastSuccess = vi.spyOn(toast, "success").mockImplementation(() => {});
-    useSavedFiltersMock.mockReturnValue({ filters: [], isLoading: false, save, remove: vi.fn(), setDefault: vi.fn() });
+    useSavedFiltersMock.mockReturnValue({
+      filters: [],
+      isLoading: false,
+      save,
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+      rename: vi.fn(),
+    });
     render(<SavedFiltersChip viewName="contacts_list" listState={fakeListState()} />);
     fireEvent.click(screen.getByRole("button", { name: "Saved filters" }));
     fireEvent.click(screen.getByRole("button", { name: "Save current filter" }));
@@ -264,7 +280,14 @@ describe("SavedFiltersChip", () => {
       throw new Error("boom");
     });
     const toastSuccess = vi.spyOn(toast, "success").mockImplementation(() => {});
-    useSavedFiltersMock.mockReturnValue({ filters: [], isLoading: false, save, remove: vi.fn(), setDefault: vi.fn() });
+    useSavedFiltersMock.mockReturnValue({
+      filters: [],
+      isLoading: false,
+      save,
+      remove: vi.fn(),
+      setDefault: vi.fn(),
+      rename: vi.fn(),
+    });
     render(<SavedFiltersChip viewName="contacts_list" listState={fakeListState()} />);
     fireEvent.click(screen.getByRole("button", { name: "Saved filters" }));
     fireEvent.click(screen.getByRole("button", { name: "Save current filter" }));
@@ -275,5 +298,116 @@ describe("SavedFiltersChip", () => {
     expect(toastSuccess).not.toHaveBeenCalled();
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     toastSuccess.mockRestore();
+  });
+
+  describe("rename", () => {
+    const archived = {
+      id: "f1",
+      viewName: "contacts_list",
+      label: "Archived",
+      queryString: "?filter[is_active]=false",
+      isDefault: false,
+    };
+
+    function renderWithRename(rename: UseSavedFiltersResult["rename"]) {
+      useSavedFiltersMock.mockReturnValue({
+        filters: [archived],
+        isLoading: false,
+        save: vi.fn(),
+        remove: vi.fn(),
+        setDefault: vi.fn(),
+        rename,
+      });
+      render(<SavedFiltersChip viewName="contacts_list" listState={fakeListState()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Saved filters" }));
+      fireEvent.click(screen.getByRole("button", { name: "Rename 'Archived'" }));
+      return screen.getByRole("textbox", { name: "Rename 'Archived'" }) as HTMLInputElement;
+    }
+
+    it("orders a row's tab stops apply, rename, set default, delete", () => {
+      renderWithRename(vi.fn());
+      fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+      const names = Array.from(
+        screen.getByRole("dialog").querySelectorAll("button"),
+        (b) => b.getAttribute("aria-label") ?? b.textContent,
+      );
+      expect(names.slice(0, 4)).toEqual([
+        "Archived",
+        "Rename 'Archived'",
+        "Set 'Archived' as default",
+        "Delete 'Archived'",
+      ]);
+    });
+
+    it("opens a focused input holding the current label", () => {
+      const input = renderWithRename(vi.fn());
+      expect(input.value).toBe("Archived");
+      expect(document.activeElement).toBe(input);
+    });
+
+    it("Enter saves the new label and returns focus to the Rename button", async () => {
+      const rename = vi.fn(async () => {});
+      const input = renderWithRename(rename);
+      fireEvent.change(input, { target: { value: "Old stuff" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+      expect(rename).toHaveBeenCalledExactlyOnceWith("f1", "Old stuff");
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Rename 'Archived'" }));
+    });
+
+    it("Escape cancels without saving or closing the panel", () => {
+      const rename = vi.fn(async () => {});
+      const input = renderWithRename(rename);
+      fireEvent.change(input, { target: { value: "Old stuff" } });
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(rename).not.toHaveBeenCalled();
+      expect(screen.queryByRole("textbox")).toBeNull();
+      expect(screen.getByRole("dialog", { name: "Saved filters" })).toBeTruthy();
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Rename 'Archived'" }));
+    });
+
+    it("blurring with a changed label saves it", async () => {
+      const rename = vi.fn(async () => {});
+      const input = renderWithRename(rename);
+      fireEvent.change(input, { target: { value: "Old stuff" } });
+      fireEvent.blur(input);
+
+      await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+      expect(rename).toHaveBeenCalledExactlyOnceWith("f1", "Old stuff");
+    });
+
+    it("blurring without a change cancels", () => {
+      const rename = vi.fn(async () => {});
+      const input = renderWithRename(rename);
+      fireEvent.blur(input);
+
+      expect(rename).not.toHaveBeenCalled();
+      expect(screen.queryByRole("textbox")).toBeNull();
+    });
+
+    it("keeps the input open with an error for an empty label", () => {
+      const rename = vi.fn(async () => {});
+      const input = renderWithRename(rename);
+      fireEvent.change(input, { target: { value: "  " } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(rename).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toBe("Enter a name.");
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+    });
+
+    it("keeps the input open with the error under it when the save fails", async () => {
+      const rename = vi.fn(async () => {
+        throw new Error("boom");
+      });
+      const input = renderWithRename(rename);
+      fireEvent.change(input, { target: { value: "Old stuff" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("boom"));
+      expect(screen.getByRole("textbox")).toBe(input);
+    });
   });
 });

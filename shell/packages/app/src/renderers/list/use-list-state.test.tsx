@@ -26,6 +26,7 @@ const { useSavedFiltersMock } = vi.hoisted(() => ({
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     }),
   ),
 }));
@@ -43,6 +44,7 @@ afterEach(() => {
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   }));
 });
 
@@ -321,6 +323,7 @@ describe("useDefaultFilterApplication", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     await renderDefaultFilterProbe("/", false, { defaultFilters: { is_active: true } });
@@ -337,6 +340,7 @@ describe("useDefaultFilterApplication", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     await renderDefaultFilterProbe("/?filter[type]=company", false, {});
@@ -351,6 +355,7 @@ describe("useDefaultFilterApplication", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     await renderDefaultFilterProbe("/", false, { defaultFilters: { is_active: true } });
@@ -374,6 +379,7 @@ describe("useDefaultFilterApplication", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     await renderDefaultFilterProbe("/", false, { applySortAndGroupBy: true });
@@ -389,6 +395,7 @@ describe("useDefaultFilterApplication", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     await renderDefaultFilterProbe("/", false, {});
@@ -403,6 +410,7 @@ describe("useDefaultFilterApplication", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     await renderDefaultFilterProbe("/?sort=-created_at", false, { applySortAndGroupBy: true });
@@ -418,6 +426,7 @@ describe("useDefaultFilterApplication", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     }));
 
     const { router } = await renderDefaultFilterProbe("/", false, { defaultFilters: { region: "us" } });
@@ -446,6 +455,7 @@ describe("useDefaultFilterApplication", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     }));
 
     await renderDefaultFilterProbe("/", false, { applySortAndGroupBy: true });

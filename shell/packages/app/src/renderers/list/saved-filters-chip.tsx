@@ -5,6 +5,7 @@ import {
   Icon,
   IconButton,
   Skeleton,
+  TextInput,
   useFloatingPanelLayer,
 } from "@goerp/sdk/components";
 import { toast } from "@goerp/sdk/notifications";
@@ -28,14 +29,105 @@ const ROW_BUTTON_CLASSES =
 function SavedFilterRow({
   filter,
   onApply,
+  onRename,
   onSetDefault,
   onRemove,
 }: {
   filter: SavedFilter;
   onApply: (filter: SavedFilter) => void;
+  onRename: (filter: SavedFilter, label: string) => Promise<void>;
   onSetDefault: (filter: SavedFilter) => void;
   onRemove: (filter: SavedFilter) => void;
 }): ReactNode {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const errorId = useId();
+  const renameButtonRef = useRef<HTMLButtonElement | null>(null);
+  // Set while a save is in flight and once the edit ends, so a blur right
+  // after Enter (or on unmount) can't save or cancel a second time.
+  const settledRef = useRef(false);
+  const refocusRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing && refocusRef.current) {
+      refocusRef.current = false;
+      renameButtonRef.current?.focus();
+    }
+  }, [editing]);
+
+  function startEditing(): void {
+    settledRef.current = false;
+    setDraft(filter.label);
+    setError(null);
+    setEditing(true);
+  }
+
+  function finish(refocus: boolean): void {
+    settledRef.current = true;
+    refocusRef.current = refocus;
+    setEditing(false);
+  }
+
+  async function commit(refocus: boolean): Promise<void> {
+    const label = draft.trim();
+    if (label === filter.label) {
+      finish(refocus);
+      return;
+    }
+    if (label === "") {
+      setError("Enter a name.");
+      return;
+    }
+    settledRef.current = true;
+    try {
+      await onRename(filter, label);
+      finish(refocus);
+    } catch (err) {
+      settledRef.current = false;
+      setError(err instanceof Error ? err.message : "Couldn't rename the filter.");
+    }
+  }
+
+  if (editing) {
+    return (
+      // Its own layer, so Escape cancels the rename instead of closing the panel.
+      <EscapeLayer onEscape={() => finish(true)}>
+        <div className="px-2 py-1">
+          <TextInput
+            size="sm"
+            value={draft}
+            onChange={(value) => {
+              setDraft(value);
+              setError(null);
+            }}
+            aria-label={`Rename '${filter.label}'`}
+            invalid={error !== null}
+            aria-describedby={error !== null ? errorId : undefined}
+            autoFocus
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void commit(true);
+              }
+            }}
+            onBlur={() => {
+              if (settledRef.current) return;
+              if (draft.trim() === filter.label) finish(false);
+              else void commit(false);
+            }}
+          />
+          {error !== null && (
+            <p id={errorId} role="alert" className="mt-1 text-danger text-xs">
+              {error}
+            </p>
+          )}
+        </div>
+      </EscapeLayer>
+    );
+  }
+
   return (
     <div className="group flex items-center gap-1 px-1">
       <button type="button" title={filter.label} className={ROW_BUTTON_CLASSES} onClick={() => onApply(filter)}>
@@ -45,6 +137,13 @@ function SavedFilterRow({
         <span className="truncate">{filter.label}</span>
       </button>
       <span className="flex flex-none items-center gap-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+        <IconButton
+          ref={renameButtonRef}
+          icon="pencil"
+          label={`Rename '${filter.label}'`}
+          size="sm"
+          onClick={startEditing}
+        />
         {!filter.isDefault && (
           <IconButton
             icon="star"
@@ -66,7 +165,7 @@ function SavedFilterRow({
 }
 
 export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps): ReactNode {
-  const { filters, isLoading, save, remove, setDefault } = useSavedFilters(viewName);
+  const { filters, isLoading, save, remove, setDefault, rename } = useSavedFilters(viewName);
   const [open, setOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const headingId = useId();
@@ -135,6 +234,11 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
     setDefault(filter.id).catch(() => {});
   }
 
+  // Rejects on failure, for the row to show the error under its input.
+  async function handleRename(filter: SavedFilter, label: string): Promise<void> {
+    await rename(filter.id, label);
+  }
+
   function handleRemove(filter: SavedFilter): void {
     remove(filter.id).catch(() => {});
   }
@@ -196,6 +300,7 @@ export function SavedFiltersChip({ viewName, listState }: SavedFiltersChipProps)
                     key={filter.id}
                     filter={filter}
                     onApply={handleApply}
+                    onRename={handleRename}
                     onSetDefault={handleSetDefault}
                     onRemove={handleRemove}
                   />

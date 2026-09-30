@@ -46,6 +46,7 @@ const {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     }),
   ),
   resolveViewPathMock: vi.fn(async (): Promise<string | null> => "/contacts/{id}"),
@@ -101,6 +102,7 @@ afterEach(() => {
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   }));
   resolveViewPathMock.mockClear();
   resolveResourceMock.mockClear();
@@ -992,6 +994,7 @@ describe("ListRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     const { router } = await renderListRenderer({}, fullAccess, "/", {
@@ -1027,6 +1030,7 @@ describe("ListRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     const { router } = await renderListRenderer({}, fullAccess, "/?filter[type]=company", view);
@@ -1051,6 +1055,7 @@ describe("ListRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     const { router } = await renderListRenderer({}, fullAccess, "/?sort=-created_at", view);
@@ -1075,6 +1080,7 @@ describe("ListRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     const { router } = await renderListRenderer({}, fullAccess, "/", {
