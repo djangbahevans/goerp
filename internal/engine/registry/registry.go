@@ -574,6 +574,11 @@ func registerBuiltinRoutes(table *route.RouteTable) {
 		{"GET", "/admin/settings/notification-delivery"},
 		{"PATCH", "/admin/settings/notification-delivery"},
 		{"POST", "/admin/settings/notification-delivery/test-email"},
+		{"GET", "/admin/settings/notification-templates"},
+		{"GET", "/admin/settings/notification-templates/{type}/{channel}/{locale}"},
+		{"PUT", "/admin/settings/notification-templates/{type}/{channel}/{locale}"},
+		{"DELETE", "/admin/settings/notification-templates/{type}/{channel}/{locale}"},
+		{"POST", "/admin/settings/notification-templates/{type}/{channel}/{locale}/preview"},
 		{"PATCH", "/admin/connectors/{name}/set-primary"},
 	} {
 		table.Register(r[0], r[1], &route.RouteEntry{

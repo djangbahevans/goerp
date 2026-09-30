@@ -18,7 +18,7 @@ type inAppContent struct {
 	Icon      string
 }
 
-var inAppColumns = []string{notiftemplate.ColTitle, notiftemplate.ColBody, notiftemplate.ColActionURL, notiftemplate.ColIcon}
+var inAppColumns = notiftemplate.ChannelColumns[notifications.ChannelInApp]
 
 // renderInApp renders tmpls' in_app template. A type with no in_app
 // template gets its label as title and nothing else.

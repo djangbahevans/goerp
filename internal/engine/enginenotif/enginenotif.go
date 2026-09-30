@@ -9,6 +9,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"maps"
 	"sync"
 
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
@@ -40,26 +41,47 @@ var Types = []manifest.NotificationType{
 		Name: ActivityAssigned, Label: "Activity assigned to you",
 		Description:     "Sent when someone assigns you a scheduled activity",
 		DefaultChannels: inAppAndEmail, AvailableChannels: assignableChannels,
-		Templates: map[string]string{notifications.ChannelInApp: "templates/activity_assigned/in_app.{locale}.json"},
+		Templates:  map[string]string{notifications.ChannelInApp: "templates/activity_assigned/in_app.{locale}.json"},
+		DataSchema: activityData(map[string]string{"AssignedByName": "string"}),
 	},
 	{
 		Name: ActivityDue, Label: "Activity due today",
 		Description:     "Sent the morning an activity assigned to you falls due",
 		DefaultChannels: []string{notifications.ChannelInApp}, AvailableChannels: assignableChannels,
-		Templates: map[string]string{notifications.ChannelInApp: "templates/activity_due/in_app.{locale}.json"},
+		Templates:  map[string]string{notifications.ChannelInApp: "templates/activity_due/in_app.{locale}.json"},
+		DataSchema: activityData(map[string]string{"Overdue": "bool"}),
 	},
 	{
 		Name: RecordMention, Label: "Mentioned you in a comment",
 		Description:     "Sent when someone @mentions you in a comment on a record",
 		DefaultChannels: inAppAndEmail, AvailableChannels: assignableChannels,
-		Templates: commentTemplates(RecordMention),
+		Templates:  commentTemplates(RecordMention),
+		DataSchema: commentData,
 	},
 	{
 		Name: RecordMessage, Label: "Message on a record you follow",
 		Description:     "Sent when someone posts a message to the followers of a record you follow",
 		DefaultChannels: inAppAndEmail, AvailableChannels: assignableChannels,
-		Templates: commentTemplates(RecordMessage),
+		Templates:  commentTemplates(RecordMessage),
+		DataSchema: commentData,
 	},
+}
+
+// activityData is a scheduled activity type's data_schema: the fields
+// every activity notification carries, plus extra.
+func activityData(extra map[string]string) map[string]string {
+	schema := map[string]string{
+		"ActivityID": "string", "Model": "string", "RecordID": "string", "RecordName": "string",
+		"Type": "string", "TypeLabel": "string", "TypeIcon": "string", "Summary": "string", "DueDate": "string",
+	}
+	maps.Copy(schema, extra)
+	return schema
+}
+
+// commentData is a comment notification type's data_schema.
+var commentData = map[string]string{
+	"EntryID": "string", "Model": "string", "ModelLabel": "string", "RecordID": "string",
+	"RecordName": "string", "AuthorName": "string", "Body": "string", "Excerpt": "string",
 }
 
 // commentTemplates are a comment notification type's template paths: an

@@ -371,19 +371,21 @@ func maskSecret(s string) string {
 	return secretMask
 }
 
-// deliveryTypes lists the engine's notification types and those of every
+// declaredType is a notification type as the engine or a module declares
+// it, under its full "{module}.{name}" type string.
+type declaredType struct {
+	typ    string
+	module string
+	nt     manifest.NotificationType
+}
+
+// declaredTypes lists the engine's notification types and those of every
 // module ready and enabled for the tenant, ordered by type.
-func (h *Handler) deliveryTypes(tc *tenantresolve.TenantContext) []DeliveryType {
-	types := []DeliveryType{}
+func (h *Handler) declaredTypes(tc *tenantresolve.TenantContext) []declaredType {
+	var types []declaredType
 	add := func(moduleName string, declared []manifest.NotificationType) {
 		for _, nt := range declared {
-			types = append(types, DeliveryType{
-				Type:              moduleName + "." + nt.Name,
-				Module:            moduleName,
-				Label:             nt.Label,
-				DefaultChannels:   orEmpty(nt.DefaultChannels),
-				AvailableChannels: orEmpty(nt.AvailableChannels),
-			})
+			types = append(types, declaredType{typ: moduleName + "." + nt.Name, module: moduleName, nt: nt})
 		}
 	}
 	add(notify.EngineModule, notify.EngineTypes)
@@ -394,7 +396,23 @@ func (h *Handler) deliveryTypes(tc *tenantresolve.TenantContext) []DeliveryType 
 			}
 		}
 	}
-	slices.SortFunc(types, func(a, b DeliveryType) int { return strings.Compare(a.Type, b.Type) })
+	slices.SortFunc(types, func(a, b declaredType) int { return strings.Compare(a.typ, b.typ) })
+	return types
+}
+
+// deliveryTypes is declaredTypes as GET
+// /admin/settings/notification-delivery lists them.
+func (h *Handler) deliveryTypes(tc *tenantresolve.TenantContext) []DeliveryType {
+	types := []DeliveryType{}
+	for _, d := range h.declaredTypes(tc) {
+		types = append(types, DeliveryType{
+			Type:              d.typ,
+			Module:            d.module,
+			Label:             d.nt.Label,
+			DefaultChannels:   orEmpty(d.nt.DefaultChannels),
+			AvailableChannels: orEmpty(d.nt.AvailableChannels),
+		})
+	}
 	return types
 }
 

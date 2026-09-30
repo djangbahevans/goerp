@@ -3,8 +3,10 @@
 // /admin/settings for the General, Security and Localisation sections,
 // POST/DELETE /admin/settings/logo for the company logo, and
 // /admin/settings/notification-delivery for the Email and Notification
-// delivery sections (notifdelivery.go). Allowed OAuth providers wait on
-// OAuth login itself.
+// delivery sections (notifdelivery.go), and
+// /admin/settings/notification-templates for the notification templates
+// page (shell-ux.md §5.8, notiftemplates.go). Allowed OAuth providers wait
+// on OAuth login itself.
 //
 // The company profile lives in system.tenants' columns; everything else
 // in tenantconfig, through the stores that enforce or serve it:
@@ -44,6 +46,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/l10n/tenantl10n"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
+	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
@@ -89,6 +92,13 @@ type Deps struct {
 	Users         *user.Store
 	TestEmail     TestEmailSender
 
+	// Templates backs the notification templates routes. AppBaseURL and
+	// PlatformDomain build the tenant links a template preview renders,
+	// the same way email_send does (mailer.TenantBaseURL).
+	Templates      *notifications.Store
+	AppBaseURL     string
+	PlatformDomain string
+
 	// Storage and Files back the logo upload; Storage may be nil when no
 	// backend is configured, which fails only the upload.
 	Storage      storage.Backend
@@ -104,10 +114,10 @@ func NewHandler(deps Deps) *Handler {
 	return &Handler{deps: deps}
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+func writeJSON(w http.ResponseWriter, status int, v any, opts ...json.Options) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+	_ = json.MarshalWrite(w, v, append(opts, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))...)
 }
 
 func writeInternalError(w http.ResponseWriter, r *http.Request, err error, msg string) {

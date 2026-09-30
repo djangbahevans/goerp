@@ -152,22 +152,12 @@ func (s *Store) Templates(ctx context.Context, tenantSlug, templateKey string, l
 
 	var out []StoredTemplate
 	for rows.Next() {
-		t := StoredTemplate{TemplateKey: templateKey, Fields: map[string]string{}}
-		fields := make([]sql.NullString, len(notiftemplate.Columns))
+		t := StoredTemplate{TemplateKey: templateKey}
 		var isDefault bool
-		dest := []any{&t.Channel, &t.Locale, &isDefault}
-		for i := range fields {
-			dest = append(dest, &fields[i])
-		}
-		if err := rows.Scan(dest...); err != nil {
-			return nil, fmt.Errorf("scan notification template: %w", err)
+		if t.Fields, err = scanTemplate(rows, &t.Channel, &t.Locale, &isDefault); err != nil {
+			return nil, err
 		}
 		t.IsOverride = !isDefault
-		for i, col := range notiftemplate.Columns {
-			if fields[i].Valid {
-				t.Fields[col] = fields[i].String
-			}
-		}
 		out = append(out, t)
 	}
 	if err := rows.Err(); err != nil {
@@ -191,10 +181,96 @@ func (s *Store) Template(ctx context.Context, tenantSlug, templateKey, channel, 
 	return nil, ErrTemplateNotFound
 }
 
+// TemplateVariant is one (template key, channel, locale) that has a
+// shipped default, a tenant override, or both.
+type TemplateVariant struct {
+	TemplateKey string
+	Channel     string
+	Locale      string
+	HasDefault  bool
+	HasOverride bool
+}
+
+// TemplateVariants lists every (template key, channel, locale) in the
+// tenant's notification_templates, ordered by key, channel and locale.
+func (s *Store) TemplateVariants(ctx context.Context, tenantSlug string) ([]TemplateVariant, error) {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT template_key, channel, locale, bool_or(is_default), bool_or(NOT is_default)
+		FROM %s.notification_templates
+		GROUP BY template_key, channel, locale
+		ORDER BY template_key, channel, locale`, tenantschema.Name(tenantSlug)))
+	if err != nil {
+		return nil, fmt.Errorf("list notification templates: %w", err)
+	}
+	defer rows.Close()
+	var out []TemplateVariant
+	for rows.Next() {
+		var v TemplateVariant
+		if err := rows.Scan(&v.TemplateKey, &v.Channel, &v.Locale, &v.HasDefault, &v.HasOverride); err != nil {
+			return nil, fmt.Errorf("scan notification template: %w", err)
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list notification templates: %w", err)
+	}
+	return out, nil
+}
+
+// TemplateVersions returns the (templateKey, channel, locale) shipped
+// default's and tenant override's content, each nil when that row does
+// not exist.
+func (s *Store) TemplateVersions(ctx context.Context, tenantSlug, templateKey, channel, locale string) (def, override map[string]string, err error) {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(
+		`SELECT is_default, %s FROM %s.notification_templates WHERE template_key = $1 AND channel = $2 AND locale = $3`,
+		strings.Join(notiftemplate.Columns, ", "), tenantschema.Name(tenantSlug)),
+		templateKey, channel, locale)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load notification template: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var isDefault bool
+		content, err := scanTemplate(rows, &isDefault)
+		if err != nil {
+			return nil, nil, err
+		}
+		if isDefault {
+			def = content
+		} else {
+			override = content
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("load notification template: %w", err)
+	}
+	return def, override, nil
+}
+
 // StoredTemplate is a notification_templates row as a send reads it.
 type StoredTemplate struct {
 	notiftemplate.Row
 	IsOverride bool
+}
+
+// scanTemplate scans a row selecting lead's columns followed by
+// notiftemplate.Columns, returning the non-NULL content columns.
+func scanTemplate(rows *sql.Rows, lead ...any) (map[string]string, error) {
+	fields := make([]sql.NullString, len(notiftemplate.Columns))
+	dest := lead
+	for i := range fields {
+		dest = append(dest, &fields[i])
+	}
+	if err := rows.Scan(dest...); err != nil {
+		return nil, fmt.Errorf("scan notification template: %w", err)
+	}
+	content := map[string]string{}
+	for i, col := range notiftemplate.Columns {
+		if fields[i].Valid {
+			content[col] = fields[i].String
+		}
+	}
+	return content, nil
 }
 
 func upsertTemplate(ctx context.Context, tx *sql.Tx, table string, r notiftemplate.Row, isDefault bool) error {
