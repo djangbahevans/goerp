@@ -136,25 +136,40 @@ func LocaleCandidates(userLocale string) []string {
 	return candidates
 }
 
+// ParseColumn parses src, the content of notification_templates column
+// col, the way a send renders it: html_template as an html/template, every
+// other column as a text/template.
+func ParseColumn(col, src string) error {
+	_, err := parseColumn(col, src)
+	return err
+}
+
 // RenderColumn parses src, the content of notification_templates column
 // col, and executes it against vars — the caller's data_schema fields and
 // the 7 engine-injected variables (notification-system.md §5 "Standard
-// template variables"). html_template is an html/template; every other
-// column is a text/template.
+// template variables").
 func RenderColumn(col, src string, vars map[string]any) (string, error) {
-	ext := "txt"
-	if col == ColHTML {
-		ext = "html"
-	}
-	exec, err := parseTemplate(ext, []byte(src))
+	exec, err := parseColumn(col, src)
 	if err != nil {
-		return "", fmt.Errorf("parse %s: %w", col, err)
+		return "", err
 	}
 	var buf bytes.Buffer
 	if err := exec.Execute(&buf, vars); err != nil {
 		return "", fmt.Errorf("execute %s: %w", col, err)
 	}
 	return buf.String(), nil
+}
+
+func parseColumn(col, src string) (executor, error) {
+	ext := "txt"
+	if col == ColHTML {
+		ext = "html"
+	}
+	exec, err := parseTemplate(ext, []byte(src))
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", col, err)
+	}
+	return exec, nil
 }
 
 // resolveOptionalChannel is resolveChannel for a template the package may

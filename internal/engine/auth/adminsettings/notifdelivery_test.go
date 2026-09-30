@@ -49,6 +49,7 @@ func (e *env) installModules(t *testing.T, ft fixtureTenant) {
 			Name: "order_confirmed", Label: "Order Confirmed",
 			DefaultChannels:   []string{"in_app", "email"},
 			AvailableChannels: []string{"in_app", "email", "sms"},
+			DataSchema:        map[string]string{"OrderReference": "string", "Total": "float"},
 		}}}},
 		themeModule: {Status: module.StatusReady, PackagePath: themeDir, Manifest: manifest.Manifest{Name: themeModule, Type: "theme"}},
 	}); err != nil {

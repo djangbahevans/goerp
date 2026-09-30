@@ -923,6 +923,9 @@ func New(cfg *config.Config) (*Engine, error) {
 			AppBaseURL:     cfg.AppBaseURL,
 			PlatformDomain: cfg.PlatformDomain,
 		},
+		Templates:      notificationStore,
+		AppBaseURL:     cfg.AppBaseURL,
+		PlatformDomain: cfg.PlatformDomain,
 	})
 	builtinRoutes["GET /admin/settings"] = http.HandlerFunc(adminSettingsHandler.ServeGet)
 	builtinRoutes["PATCH /admin/settings"] = http.HandlerFunc(adminSettingsHandler.ServePatch)
@@ -931,6 +934,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["GET /admin/settings/notification-delivery"] = http.HandlerFunc(adminSettingsHandler.ServeGetNotificationDelivery)
 	builtinRoutes["PATCH /admin/settings/notification-delivery"] = http.HandlerFunc(adminSettingsHandler.ServePatchNotificationDelivery)
 	builtinRoutes["POST /admin/settings/notification-delivery/test-email"] = http.HandlerFunc(adminSettingsHandler.ServeTestEmail)
+	builtinRoutes["GET /admin/settings/notification-templates"] = http.HandlerFunc(adminSettingsHandler.ServeListNotificationTemplates)
+	builtinRoutes["GET /admin/settings/notification-templates/{type}/{channel}/{locale}"] = http.HandlerFunc(adminSettingsHandler.ServeGetNotificationTemplate)
+	builtinRoutes["PUT /admin/settings/notification-templates/{type}/{channel}/{locale}"] = http.HandlerFunc(adminSettingsHandler.ServePutNotificationTemplate)
+	builtinRoutes["DELETE /admin/settings/notification-templates/{type}/{channel}/{locale}"] = http.HandlerFunc(adminSettingsHandler.ServeDeleteNotificationTemplate)
+	builtinRoutes["POST /admin/settings/notification-templates/{type}/{channel}/{locale}/preview"] = http.HandlerFunc(adminSettingsHandler.ServePreviewNotificationTemplate)
 	connectorPrimaryHandler := connectorprimary.NewHandler(tenantResolver, authChecker, providerselect.NewStore(primaryPool), authAuditStore)
 	builtinRoutes["PATCH /admin/connectors/{name}/set-primary"] = http.HandlerFunc(connectorPrimaryHandler.ServeSetPrimary)
 	moduleInstallWorker := &moduleinstall.Worker{

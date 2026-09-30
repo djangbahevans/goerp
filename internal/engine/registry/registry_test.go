@@ -854,3 +854,21 @@ func TestBuildFieldSecRegistry_FromModules(t *testing.T) {
 		t.Fatalf("expected no rule for contacts.contact.ssn until SDK backlog #19 lands")
 	}
 }
+
+func TestBuildRouteTable_NotificationTemplateRoutesCaptureADottedType(t *testing.T) {
+	table, err := buildRouteTable(map[string]*module.LoadedModule{})
+	if err != nil {
+		t.Fatalf("buildRouteTable() error = %v", err)
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/admin/settings/notification-templates/sales.order_confirmed/email/fr-GH"},
+		{"PUT", "/admin/settings/notification-templates/sales.order_confirmed/email/fr-GH"},
+		{"DELETE", "/admin/settings/notification-templates/sales.order_confirmed/email/fr-GH"},
+		{"POST", "/admin/settings/notification-templates/sales.order_confirmed/email/fr-GH/preview"},
+	} {
+		_, params, result, _ := table.Lookup(c.method, c.path)
+		if result != route.RouteFound || params["type"] != "sales.order_confirmed" || params["channel"] != "email" || params["locale"] != "fr-GH" {
+			t.Errorf("Lookup(%s, %s) = %v %v, want the type, channel and locale captured", c.method, c.path, result, params)
+		}
+	}
+}

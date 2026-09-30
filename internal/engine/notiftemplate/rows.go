@@ -37,6 +37,14 @@ const (
 // Columns lists every Fields key a Row can carry.
 var Columns = []string{ColTitle, ColBody, ColActionURL, ColIcon, ColSubject, ColHTML, ColText, ColSMS, ColPushTitle, ColPushBody}
 
+// ChannelColumns lists, for each channel, the columns its rows carry.
+var ChannelColumns = map[string][]string{
+	"in_app": {ColTitle, ColBody, ColActionURL, ColIcon},
+	"email":  {ColSubject, ColHTML, ColText},
+	"sms":    {ColSMS},
+	"push":   {ColPushTitle, ColPushBody},
+}
+
 var (
 	inAppColumns = map[string]string{"title": ColTitle, "body": ColBody, "action_url": ColActionURL, "icon": ColIcon}
 	pushColumns  = map[string]string{"title": ColPushTitle, "body": ColPushBody}

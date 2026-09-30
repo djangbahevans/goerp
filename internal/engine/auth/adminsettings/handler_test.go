@@ -38,6 +38,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/notifconfig"
+	"github.com/djangbahevans/goerp/internal/engine/notifications"
 	"github.com/djangbahevans/goerp/internal/engine/notify"
 	"github.com/djangbahevans/goerp/internal/engine/permcache"
 	"github.com/djangbahevans/goerp/internal/engine/permission"
@@ -74,6 +75,7 @@ type env struct {
 	config   *tenantconfig.Store
 	modules  *registry.ModuleRegistry
 	notif    *notifconfig.Service
+	notifs   *notifications.Store
 }
 
 type fixtureTenant struct {
@@ -141,6 +143,7 @@ func newEnv(t *testing.T) *env {
 	modules := &registry.ModuleRegistry{}
 	rowKeys := &rowcrypt.RowKeySet{Active: rowcrypt.RowKey{KeyID: "test-key", Key: make([]byte, 32)}}
 	notif := notifconfig.NewService(tenantconfig.NewResolver(configStore, tenantStore, modules), configStore, rowKeys)
+	notifs := notifications.NewStore(conn)
 
 	return &env{
 		conn:     conn,
@@ -156,6 +159,7 @@ func newEnv(t *testing.T) *env {
 		config:   configStore,
 		modules:  modules,
 		notif:    notif,
+		notifs:   notifs,
 		handler: NewHandler(Deps{
 			Tenants:      tenantresolve.NewResolver(tenantStore, cacheClient, billingStore),
 			Auth:         checker,
@@ -177,6 +181,10 @@ func newEnv(t *testing.T) *env {
 			Registry:      modules,
 			Users:         userStore,
 			TestEmail:     &notify.EmailTester{Registry: modules, Tenants: tenantStore, AppBaseURL: "http://localhost:5173", PlatformDomain: "goerp.test"},
+
+			Templates:      notifs,
+			AppBaseURL:     "http://localhost:5173",
+			PlatformDomain: "goerp.test",
 		}),
 	}
 }
