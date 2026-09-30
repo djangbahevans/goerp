@@ -14,15 +14,16 @@ import {
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import {
+  type ActivityType,
   type RecordReader,
   type ScheduledActivity,
   type UpdateScheduledActivityInput,
+  useActivityTypes,
   useConfirm,
   useScheduledActivities,
 } from "@goerp/sdk/react";
-import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, type SubmitEvent, useEffect, useId, useRef, useState } from "react";
 import { dueLabel, todayIn } from "../../activities/activity-dates.js";
-import { activityTypeDisplay, BUILT_IN_ACTIVITY_TYPES } from "../../activities/activity-types.js";
 import { useActivityTimezone } from "../../activities/use-due-activity-count.js";
 import { RecordReaderPicker } from "./record-reader-picker.js";
 
@@ -49,6 +50,7 @@ type FocusTarget = { kind: "row"; id: string } | { kind: "heading" } | { kind: "
 
 export function PlannedActivities({ model, recordId, announce }: PlannedActivitiesProps): ReactNode {
   const activities = useScheduledActivities(model, recordId);
+  const activityTypes = useActivityTypes();
   const { confirm } = useConfirm();
   const viewer = useAuth().user;
   const today = todayIn(useActivityTimezone());
@@ -158,6 +160,7 @@ export function PlannedActivities({ model, recordId, announce }: PlannedActiviti
             model={model}
             recordId={recordId}
             activity={activity}
+            activityTypes={activityTypes}
             today={today}
             viewerId={viewer?.id}
             viewerEmail={viewer?.email}
@@ -180,6 +183,7 @@ export function PlannedActivities({ model, recordId, announce }: PlannedActiviti
   const viewerAsReader: RecordReader | null = viewer
     ? { id: viewer.id, name: viewer.name, email: viewer.email, avatarUrl: viewer.avatarUrl }
     : null;
+  const firstActiveType = activityTypes.types.find((t) => !t.archived);
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
@@ -211,10 +215,12 @@ export function PlannedActivities({ model, recordId, announce }: PlannedActiviti
         <ActivityForm
           model={model}
           recordId={recordId}
+          activityTypes={activityTypes}
+          today={today}
           initial={{
-            type: BUILT_IN_ACTIVITY_TYPES[0]?.key ?? "todo",
-            dueDate: today,
-            summary: "",
+            type: firstActiveType?.key ?? "",
+            dueDate: dueDateFromDefault(today, firstActiveType?.defaultDueDays),
+            summary: firstActiveType?.defaultSummary ?? "",
             assignee: viewerAsReader,
             note: "",
           }}
@@ -249,11 +255,28 @@ export function PlannedActivities({ model, recordId, announce }: PlannedActiviti
   );
 }
 
+// The bits of useActivityTypes() this file threads through props.
+interface ActivityTypesLookup {
+  types: ActivityType[];
+  getType: (key: string) => ActivityType | undefined;
+}
+
+// DateField reads and writes date-only values as UTC midnight; today and
+// dueDays are both in the user's own timezone (scheduled-activities.md §9
+// "Using a type").
+function dueDateFromDefault(today: string, dueDays: number | null | undefined): string {
+  if (dueDays === undefined || dueDays === null) return today;
+  const date = new Date(`${today}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + dueDays);
+  return date.toISOString().slice(0, 10);
+}
+
 interface ActivityRowProps {
   ref: (item: HTMLLIElement | null) => void;
   model: string;
   recordId: string;
   activity: ScheduledActivity;
+  activityTypes: ActivityTypesLookup;
   today: string;
   viewerId: string | undefined;
   viewerEmail: string | undefined;
@@ -270,6 +293,7 @@ function ActivityRow({
   model,
   recordId,
   activity,
+  activityTypes,
   today,
   viewerId,
   viewerEmail,
@@ -293,7 +317,7 @@ function ActivityRow({
     setReturnFocus(null);
   }, [mode, returnFocus]);
 
-  const type = activityTypeDisplay(activity.type);
+  const type = activityTypes.getType(activity.type) ?? { label: activity.type, icon: "calendar-check" };
   const participant =
     viewerId !== undefined && (viewerId === activity.createdBy.id || viewerId === activity.assignee.id);
   const overdue = activity.dueDate < today;
@@ -339,6 +363,8 @@ function ActivityRow({
         <ActivityForm
           model={model}
           recordId={recordId}
+          activityTypes={activityTypes}
+          today={today}
           initial={{
             type: activity.type,
             dueDate: activity.dueDate,
@@ -498,6 +524,8 @@ interface ActivityFormValues {
 interface ActivityFormProps {
   model: string;
   recordId: string;
+  activityTypes: ActivityTypesLookup;
+  today: string;
   initial: ActivityFormValues;
   submitLabel: string;
   autoFocusField: "type" | "summary";
@@ -515,6 +543,8 @@ function toDateFieldValue(date: string): Date | undefined {
 function ActivityForm({
   model,
   recordId,
+  activityTypes,
+  today,
   initial,
   submitLabel,
   autoFocusField,
@@ -527,6 +557,10 @@ function ActivityForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
+  // Once the admin types by hand into summary or due date, picking a
+  // different type stops overwriting that field (scheduled-activities.md
+  // §9 "Using a type").
+  const touchedRef = useRef<Set<"summary" | "dueDate">>(new Set());
 
   // A FieldWrapper gives its control the wrapper's own id, so fields are found by their wrapping element.
   function focusField(name: keyof ActivityFormValues): void {
@@ -541,9 +575,29 @@ function ActivityForm({
   function set<K extends keyof ActivityFormValues>(key: K, value: ActivityFormValues[K]): void {
     setValues((current) => ({ ...current, [key]: value }));
     setFieldErrors((current) => ({ ...current, [key]: undefined }));
+    if (key === "summary" || key === "dueDate") touchedRef.current.add(key);
   }
 
-  async function submit(event: FormEvent): Promise<void> {
+  function setType(type: string): void {
+    const defaults = activityTypes.getType(type);
+    setValues((current) => ({
+      ...current,
+      type,
+      summary:
+        !touchedRef.current.has("summary") && defaults?.defaultSummary ? defaults.defaultSummary : current.summary,
+      dueDate:
+        !touchedRef.current.has("dueDate") && defaults?.defaultDueDays !== undefined && defaults.defaultDueDays !== null
+          ? dueDateFromDefault(today, defaults.defaultDueDays)
+          : current.dueDate,
+    }));
+    setFieldErrors(({ type: _type, ...rest }) => rest);
+  }
+
+  // Active types plus the form's current value, so an activity keeping an
+  // already-archived type doesn't vanish from its own Select.
+  const typeOptions = activityTypes.types.filter((t) => !t.archived || t.key === values.type);
+
+  async function submit(event: SubmitEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (submitting) return;
     const summary = values.summary.trim();
@@ -580,9 +634,9 @@ function ActivityForm({
         <div data-field="type">
           <FieldWrapper label="Type" required error={fieldErrors.type}>
             <Select
-              options={BUILT_IN_ACTIVITY_TYPES.map((t) => ({ value: t.key, label: t.label, icon: t.icon }))}
+              options={typeOptions.map((t) => ({ value: t.key, label: t.label, icon: t.icon }))}
               value={values.type}
-              onChange={(value) => set("type", value as string)}
+              onChange={(value) => setType(value as string)}
             />
           </FieldWrapper>
         </div>

@@ -183,6 +183,20 @@ function fakeBackend(
     };
     const fake = apiClient as unknown as Record<string, unknown>;
     fake.get = async (path: string, config?: { params?: { cursor?: string; q?: string; exclude_self?: boolean } }) => {
+      if (path === "/_meta/activity-types") {
+        return {
+          data: [
+            {
+              key: "call",
+              label: "Call",
+              icon: "phone",
+              default_summary: null,
+              default_due_days: null,
+              archived: false,
+            },
+          ],
+        };
+      }
       if (path === "/_meta/scheduled-activities") return { data: plannedRows };
       if (path === "/_meta/record-readers") {
         const q = (config?.params?.q ?? "").toLowerCase();

@@ -1,6 +1,11 @@
 import { AuthContext, type AuthContextValue, createPermissionContextValue, PermissionContext } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
-import type { ScheduledActivity, UseRecordReadersResult, UseScheduledActivitiesResult } from "@goerp/sdk/react";
+import type {
+  ActivityType,
+  ScheduledActivity,
+  UseRecordReadersResult,
+  UseScheduledActivitiesResult,
+} from "@goerp/sdk/react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addDays, todayIn } from "../../activities/activity-dates.js";
@@ -11,6 +16,12 @@ const { useScheduledActivitiesMock, useRecordReadersMock, confirmMock } = vi.hoi
   useRecordReadersMock: vi.fn(),
   confirmMock: vi.fn(async () => true),
 }));
+const ACTIVITY_TYPES: ActivityType[] = [
+  { key: "call", label: "Call", icon: "phone", defaultSummary: null, defaultDueDays: null, archived: false },
+  { key: "meeting", label: "Meeting", icon: "users", defaultSummary: null, defaultDueDays: null, archived: false },
+  { key: "email", label: "Email", icon: "mail", defaultSummary: null, defaultDueDays: null, archived: false },
+  { key: "todo", label: "To-do", icon: "square-check", defaultSummary: null, defaultDueDays: null, archived: false },
+];
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@goerp/sdk/react")>();
   return {
@@ -18,6 +29,12 @@ vi.mock("@goerp/sdk/react", async (importOriginal) => {
     useScheduledActivities: useScheduledActivitiesMock,
     useRecordReaders: useRecordReadersMock,
     useConfirm: () => ({ confirm: confirmMock }),
+    useActivityTypes: () => ({
+      types: ACTIVITY_TYPES,
+      isLoading: false,
+      isError: false,
+      getType: (key: string) => ACTIVITY_TYPES.find((t) => t.key === key),
+    }),
   };
 });
 

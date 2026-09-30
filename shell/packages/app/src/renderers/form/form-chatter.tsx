@@ -11,7 +11,13 @@ import {
   TimelineItem,
 } from "@goerp/sdk/components";
 import type { ActivityEntry } from "@goerp/sdk/react";
-import { useConfirm, useRecordActivity, useRecordFollowers, useRelationLabels } from "@goerp/sdk/react";
+import {
+  useActivityTypes,
+  useConfirm,
+  useRecordActivity,
+  useRecordFollowers,
+  useRelationLabels,
+} from "@goerp/sdk/react";
 import type { FieldDef } from "@goerp/sdk/schema";
 import { modelRegistry } from "@goerp/sdk/schema";
 import { useQuery } from "@tanstack/react-query";
@@ -50,7 +56,8 @@ function useChangeLabelContext(view: FormViewDeclaration, entries: ActivityEntry
     [model],
   );
   const relationLabels = useRelationLabels(changeRelationSpecs(entries, formFields, modelFields));
-  return { formFields, modelFields, relationLabels };
+  const { getType } = useActivityTypes();
+  return { formFields, modelFields, relationLabels, getActivityType: getType };
 }
 
 function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId: string }) {
