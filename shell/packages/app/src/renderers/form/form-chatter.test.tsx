@@ -36,6 +36,15 @@ vi.mock("@goerp/sdk/react", async (importOriginal) => {
     useRecordReaders: useRecordReadersMock,
     useConfirm: () => ({ confirm: confirmMock }),
     useRelationLabels: () => new Map([["contacts.contact|", { c2: "Acme Corp" }]]),
+    useActivityTypes: () => ({
+      types: [],
+      isLoading: false,
+      isError: false,
+      getType: (key: string) =>
+        key === "call"
+          ? { key: "call", label: "Call", icon: "phone", defaultSummary: null, defaultDueDays: null, archived: false }
+          : undefined,
+    }),
     useScheduledActivities: () => ({
       activities: [],
       isLoading: false,
@@ -272,7 +281,7 @@ describe("FormChatter", () => {
     ).toBeTruthy();
     expect(screen.getByText("Customer asked to move delivery to Friday.")).toBeTruthy();
     expect(screen.getByText("Comment deleted")).toBeTruthy();
-    expect(screen.getByText("Completed call: Confirm delivery")).toBeTruthy();
+    expect(screen.getByText("Call completed: Confirm delivery")).toBeTruthy();
     expect(screen.getByText("Done")).toBeTruthy();
     expect(screen.getByText("Created this record")).toBeTruthy();
   });

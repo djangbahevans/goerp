@@ -10,10 +10,9 @@ import {
 } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
-import { type MyScheduledActivity, useMyActivities } from "@goerp/sdk/react";
+import { type ActivityType, type MyScheduledActivity, useActivityTypes, useMyActivities } from "@goerp/sdk/react";
 import { type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { DUE_GROUP_LABELS, dueLabel, groupByDue, todayIn } from "./activity-dates.js";
-import { activityTypeDisplay } from "./activity-types.js";
 import { RecordFormLink } from "./record-form-link.js";
 import { MY_ACTIVITIES_PAGE_SIZE, useActivityTimezone } from "./use-due-activity-count.js";
 
@@ -31,6 +30,7 @@ function markDoneErrorMessage(error: unknown): string {
 // Upcoming by their own timezone, each completable inline.
 export function MyActivitiesPage(): ReactNode {
   const timeZone = useActivityTimezone();
+  const { getType } = useActivityTypes();
   const { activities, isLoading, isError, hasMore, fetchMore, isFetchingNextPage, refetch, markDone, pendingIds } =
     useMyActivities({ limit: MY_ACTIVITIES_PAGE_SIZE });
   // Completed rows leave at once rather than waiting for the refetch.
@@ -82,6 +82,7 @@ export function MyActivitiesPage(): ReactNode {
               <ActivityRow
                 key={activity.id}
                 activity={activity}
+                type={getType(activity.type)}
                 today={today}
                 pending={pendingIds.includes(activity.id)}
                 onComplete={(feedback) => complete(activity, feedback)}
@@ -124,18 +125,20 @@ function ActivityGroup({ title, children }: { title: string; children: ReactNode
 
 function ActivityRow({
   activity,
+  type: resolvedType,
   today,
   pending,
   onComplete,
 }: {
   activity: MyScheduledActivity;
+  type: ActivityType | undefined;
   today: string;
   pending: boolean;
   onComplete: (feedback: string) => Promise<boolean>;
 }): ReactNode {
   const [completing, setCompleting] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const type = activityTypeDisplay(activity.type);
+  const type = resolvedType ?? { label: activity.type, icon: "calendar-check" };
   const overdue = activity.dueDate < today;
   const recordLabel = activity.recordName ?? activity.recordId;
   const due = dueLabel(activity.dueDate, today);

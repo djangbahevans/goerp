@@ -1,18 +1,24 @@
-import type { ActivityEntry, ActivityFieldChange } from "@goerp/sdk/react";
+import type { ActivityEntry, ActivityFieldChange, ActivityType } from "@goerp/sdk/react";
 import type { FieldDef } from "@goerp/sdk/schema";
 import { describe, expect, it } from "vitest";
 import {
-  activityTypeDisplay,
   type ChangeLabelContext,
   changeRelationSpecs,
   collectFormFields,
+  entryDisplay,
   fieldLabel,
   formatChangeValue,
 } from "./chatter-entries.js";
 import type { FormField, FormViewDeclaration } from "./form-view-types.js";
 
 function context(overrides: Partial<ChangeLabelContext> = {}): ChangeLabelContext {
-  return { formFields: new Map(), modelFields: new Map(), relationLabels: new Map(), ...overrides };
+  return {
+    formFields: new Map(),
+    modelFields: new Map(),
+    relationLabels: new Map(),
+    getActivityType: () => undefined,
+    ...overrides,
+  };
 }
 
 function modelFields(...fields: FieldDef[]): Map<string, FieldDef> {
@@ -132,9 +138,38 @@ describe("changeRelationSpecs", () => {
   });
 });
 
-describe("activityTypeDisplay", () => {
-  it("maps each scheduled activity type to its icon and label", () => {
-    expect(activityTypeDisplay("todo")).toEqual({ icon: "square-check", label: "to-do" });
-    expect(activityTypeDisplay("unknown")).toEqual({ icon: "circle-check", label: "unknown" });
+describe("entryDisplay activity_done", () => {
+  const activity: ActivityEntry & { kind: "activity_done" } = {
+    id: "e1",
+    kind: "activity_done",
+    author: { id: "u1", name: "Ama", avatarUrl: null },
+    createdAt: "2024-01-01T00:00:00Z",
+    activity: {
+      activityId: "a1",
+      type: "site_visit",
+      summary: "Check the roof",
+      dueDate: "2024-01-05",
+      feedback: null,
+    },
+  };
+
+  it("leads with the resolved type's label and icon", () => {
+    const type: ActivityType = {
+      key: "site_visit",
+      label: "Site visit",
+      icon: "map-pin",
+      defaultSummary: null,
+      defaultDueDays: null,
+      archived: false,
+    };
+    const display = entryDisplay(activity, context({ getActivityType: () => type }));
+    expect(display.icon).toBe("map-pin");
+    expect(display.title).toBe("Site visit completed: Check the roof");
+  });
+
+  it("falls back to a generic icon and title when the type hasn't loaded or isn't found", () => {
+    const display = entryDisplay(activity, context());
+    expect(display.icon).toBe("calendar-check");
+    expect(display.title).toBe("Activity completed: Check the roof");
   });
 });

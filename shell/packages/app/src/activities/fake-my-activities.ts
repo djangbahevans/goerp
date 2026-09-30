@@ -53,7 +53,24 @@ export function installFakeMyActivities(seeds: FakeActivitySeed[], client = apiC
   let nextDoneError: AppError | null = null;
   const original = { get: client.get, post: client.post };
 
+  // The four built-in types (scheduled-activities.md §9 "Built-in types"),
+  // resolved — enough for useActivityTypes() to label/icon the fake rows.
+  const activityTypes = [
+    { key: "call", label: "Call", icon: "phone", default_summary: null, default_due_days: null, archived: false },
+    { key: "meeting", label: "Meeting", icon: "users", default_summary: null, default_due_days: null, archived: false },
+    { key: "email", label: "Email", icon: "mail", default_summary: null, default_due_days: null, archived: false },
+    {
+      key: "todo",
+      label: "To-do",
+      icon: "square-check",
+      default_summary: null,
+      default_due_days: null,
+      archived: false,
+    },
+  ];
+
   client.get = (async (path: string, options?: { params?: Record<string, unknown> }) => {
+    if (path === "/_meta/activity-types") return { data: activityTypes };
     if (!path.endsWith("/mine")) {
       throw new AppError({ code: "not_found", message: `no fake for GET ${path}`, httpStatus: 404 });
     }

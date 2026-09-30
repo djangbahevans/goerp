@@ -1,5 +1,5 @@
 import { formatFieldValue } from "@goerp/sdk/components";
-import type { ActivityEntry, ActivityFieldChange, RelationBatchSpec } from "@goerp/sdk/react";
+import type { ActivityEntry, ActivityFieldChange, ActivityType, RelationBatchSpec } from "@goerp/sdk/react";
 import type { FieldDef } from "@goerp/sdk/schema";
 import type { ReactNode } from "react";
 import { titleCaseWords } from "../../chrome/title-case-words.js";
@@ -7,18 +7,6 @@ import { renderCommentBody } from "./chatter-mentions.js";
 import type { FormField, FormViewDeclaration } from "./form-view-types.js";
 
 const EMPTY_VALUE = "—";
-
-// scheduled-activities.md §3's fixed activity types, per form-chatter.md.
-const ACTIVITY_TYPES: Record<string, { icon: string; label: string }> = {
-  call: { icon: "phone", label: "call" },
-  meeting: { icon: "users", label: "meeting" },
-  email: { icon: "mail", label: "email" },
-  todo: { icon: "square-check", label: "to-do" },
-};
-
-export function activityTypeDisplay(type: string): { icon: string; label: string } {
-  return ACTIVITY_TYPES[type] ?? { icon: "circle-check", label: type };
-}
 
 // Every field the form declares, across its sections and its "fields" tabs.
 export function collectFormFields(view: FormViewDeclaration): Map<string, FormField> {
@@ -41,6 +29,7 @@ export interface ChangeLabelContext {
   modelFields: Map<string, FieldDef>;
   // Keyed by relationSpecKey().
   relationLabels: Map<string, Record<string, string>>;
+  getActivityType: (key: string) => ActivityType | undefined;
 }
 
 function relationSpecKey(relatedModel: string, labelField: string | undefined): string {
@@ -157,10 +146,12 @@ export function entryDisplay(entry: ActivityEntry, context: ChangeLabelContext, 
         ),
       };
     case "activity_done": {
-      const { icon, label } = activityTypeDisplay(entry.activity.type);
+      const type = context.getActivityType(entry.activity.type);
       return {
-        icon,
-        title: `Completed ${label}: ${entry.activity.summary}${bySystem}`,
+        icon: type?.icon ?? "calendar-check",
+        title: type
+          ? `${type.label} completed: ${entry.activity.summary}${bySystem}`
+          : `Activity completed: ${entry.activity.summary}${bySystem}`,
         body: (
           <div className="text-sm text-text-secondary">
             <p>Due {formatFieldValue(entry.activity.dueDate, "date", undefined, EMPTY_VALUE)}</p>
