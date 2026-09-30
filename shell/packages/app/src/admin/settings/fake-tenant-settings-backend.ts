@@ -76,7 +76,29 @@ export function defaultDeliveryWire(): Json {
     },
     sms: { sender_id: "" },
     defaults: {},
-    types: [],
+    types: [
+      {
+        type: "engine.activity_assigned",
+        module: "engine",
+        label: "Activity assigned to you",
+        default_channels: ["in_app", "email"],
+        available_channels: ["in_app", "email", "push"],
+      },
+      {
+        type: "sales.order_confirmed",
+        module: "sales",
+        label: "Order confirmed",
+        default_channels: ["in_app", "email"],
+        available_channels: ["in_app", "email", "sms", "push"],
+      },
+      {
+        type: "sales.quote_expiring",
+        module: "sales",
+        label: "Quote expiring",
+        default_channels: ["in_app"],
+        available_channels: ["in_app", "email"],
+      },
+    ],
     locked: [],
   };
 }
@@ -233,10 +255,22 @@ export function installFakeTenantSettingsBackend(options: FakeTenantSettingsOpti
           details: { field: locked },
         });
       }
+      const sender = isObject(patch.sms) ? patch.sms.sender_id : undefined;
+      if (typeof sender === "string" && sender !== "" && !/^([A-Za-z0-9]{1,11}|\+[1-9][0-9]{1,14})$/.test(sender)) {
+        throw invalid("sms.sender_id", "a sender ID is 1 to 11 letters and digits, or a phone number in E.164 form");
+      }
       const secrets = { ...state.secrets };
       if (isObject(patch.email)) takeSecrets(patch.email, secrets);
       state.secrets = secrets;
+      // defaults merge by type, and null returns a type to its manifest defaults.
+      const defaults = { ...(state.delivery.defaults as Json) };
+      for (const [type, channels] of Object.entries(isObject(patch.defaults) ? patch.defaults : {})) {
+        if (channels === null) delete defaults[type];
+        else defaults[type] = channels;
+      }
+      delete patch.defaults;
       merge(state.delivery, patch);
+      state.delivery.defaults = defaults;
       return deliveryResponse();
     }
     return (original.patch as (p: string, b: unknown) => Promise<unknown>).call(apiClient, path, body);

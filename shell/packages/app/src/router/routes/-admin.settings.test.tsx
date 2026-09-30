@@ -93,7 +93,7 @@ afterEach(() => {
 });
 
 function section(title: string): HTMLElement {
-  return screen.getByRole("heading", { name: title }).closest("section") as HTMLElement;
+  return screen.getByRole("heading", { name: title, level: 2 }).closest("section") as HTMLElement;
 }
 
 function input(scope: HTMLElement, label: string | RegExp): HTMLInputElement {
@@ -266,6 +266,100 @@ describe("/admin/settings", () => {
 
     expect((within(email).getByLabelText("Resend") as HTMLInputElement).disabled).toBe(true);
     expect(within(email).getByText("Set by your platform operator.")).toBeTruthy();
+  });
+
+  it("turns a channel off for everyone, apart from the per-type defaults it overrides", async () => {
+    await renderSettings();
+    const delivery = section("Notification delivery");
+    expect(within(delivery).getByText(/These are not defaults\./)).toBeTruthy();
+    const smsDefault = within(delivery).getByLabelText("SMS for Order confirmed") as HTMLInputElement;
+    expect(smsDefault.disabled).toBe(false);
+
+    fireEvent.click(within(delivery).getByRole("switch", { name: "SMS" }));
+
+    expect(smsDefault.disabled).toBe(true);
+    expect(within(delivery).getByText(/SMS is off above, so its defaults have no effect\./)).toBeTruthy();
+    save(delivery);
+    await waitFor(() =>
+      expect(lastRequest("PATCH", "/admin/settings/notification-delivery")?.body).toEqual({
+        channels: { sms_enabled: false },
+      }),
+    );
+  });
+
+  it("sets a type's default channels and resets it to the manifest's", async () => {
+    await renderSettings();
+    let delivery = section("Notification delivery");
+    expect(within(delivery).queryByRole("button", { name: "Reset Order confirmed" })).toBeNull();
+
+    fireEvent.click(within(delivery).getByLabelText("Email for Order confirmed"));
+    fireEvent.click(within(delivery).getByLabelText("SMS for Order confirmed"));
+    save(delivery);
+    await waitFor(() =>
+      expect(lastRequest("PATCH", "/admin/settings/notification-delivery")?.body).toEqual({
+        defaults: { "sales.order_confirmed": ["in_app", "sms"] },
+      }),
+    );
+
+    delivery = await waitFor(() => {
+      const current = section("Notification delivery");
+      within(current).getByRole("button", { name: "Reset Order confirmed" });
+      return current;
+    });
+    fireEvent.click(within(delivery).getByRole("button", { name: "Reset Order confirmed" }));
+    expect((within(delivery).getByLabelText("Email for Order confirmed") as HTMLInputElement).checked).toBe(true);
+    save(delivery);
+    await waitFor(() =>
+      expect(lastRequest("PATCH", "/admin/settings/notification-delivery")?.body).toEqual({
+        defaults: { "sales.order_confirmed": null },
+      }),
+    );
+    expect(backend?.state().delivery.defaults).toEqual({});
+  });
+
+  it("treats channels changed back to the manifest's as no default", async () => {
+    await renderSettings();
+    const delivery = section("Notification delivery");
+    const email = within(delivery).getByLabelText("Email for Order confirmed");
+
+    fireEvent.click(email);
+    fireEvent.click(email);
+
+    expect(within(delivery).queryByRole("button", { name: "Reset Order confirmed" })).toBeNull();
+    expect((within(delivery).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("lists the engine's own types first, as General, then each module's", async () => {
+    await renderSettings();
+    const delivery = section("Notification delivery");
+
+    const rows = within(within(delivery).getByRole("table"))
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+    expect(rows).toEqual(["Activity assigned to youGeneral", "Order confirmedsales", "Quote expiringsales"]);
+    expect(within(delivery).queryByLabelText("SMS for Activity assigned to you")).toBeNull();
+  });
+
+  it("shows a channel switch the platform operator set as read-only", async () => {
+    await renderSettings({ delivery: deliveryWith({}, ["channels.sms_enabled", "defaults"]) });
+    const delivery = section("Notification delivery");
+
+    expect((within(delivery).getByRole("switch", { name: "SMS" }) as HTMLInputElement).disabled).toBe(true);
+    expect((within(delivery).getByLabelText("Email for Order confirmed") as HTMLInputElement).disabled).toBe(true);
+    expect(within(delivery).getAllByText("Set by your platform operator.")).toHaveLength(2);
+  });
+
+  it("shows a rejected SMS sender ID under its field", async () => {
+    await renderSettings();
+    const delivery = section("Notification delivery");
+
+    type(delivery, "SMS sender ID", "Acme Corporation Ltd");
+    save(delivery);
+
+    expect(
+      await within(delivery).findByText("a sender ID is 1 to 11 letters and digits, or a phone number in E.164 form"),
+    ).toBeTruthy();
   });
 
   it("shows email verification locked by the platform policy", async () => {
