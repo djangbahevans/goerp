@@ -1,4 +1,4 @@
-import { ActionButton, SectionCard } from "@goerp/sdk/components";
+import { ActionButton, cn, SectionCard } from "@goerp/sdk/components";
 import { AppError } from "@goerp/sdk/error";
 import { toast } from "@goerp/sdk/notifications";
 import type { ReactNode } from "react";
@@ -38,6 +38,9 @@ export interface SettingsSectionProps {
   onSave: () => void;
   // Shown before Save, such as "Send test email".
   actions?: ReactNode;
+  // Lets content such as a table use the card's full width; form fields
+  // otherwise keep to a readable measure.
+  wide?: boolean | undefined;
   children: ReactNode;
 }
 
@@ -49,12 +52,13 @@ export function SettingsSection({
   saving,
   onSave,
   actions,
+  wide = false,
   children,
 }: SettingsSectionProps): ReactNode {
   return (
     <SectionCard title={title}>
       {description && <p className="mt-1 text-sm text-text-secondary">{description}</p>}
-      <div className="mt-4 flex max-w-xl flex-col gap-5">{children}</div>
+      <div className={cn("mt-4 flex flex-col gap-5", !wide && "max-w-xl")}>{children}</div>
       <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-border border-t pt-4">
         {actions}
         <ActionButton onClick={onSave} loading={saving} disabled={!dirty || saving}>

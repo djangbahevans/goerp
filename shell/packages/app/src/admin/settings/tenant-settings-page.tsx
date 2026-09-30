@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { EmailSection } from "./email-section.js";
 import { GeneralSection } from "./general-section.js";
 import { LocalisationSection } from "./localisation-section.js";
+import { NotificationDeliverySection } from "./notification-delivery-section.js";
 import { SecuritySection } from "./security-section.js";
 import { useNotificationDelivery, useTenantSettings } from "./tenant-settings-api.js";
 
@@ -25,7 +26,10 @@ export function TenantSettingsPage(): ReactNode {
 
   return (
     <PageLayout>
-      <PageHeader title="Settings" subtitle="Your company's profile, email delivery, security and localisation." />
+      <PageHeader
+        title="Settings"
+        subtitle="Your company's profile, email and notification delivery, security and localisation."
+      />
       {settings.isError ? (
         <LoadError what="your settings" onRetry={() => void settings.refetch()} />
       ) : !settings.data ? (
@@ -38,19 +42,34 @@ export function TenantSettingsPage(): ReactNode {
             availableLocales={settings.data.localisation.availableLocales}
           />
           {delivery.isError ? (
-            <SectionCard title="Email">
+            <SectionCard title="Email and notification delivery">
               <div className="mt-3">
-                <LoadError what="your email settings" onRetry={() => void delivery.refetch()} />
+                <LoadError
+                  what="your email and notification delivery settings"
+                  onRetry={() => void delivery.refetch()}
+                />
               </div>
             </SectionCard>
           ) : !delivery.data ? (
             <Skeleton type="card" />
           ) : (
-            <EmailSection
-              key={JSON.stringify([delivery.data.email, delivery.data.locked])}
-              saved={delivery.data.email}
-              locked={delivery.data.locked}
-            />
+            <>
+              <EmailSection
+                key={JSON.stringify([delivery.data.email, delivery.data.locked])}
+                saved={delivery.data.email}
+                locked={delivery.data.locked}
+              />
+              <NotificationDeliverySection
+                key={JSON.stringify([
+                  delivery.data.channels,
+                  delivery.data.sms,
+                  delivery.data.defaults,
+                  delivery.data.types,
+                  delivery.data.locked,
+                ])}
+                saved={delivery.data}
+              />
+            </>
           )}
           <SecuritySection key={JSON.stringify(settings.data.security)} saved={settings.data.security} />
           <LocalisationSection

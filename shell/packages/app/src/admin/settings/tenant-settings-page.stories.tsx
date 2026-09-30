@@ -77,9 +77,25 @@ export const RejectedField: Story = {
     const website = await canvas.findByLabelText("Website");
     await userEvent.clear(website);
     await userEvent.type(website, "ftp://acme.example");
-    const general = canvas.getByRole("heading", { name: "General" }).closest("section") as HTMLElement;
+    const general = canvas.getByRole("heading", { name: "General", level: 2 }).closest("section") as HTMLElement;
     await userEvent.click(within(general).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(canvas.getByText("a website is an http or https URL")).toBeInTheDocument());
+  },
+};
+
+const customisedDelivery = defaultDeliveryWire();
+customisedDelivery.channels = { email_enabled: true, sms_enabled: false, push_enabled: true };
+customisedDelivery.sms = { sender_id: "AcmeCorp" };
+customisedDelivery.defaults = { "sales.order_confirmed": ["in_app", "sms"] };
+customisedDelivery.locked = ["channels.sms_enabled"];
+
+export const NotificationDefaults: Story = {
+  name: "SMS off by the operator, one customised default",
+  beforeEach: fakeBackend({ delivery: customisedDelivery }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getByRole("button", { name: "Reset Order confirmed" })).toBeInTheDocument());
+    expect(canvas.getByText(/SMS is off above/)).toBeInTheDocument();
   },
 };
 
