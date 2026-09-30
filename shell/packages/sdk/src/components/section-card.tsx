@@ -35,7 +35,7 @@ export function SectionCard({
               }}
               aria-expanded={!collapsed}
               aria-controls={contentId}
-              className="rounded-control p-1 text-text-secondary transition-colors duration-(--duration-fast) ease-out hover:text-text focus-visible:outline-none focus-visible:shadow-focus motion-reduce:transition-none"
+              className="rounded-control p-1 text-text-secondary transition-colors duration-(--duration-fast) ease-out hover:text-text focus-visible:shadow-focus focus-visible:outline-none motion-reduce:transition-none"
             >
               {collapsed ? "Expand" : "Collapse"}
             </button>
@@ -54,7 +54,7 @@ export function SectionCard({
         id={contentId}
         hidden={collapsed}
         className={cn(
-          "mt-3 grid grid-rows-[1fr] transition-[grid-template-rows,display] transition-discrete duration-(--duration-base) ease-out [[hidden]]:grid-rows-[0fr] [[hidden]]:ease-in motion-reduce:transition-none",
+          "mt-3 grid grid-rows-[1fr] transition-[grid-template-rows,display] transition-discrete duration-(--duration-base) ease-out motion-reduce:transition-none [[hidden]]:grid-rows-[0fr] [[hidden]]:ease-in",
           toggled && "starting:grid-rows-[0fr]",
         )}
       >

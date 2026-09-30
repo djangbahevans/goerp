@@ -61,7 +61,7 @@ export function TimelineItem({
       >
         {icon}
       </span>
-      <span data-timeline-line aria-hidden="true" className="absolute bottom-0 left-4 top-8 w-px bg-border" />
+      <span data-timeline-line aria-hidden="true" className="absolute top-8 bottom-0 left-4 w-px bg-border" />
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <p className="text-sm text-text">{title}</p>

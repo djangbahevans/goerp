@@ -135,7 +135,7 @@ export function AlertDialog({
                   aria-hidden="true"
                 />
               )}
-              <AlertDialogPrimitive.Title className="text-lg font-semibold text-text">
+              <AlertDialogPrimitive.Title className="font-semibold text-lg text-text">
                 {title}
               </AlertDialogPrimitive.Title>
             </div>
@@ -185,7 +185,7 @@ export function AlertDialog({
                 </label>
               )}
             </div>
-            <div className="flex justify-end gap-2 px-6 pb-6 pt-2">
+            <div className="flex justify-end gap-2 px-6 pt-2 pb-6">
               <AlertDialogPrimitive.Cancel asChild>
                 <Button variant="ghost">{cancelLabel}</Button>
               </AlertDialogPrimitive.Cancel>

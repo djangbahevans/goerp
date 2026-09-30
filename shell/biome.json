@@ -19,7 +19,8 @@
     "rules": {
       "preset": "recommended",
       "nursery": {
-        "useReactCompiler": "error"
+        "useReactCompiler": "error",
+        "useSortedClasses": "on"
       }
     }
   },

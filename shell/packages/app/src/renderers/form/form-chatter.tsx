@@ -204,7 +204,7 @@ function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId:
                   <>
                     {display.body}
                     {deleteErrors.has(entry.id) && (
-                      <p role="alert" className="mt-1 text-sm text-danger">
+                      <p role="alert" className="mt-1 text-danger text-sm">
                         Couldn't delete this comment.
                       </p>
                     )}
@@ -215,7 +215,7 @@ function ChatterPanel({ view, recordId }: { view: FormViewDeclaration; recordId:
           })}
         </Timeline>
         {isError && (
-          <p role="alert" className="mt-4 text-center text-sm text-danger">
+          <p role="alert" className="mt-4 text-center text-danger text-sm">
             {loadMoreFailed ? "Couldn't load more activity." : "Couldn't refresh activity."}
           </p>
         )}

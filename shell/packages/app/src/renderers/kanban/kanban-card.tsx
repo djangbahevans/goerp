@@ -102,7 +102,7 @@ export function KanbanCard({
       aria-grabbed={isDragging}
       aria-label={card.accessibleTitle}
       className={`kanban-card rounded-control border bg-surface p-3 text-left shadow-sm transition-shadow duration-(--duration-fast) ease-out focus-visible:shadow-focus focus-visible:outline-none ${
-        isDragging ? "border-dashed border-border" : "border-border hover:border-border-strong hover:shadow-md"
+        isDragging ? "border-border border-dashed" : "border-border hover:border-border-strong hover:shadow-md"
       }`}
     >
       {card.render ? (

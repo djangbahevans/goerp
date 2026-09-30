@@ -86,7 +86,7 @@ export function NotificationSheet({ open, onClose }: NotificationSheetProps): Re
             <NotificationItem key={notification.id} notification={notification} onOpen={handleOpen} />
           ))}
           {isFetchingNextPage && (
-            <div className="flex justify-center p-3 text-text-secondary text-sm" aria-live="polite">
+            <div className="flex justify-center p-3 text-sm text-text-secondary" aria-live="polite">
               Loading more…
             </div>
           )}

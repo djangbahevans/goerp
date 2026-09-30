@@ -51,7 +51,7 @@ const BADGE_CAP = 99;
 function ItemBadge({ count }: { count: number | undefined }): ReactNode {
   if (!count || count <= 0) return null;
   return (
-    <span className="ms-auto flex-none rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-text-inverse">
+    <span className="ms-auto flex-none rounded-full bg-primary px-1.5 py-0.5 font-medium text-[10px] text-text-inverse">
       {count > BADGE_CAP ? `${BADGE_CAP}+` : count}
     </span>
   );
@@ -327,7 +327,7 @@ export function ActionMenu({ label, items, disabled = false, trigger }: ActionMe
                 // permissions) — index is the only stable key available.
                 if (item.type === "separator") {
                   // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-                  return <hr key={index} className="mx-2 my-1 border-t border-border" />;
+                  return <hr key={index} className="mx-2 my-1 border-border border-t" />;
                 }
                 return (
                   <ActionMenuItemButton

@@ -41,7 +41,7 @@ export function KanbanQuickCreateRow({ groupId, fields, onSubmit }: KanbanQuickC
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-control p-2 text-left text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
+        className="w-full rounded-control p-2 text-left text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:shadow-focus focus-visible:outline-none"
       >
         + Add
       </button>

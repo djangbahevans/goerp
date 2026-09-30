@@ -225,7 +225,7 @@ function NewAccountForm({
           minLength={minLength}
         />
 
-        <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
+        <div role="status" aria-live="polite" className="text-danger text-sm empty:hidden">
           {formError}
           {phase.kind === "locked" && (
             <>
@@ -284,7 +284,7 @@ function ExistingAccountAccess({
           Accept to add {info.tenantName} to your existing account ({info.email}), then sign in with your existing
           password.
         </p>
-        <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
+        <div role="status" aria-live="polite" className="text-danger text-sm empty:hidden">
           {phase.kind === "failed" && phase.message}
         </div>
         <Button variant="primary" fullWidth loading={accepting} onClick={() => void handleAccept()}>

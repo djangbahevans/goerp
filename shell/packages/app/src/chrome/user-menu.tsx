@@ -84,7 +84,7 @@ export function UserMenu(): ReactNode {
           aria-label={`${displayName}'s account menu`}
           onClick={onClick}
           onKeyDown={onKeyDown}
-          className="flex items-center gap-1.5 rounded-control p-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:shadow-focus"
+          className="flex items-center gap-1.5 rounded-control p-1 hover:bg-surface-hover focus-visible:shadow-focus focus-visible:outline-none"
         >
           <UserAvatar userId={user.id} name={displayName} avatarUrl={user.avatarUrl} size="sm" />
           <ChevronDown

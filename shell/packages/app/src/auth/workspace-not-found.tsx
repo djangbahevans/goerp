@@ -35,7 +35,7 @@ export function WorkspaceNotFound({ appUrl, hostname = window.location.hostname 
           Workspace not found
         </h1>
         <p className="text-sm text-text-secondary">
-          There's no workspace at <strong className="font-semibold text-text break-all">{hostname}</strong>. Check the
+          There's no workspace at <strong className="break-all font-semibold text-text">{hostname}</strong>. Check the
           address, or sign in to find yours.
         </p>
         {loginHref && (

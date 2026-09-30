@@ -241,7 +241,7 @@ export function RelationPicker({
                   disabled={disabled}
                   onClick={() => removeSelected(item.id)}
                   aria-label={`Remove ${item.display}`}
-                  className="rounded-control p-1 transition-colors duration-(--duration-fast) ease-out hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-control p-1 transition-colors duration-(--duration-fast) ease-out hover:opacity-75 focus-visible:shadow-focus focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   ×
                 </button>

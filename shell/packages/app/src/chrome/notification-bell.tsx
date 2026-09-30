@@ -23,7 +23,7 @@ export function NotificationBell(): ReactNode {
         {count > 0 && (
           <span
             aria-hidden="true"
-            className="pointer-events-none -top-0.5 -right-0.5 absolute flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-text-inverse"
+            className="pointer-events-none absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-danger font-bold text-[9px] text-text-inverse"
           >
             {capped}
           </span>

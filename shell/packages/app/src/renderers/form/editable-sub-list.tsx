@@ -597,7 +597,7 @@ export function EditableSubList({
     const rowError = deleteError && deleteError.key === key ? deleteError.message : null;
     return (
       <Fragment key={key ?? `row-${index}`}>
-        <tr className={`border-b border-border bg-surface ${editable ? "hover:bg-surface-hover" : ""}`}>
+        <tr className={`border-border border-b bg-surface ${editable ? "hover:bg-surface-hover" : ""}`}>
           {columns.map((column) => {
             const cellEditable = editable && editors.has(column.field);
             const rawValue = row[column.field];
@@ -664,7 +664,7 @@ export function EditableSubList({
     const displayRow: Row = { ...state.base, ...state.preview, ...state.edits };
     return (
       <Fragment key={state.key}>
-        <tr className="border-b border-border bg-surface" onKeyDown={onEditRowKeyDown} aria-busy={saving || undefined}>
+        <tr className="border-border border-b bg-surface" onKeyDown={onEditRowKeyDown} aria-busy={saving || undefined}>
           {columns.map((column, columnIndex) => {
             const editor = editors.get(column.field);
             const inset = columnIndex === 0 ? "shadow-[inset_2px_0_0_var(--color-primary)]" : "";
@@ -752,13 +752,13 @@ export function EditableSubList({
             "Cells in edit mode"). */}
         <table aria-label={label} className="w-full table-fixed border-collapse" style={{ minWidth: tableMinWidth }}>
           <thead>
-            <tr className="border-b border-border bg-surface">
+            <tr className="border-border border-b bg-surface">
               {columns.map((column) => (
                 <th
                   key={column.field}
                   scope="col"
                   style={columnStyle(column)}
-                  className="p-3 text-left text-sm font-medium text-text-secondary"
+                  className="p-3 text-left font-medium text-sm text-text-secondary"
                 >
                   {column.label ?? column.field}
                   {editors.has(column.field) && required.has(column.field) && (
@@ -837,7 +837,7 @@ function isSingleLineInput(el: HTMLElement): boolean {
 
 function RowErrorLine({ colSpan, message }: { colSpan: number; message: string }): ReactNode {
   return (
-    <tr className="border-b border-border">
+    <tr className="border-border border-b">
       <td colSpan={colSpan} className="bg-danger-subtle px-3 py-2">
         <span role="alert" className="flex items-center gap-2 text-sm text-text">
           <Icon name="circle-alert" size={16} className="shrink-0 text-danger" aria-hidden="true" />
@@ -924,7 +924,7 @@ function CellControl({
         {control}
       </FieldControlProvider>
       {error !== undefined && (
-        <span id={errorId} className="text-sm text-danger">
+        <span id={errorId} className="text-danger text-sm">
           {error}
         </span>
       )}

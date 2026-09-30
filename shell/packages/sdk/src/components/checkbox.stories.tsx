@@ -110,7 +110,7 @@ export const LabelHidden: Story = {
     return (
       <table className="w-full text-sm text-text">
         <thead>
-          <tr className="border-b border-border">
+          <tr className="border-border border-b">
             <th scope="col" className="w-10 p-3 text-left">
               <Checkbox
                 label="Select all contacts"
@@ -127,7 +127,7 @@ export const LabelHidden: Story = {
         </thead>
         <tbody>
           {rows.map((name) => (
-            <tr key={name} className="border-b border-border">
+            <tr key={name} className="border-border border-b">
               <td className="p-3">
                 <Checkbox label="Select row" labelHidden checked={selected.has(name)} onChange={() => toggle(name)} />
               </td>

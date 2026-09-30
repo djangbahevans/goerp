@@ -133,7 +133,7 @@ function SelectSingle({
                   value={option.value}
                   disabled={option.disabled ?? false}
                   textValue={option.label}
-                  className={`${ROW_CLASSES} data-highlighted:bg-surface-hover data-disabled:cursor-not-allowed data-disabled:opacity-50`}
+                  className={`${ROW_CLASSES} data-disabled:cursor-not-allowed data-highlighted:bg-surface-hover data-disabled:opacity-50`}
                 >
                   <SelectPrimitive.ItemIndicator>
                     <Check size={16} className="shrink-0 text-primary" aria-hidden />

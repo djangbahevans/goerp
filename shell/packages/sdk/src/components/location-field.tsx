@@ -284,7 +284,7 @@ export function LocationField({
         />
       </div>
       {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
+        <span role="alert" className="text-danger text-sm">
           {error}
         </span>
       )}

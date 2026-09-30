@@ -23,7 +23,7 @@ interface FilterInputProps {
 // filter's label and a form field's label read as the same kind of text.
 export function FilterFieldLabel({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   return (
-    <label htmlFor={id} className="flex flex-col gap-1 text-sm text-text font-medium">
+    <label htmlFor={id} className="flex flex-col gap-1 font-medium text-sm text-text">
       <span>{label}</span>
       {children}
     </label>

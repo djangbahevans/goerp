@@ -108,7 +108,7 @@ export function KanbanColumn({
       </div>
 
       {/* overflow-x explicit "hidden": the CSS spec force-computes a "visible" x-axis to "auto" next to overflow-y-auto, which turned an open card's ActionMenu into an unwanted horizontal scrollbar. */}
-      <div className="flex max-h-full flex-col gap-2 overflow-x-hidden overflow-y-auto">
+      <div className="flex max-h-full flex-col gap-2 overflow-y-auto overflow-x-hidden">
         {group.cards.length === 0 ? (
           <EmptyState title={emptyMessage} size="compact" />
         ) : (
@@ -140,7 +140,7 @@ export function KanbanColumn({
         <button
           type="button"
           onClick={onLoadMore}
-          className="w-full rounded-control p-2 text-center text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
+          className="w-full rounded-control p-2 text-center text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:shadow-focus focus-visible:outline-none"
         >
           Load more
         </button>

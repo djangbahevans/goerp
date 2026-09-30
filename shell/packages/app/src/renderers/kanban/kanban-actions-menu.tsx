@@ -30,7 +30,7 @@ export function KanbanActionsMenu({ actions, label }: KanbanActionsMenuProps): R
         onClick={() => soleAction.onClick?.()}
         disabled={soleAction.disabled}
         title={soleAction.label}
-        className="rounded-control px-1.5 py-0.5 text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
+        className="rounded-control px-1.5 py-0.5 text-text-secondary text-xs hover:bg-surface-hover hover:text-text focus-visible:shadow-focus focus-visible:outline-none"
       >
         {soleAction.label}
       </button>

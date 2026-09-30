@@ -37,7 +37,7 @@ function ItemContent({ icon: IconGlyph, label, badge }: { icon: LucideIcon; labe
         {badge !== undefined && badge > 0 && (
           <span
             aria-hidden="true"
-            className="-top-1.5 -inset-e-2.5 absolute min-w-4 rounded-full bg-primary px-1 text-center font-medium text-[10px] text-text-inverse leading-4"
+            className="absolute -inset-e-2.5 -top-1.5 min-w-4 rounded-full bg-primary px-1 text-center font-medium text-[10px] text-text-inverse leading-4"
           >
             {capped(badge)}
           </span>

@@ -44,7 +44,7 @@ export function Badge({ label, color = "gray", icon }: BadgeProps): ReactNode {
   // color — fall back to gray rather than rendering a broken className.
   const colorClasses = BADGE_COLOR_CLASSES[color] ?? BADGE_COLOR_CLASSES.gray;
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${colorClasses}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium text-xs ${colorClasses}`}>
       {icon && <Icon name={icon} size={12} className="shrink-0" aria-hidden="true" />}
       {label}
     </span>

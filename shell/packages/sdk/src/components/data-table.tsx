@@ -65,7 +65,7 @@ export function DataTable<T>({
                 }
                 className={`border-border border-b bg-surface ${
                   handleActivate
-                    ? "cursor-pointer hover:bg-surface-hover focus-visible:[outline:2px_solid_var(--color-primary)] focus-visible:-outline-offset-2"
+                    ? "cursor-pointer hover:bg-surface-hover focus-visible:-outline-offset-2 focus-visible:[outline:2px_solid_var(--color-primary)]"
                     : ""
                 }`}
               >

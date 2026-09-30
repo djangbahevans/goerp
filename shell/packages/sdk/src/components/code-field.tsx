@@ -218,7 +218,7 @@ export function CodeField({
         <div ref={hostRef} style={{ minHeight: `${rows * 1.5}em` }} />
       </div>
       {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
+        <span role="alert" className="text-danger text-sm">
           {error}
         </span>
       )}

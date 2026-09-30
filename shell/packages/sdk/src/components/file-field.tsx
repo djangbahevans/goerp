@@ -295,7 +295,7 @@ export function FileField({
       )}
 
       {rejectionError && (
-        <span role="alert" className="text-xs text-danger">
+        <span role="alert" className="text-danger text-xs">
           {rejectionError}
         </span>
       )}
@@ -321,7 +321,7 @@ export function FileField({
           />
           {item.status === "failed" && (
             <>
-              <span role="alert" className="text-xs text-danger">
+              <span role="alert" className="text-danger text-xs">
                 {item.error}
               </span>
               <span className="flex self-start">
@@ -344,7 +344,7 @@ export function FileField({
                   {previewUrl && (
                     <img src={previewUrl} alt={fileValue.name} className="h-24 w-24 rounded-full object-cover" />
                   )}
-                  <span className="absolute top-1 inset-e-1 flex">
+                  <span className="absolute inset-e-1 top-1 flex">
                     <IconButton
                       icon="x"
                       label={`Remove ${fileValue.name}`}
@@ -363,7 +363,7 @@ export function FileField({
                   {previewUrl && (
                     <img src={previewUrl} alt={fileValue.name} className="h-32 w-32 rounded-control object-cover" />
                   )}
-                  <span className="absolute top-1 inset-e-1 flex">
+                  <span className="absolute inset-e-1 top-1 flex">
                     <IconButton
                       icon="x"
                       label={`Remove ${fileValue.name}`}
@@ -386,7 +386,7 @@ export function FileField({
                   <span className="max-w-50 truncate text-sm text-text" title={fileValue.name}>
                     {fileValue.name}
                   </span>
-                  <span className="text-xs text-text-secondary">{formatFileSize(fileValue.sizeBytes)}</span>
+                  <span className="text-text-secondary text-xs">{formatFileSize(fileValue.sizeBytes)}</span>
                 </span>
                 <IconButton
                   icon="x"

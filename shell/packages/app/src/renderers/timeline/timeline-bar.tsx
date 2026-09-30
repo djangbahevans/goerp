@@ -219,7 +219,7 @@ export function TimelineBar({
         </>
       )}
       {isDragging && (
-        <div className="-top-6 absolute left-0 whitespace-nowrap rounded-control bg-surface px-1.5 py-0.5 text-text text-xs shadow-md">
+        <div className="absolute -top-6 left-0 whitespace-nowrap rounded-control bg-surface px-1.5 py-0.5 text-text text-xs shadow-md">
           {formatDateRange(displayStart, displayEnd)}
         </div>
       )}

@@ -18,7 +18,7 @@ function Field({ label, type = "text" }: { label: string; type?: string }): Reac
 
 const signInContent = (
   <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
-    <h1 className="text-xl font-semibold">Sign in</h1>
+    <h1 className="font-semibold text-xl">Sign in</h1>
     <Field label="Email" type="email" />
     <Field label="Password" type="password" />
     <Button type="submit" variant="primary" fullWidth>
@@ -32,7 +32,7 @@ function AcceptInviteContent(): ReactNode {
   const [confirm, setConfirm] = useState("");
   return (
     <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
-      <h1 className="text-xl font-semibold">Join Acme Corp</h1>
+      <h1 className="font-semibold text-xl">Join Acme Corp</h1>
       <p className="text-sm text-text-secondary">
         Jordan Lee invited you to join Acme Corp on GoERP. Set up your account below to accept the invitation and get
         started with your team.
