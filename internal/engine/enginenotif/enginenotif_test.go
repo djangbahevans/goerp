@@ -1,8 +1,8 @@
 package enginenotif
 
 import (
-	"encoding/json/v2"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -11,13 +11,10 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 )
 
-func TestTemplates_EveryDeclaredTemplateLoads(t *testing.T) {
-	mt := Templates()
+func TestTemplates_EveryDeclaredTemplateHasAnEnRow(t *testing.T) {
 	for _, nt := range Types {
 		for channel := range nt.Templates {
-			if _, _, ok := mt.Resolve(nt.Name, channel, "en"); !ok {
-				t.Errorf("%s %s template did not resolve for en", nt.Name, channel)
-			}
+			defaultRow(t, nt.Name, channel)
 		}
 	}
 }
@@ -48,19 +45,7 @@ func TestTemplates_ActivityInAppContent(t *testing.T) {
 	for _, tt := range tests {
 		vars := maps.Clone(data)
 		maps.Copy(vars, tt.extra)
-		locale, tmpl, ok := Templates().Resolve(tt.name, notifications.ChannelInApp, "fr-GH")
-		if !ok {
-			t.Fatalf("%s in_app template did not resolve", tt.name)
-		}
-		rendered, err := notiftemplate.Render(tmpl, locale, vars)
-		if err != nil {
-			t.Fatalf("Render(%s) error: %v", tt.name, err)
-		}
-		var got inApp
-		if err := json.Unmarshal([]byte(rendered), &got); err != nil {
-			t.Fatalf("%s in_app output is not JSON: %v\n%s", tt.name, err, rendered)
-		}
-		if got != tt.want {
+		if got := renderInApp(t, tt.name, vars); got != tt.want {
 			t.Errorf("%s with %v = %+v, want %+v", tt.name, tt.extra, got, tt.want)
 		}
 	}
@@ -74,9 +59,7 @@ func TestLoadTemplates_RejectsAMissingEnVariant(t *testing.T) {
 }
 
 type inApp struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Icon  string `json:"icon"`
+	Title, Body, Icon string
 }
 
 func TestDefaultRows_HaveOneInAppRowPerShippedTemplate(t *testing.T) {
@@ -133,51 +116,56 @@ func TestTemplates_CommentContent(t *testing.T) {
 	for _, tt := range tests {
 		vars := maps.Clone(data)
 		vars["RecordName"] = tt.recordName
-		escaped := maps.Clone(vars)
-		escaped["Body"] = `@Ama Owusu can you confirm \"Friday\"?\nThanks`
 
-		var got inApp
-		renderJSON(t, tt.name, notifications.ChannelInApp, escaped, &got)
-		if got != tt.want {
+		if got := renderInApp(t, tt.name, vars); got != tt.want {
 			t.Errorf("%s in_app with record name %q = %+v, want %+v", tt.name, tt.recordName, got, tt.want)
 		}
-		var subject struct {
-			Subject string `json:"subject"`
-		}
-		renderJSON(t, tt.name, notiftemplate.ChannelEmailSubject, escaped, &subject)
-		if subject.Subject != tt.subject {
-			t.Errorf("%s email subject = %q, want %q", tt.name, subject.Subject, tt.subject)
+		if subject := render(t, tt.name, notifications.ChannelEmail, notiftemplate.ColSubject, vars); subject != tt.subject {
+			t.Errorf("%s email subject = %q, want %q", tt.name, subject, tt.subject)
 		}
 
-		html := render(t, tt.name, notifications.ChannelEmail, vars)
+		html := render(t, tt.name, notifications.ChannelEmail, notiftemplate.ColHTML, vars)
 		for _, want := range []string{"can you confirm &#34;Friday&#34;?\nThanks", `href="https://acme.example/_m/sales/orders/1"`} {
 			if !strings.Contains(html, want) {
 				t.Errorf("%s email html = %q, want it to contain %q", tt.name, html, want)
 			}
 		}
-		if text := render(t, tt.name, notiftemplate.ChannelEmailText, vars); !strings.Contains(text, "can you confirm \"Friday\"?\nThanks") {
+		if text := render(t, tt.name, notifications.ChannelEmail, notiftemplate.ColText, vars); !strings.Contains(text, "can you confirm \"Friday\"?\nThanks") {
 			t.Errorf("%s email text = %q, want the whole comment", tt.name, text)
 		}
 	}
 }
 
-func render(t *testing.T, name, channel string, vars map[string]any) string {
+// defaultRow is the en row DefaultRows has for name's channel template.
+func defaultRow(t *testing.T, name, channel string) notiftemplate.Row {
 	t.Helper()
-	locale, tmpl, ok := Templates().Resolve(name, channel, "en")
-	if !ok {
-		t.Fatalf("%s %s template did not resolve", name, channel)
-	}
-	rendered, err := notiftemplate.Render(tmpl, locale, vars)
+	rows, err := DefaultRows()
 	if err != nil {
-		t.Fatalf("Render(%s %s) error: %v", name, channel, err)
+		t.Fatalf("DefaultRows() error: %v", err)
+	}
+	i := slices.IndexFunc(rows, func(r notiftemplate.Row) bool {
+		return r.TemplateKey == Module+"."+name && r.Channel == channel && r.Locale == "en"
+	})
+	if i < 0 {
+		t.Fatalf("DefaultRows() has no en %s row for %s", channel, name)
+	}
+	return rows[i]
+}
+
+func render(t *testing.T, name, channel, col string, vars map[string]any) string {
+	t.Helper()
+	rendered, err := notiftemplate.RenderColumn(col, defaultRow(t, name, channel).Fields[col], vars)
+	if err != nil {
+		t.Fatalf("RenderColumn(%s %s) error: %v", name, col, err)
 	}
 	return rendered
 }
 
-func renderJSON(t *testing.T, name, channel string, vars map[string]any, out any) {
+func renderInApp(t *testing.T, name string, vars map[string]any) inApp {
 	t.Helper()
-	rendered := render(t, name, channel, vars)
-	if err := json.Unmarshal([]byte(rendered), out); err != nil {
-		t.Fatalf("%s %s output is not JSON: %v\n%s", name, channel, err, rendered)
+	return inApp{
+		Title: render(t, name, notifications.ChannelInApp, notiftemplate.ColTitle, vars),
+		Body:  render(t, name, notifications.ChannelInApp, notiftemplate.ColBody, vars),
+		Icon:  render(t, name, notifications.ChannelInApp, notiftemplate.ColIcon, vars),
 	}
 }

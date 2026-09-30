@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -110,23 +111,14 @@ func TestLoad_FromLooseDirectory(t *testing.T) {
 		t.Fatal("expected non-nil ModuleTemplates")
 	}
 
-	locale, tmpl, ok := mt.Resolve("order_confirmed", "email", "fr-CA")
-	if !ok {
-		t.Fatal("Resolve(email, fr-CA) = not ok, want a language-only fallback match")
+	email := mt.templates["order_confirmed.email"]
+	if email == nil || email.Ext != "html" || len(email.Sources) != 2 || !strings.Contains(string(email.Sources["fr"]), "Bonjour") {
+		t.Fatalf("email template = %+v, want the html en and fr variants", email)
 	}
-	if locale != "fr" {
-		t.Errorf("locale = %q, want %q (language-only fallback)", locale, "fr")
-	}
-	if tmpl.Ext != "html" {
-		t.Errorf("Ext = %q, want %q", tmpl.Ext, "html")
-	}
-
-	out, err := Render(tmpl, locale, map[string]any{"UserFirstName": "Ama", "OrderReference": "ORD-1"})
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if !strings.Contains(out, "Ama") || !strings.Contains(out, "ORD-1") {
-		t.Errorf("rendered output = %q, want it to contain the substituted values", out)
+	for _, name := range []string{"order_confirmed.in_app", "order_confirmed.sms"} {
+		if tmpl := mt.templates[name]; tmpl == nil || len(tmpl.Sources) != 1 {
+			t.Errorf("%s = %+v, want its en variant", name, tmpl)
+		}
 	}
 }
 
@@ -144,12 +136,9 @@ func TestLoad_FromZipPackage(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	locale, tmpl, ok := mt.Resolve("order_confirmed", "in_app", "en")
-	if !ok || locale != "en" {
-		t.Fatalf("Resolve(in_app, en) = (%q, %v), want (\"en\", true)", locale, ok)
-	}
-	if tmpl.Ext != "json" {
-		t.Errorf("Ext = %q, want %q", tmpl.Ext, "json")
+	tmpl := mt.templates["order_confirmed.in_app"]
+	if tmpl == nil || tmpl.Ext != "json" || string(tmpl.Sources["en"]) != `{"title":"Order confirmed","body":"{{.OrderReference}}"}` {
+		t.Fatalf("in_app template = %+v, want the zip's en variant", tmpl)
 	}
 }
 
@@ -184,34 +173,30 @@ func TestLoad_ErrorsOnUnparseableTemplate(t *testing.T) {
 	}
 }
 
-func TestResolve_FallsBackToEnWhenNoMatchAtAll(t *testing.T) {
-	root := t.TempDir()
-	writeDirFixture(t, root, map[string]string{
-		"notifications/order_confirmed/sms.en.txt": "hi",
-	})
-
-	mt, err := Load(orderConfirmedType(map[string]string{
-		"sms": "notifications/order_confirmed/sms.{locale}.txt",
-	}), root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	locale, _, ok := mt.Resolve("order_confirmed", "sms", "de-DE")
-	if !ok || locale != "en" {
-		t.Fatalf("Resolve(sms, de-DE) = (%q, %v), want (\"en\", true) via final-resort fallback", locale, ok)
+func TestLocaleCandidates(t *testing.T) {
+	for locale, want := range map[string][]string{
+		"fr-GH": {"fr-GH", "fr", "en"},
+		"fr":    {"fr", "en"},
+		"en-GB": {"en-GB", "en"},
+		"en":    {"en"},
+		"":      {"en"},
+	} {
+		if got := LocaleCandidates(locale); !slices.Equal(got, want) {
+			t.Errorf("LocaleCandidates(%q) = %v, want %v", locale, got, want)
+		}
 	}
 }
 
-func TestResolve_NoMatchReturnsNotOk(t *testing.T) {
-	mt, err := Load(orderConfirmedType(map[string]string{}), t.TempDir())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+func TestRenderColumn_EscapesOnlyTheHTMLColumn(t *testing.T) {
+	vars := map[string]any{"Name": `<b>"Ama"</b>`}
+	if got, err := RenderColumn(ColHTML, "<p>{{.Name}}</p>", vars); err != nil || got != "<p>&lt;b&gt;&#34;Ama&#34;&lt;/b&gt;</p>" {
+		t.Errorf("RenderColumn(html) = %q, %v, want the value escaped", got, err)
 	}
-
-	_, _, ok := mt.Resolve("order_confirmed", "push", "en")
-	if ok {
-		t.Error("expected ok=false for a channel with no declared template at all")
+	if got, err := RenderColumn(ColTitle, "Hi {{.Name}}", vars); err != nil || got != `Hi <b>"Ama"</b>` {
+		t.Errorf("RenderColumn(title) = %q, %v, want the value verbatim", got, err)
+	}
+	if _, err := RenderColumn(ColTitle, "{{.Unclosed", vars); err == nil {
+		t.Error("RenderColumn() of an unparseable template: error = nil")
 	}
 }
 
@@ -272,16 +257,11 @@ func TestLoad_EmailSiblingsResolveBesideTheHTMLTemplate(t *testing.T) {
 	}
 
 	for channel, want := range map[string]string{
-		ChannelEmailSubject: `{"subject": "Order ORD-1"}`,
-		ChannelEmailText:    "Order ORD-1 & more",
+		ChannelEmailSubject: `{"subject": "Order {{.OrderReference}}"}`,
+		ChannelEmailText:    "Order {{.OrderReference}} & more",
 	} {
-		locale, tmpl, ok := mt.Resolve("order_confirmed", channel, "fr")
-		if !ok || locale != "en" {
-			t.Fatalf("Resolve(%s, fr) = %q, %v, want the en fallback", channel, locale, ok)
-		}
-		got, err := Render(tmpl, locale, map[string]any{"OrderReference": "ORD-1"})
-		if err != nil || got != want {
-			t.Errorf("Render(%s) = %q, %v, want %q unescaped", channel, got, err, want)
+		if tmpl := mt.templates["order_confirmed."+channel]; tmpl == nil || string(tmpl.Sources["en"]) != want {
+			t.Errorf("%s = %+v, want the en sibling %q", channel, tmpl, want)
 		}
 	}
 }
@@ -294,8 +274,8 @@ func TestLoad_EmailSiblingsAreOptionalButNeedEn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load without siblings: %v", err)
 	}
-	if _, _, ok := mt.Resolve("order_confirmed", ChannelEmailText, "en"); ok {
-		t.Error("Resolve(email_text) ok with no .txt in the package")
+	if _, ok := mt.templates["order_confirmed."+ChannelEmailText]; ok {
+		t.Error("email_text template loaded with no .txt in the package")
 	}
 
 	writeDirFixture(t, root, map[string]string{"notifications/order_confirmed/email.fr.txt": "salut"})
@@ -315,7 +295,7 @@ func TestReadPackageFile_RejectsPathsOutsideThePackage(t *testing.T) {
 	}
 }
 
-func TestLoadFS_ResolvesAndRendersFromAnFS(t *testing.T) {
+func TestLoadFS_LoadsEveryLocaleFromAnFS(t *testing.T) {
 	fsys := fstest.MapFS{
 		"t/order_confirmed/in_app.en.json": {Data: []byte(`{"title": "Order {{.OrderReference}}"}`)},
 		"t/order_confirmed/in_app.fr.json": {Data: []byte(`{"title": "Commande {{.OrderReference}}"}`)},
@@ -324,16 +304,9 @@ func TestLoadFS_ResolvesAndRendersFromAnFS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFS() error: %v", err)
 	}
-	locale, tmpl, ok := mt.Resolve("order_confirmed", "in_app", "fr-CI")
-	if !ok || locale != "fr" {
-		t.Fatalf("Resolve(fr-CI) = (%q, %v), want (\"fr\", true)", locale, ok)
-	}
-	got, err := Render(tmpl, locale, map[string]any{"OrderReference": "SO-1"})
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-	if want := `{"title": "Commande SO-1"}`; got != want {
-		t.Errorf("Render() = %s, want %s", got, want)
+	rows, err := mt.Rows("sales")
+	if err != nil || len(rows) != 2 || rows[1].Locale != "fr" || rows[1].Fields[ColTitle] != "Commande {{.OrderReference}}" {
+		t.Errorf("Rows() = %+v, %v, want the en and fr in_app rows", rows, err)
 	}
 }
 

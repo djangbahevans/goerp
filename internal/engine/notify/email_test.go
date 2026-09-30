@@ -109,6 +109,7 @@ func openEmailEnv(t *testing.T) *emailEnv {
 	env := openTestEnv(t)
 	reg := emailRegistry(t)
 	env.sender.Registry = reg
+	env.seedTemplates(t, reg)
 	*env.config = notifconfig.Config{
 		EmailEnabled: true,
 		Email: notifconfig.EmailConfig{

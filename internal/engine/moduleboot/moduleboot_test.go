@@ -682,8 +682,9 @@ func TestLoadCascading_SetsNotifTemplatesOnSuccess(t *testing.T) {
 	if m.NotifTemplates == nil {
 		t.Fatal("expected NotifTemplates to be set")
 	}
-	if _, _, ok := m.NotifTemplates.Resolve("welcome", "in_app", "en"); !ok {
-		t.Error("expected Resolve(welcome, in_app, en) to succeed")
+	rows, err := m.NotifTemplates.Rows("widgets")
+	if err != nil || len(rows) != 1 || rows[0].TemplateKey != "widgets.welcome" || rows[0].Channel != "in_app" || rows[0].Locale != "en" {
+		t.Errorf("NotifTemplates.Rows() = %+v, %v, want the widgets.welcome in_app en row", rows, err)
 	}
 }
 

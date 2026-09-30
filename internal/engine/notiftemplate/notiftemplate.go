@@ -1,10 +1,10 @@
-// Package notiftemplate resolves and renders a module's notification
-// templates (manifest-spec.md §13a "Template file format"): discovering
-// which locale variants of a declared channel template actually exist
-// inside a module's package, validating that the mandatory "en" fallback
-// is present, and rendering a resolved template against engine-injected
-// variables plus a notification type's own data_schema fields
-// (notification-system.md §5).
+// Package notiftemplate loads and renders notification templates
+// (manifest-spec.md §13a "Template file format"): discovering which locale
+// variants of a declared channel template exist inside a module's package,
+// validating that the mandatory "en" fallback is present, converting them
+// to notification_templates rows, and rendering a row's columns against
+// engine-injected variables plus a notification type's own data_schema
+// fields (notification-system.md §5).
 package notiftemplate
 
 import (
@@ -28,19 +28,15 @@ import (
 
 // executor is satisfied by both *html/template.Template and
 // *text/template.Template — they share this method signature but no
-// common exported interface. Safe for concurrent use once parsed, since
-// nothing here mutates a template after Load returns.
+// common exported interface.
 type executor interface {
 	Execute(w io.Writer, data any) error
 }
 
-// Template is one channel's parsed template, one entry per locale variant
-// discovered in the module's package.
+// Template is one channel's template: each locale variant's raw file
+// content discovered in the module's package, keyed by locale.
 type Template struct {
 	Ext     string
-	Locales map[string]executor
-	// Sources holds each locale variant's raw file content, as stored in
-	// notification_templates' default rows.
 	Sources map[string][]byte
 }
 
@@ -123,56 +119,40 @@ func load(notifTypes []manifest.NotificationType, src fileSource) (*ModuleTempla
 	return &ModuleTemplates{templates: templates}, nil
 }
 
-// Resolve applies the 3-step locale fallback (notification-system.md §5:
-// exact match, language-only match, "en" default) and returns the
-// matched locale and template. ok is false, and the miss is logged, when
-// none of the three match anything Load discovered — the caller (e.g. a
-// future notify.Send) decides whether to skip the channel.
-func (mt *ModuleTemplates) Resolve(notificationType, channel, userLocale string) (string, *Template, bool) {
-	if mt == nil {
-		return "", nil, false
-	}
-
-	tmpl, ok := mt.templates[notificationType+"."+channel]
-	if !ok {
-		return "", nil, false
-	}
-
+// LocaleCandidates are the locales a template is looked up in for
+// userLocale, closest first (notification-system.md §5 "Locale
+// fallback"): the exact locale, its language, then "en".
+func LocaleCandidates(userLocale string) []string {
 	candidates := make([]string, 0, 3)
-	candidates = append(candidates, userLocale)
-	if idx := strings.Index(userLocale, "-"); idx > 0 {
-		candidates = append(candidates, userLocale[:idx])
+	if userLocale != "" {
+		candidates = append(candidates, userLocale)
 	}
-	candidates = append(candidates, "en")
-
-	for _, c := range candidates {
-		if _, ok := tmpl.Locales[c]; ok {
-			return c, tmpl, true
-		}
+	if lang, _, ok := strings.Cut(userLocale, "-"); ok && lang != "" {
+		candidates = append(candidates, lang)
 	}
-
-	log.Warn().
-		Str("notification_type", notificationType).
-		Str("channel", channel).
-		Str("locale", userLocale).
-		Msg("no notification template variant matched exact, language, or en fallback locale")
-	return "", nil, false
+	if !slices.Contains(candidates, "en") {
+		candidates = append(candidates, "en")
+	}
+	return candidates
 }
 
-// Render executes tmpl's parsed template for locale against vars — the
-// caller's merged data_schema fields and the 7 engine-injected variables
-// (notification-system.md §5 "Standard template variables"), addressed
-// uniformly via {{.Key}} since Go's template dot-notation resolves map
-// keys the same way it resolves struct fields.
-func Render(tmpl *Template, locale string, vars map[string]any) (string, error) {
-	exec, ok := tmpl.Locales[locale]
-	if !ok {
-		return "", fmt.Errorf("locale %q not present in this template", locale)
+// RenderColumn parses src, the content of notification_templates column
+// col, and executes it against vars — the caller's data_schema fields and
+// the 7 engine-injected variables (notification-system.md §5 "Standard
+// template variables"). html_template is an html/template; every other
+// column is a text/template.
+func RenderColumn(col, src string, vars map[string]any) (string, error) {
+	ext := "txt"
+	if col == ColHTML {
+		ext = "html"
 	}
-
+	exec, err := parseTemplate(ext, []byte(src))
+	if err != nil {
+		return "", fmt.Errorf("parse %s: %w", col, err)
+	}
 	var buf bytes.Buffer
 	if err := exec.Execute(&buf, vars); err != nil {
-		return "", fmt.Errorf("execute template: %w", err)
+		return "", fmt.Errorf("execute %s: %w", col, err)
 	}
 	return buf.String(), nil
 }
@@ -211,7 +191,7 @@ func ReadPackageFile(packagePath, name string) ([]byte, error) {
 // requires "en" among them, warns on an over-length raw sms source
 // (notification-system.md §5 — rune count of the raw template, not
 // rendered output, checked here at load time since no per-notification
-// data exists yet to render against), and parses each variant.
+// data exists yet to render against), and checks each variant parses.
 func resolveChannel(src fileSource, names []string, channel, declared string) (*Template, error) {
 	re, err := compileLocalePattern(declared)
 	if err != nil {
@@ -247,16 +227,13 @@ func resolveChannel(src fileSource, names []string, channel, declared string) (*
 	}
 
 	ext := strings.TrimPrefix(filepath.Ext(declared), ".")
-	parsed := make(map[string]executor, len(locales))
 	for locale, data := range locales {
-		exec, err := parseTemplate(ext, data)
-		if err != nil {
+		if _, err := parseTemplate(ext, data); err != nil {
 			return nil, fmt.Errorf("parse %s (%s): %w", declared, locale, err)
 		}
-		parsed[locale] = exec
 	}
 
-	return &Template{Ext: ext, Locales: parsed, Sources: locales}, nil
+	return &Template{Ext: ext, Sources: locales}, nil
 }
 
 // compileLocalePattern turns a manifest-declared path containing exactly
