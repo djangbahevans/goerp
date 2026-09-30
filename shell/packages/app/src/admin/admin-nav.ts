@@ -6,6 +6,7 @@ export const ADMIN_NAV_GROUPS: SectionNavGroup[] = [
     items: [
       { to: "/admin/users", label: "Users", icon: "users" },
       { to: "/admin/roles", label: "Roles", icon: "shield" },
+      { to: "/admin/settings", label: "Settings", icon: "settings" },
     ],
   },
 ];
