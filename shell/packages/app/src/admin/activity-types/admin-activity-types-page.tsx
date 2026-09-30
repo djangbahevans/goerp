@@ -172,27 +172,27 @@ export function AdminActivityTypesPage(): ReactNode {
         />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="border-border border-b bg-surface">
-                <th scope="col" className="w-8 p-3" />
-                <th scope="col" className="w-8 p-3" />
-                <th scope="col" className="p-3 text-left font-medium text-sm text-text-secondary">
-                  Label
-                </th>
-                <th scope="col" className="p-3 text-left font-medium text-sm text-text-secondary">
-                  Key
-                </th>
-                <th scope="col" className="p-3 text-left font-medium text-sm text-text-secondary">
-                  Defaults
-                </th>
-                <th scope="col" className="p-3 text-left font-medium text-sm text-text-secondary">
-                  Usage
-                </th>
-                <th scope="col" className="w-8 p-3" />
-              </tr>
-            </thead>
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-border border-b bg-surface">
+                  <th scope="col" className="w-8 p-3" />
+                  <th scope="col" className="w-8 p-3" />
+                  <th scope="col" className="p-3 text-left font-medium text-sm text-text-secondary">
+                    Label
+                  </th>
+                  <th scope="col" className="p-3 text-left font-medium text-sm text-text-secondary">
+                    Key
+                  </th>
+                  <th scope="col" className="p-3 text-left font-medium text-sm text-text-secondary">
+                    Defaults
+                  </th>
+                  <th scope="col" className="p-3 text-left font-medium text-sm text-text-secondary">
+                    Usage
+                  </th>
+                  <th scope="col" className="w-8 p-3" />
+                </tr>
+              </thead>
               <SortableContext items={types.map((t) => t.key)} strategy={verticalListSortingStrategy}>
                 <tbody>
                   {types.map((type, index) => (
@@ -212,8 +212,8 @@ export function AdminActivityTypesPage(): ReactNode {
                   ))}
                 </tbody>
               </SortableContext>
-            </DndContext>
-          </table>
+            </table>
+          </DndContext>
         </div>
       )}
       <ActivityTypeSheet open={sheetOpen} onClose={() => setSheetOpen(false)} editing={editing} />
