@@ -347,10 +347,11 @@ func TestGet_Defaults(t *testing.T) {
 	want := Settings{
 		General: General{Profile: tenant.Profile{Name: "Settings Test Co"}, DefaultLocale: "en", DefaultTimezone: "UTC"},
 		Security: Security{
-			MFA:            MFA{Mode: "optional", RequiredRoles: []string{}, MaxAssuranceAgeHours: 24},
-			PasswordPolicy: PasswordPolicy{MinLength: password.Global.MinLength, Enforcement: "nudge", GraceDays: password.DefaultGraceDays},
+			MFA:               MFA{Mode: "optional", RequiredRoles: []string{}, MaxAssuranceAgeHours: 24},
+			PasswordPolicy:    PasswordPolicy{MinLength: password.Global.MinLength, Enforcement: "nudge", GraceDays: password.DefaultGraceDays},
+			EmailVerification: EmailVerification{Policy: VerificationTenantChoice, Required: true},
 		},
-		Localisation: Localisation{AvailableLocales: platformLocales, FirstDayOfWeek: "monday", NumberFormat: "1,234.56"},
+		Localisation: Localisation{PlatformLocales: platformLocales, AvailableLocales: platformLocales, FirstDayOfWeek: "monday", NumberFormat: "1,234.56"},
 	}
 	gotJSON, _ := json.Marshal(got)
 	wantJSON, _ := json.Marshal(want)
@@ -386,10 +387,11 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 			"country": "gh", "default_currency": "GHS", "default_locale": "fr", "default_timezone": "Africa/Accra",
 		},
 		"security": map[string]any{
-			"mfa":             map[string]any{"mode": "required_for_roles", "required_roles": []string{"admin"}, "max_assurance_age_hours": 8},
-			"password_policy": map[string]any{"min_length": 16, "enforcement": "require", "grace_days": 30},
-			"session":         map[string]any{"idle_timeout_minutes": 30, "absolute_max_minutes": 720},
-			"ip_allowlist":    "203.0.113.0/24, 2001:db8::/32",
+			"mfa":                map[string]any{"mode": "required_for_roles", "required_roles": []string{"admin"}, "max_assurance_age_hours": 8},
+			"password_policy":    map[string]any{"min_length": 16, "enforcement": "require", "grace_days": 30},
+			"session":            map[string]any{"idle_timeout_minutes": 30, "absolute_max_minutes": 720},
+			"ip_allowlist":       "203.0.113.0/24, 2001:db8::/32",
+			"email_verification": map[string]any{"required": false},
 		},
 		"localisation": map[string]any{"available_locales": []string{"fr", "en"}, "first_day_of_week": "sunday", "number_format": "1.234,56"},
 	})
@@ -411,12 +413,13 @@ func TestPatch_EveryFieldRoundTrips(t *testing.T) {
 			DefaultLocale: "fr", DefaultTimezone: "Africa/Accra",
 		},
 		Security: Security{
-			MFA:            MFA{Mode: "required_for_roles", RequiredRoles: []string{"admin"}, MaxAssuranceAgeHours: 8},
-			PasswordPolicy: PasswordPolicy{MinLength: 16, Enforcement: "require", GraceDays: 30, ChangedAt: changedAt},
-			Session:        Session{IdleTimeoutMinutes: 30, AbsoluteMaxMinutes: 720},
-			IPAllowlist:    "203.0.113.0/24,2001:db8::/32",
+			MFA:               MFA{Mode: "required_for_roles", RequiredRoles: []string{"admin"}, MaxAssuranceAgeHours: 8},
+			PasswordPolicy:    PasswordPolicy{MinLength: 16, Enforcement: "require", GraceDays: 30, ChangedAt: changedAt},
+			Session:           Session{IdleTimeoutMinutes: 30, AbsoluteMaxMinutes: 720},
+			IPAllowlist:       "203.0.113.0/24,2001:db8::/32",
+			EmailVerification: EmailVerification{Policy: VerificationTenantChoice},
 		},
-		Localisation: Localisation{AvailableLocales: []string{"fr", "en"}, FirstDayOfWeek: "sunday", NumberFormat: "1.234,56"},
+		Localisation: Localisation{PlatformLocales: platformLocales, AvailableLocales: []string{"fr", "en"}, FirstDayOfWeek: "sunday", NumberFormat: "1.234,56"},
 	}
 	wantJSON, _ := json.Marshal(want)
 	for name, got := range map[string]Settings{"PATCH response": patched, "GET after PATCH": e.get(t, ft, token)} {
@@ -803,5 +806,37 @@ func TestApply_ReportsFieldsCommittedBeforeAFailure(t *testing.T) {
 	}
 	if !slices.Equal(committed, []string{"general.name"}) {
 		t.Errorf("committed = %v, want [general.name]", committed)
+	}
+}
+
+func TestPatch_EmailVerificationFollowsThePlatformPolicy(t *testing.T) {
+	e := newEnv(t)
+	ft := e.newTenant(t)
+	admin, token := e.member(t, ft, "admin")
+	off := map[string]any{"security": map[string]any{"email_verification": map[string]any{"required": false}}}
+
+	if rec := e.patch(t, ft, token, off); rec.Code != http.StatusOK {
+		t.Fatalf("PATCH under tenant_choice = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := e.get(t, ft, token).Security.EmailVerification; got != (EmailVerification{Policy: VerificationTenantChoice, Required: false}) {
+		t.Errorf("email_verification = %+v, want tenant_choice, not required", got)
+	}
+	audittest.AssertLatest(t, e.conn, ft.id, "tenant.settings_updated", "", admin)
+
+	for _, policy := range []string{VerificationRequired, VerificationOff} {
+		e.handler.deps.EmailVerificationPolicy = policy
+		want := EmailVerification{Policy: policy, Required: policy == VerificationRequired}
+		if got := e.get(t, ft, token).Security.EmailVerification; got != want {
+			t.Errorf("%s: email_verification = %+v, want %+v", policy, got, want)
+		}
+		flip := map[string]any{"security": map[string]any{"email_verification": map[string]any{"required": !want.Required}}}
+		rec := e.patch(t, ft, token, flip)
+		if got := decode[errorBody](t, rec); rec.Code != http.StatusUnprocessableEntity || got.Error.Details["field"] != "security.email_verification" {
+			t.Errorf("%s: PATCH changing it = %d %s, want 422 on security.email_verification", policy, rec.Code, rec.Body.String())
+		}
+		same := map[string]any{"security": map[string]any{"email_verification": map[string]any{"required": want.Required}}}
+		if rec := e.patch(t, ft, token, same); rec.Code != http.StatusOK {
+			t.Errorf("%s: PATCH resending it = %d %s, want 200", policy, rec.Code, rec.Body.String())
+		}
 	}
 }

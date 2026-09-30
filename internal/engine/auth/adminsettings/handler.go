@@ -78,6 +78,10 @@ type Deps struct {
 	Locales      *tenantl10n.Store
 	Audit        AuditRecorder
 
+	// EmailVerificationPolicy is GOERP_REQUIRE_EMAIL_VERIFICATION; ""
+	// reads as tenant_choice, its default.
+	EmailVerificationPolicy string
+
 	// Notifications, Registry, Users and TestEmail back the notification
 	// delivery routes.
 	Notifications *notifconfig.Service
