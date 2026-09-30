@@ -136,38 +136,59 @@ func (s *Store) ResetTemplate(ctx context.Context, tenantSlug, templateKey, chan
 	return nil
 }
 
+// Templates returns the rows a send of templateKey renders from in any of
+// locales: for each (channel, locale), the tenant's override if it has
+// one, else the shipped default. Each row's IsOverride reports which.
+func (s *Store) Templates(ctx context.Context, tenantSlug, templateKey string, locales []string) ([]StoredTemplate, error) {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(
+		`SELECT DISTINCT ON (channel, locale) channel, locale, is_default, %s FROM %s.notification_templates
+		 WHERE template_key = $1 AND locale = ANY($2)
+		 ORDER BY channel, locale, is_default`, strings.Join(notiftemplate.Columns, ", "), tenantschema.Name(tenantSlug)),
+		templateKey, locales)
+	if err != nil {
+		return nil, fmt.Errorf("load notification templates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []StoredTemplate
+	for rows.Next() {
+		t := StoredTemplate{TemplateKey: templateKey, Fields: map[string]string{}}
+		fields := make([]sql.NullString, len(notiftemplate.Columns))
+		var isDefault bool
+		dest := []any{&t.Channel, &t.Locale, &isDefault}
+		for i := range fields {
+			dest = append(dest, &fields[i])
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("scan notification template: %w", err)
+		}
+		t.IsOverride = !isDefault
+		for i, col := range notiftemplate.Columns {
+			if fields[i].Valid {
+				t.Fields[col] = fields[i].String
+			}
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load notification templates: %w", err)
+	}
+	return out, nil
+}
+
 // Template returns the row a send of (templateKey, channel, locale) uses:
-// the tenant's override if it has one, else the shipped default. Its
-// IsOverride reports which.
+// the tenant's override if it has one, else the shipped default.
 func (s *Store) Template(ctx context.Context, tenantSlug, templateKey, channel, locale string) (*StoredTemplate, error) {
-	row := s.db.QueryRowContext(ctx, fmt.Sprintf(
-		`SELECT is_default, %s FROM %s.notification_templates
-		 WHERE template_key = $1 AND channel = $2 AND locale = $3
-		 ORDER BY is_default LIMIT 1`, strings.Join(notiftemplate.Columns, ", "), tenantschema.Name(tenantSlug)),
-		templateKey, channel, locale)
-
-	fields := make([]sql.NullString, len(notiftemplate.Columns))
-	var isDefault bool
-	dest := []any{&isDefault}
-	for i := range fields {
-		dest = append(dest, &fields[i])
+	rows, err := s.Templates(ctx, tenantSlug, templateKey, []string{locale})
+	if err != nil {
+		return nil, err
 	}
-	if err := row.Scan(dest...); errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrTemplateNotFound
-	} else if err != nil {
-		return nil, fmt.Errorf("load notification template: %w", err)
-	}
-
-	t := &StoredTemplate{
-		TemplateKey: templateKey, Channel: channel, Locale: locale, Fields: map[string]string{},
-		IsOverride: !isDefault,
-	}
-	for i, col := range notiftemplate.Columns {
-		if fields[i].Valid {
-			t.Fields[col] = fields[i].String
+	for _, r := range rows {
+		if r.Channel == channel {
+			return &r, nil
 		}
 	}
-	return t, nil
+	return nil, ErrTemplateNotFound
 }
 
 // StoredTemplate is a notification_templates row as a send reads it.

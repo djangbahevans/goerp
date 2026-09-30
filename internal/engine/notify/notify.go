@@ -265,7 +265,6 @@ func (s *Sender) SendBulk(ctx context.Context, tenantID, moduleName, notificatio
 
 // sendSpec is what a send resolves once, whoever it goes to.
 type sendSpec struct {
-	snapshot         *registry.RegistrySnapshot
 	tenant           *tenant.Tenant
 	cfg              *notifconfig.Config
 	moduleName       string
@@ -276,6 +275,8 @@ type sendSpec struct {
 	// providers memoizes resolveProvider by category: every recipient of a
 	// send shares its tenant's provider.
 	providers map[string]string
+	// templates memoizes the send's templates by recipient locale.
+	templates map[string]sendTemplates
 }
 
 // preparedSend is everything one recipient's send writes, resolved before
@@ -300,8 +301,7 @@ func (s *Sender) prepareSend(ctx context.Context, tenantID, moduleName, notifica
 	if err := validateChannels(opts.AdditionalChannels); err != nil {
 		return nil, err
 	}
-	snapshot := s.Registry.Snapshot()
-	nt, err := lookupType(snapshot, moduleName, notificationType)
+	nt, err := lookupType(s.Registry.Snapshot(), moduleName, notificationType)
 	if err != nil {
 		return nil, err
 	}
@@ -319,9 +319,9 @@ func (s *Sender) prepareSend(ctx context.Context, tenantID, moduleName, notifica
 		return nil, fmt.Errorf("load notification config: %w", err)
 	}
 	return &sendSpec{
-		snapshot: snapshot, tenant: t, cfg: cfg,
+		tenant: t, cfg: cfg,
 		moduleName: moduleName, notificationType: notificationType, declared: nt, priority: priority,
-		providers: make(map[string]string),
+		providers: make(map[string]string), templates: make(map[string]sendTemplates),
 	}, nil
 }
 
@@ -352,15 +352,22 @@ func (s *Sender) prepareRecipient(ctx context.Context, spec *sendSpec, userID st
 		return nil, err
 	}
 
+	tmpls, ok := spec.templates[user.locale]
+	if !ok {
+		if tmpls, err = loadSendTemplates(ctx, s.Store, t.Slug, spec.notificationType, user.locale); err != nil {
+			return nil, err
+		}
+		spec.templates[user.locale] = tmpls
+	}
 	vars := templateVars(data, t, user, opts)
-	content, err := renderInApp(spec.snapshot, spec.moduleName, spec.declared.Name, spec.declared.Label, user.locale, vars)
+	content, err := renderInApp(tmpls, spec.declared.Label, vars)
 	if err != nil {
 		return nil, err
 	}
 	if opts.ActionURL != "" {
 		content.ActionURL = opts.ActionURL
 	}
-	provider := renderProviderChannels(spec.snapshot, spec.moduleName, spec.declared.Name, user.locale, plan, content, vars)
+	provider := renderProviderChannels(tmpls, plan, content, vars)
 
 	return &preparedSend{
 		sendSpec: spec, userID: userID, data: data, plan: plan, content: content, provider: provider,

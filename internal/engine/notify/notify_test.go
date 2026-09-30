@@ -17,6 +17,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/djangbahevans/goerp/internal/engine/enginenotif"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
@@ -144,6 +145,7 @@ func openTestEnv(t *testing.T) *testEnv {
 	store := notifications.NewStore(conn)
 	for _, bootstrap := range []func(context.Context, string) error{
 		roles.Bootstrap, store.BootstrapFeed, store.BootstrapDeliveries, store.BootstrapPreferences, store.BootstrapDeviceTokens,
+		store.BootstrapTemplates,
 	} {
 		if err := bootstrap(ctx, slug); err != nil {
 			t.Fatalf("bootstrap notification tables: %v", err)
@@ -161,10 +163,11 @@ func openTestEnv(t *testing.T) *testEnv {
 		SMS:   notifconfig.SMSConfig{SenderID: "ACME"},
 	}
 	hub := &recordingHub{}
+	reg := salesRegistry(t)
 	sender := NewSender(Deps{
 		DB:        conn,
 		Store:     store,
-		Registry:  salesRegistry(t),
+		Registry:  reg,
 		Config:    staticConfig{cfg},
 		Providers: staticProviders{providerselect.CategoryPush: "connector_fcm", providerselect.CategorySMS: "connector_africastalking"},
 		Tenants:   tenantStore,
@@ -172,7 +175,31 @@ func openTestEnv(t *testing.T) *testEnv {
 		Jobs:      jobs,
 		Hub:       hub,
 	})
-	return &testEnv{conn: conn, roleID: roleID, tenant: tt, store: store, config: cfg, hub: hub, sender: sender}
+	env := &testEnv{conn: conn, roleID: roleID, tenant: tt, store: store, config: cfg, hub: hub, sender: sender}
+	engineRows, err := enginenotif.DefaultRows()
+	if err != nil {
+		t.Fatalf("enginenotif.DefaultRows() error: %v", err)
+	}
+	if err := store.SeedDefaultTemplates(ctx, slug, EngineModule, engineRows); err != nil {
+		t.Fatalf("seed engine templates: %v", err)
+	}
+	env.seedTemplates(t, reg)
+	return env
+}
+
+// seedTemplates stores the templates of reg's modules as the tenant's
+// default notification_templates rows, the way a module install does.
+func (e *testEnv) seedTemplates(t *testing.T, reg *registry.ModuleRegistry) {
+	t.Helper()
+	for name, mod := range reg.Snapshot().Modules() {
+		rows, err := mod.NotifTemplates.Rows(name)
+		if err != nil {
+			t.Fatalf("%s template rows: %v", name, err)
+		}
+		if err := e.store.SeedDefaultTemplates(t.Context(), e.tenant.Slug, name, rows); err != nil {
+			t.Fatalf("seed %s templates: %v", name, err)
+		}
+	}
 }
 
 // salesRegistry holds a "sales" module declaring salesTypes, with in_app,
@@ -185,7 +212,7 @@ func salesRegistry(t *testing.T) *registry.ModuleRegistry {
 		t.Fatal(err)
 	}
 	for name, template := range map[string]string{
-		"in_app.en.json": `{"title": "Order {{.OrderReference}} confirmed", "body": "Hi {{.UserFirstName}}, {{.TenantName}} confirmed it.", "action_url": "/_m/sales/orders/{{.OrderID}}", "icon": "shopping-cart"}`,
+		"in_app.en.json": `{"title": "Order {{.OrderReference}} confirmed", "body": "Hi {{.UserFirstName}}, {{.TenantName}} confirmed it.{{if .BreakInApp}}{{index .BreakInApp 9}}{{end}}", "action_url": "/_m/sales/orders/{{.OrderID}}", "icon": "shopping-cart"}`,
 		"sms.en.txt":     "{{.TenantName}}: order {{.OrderReference}} confirmed.{{if .BreakSMS}}{{index .BreakSMS 9}}{{end}}\n",
 		"push.en.json":   `{"title": "Order {{.OrderReference}}", "body": "Confirmed by {{.TenantName}}"}`,
 	} {

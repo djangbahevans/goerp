@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -493,10 +492,9 @@ func TestProviderDelivery_RealConnectorPermanentErrorFailsDeliveries(t *testing.
 // A type with no sms or push template sends its in_app title and body.
 func TestRenderProviderChannels_FallsBackToInAppContent(t *testing.T) {
 	plan := []channelPlan{{channel: sms}, {channel: push}}
-	got := renderProviderChannels(nil, "sales", "order_confirmed", "en", plan, inAppContent{Title: "Order confirmed", Body: "Total GH₵10"}, nil)
-	want := providerContent{smsBody: "Order confirmed\nTotal GH₵10", pushTitle: "Order confirmed", pushBody: "Total GH₵10", failed: map[string]error{}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("renderProviderChannels() = %+v, want %+v", got, want)
+	got := renderProviderChannels(nil, plan, inAppContent{Title: "Order confirmed", Body: "Total GH₵10"}, nil)
+	if got.smsBody != "Order confirmed\nTotal GH₵10" || got.pushTitle != "Order confirmed" || got.pushBody != "Total GH₵10" || len(got.failed) != 0 {
+		t.Errorf("renderProviderChannels() = %+v, want the in_app title and body on both channels and no failures", got)
 	}
 }
 

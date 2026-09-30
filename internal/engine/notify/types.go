@@ -10,7 +10,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
-	"github.com/djangbahevans/goerp/internal/engine/notiftemplate"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 )
 
@@ -66,17 +65,4 @@ func validateChannels(channels []string) error {
 		}
 	}
 	return nil
-}
-
-// resolveTemplate resolves moduleName's notificationName/channel template
-// for locale: an engine type's from the templates embedded in the binary,
-// any other from its module's package in snapshot.
-func resolveTemplate(snapshot *registry.RegistrySnapshot, moduleName, notificationName, channel, locale string) (string, *notiftemplate.Template, bool) {
-	if moduleName == EngineModule {
-		return enginenotif.Templates().Resolve(notificationName, channel, locale)
-	}
-	if snapshot == nil {
-		return "", nil, false
-	}
-	return snapshot.NotifTemplate(moduleName, notificationName, channel, locale)
 }

@@ -88,7 +88,6 @@ type emailDelivery struct {
 	status    string
 	userID    string
 	typ       string
-	module    string
 	title     string
 	body      string
 	actionURL string
@@ -189,11 +188,11 @@ func (w *EmailWorker) loadDelivery(ctx context.Context, tenantSlug, deliveryID s
 	var d emailDelivery
 	var data []byte
 	err := w.DB.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT d.status, n.user_id, n.type, n.module, n.title, COALESCE(n.body, ''), COALESCE(n.action_url, ''), n.data, n.created_at
+		SELECT d.status, n.user_id, n.type, n.title, COALESCE(n.body, ''), COALESCE(n.action_url, ''), n.data, n.created_at
 		FROM %s.notification_deliveries d
 		JOIN %s.notifications n ON n.id = d.notification_id
 		WHERE d.id = $1
-	`, schema, schema), deliveryID).Scan(&d.status, &d.userID, &d.typ, &d.module, &d.title, &d.body, &d.actionURL, &data, &d.createdAt)
+	`, schema, schema), deliveryID).Scan(&d.status, &d.userID, &d.typ, &d.title, &d.body, &d.actionURL, &data, &d.createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -228,11 +227,11 @@ func (w *EmailWorker) update(ctx context.Context, args jobqueue.EmailSendArgs, s
 	return nil
 }
 
-// prepare picks the tenant's provider and renders the message. Everything
-// that feeds the message is fixed by the notification, not the attempt —
-// the unsubscribe token and {{.Year}} are as of the notification's
-// creation — so a retry sends the same message under the same
-// idempotency key.
+// prepare picks the tenant's provider and renders the message from the
+// tenant's current templates. Everything else that feeds the message is
+// fixed by the notification, not the attempt — the unsubscribe token and
+// {{.Year}} are as of the notification's creation — so a retry sends the
+// same message under the same idempotency key unless a template changed.
 func (w *EmailWorker) prepare(ctx context.Context, args jobqueue.EmailSendArgs, d *emailDelivery) (emailprovider.Sender, emailprovider.Message, error) {
 	var msg emailprovider.Message
 	t, err := w.Tenants.GetByID(ctx, args.TenantID)
@@ -275,7 +274,11 @@ func (w *EmailWorker) prepare(ctx context.Context, args jobqueue.EmailSendArgs, 
 		vars["ActionURL"] = absoluteURL(base, d.actionURL)
 	}
 
-	content, err := w.render(d, user.locale, vars)
+	tmpls, err := loadSendTemplates(ctx, notifications.NewStore(w.DB), t.Slug, d.typ, user.locale)
+	if err != nil {
+		return sender, msg, err
+	}
+	content, err := w.render(d, tmpls, vars)
 	if err != nil {
 		return sender, msg, fmt.Errorf("%w: %w", errEmailPermanent, err)
 	}
@@ -363,36 +366,23 @@ type emailContent struct {
 }
 
 // render renders d's email subject, HTML body and plain-text body from
-// its module's email templates (notification-system.md §5), each part
-// falling back to the notification's in-app title, body and action link
-// when its template is absent.
-func (w *EmailWorker) render(d *emailDelivery, locale string, vars map[string]any) (emailContent, error) {
+// tmpls' email template (notification-system.md §10 "Email rendering"),
+// each part falling back to the notification's in-app title, body and
+// action link when its template is absent.
+func (w *EmailWorker) render(d *emailDelivery, tmpls sendTemplates, vars map[string]any) (emailContent, error) {
 	c := emailContent{subject: d.title}
-	name := strings.TrimPrefix(d.typ, d.module+".")
-	snapshot := w.Registry.Snapshot()
-	resolve := func(channel string) (string, *notiftemplate.Template, bool) {
-		return resolveTemplate(snapshot, d.module, name, channel, locale)
-	}
 
-	if matched, tmpl, ok := resolve(notiftemplate.ChannelEmailSubject); ok {
-		rendered, err := notiftemplate.Render(tmpl, matched, jsonEscapedStrings(vars))
+	if fields, ok := tmpls.part(notifications.ChannelEmail, notiftemplate.ColSubject); ok {
+		subject, err := renderColumn(fields, notiftemplate.ColSubject, vars)
 		if err != nil {
 			return c, fmt.Errorf("%w: email subject: %w", ErrRenderFailed, err)
 		}
-		var subject struct {
-			Subject string `json:"subject"`
-		}
-		if err := json.Unmarshal([]byte(rendered), &subject); err != nil {
-			return c, fmt.Errorf("%w: email subject output is not a JSON object: %w", ErrRenderFailed, err)
-		}
-		if subject.Subject != "" {
-			c.subject = subject.Subject
-		}
+		c.subject = cmp.Or(subject, c.subject)
 	}
 
 	actionURL, _ := vars["ActionURL"].(string)
-	if matched, tmpl, ok := resolve(notifications.ChannelEmail); ok {
-		rendered, err := notiftemplate.Render(tmpl, matched, vars)
+	if fields, ok := tmpls.part(notifications.ChannelEmail, notiftemplate.ColHTML); ok {
+		rendered, err := renderColumn(fields, notiftemplate.ColHTML, vars)
 		if err != nil {
 			return c, fmt.Errorf("%w: email html: %w", ErrRenderFailed, err)
 		}
@@ -405,8 +395,8 @@ func (w *EmailWorker) render(d *emailDelivery, locale string, vars map[string]an
 		c.html = buf.String()
 	}
 
-	if matched, tmpl, ok := resolve(notiftemplate.ChannelEmailText); ok {
-		rendered, err := notiftemplate.Render(tmpl, matched, vars)
+	if fields, ok := tmpls.part(notifications.ChannelEmail, notiftemplate.ColText); ok {
+		rendered, err := renderColumn(fields, notiftemplate.ColText, vars)
 		if err != nil {
 			return c, fmt.Errorf("%w: email text: %w", ErrRenderFailed, err)
 		}

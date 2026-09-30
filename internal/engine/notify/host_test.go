@@ -57,10 +57,8 @@ func TestHostSender_MapsCallerErrors(t *testing.T) {
 	_, err = host.SendBulk(t.Context(), badChannel)
 	requireHostErrorCode(t, err, abiv1.ErrCodeNotifyInvalidOptions)
 
-	// A map key is printed unescaped, so this data renders the in_app
-	// template to invalid JSON.
 	unrenderable := hostRequest(env, orderConfirmed, userID)
-	unrenderable.Data = map[string]any{"OrderReference": map[string]any{`a"b`: 1}}
+	unrenderable.Data = map[string]any{"BreakInApp": []any{"x"}}
 	_, err = host.SendBulk(t.Context(), unrenderable)
 	requireHostErrorCode(t, err, abiv1.ErrCodeNotifyRenderFailed)
 
