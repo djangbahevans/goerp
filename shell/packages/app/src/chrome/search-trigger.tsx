@@ -13,7 +13,7 @@ export function SearchTrigger(): ReactNode {
       type="button"
       onClick={openCommandPalette}
       aria-label={`Search (${shortcutLabel})`}
-      className="flex items-center gap-2 rounded-control px-2 py-1.5 text-text-secondary hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:shadow-focus"
+      className="flex items-center gap-2 rounded-control px-2 py-1.5 text-text-secondary hover:bg-surface-hover hover:text-text focus-visible:shadow-focus focus-visible:outline-none"
     >
       <Search size={18} aria-hidden="true" />
       {/* No aria-hidden: the button's own aria-label already covers this text, and biome's noAriaHiddenOnFocusable rejects it here anyway. */}

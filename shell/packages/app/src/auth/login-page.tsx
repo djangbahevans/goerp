@@ -241,7 +241,7 @@ export function LoginPage({
           <TextLink href="/auth/forgot-password">Forgot password?</TextLink>
         </div>
 
-        <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
+        <div role="status" aria-live="polite" className="text-danger text-sm empty:hidden">
           {phase.kind === "locked" && (
             <>
               Too many attempts. Try again in{" "}

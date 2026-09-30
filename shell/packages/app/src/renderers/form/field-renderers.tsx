@@ -445,7 +445,7 @@ function ComputedDisplayField({
   const result = conditions.computeValue(field.expression, `field "${field.field}" expression`, record);
   if (!result.ok) {
     return (
-      <span className="text-sm text-danger" title={result.message}>
+      <span className="text-danger text-sm" title={result.message}>
         Can't compute<span className="sr-only">: {result.message}</span>
       </span>
     );

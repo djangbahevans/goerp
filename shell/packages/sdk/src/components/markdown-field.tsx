@@ -327,7 +327,7 @@ export function MarkdownField({
                         applyLink();
                       }
                     }}
-                    className={`w-56 rounded-control border px-2 py-1 text-sm text-text focus-visible:outline-none focus-visible:shadow-focus ${linkUrlInvalid ? "border-danger" : "border-border"}`}
+                    className={`w-56 rounded-control border px-2 py-1 text-sm text-text focus-visible:shadow-focus focus-visible:outline-none ${linkUrlInvalid ? "border-danger" : "border-border"}`}
                   />
                   {activeMarks.link && (
                     <Button
@@ -363,7 +363,7 @@ export function MarkdownField({
         </div>
       </div>
       {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
+        <span role="alert" className="text-danger text-sm">
           {error}
         </span>
       )}

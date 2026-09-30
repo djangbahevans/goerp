@@ -79,7 +79,7 @@ export function CalendarAgendaList({ today, events, onEventClick }: CalendarAgen
                         style={{ backgroundColor: event.color }}
                       />
                     )}
-                    <span className="w-24 shrink-0 text-text-secondary text-sm">
+                    <span className="w-24 shrink-0 text-sm text-text-secondary">
                       {formatEventTime(event.start, event.end)}
                     </span>
                     <span className="truncate">{event.title}</span>

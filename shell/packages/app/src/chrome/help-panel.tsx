@@ -49,7 +49,7 @@ export function HelpPanel({ open, onClose, links = HELP_LINKS }: HelpPanelProps)
                     href={link.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-3 rounded-control p-2 text-sm text-text hover:bg-surface-hover focus-visible:outline-none focus-visible:shadow-focus"
+                    className="flex items-center gap-3 rounded-control p-2 text-sm text-text hover:bg-surface-hover focus-visible:shadow-focus focus-visible:outline-none"
                   >
                     <Icon name={link.icon} size={16} aria-hidden="true" className="text-text-secondary" />
                     <span className="flex-1">{link.label}</span>

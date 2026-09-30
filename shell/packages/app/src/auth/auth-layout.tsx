@@ -16,12 +16,12 @@ export function AuthLayout({ children, tenantLogo, privacyPolicyUrl }: AuthLayou
           {tenantLogo && <img src={tenantLogo.url} alt={tenantLogo.alt} className="mx-auto mb-4 h-8 w-auto" />}
           {children}
         </div>
-        <footer className="mt-6 flex justify-center gap-3 text-xs text-text-secondary">
+        <footer className="mt-6 flex justify-center gap-3 text-text-secondary text-xs">
           <span>Powered by GoERP</span>
           {privacyPolicyUrl && (
             <a
               href={privacyPolicyUrl}
-              className="rounded-control text-text hover:underline focus-visible:outline-none focus-visible:shadow-focus"
+              className="rounded-control text-text hover:underline focus-visible:shadow-focus focus-visible:outline-none"
             >
               Privacy policy
             </a>

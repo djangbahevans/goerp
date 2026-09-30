@@ -226,13 +226,13 @@ export function BarcodeField({
             void startScan();
           }}
           style={TRAILING_BUTTON_STYLE}
-          className="flex h-11 w-11 items-center justify-center rounded-control text-text-secondary hover:opacity-75 focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-11 w-11 items-center justify-center rounded-control text-text-secondary hover:opacity-75 focus-visible:shadow-focus focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ScanBarcode size={16} />
         </button>
       </div>
       {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
+        <span role="alert" className="text-danger text-sm">
           {error}
         </span>
       )}
@@ -271,7 +271,7 @@ export function BarcodeField({
                   />
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-6 rounded-control border-2 border-primary filter-[drop-shadow(0_0_4px_rgb(0_0_0/0.6))]"
+                    className="filter-[drop-shadow(0_0_4px_rgb(0_0_0/0.6))] pointer-events-none absolute inset-6 rounded-control border-2 border-primary"
                   />
                   <button
                     type="button"

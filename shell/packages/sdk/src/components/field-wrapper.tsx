@@ -71,7 +71,7 @@ export function FieldLabel({
   children: ReactNode;
 }): ReactNode {
   return (
-    <label htmlFor={htmlFor} className="text-sm font-medium text-text">
+    <label htmlFor={htmlFor} className="font-medium text-sm text-text">
       {children}
       {required && (
         <span aria-hidden="true" className="text-danger">
@@ -93,7 +93,7 @@ export function FieldDescription({ id, children }: { id: string; children: React
 
 export function FieldError({ id, children }: { id: string; children: ReactNode }): ReactNode {
   return (
-    <span id={id} role="alert" className="text-sm text-danger">
+    <span id={id} role="alert" className="text-danger text-sm">
       {children}
     </span>
   );

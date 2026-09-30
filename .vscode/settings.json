@@ -1,5 +1,6 @@
 {
   "go.lintTool": "golangci-lint",
   "go.lintOnSave": "package",
-  "go.lintFlags": ["--fast"]
+  "go.lintFlags": ["--fast"],
+  "biome.configurationPath": "shell/biome.json"
 }

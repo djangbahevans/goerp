@@ -48,7 +48,7 @@ export function ChromeBanner({
       className={`@container flex items-start gap-2 border-border border-b px-4 py-2 text-sm text-text ${classes.row}`}
     >
       <ToneIcon size={16} aria-hidden="true" className={`mt-0.5 shrink-0 ${classes.icon}`} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1 @xl:flex-row @xl:items-baseline @xl:gap-3">
+      <div className="flex min-w-0 flex-1 @xl:flex-row flex-col @xl:items-baseline @xl:gap-3 gap-1">
         <p className="min-w-0">{children}</p>
         {action && (
           <span className="shrink-0">

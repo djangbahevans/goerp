@@ -42,7 +42,7 @@ export function ColorPicker({
         }`}
       />
       {error !== undefined && (
-        <span role="alert" className="text-sm text-danger">
+        <span role="alert" className="text-danger text-sm">
           {error}
         </span>
       )}

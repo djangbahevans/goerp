@@ -265,7 +265,7 @@ export function ChatterComposer({
           document.body,
         )}
       {error && (
-        <p id={errorId} role="alert" className="mt-1 text-sm text-danger">
+        <p id={errorId} role="alert" className="mt-1 text-danger text-sm">
           {error}
         </p>
       )}

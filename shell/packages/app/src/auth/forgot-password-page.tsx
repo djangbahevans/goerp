@@ -127,7 +127,7 @@ export function ForgotPasswordPage({ requestReset = requestPasswordReset }: Forg
           />
         </FieldWrapper>
 
-        <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
+        <div role="status" aria-live="polite" className="text-danger text-sm empty:hidden">
           {formError}
           {phase.kind === "locked" && (
             <>

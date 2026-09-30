@@ -23,7 +23,7 @@ export function ToggleField({ id, value, onChange, disabled = false }: ToggleFie
     <label
       data-checked={value}
       style={TRACK_STYLE}
-      className="group inline-flex h-5 shrink-0 cursor-pointer items-center rounded-full border px-0.5 py-0.5 transition-colors duration-(--duration-fast) ease-out has-focus-visible:shadow-focus has-disabled:cursor-not-allowed has-disabled:opacity-50 data-[checked=false]:border-border-control data-[checked=false]:bg-bg-subtle data-[checked=false]:hover:border-text-secondary data-[checked=true]:border-transparent data-[checked=true]:bg-primary data-[checked=true]:hover:bg-primary-hover"
+      className="group inline-flex h-5 shrink-0 cursor-pointer items-center rounded-full border px-0.5 py-0.5 transition-colors duration-(--duration-fast) ease-out has-disabled:cursor-not-allowed has-disabled:opacity-50 has-focus-visible:shadow-focus data-[checked=false]:border-border-control data-[checked=true]:border-transparent data-[checked=false]:bg-bg-subtle data-[checked=true]:bg-primary data-[checked=false]:hover:border-text-secondary data-[checked=true]:hover:bg-primary-hover"
     >
       <input
         id={field?.id ?? id}

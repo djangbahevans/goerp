@@ -105,7 +105,7 @@ export interface EntryDisplay {
 function ChangeLines({ changes, context }: { changes: ActivityFieldChange[]; context: ChangeLabelContext }) {
   const single = changes.length === 1;
   return (
-    <ul className="space-y-1 text-sm text-text-secondary wrap-anywhere">
+    <ul className="wrap-anywhere space-y-1 text-sm text-text-secondary">
       {changes.map((change) => (
         <li key={change.field}>
           {!single && `${fieldLabel(change.field, context.formFields.get(change.field))}: `}
@@ -140,7 +140,7 @@ export function entryDisplay(entry: ActivityEntry, context: ChangeLabelContext, 
         icon: entry.notifyFollowers ? "send" : "message-square",
         title: entry.notifyFollowers ? "Messaged followers" : "Commented",
         body: (
-          <p className="max-w-[80ch] whitespace-pre-wrap text-sm text-text wrap-anywhere">
+          <p className="wrap-anywhere max-w-[80ch] whitespace-pre-wrap text-sm text-text">
             {renderCommentBody(entry.body ?? "", entry.mentions, viewerId)}
           </p>
         ),
@@ -156,7 +156,7 @@ export function entryDisplay(entry: ActivityEntry, context: ChangeLabelContext, 
           <div className="text-sm text-text-secondary">
             <p>Due {formatFieldValue(entry.activity.dueDate, "date", undefined, EMPTY_VALUE)}</p>
             {entry.activity.feedback && (
-              <p className="max-w-[80ch] whitespace-pre-wrap text-text wrap-anywhere">{entry.activity.feedback}</p>
+              <p className="wrap-anywhere max-w-[80ch] whitespace-pre-wrap text-text">{entry.activity.feedback}</p>
             )}
           </div>
         ),

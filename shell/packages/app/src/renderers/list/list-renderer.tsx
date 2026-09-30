@@ -539,7 +539,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                     <colgroup>, which desyncs cross-group column alignment
                     under the shared scroll container above. */}
                 {!isTree && listState.groupBy && (
-                  <caption className="bg-bg-subtle p-3 text-left text-sm font-medium text-text-secondary">
+                  <caption className="bg-bg-subtle p-3 text-left font-medium text-sm text-text-secondary">
                     {/* Pinned so the label stays in view when the shared container scrolls horizontally. */}
                     <span className="sticky left-3 inline-block">
                       {listState.groupBy} = {group.key}
@@ -559,11 +559,11 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                   ))}
                 </colgroup>
                 <thead>
-                  <tr className="border-b border-border bg-surface">
+                  <tr className="border-border border-b bg-surface">
                     {showSelection && (
                       <th
                         scope="col"
-                        className={`p-3 text-left bg-surface ${stickyCheckboxClassName} ${scrolled ? "shadow-sm" : ""}`}
+                        className={`bg-surface p-3 text-left ${stickyCheckboxClassName} ${scrolled ? "shadow-sm" : ""}`}
                       >
                         <SelectAllCheckbox
                           label={
@@ -582,7 +582,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                           scope="col"
                           key={column.field}
                           style={columnStyle(column)}
-                          className="p-3 text-left text-sm font-medium text-text-secondary"
+                          className="p-3 text-left font-medium text-sm text-text-secondary"
                           aria-sort={
                             !column.sortable
                               ? undefined
@@ -631,9 +631,9 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                     return (
                       <Fragment key={rowKey}>
                         <tr
-                          className={`border-b border-border last:border-b-0 ${selected ? "bg-primary-subtle" : "bg-surface"} ${
+                          className={`border-border border-b last:border-b-0 ${selected ? "bg-primary-subtle" : "bg-surface"} ${
                             rowHandleActivate
-                              ? "cursor-pointer hover:bg-surface-hover focus-visible:[outline:2px_solid_var(--color-primary)] focus-visible:-outline-offset-2"
+                              ? "cursor-pointer hover:bg-surface-hover focus-visible:-outline-offset-2 focus-visible:[outline:2px_solid_var(--color-primary)]"
                               : ""
                           }`}
                           aria-level={isTree ? treeRow.depth + 1 : undefined}
@@ -733,7 +733,7 @@ export function ListRenderer({ view, module, recordId, embedded, baseFilter, sho
                           <tr className="bg-surface">
                             <td colSpan={(showSelection ? 1 : 0) + columns.length} className="p-3">
                               <span
-                                className="flex items-center gap-2 text-sm text-danger"
+                                className="flex items-center gap-2 text-danger text-sm"
                                 style={{ paddingInlineStart: `calc(var(--space-4) * ${treeRow.depth + 1})` }}
                               >
                                 <Icon name="circle-alert" size={14} aria-hidden="true" />

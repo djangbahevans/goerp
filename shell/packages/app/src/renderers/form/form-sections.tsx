@@ -233,7 +233,7 @@ function SubListSection({ section, resource, module, record, recordId, formReado
   if (isLoading) return card(<p className="text-sm text-text-secondary">Loading…</p>);
   if (isError) {
     return card(
-      <p role="alert" className="text-sm text-danger">
+      <p role="alert" className="text-danger text-sm">
         {error instanceof Error ? error.message : String(error)}
       </p>,
     );

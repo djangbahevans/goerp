@@ -73,7 +73,7 @@ function ShareRow({
         </ActionButton>
       </div>
       {error && (
-        <p role="alert" className="text-xs text-danger">
+        <p role="alert" className="text-danger text-xs">
           Couldn't revoke access. {error}
         </p>
       )}
@@ -212,7 +212,7 @@ export function SharePanel({ resource, recordId, label, permissions, headingId }
             </p>
           )}
           {permissions.length === 1 && (
-            <p className="text-xs text-text-secondary">
+            <p className="text-text-secondary text-xs">
               They'll be able to {PERMISSION_VERBS[permission]} this {label}.
             </p>
           )}

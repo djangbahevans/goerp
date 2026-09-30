@@ -162,12 +162,12 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         // "Structure stays put" the way AlertDialog's own fixed button row
         // does, at a smaller scale — sticky, not scrolled away with a long
         // field list.
-        <footer className="sticky bottom-0 flex items-center gap-4 border-t border-border bg-bg p-4">
+        <footer className="sticky bottom-0 flex items-center gap-4 border-border border-t bg-bg p-4">
           <ActionButton variant="primary" loading={isSaving} disabled={!isDirty || formReadonly} onClick={save}>
             Save
           </ActionButton>
           {saveError && (
-            <span role="alert" className="text-sm text-danger">
+            <span role="alert" className="text-danger text-sm">
               {saveError.message}
             </span>
           )}
@@ -179,7 +179,7 @@ export function FormRenderer({ view, module, recordId, testFormRecordOptions }: 
         </span>
       )}
       {view.autosave && saveError && (
-        <span role="alert" className="text-sm text-danger">
+        <span role="alert" className="text-danger text-sm">
           {saveError.message}
         </span>
       )}

@@ -226,7 +226,7 @@ export function CalendarTimeGrid({
               <tr key={hour}>
                 <td
                   style={{ height: ROW_HEIGHT_PX }}
-                  className="border-border border-b pr-2 text-right text-text-secondary text-xs align-top"
+                  className="border-border border-b pr-2 text-right align-top text-text-secondary text-xs"
                 >
                   {HOUR_FORMAT.format(new Date(2026, 0, 1, hour))}
                 </td>

@@ -411,12 +411,12 @@ function ActivityRow({
           <Icon name={type.icon} size={16} aria-hidden="true" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-sm text-text wrap-anywhere">
+          <span className="wrap-anywhere text-sm text-text">
             <span className="sr-only">{type.label}, </span>
             {activity.summary}
           </span>
           {activity.note && (
-            <p className="max-w-[80ch] whitespace-pre-wrap text-sm text-text-secondary wrap-anywhere">
+            <p className="wrap-anywhere max-w-[80ch] whitespace-pre-wrap text-sm text-text-secondary">
               {activity.note}
             </p>
           )}

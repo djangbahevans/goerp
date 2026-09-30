@@ -110,7 +110,7 @@ export function VerifyEmailPage({
             Couldn't verify your email. Try again.
           </p>
         )}
-        <div role="status" aria-live="polite" className="text-sm text-danger empty:hidden">
+        <div role="status" aria-live="polite" className="text-danger text-sm empty:hidden">
           {phase.kind === "locked" && (
             <>
               Too many attempts. Try again in{" "}
