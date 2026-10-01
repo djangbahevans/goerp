@@ -17,7 +17,7 @@
     "format": "biome check --write ."
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "^2.5.15",
     "@storybook/react-vite": "^10.6.0",
     "storybook": "^10.6.0",
     "typescript": "7.0.2"
