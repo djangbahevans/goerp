@@ -1,24 +1,27 @@
-import { createPermissionContextValue, permissionDataRef } from "@goerp/sdk/auth";
-import { viewRegistryRef } from "@goerp/sdk/schema";
+import { usePermissionsStatus } from "@goerp/sdk/auth";
+import { useViewRegistryStatus } from "@goerp/sdk/schema";
 import { createFileRoute, notFound, redirect } from "@tanstack/react-router";
 import { ensureModuleRegistered } from "../../bootstrap/module-loader.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
 import { GenericRenderer } from "../../renderers/generic-renderer.js";
+import { WorkspaceLoadError, WorkspaceLoading } from "../workspace-load-state.js";
 
-// The shell's own /_m/* catch-all (shell-architecture.md §6 "Dynamic
-// module routes") — the file is named `[_m].$.tsx`, not `_m.$.tsx`: a bare
-// leading underscore on a route segment is TanStack Router's own
-// pathless-layout convention (verified against the actual generated
-// routeTree.gen.ts — `_m.$.tsx` resolves to path "/$", stripping "_m"
-// entirely and catching every top-level path, not just "/_m/*"). The
-// square-bracket escape is what keeps "_m" a literal, routable segment.
+// Brackets prevent TanStack Router from treating _m as a pathless layout.
 export const Route = createFileRoute("/_m/$")({
-  beforeLoad: ({ params }) => {
+  beforeLoad: ({ params, context }) => {
+    const workspace = context.workspace;
+    if (
+      workspace?.registryStatus !== "ready" ||
+      workspace.permissionsStatus !== "ready" ||
+      !workspace.registry ||
+      !workspace.permissions
+    )
+      return { view: null, bundleSha256: null };
     const apiPath = `/${params._splat ?? ""}`;
-    const view = viewRegistryRef.current.resolveRoute(apiPath);
+    const view = workspace.registry.resolveRoute(apiPath);
     if (!view) throw notFound();
 
-    const permissions = createPermissionContextValue(permissionDataRef.current);
+    const permissions = workspace.permissions;
     if (!permissions.moduleEnabled(view.module)) {
       throw redirect({ to: "/403", search: { reason: "module_not_enabled", module: view.module } });
     }
@@ -26,19 +29,13 @@ export const Route = createFileRoute("/_m/$")({
       throw redirect({ to: "/403", search: { reason: "missing_permission" } });
     }
 
-    // Handed to loader via context rather than re-resolving there: the
-    // registry can change between these two phases (a schema.updated/
-    // module.installed WS event lands, ViewRegistryProvider swaps
-    // viewRegistryRef.current and calls router.invalidate()) — re-resolving
-    // in loader would read whatever the registry became by then, not what
-    // was actually permission-checked just above. bundleSha256 is captured
-    // here too so it can never end up paired with a bundleUrl resolved
-    // from a different registry snapshot (a hot reload landing mid-navigation
-    // could otherwise pair an old bundle with a new hash, or vice versa).
-    return { view, bundleSha256: viewRegistryRef.current.getBundleSHA256(view.module) };
+    // Keep the permission-checked view and bundle hash from the same snapshot
+    // even if a schema refresh lands before the loader runs.
+    return { view, bundleSha256: workspace.registry.getBundleSHA256(view.module) };
   },
   loader: async ({ context }) => {
     const { view, bundleSha256 } = context;
+    if (!view) return null;
     await ensureModuleRegistered(view.module, view.bundleUrl, bundleSha256);
     return view;
   },
@@ -47,6 +44,10 @@ export const Route = createFileRoute("/_m/$")({
 });
 
 function RouteComponent() {
+  const registryStatus = useViewRegistryStatus();
+  const permissionsStatus = usePermissionsStatus();
   const resolvedView = Route.useLoaderData();
+  if (registryStatus === "error" || permissionsStatus === "error") return <WorkspaceLoadError />;
+  if (registryStatus !== "ready" || permissionsStatus !== "ready" || !resolvedView) return <WorkspaceLoading />;
   return <GenericRenderer resolvedView={resolvedView} />;
 }

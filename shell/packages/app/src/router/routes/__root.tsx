@@ -1,4 +1,11 @@
-import { type AuthContextValue, isSessionExpired, tenantSuspension } from "@goerp/sdk/auth";
+import {
+  type AuthContextValue,
+  isSessionExpired,
+  type PermissionContextValue,
+  type PermissionsStatus,
+  tenantSuspension,
+} from "@goerp/sdk/auth";
+import type { LoadStatus, ViewRegistry } from "@goerp/sdk/schema";
 import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { isAuthPath } from "../../auth/safe-redirect.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
@@ -9,12 +16,16 @@ const MFA_SETUP_EXEMPT = new Set(["/auth/mfa-setup", "/auth/logout"]);
 
 export interface RouterContext {
   auth: AuthContextValue;
+  workspace?: {
+    registry: ViewRegistry | null;
+    permissions: PermissionContextValue | null;
+    registryStatus: LoadStatus;
+    permissionsStatus: PermissionsStatus;
+  };
 }
 
-// shell-architecture.md §6 "Auth-gating". Something outside the router (e.g.
-// ViewRegistryProvider's invalidate) can trigger a load before the mount-time
-// session check settles; that load decides nothing, and AuthRouterProvider
-// re-runs the gate once the check does settle.
+// Route loads can start before the session check settles; AuthRouterProvider
+// reruns the auth gate after it settles.
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: ({ location, context }) => {
     // shell-ux.md §6.6: a suspended tenant has nothing else to show, signed
