@@ -1409,6 +1409,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 	var computeTargets map[string]wasm.ComputeTarget
 	var permRegistry *permission.PermissionRegistry
 	var searchIndexRegistry *searchindex.Registry
+
 	if e.moduleRegistry != nil {
 		if snap := e.moduleRegistry.Snapshot(); snap != nil {
 			fieldSecRegistry = snap.FieldSecRegistry()
@@ -1419,6 +1420,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 			searchIndexRegistry = snap.SearchIndexRegistry()
 		}
 	}
+
 	return wasm.NewModuleContext(req.ID, mod.Manifest.Name, req.UserID, "", nil, req.PermissionSet, req.TenantID, req.TenantSlug, req.TraceID, mod.Capabilities, e.wasmRuntime.TxLimiter(), wasm.ModuleSnapshot{
 		ModelDecls:          mod.ModelDecls,
 		FieldSecRegistry:    fieldSecRegistry,
@@ -1431,6 +1433,7 @@ func (e *Engine) newModuleContext(ctx context.Context, req EngineRequest, mod *m
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
 		JobTypes:            mod.Manifest.JobTypes,
+		HTTPAllowlist:       mod.Manifest.HTTPAllowlist,
 		ORMBulkMaxRows:      e.wasmRuntime.ORMBulkMaxRows(),
 		ORMStatementTimeout: e.wasmRuntime.ORMStatementTimeout(),
 	})

@@ -166,15 +166,8 @@ func (s *RegistrySnapshot) ModelForTable(table string) (string, bool) {
 	return qualified, ok
 }
 
-// ComputeTargets builds one wasm.ComputeTarget per loaded, non-failed
-// module in snap — the per-request data host.orm's write/read halves need
-// to borrow a fresh WASM instance from any module and invoke its
-// .Computed() functions (go-sdk-reference.md §22 "Computed field
-// recomputation"), regardless of which module's own write or read
-// triggered the recompute. Lives here (not in wasm) because it needs
-// module.LoadedModule's Pool/Capabilities/ModelDecls, and wasm cannot
-// import module without an import cycle (module.LoadedModule itself holds
-// a *wasm.InstancePool).
+// ComputeTargets captures each module's pool and declarations for nested calls.
+// The registry owns this lookup because importing it from wasm would create a cycle.
 func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
 	targets := make(map[string]wasm.ComputeTarget, len(snap.modules))
 	for name, m := range snap.modules {
@@ -182,13 +175,15 @@ func ComputeTargets(snap *RegistrySnapshot) map[string]wasm.ComputeTarget {
 			continue
 		}
 		targets[name] = wasm.ComputeTarget{
-			Pool:         m.Pool,
-			Capabilities: m.Capabilities,
-			ModelDecls:   m.ModelDecls,
-			ConfigSchema: m.Manifest.ConfigSchema,
-			JobTypes:     m.Manifest.JobTypes,
+			Pool:          m.Pool,
+			Capabilities:  m.Capabilities,
+			ModelDecls:    m.ModelDecls,
+			ConfigSchema:  m.Manifest.ConfigSchema,
+			JobTypes:      m.Manifest.JobTypes,
+			HTTPAllowlist: m.Manifest.HTTPAllowlist,
 		}
 	}
+
 	return targets
 }
 

@@ -272,15 +272,8 @@ func newJobEnvelope(job *river.Job[jobqueue.WASMJobArgs]) abiv1.JobEnvelope {
 	}
 }
 
-// newModuleContext builds the wasm.ModuleContext a handle_job invocation
-// runs under — the same registry-derived data engine.go's own
-// newModuleContext pulls from a snapshot for an HTTP-dispatched request,
-// with no live user (permSet/roles empty, same as
-// adminapi/activitydispatch.go's own workflow-activity dispatch) and the
-// trace ID the job was enqueued under.
-// IsDataMigrationJob is set only for a real data-migration job — the gate
-// host.db.migration_ddl (host_db_migration_ddl.go, goerp#500) checks so
-// CapDBMigrationDDL alone isn't enough to call it from an ordinary job.
+// Data-migration context is restricted to dispatched migration jobs so the
+// migration_ddl capability alone cannot authorize DDL from an ordinary job.
 func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
 	mc := wasm.NewModuleContext("", mod.Manifest.Name, "", "", nil, nil, args.TenantID, tenantSlug, args.TraceID, mod.Capabilities, rt.TxLimiter(), wasm.ModuleSnapshot{
 		ModelDecls:          mod.ModelDecls,
@@ -294,10 +287,12 @@ func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
 		JobTypes:            mod.Manifest.JobTypes,
+		HTTPAllowlist:       mod.Manifest.HTTPAllowlist,
 		ORMBulkMaxRows:      rt.ORMBulkMaxRows(),
 		ORMStatementTimeout: rt.ORMStatementTimeout(),
 	})
 	mc.IsDataMigrationJob = args.IsDataMigration
+
 	return mc
 }
 

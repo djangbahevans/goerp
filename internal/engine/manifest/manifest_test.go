@@ -171,13 +171,14 @@ func TestLoadManifestHTTPFetchRequiresNonEmptyAllowlist(t *testing.T) {
 	}{
 		"http.fetch without allowlist":        {[]string{"http.fetch"}, nil, true},
 		"http.fetch with empty allowlist":     {[]string{"http.fetch"}, []string{}, true},
-		"http.fetch with non-empty allowlist": {[]string{"http.fetch"}, []string{"example.com"}, false},
+		"http.fetch with non-empty allowlist": {[]string{"http.fetch"}, []string{"https://example.com"}, false},
 		"no http.fetch, no allowlist":         {[]string{"db.read"}, nil, false},
 	}
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			fields := minimalManifestFields()
+			fields["type"] = "connector"
 			fields["capabilities"] = c.capabilities
 			if c.httpAllowlist != nil {
 				fields["http_allowlist"] = c.httpAllowlist

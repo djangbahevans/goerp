@@ -3,28 +3,16 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
-// moduleHasUI reports whether m presents any UI — either a generic-renderer
-// View (manifest-spec.md §9) or a custom FrontendConfig bundle (§2's
-// "frontend" field) — the two ways a module can have UI.
 func moduleHasUI(m Manifest) bool {
 	return len(m.Views) > 0 || m.Frontend != nil
 }
 
-// validateModuleType enforces the per-type manifest-field constraint matrix
-// (manifest-spec.md §3 "Type-specific validation rules"): wasm requirement,
-// has_ui, owns_schema, and each type's required extra fields. All of it is
-// checkable from the parsed manifest alone.
-//
-// The matrix's "may register routes" column is not enforced here — that
-// needs a get_routes() WASM call the loader makes, not the manifest package
-// (goerp#118). The connector type's owns_schema column is skipped entirely
-// for the same reason: its "forbidden" rule carves out model.Virtual()
-// models, and only a get_model_declarations() call can tell those apart
-// from table-backed ones — enforcing "forbidden" without that carve-out
-// would reject legitimate connector modules (goerp#116).
+// Route and connector schema restrictions need WASM declarations: the manifest
+// alone cannot distinguish Virtual models from owned tables.
 func validateModuleType(m Manifest) error {
 	var violations []string
 	reject := func(format string, args ...any) {
@@ -48,6 +36,10 @@ func validateModuleType(m Manifest) error {
 		if hasUI {
 			reject("type %q must not declare views or a frontend bundle", m.Type)
 		}
+	}
+
+	if slices.Contains(m.Capabilities, "http.fetch") && m.Type != "connector" {
+		reject("type %q must not declare http.fetch; outbound HTTP requires a connector module", m.Type)
 	}
 
 	switch m.Type {
@@ -108,5 +100,6 @@ func validateModuleType(m Manifest) error {
 	if len(violations) == 0 {
 		return nil
 	}
+
 	return errors.New(strings.Join(violations, "; "))
 }
