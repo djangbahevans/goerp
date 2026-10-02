@@ -4,15 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>GoERP</title>
+    <!--goerp-import-map-->
   </head>
   <body>
     <div id="root"></div>
-    <!-- shell-architecture.md's dark-mode section: applied before the React
-         bundle runs, preventing a flash of the wrong theme. Also checks
-         prefers-color-scheme (not in the doc's own simpler example) to
-         match ThemeStore's real fallback (use-theme.ts) when nothing's
-         stored yet. data-contrast resolves the same way through
-         prefers-contrast. -->
+    <!-- Resolve theme before React mounts to prevent a flash of the wrong colors. -->
     <script>
       (() => {
         var stored = localStorage.getItem("goerp-theme");

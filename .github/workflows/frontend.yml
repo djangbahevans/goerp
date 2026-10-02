@@ -23,6 +23,7 @@ jobs:
           filters: |
             frontend:
               - "shell/**"
+              - "internal/engine/shellassets/**"
               - "testdata/**"
               - "**/frontend/**"
               - ".github/workflows/frontend.yml"
@@ -62,6 +63,19 @@ jobs:
       - name: Build
         working-directory: shell
         run: npm run build
+
+      - name: Setup Go for Module Runtime Tests
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.0"
+
+      - name: Install Chromium
+        working-directory: shell
+        run: npx playwright install --with-deps chromium
+
+      - name: Test Module Runtime
+        working-directory: shell
+        run: npm run test-module-runtime -w @goerp/shell-app
 
   storybook-tests:
     needs: changes

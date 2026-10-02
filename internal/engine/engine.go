@@ -34,6 +34,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -127,6 +128,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/search"
 	"github.com/djangbahevans/goerp/internal/engine/searchindex"
 	"github.com/djangbahevans/goerp/internal/engine/secrets"
+	"github.com/djangbahevans/goerp/internal/engine/shellassets"
 	"github.com/djangbahevans/goerp/internal/engine/storage"
 	"github.com/djangbahevans/goerp/internal/engine/storageupload"
 	"github.com/djangbahevans/goerp/internal/engine/systemworker"
@@ -230,6 +232,14 @@ type Engine struct {
 }
 
 func New(cfg *config.Config) (*Engine, error) {
+	var shell *shellassets.Handler
+	if cfg.ShellDir != "" {
+		var err error
+		shell, err = shellassets.New(os.DirFS(cfg.ShellDir))
+		if err != nil {
+			return nil, fmt.Errorf("load shell build: %w", err)
+		}
+	}
 	ctx := context.Background()
 
 	secretsBackend, err := secrets.New(cfg.SecretsBackend)
@@ -1267,12 +1277,11 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("verify builtin route parity: %w", err)
 	}
 
-	// buildChain needs e (dispatchORMRoute/invokeHandler are *Engine
-	// methods), which doesn't exist until the literal above — this call
-	// used to sit right after builtinRoutes/defaultRateLimit were built,
-	// moved here since nothing between there and here reads or depends on
-	// the HTTP handler being set earlier.
-	server.SetHandler(buildChain(e, moduleRegistry, builtinRoutes, cfg.TrustedProxies, tenantResolver, authChecker, tracer, cacheClient, defaultRateLimit))
+	handler := buildChain(e, moduleRegistry, builtinRoutes, cfg.TrustedProxies, tenantResolver, authChecker, tracer, cacheClient, defaultRateLimit)
+	if shell != nil {
+		handler = shell.Wrap(handler)
+	}
+	server.SetHandler(handler)
 
 	return e, nil
 }
