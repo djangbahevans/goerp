@@ -2,3 +2,7 @@
 .github
 *.md
 coverage.txt
+**/node_modules
+shell/packages/*/dist
+shell/packages/*/dist-types
+shell/packages/*/tsconfig.tsbuildinfo

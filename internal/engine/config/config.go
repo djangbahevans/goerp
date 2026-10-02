@@ -55,6 +55,7 @@ type Config struct {
 	LogFormat          string        `env:"GOERP_LOG_FORMAT" envDefault:"json" validate:"oneof=json text"`
 	CompilationCache   string        `env:"GOERP_COMPILATION_CACHE" envDefault:"./wasm-cache"`
 	ModuleDir          string        `env:"GOERP_MODULE_DIR" envDefault:"./modules"`
+	ShellDir           string        `env:"GOERP_SHELL_DIR"`
 	ShutdownTimeout    time.Duration `env:"GOERP_SHUTDOWN_TIMEOUT" envDefault:"30s"`
 	ShutdownDrainDelay time.Duration `env:"GOERP_SHUTDOWN_DRAIN_DELAY" envDefault:"5s"`
 	// HotReloadEnabled gates whether Engine.Start launches

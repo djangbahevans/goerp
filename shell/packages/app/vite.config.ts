@@ -4,6 +4,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { engineProxy } from "./src/dev-server/engine-proxy.js";
+import { sharedPackages } from "./src/dev-server/shared-packages.js";
 
 export default defineConfig({
   // Tenants resolve from the host, so the dev server answers <tenant>.localhost.
@@ -17,6 +18,7 @@ export default defineConfig({
   // worker-loading logic intact.
   optimizeDeps: { exclude: ["maplibre-gl", "@duckdb/duckdb-wasm"] },
   plugins: [
+    sharedPackages(),
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,

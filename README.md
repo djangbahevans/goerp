@@ -111,4 +111,8 @@ A healthy response looks like:
 
 ## Frontend build-time config
 
+The shell build includes shared ES module entries for React, TanStack Query and every public SDK export. Module bundles externalize those packages and resolve them through the shell's import map, sharing the same runtime instances as the app.
+
+For development, `make shell` injects the map through Vite. To serve a production build from the engine, run `npm run build` from `shell/`, then set `GOERP_SHELL_DIR` to the absolute path of `shell/packages/app/dist` before starting the engine. An incomplete build fails engine startup. The engine container includes this build and sets the directory automatically. HTML and the import-map endpoint are uncached; content-hashed assets use immutable caching. The shell reloads when a shared package mapping changes.
+
 The shell app (`shell/packages/app`) takes deployment-wide build-time config via Vite env vars — copy `shell/packages/app/.env.example` to `.env` and fill in for a real deployment. Currently just `VITE_MAP_TILE_URL` (the PMTiles archive URL above); unset, `LocationField` renders its plain-background fallback with no other behavior change.
