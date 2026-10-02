@@ -11,7 +11,6 @@ const queryClient = new QueryClient();
 // even when the bundle is unchanged (l10n-guide.md §7 "Translation loading").
 function onRegistryUpdate() {
   void translationLoader.refreshLoaded();
-  void router.invalidate();
 }
 
 export function App() {
@@ -19,11 +18,6 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <PermissionProvider>
-          {/* onUpdate re-runs every active route's beforeLoad/loader after a
-              rebuild (login, logout, schema.updated, module.installed) so a
-              route already on screen picks up the fresh registry without a
-              manual refresh — shell-architecture.md §9 "Registry updates on
-              hot reload" step 5. */}
           <ViewRegistryProvider onUpdate={onRegistryUpdate}>
             <AuthRouterProvider router={router} />
           </ViewRegistryProvider>

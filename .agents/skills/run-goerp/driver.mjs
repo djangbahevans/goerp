@@ -53,9 +53,6 @@ page.on("response", (r) => {
 async function heading() {
   const h1 = page.locator("h1").first();
   await h1.waitFor({ timeout: 15000 });
-  // A cold load of a module view shows "Page not found" until /_meta/schema
-  // arrives (goerp#1230); give it a few seconds to settle.
-  for (let i = 0; i < 20 && (await h1.innerText()) === "Page not found"; i++) await page.waitForTimeout(250);
   return h1.innerText();
 }
 

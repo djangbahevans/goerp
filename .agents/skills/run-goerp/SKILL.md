@@ -108,7 +108,7 @@ make check-shell
 - **Enabling a module needs no engine restart** (the script drops the Redis entitlement cache), but loading a newly built `.erp` does: restart `make engine` after `make module`.
 - **Sidebar groups start collapsed.** Click the group (`role=button[name="CRM"]`) before its item link.
 - **`wait text=…` doesn't match an input's value**; read values with `eval`.
-- **A cold load of a module URL shows "Page not found" for up to a few seconds** (goerp#1230). `nav` and `h1` wait it out; a heading still reading "Page not found" after that is real.
+- **A cold load of a module URL waits for schema and permissions.** `nav` and `h1` wait for the final page heading. A failed initial fetch shows "Couldn't load your workspace" with a Reload action.
 - **Full page loads clear the client cache.** To reproduce in-app state bugs, navigate with `click`, not `nav`.
 - **`/_notif/*` 404s are expected** (no backend yet, goerp#1112); `errors` filters them.
 - **Repeated logins hit the rate limiter.** Clear it with `docker compose -f compose.dev.yml exec -T redis sh -c 'redis-cli --scan --pattern "ratelimit:*" | xargs -r redis-cli del'`.
