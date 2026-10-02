@@ -28,8 +28,6 @@ const {
 } = vi.hoisted(() => ({
   useInfiniteListMock: vi.fn(),
   useRelationLabelsMock: vi.fn((_specs: { ids: string[] }[]) => new Map()),
-  // No extensions target the current view by default — this file's own
-  // "ListRenderer view extensions" describe block overrides per test.
   forTargetMock: vi.fn<() => Promise<ViewExtensionEntry[]>>(async () => []),
   extensionLoaderHasMock: vi.fn<(key: string) => boolean>(() => false),
   extensionLoaderResolveMock: vi.fn(),
@@ -46,6 +44,7 @@ const {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     }),
   ),
   resolveViewPathMock: vi.fn(async (): Promise<string | null> => "/contacts/{id}"),
@@ -101,6 +100,7 @@ afterEach(() => {
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   }));
   resolveViewPathMock.mockClear();
   resolveResourceMock.mockClear();
@@ -992,6 +992,7 @@ describe("ListRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     const { router } = await renderListRenderer({}, fullAccess, "/", {
@@ -1027,6 +1028,7 @@ describe("ListRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     const { router } = await renderListRenderer({}, fullAccess, "/?filter[type]=company", view);
@@ -1051,6 +1053,7 @@ describe("ListRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     const { router } = await renderListRenderer({}, fullAccess, "/?sort=-created_at", view);
@@ -1075,6 +1078,7 @@ describe("ListRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     const { router } = await renderListRenderer({}, fullAccess, "/", {
@@ -1375,9 +1379,6 @@ describe("ListRenderer", () => {
 
       await renderListRenderer({}, fullAccess, "/", treeView);
 
-      // role="treegrid" (list-renderer.md's Accessibility section), not
-      // "table" — a tree_field view's table carries a different accessible
-      // role than a flat list's.
       const table = screen.getByRole("treegrid", { name: "Contacts" });
       expect(within(table).queryByText("Child")).toBeNull();
 
@@ -1388,9 +1389,6 @@ describe("ListRenderer", () => {
       fireEvent.click(screen.getByRole("button", { name: "Expand" }));
 
       await waitFor(() => expect(within(table).getByText("Child")).toBeTruthy());
-      // treeView's base sort (view.default_sort: "name") applies to the
-      // children fetch too, same as any other filter/sort a flat list on
-      // this view would already send.
       expect(getMock).toHaveBeenCalledWith("/contacts", { params: { "filter[parent_id]": "r1", sort: "name" } });
       expect(rootRow.getAttribute("aria-expanded")).toBe("true");
       expect(screen.getByText("Child").closest("tr")?.getAttribute("aria-level")).toBe("2");
@@ -1623,7 +1621,7 @@ describe("ListRenderer view extensions", () => {
         },
       },
     ]);
-    extensionLoaderHasMock.mockReturnValue(false); // module not loaded — no loader registered
+    extensionLoaderHasMock.mockReturnValue(false);
 
     await renderListRenderer({}, permissionWrapperWithPermission(["hr:employee:read"]), "/", {
       ...view,
@@ -1632,7 +1630,6 @@ describe("ListRenderer view extensions", () => {
 
     await screen.findByRole("columnheader", { name: "Department" });
     expect(extensionLoaderResolveMock).not.toHaveBeenCalled();
-    // The column renders (namespaced field, unresolved) but blank — no crash.
     expect(screen.queryByRole("cell", { name: "Engineering" })).toBeNull();
   });
 

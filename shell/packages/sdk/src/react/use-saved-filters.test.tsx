@@ -7,6 +7,7 @@ import type { APIClient } from "../http/types.js";
 import {
   createSavedFiltersQueryOptions,
   createSavedFiltersRemoveMutationOptions,
+  createSavedFiltersRenameMutationOptions,
   createSavedFiltersSaveMutationOptions,
   createSavedFiltersSetDefaultMutationOptions,
   useSavedFilters,
@@ -113,6 +114,27 @@ describe("createSavedFiltersSetDefaultMutationOptions", () => {
   });
 });
 
+describe("createSavedFiltersRenameMutationOptions", () => {
+  it("PATCHes only the new label", async () => {
+    const client = fakeMutationClient();
+    const options = createSavedFiltersRenameMutationOptions("contacts_list", new QueryClient(), client);
+
+    await options.mutationFn({ id: "f1", label: "Renamed" });
+
+    expect(client.patch).toHaveBeenCalledWith("/_meta/saved-filters/f1", { label: "Renamed" });
+  });
+
+  it("invalidates the view's saved-filters query on success", () => {
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const options = createSavedFiltersRenameMutationOptions("contacts_list", queryClient, fakeMutationClient());
+
+    options.onSuccess();
+
+    expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: ["saved-filters", "contacts_list"] });
+  });
+});
+
 const { getMock, postMock, patchMock, deleteMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
@@ -166,7 +188,7 @@ describe("useSavedFilters", () => {
     expect(result.current.filters).toEqual([]);
   });
 
-  it("save/remove/setDefault resolve on success", async () => {
+  it("save/remove/setDefault/rename resolve on success", async () => {
     getMock.mockResolvedValue({ data: [] });
     postMock.mockResolvedValue({ id: "f1" });
     patchMock.mockResolvedValue({ id: "f1" });
@@ -177,6 +199,7 @@ describe("useSavedFilters", () => {
 
     await act(() => result.current.save("Label"));
     await act(() => result.current.setDefault("f1"));
+    await act(() => result.current.rename("f1", "Renamed"));
     await act(() => result.current.remove("f1"));
 
     expect(postMock).toHaveBeenCalled();
@@ -194,5 +217,16 @@ describe("useSavedFilters", () => {
 
     await expect(act(() => result.current.save("Label"))).rejects.toThrow("boom");
     expect(toastErrorMock).toHaveBeenCalledWith("boom");
+  });
+
+  it("rejects a failed rename without toasting, leaving the error to the inline input", async () => {
+    getMock.mockResolvedValue({ data: [] });
+    patchMock.mockRejectedValue(new AppError({ code: "internal_error", message: "boom", httpStatus: 500 }));
+
+    const { result } = renderHook(() => useSavedFilters("contacts_list"), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await expect(act(() => result.current.rename("f1", "Renamed"))).rejects.toThrow("boom");
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 });

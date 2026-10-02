@@ -27,6 +27,7 @@ const { useInfiniteListMock, resolveViewPathMock, useSavedFiltersMock } = vi.hoi
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     }),
   ),
 }));
@@ -50,6 +51,7 @@ afterEach(() => {
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   }));
 });
 
@@ -266,6 +268,7 @@ describe("CalendarRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     await renderCalendarRenderer({}, { ...view, default_filters: { assigned_to: "u1" } });

@@ -68,6 +68,7 @@ export type { SavedFilter, UseSavedFiltersResult } from "./use-saved-filters.js"
 export {
   createSavedFiltersQueryOptions,
   createSavedFiltersRemoveMutationOptions,
+  createSavedFiltersRenameMutationOptions,
   createSavedFiltersSaveMutationOptions,
   createSavedFiltersSetDefaultMutationOptions,
   useSavedFilters,
