@@ -22,12 +22,9 @@ export interface UseSavedFiltersResult {
   save: (label: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   setDefault: (id: string) => Promise<void>;
+  rename: (id: string, label: string) => Promise<void>;
 }
 
-// The engine's own wire shape (dispatch_meta.go's savedFilterResponse) —
-// snake_case, converted to SavedFilter's camelCase below. No transform
-// layer exists between apiClient and a caller, so every hook owns this
-// mapping itself.
 interface SavedFilterWire {
   id: string;
   view_name: string;
@@ -80,8 +77,6 @@ export function createSavedFiltersSaveMutationOptions(
   client: MutationClient = apiClient,
 ) {
   return {
-    // Captures location.search automatically, per the hook's own contract
-    // — the caller only supplies the label.
     mutationFn: (label: string) =>
       client.post<SavedFilterWire>("/_meta/saved-filters", {
         view_name: viewName,
@@ -118,17 +113,29 @@ export function createSavedFiltersSetDefaultMutationOptions(
   };
 }
 
-// options.enabled (default true) is an additive extension beyond
-// typescript-sdk-reference.md's single-argument worked example — used by
-// the generic renderers to skip the fetch entirely in embedded mode,
-// where a saved default is never consulted (view-system.md's embedded
-// contract: embedded views never touch the URL).
+// No onError toast: a rename's failure is shown under its own inline input
+// (saved-filters-chip.md), and a toast on top would say it twice. The
+// returned promise still rejects for the caller to render.
+export function createSavedFiltersRenameMutationOptions(
+  viewName: string,
+  queryClient: QueryClient,
+  client: MutationClient = apiClient,
+) {
+  return {
+    mutationFn: ({ id, label }: { id: string; label: string }) =>
+      client.patch<SavedFilterWire>(`/_meta/saved-filters/${id}`, { label }),
+    onSuccess: () => invalidateSavedFilters(queryClient, viewName),
+  };
+}
+
+// Embedded views leave URL state untouched and skip saved-filter defaults.
 export function useSavedFilters(viewName: string, options: { enabled?: boolean } = {}): UseSavedFiltersResult {
   const queryClient = useQueryClient();
   const query = useQuery(createSavedFiltersQueryOptions(viewName, options.enabled ?? true));
   const saveMutation = useMutation(createSavedFiltersSaveMutationOptions(viewName, queryClient));
   const removeMutation = useMutation(createSavedFiltersRemoveMutationOptions(viewName, queryClient));
   const setDefaultMutation = useMutation(createSavedFiltersSetDefaultMutationOptions(viewName, queryClient));
+  const renameMutation = useMutation(createSavedFiltersRenameMutationOptions(viewName, queryClient));
 
   return {
     filters: query.data ?? [],
@@ -141,6 +148,9 @@ export function useSavedFilters(viewName: string, options: { enabled?: boolean }
     },
     setDefault: async (id: string) => {
       await setDefaultMutation.mutateAsync(id);
+    },
+    rename: async (id: string, label: string) => {
+      await renameMutation.mutateAsync({ id, label });
     },
   };
 }

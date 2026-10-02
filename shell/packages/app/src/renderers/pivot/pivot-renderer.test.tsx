@@ -23,6 +23,7 @@ const { usePivotDataMock, useSavedFiltersMock } = vi.hoisted(() => ({
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   })),
 }));
 vi.mock("@goerp/sdk/react", async (importOriginal) => {
@@ -40,6 +41,7 @@ afterEach(() => {
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   }));
 });
 

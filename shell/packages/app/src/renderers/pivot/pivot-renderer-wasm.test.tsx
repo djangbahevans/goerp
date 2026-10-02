@@ -20,6 +20,7 @@ const { usePivotWasmDataMock, useSavedFiltersMock } = vi.hoisted(() => ({
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   })),
 }));
 vi.mock("./use-pivot-wasm-data.js", () => ({ usePivotWasmData: usePivotWasmDataMock }));
@@ -38,6 +39,7 @@ afterEach(() => {
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   }));
 });
 

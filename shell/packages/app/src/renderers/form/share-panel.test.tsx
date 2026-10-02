@@ -60,6 +60,7 @@ beforeEach(() => useSharesMock.mockReturnValue(handle()));
 afterEach(() => {
   cleanup();
   useSharesMock.mockReset();
+  vi.useRealTimers();
 });
 
 describe("SharePanel", () => {
@@ -173,6 +174,8 @@ describe("SharePanel", () => {
     });
 
     it("sends the chosen expiry as the end of that local day", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(2026, 8, 30, 12));
       const grant = vi.fn(async () => {});
       useSharesMock.mockReturnValue(handle({ grant }));
       renderPanel();

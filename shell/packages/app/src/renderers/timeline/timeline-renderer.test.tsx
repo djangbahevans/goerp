@@ -27,6 +27,7 @@ const { useInfiniteListMock, saveRecordMock, useSavedFiltersMock } = vi.hoisted(
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     }),
   ),
 }));
@@ -51,6 +52,7 @@ afterEach(() => {
     save: vi.fn(),
     remove: vi.fn(),
     setDefault: vi.fn(),
+    rename: vi.fn(),
   }));
 });
 
@@ -201,6 +203,7 @@ describe("TimelineRenderer", () => {
       save: vi.fn(),
       remove: vi.fn(),
       setDefault: vi.fn(),
+      rename: vi.fn(),
     });
 
     await renderTimelineRenderer({}, { ...view, default_filters: { assignee_id: "u1" } });
