@@ -2,7 +2,7 @@
 # Provision a dev tenant with a usable admin login and enable modules for it.
 # Needs `make infra` and a running `make engine`. Run from the repo root.
 #
-#   .claude/skills/run-goerp/bootstrap-tenant.sh <slug> <admin-email> <password> [module...]
+#   .agents/skills/run-goerp/bootstrap-tenant.sh <slug> <admin-email> <password> [module...]
 #
 # Afterwards sign in at http://<slug>.localhost:5173 (with `make shell` running).
 # A module must already be built into GOERP_MODULE_DIR (`make module`) and

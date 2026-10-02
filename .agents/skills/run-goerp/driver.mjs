@@ -1,7 +1,7 @@
 // Headless-Chromium REPL for the goerp shell app. Reads one command per line
 // from stdin (a piped heredoc or tmux send-keys) and runs them in order.
 //
-//   node .claude/skills/run-goerp/driver.mjs <<'EOF'
+//   node .agents/skills/run-goerp/driver.mjs <<'EOF'
 //   open smoke
 //   login admin@smoke.test Smoke-Pass-2026!
 //   nav /activities

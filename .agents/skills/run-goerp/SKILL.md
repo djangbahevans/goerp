@@ -3,7 +3,7 @@ name: run-goerp
 description: Start, run and drive the goerp platform locally — dev infrastructure, the engine, the shell app — provision a dev tenant with an admin login, and drive the shell in a headless browser to click through views and take screenshots. Use when asked to run goerp, start the engine or shell, check a change in the real app or a real browser, screenshot a page, create a test tenant, or run the Go/shell test suites.
 ---
 
-The platform runs as the compose dev stack (`make infra`), the engine on the host (`make engine`, `:8080`/`:8081`) and the shell app's Vite dev server (`make shell`, `:5173`, proxying API calls to the engine). Drive the shell with `.claude/skills/run-goerp/driver.mjs`, a headless-Chromium REPL that reads commands from stdin and writes screenshots to `/tmp/goerp-shots/`.
+The platform runs as the compose dev stack (`make infra`), the engine on the host (`make engine`, `:8080`/`:8081`) and the shell app's Vite dev server (`make shell`, `:5173`, proxying API calls to the engine). Drive the shell with `.agents/skills/run-goerp/driver.mjs`, a headless-Chromium REPL that reads commands from stdin and writes screenshots to `/tmp/goerp-shots/`.
 
 All paths are relative to the repo root.
 
@@ -23,7 +23,7 @@ npm install --prefix ~/.cache/goerp-run-driver --no-audit --no-fund playwright-c
 ```bash
 (cd shell && npm install && npm run build -w @goerp/sdk)
 make infra
-make module M=.claude/skills/run-goerp/sample-crm
+make module M=.agents/skills/run-goerp/sample-crm
 ```
 
 The app imports `@goerp/sdk` from its `dist/`, so rebuild it (`npm run build -w @goerp/sdk` in `shell/`) after any SDK change. `make module` builds into `.dev/modules/`, where `make engine` loads it from.
@@ -42,13 +42,13 @@ curl -s localhost:8080/_ready
 `/_ready` should report every module `ready`. Then provision a tenant whose admin can sign in, with the sample module enabled:
 
 ```bash
-.claude/skills/run-goerp/bootstrap-tenant.sh demo admin@demo.test Demo-Pass-2026! crm
+.agents/skills/run-goerp/bootstrap-tenant.sh demo admin@demo.test Demo-Pass-2026! crm
 ```
 
 Drive it. Each line is one command, and output and errors print per command:
 
 ```bash
-node .claude/skills/run-goerp/driver.mjs <<'EOF'
+node .agents/skills/run-goerp/driver.mjs <<'EOF'
 open demo
 login admin@demo.test Demo-Pass-2026!
 h1
@@ -83,14 +83,7 @@ Screenshots land in `/tmp/goerp-shots/NN-<name>.png` (override with `SHOTS_DIR`)
 
 For step-by-step debugging, run the same driver under tmux and `send-keys` one command at a time.
 
-Stop everything this session started:
-
-```bash
-for p in $(ss -ltnp | grep -E ':(8080|8081|5173) ' | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do kill $p; done
-timeout 30 bash -c 'while ss -ltn | grep -qE ":(8080|8081|5173) "; do sleep 1; done'
-```
-
-The engine shuts down gracefully, so its ports can take up to about 15 seconds to free. Leave the containers running: other sessions share them.
+Stop only engine and shell processes started by this session. Record their PIDs when launching them and verify process ownership before sending SIGTERM. Leave shared containers and other sessions' processes running. The engine can take about 15 seconds to shut down.
 
 ## Run (human path)
 
@@ -123,7 +116,7 @@ make check-shell
 
 ## Troubleshooting
 
-- **`make engine` exits with `bind http listener on :8080: … address already in use`**: another engine holds the port. Kill it (the stop command above) and restart.
+- **`make engine` exits with `bind http listener on :8080: … address already in use`**: another engine holds the port. Check who owns it; reuse a suitable running instance, or stop it only when this session owns it or the user authorizes that action.
 - **`relation "system.river_job" does not exist` / `column "unique_key" does not exist` from a running engine**: the database was reset under it (e.g. `make infra-down` with `-v`, or another session). Restart the engine; it re-bootstraps the schema.
 - **`Cannot find module '@storybook/addon-vitest/vitest-plugin'` from `make check-shell`**: `shell/node_modules` predates a dependency change. Run `npm install` in `shell/`.
 - **`you are using a configuration file for golangci-lint v2 with golangci-lint v1`**: install v2 with `GOTOOLCHAIN=go1.27.1 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
