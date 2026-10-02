@@ -8,25 +8,9 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// This file holds the cross-module compute-function dispatch both
-// host_orm_write.go (recompute after create/write) and host_orm.go
-// (Store(false) fields, computed fresh on read) call into — a single
-// choke point for "borrow a fresh instance of the field's owning module
-// and run its .Computed() function," so the two call sites never diverge
-// on how a nested ModuleContext gets built.
-
-// borrowModuleInstance borrows a fresh instance from moduleName's own
-// pool and builds a nested ModuleContext scoped to that module's own
-// capabilities/models, inheriting the triggering request's identity
-// (tenant/user/trace) and registries from modCtx — so a nested call's own
-// host.orm calls (e.g. a compute function or preview hook looking up
-// related data) resolve exactly as if this were a normal request to that
-// module. Always a new instance — never the currently-executing one,
-// which can't be reentered mid-call — uniform whether moduleName is the
-// module that triggered the call or a different one reached through a
-// Many2One-hop dependency (go-sdk-reference.md §22 "Computed field
-// recomputation"). The returned cleanup func must be deferred by the
-// caller; hostErr is non-nil only when inst/cleanup are both nil.
+// A nested call needs a fresh instance because WASM cannot reenter the caller.
+// It inherits request identity while using the target's capabilities and declarations.
+// The caller must defer the returned cleanup function.
 func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext, moduleName string) (inst *ModuleInstance, cleanup func(), hostErr *abiv1.HostError) {
 	target, ok := modCtx.ComputeTargets()[moduleName]
 	if !ok || target.Pool == nil {
@@ -49,6 +33,7 @@ func borrowModuleInstance(ctx context.Context, r *Runtime, modCtx *ModuleContext
 			ComputeTargets:      modCtx.ComputeTargets(),
 			ConfigSchema:        target.ConfigSchema,
 			JobTypes:            target.JobTypes,
+			HTTPAllowlist:       target.HTTPAllowlist,
 			ORMBulkMaxRows:      modCtx.ormBulkMaxRows(),
 			ORMStatementTimeout: modCtx.ormStatementTimeout(),
 		},

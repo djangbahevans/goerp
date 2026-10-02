@@ -7,20 +7,9 @@ import (
 	"github.com/tetratelabs/wazero"
 )
 
-// hostNamespaces is the complete set of host.* namespaces from
-// host-abi-reference.md §4, minus "host.db", "host.storage", "host.orm",
-// "host.event", "host.jobs", "host.authz", "host.search", "host.config",
-// and "host.notify" — their real functions are registered separately by
-// wasm.registerHostDB/registerHostStorage/registerHostORM/registerHostEvent/registerHostJobs/registerHostAuthz/registerHostSearch/registerHostConfig/registerHostNotify
-// (which need direct access to *sql.DB/storage.Backend/Runtime/a River
-// client/*Runtime/the tenant-config resolver+store/the notification
-// pipeline, wasm-package types
-// abi cannot import without an import cycle). Every other namespace here
-// still has no functions attached — the individual host.*.* functions are
-// each their own ticket and attach to these builders separately.
+// Stateful host namespaces are registered by wasm, which owns their runtime dependencies.
 var hostNamespaces = []string{
 	"host.cache",
-	"host.http",
 	"host.connector",
 	"host.webhooks",
 	"host.workflow",

@@ -49,8 +49,8 @@ type Runtime struct {
 	configResolver ConfigResolver
 	configStore    ConfigStore
 
-	// notifySender backs host.notify (host_notify.go).
 	notifySender NotifySender
+	httpFetcher  *httpFetcher
 
 	// rowCryptKeys encrypts/decrypts an "encrypted": true config_schema
 	// entry's value (host-abi-reference.md §14), reusing the engine's
@@ -133,21 +133,8 @@ func (r *Runtime) SetSchemaSyncDB(db *sql.DB) {
 	r.schemaSyncDB.Store(db)
 }
 
-// New builds the shared wazero runtime and registers the host ABI against
-// it. db is the primary connection pool host.db's transaction-lifecycle
-// functions (host-abi-reference.md §5) open transactions on — it must
-// already be connected by the time New is called, since registerHostDB
-// closes over it while building the host.db module. storageBackend backs
-// host.storage.upload — it is a warn-only dependency (engine.go's
-// storage.New already logs-and-continues on failure), so it may be nil
-// here; registerHostStorage's closures nil-guard it themselves.
-// cacheClient backs Transient-model host.orm routing (goerp#344) — unlike
-// storageBackend, Redis is fail-hard at Stage 1 (engine-internals.md §2),
-// so cacheClient is never nil by the time New is called.
-//
-// replicaDB (host.db.query's opts.read_only routing and
-// host.db.query_replica) is not a New parameter — see SetReplicaDB's own
-// doc comment for why.
+// New registers the host ABI against the shared runtime. Postgres must be
+// connected; an unavailable optional storage backend fails only storage calls.
 func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheClient *cache.Client) (*Runtime, error) {
 	ctx := context.Background()
 
@@ -176,13 +163,9 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		return nil, fmt.Errorf("instantiate wasi: %w", err)
 	}
 
-	// r is constructed before any host module is registered so that
-	// registerHostDB's closures (below) can already close over it —
-	// InstanceForModule/RegisterInstance/UnregisterInstance are populated
-	// per-request later (by invokeHandler), but the registry and limiter
-	// themselves must exist now.
 	r := &Runtime{
 		registry:              newInstanceRegistry(),
+		httpFetcher:           newHTTPFetcher(),
 		txLimiter:             NewTransactionLimiter(cfg.DBMaxConcurrentTransactions),
 		syncSubscriberTimeout: cfg.SyncSubscriberTimeout,
 		syncProviderTimeout:   cfg.SyncProviderTimeout,
@@ -200,18 +183,8 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 		return nil, fmt.Errorf("register host.db: %w", err)
 	}
 
-	// eventInsertClient is a separate, never-started river.Client[*sql.Tx]
-	// purely so host.event.emit_tx's and host.jobs.enqueue_tx's InsertTx
-	// can accept the stdlib *sql.Tx modCtx.Transaction returns — the
-	// engine's own job-working client
-	// (jobqueue.New) is pgx-based and generic over pgx.Tx, incompatible
-	// with that transaction type. A job inserted through this client is
-	// fully visible to and worked by the pgx-based client regardless
-	// (River's job table is driver-agnostic) — see registerHostEvent's
-	// own doc comment for the full reasoning. Constructed before
-	// registerHostORM (not just registerHostEvent) since host.orm's write
-	// half (goerp#343) also emits orm.record.* events transactionally
-	// through this same client.
+	// InsertTx needs a sql.Tx client; the engine worker uses pgx.Tx.
+	// Both clients share River's job table without starting a second worker.
 	eventInsertClient, err := river.NewClient(riverdatabasesql.New(db), &river.Config{Schema: jobqueue.Schema})
 	if err != nil {
 		_ = rt.Close(ctx)
@@ -261,6 +234,11 @@ func New(cfg *config.Config, db *sql.DB, storageBackend storage.Backend, cacheCl
 	if err := registerHostNotify(ctx, rt, r); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("register host.notify: %w", err)
+	}
+
+	if err := registerHostHTTP(ctx, rt, r); err != nil {
+		_ = rt.Close(ctx)
+		return nil, fmt.Errorf("register host.http: %w", err)
 	}
 
 	stdout := log.With().Str("component", "wasm").Str("stream", "stdout").Logger()

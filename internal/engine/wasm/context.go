@@ -20,40 +20,28 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// ComputeTarget bundles what's needed to invoke a module's .Computed()
-// functions from outside that module's own request — its instance pool
-// to borrow a fresh WASM instance from, and its own declared capabilities,
-// models, config_schema and job_types, so host.* calls made inside that
-// nested call resolve against the owning module's declarations.
-// One ComputeTarget exists per loaded module, not per calling module, so
-// a computed field's owning module is reachable regardless of which
-// module's write triggered the recompute (host_orm_write.go's
-// Many2One-hop case, go-sdk-reference.md §22).
+// Nested compute calls use the owning module's declarations and capabilities,
+// even when another module triggers the call.
 type ComputeTarget struct {
-	Pool         *InstancePool
-	Capabilities abi.CapabilitySet
-	ModelDecls   []model.ModelDeclaration
-	ConfigSchema []manifest.ConfigEntry
-	JobTypes     []manifest.JobType
+	Pool          *InstancePool
+	Capabilities  abi.CapabilitySet
+	ModelDecls    []model.ModelDeclaration
+	ConfigSchema  []manifest.ConfigEntry
+	JobTypes      []manifest.JobType
+	HTTPAllowlist []string
 }
 
 // ModuleSnapshot bundles the pieces of a registry snapshot a host function
 // needs, captured once at ModuleContext construction time so a hot reload
 // mid-request can't change what a single request's host.* calls see.
-// Extend this struct for new registry-derived data, rather than growing
-// NewModuleContext's own positional parameter list further.
 type ModuleSnapshot struct {
 	// ModelDecls is the calling module's own declared models — host.orm
 	// calls resolve a model name against this list, never against another
 	// module's models (internal/engine/wasm/host_orm.go).
 	ModelDecls []model.ModelDeclaration
 
-	// FieldSecRegistry is the field security registry in effect for this
-	// request.
 	FieldSecRegistry *fieldsec.FieldSecurityRegistry
 
-	// EventRegistry is the event registry in effect for this request —
-	// host.event.emit_tx validates a caller's event name against it.
 	EventRegistry *event.EventRegistry
 
 	// ComputedIndex is the reverse-dependency index (internal/engine/computed)
@@ -104,6 +92,8 @@ type ModuleSnapshot struct {
 	// (manifest-spec.md §15) — host.jobs.enqueue/enqueue_tx reject a job
 	// type not in this list.
 	JobTypes []manifest.JobType
+
+	HTTPAllowlist []string
 
 	// ORMBulkMaxRows caps create_batch/write_many/write_where/unlink at
 	// this many records/IDs per call. Zero defaults to
@@ -160,6 +150,8 @@ type ModuleContext struct {
 }
 
 func NewModuleContext(requestID, moduleName, userID, contactID string, roles []string, permSet permission.PermissionBitfield, tenantID, tenantSlug, traceID string, capabilities abi.CapabilitySet, txLimiter *TransactionLimiter, snapshot ModuleSnapshot) *ModuleContext {
+	snapshot.HTTPAllowlist = slices.Clone(snapshot.HTTPAllowlist)
+
 	return &ModuleContext{
 		RequestID:     requestID,
 		ModuleName:    moduleName,

@@ -115,8 +115,6 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// ModuleContext needs the tenant slug too (host_db.go builds the
-	// search path from it); the request only carries the ID.
 	t, err := h.deps.Tenants.GetByID(r.Context(), req.TenantID)
 	if err != nil {
 		if errors.Is(err, tenant.ErrTenantNotFound) {
@@ -170,6 +168,7 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		ExtendsModels:       mod.Manifest.Schema.ExtendsModels,
 		ConfigSchema:        mod.Manifest.ConfigSchema,
 		JobTypes:            mod.Manifest.JobTypes,
+		HTTPAllowlist:       mod.Manifest.HTTPAllowlist,
 		ORMBulkMaxRows:      h.deps.ORMBulkMaxRows,
 		ORMStatementTimeout: h.deps.ORMStatementTimeout,
 	})
