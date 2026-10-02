@@ -22,7 +22,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	sdkmodel "github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/rs/zerolog/log"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // metaPermissionsResponse is GET /_meta/permissions' response shape —
@@ -224,8 +223,6 @@ func (e *Engine) readRecordsAs(ctx context.Context, tenantCtx *tenantresolve.Ten
 	return records, err == nil
 }
 
-// errReadModelNotFound: the model a record read names isn't a registered
-// model of a loaded module.
 var errReadModelNotFound = errors.New("model not found")
 
 // readRecordsAsErr is readRecordsAs reporting why a read failed: an error
@@ -242,7 +239,7 @@ func (e *Engine) readRecordsAsErr(ctx context.Context, tenantCtx *tenantresolve.
 		return nil, fmt.Errorf("%w: %q", errReadModelNotFound, modelName)
 	}
 
-	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
+	traceID := httperr.TraceIDFromContext(ctx)
 	modCtx := e.newModuleContext(ctx, EngineRequest{
 		ID:            requestIDFromContext(ctx),
 		UserID:        userID,

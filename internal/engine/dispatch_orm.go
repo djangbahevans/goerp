@@ -17,13 +17,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
-	"go.opentelemetry.io/otel/trace"
 )
 
-// defaultListLimit/maxListLimit bound an unbounded ?limit= query param —
-// erp-design.md §11.4 documents cursor pagination but no explicit default/
-// cap, so these are new, conservative choices rather than a documented
-// convention.
 const (
 	defaultListLimit = 50
 	maxListLimit     = 100
@@ -70,7 +65,7 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	traceID := trace.SpanFromContext(r.Context()).SpanContext().TraceID().String()
+	traceID := httperr.TraceIDFromContext(r.Context())
 	req := EngineRequest{
 		ID:            requestIDFromContext(r.Context()),
 		UserID:        authCtx.UserID,
@@ -519,13 +514,6 @@ func writeHostError(ctx context.Context, w http.ResponseWriter, hostErr *abiv1.H
 	httperr.Write(ctx, w, ormErrorStatus(hostErr.Code), hostErr.Code, hostErr.Message)
 }
 
-// ormErrorStatus maps a host.orm *abiv1.HostError's Code to an HTTP status.
-// No such mapping exists anywhere else in the codebase yet — sdk/go/engine's
-// documented FromHostError (go-sdk-reference.md) was never built either —
-// this is the first real one, grounded in the two documented precedents
-// that do exist: orm.not_found -> 404 and orm.etag_mismatch -> 409
-// (host-abi-reference.md's own note on orm.Write's 0-row disambiguation;
-// erp-design.md's status table).
 func ormErrorStatus(code string) int {
 	switch code {
 	case abiv1.ErrCodeNotFound, abiv1.ErrCodeModelNotFound:
