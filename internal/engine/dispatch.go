@@ -17,7 +17,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	"github.com/rs/zerolog/log"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // defaultHandlerTimeout is the wall-clock budget for a route's handler
@@ -128,12 +127,8 @@ func (e *Engine) buildDispatchHandler(builtins map[string]http.Handler) http.Han
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 
-		// EnableOps-served routes (Table/Transient models) never borrow a
-		// WASM instance — the entire point of go-sdk-reference.md's
-		// "auto-generated CRUD routes" guarantee. dispatchORMRoute keeps
-		// its existing signature (writes straight to a ResponseWriter,
-		// unchanged since goerp#346) — recorded here so both dispatch
-		// paths still end at the one shared writeResponse call below.
+		// Native CRUD routes bypass WASM; buffering gives both paths the
+		// same error-envelope annotation through writeResponse.
 		if rr.entry.Manifest.EngineNative {
 			rec := newEngineResponseRecorder()
 			e.dispatchORMRoute(rec, r)
@@ -211,7 +206,7 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		UserID:        authCtx.UserID,
 		TenantID:      tenantCtx.TenantID,
 		TenantSlug:    tenantCtx.Slug,
-		TraceID:       trace.SpanFromContext(ctx).SpanContext().TraceID().String(),
+		TraceID:       httperr.TraceIDFromContext(ctx),
 		RequestedAt:   time.Now(),
 		PermissionSet: authCtx.PermissionSet,
 	}
@@ -260,11 +255,6 @@ func writeResponse(ctx context.Context, w http.ResponseWriter, resp EngineRespon
 	}
 }
 
-// engineResponseRecorder is an http.ResponseWriter that buffers what it's
-// given instead of writing to the wire, so dispatchORMRoute — which writes
-// directly to a ResponseWriter and predates this ticket — can still be
-// funneled through writeResponse without changing its signature or
-// touching its already-shipped, already-tested CRUD handlers.
 type engineResponseRecorder struct {
 	header     http.Header
 	statusCode int

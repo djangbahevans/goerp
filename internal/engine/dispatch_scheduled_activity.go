@@ -25,7 +25,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/scheduledactivity"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	sdkmodel "github.com/djangbahevans/goerp/sdk/go/model"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // /_meta/scheduled-activities (scheduled-activities.md §5): a record's open
@@ -366,10 +365,7 @@ func (e *Engine) dispatchScheduledActivityDoneRoute(w http.ResponseWriter, r *ht
 		return
 	}
 
-	traceID := ""
-	if sc := trace.SpanFromContext(ctx).SpanContext(); sc.HasTraceID() {
-		traceID = sc.TraceID().String()
-	}
+	traceID := httperr.TraceIDFromContext(ctx)
 	done, err := e.scheduledActivityStore.MarkDone(ctx, tenantCtx.Slug, a.ID, authCtx.UserID, feedback, requestIDFromContext(ctx), traceID)
 	if err != nil {
 		writeScheduledActivityStoreError(ctx, w, err, "mark scheduled activity done failed")
@@ -495,8 +491,6 @@ func (e *Engine) readableRecordNames(ctx context.Context, authCtx *authcheck.Aut
 	return e.readableRecordNamesAs(ctx, tenantCtx, authCtx.UserID, authCtx.PermissionSet, modelName, ids)
 }
 
-// readableRecordNamesAs is readableRecordNames read as userID holding
-// permSet.
 func (e *Engine) readableRecordNamesAs(ctx context.Context, tenantCtx *tenantresolve.TenantContext, userID string, permSet permission.PermissionBitfield, modelName string, ids []string) map[string]*string {
 	names, err := e.recordNamesAs(ctx, tenantCtx, userID, permSet, modelName, ids)
 	if err != nil {

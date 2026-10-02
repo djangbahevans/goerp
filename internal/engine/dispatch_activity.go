@@ -24,7 +24,6 @@ import (
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 	"github.com/rs/zerolog/log"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // /_meta/activity (record-activity.md §6): one record's feed, posting and
@@ -227,10 +226,7 @@ func (e *Engine) dispatchActivityCreateRoute(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	traceID := ""
-	if sc := trace.SpanFromContext(ctx).SpanContext(); sc.HasTraceID() {
-		traceID = sc.TraceID().String()
-	}
+	traceID := httperr.TraceIDFromContext(ctx)
 	comment := recordactivity.NewComment{
 		Model: body.Model, RecordID: body.RecordID, AuthorID: authCtx.UserID, Body: text,
 		NotifyFollowers: body.NotifyFollowers, RequestID: requestIDFromContext(ctx), TraceID: traceID,
@@ -355,14 +351,10 @@ func (e *Engine) dispatchActivityFollowersListRoute(w http.ResponseWriter, r *ht
 	writeJSON(ctx, w, http.StatusOK, map[string]any{"data": out, "meta": meta})
 }
 
-// dispatchActivityFollowRoute is PUT /_meta/activity/followers's handler —
-// makes the caller a follower of the record. Idempotent.
 func (e *Engine) dispatchActivityFollowRoute(w http.ResponseWriter, r *http.Request) {
 	e.dispatchActivityFollowChange(w, r, e.recordActivityStore.Follow, "follow failed")
 }
 
-// dispatchActivityUnfollowRoute is DELETE /_meta/activity/followers's
-// handler — removes the caller's follow of the record. Idempotent.
 func (e *Engine) dispatchActivityUnfollowRoute(w http.ResponseWriter, r *http.Request) {
 	e.dispatchActivityFollowChange(w, r, e.recordActivityStore.Unfollow, "unfollow failed")
 }
