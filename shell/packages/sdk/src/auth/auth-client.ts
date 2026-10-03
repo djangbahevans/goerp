@@ -17,6 +17,8 @@ import type {
   MFACodeConfirmation,
   MFAFactors,
   MFAMethod,
+  MFAVerification,
+  PasskeyEnrollmentConfirmation,
   PasswordResetConfirmation,
   PasswordResetOutcome,
   PasswordResetRequest,
@@ -101,8 +103,6 @@ function minLengthOr(value: unknown): number {
   return typeof value === "number" && value > 0 ? value : GLOBAL_PASSWORD_MIN_LENGTH;
 }
 
-// passwordMinLengthFrom reads details.min_length off a 422
-// auth.password_too_weak, or null for any other error.
 export function passwordMinLengthFrom(err: unknown): number | null {
   if (!(err instanceof AppError) || err.code !== "auth.password_too_weak") return null;
   const value = err.details?.min_length;
@@ -121,9 +121,7 @@ async function readError(response: Response): Promise<AppError> {
     if (body.error?.message) message = body.error.message;
     const d = body.error?.details;
     if (d !== null && typeof d === "object" && !Array.isArray(d)) bodyDetails = d as Record<string, unknown>;
-  } catch {
-    // Non-JSON or empty body — fall back to the status text above.
-  }
+  } catch {}
   const retryAfter = Number.parseInt(response.headers.get("Retry-After") ?? "", 10);
   const details =
     bodyDetails || Number.isFinite(retryAfter)
@@ -134,10 +132,7 @@ async function readError(response: Response): Promise<AppError> {
   return error;
 }
 
-// fetchCurrentSession backs the checking state (GET /auth/me,
-// auth-internals.md §9). Any non-200 response — 401, or anything else —
-// resolves to "no session" rather than throwing: the auth machine has no
-// error state for this check to land in, only authenticated/unauthenticated.
+// Session-check failures resolve to no session because the auth machine has no separate check-error state.
 export async function fetchCurrentSession(): Promise<{ user: CurrentUser; tenant: CurrentTenant } | null> {
   let response: Response;
   try {
@@ -161,10 +156,7 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
-// fetchTenantContext backs GET /auth/tenant-context. A 404 tenant_not_found
-// resolves to a workspaceNotFound context; any other failure resolves to
-// null — the login page then falls back to asking for the company slug,
-// the same form the shared-domain host gets.
+// Lookup failures fall back to the company-slug form; a missing workspace keeps its distinct error screen.
 export async function fetchTenantContext(): Promise<TenantContext | null> {
   try {
     const response = await fetch("/auth/tenant-context", { credentials: "include" });
@@ -222,10 +214,7 @@ function toLoginResult(body: LoginResponseBody): LoginResult {
   return { kind: "authenticated", passwordUpdateRecommended: body.password_update_recommended === true };
 }
 
-// login backs POST /auth/login (auth-internals.md §3). A successful full
-// login carries no user/tenant data of its own (only expires_in, per the
-// documented response body) — the caller still needs fetchCurrentSession
-// afterward to hydrate the authenticated state.
+// The login response contains no user or tenant data; a session reload supplies the authenticated identity.
 export async function login(credentials: LoginCredentials): Promise<LoginResult> {
   const response = await fetch("/auth/login", {
     method: "POST",
@@ -242,8 +231,6 @@ export async function login(credentials: LoginCredentials): Promise<LoginResult>
   return toLoginResult((await response.json()) as LoginResponseBody);
 }
 
-// tenantSelectionFrom reads the tenants and selection_token out of a
-// login's 409 tenant_required, or null for any other error.
 export function tenantSelectionFrom(err: unknown): TenantSelection | null {
   if (!(err instanceof AppError) || err.httpStatus !== 409 || err.code !== "tenant_required") return null;
   const token = err.details?.selection_token;
@@ -257,11 +244,6 @@ export function tenantSelectionFrom(err: unknown): TenantSelection | null {
   return { tenants, selectionToken: token };
 }
 
-// selectTenant backs POST /auth/select-tenant (auth-internals.md §3
-// "Cross-tenant user membership"): it finishes a tenantless login for the
-// chosen tenant. A 401 auth.selection_token_invalid means the token
-// expired or was already used; a 403 tenant_membership_required means the
-// account no longer belongs to that tenant.
 export async function selectTenant(selectionToken: string, tenant: string): Promise<LoginResult> {
   const response = await fetch("/auth/select-tenant", {
     method: "POST",
@@ -273,10 +255,6 @@ export async function selectTenant(selectionToken: string, tenant: string): Prom
   return toLoginResult((await response.json()) as LoginResponseBody);
 }
 
-// exchangeHandoff backs POST /auth/handoff (auth-internals.md §3
-// "Shared-domain handoff"): on the tenant's own host, it trades a handoff
-// code for the session or an MFA challenge. A 401
-// auth.handoff_code_invalid means the code expired or was already used.
 export async function exchangeHandoff(code: string): Promise<LoginResult> {
   const response = await fetch("/auth/handoff", {
     method: "POST",
@@ -288,26 +266,24 @@ export async function exchangeHandoff(code: string): Promise<LoginResult> {
   return toLoginResult((await response.json()) as LoginResponseBody);
 }
 
-// submitMFACode backs POST /auth/mfa/verify (auth-internals.md §8). Same
-// as login, a successful verify carries no user/tenant data of its own;
-// it resolves to the password_update_recommended flag.
-export async function submitMFACode(challengeToken: string, code: string, method: MFAMethod): Promise<boolean> {
+function verificationBody(input: MFAVerification) {
+  return input.type === "webauthn"
+    ? { type: input.type, ceremony_id: input.ceremonyId, response: input.response }
+    : { type: input.type, code: input.code };
+}
+
+export async function verifyMFA(challengeToken: string, input: MFAVerification): Promise<boolean> {
   const response = await fetch("/auth/mfa/verify", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mfa_token: challengeToken, type: method, code }),
+    body: JSON.stringify({ mfa_token: challengeToken, ...verificationBody(input) }),
   });
   if (!response.ok) throw await readError(response);
   const body = (await response.json().catch(() => ({}))) as { password_update_recommended?: boolean };
   return body.password_update_recommended === true;
 }
 
-// updateProfile backs PATCH /auth/me (shell-ux.md §4.1). Its own response
-// carries only the saved name, not the full CurrentUser shape (no
-// resolved avatar URL, roles, etc.) — the caller re-fetches the session
-// afterward, same "the mutation call itself doesn't carry the hydrated
-// state" pattern login/submitMFA already use.
 export async function updateProfile(input: UpdateProfileInput): Promise<void> {
   const response = await fetch("/auth/me", {
     method: "PATCH",
@@ -318,8 +294,6 @@ export async function updateProfile(input: UpdateProfileInput): Promise<void> {
   if (!response.ok) throw await readError(response);
 }
 
-// updatePreferences backs PATCH /auth/me for the Appearance page
-// (shell-ux.md §4.4): only the fields given are sent.
 export async function updatePreferences(input: UpdatePreferencesInput): Promise<void> {
   const body: Record<string, unknown> = {};
   if (input.theme !== undefined) body.theme = input.theme;
@@ -336,9 +310,7 @@ export async function updatePreferences(input: UpdatePreferencesInput): Promise<
   if (!response.ok) throw await readError(response);
 }
 
-// requestPasswordReset backs POST /auth/password-reset/request
-// (auth-internals.md §3). The engine answers 200 for every well-formed
-// request, so success says nothing about whether the email is registered.
+// The API returns success for every well-formed request to prevent account enumeration.
 export async function requestPasswordReset(input: PasswordResetRequest): Promise<void> {
   const response = await fetch("/auth/password-reset/request", {
     method: "POST",
@@ -349,9 +321,6 @@ export async function requestPasswordReset(input: PasswordResetRequest): Promise
   if (!response.ok) throw await readError(response);
 }
 
-// changePassword backs POST /auth/me/change-password (auth-internals.md §3
-// "Password change"). The caller's session survives, so there's no session
-// state to refresh afterwards.
 export async function changePassword(input: ChangePasswordInput): Promise<void> {
   const response = await fetch("/auth/me/change-password", {
     method: "POST",
@@ -362,10 +331,6 @@ export async function changePassword(input: ChangePasswordInput): Promise<void> 
   if (!response.ok) throw await readError(response);
 }
 
-// confirmPasswordReset backs POST /auth/password-reset/confirm
-// (auth-internals.md §3). A 404 means the token is invalid, expired, or
-// already used; a 422 (auth.password_too_weak) means the tenant's policy
-// rejected the password.
 export async function confirmPasswordReset(input: PasswordResetConfirmation): Promise<PasswordResetOutcome> {
   const response = await fetch("/auth/password-reset/confirm", {
     method: "POST",
@@ -378,9 +343,6 @@ export async function confirmPasswordReset(input: PasswordResetConfirmation): Pr
   return body.login_required ? "login_required" : "signed_in";
 }
 
-// verifyEmail backs POST /auth/verify-email (auth-internals.md §3 "Email
-// verification confirm"). A 404 means the token is invalid, expired, or
-// already used.
 export async function verifyEmail(input: EmailVerification): Promise<EmailVerificationOutcome> {
   const response = await fetch("/auth/verify-email", {
     method: "POST",
@@ -393,8 +355,6 @@ export async function verifyEmail(input: EmailVerification): Promise<EmailVerifi
   return body.login_required ? "login_required" : "signed_in";
 }
 
-// beginTOTPEnrollment backs POST /auth/mfa/enroll/totp (auth-internals.md
-// §8 "MFA enrollment"): a new secret held pending until confirmed.
 export async function beginTOTPEnrollment(): Promise<TOTPEnrollment> {
   const response = await fetch("/auth/mfa/enroll/totp", {
     method: "POST",
@@ -407,13 +367,7 @@ export async function beginTOTPEnrollment(): Promise<TOTPEnrollment> {
   return { enrollmentId: body.enrollment_id, qrSvg: body.qr_svg, secret: body.secret };
 }
 
-// confirmTOTPEnrollment backs POST /auth/mfa/enroll/totp/confirm. Resolves
-// to the recovery codes issued with the user's first factor, or null when
-// they already hold some. Rejects with invalid_mfa_code (400),
-// mfa_enrollment_not_found (404), or mfa_required/mfa_reverify_required
-// (403) for an enrolled user whose session needs fresh MFA. The session's
-// access token is reissued by cookie; call reloadSession to pick up the
-// cleared mfaSetupRequired.
+// Confirmation reissues the access-token cookie; reloadSession reads the cleared MFA setup flag.
 export async function confirmTOTPEnrollment(input: TOTPEnrollmentConfirmation): Promise<string[] | null> {
   const response = await fetch("/auth/mfa/enroll/totp/confirm", {
     method: "POST",
@@ -426,18 +380,39 @@ export async function confirmTOTPEnrollment(input: TOTPEnrollmentConfirmation): 
   return body.recovery_codes ?? null;
 }
 
-// reverifyMFA backs POST /auth/mfa/reverify (auth-internals.md §8
-// "Step-up re-verification"): refreshes the session's MFA assurance after a
-// 403 mfa_reverify_required or mfa_required. Rejects with invalid_mfa_code
-// (401) or mfa_locked (423). The access token is reissued by cookie.
-export async function reverifyMFA(input: MFACodeConfirmation): Promise<void> {
+// Re-verification reissues the access-token cookie without creating a new session.
+export async function reverifyMFA(input: MFAVerification): Promise<void> {
   const response = await fetch("/auth/mfa/reverify", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: input.type, code: input.code }),
+    body: JSON.stringify(verificationBody(input)),
   });
   if (!response.ok) throw await readError(response);
+}
+
+export async function confirmPasskeyEnrollment(input: PasskeyEnrollmentConfirmation): Promise<string[] | null> {
+  const response = await fetch("/auth/mfa/enroll/webauthn/confirm", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ceremony_id: input.ceremonyId, response: input.response, label: input.label }),
+  });
+  if (!response.ok) throw await readError(response);
+  const body = (await response.json()) as { recovery_codes: string[] | null };
+  return body.recovery_codes ?? null;
+}
+
+export async function fetchPasskeyOptions<T>(path: string, body: object, signal?: AbortSignal) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) throw await readError(response);
+  return (await response.json()) as { ceremony_id: string; options: { publicKey: T } };
 }
 
 interface MFAFactorsWire {
@@ -485,10 +460,7 @@ export async function removeMFAFactor(id: string, confirmation: MFACodeConfirmat
   if (!response.ok) throw await readError(response);
 }
 
-// regenerateRecoveryCodes backs POST /auth/mfa/recovery-codes/regenerate:
-// resolves to the new set, shown once. The user's other sessions in this
-// tenant are signed out. Rejects with mfa_not_enrolled (409),
-// invalid_mfa_code (401), or mfa_locked (423).
+// Regenerating codes signs out the account's other sessions in this tenant.
 export async function regenerateRecoveryCodes(confirmation: MFACodeConfirmation): Promise<string[]> {
   const response = await fetch("/auth/mfa/recovery-codes/regenerate", {
     method: "POST",
@@ -512,9 +484,6 @@ interface SessionWire {
   current: boolean;
 }
 
-// fetchSessions backs GET /auth/sessions (auth-internals.md §4 "Session
-// management endpoints"): the caller's sessions in this tenant, the current
-// one first.
 export async function fetchSessions(signal?: AbortSignal): Promise<ActiveSession[]> {
   const response = await fetch("/auth/sessions", { credentials: "include", ...(signal ? { signal } : {}) });
   if (!response.ok) throw await readError(response);
@@ -531,9 +500,6 @@ export async function fetchSessions(signal?: AbortSignal): Promise<ActiveSession
   }));
 }
 
-// revokeSession backs DELETE /auth/sessions/{id}. Rejects with
-// session_not_found (404), or cannot_revoke_current_session (400) for the
-// caller's own session, which ends through logout instead.
 export async function revokeSession(id: string): Promise<void> {
   const response = await fetch(`/auth/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -542,8 +508,6 @@ export async function revokeSession(id: string): Promise<void> {
   if (!response.ok) throw await readError(response);
 }
 
-// revokeOtherSessions backs DELETE /auth/sessions: ends every session but
-// the caller's own and resolves to how many it ended.
 export async function revokeOtherSessions(): Promise<number> {
   const response = await fetch("/auth/sessions", { method: "DELETE", credentials: "include" });
   if (!response.ok) throw await readError(response);
@@ -551,9 +515,7 @@ export async function revokeOtherSessions(): Promise<number> {
   return body.revoked;
 }
 
-// resendVerificationEmail backs POST /auth/verify-email/resend
-// (auth-internals.md §3). The engine answers 200 for every well-formed
-// request, so success says nothing about whether a link was sent.
+// The API returns success even when no link is sent to prevent account enumeration.
 export async function resendVerificationEmail(input: VerificationEmailRequest): Promise<void> {
   const response = await fetch("/auth/verify-email/resend", {
     method: "POST",
@@ -564,9 +526,6 @@ export async function resendVerificationEmail(input: VerificationEmailRequest): 
   if (!response.ok) throw await readError(response);
 }
 
-// register backs POST /auth/register (shell-ux.md §2.2). A 409 carries
-// auth.email_already_exists or tenant.slug_taken; a 422 (validation_failed)
-// carries per-field messages in details.
 export async function register(input: Registration): Promise<RegisterOutcome> {
   const response = await fetch("/auth/register", {
     method: "POST",
@@ -596,8 +555,6 @@ export async function register(input: Registration): Promise<RegisterOutcome> {
   return body.login_required ? { kind: "login_required", tenantSlug } : { kind: "signed_in", tenantSlug };
 }
 
-// checkSlug backs GET /auth/check-slug. false covers a malformed or reserved
-// slug as well as a taken one.
 export async function checkSlug(slug: string, signal?: AbortSignal): Promise<boolean> {
   const response = await fetch(`/auth/check-slug?${new URLSearchParams({ slug })}`, {
     credentials: "include",
@@ -608,9 +565,6 @@ export async function checkSlug(slug: string, signal?: AbortSignal): Promise<boo
   return body.available === true;
 }
 
-// fetchInviteInfo backs GET /auth/accept-invite/info (shell-ux.md §2.5).
-// A 404 (invalid_invite) covers every dead link: unknown, expired,
-// revoked, or already accepted.
 export async function fetchInviteInfo(link: InviteLink): Promise<InviteInfo> {
   const query = new URLSearchParams({ token: link.token, tenant: link.tenant });
   const response = await fetch(`/auth/accept-invite/info?${query}`, { credentials: "include" });
@@ -631,7 +585,6 @@ export async function fetchInviteInfo(link: InviteLink): Promise<InviteInfo> {
   };
 }
 
-// acceptInvite backs POST /auth/accept-invite (shell-ux.md §2.5).
 export async function acceptInvite(input: InviteAcceptance): Promise<InviteAcceptOutcome> {
   const response = await fetch("/auth/accept-invite", {
     method: "POST",
@@ -644,14 +597,9 @@ export async function acceptInvite(input: InviteAcceptance): Promise<InviteAccep
   return body.login_required ? "login_required" : "signed_in";
 }
 
-// logout backs POST /auth/logout (auth-internals.md §4). Deliberately
-// swallows the response — the machine transitions to unauthenticated
-// regardless of the call's outcome (a session the user asked to end is
-// never left looking authenticated).
+// Client auth state ends even when the server cannot process logout.
 export async function logout(): Promise<void> {
   try {
     await fetch("/auth/logout", { method: "POST", credentials: "include" });
-  } catch {
-    // Network failure — the client-side session still ends below.
-  }
+  } catch {}
 }

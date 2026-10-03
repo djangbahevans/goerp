@@ -1,4 +1,9 @@
-import type { MFACodeConfirmation, TOTPEnrollment, TOTPEnrollmentConfirmation } from "@goerp/sdk/auth";
+import {
+  type MFAVerification,
+  requestPasskeyAssertion,
+  type TOTPEnrollment,
+  type TOTPEnrollmentConfirmation,
+} from "@goerp/sdk/auth";
 import { Button, Checkbox, FieldWrapper, Spinner, TextInput } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { type ReactNode, type SubmitEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -10,7 +15,7 @@ import { MFACodeForm } from "./mfa-code-dialog.js";
 export interface AddAuthenticatorClient {
   begin: () => Promise<TOTPEnrollment>;
   confirm: (input: TOTPEnrollmentConfirmation) => Promise<string[] | null>;
-  reverify: (confirmation: MFACodeConfirmation) => Promise<void>;
+  reverify: (confirmation: MFAVerification) => Promise<void>;
 }
 
 export interface AddAuthenticatorSheetProps {
@@ -19,6 +24,7 @@ export interface AddAuthenticatorSheetProps {
   // The factor is enrolled, before any recovery codes are shown.
   onEnrolled: () => void;
   onClose: () => void;
+  canReverifyPasskey?: boolean;
 }
 
 const CODE_LENGTH = 6;
@@ -32,16 +38,18 @@ type Step =
   | { kind: "scan"; enrollment: TOTPEnrollment; notice?: string }
   | { kind: "codes"; codes: string[] };
 
-// The user already holds a factor here, so the enrollment calls can ask the
-// session to prove MFA again first (auth-internals.md §8 "MFA enrollment").
+// Enrolling another factor requires fresh assurance from an accepted existing factor.
 function needsReverify(err: unknown): boolean {
   return isAppError(err) && (err.code === "mfa_reverify_required" || err.code === "mfa_required");
 }
 
-// shell-ux.md §4.3 "Add authenticator app": §2.7's TOTP steps in a
-// dismissable sheet.
-export function AddAuthenticatorSheet({ open, client, onEnrolled, onClose }: AddAuthenticatorSheetProps): ReactNode {
-  // A fresh flow, and so a fresh pending enrollment, each time the sheet opens.
+export function AddAuthenticatorSheet({
+  open,
+  client,
+  onEnrolled,
+  onClose,
+  canReverifyPasskey = false,
+}: AddAuthenticatorSheetProps): ReactNode {
   const [run, setRun] = useState(0);
   // New recovery codes are on screen and not yet marked saved: they're shown
   // only once, so the sheet stays open until the user confirms.
@@ -67,6 +75,7 @@ export function AddAuthenticatorSheet({ open, client, onEnrolled, onClose }: Add
           onEnrolled={onEnrolled}
           onHoldingCodes={setHoldingCodes}
           onDone={onClose}
+          canReverifyPasskey={canReverifyPasskey}
         />
       )}
     </SideSheet>
@@ -78,9 +87,16 @@ interface FlowProps {
   onEnrolled: () => void;
   onHoldingCodes: (holding: boolean) => void;
   onDone: () => void;
+  canReverifyPasskey: boolean;
 }
 
-function AddAuthenticatorFlow({ client, onEnrolled, onHoldingCodes, onDone }: FlowProps): ReactNode {
+function AddAuthenticatorFlow({
+  client,
+  onEnrolled,
+  onHoldingCodes,
+  onDone,
+  canReverifyPasskey,
+}: FlowProps): ReactNode {
   const [step, setStep] = useState<Step>({ kind: "starting" });
   const [label, setLabel] = useState("");
   const [code, setCode] = useState("");
@@ -89,6 +105,14 @@ function AddAuthenticatorFlow({ client, onEnrolled, onHoldingCodes, onDone }: Fl
   const [saved, setSaved] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
   const started = useRef(false);
+  const active = useRef(true);
+
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
 
   const start = useCallback(
     async (notice?: string) => {
@@ -190,22 +214,30 @@ function AddAuthenticatorFlow({ client, onEnrolled, onHoldingCodes, onDone }: Fl
 
   if (step.kind === "reverify") {
     const { retry } = step;
+    const reverify = async (confirmation: MFAVerification) => {
+      await client.reverify(confirmation);
+      if (!active.current) return;
+      if (retry.kind === "begin") {
+        void start();
+        return;
+      }
+      setStep({ kind: "scan", enrollment: retry.enrollment });
+      void confirm(retry.input, retry.enrollment);
+    };
     return (
       <div className="flex flex-col gap-4 p-4">
-        <p className="text-sm text-text-secondary">
-          Confirm it's you before adding another authenticator app. Enter a code from one you already use.
-        </p>
+        <p className="text-sm text-text-secondary">Confirm it's you before adding another authenticator app.</p>
         <MFACodeForm
           submitLabel="Continue"
-          onSubmit={async (confirmation) => {
-            await client.reverify(confirmation);
-            if (retry.kind === "begin") {
-              void start();
-              return;
-            }
-            setStep({ kind: "scan", enrollment: retry.enrollment });
-            void confirm(retry.input, retry.enrollment);
-          }}
+          onSubmit={reverify}
+          onPasskey={
+            canReverifyPasskey
+              ? async (signal) => {
+                  const assertion = await requestPasskeyAssertion({ signal });
+                  if (assertion && !signal.aborted) await reverify(assertion);
+                }
+              : undefined
+          }
         />
       </div>
     );

@@ -1,5 +1,5 @@
 import type { AuthContextValue } from "@goerp/sdk/auth";
-import { AuthContext } from "@goerp/sdk/auth";
+import { AuthContext, supportsPasskeys } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
 import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
@@ -109,8 +109,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// Step 1: scan the QR code or type the key, then enter a code.
-export const ScanAndVerify: Story = {};
+async function chooseAuthenticator(canvas: ReturnType<typeof within>) {
+  if (supportsPasskeys())
+    await userEvent.click(await canvas.findByRole("button", { name: "Use an authenticator app" }));
+}
+
+export const MethodChoice: Story = {};
+
+export const ScanAndVerify: Story = {
+  play: async ({ canvasElement }) => chooseAuthenticator(within(canvasElement)),
+};
 
 export const IncorrectCode: Story = {
   args: {
@@ -122,15 +130,16 @@ export const IncorrectCode: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await chooseAuthenticator(canvas);
     await userEvent.type(await canvas.findByLabelText("Verification code"), "000000");
     await expect(await canvas.findByText(/Incorrect code/)).toBeVisible();
   },
 };
 
-// Step 2: the recovery codes issued with the first factor.
 export const RecoveryCodes: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await chooseAuthenticator(canvas);
     await userEvent.type(await canvas.findByLabelText("Verification code"), "123456");
     await expect(await canvas.findByRole("list", { name: "Recovery codes" })).toBeVisible();
     await expect(canvas.getByRole("button", { name: "Finish" })).toBeDisabled();
@@ -145,4 +154,5 @@ export const StartFailed: Story = {
       },
     }),
   },
+  play: async ({ canvasElement }) => chooseAuthenticator(within(canvasElement)),
 };

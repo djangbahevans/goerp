@@ -195,7 +195,7 @@ describe("AuthProvider and the password update notice", () => {
     const { auth, notice } = await mountProvider();
 
     await act(() => auth().login({ email: "ada@example.com", password: "pw", tenant: "acme" }));
-    await act(() => auth().submitMFA("123456"));
+    await act(() => auth().submitMFA({ type: "totp", code: "123456" }));
     expect(notice.get()).toBe(true);
   });
 

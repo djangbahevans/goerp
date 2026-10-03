@@ -1,4 +1,4 @@
-import type { MFACodeConfirmation } from "@goerp/sdk/auth";
+import { type MFACodeConfirmation, supportsPasskeys } from "@goerp/sdk/auth";
 import {
   Button,
   FieldWrapper,
@@ -32,22 +32,19 @@ function defaultErrorMessage(err: unknown, mode: Mode): string {
 export interface MFACodeFormProps {
   submitLabel: string;
   submitVariant?: "primary" | "danger" | undefined;
-  // Rejects to show an inline error and keep the form open.
   onSubmit: (confirmation: MFACodeConfirmation) => Promise<void>;
-  // Overrides the inline message for a rejection; undefined falls back to
-  // the invalid-code, lockout and connection messages.
   describeError?: ((err: unknown) => string | undefined) | undefined;
   onCancel?: (() => void) | undefined;
+  onPasskey?: ((signal: AbortSignal) => Promise<void>) | undefined;
 }
 
-// A current 2FA code — six digits from the authenticator app, or a recovery
-// code — as on the MFA challenge page (shell-ux.md §2.6).
 export function MFACodeForm({
   submitLabel,
   submitVariant = "primary",
   onSubmit,
   describeError,
   onCancel,
+  onPasskey,
 }: MFACodeFormProps): ReactNode {
   const [mode, setMode] = useState<Mode>("totp");
   const [code, setCode] = useState("");
@@ -57,6 +54,17 @@ export function MFACodeForm({
   const [focusRequest, setFocusRequest] = useState(0);
   const codeRef = useRef<HTMLInputElement>(null);
   const recoveryRef = useRef<HTMLInputElement>(null);
+  const passkeyRef = useRef<HTMLButtonElement>(null);
+  const passkeyAbort = useRef<AbortController | null>(null);
+  const restorePasskeyFocus = useRef(false);
+
+  useEffect(() => () => passkeyAbort.current?.abort(), []);
+  useEffect(() => {
+    if (!busy && restorePasskeyFocus.current) {
+      restorePasskeyFocus.current = false;
+      passkeyRef.current?.focus();
+    }
+  }, [busy]);
 
   useEffect(() => {
     if (focusRequest === 0) return;
@@ -102,8 +110,35 @@ export function MFACodeForm({
     setFocusRequest((n) => n + 1);
   };
 
+  const submitPasskey = async () => {
+    if (busy || !onPasskey) return;
+    setError(undefined);
+    setBusy(true);
+    const controller = new AbortController();
+    passkeyAbort.current = controller;
+    restorePasskeyFocus.current = true;
+    try {
+      await onPasskey(controller.signal);
+    } catch (err) {
+      setError(
+        describeError?.(err) ??
+          (isAppError(err) && err.code === "mfa_locked"
+            ? "Too many failed verification attempts. Try again later."
+            : "Couldn't use your passkey. Try again or choose another method."),
+      );
+    } finally {
+      passkeyAbort.current = null;
+      setBusy(false);
+    }
+  };
+
   return (
     <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
+      {onPasskey && supportsPasskeys() && (
+        <Button ref={passkeyRef} variant="secondary" disabled={busy} onClick={() => void submitPasskey()}>
+          Use a passkey
+        </Button>
+      )}
       {mode === "totp" ? (
         <VerificationCodeInput
           ref={codeRef}
@@ -171,17 +206,12 @@ export interface MFADialogProps {
   title: string;
   description?: string | undefined;
   tone?: "default" | "warning" | undefined;
-  // Escape and the close paths call this; false while the dialog must stay
-  // up, such as while new recovery codes are on screen unsaved.
   onDismiss: () => void;
   dismissible?: boolean | undefined;
   children: ReactNode;
 }
 
-// AlertDialog's panel and motion (components/alert-dialog.md) with a custom
-// body. AlertDialog itself takes at most one text or select input, while
-// these confirmations need the code field, its recovery-code switch, and an
-// inline error that keeps the dialog open.
+// The code form needs an inline error and multiple inputs, which AlertDialog does not support.
 export function MFADialog({
   open,
   title,
@@ -191,8 +221,7 @@ export function MFADialog({
   dismissible = true,
   children,
 }: MFADialogProps): ReactNode {
-  // Open-controlled with no Trigger, so Radix has no element to return focus
-  // to; captured and restored by hand, as AlertDialog does.
+  // Trigger-less dialogs need an explicit focus-return target.
   const triggerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (open) triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;

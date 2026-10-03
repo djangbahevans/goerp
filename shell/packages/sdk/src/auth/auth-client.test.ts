@@ -25,11 +25,11 @@ import {
   revokeOtherSessions,
   revokeSession,
   selectTenant,
-  submitMFACode,
   tenantSelectionFrom,
   updatePreferences,
   updateProfile,
   verifyEmail,
+  verifyMFA,
 } from "./auth-client.js";
 import { tenantSuspension } from "./tenant-suspension.js";
 
@@ -548,12 +548,12 @@ describe("tenant suspension", () => {
   });
 });
 
-describe("submitMFACode", () => {
+describe("verifyMFA", () => {
   it("posts the challenge token, type, and code", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { expires_in: 900 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(await submitMFACode("mfa-tok", "123456", "totp")).toBe(false);
+    expect(await verifyMFA("mfa-tok", { type: "totp", code: "123456" })).toBe(false);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/auth/mfa/verify",
@@ -571,7 +571,7 @@ describe("submitMFACode", () => {
       vi.fn(async () => jsonResponse(200, { expires_in: 900, password_update_recommended: true })),
     );
 
-    expect(await submitMFACode("mfa-tok", "123456", "totp")).toBe(true);
+    expect(await verifyMFA("mfa-tok", { type: "totp", code: "123456" })).toBe(true);
   });
 
   it("throws an AppError on an invalid code", async () => {
@@ -580,7 +580,7 @@ describe("submitMFACode", () => {
       vi.fn(async () => jsonResponse(401, { error: { code: "invalid_mfa_code", message: "invalid MFA code" } })),
     );
 
-    await expect(submitMFACode("mfa-tok", "000000", "totp")).rejects.toMatchObject({
+    await expect(verifyMFA("mfa-tok", { type: "totp", code: "000000" })).rejects.toMatchObject({
       code: "invalid_mfa_code",
     });
   });

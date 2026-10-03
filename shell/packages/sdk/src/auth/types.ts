@@ -224,7 +224,7 @@ export interface AuthContextValue {
   // /auth/select-tenant); resolves like login.
   selectTenant: (selectionToken: string, tenant: string) => Promise<SignInHandoff | null>;
   logout: () => Promise<void>;
-  submitMFA: (code: string, method?: MFAMethod) => Promise<void>;
+  submitMFA: (confirmation: MFAVerification) => Promise<void>;
   updateProfile: (input: UpdateProfileInput) => Promise<void>;
   // PATCH /auth/me with the Appearance preferences (shell-ux.md §4.4).
   // Rejects with an AppError whose code is invalid_preference and whose
@@ -291,3 +291,20 @@ export interface MFACodeConfirmation {
   type: Extract<MFAMethod, "totp" | "recovery_code">;
   code: string;
 }
+
+export interface PasskeyEnrollment {
+  ceremonyId: string;
+  response: RegistrationResponseJSON;
+}
+
+export interface PasskeyEnrollmentConfirmation extends PasskeyEnrollment {
+  label?: string | undefined;
+}
+
+export interface MFAPasskeyConfirmation {
+  type: "webauthn";
+  ceremonyId: string;
+  response: AuthenticationResponseJSON;
+}
+
+export type MFAVerification = MFACodeConfirmation | MFAPasskeyConfirmation;

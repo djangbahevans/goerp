@@ -1,13 +1,19 @@
-import { beginTOTPEnrollment, confirmTOTPEnrollment, type TOTPEnrollment, useAuth } from "@goerp/sdk/auth";
+import {
+  beginTOTPEnrollment,
+  confirmTOTPEnrollment,
+  supportsPasskeys,
+  type TOTPEnrollment,
+  useAuth,
+} from "@goerp/sdk/auth";
 import { Button, Checkbox, Spinner } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, type SubmitEvent, useCallback, useEffect, useRef, useState } from "react";
 import { AuthLayout } from "./auth-layout.js";
+import { PasskeyEnrollmentForm } from "./passkey-enrollment-form.js";
 import { RecoveryCodesList, TOTPScanDetails } from "./totp-enrollment-parts.js";
 import { VerificationCodeInput } from "./verification-code-input.js";
 
-// Injectable for stories; the route uses the real auth client.
 export interface MFASetupClient {
   begin: () => Promise<TOTPEnrollment>;
   confirm: (enrollmentId: string, code: string) => Promise<string[] | null>;
@@ -27,6 +33,8 @@ export interface MFASetupPageProps {
 const CODE_LENGTH = 6;
 
 type Step =
+  | { kind: "choose" }
+  | { kind: "passkey" }
   | { kind: "starting"; notice?: string }
   | { kind: "start_failed" }
   | { kind: "scan"; enrollment: TOTPEnrollment; notice?: string }
@@ -34,13 +42,11 @@ type Step =
   // Enrolled, with no new recovery codes to show; finishing may need a retry.
   | { kind: "done" };
 
-// shell-ux.md §2.7: TOTP setup the tenant's MFA policy requires before the
-// user can do anything else. Step 1 scans and verifies; step 2 shows the
-// recovery codes issued with the first factor.
 export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPageProps): ReactNode {
   const { reloadSession, logout } = useAuth();
   const navigate = useNavigate();
-  const [step, setStep] = useState<Step>({ kind: "starting" });
+  const passkeysSupported = supportsPasskeys();
+  const [step, setStep] = useState<Step>({ kind: passkeysSupported ? "choose" : "starting" });
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -68,8 +74,8 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    void start();
-  }, [start]);
+    if (!passkeysSupported) void start();
+  }, [start, passkeysSupported]);
 
   const finish = async () => {
     setBusy(true);
@@ -132,6 +138,31 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
     <AuthLayout>
       <h1 className="mb-2 font-semibold text-text text-xl">Your organisation requires two-factor authentication</h1>
 
+      {step.kind === "choose" && (
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-text-secondary">Choose how to protect your account when you sign in.</p>
+          <Button variant="primary" fullWidth onClick={() => setStep({ kind: "passkey" })}>
+            Use a passkey
+          </Button>
+          <Button variant="secondary" fullWidth onClick={() => void start()}>
+            Use an authenticator app
+          </Button>
+        </div>
+      )}
+
+      {step.kind === "passkey" && (
+        <PasskeyEnrollmentForm
+          onBusy={setBusy}
+          onEnrolled={(codes) => {
+            if (codes?.length) setStep({ kind: "codes", codes });
+            else {
+              setStep({ kind: "done" });
+              void finish();
+            }
+          }}
+        />
+      )}
+
       {step.kind === "starting" && (
         <div role="status" className="flex items-center gap-2 py-8 text-sm text-text-secondary">
           <Spinner size={16} />
@@ -191,7 +222,7 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
         <div className="flex flex-col gap-4">
           <p className="text-sm text-text-secondary">
             Step 2 of 2. Save these recovery codes somewhere safe. Each one signs you in once if you lose your
-            authenticator app, and they won't be shown again.
+            two-factor method, and they won't be shown again.
           </p>
           <RecoveryCodesList codes={step.codes} />
           <Checkbox label="I've saved these codes" checked={saved} disabled={busy} onChange={setSaved} />
@@ -228,10 +259,22 @@ export function MFASetupPage({ redirectTo, client = defaultClient }: MFASetupPag
       )}
 
       <div className="mt-6 flex justify-center text-sm">
-        <Button variant="link" onClick={() => void signOut()}>
+        <Button variant="link" disabled={busy} onClick={() => void signOut()}>
           Sign out
         </Button>
       </div>
+
+      {passkeysSupported && step.kind !== "choose" && step.kind !== "codes" && step.kind !== "done" && (
+        <div className="mt-3 flex justify-center text-sm">
+          <Button
+            variant="link"
+            disabled={busy || step.kind === "starting"}
+            onClick={() => setStep({ kind: "choose" })}
+          >
+            Choose another method
+          </Button>
+        </div>
+      )}
     </AuthLayout>
   );
 }

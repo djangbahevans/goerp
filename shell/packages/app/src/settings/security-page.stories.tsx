@@ -127,7 +127,9 @@ function memoryTwoFactor(initial: Partial<MFAFactors> = {}): TwoFactorClient {
       check(code);
       return null;
     },
-    reverify: async ({ code }) => check(code),
+    reverify: async (confirmation) => {
+      if (confirmation.type !== "webauthn") check(confirmation.code);
+    },
   };
 }
 
