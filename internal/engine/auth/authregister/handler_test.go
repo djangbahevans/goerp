@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -190,14 +191,17 @@ func (f *fixture) handlers(enabled bool, policy string) *Handlers {
 	return NewHandlers(Config{Enabled: enabled, VerificationPolicy: policy, ProvisionTimeout: 10 * time.Second}, f.users, f.tenants, f.provisioner, password.NewHasher(256, time.Second), f.issuer, f.mailer, f.handoffs)
 }
 
-// registration returns a unique company name and email, cleaning up the
-// tenant, schema and account it produces.
 func (f *fixture) registration(t *testing.T) (company, slug, email string) {
 	t.Helper()
-	n := time.Now().UnixNano()
-	company = fmt.Sprintf("Register Test %d", n)
-	slug = DeriveSlug(company)
-	email = fmt.Sprintf("founder%d@example.com", n)
+	return f.registrationWithCompany(t, fmt.Sprintf("Register Test %d", time.Now().UnixNano()))
+}
+
+func (f *fixture) registrationWithCompany(t *testing.T, company string) (string, string, string) {
+	t.Helper()
+
+	slug := DeriveSlug(company)
+	email := fmt.Sprintf("founder%d@example.com", time.Now().UnixNano())
+
 	t.Cleanup(func() {
 		_, _ = f.conn.Exec(`DELETE FROM system.sessions WHERE user_id IN (SELECT id FROM system.users WHERE email = $1)`, email)
 		_, _ = f.conn.Exec(`DELETE FROM system.users WHERE email = $1`, email)
@@ -273,11 +277,14 @@ func TestCheckSlug(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.tenants WHERE slug = $1`, existing) })
 
+	free := fmt.Sprintf("free%d", time.Now().UnixNano())
 	for slug, want := range map[string]bool{
-		fmt.Sprintf("free%d", time.Now().UnixNano()): true,
-		existing: false,
-		"ab":     false,
-		"Upper":  false,
+		free:                                     true,
+		free + strings.Repeat("a", 56-len(free)): true,
+		existing:                                 false,
+		"ab":                                     false,
+		"Upper":                                  false,
+		strings.Repeat("a", 57):                  false,
 	} {
 		rec := doCheckSlug(t, h, slug)
 		if rec.Code != http.StatusOK || decode(t, rec)["available"] != want {
@@ -491,5 +498,20 @@ func TestReservedSlugs_ReadAsTaken(t *testing.T) {
 	}
 	if len(f.provisioner.calls) != 0 {
 		t.Error("provisioning ran for a reserved slug")
+	}
+}
+
+func TestRegister_LongCompanyNameProducesMaximumLengthSlug(t *testing.T) {
+	f := newFixture(t)
+	companyName := fmt.Sprintf("Register Test %d %s", time.Now().UnixNano(), strings.Repeat("a", 100))
+	company, slug, email := f.registrationWithCompany(t, companyName)
+
+	rec := doRegister(t, f.handlers(true, VerificationOff), body(company, email))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s, want 201", rec.Code, rec.Body.String())
+	}
+
+	if got := decode(t, rec)["tenant_slug"]; got != slug || len(slug) != 56 {
+		t.Errorf("tenant_slug = %v, want 56-character slug %q", got, slug)
 	}
 }

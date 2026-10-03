@@ -944,3 +944,29 @@ func TestCreateAndImportRoutes_RejectReservedSlugs(t *testing.T) {
 		t.Errorf("non-reserved slug status = %d, provisioner calls = %d, want 202 and 1", w.Code, provisioner.calls)
 	}
 }
+
+func TestCreateRoute_SlugLengthBoundary(t *testing.T) {
+	for _, length := range []int{56, 57} {
+		provisioner := &recordingProvisioner{}
+		mux := http.NewServeMux()
+		RegisterTenantRoutes(mux, TenantDeps{Store: tenant.NewStore(nil), Provisioner: provisioner})
+
+		body := `{"slug":"` + strings.Repeat("a", length) + `","admin_email":"a@example.test"}`
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/admin/tenants", strings.NewReader(body)))
+
+		if length == 56 {
+			if w.Code != http.StatusAccepted || provisioner.calls != 1 {
+				t.Errorf("56-character slug: status=%d calls=%d, want 202 and one call", w.Code, provisioner.calls)
+			}
+		} else {
+			if w.Code != http.StatusBadRequest || provisioner.calls != 0 {
+				t.Errorf("57-character slug: status=%d calls=%d, want 400 and no calls", w.Code, provisioner.calls)
+			}
+
+			if env := decodeEnvelope(t, w); env.Error == nil || env.Error.Code != "invalid_request" {
+				t.Errorf("error = %+v, want invalid_request", env.Error)
+			}
+		}
+	}
+}

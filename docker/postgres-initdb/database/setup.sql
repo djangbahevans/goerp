@@ -45,15 +45,15 @@ ALTER DEFAULT PRIVILEGES FOR ROLE schema_sync_user IN SCHEMA system
 
 -- Tenant roles are created and dropped only through these two functions.
 -- A tenant's role has the same name as its schema, so the slug check
--- mirrors system.tenants' own, plus Postgres's 63-byte identifier limit,
--- past which the name would be silently truncated.
+-- caps it at 56 ASCII characters so tenant_{slug} fits Postgres's
+-- 63-byte identifier limit without truncation.
 CREATE FUNCTION system.create_tenant_role(slug text) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER SET search_path = system, pg_temp
 AS $$
 DECLARE
     role_name text := 'tenant_' || slug;
 BEGIN
-    IF slug !~ '^[a-z][a-z0-9\-]{1,62}[a-z0-9]$' OR octet_length(role_name) > 63 THEN
+    IF slug !~ '^[a-z][a-z0-9\-]{1,54}[a-z0-9]$' OR octet_length(role_name) > 63 THEN
         RAISE EXCEPTION 'invalid tenant slug: %', slug USING ERRCODE = 'invalid_parameter_value';
     END IF;
     BEGIN
@@ -69,7 +69,7 @@ CREATE FUNCTION system.drop_tenant_role(slug text) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER SET search_path = system, pg_temp
 AS $$
 BEGIN
-    IF slug !~ '^[a-z][a-z0-9\-]{1,62}[a-z0-9]$' THEN
+    IF slug !~ '^[a-z][a-z0-9\-]{1,54}[a-z0-9]$' THEN
         RAISE EXCEPTION 'invalid tenant slug: %', slug USING ERRCODE = 'invalid_parameter_value';
     END IF;
     EXECUTE format('DROP ROLE IF EXISTS %I', 'tenant_' || slug);

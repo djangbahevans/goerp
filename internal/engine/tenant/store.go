@@ -11,17 +11,11 @@ import (
 
 var ErrTenantNotFound = errors.New("tenant not found")
 
-// createTenantsTable matches multitenancy-internals.md §2's tenants
-// definition, except suspended_by omits its documented
-// "REFERENCES users(id)" — no system.users table exists in this repo yet
-// (a separate, unfiled ticket). The column stays a plain UUID so that
-// constraint can be added via ALTER TABLE once users lands, rather than
-// blocking this table on a table that doesn't exist.
 const createTenantsTable = `
 CREATE TABLE IF NOT EXISTS system.tenants (
     id              UUID PRIMARY KEY DEFAULT uuidv7(),
     slug            TEXT NOT NULL UNIQUE
-                        CHECK (slug ~ '^[a-z][a-z0-9\-]{1,62}[a-z0-9]$'),
+                        CHECK (slug ~ '` + SlugPattern + `'),
     name            TEXT NOT NULL,
     plan            TEXT NOT NULL DEFAULT 'starter'
                         CHECK (plan IN ('starter','pro','enterprise','internal')),

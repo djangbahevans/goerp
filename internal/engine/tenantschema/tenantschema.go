@@ -24,7 +24,7 @@ import (
 // Name quotes tenant_{slug} as a safe identifier, ready to interpolate
 // directly into SQL. Safe because slug's character set is already
 // DB-constrained (system.tenants' own CHECK:
-// ^[a-z][a-z0-9\-]{1,62}[a-z0-9]$) by the time it reaches here. It names
+// ^[a-z][a-z0-9\-]{1,54}[a-z0-9]$) by the time it reaches here. It names
 // both the tenant's schema and its role.
 func Name(slug string) string {
 	return `"tenant_` + slug + `"`

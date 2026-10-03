@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveSlug, isValidSlug } from "./slug.js";
 
-// The same cases as the engine's TestDeriveSlug, so the two stay in step.
 describe("deriveSlug", () => {
   it.each([
     ["Acme Corp", "acme-corp"],
@@ -12,13 +11,20 @@ describe("deriveSlug", () => {
     ["--Acme--", "acme"],
     ["安全", ""],
     ["AB", "ab"],
-    ["abc-".repeat(30), "abc-".repeat(16).replace(/-+$/, "")],
+    ["a".repeat(56), "a".repeat(56)],
+    ["a".repeat(57), "a".repeat(56)],
+    [`3${"a".repeat(100)}`, `co-3${"a".repeat(52)}`],
+    ["abc-".repeat(30), "abc-".repeat(14).replace(/-+$/, "")],
   ])("derives %j as %j", (name, want) => {
     expect(deriveSlug(name)).toBe(want);
   });
 });
 
 describe("isValidSlug", () => {
+  it.each([2, 3, 55, 56, 57, 64])("validates a %i-character slug", (length) => {
+    expect(isValidSlug("a".repeat(length))).toBe(length >= 3 && length <= 56);
+  });
+
   it.each([
     ["Acme Corp", true],
     ["3M Ghana", true],

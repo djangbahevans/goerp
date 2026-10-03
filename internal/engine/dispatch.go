@@ -16,6 +16,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/route"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/rs/zerolog/log"
 )
 
@@ -43,12 +44,7 @@ const (
 	pathParamKindInt  = "int"
 )
 
-// slugParamPattern mirrors system.tenants.slug's own CHECK constraint
-// (internal/engine/tenant/store.go) — the one slug-shape convention this
-// codebase already establishes anywhere, reused here rather than
-// inventing a second, possibly-inconsistent one for PathParam's own
-// "slug" kind, which no doc pins down independently.
-var slugParamPattern = regexp.MustCompile(`^[a-z][a-z0-9\-]{1,62}[a-z0-9]$`)
+var slugParamPattern = regexp.MustCompile(tenant.SlugPattern)
 
 // buildDispatchHandler is buildChain's terminal handler. Route resolution
 // already happened once, early in the chain (routeResolutionMiddleware) —

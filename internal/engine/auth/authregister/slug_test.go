@@ -15,7 +15,10 @@ func TestDeriveSlug(t *testing.T) {
 		{"--Acme--", "acme"},
 		{"安全", ""},
 		{"AB", "ab"},
-		{strings.Repeat("abc-", 30), strings.TrimRight(strings.Repeat("abc-", 16), "-")},
+		{strings.Repeat("a", 56), strings.Repeat("a", 56)},
+		{strings.Repeat("a", 57), strings.Repeat("a", 56)},
+		{"3" + strings.Repeat("a", 100), "co-3" + strings.Repeat("a", 52)},
+		{strings.Repeat("abc-", 30), strings.TrimRight(strings.Repeat("abc-", 14), "-")},
 	}
 	for _, c := range cases {
 		if got := DeriveSlug(c.name); got != c.want {
@@ -34,6 +37,16 @@ func TestDeriveSlug_ValidityFollowsTheSlugRule(t *testing.T) {
 	} {
 		if got := validSlug(DeriveSlug(name)); got != want {
 			t.Errorf("validSlug(DeriveSlug(%q)) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestValidSlug_LengthBoundary(t *testing.T) {
+	for _, length := range []int{2, 3, 55, 56, 57, 64} {
+		slug := strings.Repeat("a", length)
+
+		if got, want := validSlug(slug), length >= 3 && length <= 56; got != want {
+			t.Errorf("validSlug(%d characters) = %v, want %v", length, got, want)
 		}
 	}
 }

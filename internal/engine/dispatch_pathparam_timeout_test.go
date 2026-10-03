@@ -3,6 +3,7 @@ package engine
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +31,12 @@ func TestValidatePathParams_SlugKind(t *testing.T) {
 	if _, ok := validatePathParams(kinds, map[string]string{"slug": "acme-corp"}); !ok {
 		t.Error("valid slug rejected")
 	}
-	for _, bad := range []string{"Acme-Corp", "-acme", "a", "acme_corp", "acme.corp"} {
+
+	if _, ok := validatePathParams(kinds, map[string]string{"slug": strings.Repeat("a", 56)}); !ok {
+		t.Error("56-character slug rejected")
+	}
+
+	for _, bad := range []string{"Acme-Corp", "-acme", "a", "acme_corp", "acme.corp", strings.Repeat("a", 57)} {
 		if _, ok := validatePathParams(kinds, map[string]string{"slug": bad}); ok {
 			t.Errorf("invalid slug %q accepted", bad)
 		}

@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // localPostgresDSN points directly at the compose.dev.yml Postgres
@@ -822,5 +824,23 @@ func TestDeleteProvisioning_NonProvisioningTenantReturnsNotFound(t *testing.T) {
 	// Confirm it really wasn't deleted, not just that the error looked right.
 	if _, err := store.GetByID(context.Background(), created.ID); err != nil {
 		t.Errorf("GetByID() after a rejected DeleteProvisioning(): error = %v, want nil (tenant should still exist)", err)
+	}
+}
+
+func TestCreateTenant_SlugLengthBoundary(t *testing.T) {
+	store, conn := openTestStore(t)
+	ctx := t.Context()
+
+	slug := uniqueSlug(t)
+	slug += strings.Repeat("a", 56-len(slug))
+
+	created := createTenant(t, store, conn, slug, "Slug Length Boundary")
+	if created.Slug != slug {
+		t.Errorf("Slug = %q, want %q", created.Slug, slug)
+	}
+
+	_, err := store.CreateTenant(ctx, slug+"b", "Too Long")
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != "23514" {
+		t.Fatalf("CreateTenant(57-character slug) = %v, want check violation (23514)", err)
 	}
 }

@@ -2,8 +2,8 @@
 // "Slug derivation", internal/engine/auth/authregister/slug.go), so the
 // availability check asks about the slug POST /auth/register will use.
 
-const SLUG_PATTERN = /^[a-z][a-z0-9-]{1,62}[a-z0-9]$/;
-const MAX_SLUG_LENGTH = 64;
+const SLUG_PATTERN = /^[a-z][a-z0-9-]{1,54}[a-z0-9]$/;
+const MAX_SLUG_LENGTH = 56;
 
 export function deriveSlug(companyName: string): string {
   let slug = "";
