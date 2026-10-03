@@ -177,13 +177,6 @@ func init() {
 		return engine.Created(body)
 	}, engine.Auth(engine.AuthNone))
 
-	// /gadget-query-delete exercises goerp#980's generated instance
-	// convenience methods end to end: Gadget{}.Query() must produce
-	// identical results to orm.From[models.Gadget]() (the AC's own
-	// example), and Delete() must actually soft-delete the record via
-	// orm.Unlink — Gadget has a deleted_at column (WithStandardFields), so
-	// Unlink sets it rather than removing the row, and a plain query still
-	// returns it (host.orm applies no default deleted_at IS NULL filter).
 	engine.POST("/gadget-query-delete", func(req *engine.Request) *engine.Response {
 		vals := models.NewGadgetValues().
 			SetName("QueryDeleteGadget").
@@ -214,17 +207,18 @@ func init() {
 				"error": map[string]any{"code": "widgets.gadget_delete_failed", "message": err.Error()},
 			}}
 		}
-		afterDelete, err := orm.Get[models.Gadget](gadget.ID)
-		if err != nil {
+		_, err = orm.Get[models.Gadget](gadget.ID)
+		if err != nil && !orm.IsNotFound(err) {
 			return &engine.Response{StatusCode: 500, Body: map[string]any{
 				"error": map[string]any{"code": "widgets.gadget_get_failed", "message": err.Error()},
 			}}
 		}
 
 		return engine.Created(map[string]any{
-			"query_method_ids": idsOf(viaMethod),
-			"from_func_ids":    idsOf(viaFrom),
-			"soft_deleted":     afterDelete.DeletedAt != nil,
+			"query_method_ids":    idsOf(viaMethod),
+			"from_func_ids":       idsOf(viaFrom),
+			"gadget_id":           gadget.ID,
+			"hidden_after_delete": orm.IsNotFound(err),
 		})
 	}, engine.Auth(engine.AuthNone))
 
