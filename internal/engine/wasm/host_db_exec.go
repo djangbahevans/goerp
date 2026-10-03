@@ -280,20 +280,8 @@ func prepareExec(sqlText string, opts abiv1.DBExecOpts, modCtx *ModuleContext) (
 	}, nil
 }
 
-// beginOrBorrowExecTx returns the *sql.Conn/*sql.Tx a statement should
-// run in — the caller's own transaction (and its pinned connection, via
-// ModuleContext.RawConn) if txID names one already registered via
-// host.db.begin, otherwise a freshly-opened, tenant-scoped one, pinned
-// the same way host.db.begin pins its own (goerp#511) — needed so a
-// caller can reach the raw pgx handle via conn.Raw(...) for
-// host.db.exec_batch's COPY/pipeline fast paths (goerp#513); a plain
-// host.db.exec caller that has no use for conn simply discards it.
-// finish commits or rolls back a freshly-opened transaction and closes
-// its pinned connection (Commit/Rollback alone never returns a
-// db.Conn-acquired connection to the pool — see openTransaction's own
-// doc comment in context.go); for a borrowed transaction it's a no-op,
-// since that transaction is owned by whoever called host.db.begin, not
-// by this call.
+// Owned transactions pin a connection for exec_batch's raw pgx operations.
+// Borrowed transactions retain their caller's commit and rollback ownership.
 func beginOrBorrowExecTx(qCtx context.Context, primary *sql.DB, modCtx *ModuleContext, txID string) (conn *sql.Conn, tx *sql.Tx, finish func(error) error, hostErr *abiv1.HostError) {
 	if txID != "" {
 		borrowedConn, borrowedTx, ok := modCtx.TransactionAndConn(txID)
@@ -303,7 +291,12 @@ func beginOrBorrowExecTx(qCtx context.Context, primary *sql.DB, modCtx *ModuleCo
 		return borrowedConn, borrowedTx, func(error) error { return nil }, nil
 	}
 
-	newConn, err := primary.Conn(qCtx)
+	target, err := modCtx.database(primary)
+	if err != nil {
+		return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
+	}
+
+	newConn, err := target.Conn(qCtx)
 	if err != nil {
 		return nil, nil, nil, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 	}

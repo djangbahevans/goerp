@@ -85,12 +85,8 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 			asTenant func(func() *abiv1.HostError) *abiv1.HostError
 		)
 		if input.TxID != "" {
-			// A borrowed transaction is already bound to whatever pool
-			// host.db.begin opened it against — always primary, never a
-			// replica — so host.db.query_replica's "always routes to
-			// replica" guarantee can't be honored here; reject rather than
-			// silently running on primary.
-			if forceReplica {
+			// Migration reads stay on the schema-sync pool even when a replica is requested.
+			if forceReplica && !modCtx.IsDataMigrationJob {
 				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
 					Code:    abiv1.ErrCodeReplicaUnavailable,
 					Message: "host.db.query_replica cannot run inside an existing transaction, which is always bound to primary",
@@ -104,12 +100,15 @@ func makeDBQuery(r *Runtime, primary *sql.DB, forceReplica bool) func(ctx contex
 				})
 			}
 			q = tx
-			// Owned by whoever called host.db.begin.
 			finish = func(error) error { return nil }
 			asTenant = func(fn func() *abiv1.HostError) *abiv1.HostError { return withTenantRole(qCtx, tx, modCtx, fn) }
 		} else {
-			target := primary
-			if forceReplica || input.Opts.ReadOnly {
+			target, err := modCtx.database(primary)
+			if err != nil {
+				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()})
+			}
+
+			if !modCtx.IsDataMigrationJob && (forceReplica || input.Opts.ReadOnly) {
 				replica := r.replicaDB.Load()
 				if replica == nil {
 					return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{

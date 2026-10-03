@@ -913,11 +913,13 @@ func resolveORMWriteTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, t
 	return tx, tx.Commit, func() { _ = tx.Rollback() }, nil
 }
 
-// beginTenantScopedWrite is beginTenantScopedRead without ReadOnly — same
-// session-var scoping so RLS applies automatically to writes too, and the
-// same statement_timeout (goerp#898).
 func beginTenantScopedWrite(ctx context.Context, db *sql.DB, modCtx *ModuleContext) (*sql.Tx, error) {
-	tx, err := db.BeginTx(ctx, nil)
+	target, err := modCtx.database(db)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := target.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

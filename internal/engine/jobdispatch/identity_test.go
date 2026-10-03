@@ -156,8 +156,9 @@ func newJobIdentityFixture(t *testing.T) *jobIdentityFixture {
 
 	t.Cleanup(func() { _ = compiled.Close(cleanupCtx) })
 
+	// ORM writes borrow another instance for constraint dispatch.
 	pool := rt.NewPool("identityfixture", compiled, wasm.PoolConfig{
-		MaxSize:       1,
+		MaxSize:       2,
 		BorrowTimeout: time.Second,
 	})
 	t.Cleanup(func() { pool.DrainAndClose(cleanupCtx, 5*time.Second) })

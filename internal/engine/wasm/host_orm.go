@@ -802,14 +802,13 @@ func resolveORMReadTx(ctx context.Context, db *sql.DB, modCtx *ModuleContext, tx
 	return tx, func() { _ = tx.Rollback() }, nil
 }
 
-// beginTenantScopedRead opens a read-only transaction with the same
-// search_path/ABAC session-variable scoping host.db.begin uses
-// (multitenancy-internals.md §5a "Layer 1"), so the RLS policies
-// goerp#71/#72 install apply automatically — host.orm does nothing extra
-// for row filtering, the table already enforces it. Also sets this
-// request's own statement_timeout via applyORMStatementTimeout.
 func beginTenantScopedRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext) (*sql.Tx, error) {
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	target, err := modCtx.database(db)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := target.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}

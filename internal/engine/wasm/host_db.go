@@ -81,11 +81,14 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 			})
 		}
 
-		// Pinned to this one *sql.Conn (rather than calling BeginTx on the
-		// pool directly) so a host function can later reach the same
-		// physical connection's raw pgx handle via ModuleContext.RawConn,
-		// e.g. for host.db.exec_batch's COPY/pipeline path (goerp#511).
-		conn, err := db.Conn(ctx)
+		target, err := modCtx.database(db)
+		if err != nil {
+			r.txLimiter.Release()
+			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()})
+		}
+
+		// Pin the connection so exec_batch can access its raw pgx handle.
+		conn, err := target.Conn(ctx)
 		if err != nil {
 			r.txLimiter.Release()
 			return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{
@@ -106,10 +109,6 @@ func makeDBBegin(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Module,
 			})
 		}
 
-		// search_path and the ABAC session vars — see applyTenantScope's own
-		// doc comment (multitenancy-internals.md §5's "PgBouncer correctness
-		// note"). Discarded automatically at commit/rollback — never leaks
-		// into whatever this backend connection is reused for next.
 		if err := applyTenantScope(ctx, tx, modCtx); err != nil {
 			_ = tx.Rollback()
 			_ = conn.Close()
@@ -169,8 +168,7 @@ func makeDBCommit(r *Runtime) func(ctx context.Context, m api.Module, ptr, lengt
 			// module should retry the whole transaction from begin
 			// (host-abi-reference.md §5 "host.db.commit"). Other commit
 			// failures aren't necessarily safe to blindly retry.
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "40001" {
+			if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "40001" {
 				hostErr.Details = map[string]any{"detail": "serialization_failure"}
 				hostErr.Retry = true
 			}
