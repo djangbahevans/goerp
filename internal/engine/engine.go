@@ -606,12 +606,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, storageBackend, ordered)
 
 	moduleRegistry := &registry.ModuleRegistry{}
-	// Wired before the first Update so a request arriving the instant
-	// modules become ready can already dispatch a "sync": true emission —
-	// SyncDispatcher.DispatchSync itself nil-guards against a not-yet-
-	// populated Snapshot() the same way every other ModuleRegistry-backed
-	// worker does.
-	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry})
+	eventInvoker := &eventdelivery.HandlerInvoker{Runtime: runtime, TenantStore: tenantStore, Roles: roleStore}
+	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
 	runtime.SetSyncJobDispatcher(&jobdispatch.SyncDispatcher{ModuleRegistry: moduleRegistry, Runtime: runtime})
 	runtime.SetProviderStore(providerselect.NewStore(primaryPool))
 	snap, err := moduleRegistry.Update(loadedModules)
@@ -966,7 +962,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, moduleInstallWorker)
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
-	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry})
+	river.AddWorker(jobWorkers, &eventdelivery.SubscriberDeliveryWorker{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
 	river.AddWorker(jobWorkers, &jobqueue.PartitionMaintenanceWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.ReindexWorker{Pool: schemaPool})
 	river.AddWorker(jobWorkers, &jobqueue.InviteExpiryWorker{TenantStore: tenantStore, InviteStore: inviteStore, AuditStore: authAuditStore})

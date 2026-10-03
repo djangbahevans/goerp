@@ -1,57 +1,36 @@
 package eventdelivery
 
 import (
-	"context"
 	"testing"
-	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
-	"github.com/djangbahevans/goerp/internal/engine/wasm"
-	"github.com/tetratelabs/wazero"
 )
 
-// newTestSyncDispatcher builds a real *registry.ModuleRegistry with one
-// StatusReady module backed by a real *wasm.InstancePool compiled from
-// wasmBytes — the same pattern newTestSubscriberWorker (subscriber_worker_
-// test.go) already establishes for the async path.
 func newTestSyncDispatcher(t *testing.T, wasmBytes []byte) *SyncDispatcher {
 	t.Helper()
-	ctx := context.Background()
 
-	rt := wazero.NewRuntime(ctx)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	w := newTestSubscriberWorker(t, wasmBytes)
+	return &SyncDispatcher{ModuleRegistry: w.ModuleRegistry, Invoker: w.Invoker}
+}
+
+func testSyncEnvelope(t *testing.T) []byte {
+	t.Helper()
+
+	data, err := (event.Envelope{Name: testEventName}).Marshal()
 	if err != nil {
-		t.Fatalf("CompileModule: %v", err)
-	}
-	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
-
-	pool := wasm.NewInstancePool(testEventModuleName, compiled, rt, wasm.PoolConfig{
-		MaxSize:       2,
-		BorrowTimeout: time.Second,
-	})
-	t.Cleanup(func() { pool.DrainAndClose(context.Background(), time.Second) })
-
-	reg := &registry.ModuleRegistry{}
-	if _, err := reg.Update(map[string]*module.LoadedModule{
-		testEventModuleName: {
-			Status:   module.StatusReady,
-			Pool:     pool,
-			Manifest: manifest.Manifest{Type: "standard"},
-		},
-	}); err != nil {
-		t.Fatalf("ModuleRegistry.Update: %v", err)
+		t.Fatal(err)
 	}
 
-	return &SyncDispatcher{ModuleRegistry: reg}
+	return data
 }
 
 func TestSyncDispatcher_DispatchSync_ZeroPayloadSucceeds(t *testing.T) {
-	d := newTestSyncDispatcher(t, handleEventEchoModule)
+	d := newTestSyncDispatcher(t, buildHandleEventConstStatusModule(0))
 
-	status, err := d.DispatchSync(context.Background(), testEventModuleName, testHandlerName, nil)
+	status, err := d.DispatchSync(t.Context(), testEventModuleName, testHandlerName, testSyncEnvelope(t))
 	if err != nil {
 		t.Fatalf("DispatchSync: %v", err)
 	}
@@ -61,9 +40,9 @@ func TestSyncDispatcher_DispatchSync_ZeroPayloadSucceeds(t *testing.T) {
 }
 
 func TestSyncDispatcher_DispatchSync_NonZeroStatusPropagated(t *testing.T) {
-	d := newTestSyncDispatcher(t, handleEventEchoModule)
+	d := newTestSyncDispatcher(t, buildHandleEventConstStatusModule(1))
 
-	status, err := d.DispatchSync(context.Background(), testEventModuleName, testHandlerName, []byte{0})
+	status, err := d.DispatchSync(t.Context(), testEventModuleName, testHandlerName, testSyncEnvelope(t))
 	if err != nil {
 		t.Fatalf("DispatchSync: %v", err)
 	}
@@ -75,7 +54,7 @@ func TestSyncDispatcher_DispatchSync_NonZeroStatusPropagated(t *testing.T) {
 func TestSyncDispatcher_DispatchSync_UnknownModuleReturnsError(t *testing.T) {
 	d := newTestSyncDispatcher(t, handleEventEchoModule)
 
-	_, err := d.DispatchSync(context.Background(), "does-not-exist", testHandlerName, nil)
+	_, err := d.DispatchSync(t.Context(), "does-not-exist", testHandlerName, testSyncEnvelope(t))
 	if err == nil {
 		t.Fatal("expected an error for an unknown module")
 	}
@@ -84,7 +63,7 @@ func TestSyncDispatcher_DispatchSync_UnknownModuleReturnsError(t *testing.T) {
 func TestSyncDispatcher_DispatchSync_NilSnapshotReturnsError(t *testing.T) {
 	d := &SyncDispatcher{ModuleRegistry: &registry.ModuleRegistry{}}
 
-	_, err := d.DispatchSync(context.Background(), testEventModuleName, testHandlerName, nil)
+	_, err := d.DispatchSync(t.Context(), testEventModuleName, testHandlerName, testSyncEnvelope(t))
 	if err == nil {
 		t.Fatal("expected an error when the registry has no snapshot yet")
 	}
@@ -99,7 +78,7 @@ func TestSyncDispatcher_DispatchSync_NilPoolReturnsErrorNotPanic(t *testing.T) {
 	}
 	d := &SyncDispatcher{ModuleRegistry: reg}
 
-	_, err := d.DispatchSync(context.Background(), testEventModuleName, testHandlerName, nil)
+	_, err := d.DispatchSync(t.Context(), testEventModuleName, testHandlerName, testSyncEnvelope(t))
 	if err == nil {
 		t.Fatal("expected an error for a module with a nil Pool")
 	}

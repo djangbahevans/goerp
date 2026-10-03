@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/djangbahevans/goerp/internal/engine/event"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
@@ -16,25 +17,20 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// replayEventRow is one matched event_log row — the columns a replay needs
-// to reconstruct a SubscriberDeliveryArgs job, not the full row shape
-// Worker's own INSERT writes.
 type replayEventRow struct {
 	ID            string
 	EventName     string
+	EventVersion  int
 	EmitterModule string
 	Payload       []byte
 	TraceID       sql.NullString
+	UserID        sql.NullString
+	EmittedAt     time.Time
 }
 
-// matchingEventLogRows pages through qualifiedSlug's event_log table for
-// rows matching eventNames/module/[from,to], ordered by emitted_at so
-// repeated calls with increasing offset never skip or repeat a row
-// between pages even as new events continue to be logged concurrently
-// (an insert-only table growing at the tail doesn't shift earlier rows).
 func matchingEventLogRows(ctx context.Context, pool *sql.DB, tenantSlug string, filter jobqueue.EventsReplayArgs, limit, offset int) ([]replayEventRow, error) {
 	query := fmt.Sprintf(`
-		SELECT id, event_name, emitter_module, payload, trace_id
+		SELECT id, event_name, event_version, emitter_module, payload, trace_id, user_id, emitted_at
 		FROM %s.event_log
 		WHERE event_name = ANY($1) AND ($2 = '' OR emitter_module = $2) AND emitted_at BETWEEN $3 AND $4
 		ORDER BY emitted_at
@@ -49,7 +45,7 @@ func matchingEventLogRows(ctx context.Context, pool *sql.DB, tenantSlug string, 
 	var out []replayEventRow
 	for rows.Next() {
 		var r replayEventRow
-		if err := rows.Scan(&r.ID, &r.EventName, &r.EmitterModule, &r.Payload, &r.TraceID); err != nil {
+		if err := rows.Scan(&r.ID, &r.EventName, &r.EventVersion, &r.EmitterModule, &r.Payload, &r.TraceID, &r.UserID, &r.EmittedAt); err != nil {
 			return nil, fmt.Errorf("scan event_log row: %w", err)
 		}
 		out = append(out, r)
@@ -60,14 +56,7 @@ func matchingEventLogRows(ctx context.Context, pool *sql.DB, tenantSlug string, 
 	return out, nil
 }
 
-// pqStringArray formats a Go string slice as a Postgres text[] literal
-// for the ANY($1) match above — database/sql has no native []string
-// binding, and this codebase has no pq/pgtype array-encoding dependency
-// wired into the plain *sql.DB pool other tenant-schema writes here
-// already use (role.go/invite.go's own convention). Each element is
-// double-quoted with backslash/quote escaping per Postgres's own array
-// literal syntax — event names are manifest-declared, not free-form user
-// input, but escaping costs nothing and avoids depending on that.
+// database/sql binds Postgres arrays as text literals with escaped elements.
 func pqStringArray(vals []string) string {
 	quoted := make([]string, len(vals))
 	for i, v := range vals {
@@ -78,13 +67,7 @@ func pqStringArray(vals []string) string {
 	return "{" + strings.Join(quoted, ",") + "}"
 }
 
-// targetSubscribers resolves which of eventName's currently registered
-// subscribers a replay should fan out to: async subscribers only (a sync
-// subscriber has no job-based delivery path — sync dispatch happens
-// inline at emit time, the same reasoning Worker.Work already applies),
-// further narrowed to subscriberFilter's module names when it's
-// non-empty ("--subscriber" omitted replays to every current async
-// subscriber, cli-reference.md §8).
+// Synchronous subscribers run inline at emission and have no replay jobs.
 func targetSubscribers(snap *registry.RegistrySnapshot, eventName string, subscriberFilter []string) []event.EventSubscription {
 	allowed := make(map[string]bool, len(subscriberFilter))
 	for _, m := range subscriberFilter {
@@ -104,15 +87,6 @@ func targetSubscribers(snap *registry.RegistrySnapshot, eventName string, subscr
 	return out
 }
 
-// resolveReplayTenants expands filter.Tenant ("all", or a single slug)
-// into the tenants a replay should process — every currently active
-// tenant for "all" (tenant.Store.ActiveTenants), or just the one named
-// slug (validated to exist via GetBySlug, so a typo'd slug fails fast
-// with a clear error rather than silently matching zero event_log rows).
-// Returns full *tenant.Tenant values, not bare slugs: SubscriberDeliveryArgs.TenantID
-// must carry the tenant's real ID (matching Worker.Work's own
-// EventDeliveryArgs.TenantID convention, ultimately modCtx.TenantID at
-// emit time), not its schema-naming slug.
 func resolveReplayTenants(ctx context.Context, tenantStore *tenant.Store, filterTenant string) ([]*tenant.Tenant, error) {
 	if filterTenant == "all" {
 		tenants, err := tenantStore.ActiveTenants(ctx)
@@ -133,10 +107,6 @@ func resolveReplayTenants(ctx context.Context, tenantStore *tenant.Store, filter
 	return []*tenant.Tenant{t}, nil
 }
 
-// CountReplayMatches computes the matching-event and resulting-job counts
-// a dry-run reports (cli-reference.md §8) without enqueueing anything —
-// the read-only half of what EventsReplayWorker.Work does when it
-// actually runs.
 func CountReplayMatches(ctx context.Context, pool *sql.DB, moduleRegistry *registry.ModuleRegistry, tenantStore *tenant.Store, filter jobqueue.EventsReplayArgs) (eventCount, jobCount int, err error) {
 	snap := moduleRegistry.Snapshot()
 	if snap == nil {
@@ -169,9 +139,6 @@ func CountReplayMatches(ctx context.Context, pool *sql.DB, moduleRegistry *regis
 	return eventCount, jobCount, nil
 }
 
-// EstimatedDurationMinutes is a rough, operator-facing estimate only — no
-// doc defines an exact formula, so this assumes one minute per batch of
-// jobCount/batchSize jobs, rounded up, with a one-minute floor.
 func EstimatedDurationMinutes(jobCount, batchSize int) int {
 	if batchSize <= 0 {
 		batchSize = 1
@@ -180,16 +147,7 @@ func EstimatedDurationMinutes(jobCount, batchSize int) int {
 	return max(minutes, 1)
 }
 
-// EventsReplayWorker processes jobqueue.EventsReplayArgs jobs: for every
-// tenant the filter resolves to, pages through matching event_log rows
-// and enqueues one jobqueue.SubscriberDeliveryArgs job per matched-event/
-// targeted-subscriber pair directly — it never re-inserts an
-// EventDeliveryArgs job and never touches event_log itself, so a replay
-// can never duplicate the original audit row. Each fan-out job carries
-// the original event_log row's own id as EventID (for traceability back
-// to the source event) and is UniqueOpts{ByArgs: true}-deduped exactly
-// like Worker's own live-dispatch fan-out, so replaying the same range
-// twice never double-enqueues.
+// Replays enqueue subscriber jobs directly to preserve the original event log entry.
 type EventsReplayWorker struct {
 	river.WorkerDefaults[jobqueue.EventsReplayArgs]
 	ModuleRegistry *registry.ModuleRegistry
@@ -216,10 +174,6 @@ func (w *EventsReplayWorker) Work(ctx context.Context, job *river.Job[jobqueue.E
 	for _, t := range tenants {
 		if err := replayTenant(ctx, riverClient, w.Pool, snap, t, filter, limit); err != nil {
 			if filter.Tenant == "all" {
-				// "protect the database": one tenant's failure never
-				// blocks another's (event-system.md §10) — only
-				// resolveReplayTenants' own enumeration failure above is
-				// fatal to the whole job.
 				log.Error().Err(err).Str("tenant", t.Slug).Msg("events replay: tenant failed, continuing")
 				continue
 			}
@@ -242,13 +196,17 @@ func replayTenant(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *
 			for _, sub := range targetSubscribers(snap, r.EventName, filter.Subscribers) {
 				batch = append(batch, river.InsertManyParams{
 					Args: jobqueue.SubscriberDeliveryArgs{
-						EventID:     r.ID,
-						EventName:   r.EventName,
-						ModuleName:  sub.ModuleName,
-						HandlerName: sub.HandlerName,
-						Payload:     r.Payload,
-						TenantID:    t.ID,
-						TraceID:     r.TraceID.String,
+						EventID:       r.ID,
+						EventName:     r.EventName,
+						EventVersion:  r.EventVersion,
+						EmitterModule: r.EmitterModule,
+						ModuleName:    sub.ModuleName,
+						HandlerName:   sub.HandlerName,
+						Payload:       r.Payload,
+						TenantID:      t.ID,
+						TraceID:       r.TraceID.String,
+						UserID:        r.UserID.String,
+						EmittedAt:     r.EmittedAt,
 					},
 					InsertOpts: &river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}},
 				})

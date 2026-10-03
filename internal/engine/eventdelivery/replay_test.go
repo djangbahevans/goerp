@@ -1,8 +1,8 @@
 package eventdelivery
 
 import (
-	"context"
 	"database/sql"
+	"encoding/json/v2"
 	"testing"
 	"time"
 	"uuid"
@@ -14,12 +14,10 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// insertFixtureEventLogRow inserts one event_log row directly, bypassing
-// Worker entirely — replay tests need pre-existing historical rows to
-// match against, not a live dispatch.
 func insertFixtureEventLogRow(t *testing.T, conn *sql.DB, slug, id, eventName, emitterModule string, emittedAt time.Time) {
 	t.Helper()
-	_, err := conn.ExecContext(context.Background(), `
+
+	_, err := conn.ExecContext(t.Context(), `
 		INSERT INTO `+tenantschema.Name(slug)+`.event_log (id, event_name, emitter_module, payload, emitted_at)
 		VALUES ($1, $2, $3, $4, $5)
 	`, id, eventName, emitterModule, []byte(`{}`), emittedAt)
@@ -50,7 +48,7 @@ func TestMatchingEventLogRows_FiltersByEventNameModuleAndTimeRange(t *testing.T)
 		From:       now.Add(-time.Hour),
 		To:         now.Add(time.Hour),
 	}
-	rows, err := matchingEventLogRows(context.Background(), conn, slug, filter, 100, 0)
+	rows, err := matchingEventLogRows(t.Context(), conn, slug, filter, 100, 0)
 	if err != nil {
 		t.Fatalf("matchingEventLogRows: %v", err)
 	}
@@ -98,7 +96,7 @@ func TestCountReplayMatches_SingleTenant(t *testing.T) {
 		To:         now.Add(time.Hour),
 		BatchSize:  100,
 	}
-	eventCount, jobCount, err := CountReplayMatches(context.Background(), conn, w.ModuleRegistry, tenantStore, filter)
+	eventCount, jobCount, err := CountReplayMatches(t.Context(), conn, w.ModuleRegistry, tenantStore, filter)
 	if err != nil {
 		t.Fatalf("CountReplayMatches: %v", err)
 	}
@@ -121,6 +119,10 @@ func TestEventsReplayWorker_Work_EnqueuesFanOutJobsForMatchedEvents(t *testing.T
 	now := time.Now().UTC().Truncate(time.Second)
 	eventID := uuid.NewV7().String()
 	insertFixtureEventLogRow(t, conn, slug, eventID, eventName, "sales", now)
+	userID := uuid.New().String()
+	if _, err := conn.ExecContext(t.Context(), "UPDATE "+tenantschema.Name(slug)+".event_log SET user_id = $1, event_version = 3, trace_id = 'replay-trace' WHERE id = $2", userID, eventID); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		_, _ = conn.Exec(`DELETE FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1`, eventID)
 	})
@@ -147,6 +149,18 @@ func TestEventsReplayWorker_Work_EnqueuesFanOutJobsForMatchedEvents(t *testing.T
 	}
 	if tenantID != tt.ID {
 		t.Errorf("fan-out job tenant_id = %q, want the tenant's real ID %q", tenantID, tt.ID)
+	}
+
+	var replayed jobqueue.SubscriberDeliveryArgs
+	var args []byte
+	if err := conn.QueryRowContext(t.Context(), "SELECT args FROM system.river_job WHERE kind = 'subscriber_delivery' AND args->>'event_id' = $1", eventID).Scan(&args); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(args, &replayed); err != nil {
+		t.Fatal(err)
+	}
+	if replayed.UserID != userID || replayed.EventVersion != 3 || replayed.EmitterModule != "sales" || replayed.TraceID != "replay-trace" || !replayed.EmittedAt.Equal(now) {
+		t.Fatalf("replay changed source envelope metadata: %+v", replayed)
 	}
 }
 
