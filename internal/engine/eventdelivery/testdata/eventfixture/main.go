@@ -80,6 +80,7 @@ func init() {
 		if err != nil {
 			return err
 		}
+
 		for _, record := range records {
 			ormNames = append(ormNames, record.Name)
 		}

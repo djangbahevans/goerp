@@ -62,8 +62,10 @@ func (h *HandlerInvoker) invoke(ctx context.Context, snap *registry.RegistrySnap
 		ORMBulkMaxRows:      h.Runtime.ORMBulkMaxRows(),
 		ORMStatementTimeout: h.Runtime.ORMStatementTimeout(),
 	})
+
 	inst.SetModuleContext(mc)
 	h.Runtime.RegisterInstance(inst)
+
 	defer func() {
 		h.Runtime.UnregisterInstance(inst)
 		mc.RollbackAll()

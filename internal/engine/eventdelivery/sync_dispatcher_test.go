@@ -23,6 +23,7 @@ func testSyncEnvelope(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return data
 }
 

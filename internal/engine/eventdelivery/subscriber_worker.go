@@ -41,6 +41,7 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 	if !ok || mod.Status != module.StatusReady {
 		return fmt.Errorf("module %q is not ready", args.ModuleName)
 	}
+
 	if mod.Pool == nil {
 		return fmt.Errorf("module %q has no WASM instance pool (wasm: false)", args.ModuleName)
 	}
@@ -56,6 +57,7 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 		}
 		return err
 	}
+
 	switch status {
 	case 0:
 		return nil
@@ -72,11 +74,13 @@ func (w *SubscriberDeliveryWorker) NextRetry(job *river.Job[jobqueue.SubscriberD
 	if snap == nil {
 		return time.Time{}
 	}
+
 	for _, sub := range snap.EventRegistry().Subscribers(job.Args.EventName) {
 		if sub.ModuleName == job.Args.ModuleName && sub.HandlerName == job.Args.HandlerName && sub.Async {
 			return computeBackoff(sub.RetryPolicy, job.Attempt)
 		}
 	}
+
 	return time.Time{}
 }
 
@@ -86,5 +90,6 @@ func isLiveAsyncSubscriber(subs []event.EventSubscription, moduleName, handlerNa
 			return true
 		}
 	}
+
 	return false
 }

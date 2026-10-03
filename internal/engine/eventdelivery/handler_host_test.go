@@ -165,11 +165,13 @@ func (f *eventHostFixture) deliver(t *testing.T, async bool, userID, mode string
 
 	env := event.Envelope{ID: uuid.New().String(), Name: testEventName, Version: 1, EmitterModule: "emitter",
 		TenantID: f.tenant.ID, UserID: userID, TraceID: "event-trace", Payload: payload}
+
 	if !async {
 		data, err := env.Marshal()
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		return f.sync.DispatchSync(t.Context(), "eventfixture", testHandlerName, data)
 	}
 
@@ -214,6 +216,7 @@ func (f *eventHostFixture) read(t *testing.T, async bool, userID, contactID, rol
 	if err := f.admin.QueryRowContext(t.Context(), "SELECT user_id, contact_id, roles, sql_names, orm_names FROM "+f.schema+".delivery_audit").Scan(&gotUser, &gotContact, &gotRoles, &sqlNames, &ormNames); err != nil {
 		t.Fatal(err)
 	}
+
 	if gotUser != userID || gotContact != contactID || gotRoles != roles || sqlNames != names || ormNames != names {
 		t.Fatalf("identity/rows = %q %q %q %q %q, want %q %q %q %q", gotUser, gotContact, gotRoles, sqlNames, ormNames, userID, contactID, roles, names)
 	}
@@ -222,6 +225,7 @@ func (f *eventHostFixture) read(t *testing.T, async bool, userID, contactID, rol
 	if err := f.admin.QueryRowContext(t.Context(), "SELECT COALESCE(string_agg(name, ',' ORDER BY name), '') FROM "+f.schema+".widget WHERE seen = 1").Scan(&updated); err != nil {
 		t.Fatal(err)
 	}
+
 	if updated != names {
 		t.Fatalf("host.db.exec updated %q, want %q", updated, names)
 	}
@@ -273,13 +277,16 @@ func TestEventHandlers_CleanUpEveryOutcome(t *testing.T) {
 					if mode == "permanent" {
 						want = 2
 					}
+
 					if !async && (err != nil || status != want) {
 						t.Fatalf("%s = %d, %v", mode, status, err)
 					}
+
 					if async {
 						if err == nil {
 							t.Fatalf("%s succeeded", mode)
 						}
+
 						_, cancelled := errors.AsType[*river.JobCancelError](err)
 						if cancelled != (mode == "permanent") {
 							t.Fatalf("%s cancellation = %v", mode, cancelled)
@@ -319,6 +326,7 @@ func TestEventHandlers_ActingUserResolutionFailsClosed(t *testing.T) {
 				if !errors.Is(err, role.ErrNotMember) {
 					t.Fatalf("missing/suspended user = %v", err)
 				}
+
 				if async {
 					if _, ok := errors.AsType[*river.JobCancelError](err); !ok {
 						t.Fatalf("inactive member is retryable: %v", err)
@@ -334,6 +342,7 @@ func TestEventHandlers_ActingUserResolutionFailsClosed(t *testing.T) {
 			if err == nil {
 				t.Fatal("actor lookup failure succeeded")
 			}
+
 			if _, ok := errors.AsType[*river.JobCancelError](err); ok {
 				t.Fatalf("DB error is permanent: %v", err)
 			}
@@ -342,6 +351,7 @@ func TestEventHandlers_ActingUserResolutionFailsClosed(t *testing.T) {
 			if err := f.admin.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+f.schema+".delivery_audit").Scan(&count); err != nil {
 				t.Fatal(err)
 			}
+
 			if count != 0 {
 				t.Fatal("rejected event executed host calls")
 			}

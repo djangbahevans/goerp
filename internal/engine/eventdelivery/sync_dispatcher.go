@@ -25,6 +25,7 @@ func (d *SyncDispatcher) DispatchSync(ctx context.Context, moduleName, handlerNa
 	if !ok || mod.Status != module.StatusReady {
 		return 0, fmt.Errorf("module %q is not ready", moduleName)
 	}
+
 	if mod.Pool == nil {
 		return 0, fmt.Errorf("module %q has no WASM instance pool (wasm: false)", moduleName)
 	}
@@ -33,5 +34,6 @@ func (d *SyncDispatcher) DispatchSync(ctx context.Context, moduleName, handlerNa
 	if err := msgpack.Unmarshal(payload, &env); err != nil {
 		return 0, fmt.Errorf("decode event envelope: %w", err)
 	}
+
 	return d.Invoker.invoke(ctx, snap, mod, env)
 }
