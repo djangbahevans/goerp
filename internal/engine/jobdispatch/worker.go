@@ -1,16 +1,4 @@
-// Package jobdispatch implements Worker, the River worker that processes
-// jobqueue.WASMJobArgs jobs (manifest-spec.md §26, goerp#110) by invoking
-// the target module's handle_job WASM export. It lives in its own
-// package, separate from internal/engine/jobqueue itself, for the same
-// import-cycle reason internal/engine/eventdelivery does (see that
-// package's own doc comment): it needs internal/engine/registry (to
-// resolve a *module.LoadedModule by name) and internal/engine/wasm, and
-// internal/engine/wasm already imports internal/engine/jobqueue, so
-// registry (which reaches wasm via internal/engine/module) can never be
-// imported back into jobqueue without a cycle. It also needs
-// internal/engine/schema, for the same reason: schema has no dependency on
-// this package or anything upstream of it (only internal/engine/db and
-// internal/engine/manifest), so there's no cycle importing it here either.
+// Package jobdispatch runs module job handlers through River and synchronous provider dispatch.
 package jobdispatch
 
 import (
@@ -38,37 +26,14 @@ const (
 	statusPermanent = 2
 )
 
-// Worker processes jobqueue.WASMJobArgs jobs: resolve the target module,
-// borrow an instance from its InstancePool, call InvokeHandleJob with the
-// job's abiv1.JobEnvelope, and translate the result onto River's own retry
-// semantics — status 2 (permanent) cancels the job via river.JobCancel;
-// any other non-zero status or a Go/trap-level error returns a plain
-// error from Work, so River retries per the job's own MaxAttempts (set at
-// insert time, jobqueue.WASMJobArgs.InsertOpts) and marks it discarded
-// once exhausted, never silently drops it. Doesn't itself build any
-// richer per-job-type backoff/snooze policy — that's event-subscriber
-// delivery's own retry_policy work (goerp#129), generalized to ordinary
-// jobs by implementation-backlog.md #165, not this package's scope.
-//
-// SchemaSyncPool is only consulted for an IsDataMigration job (goerp#114):
-// advancing the tenant's data_migration_version watermark on success, and
-// enqueueing the next applicable handler, if any (EnqueueApplicableDataMigration
-// below) — the same chaining step whatever first triggered this tenant's
-// migration run (hot reload, module install, tenant provisioning) also
-// calls, so a whole tenant's applicable-migration sequence only ever needs
-// one external trigger to complete end to end, one handler at a time.
+// Worker cancels permanently invalid jobs and retries transient dispatch failures.
 type Worker struct {
 	river.WorkerDefaults[jobqueue.WASMJobArgs]
 	ModuleRegistry *registry.ModuleRegistry
 	SchemaSyncPool *schema.SchemaSyncPool
-	// Runtime and TenantStore build the wasm.ModuleContext each
-	// handle_job invocation runs under, which every host.* call from
-	// inside a job handler needs.
-	Runtime     *wasm.Runtime
-	TenantStore *tenant.Store
-	// Deliveries tracks a notification delivery job — one whose
-	// NotificationID is set — on its notification's deliveries.
-	Deliveries DeliveryTracker
+	Runtime        *wasm.Runtime
+	TenantStore    *tenant.Store
+	Deliveries     DeliveryTracker
 }
 
 // DeliveryTracker records a notification's sms_send or push_send job on
@@ -99,17 +64,11 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs])
 	return w.Deliveries.Finish(ctx, job, w.work(ctx, job, payload))
 }
 
-// work runs job's handler with payload in place of the job's own.
 func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs], payload []byte) error {
 	args := job.Args
 
 	snap := w.ModuleRegistry.Snapshot()
 	if snap == nil {
-		// Shouldn't happen once the engine has started successfully
-		// (ModuleRegistry.Update runs during Stage 3, well before any
-		// worker can process a job) — guarded anyway, matching
-		// eventdelivery.Worker's own nil-snapshot check. Returning an
-		// error lets River retry once the registry is populated.
 		return fmt.Errorf("module registry has no snapshot yet")
 	}
 
@@ -117,39 +76,29 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 	if err != nil {
 		return err
 	}
+	if mod.Pool == nil {
+		return river.JobCancel(fmt.Errorf("module %q has no WASM instance pool (wasm: false)", args.ModuleName))
+	}
 
-	// Ownership is checked against three different name spaces depending on
-	// who is allowed to have enqueued this class of job — see
-	// jobqueue.WASMJobArgs's own doc comment for why neither a data
-	// migration handler nor a provider-category job can be checked against
-	// JobRegistry the way an ordinary job is.
+	// Migration handlers and provider jobs are not declared in job_types.
 	switch {
 	case args.IsDataMigration:
 		if !hasDataMigrationHandler(mod, args.JobType) {
-			return fmt.Errorf("module %q has no declared data migration handler %q", args.ModuleName, args.JobType)
+			return river.JobCancel(fmt.Errorf("module %q has no declared data migration handler %q", args.ModuleName, args.JobType))
 		}
 	case args.ProviderCategory != "":
 		// The provider was resolved at enqueue time; a module reloaded
 		// since without this category in its provides must not receive
 		// a job it no longer claims to handle.
 		if !mod.Manifest.Provides[args.ProviderCategory] {
-			return fmt.Errorf("module %q no longer provides %s", args.ModuleName, args.ProviderCategory)
+			return river.JobCancel(fmt.Errorf("module %q no longer provides %s", args.ModuleName, args.ProviderCategory))
 		}
 	default:
 		if owner, ok := snap.JobRegistry().Owner(args.JobType); !ok || owner != args.ModuleName {
-			// A job whose declared (ModuleName, JobType) pair no longer
-			// matches a live manifest declaration — a stale job surviving
-			// a module removal/rename, or simply a caller-constructed args
-			// value that named the wrong module for a real job type.
-			// Neither is retryable: the mismatch won't resolve itself on
-			// a later attempt.
-			return fmt.Errorf("job type %q is not registered to module %q", args.JobType, args.ModuleName)
+			return river.JobCancel(fmt.Errorf("job type %q is not registered to module %q", args.JobType, args.ModuleName))
 		}
 	}
 
-	// ModuleContext needs the tenant slug too (wasm.applyTenantScope builds
-	// the search path from it); args only carries the ID — same reason
-	// adminapi/activitydispatch.go's own moduleCtx construction resolves it.
 	t, err := w.TenantStore.GetByID(ctx, args.TenantID)
 	if err != nil {
 		return fmt.Errorf("resolve tenant %s: %w", args.TenantID, err)
@@ -187,10 +136,6 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 			return fmt.Errorf("module %q no longer loaded", args.ModuleName)
 		}
 
-		// river.ClientFromContext is safe here regardless of which trigger
-		// (hot reload, module install, tenant provisioning) originally
-		// started this tenant's migration chain: this Work method only
-		// ever runs as a real River job, so ctx is always River-managed.
 		riverClient := river.ClientFromContext[pgx.Tx](ctx)
 		if err := EnqueueApplicableDataMigration(ctx, riverClient, w.SchemaSyncPool, args.TenantID, freshMod); err != nil {
 			return fmt.Errorf("enqueue next data migration for %s/%s: %w", args.ModuleName, args.TenantID, err)
@@ -200,22 +145,10 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 	return nil
 }
 
-// readyModule returns moduleName's loaded module when it is ready to run a
-// handle_job invocation.
 func readyModule(snap *registry.RegistrySnapshot, moduleName string) (*module.LoadedModule, error) {
 	mod, ok := snap.Modules()[moduleName]
 	if !ok || mod.Status != module.StatusReady {
 		return nil, fmt.Errorf("module %q is not ready", moduleName)
-	}
-	if mod.Pool == nil {
-		// A module manifest can legitimately declare wasm: false (e.g.
-		// the "theme" type requires it, manifest/module_type.go) and
-		// still reach StatusReady with no compiled WASM at all — job_types
-		// on such a module would be a manifest inconsistency nothing
-		// today rejects at load time, but this must not panic on
-		// mod.Pool.Borrow if it ever happens; not retryable, the mismatch
-		// won't resolve itself on a later attempt.
-		return nil, fmt.Errorf("module %q has no WASM instance pool (wasm: false)", moduleName)
 	}
 	return mod, nil
 }
@@ -226,6 +159,10 @@ func readyModule(snap *registry.RegistrySnapshot, moduleName string) (*module.Lo
 // the value the handler passes to host.jobs.set_result is returned as
 // result; without it set_result is a no-op.
 func invokeHandleJob(ctx context.Context, rt *wasm.Runtime, snap *registry.RegistrySnapshot, mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, env abiv1.JobEnvelope, captureResult bool) (status int32, result []byte, err error) {
+	if mod.Pool == nil {
+		return 0, nil, fmt.Errorf("%w: module %q has no WASM instance pool (wasm: false)", wasm.ErrSyncJobTargetUnavailable, args.ModuleName)
+	}
+
 	envelope, err := msgpack.Marshal(env)
 	if err != nil {
 		return 0, nil, fmt.Errorf("marshal job envelope: %w", err)
@@ -256,7 +193,6 @@ func invokeHandleJob(ctx context.Context, rt *wasm.Runtime, snap *registry.Regis
 	return status, moduleCtx.JobResult(), nil
 }
 
-// newJobEnvelope builds the abi.JobEnvelope handle_job receives for job.
 func newJobEnvelope(job *river.Job[jobqueue.WASMJobArgs]) abiv1.JobEnvelope {
 	args := job.Args
 	return abiv1.JobEnvelope{
@@ -305,17 +241,9 @@ func hasDataMigrationHandler(mod *module.LoadedModule, handler string) bool {
 	return false
 }
 
-// EnqueueApplicableDataMigration enqueues one jobqueue.WASMJobArgs job for
-// the first data migration handler still applicable to tenantID's own
-// data_migration_version watermark against mod's declared DataMigrations —
-// or does nothing if none apply. Handlers run strictly one at a time per
-// tenant (migration-guide.md §4 "Execution order" — later handlers may
-// depend on an earlier one having already run): this only ever enqueues
-// the single next handler, never the whole applicable set at once. Worker.Work
-// calls this again itself once a handler succeeds, so the caller that
-// triggers the very first call (hot reload leader, module install worker,
-// tenant provisioning) is the only one that ever needs to call it
-// directly — the rest of a tenant's chain drives itself.
+// EnqueueApplicableDataMigration starts the next applicable migration for a tenant.
+// Handlers run sequentially because later migrations can depend on earlier ones;
+// Worker enqueues the next handler after advancing the version watermark.
 func EnqueueApplicableDataMigration(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *schema.SchemaSyncPool, tenantID string, mod *module.LoadedModule) error {
 	if len(mod.DataMigrations) == 0 {
 		return nil
@@ -348,8 +276,6 @@ func EnqueueApplicableDataMigration(ctx context.Context, riverClient *river.Clie
 		return fmt.Errorf("migration %q: %w", next.Handler, err)
 	}
 
-	// The JobEnvelope payload engine.DispatchJob decodes for a data
-	// migration job on the module's own side.
 	payload, err := msgpack.Marshal(abiv1.MigrationJobPayload{
 		Handler:     next.Handler,
 		TenantID:    tenantID,
@@ -370,14 +296,8 @@ func EnqueueApplicableDataMigration(ctx context.Context, riverClient *river.Clie
 		MigrationToVersion:   toVersion.String(),
 	}, &river.InsertOpts{
 		Queue: jobqueue.QueueDefault,
-		// ByState covers redelivery after this exact migration already
-		// ran to completion, was discarded, or was cancelled by a
-		// handler's jobs.PermanentError — a handler's version range only
-		// ever matches once a tenant's watermark has passed it, so a
-		// repeat call here (e.g. two triggers racing to start the same
-		// tenant's chain) must never re-run it. Matches
-		// eventdelivery.Worker's identical use of
-		// jobqueue.UniqueAcrossAllJobStates for the same reason.
+		// Racing triggers must not rerun an identical migration, even after
+		// cancellation or discard. The version watermark advances on success only.
 		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: jobqueue.UniqueAcrossAllJobStates},
 	})
 	if err != nil {
@@ -386,17 +306,8 @@ func EnqueueApplicableDataMigration(ctx context.Context, riverClient *river.Clie
 	return nil
 }
 
-// EnqueueApplicableDataMigrations calls EnqueueApplicableDataMigration for
-// every tenant in tenants — the shared "kick off each tenant's migration
-// chain once its sync succeeds" step hot reload, module install, tenant
-// provisioning, and the admin-triggered schema sync/accept jobs all need
-// once mod is live in the registry. riverClient nil (not yet wired — e.g.
-// before Engine.Start, or a test calling a Worker's run directly) is a
-// no-op, not a panic. A per-tenant enqueue failure is logged, tagged with
-// source (e.g. "hot reload", "module install"), and never blocks another
-// tenant's — matching every other per-tenant failure in this pipeline
-// (engine-internals.md §2 Stage 4's own "a schema-sync failure on one
-// tenant doesn't block others").
+// EnqueueApplicableDataMigrations starts each tenant's migration chain after schema
+// sync. Enqueue failures are logged independently so one tenant cannot block another.
 func EnqueueApplicableDataMigrations(ctx context.Context, riverClient *river.Client[pgx.Tx], pool *schema.SchemaSyncPool, tenants []tenant.Tenant, mod *module.LoadedModule, source string) {
 	if riverClient == nil {
 		return
