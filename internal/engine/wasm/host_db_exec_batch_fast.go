@@ -330,6 +330,10 @@ func execBatchCopy(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, 
 		newRows    []map[string]any
 	)
 	hostErr = withTenantRole(ctx, tx, modCtx, func() *abiv1.HostError {
+		if hostErr := p.validateReturning(ctx, tx); hostErr != nil {
+			return hostErr
+		}
+
 		copyErr := conn.Raw(func(driverConn any) error {
 			pgxConn := driverConn.(*stdlib.Conn).Conn()
 			n, err := pgxConn.CopyFrom(ctx, pgx.Identifier{p.table}, plan.Columns, pgx.CopyFromRows(input.ParamSets))
@@ -408,32 +412,9 @@ func copyReadback(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan
 // pk column's position within plan.Columns, precomputed once by the
 // caller since it's the same for every chunk.
 func copyReadbackChunk(ctx context.Context, tx *sql.Tx, p preparedExec, plan copyPlan, pkIdx int, paramSets [][]any) ([]map[string]any, *abiv1.HostError) {
-	// A plain "WHERE pk IN (...)" gives Postgres no ordering guarantee —
-	// this ABI's own contract requires opts.returning rows back in
-	// param_sets order (see host-abi-reference.md's own ABI-level output
-	// shape). One UNION ALL branch per row, each a direct "t.pk = $n"
-	// point lookup tagged with its own literal ordinal, replaces the
-	// CASE/WHEN technique this function used before (one branch
-	// evaluated per row per WHEN clause — O(n²) worst case per chunk)
-	// with N independent index scans (confirmed via EXPLAIN against a
-	// real table) plus a single cheap sort of the (small) unioned
-	// result by that ordinal. A join against a (pk, ordinal) VALUES
-	// list was tried and rejected: a VALUES list's own column type
-	// resolves independently of how its rows are later compared
-	// elsewhere in the statement, so an untyped pk parameter used only
-	// inside VALUES(...) defaults to text regardless of context —
-	// confirmed against real Postgres — and a text = uuid (or any
-	// other non-text pk type) comparison has no operator; each branch
-	// here instead compares $n directly against t.<pk>, the same
-	// context that already lets Postgres infer $n's real type
-	// correctly (proven by the WHERE ... IN (...) form this replaced).
-	// Selecting each branch's row as one whole-row composite
-	// (row_data) rather than t.* keeps the UNION to two columns
-	// (row_data, ordinal) regardless of the table's own column count,
-	// so ORDER BY sorts a small fixed-width row rather than the
-	// table's full row shape; the outer SELECT then expands
-	// (row_data).* back into the table's own column set, unchanged
-	// from a plain "SELECT *"'s own shape.
+	// Each branch compares its key parameter directly with the typed column;
+	// parameters used only in a VALUES list would resolve to text. The ordinal
+	// restores input order while the composite keeps the sort row narrow.
 	pkIdent := pgx.Identifier{plan.PKCol}.Sanitize()
 	tableIdent := pgx.Identifier{p.table}.Sanitize()
 
@@ -449,17 +430,6 @@ func copyReadbackChunk(ctx context.Context, tx *sql.Tx, p preparedExec, plan cop
 	rows, err := tx.QueryContext(ctx, selectSQL, pkValues...)
 	if err != nil {
 		return nil, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
-	}
-	if p.requestedCols != nil {
-		available, err := rows.Columns()
-		if err != nil {
-			_ = rows.Close()
-			return nil, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
-		}
-		if err := validateRequestedColumns(p.requestedCols, available); err != nil {
-			_ = rows.Close()
-			return nil, &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
-		}
 	}
 	newRows, err := scanRowsToMaps(rows)
 	if err != nil {
@@ -522,27 +492,8 @@ type pipelineRowResult struct {
 	newRows      []map[string]any
 }
 
-// execBatchPipeline runs a pipeline-eligible UPDATE/DELETE batch (per
-// pipelineEligible) via pgx's SendBatch instead of one round trip per
-// parameter set. Every queued statement shares p.finalSQL — the same
-// template, RETURNING clause included when p.needReturning, that the
-// sequential path's own execRow runs per row — so only how the N
-// statements are sent and their results collected changes; RETURNING/
-// etag/audit interpretation per result reuses the sequential path's own
-// helpers (isEtagMismatch, writeAuditForExec) unchanged.
-//
-// Each row's own "before" state (audited UPDATE/DELETE) is still
-// captured sequentially via captureRowsBeforeExec, exactly as the
-// sequential path does per row — pipelining only changes how the batch's
-// write statements themselves are sent, not this existing pre-read.
-// Known scope boundary: for an audited table this pre-read stays one
-// round trip per row rather than a single batched read (the way
-// copyReadback batches the COPY path's own post-write read), since a
-// general batched pre-read would need to interpret an arbitrary WHERE
-// clause rather than a known primary-key equality — undercutting
-// pipelining's own round-trip savings for audited UPDATE/DELETE batches
-// specifically; unaudited batches (no pre-read at all) get the full
-// benefit already.
+// Audit pre-reads precede all pipelined writes, so eligibility excludes
+// repeated targets whose intermediate values must appear in the audit trail.
 func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleContext, p preparedExec, input abiv1.DBExecBatchInput) (abiv1.DBExecBatchOutput, *abiv1.HostError) {
 	conn, tx, finish, hostErr := beginOrBorrowExecTx(ctx, primary, modCtx, input.TxID)
 	if hostErr != nil {
@@ -556,6 +507,10 @@ func execBatchPipeline(ctx context.Context, primary *sql.DB, modCtx *ModuleConte
 		results         = make([]pipelineRowResult, len(input.ParamSets))
 	)
 	hostErr = withTenantRole(ctx, tx, modCtx, func() *abiv1.HostError {
+		if hostErr := p.validateReturning(ctx, tx); hostErr != nil {
+			return batchErrorForHostErr(0, hostErr)
+		}
+
 		if p.audited {
 			rows, err := captureRowsBeforeExecBatch(ctx, tx, auditableExecStmt{
 				Operation: p.stmt.Operation, Table: p.table, Relation: p.stmt.Relation, WhereClause: p.stmt.WhereClause,
@@ -640,20 +595,6 @@ func sendPipelineBatch(ctx context.Context, conn *sql.Conn, p preparedExec, para
 				rows, err := br.Query()
 				if err != nil {
 					return &pipelineRowError{index: i, host: translateExecError(err)}
-				}
-				// Every queued statement shares the same template
-				// (p.finalSQL), so its RETURNING column set is identical
-				// across every row — validated once, from the first
-				// row's own field descriptions, rather than redundantly
-				// on every one of the batch's N rows.
-				if i == 0 && p.requestedCols != nil {
-					available := make([]string, len(rows.FieldDescriptions()))
-					for j, f := range rows.FieldDescriptions() {
-						available[j] = f.Name
-					}
-					if err := validateRequestedColumns(p.requestedCols, available); err != nil {
-						return &pipelineRowError{index: i, host: &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}}
-					}
 				}
 				newRows, err = pgx.CollectRows(rows, pgx.RowToMap)
 				if err != nil {
