@@ -283,3 +283,23 @@ func TestLoadAvailableLocales(t *testing.T) {
 		t.Error("Load() accepted a GOERP_AVAILABLE_LOCALES entry that isn't a BCP 47 locale")
 	}
 }
+
+func TestLoadWebAuthnConfig(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("GOERP_WEBAUTHN_RP_ID", "goerp.test")
+	t.Setenv("GOERP_WEBAUTHN_RP_DISPLAY_NAME", "Example ERP")
+	t.Setenv("GOERP_WEBAUTHN_RP_ORIGINS", "https://acme.goerp.test,https://erp.example.com")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.WebAuthnRPID != "goerp.test" || cfg.WebAuthnRPDisplayName != "Example ERP" {
+		t.Fatalf("RP ID/name = %q/%q", cfg.WebAuthnRPID, cfg.WebAuthnRPDisplayName)
+	}
+
+	if len(cfg.WebAuthnRPOrigins) != 2 || cfg.WebAuthnRPOrigins[0] != "https://acme.goerp.test" || cfg.WebAuthnRPOrigins[1] != "https://erp.example.com" {
+		t.Fatalf("origins = %v", cfg.WebAuthnRPOrigins)
+	}
+}

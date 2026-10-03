@@ -68,11 +68,13 @@ type fixture struct {
 	adminRole  string
 	userID     string
 	conn       *sql.DB
+	cache      *cache.Client
+	rowKeys    *rowcrypt.RowKeySet
 }
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -142,7 +144,7 @@ func newFixture(t *testing.T) *fixture {
 	checker := authcheck.NewChecker(&signingKeySet.Active, sessionrevoke.NewRevoker(sessionStore, cacheClient), userStore, roleStore, roleCache, roleMap, apiKeys, false, nil, mfaStore, enforce.NewStore(configStore))
 	audit := &recordingAudit{}
 	handlers := NewHandlers(tenantResolver, checker, userStore, mfaStore, sessionStore, issuer,
-		totp.NewService(mfaStore, rowKeys, cacheClient), recoverycode.NewService(mfaStore), audit)
+		totp.NewService(mfaStore, rowKeys, cacheClient), recoverycode.NewService(mfaStore), audit, nil)
 
 	slug := fmt.Sprintf("mfaenrolltest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "MFA Enroll Test Co")
@@ -189,6 +191,8 @@ func newFixture(t *testing.T) *fixture {
 		schema:     schema,
 		adminRole:  roleID,
 		conn:       conn,
+		cache:      cacheClient,
+		rowKeys:    rowKeys,
 	}
 	f.userID = f.createMember(t)
 	return f
@@ -198,7 +202,7 @@ func newFixture(t *testing.T) *fixture {
 // tenant.
 func (f *fixture) createMember(t *testing.T) string {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	email := fmt.Sprintf("member%d@%s.example.com", time.Now().UnixNano(), f.tenantSlug)
 	userID, err := user.NewStore(f.conn).FindOrCreateInvited(ctx, email)
 	if err != nil {
@@ -220,7 +224,7 @@ func (f *fixture) createMember(t *testing.T) string {
 
 func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	for _, name := range []string{"test.jwt_signing_keys_table", "test.row_encryption_keys_table"} {
 		key := db.AdvisoryLockKey(name)
 		conn, err := pool.Conn(ctx)
@@ -246,7 +250,7 @@ func (f *fixture) requireMFA(t *testing.T) {
 
 func (f *fixture) login(t *testing.T, userID string) string {
 	t.Helper()
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   "11111111-1111-1111-1111-111111111111",
@@ -259,7 +263,7 @@ func (f *fixture) login(t *testing.T, userID string) string {
 
 func (f *fixture) authContext(t *testing.T, accessToken string) *authcheck.AuthContext {
 	t.Helper()
-	authCtx, err := f.checker.Authenticate(context.Background(), accessToken, f.tenantID, f.tenantSlug, "203.0.113.7", nil, nil)
+	authCtx, err := f.checker.Authenticate(t.Context(), accessToken, f.tenantID, f.tenantSlug, "203.0.113.7", nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
 		t.Fatalf("Authenticate() = %+v, %v; want an authenticated context", authCtx, err)
 	}

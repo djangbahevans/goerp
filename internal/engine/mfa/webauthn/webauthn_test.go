@@ -65,6 +65,7 @@ func (b *memoryBackend) Rotate(ctx context.Context, key string) (string, error) 
 // touching the shared system.row_encryption_keys table.
 func lockRowEncryptionKeysTable(t *testing.T, pool *sql.DB) {
 	t.Helper()
+
 	ctx := t.Context()
 	key := db.AdvisoryLockKey("test.row_encryption_keys_table")
 
@@ -92,6 +93,7 @@ type testEnv struct {
 
 func openTestEnv(t *testing.T) *testEnv {
 	t.Helper()
+
 	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
@@ -156,6 +158,7 @@ func openTestEnv(t *testing.T) *testEnv {
 
 func (e *testEnv) createUser(t *testing.T) string {
 	t.Helper()
+
 	email := fmt.Sprintf("webauthntest%d@example.com", time.Now().UnixNano())
 	userID, err := e.users.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
@@ -177,6 +180,7 @@ func testRP() virtualwebauthn.RelyingParty {
 // authenticator/credential, returning both for use in a following login.
 func register(t *testing.T, env *testEnv, userID string) (virtualwebauthn.Authenticator, virtualwebauthn.Credential) {
 	t.Helper()
+
 	ctx := t.Context()
 
 	optionsJSON, ceremonyID, err := env.service.BeginRegistration(ctx, userID, "user@example.com", mfa.Scope{TenantID: env.tenant.ID})
@@ -398,6 +402,7 @@ func TestBeginRegistration_ExcludesAlreadyEnrolledCredential(t *testing.T) {
 
 func (e *testEnv) sessionID(t *testing.T, userID string) string {
 	t.Helper()
+
 	store := session.NewStore(e.conn)
 	if err := store.Bootstrap(t.Context()); err != nil {
 		t.Fatal(err)
@@ -417,4 +422,51 @@ func (e *testEnv) sessionID(t *testing.T, userID string) string {
 		_, _ = e.conn.Exec(`DELETE FROM system.sessions WHERE id=$1`, id)
 	})
 	return id
+}
+
+func TestFinishLoginConcurrentCompletionIsSingleUse(t *testing.T) {
+	env := openTestEnv(t)
+	userID := env.createUser(t)
+	authenticator, credential := register(t, env, userID)
+	scope := mfa.Scope{TenantID: env.tenant.ID}
+
+	optionsJSON, ceremonyID, err := env.service.BeginLogin(t.Context(), userID, "user@example.com", scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	options, err := virtualwebauthn.ParseAssertionOptions(string(optionsJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	credential.Counter = 1
+	response := []byte(virtualwebauthn.CreateAssertionResponse(testRP(), authenticator, credential, *options))
+	results := make(chan error, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Go(func() {
+			_, err := env.service.FinishLogin(t.Context(), userID, ceremonyID, "user@example.com", response, scope)
+			results <- err
+		})
+	}
+
+	workers.Wait()
+	close(results)
+
+	var successful, expired int
+	for err := range results {
+		switch {
+		case err == nil:
+			successful++
+		case errors.Is(err, ErrCeremonyExpired):
+			expired++
+		default:
+			t.Fatalf("concurrent completion: %v", err)
+		}
+	}
+
+	if successful != 1 || expired != 1 {
+		t.Fatalf("successful/expired = %d/%d, want 1/1", successful, expired)
+	}
 }

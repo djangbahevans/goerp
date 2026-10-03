@@ -98,6 +98,8 @@ func TestRouteExempt(t *testing.T) {
 	}{
 		{"/auth/mfa/verify", true},
 		{"/auth/mfa/reverify", true},
+		{"/auth/mfa/webauthn/options", true},
+		{"/auth/mfa/reverify/webauthn/options", true},
 		{"/auth/mfa/enroll", true},
 		{"/auth/mfa/enroll/totp", true},
 		{"/auth/login", false},

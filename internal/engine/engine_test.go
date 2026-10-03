@@ -31,6 +31,8 @@ func baseTestConfig(t *testing.T) *config.Config {
 
 	return &config.Config{
 		ListenAddr:               ":0",
+		AppBaseURL:               "http://localhost:8080",
+		PlatformDomain:           "localhost",
 		AdminAddr:                "127.0.0.1:0",
 		Environment:              "development",
 		LogLevel:                 "info",

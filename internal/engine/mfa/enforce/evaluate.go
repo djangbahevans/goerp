@@ -65,19 +65,13 @@ func Evaluate(policy Policy, ctx Context, now time.Time) Decision {
 	return Allowed
 }
 
-// exemptRoutes are the fixed-path routes auth-internals.md §8 exempts
-// from this check outright — they either carry no full session yet
-// (enroll*/verify) or are the handler that resolves ReverifyRequired
-// itself (reverify), so rejecting the request before it reaches them
-// would make each unreachable exactly when it's needed.
 var exemptRoutes = map[string]bool{
-	"/auth/mfa/verify":   true,
-	"/auth/mfa/reverify": true,
+	"/auth/mfa/verify":                    true,
+	"/auth/mfa/reverify":                  true,
+	"/auth/mfa/webauthn/options":          true,
+	"/auth/mfa/reverify/webauthn/options": true,
 }
 
-// RouteExempt reports whether path is exempt from MFA enforcement —
-// auth-internals.md §8's /auth/mfa/enroll*, /auth/mfa/verify,
-// /auth/mfa/reverify.
 func RouteExempt(path string) bool {
 	if exemptRoutes[path] {
 		return true

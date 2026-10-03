@@ -1,11 +1,5 @@
-// Package config loads the engine's configuration from environment
-// variables (caarlos0/env, matching engine-internals.md §14 — "All
-// configuration is via environment variables") and validates it
-// (go-playground/validator/v10). Fields specific to a single secrets or
-// storage backend (Vault auth method, AWS region, etc.) deliberately don't
-// live here — each backend package parses its own env vars only once that
-// backend is actually selected, so Config only grows with what's genuinely
-// engine-wide.
+// Package config loads and validates shared engine environment settings.
+// Backend-specific settings are parsed only by the selected backend.
 package config
 
 import (
@@ -27,7 +21,6 @@ const (
 )
 
 type Config struct {
-	// Core
 	ListenAddr              string        `env:"GOERP_LISTEN_ADDR" envDefault:":8080" validate:"hostname_port"`
 	ServerReadTimeout       time.Duration `env:"GOERP_SERVER_READ_TIMEOUT" envDefault:"30s"`
 	ServerReadHeaderTimeout time.Duration `env:"GOERP_SERVER_READ_HEADER_TIMEOUT" envDefault:"5s"`
@@ -58,16 +51,8 @@ type Config struct {
 	ShellDir           string        `env:"GOERP_SHELL_DIR"`
 	ShutdownTimeout    time.Duration `env:"GOERP_SHUTDOWN_TIMEOUT" envDefault:"30s"`
 	ShutdownDrainDelay time.Duration `env:"GOERP_SHUTDOWN_DRAIN_DELAY" envDefault:"5s"`
-	// HotReloadEnabled gates whether Engine.Start launches
-	// internal/engine/hotreload's trigger goroutines (fsnotify, pub/sub,
-	// registry poll) at all. Defaults to false: goerp#452 only builds the
-	// trigger/coordination scaffolding — the leader and follower paths it
-	// calls into (goerp#467, goerp#490) aren't implemented yet, so every
-	// real reload attempt would currently just fail. hotreload.Coordinator
-	// itself is always constructed and directly testable regardless of
-	// this flag.
-	HotReloadEnabled bool          `env:"GOERP_HOT_RELOAD_ENABLED" envDefault:"false"`
-	HotReloadLockTTL time.Duration `env:"GOERP_HOT_RELOAD_LOCK_TTL" envDefault:"60s"`
+	HotReloadEnabled   bool          `env:"GOERP_HOT_RELOAD_ENABLED" envDefault:"false"`
+	HotReloadLockTTL   time.Duration `env:"GOERP_HOT_RELOAD_LOCK_TTL" envDefault:"60s"`
 
 	// SyncSubscriberTimeout bounds each async:false event subscriber's
 	// execution during inline synchronous dispatch (events.WithSync(),
@@ -81,28 +66,23 @@ type Config struct {
 	// is expected to make its own outbound API call.
 	SyncProviderTimeout time.Duration `env:"GOERP_SYNC_PROVIDER_TIMEOUT" envDefault:"15s"`
 
-	// Database
 	DBPrimaryDSN                string `env:"GOERP_DB_PRIMARY_DSN,required"`
 	DBReplicaDSN                string `env:"GOERP_DB_REPLICA_DSN"`
 	DBSchemaSyncDSN             string `env:"GOERP_DB_SCHEMA_SYNC_DSN,required,notEmpty"`
 	DBMaxConcurrentTransactions int    `env:"GOERP_DB_MAX_CONCURRENT_TRANSACTIONS" envDefault:"100" validate:"min=1"`
 
-	// host.orm bulk operation bounds (create_batch/write_many/write_where/unlink)
 	ORMBulkMaxRows      int           `env:"GOERP_ORM_BULK_MAX_ROWS" envDefault:"1000" validate:"min=1"`
 	ORMStatementTimeout time.Duration `env:"GOERP_ORM_STATEMENT_TIMEOUT" envDefault:"30s"`
 
-	// Redis
 	RedisAddr           string   `env:"GOERP_REDIS_ADDR" envDefault:"localhost:6379" validate:"hostname_port"`
 	RedisSentinelAddrs  []string `env:"GOERP_REDIS_SENTINEL_ADDRS" validate:"dive,hostname_port"`
 	RedisSentinelMaster string   `env:"GOERP_REDIS_SENTINEL_MASTER" envDefault:"mymaster"`
 	RedisDB             int      `env:"GOERP_REDIS_DB" envDefault:"0" validate:"min=0"`
 	RedisMaxRetries     int      `env:"GOERP_REDIS_MAX_RETRIES" envDefault:"3" validate:"min=0"`
 
-	// Search
 	MeilisearchURL    string `env:"GOERP_MEILISEARCH_URL" validate:"omitempty,http_url"`
 	MeilisearchAPIKey string `env:"GOERP_MEILISEARCH_API_KEY"`
 
-	// Events and jobs
 	SchemaSyncDDLStatementTimeout time.Duration `env:"GOERP_SCHEMA_SYNC_STATEMENT_TIMEOUT" envDefault:"30s"`
 	SchemaSyncConcurrency         int           `env:"GOERP_SCHEMA_SYNC_CONCURRENCY" envDefault:"8"`
 	QueueCriticalConcurrency      int           `env:"GOERP_QUEUE_CRITICAL_CONCURRENCY" envDefault:"5"`
@@ -113,7 +93,6 @@ type Config struct {
 	QueueAdminConcurrency         int           `env:"GOERP_QUEUE_ADMIN_CONCURRENCY" envDefault:"5"`
 	QueueEventsConcurrency        int           `env:"GOERP_QUEUE_EVENTS_CONCURRENCY" envDefault:"10"`
 
-	// Security
 	SecretsBackend string `env:"GOERP_SECRETS_BACKEND" envDefault:"env" validate:"oneof=env vault aws_secretsmanager"`
 	EnableAPIKeys  bool   `env:"GOERP_ENABLE_API_KEYS" envDefault:"false"`
 	// Argon2MemoryBudgetMB caps memory spent on concurrent Argon2id
@@ -127,17 +106,17 @@ type Config struct {
 	// /auth/check-slug (404 when off). RequireEmailVerification is the
 	// platform email-verification policy (auth-internals.md §3 "Email
 	// verification policy").
-	RegistrationEnabled bool `env:"GOERP_REGISTRATION_ENABLED" envDefault:"false"`
-	// ReservedSlugs extends the built-in list of slugs no tenant may use
-	// (multitenancy-internals.md §1 "Reserved slugs").
+	RegistrationEnabled      bool     `env:"GOERP_REGISTRATION_ENABLED" envDefault:"false"`
 	ReservedSlugs            []string `env:"GOERP_RESERVED_SLUGS"`
 	RequireEmailVerification string   `env:"GOERP_REQUIRE_EMAIL_VERIFICATION" envDefault:"tenant_choice" validate:"oneof=required tenant_choice off"`
 	// AvailableLocales are the locales a user can choose on the Appearance
 	// page when their tenant sets none of its own (l10n-guide.md §2).
 	AvailableLocales []string `env:"GOERP_AVAILABLE_LOCALES" envDefault:"en,fr,ar" validate:"min=1"`
-	// TermsURL is the terms of service the register page links to and
-	// requires accepting; unset, the page shows no terms checkbox.
-	TermsURL string `env:"GOERP_TERMS_URL" validate:"omitempty,http_url"`
+	TermsURL         string   `env:"GOERP_TERMS_URL" validate:"omitempty,http_url"`
+
+	WebAuthnRPID          string   `env:"GOERP_WEBAUTHN_RP_ID"`
+	WebAuthnRPDisplayName string   `env:"GOERP_WEBAUTHN_RP_DISPLAY_NAME" envDefault:"GoERP"`
+	WebAuthnRPOrigins     []string `env:"GOERP_WEBAUTHN_RP_ORIGINS" envSeparator:","`
 
 	StorageBackend      string   `env:"GOERP_STORAGE_BACKEND" envDefault:"local" validate:"oneof=local seaweedfs s3 r2 gcs"`
 	StorageBucket       string   `env:"GOERP_STORAGE_BUCKET" envDefault:"goerp-files"`
@@ -150,9 +129,6 @@ type Config struct {
 	PoolBorrowTimeout time.Duration `env:"GOERP_POOL_BORROW_TIMEOUT" envDefault:"5s"`
 	PoolMaxMemoryByes uint32        `env:"GOERP_POOL_MAX_MEMORY_BYTES" envDefault:"16777216"`
 
-	// SMTP (invite emails) — defaults match compose.dev.yml's Mailpit
-	// (localhost:1025, no auth); a real deployment overrides Host/Port/
-	// User/Pass to point at its own relay.
 	SMTPHost string `env:"GOERP_SMTP_HOST" envDefault:"localhost"`
 	SMTPPort int    `env:"GOERP_SMTP_PORT" envDefault:"1025"`
 	SMTPUser string `env:"GOERP_SMTP_USER"`
@@ -164,14 +140,7 @@ type Config struct {
 	// GET /auth/tenant-context treats as the shared domain.
 	AppBaseURL string `env:"GOERP_APP_BASE_URL" envDefault:"http://localhost:8080" validate:"http_url"`
 
-	// Observability — engine-internals.md's own env var table names these
-	// two bare (not GOERP_-prefixed) to match the standard OTel SDK
-	// environment variable names every OTel language SDK and collector
-	// config already recognizes. OTelExporterOTLPEndpoint's empty default
-	// (the doc's own "—") means tracing is off — a no-op tracer — unless
-	// a deployment or developer explicitly opts in. OTelInsecure isn't in
-	// that table but is itself a standard OTel env var name; defaulted to
-	// true since compose.dev.yml's own Jaeger accepts plain-text OTLP.
+	// OTel uses the standard SDK environment names across languages.
 	OTelExporterOTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
 	OTelServiceName          string `env:"OTEL_SERVICE_NAME" envDefault:"goerp-engine"`
 	OTelInsecure             bool   `env:"OTEL_EXPORTER_OTLP_INSECURE" envDefault:"true"`
