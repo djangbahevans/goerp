@@ -12,7 +12,6 @@ import { apiClient } from "../http/index.js";
 import { type PagedResponseWire, toPagedResponse } from "../http/paged-response.js";
 import type { APIClient, PagedResponse } from "../http/types.js";
 
-// typescript-sdk-reference.md §8's canonical Notification interface.
 export interface Notification {
   id: string;
   type: string;
@@ -34,12 +33,9 @@ export interface UseNotificationsResult {
   isLoading: boolean;
   hasMore: boolean;
   fetchMore: () => void;
-  // Beyond §8's minimal illustrative shape — needed for the trailing
-  // spinner row, distinct from the first-load isLoading state.
   isFetchingNextPage: boolean;
 }
 
-// notification-system.md §9 "Feed response shape".
 interface NotificationWire {
   id: string;
   type: string;
@@ -72,8 +68,6 @@ const UNREAD_COUNT_QUERY_KEY: QueryKey = ["notifications", "unread-count"];
 type FeedClient = Pick<APIClient, "get">;
 type MutationClient = Pick<APIClient, "post" | "delete">;
 
-// go-sdk-reference.md §13 "Built-in notification routes": GET /_notif/feed,
-// paginated per typescript-sdk-reference.md §4's cursor convention.
 export function createNotificationsInfiniteQueryOptions(
   options: UseNotificationsOptions = {},
   client: FeedClient = apiClient,
@@ -115,11 +109,10 @@ export function useNotifications(options: UseNotificationsOptions = {}): UseNoti
   };
 }
 
-// GET /_notif/count.
 export function createUnreadCountQueryOptions(client: FeedClient = apiClient) {
   return {
     queryKey: UNREAD_COUNT_QUERY_KEY,
-    queryFn: (): Promise<{ count: number }> => client.get<{ count: number }>("/_notif/count"),
+    queryFn: (): Promise<{ count: number }> => client.get<{ count: number }>("/_notif/count", { background: true }),
   };
 }
 
@@ -128,14 +121,10 @@ export function useUnreadCount(): { count: number } {
   return { count: query.data?.count ?? 0 };
 }
 
-// invalidateQueries matches by key prefix (its default, non-exact mode), so
-// invalidating the ["notifications"] prefix alone already covers
-// UNREAD_COUNT_QUERY_KEY (["notifications", "unread-count"]) too.
 function invalidateFeed(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
 }
 
-// POST /_notif/{id}/read.
 export function createMarkReadMutationOptions(queryClient: QueryClient, client: MutationClient = apiClient) {
   return {
     mutationFn: (id: string) => client.post<void>(`/_notif/${id}/read`),
@@ -148,7 +137,6 @@ export function useMarkRead(): UseMutationResult<void, Error, string> {
   return useMutation<void, Error, string>(createMarkReadMutationOptions(queryClient));
 }
 
-// POST /_notif/read-all.
 export function createMarkAllReadMutationOptions(queryClient: QueryClient, client: MutationClient = apiClient) {
   return {
     mutationFn: () => client.post<void>("/_notif/read-all"),
@@ -161,7 +149,6 @@ export function useMarkAllRead(): UseMutationResult<void, Error, void> {
   return useMutation<void, Error, void>(createMarkAllReadMutationOptions(queryClient));
 }
 
-// DELETE /_notif/{id}.
 export function createDismissNotificationMutationOptions(queryClient: QueryClient, client: MutationClient = apiClient) {
   return {
     mutationFn: (id: string) => client.delete<void>(`/_notif/${id}`),

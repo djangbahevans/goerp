@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authMachine } from "../auth/auth-machine.js";
+import { sessionActivity } from "../auth/session-activity.js";
 import { tenantSuspension } from "../auth/tenant-suspension.js";
 import { AppError } from "../error/app-error.js";
 import { FetchAPIClient } from "./api-client.js";
@@ -27,7 +28,13 @@ function emptyResponse(status: number): Response {
   } as unknown as Response;
 }
 
+beforeEach(() => {
+  sessionActivity.acknowledge();
+  sessionActivity.record();
+});
+
 afterEach(() => {
+  sessionActivity.acknowledge();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   tenantSuspension.set(false);
@@ -198,6 +205,47 @@ describe("FetchAPIClient error deserialization", () => {
 });
 
 describe("FetchAPIClient silent refresh on 401", () => {
+  it("does not refresh or expire an idle session for an automatic request", async () => {
+    sessionActivity.acknowledge();
+    const transition = vi.spyOn(authMachine, "transition");
+    const fetchMock = vi.fn(async () => jsonResponse(401, { error: { code: "unauthenticated" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new FetchAPIClient().get("/_notif/count")).rejects.toMatchObject({ httpStatus: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("never refreshes background traffic even after input", async () => {
+    const transition = vi.spyOn(authMachine, "transition");
+    const fetchMock = vi.fn(async () => jsonResponse(401, { error: { code: "unauthenticated" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new FetchAPIClient().get("/_notif/count", { background: true })).rejects.toMatchObject({
+      httpStatus: 401,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(transition).not.toHaveBeenCalled();
+    expect(sessionActivity.hasActivity()).toBe(true);
+  });
+
+  it("uses activity captured at request start when another refresh finishes first", async () => {
+    let complete!: (response: Response) => void;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === "/auth/refresh") return Promise.resolve(jsonResponse(200, { expires_in: 600 }));
+      return new Promise<Response>((resolve) => {
+        complete = resolve;
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FetchAPIClient();
+    const request = client.get("/contacts");
+    await client.refreshSession();
+    expect(sessionActivity.hasActivity()).toBe(false);
+    complete(jsonResponse(401, { error: { code: "unauthenticated" } }));
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === "/auth/refresh")).toHaveLength(2));
+    complete(jsonResponse(200, []));
+    await expect(request).resolves.toEqual([]);
+  });
+
   it("refreshes once and retries the original request on success", async () => {
     const calls: string[] = [];
     const fetchMock = vi.fn(async (url: string) => {

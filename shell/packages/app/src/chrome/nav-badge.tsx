@@ -15,8 +15,6 @@ type CountClient = Pick<APIClient, "get">;
 // 56px rail has no buffer outside its own edge for an overhanging badge.
 const COLLAPSED_CLASS_NAME = "absolute top-0.5 end-0.5 h-3 min-w-3 px-0.5 text-center text-[8px] leading-3";
 
-// shell-architecture.md §16's NavBadge: a live-polled unread/pending count
-// for one nav item's badge_count_route, capped at "99+".
 export function NavBadge({
   route,
   collapsed = false,
@@ -28,7 +26,7 @@ export function NavBadge({
 }): ReactNode {
   const { data } = useQuery({
     queryKey: ["nav-badge", route],
-    queryFn: () => client.get<{ count: number }>(route),
+    queryFn: () => client.get<{ count: number }>(route, { background: true }),
     refetchInterval: POLL_INTERVAL_MS,
     staleTime: STALE_TIME_MS,
   });
