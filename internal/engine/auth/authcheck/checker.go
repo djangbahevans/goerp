@@ -87,6 +87,7 @@ func ExtractToken(r *http.Request) string {
 type AuthContext struct {
 	IsAuthenticated bool
 	UserID          string
+	ContactID       string
 	SessionID       string
 	TenantID        string
 	TenantSlug      string
@@ -252,9 +253,12 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		return nil, ErrPasswordChangeRequired
 	}
 
-	rolesLive, err := c.roles.RoleNamesForUser(ctx, tenantSlug, claims.Subject)
+	actor, err := c.roles.ResolveActingUser(ctx, tenantSlug, claims.Subject)
 	if err != nil {
-		return nil, fmt.Errorf("load live roles: %w", err)
+		if errors.Is(err, role.ErrNotMember) {
+			return nil, ErrNotTenantMember
+		}
+		return nil, fmt.Errorf("resolve acting user: %w", err)
 	}
 
 	permSet, err := c.hydratePermissionSet(ctx, claims.TenantID, tenantSlug, claims.Subject, claims.SessionID)
@@ -278,6 +282,7 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 	return &AuthContext{
 		IsAuthenticated: true,
 		UserID:          claims.Subject,
+		ContactID:       actor.ContactID,
 		SessionID:       claims.SessionID,
 		TenantID:        claims.TenantID,
 		TenantSlug:      tenantSlug,
@@ -285,7 +290,7 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		MFAVerified:     hasMFAFactor(claims.AMR),
 		MFAVerifiedAt:   mfaVerifiedAt,
 		Roles:           claims.Roles,
-		RolesLive:       rolesLive,
+		RolesLive:       actor.Roles,
 		PermissionSet:   permSet,
 		AuthMethod:      "jwt",
 
@@ -417,9 +422,6 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 		return nil, fmt.Errorf("look up api key: %w", err)
 	}
 
-	// Defense in depth against a leaked key from one tenant being replayed
-	// against a different tenant's subdomain — same reasoning the JWT
-	// branch's own tenant-mismatch check above already documents.
 	if key.TenantID != tenantID {
 		return nil, ErrTenantMismatch
 	}
@@ -430,7 +432,7 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 		return nil, ErrAPIKeyIPNotAllowed
 	}
 
-	var rolesLive []string
+	var actor role.ActingUser
 	var permSet permission.PermissionBitfield
 	if key.UserID != nil {
 		u, err := c.users.GetByID(ctx, *key.UserID)
@@ -452,15 +454,14 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 			return nil, ErrNotTenantMember
 		}
 
-		rolesLive, err = c.roles.RoleNamesForUser(ctx, tenantSlug, *key.UserID)
+		actor, err = c.roles.ResolveActingUser(ctx, tenantSlug, *key.UserID)
 		if err != nil {
-			return nil, fmt.Errorf("load live roles: %w", err)
+			if errors.Is(err, role.ErrNotMember) {
+				return nil, ErrNotTenantMember
+			}
+			return nil, fmt.Errorf("resolve acting user: %w", err)
 		}
 
-		// sessionID "" is correct here — an API-key request has no
-		// session, so IsRolesStale's check against an empty suffix
-		// always reads "not stale," which is the right answer since
-		// there's no session to ever mark stale.
 		permSet, err = c.hydratePermissionSet(ctx, tenantID, tenantSlug, *key.UserID, "")
 		if err != nil {
 			return nil, fmt.Errorf("hydrate permission set: %w", err)
@@ -470,13 +471,8 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 		permSet = scopesToBitfield(key.Scopes, permissions)
 	}
 
-	// §7 step 10 — updated once the auth context itself is built,
-	// regardless of whether step 11's permission check below then denies
-	// this particular request: the key was still genuinely presented and
-	// authenticated. Fire-and-forget: context.Background(), not ctx,
-	// since this update must outlive the request that triggered it, which
-	// may already be done (and its ctx canceled) by the time this
-	// goroutine runs.
+	// Record usage even for permission-denied requests, outside the request's
+	// cancellation scope so returning a response cannot abort the update.
 	go func() {
 		if err := c.apiKeys.UpdateLastUsed(context.Background(), key.ID, remoteIP); err != nil {
 			log.Warn().Err(err).Str("api_key_id", key.ID).Msg("authcheck: failed to update api key last-used")
@@ -498,9 +494,10 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 	return &AuthContext{
 		IsAuthenticated: true,
 		UserID:          userID,
+		ContactID:       actor.ContactID,
 		TenantID:        key.TenantID,
 		TenantSlug:      tenantSlug,
-		RolesLive:       rolesLive,
+		RolesLive:       actor.Roles,
 		PermissionSet:   permSet,
 		AuthMethod:      "api_key",
 		APIKey:          key,

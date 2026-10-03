@@ -239,6 +239,10 @@ func (e *Engine) readRecordsAsErr(ctx context.Context, tenantCtx *tenantresolve.
 		return nil, fmt.Errorf("%w: %q", errReadModelNotFound, modelName)
 	}
 
+	actor, err := e.roleStore.ResolveActingUser(ctx, tenantCtx.Slug, userID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve record reader: %w", err)
+	}
 	traceID := httperr.TraceIDFromContext(ctx)
 	modCtx := e.newModuleContext(ctx, EngineRequest{
 		ID:            requestIDFromContext(ctx),
@@ -247,6 +251,8 @@ func (e *Engine) readRecordsAsErr(ctx context.Context, tenantCtx *tenantresolve.
 		TenantSlug:    tenantCtx.Slug,
 		TraceID:       traceID,
 		PermissionSet: permSet,
+		ContactID:     actor.ContactID,
+		RolesLive:     actor.Roles,
 	}, mod)
 	defer modCtx.RollbackAll()
 

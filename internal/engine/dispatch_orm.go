@@ -56,11 +56,6 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 	authCtx := authFromContext(r.Context())
 	tenantCtx := tenantFromContext(r.Context())
 	if authCtx == nil || tenantCtx == nil {
-		// Unreachable via the real middleware chain — tenantResolutionMiddleware/
-		// authMiddleware both run for any EngineNative-but-not-EngineBuiltin
-		// route (goerp#369) before dispatchORMRoute is ever reached. Guarded
-		// for direct-call testability, matching buildDispatchHandler's own
-		// rr==nil guard above.
 		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "not_ready", "tenant/auth context not resolved")
 		return
 	}
@@ -73,6 +68,8 @@ func (e *Engine) dispatchORMRoute(w http.ResponseWriter, r *http.Request) {
 		TenantSlug:    tenantCtx.Slug,
 		TraceID:       traceID,
 		PermissionSet: authCtx.PermissionSet,
+		ContactID:     authCtx.ContactID,
+		RolesLive:     authCtx.RolesLive,
 	}
 	modCtx := e.newModuleContext(r.Context(), req, mod)
 	defer modCtx.RollbackAll()

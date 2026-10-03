@@ -20,6 +20,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/recordshares"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/route"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -219,12 +220,6 @@ func TestDispatchPermissionsRoute_NoTokenReturns401(t *testing.T) {
 	}
 }
 
-// dispatchSharesFixture wires up everything the /_meta/shares handlers
-// need — a real Engine (primaryDB + wasmRuntime + moduleRegistry +
-// userStore + recordSharesStore, every other field left zero-value, the
-// same posture dispatchORMFixture uses for Table-backed dispatch), one
-// StatusReady module declaring a .Shareable() widget model with a real
-// row, and a recipient user shares get granted to.
 type dispatchSharesFixture struct {
 	e              *Engine
 	slug           string
@@ -241,6 +236,10 @@ func newDispatchSharesFixture(t *testing.T, shareOpts ...model.SharePermission) 
 	ensureRiverJobMigrated(t)
 	slug := fmt.Sprintf("dispatchsharestest%d", time.Now().UnixNano())
 	createFixtureWidgetsSchema(t, conn, slug)
+	roles := role.NewStore(conn)
+	if err := roles.Bootstrap(t.Context(), slug); err != nil {
+		t.Fatalf("bootstrap fixture members: %v", err)
+	}
 
 	recordSharesStore := recordshares.NewStore(conn)
 	if err := recordSharesStore.Bootstrap(context.Background(), slug); err != nil {
@@ -301,10 +300,16 @@ func newDispatchSharesFixture(t *testing.T, shareOpts ...model.SharePermission) 
 		moduleRegistry:    reg,
 		userStore:         userStore,
 		recordSharesStore: recordSharesStore,
+		roleStore:         roles,
 	}
 
 	tenantID := "00000000-0000-0000-0000-000000000001"
 	sharerID := "00000000-0000-0000-0000-0000000000aa"
+	for _, id := range []string{sharerID, recipientID} {
+		if err := roles.AddMember(t.Context(), slug, id); err != nil {
+			t.Fatalf("add fixture member: %v", err)
+		}
+	}
 	recordID := "11111111-1111-1111-1111-111111111111"
 
 	schemaName := tenantschema.Name(slug)

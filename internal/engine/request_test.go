@@ -15,6 +15,8 @@ func TestEngineRequestEncodesWireRequestInline(t *testing.T) {
 	req := EngineRequest{
 		ID: "req-1", Method: "GET", TenantSlug: "acme",
 		PermissionSet: permission.PermissionBitfield{5},
+		ContactID:     "contact-1",
+		RolesLive:     []string{"sales_manager"},
 	}
 	b, err := msgpack.Marshal(req)
 	if err != nil {
@@ -32,6 +34,11 @@ func TestEngineRequestEncodesWireRequestInline(t *testing.T) {
 	}
 	if _, nested := keys["Request"]; nested {
 		t.Errorf("wire request is nested under %q instead of inlined", "Request")
+	}
+	for _, key := range []string{"ContactID", "RolesLive"} {
+		if _, ok := keys[key]; ok {
+			t.Errorf("host authorization field %q leaked into the wire request", key)
+		}
 	}
 
 	var got abiv1.Request
