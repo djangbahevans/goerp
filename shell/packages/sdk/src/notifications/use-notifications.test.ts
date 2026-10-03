@@ -123,7 +123,7 @@ describe("createUnreadCountQueryOptions", () => {
     const options = createUnreadCountQueryOptions(client);
 
     await expect(options.queryFn()).resolves.toEqual({ count: 3 });
-    expect(client.get).toHaveBeenCalledWith("/_notif/count");
+    expect(client.get).toHaveBeenCalledWith("/_notif/count", { background: true });
   });
 });
 

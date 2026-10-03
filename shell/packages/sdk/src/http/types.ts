@@ -2,6 +2,7 @@ export interface RequestOptions {
   params?: Record<string, unknown>;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  background?: boolean;
 }
 
 // A DELETE that names its target in a JSON body rather than the path,
@@ -43,11 +44,10 @@ export interface RefreshOutcome {
   expiresIn?: number;
 }
 
-// Lets a caller outside the generated-code surface (auth's own
-// TokenRefreshScheduler) share an APIClient's coalesced refresh instead
-// of firing an independent POST /auth/refresh that could race it.
+// A browser refresh acknowledges only the input captured when its coalesced request started.
 export interface SessionRefresher {
   refreshSession(): Promise<RefreshOutcome>;
+  subscribeRefresh?: (listener: (expiresIn: number) => void) => () => void;
 }
 
 export interface APIClientConfig {

@@ -1,4 +1,5 @@
 import { authMachine } from "../auth/auth-machine.js";
+import { sessionActivity } from "../auth/session-activity.js";
 import { noteTenantSuspension } from "../auth/tenant-suspension.js";
 import { AppError } from "../error/app-error.js";
 import type {
@@ -14,7 +15,6 @@ import type {
 const MAX_NETWORK_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 300;
 
-// erp-design.md §4.4.6: POST/PUT/PATCH support de-duplication via this header.
 const IDEMPOTENT_KEYED_METHODS = new Set(["POST", "PUT", "PATCH"]);
 
 function delay(ms: number): Promise<void> {
@@ -26,9 +26,6 @@ function buildURL(path: string, params?: Record<string, unknown>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
-    // An array value becomes repeated `key=v1&key=v2` entries — e.g.
-    // manifest-spec.md's `filter[id][]=uuid1&filter[id][]=uuid2` batch-fetch
-    // convention — rather than a single comma-joined value.
     if (Array.isArray(value)) {
       for (const item of value) search.append(key, String(item));
       continue;
@@ -61,7 +58,6 @@ interface ErrorBody {
   traceId: string | undefined;
 }
 
-// Matches erp-design.md §4.4.5's error envelope.
 async function readErrorBody(response: Response): Promise<ErrorBody> {
   try {
     const body = (await response.json()) as {
@@ -105,10 +101,8 @@ function toAppError(response: Response, body: ErrorBody): AppError {
 }
 
 export class FetchAPIClient implements APIClient, SessionRefresher {
-  // Per-instance, not module-level: two instances (e.g. a browser
-  // instance and a differently-configured one) must never coalesce their
-  // refreshes into each other's.
   private refreshInFlight: Promise<RefreshOutcome> | null = null;
+  private readonly refreshListeners = new Set<(expiresIn: number) => void>();
 
   constructor(private readonly config: APIClientConfig = {}) {}
 
@@ -157,6 +151,7 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
   }
 
   private async send(method: string, path: string, body: unknown, options?: RequestOptions): Promise<Response> {
+    const canRefresh = this.config.clientType === "cli" || (!options?.background && sessionActivity.hasActivity());
     const url = buildURL(path, options?.params);
     const isFormData = body instanceof FormData;
     const idempotencyKey =
@@ -184,15 +179,13 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
     const baseDelayMs = this.config.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS;
     let response = await fetchWithNetworkRetry(url, buildInit(), baseDelayMs);
 
-    // Never trigger the refresh cycle for a 401 from /auth/refresh itself.
     if (response.status === 401 && path !== "/auth/refresh") {
+      if (!canRefresh) throw toAppError(response, await readErrorBody(response));
       const refreshed = await this.ensureRefreshed(baseDelayMs);
       if (!refreshed.ok) {
         authMachine.transition({ type: "session_expired" });
         throw toAppError(response, await readErrorBody(response));
       }
-      // Exactly one retry, no matter its own outcome — this never loops
-      // back into a second refresh attempt.
       response = await fetchWithNetworkRetry(url, buildInit(), baseDelayMs);
       if (response.status === 401) {
         authMachine.transition({ type: "session_expired" });
@@ -201,8 +194,6 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
 
     if (!response.ok) {
       const body = await readErrorBody(response);
-      // auth-internals.md §8: step 9 rejects every module route for a user
-      // the tenant requires to enroll; the shell's route guard takes over.
       if (response.status === 403 && body.code === "mfa_setup_required") {
         authMachine.transition({ type: "mfa_setup_required" });
       }
@@ -213,20 +204,16 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
     return response;
   }
 
-  // Public so other pieces that need a refresh (auth's own
-  // TokenRefreshScheduler) share this exact coalescing instead of firing
-  // an independent /auth/refresh that could race it — see ensureRefreshed.
   refreshSession(): Promise<RefreshOutcome> {
     return this.ensureRefreshed(this.config.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS);
   }
 
-  // Coalesces concurrent 401s (and any other caller, e.g. the proactive
-  // refresh scheduler) into one POST /auth/refresh call. auth-internals.md
-  // §4's refresh token rotation makes this a correctness requirement: two
-  // independent refresh calls presenting the same not-yet-rotated token
-  // would race a `SELECT ... FOR UPDATE`, and the loser gets back a bare
-  // 401 for that call itself — an uncoalesced client would spuriously log
-  // out whichever request lost.
+  subscribeRefresh(listener: (expiresIn: number) => void): () => void {
+    this.refreshListeners.add(listener);
+    return () => this.refreshListeners.delete(listener);
+  }
+
+  // Rotation is single-use; concurrent refreshes must share the same request to avoid a false logout.
   private ensureRefreshed(baseDelayMs: number): Promise<RefreshOutcome> {
     this.refreshInFlight ??= this.performRefresh(baseDelayMs).finally(() => {
       this.refreshInFlight = null;
@@ -235,6 +222,7 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
   }
 
   private async performRefresh(baseDelayMs: number): Promise<RefreshOutcome> {
+    const activity = sessionActivity.snapshot();
     const isCli = this.config.clientType === "cli";
     try {
       const headers: Record<string, string> = {};
@@ -242,10 +230,7 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
         headers["X-Client-Type"] = "cli";
         const refreshToken = this.config.getRefreshToken?.();
         if (refreshToken) headers.Authorization = `Bearer ${refreshToken}`;
-        // auth-internals.md §19: a non-browser client must resend its own
-        // device_id on every refresh — §4 step 5c treats a mismatched (or
-        // absent) device_id on a raced/replayed token as compromise and
-        // revokes the whole session family, not just this request.
+        // A missing or mismatched device ID on a replay revokes the entire session family.
         const deviceId = this.config.getDeviceId?.();
         if (deviceId) headers.device_id = deviceId;
       }
@@ -269,6 +254,8 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
         };
         this.config.onTokensRefreshed?.(tokens);
       }
+      if (!isCli) sessionActivity.acknowledge(activity);
+      for (const listener of this.refreshListeners) listener(body.expires_in);
       return { ok: true, expiresIn: body.expires_in };
     } catch {
       return { ok: false };
@@ -281,7 +268,4 @@ async function parseJSON<T>(response: Response): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
-// The browser shell's shared client — zero setup required. A non-browser
-// consumer (none exists in this repo yet) instantiates its own
-// FetchAPIClient with clientType: "cli" instead of using this instance.
 export const apiClient: APIClient & SessionRefresher = new FetchAPIClient();
