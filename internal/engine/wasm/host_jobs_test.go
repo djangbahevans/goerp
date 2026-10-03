@@ -242,6 +242,10 @@ func TestHostJobs_EnqueueTx_InsertsJobOnlyOnCommit(t *testing.T) {
 	if _, err := jobqueue.DecodeJobID(out.JobID); err != nil {
 		t.Errorf("JobID %q: %v", out.JobID, err)
 	}
+	args, _ := loadJobRow(t, primaryDB, out.JobID)
+	if args.UserID != mc.UserID {
+		t.Errorf("transactional job user = %q, want %q", args.UserID, mc.UserID)
+	}
 }
 
 func TestHostJobs_EnqueueTx_UnknownTransaction(t *testing.T) {
@@ -278,9 +282,14 @@ func TestHostJobs_Enqueue_IdempotencyKeyDeduplicates(t *testing.T) {
 	if first.Deduplicated {
 		t.Fatal("first enqueue reported deduplicated")
 	}
+	mc.UserID = "user-2"
 	repeat := enqueue("import:file-1", map[string]any{"file_id": "file-1", "retry": true})
 	if !repeat.Deduplicated || repeat.JobID != first.JobID {
 		t.Errorf("repeat = %+v, want deduplicated onto %s", repeat, first.JobID)
+	}
+	original, _ := loadJobRow(t, primaryDB, first.JobID)
+	if original.UserID != "user-1" {
+		t.Errorf("deduplicated job user = %q, want original user-1", original.UserID)
 	}
 	fresh := enqueue("import:file-2", map[string]any{"file_id": "file-2"})
 	if fresh.Deduplicated || fresh.JobID == first.JobID {
@@ -331,7 +340,7 @@ func TestHostJobs_Enqueue_StampsMetadataAndArgs(t *testing.T) {
 	if err := json.Unmarshal(argsRaw, &args); err != nil {
 		t.Fatalf("decode args: %v", err)
 	}
-	if args.ModuleName != "contacts" || args.JobType != "contacts_import" || args.TenantID != tenantID || args.TraceID != "trace-1" {
+	if args.ModuleName != "contacts" || args.JobType != "contacts_import" || args.TenantID != tenantID || args.UserID != mc.UserID || args.TraceID != "trace-1" {
 		t.Errorf("args = %+v", args)
 	}
 }

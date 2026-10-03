@@ -6,13 +6,13 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
 )
 
-// JobContext describes the job a handler registered via OnJob is running.
-// Attempt is 1 on the first run and counts up on each retry, up to
-// MaxAttempts.
+// UserID is empty for jobs without an initiating user. Host calls resolve its
+// current permissions independently of the HTTP session that enqueued the job.
 type JobContext struct {
 	JobID       string
 	JobType     string
 	TenantID    string
+	UserID      string
 	TraceID     string
 	Attempt     int
 	MaxAttempts int

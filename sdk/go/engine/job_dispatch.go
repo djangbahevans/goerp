@@ -6,15 +6,8 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// DispatchJob is what a module's handle_job export calls
-// (manifest-spec.md §26): decode the incoming abi.JobEnvelope, route it to
-// the handler registered via OnJob for its job type, or via
-// OnDataMigration when the envelope marks a data migration job, and
-// return the i32 status handle_job's ABI reserves — the same codes as
-// DispatchEvent: 0 success, 1 retryable failure, 2 permanent failure
-// (jobs.PermanentError). jobs.RetryAfter's delay isn't carried over this
-// ABI, so it degrades to status 1 and the job retries on its ordinary
-// backoff.
+// RetryAfter's delay is not carried by the status-only handle_job ABI; it uses
+// ordinary retry backoff. Permanent errors return status 2 instead of 1.
 func DispatchJob(ptr, length uint32) uint32 {
 	buf := ReadMem(ptr, length)
 
@@ -36,6 +29,7 @@ func DispatchJob(ptr, length uint32) uint32 {
 		JobID:       env.JobID,
 		JobType:     env.JobType,
 		TenantID:    env.TenantID,
+		UserID:      env.UserID,
 		TraceID:     env.TraceID,
 		Attempt:     env.Attempt,
 		MaxAttempts: env.MaxAttempts,
@@ -43,8 +37,6 @@ func DispatchJob(ptr, length uint32) uint32 {
 	return jobStatus(handler(ctx, env.Payload))
 }
 
-// dispatchDataMigration runs the handler registered via OnDataMigration
-// that payload, a msgpack model.MigrationJobPayload, names.
 func dispatchDataMigration(payload []byte) uint32 {
 	var p model.MigrationJobPayload
 	if err := unmarshal(payload, &p); err != nil {
@@ -64,8 +56,6 @@ func dispatchDataMigration(payload []byte) uint32 {
 	return jobStatus(err)
 }
 
-// jobStatus maps a job handler's returned error onto handle_job's status
-// codes.
 func jobStatus(err error) uint32 {
 	if err == nil {
 		return 0

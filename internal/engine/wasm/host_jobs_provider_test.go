@@ -198,7 +198,7 @@ func TestHostJobs_EnqueueProvider_ResolvesSoleProvider(t *testing.T) {
 
 	args, metadata := loadJobRow(t, f.conn, out.JobID)
 	if args.ModuleName != "connector_twilio" || args.JobType != "sms_send" || args.ProviderCategory != providerselect.CategorySMS ||
-		args.TenantID != f.tenantID || args.EnqueuedBy != "notifications" {
+		args.TenantID != f.tenantID || args.UserID != f.modCtx.UserID || args.EnqueuedBy != "notifications" {
 		t.Errorf("args = %+v", args)
 	}
 	if args.Queue != jobqueue.QueueDefault || args.MaxAttempts != defaultJobMaxAttempts {
@@ -369,10 +369,10 @@ func TestHostJobs_DispatchProviderSync_ReturnsHandlerResult(t *testing.T) {
 
 	want := SyncJobRequest{
 		ModuleName: "connector_paystack", JobType: "payment_charge", Payload: payload,
-		TenantID: f.tenantID, TenantSlug: f.modCtx.TenantSlug, TraceID: "trace-1",
+		TenantID: f.tenantID, TenantSlug: f.modCtx.TenantSlug, UserID: f.modCtx.UserID, TraceID: "trace-1",
 	}
 	if d.got.ModuleName != want.ModuleName || d.got.JobType != want.JobType || string(d.got.Payload) != string(want.Payload) ||
-		d.got.TenantID != want.TenantID || d.got.TenantSlug != want.TenantSlug || d.got.TraceID != want.TraceID {
+		d.got.UserID != want.UserID || d.got.TenantID != want.TenantID || d.got.TenantSlug != want.TenantSlug || d.got.TraceID != want.TraceID {
 		t.Errorf("dispatched %+v, want %+v", d.got, want)
 	}
 	if got := countWASMJobs(t, f.conn, f.tenantID); got != 0 {

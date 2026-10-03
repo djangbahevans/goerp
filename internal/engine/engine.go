@@ -608,7 +608,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	moduleRegistry := &registry.ModuleRegistry{}
 	eventInvoker := &eventdelivery.HandlerInvoker{Runtime: runtime, TenantStore: tenantStore, Roles: roleStore}
 	runtime.SetSyncEventDispatcher(&eventdelivery.SyncDispatcher{ModuleRegistry: moduleRegistry, Invoker: eventInvoker})
-	runtime.SetSyncJobDispatcher(&jobdispatch.SyncDispatcher{ModuleRegistry: moduleRegistry, Runtime: runtime})
+	runtime.SetSyncJobDispatcher(&jobdispatch.SyncDispatcher{
+		ModuleRegistry: moduleRegistry,
+		Runtime:        runtime,
+		Roles:          roleStore,
+	})
 	runtime.SetProviderStore(providerselect.NewStore(primaryPool))
 	snap, err := moduleRegistry.Update(loadedModules)
 	if err != nil {
@@ -984,8 +988,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		PlatformDomain: cfg.PlatformDomain,
 	}))
 	river.AddWorker(jobWorkers, &jobdispatch.Worker{
-		ModuleRegistry: moduleRegistry, SchemaSyncPool: syncPool, Runtime: runtime, TenantStore: tenantStore,
-		Deliveries: &notify.ProviderDeliveries{DB: primaryPool, Tenants: tenantStore},
+		ModuleRegistry: moduleRegistry,
+		SchemaSyncPool: syncPool,
+		Runtime:        runtime,
+		TenantStore:    tenantStore,
+		Roles:          roleStore,
+		Deliveries:     &notify.ProviderDeliveries{DB: primaryPool, Tenants: tenantStore},
 	})
 	jobQueueClient, err := jobqueue.New(jobQueuePool, cfg, jobWorkers)
 	if err != nil {

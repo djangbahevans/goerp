@@ -60,14 +60,14 @@ func TestDispatchJob_RoutesByJobTypeWithTypedPayloadAndContext(t *testing.T) {
 
 	ptr, length := writeJobEnvelope(t, abi.JobEnvelope{
 		JobID: "job_42", JobType: "sms_send", TenantID: "tenant_1", ModuleName: "notify",
-		TraceID: "trace_1", Attempt: 2, MaxAttempts: 5,
+		UserID: "user_1", TraceID: "trace_1", Attempt: 2, MaxAttempts: 5,
 		Payload: mustMarshal(t, sendPayload{To: "+233200000000", Body: "hi"}),
 	})
 
 	if status := DispatchJob(ptr, length); status != 0 {
 		t.Fatalf("status = %d, want 0", status)
 	}
-	want := JobContext{JobID: "job_42", JobType: "sms_send", TenantID: "tenant_1", TraceID: "trace_1", Attempt: 2, MaxAttempts: 5}
+	want := JobContext{JobID: "job_42", JobType: "sms_send", TenantID: "tenant_1", UserID: "user_1", TraceID: "trace_1", Attempt: 2, MaxAttempts: 5}
 	if gotCtx == nil || *gotCtx != want {
 		t.Fatalf("JobContext = %+v, want %+v", gotCtx, want)
 	}

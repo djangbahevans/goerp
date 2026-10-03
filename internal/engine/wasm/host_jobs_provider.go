@@ -31,15 +31,13 @@ type ProviderStore interface {
 	IsEnabledProvider(ctx context.Context, tenantID, moduleName, category string) (bool, error)
 }
 
-// SyncJobRequest is one host.jobs.dispatch_provider_sync invocation of
-// ModuleName's handle_job, run under the calling request's tenant and
-// trace.
 type SyncJobRequest struct {
 	ModuleName string
 	JobType    string
 	Payload    []byte
 	TenantID   string
 	TenantSlug string
+	UserID     string
 	TraceID    string
 }
 
@@ -198,11 +196,8 @@ func writeProviderJobInsertResult(ctx context.Context, m api.Module, allocate ap
 	})
 }
 
-// makeJobsDispatchProviderSync builds host.jobs.dispatch_provider_sync:
-// invoke provider_module's handle_job in-process and block for its
-// host.jobs.set_result value, with no River job inserted. Like
-// host.event.emit's sync path it is refused while the caller holds a
-// host.db transaction open, and a failure is returned to the caller as is.
+// Inline provider dispatch cannot run while the caller holds a transaction:
+// its independently scoped host calls could wait on the caller's locks.
 func makeJobsDispatchProviderSync(r *Runtime) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -238,8 +233,13 @@ func makeJobsDispatchProviderSync(r *Runtime) func(ctx context.Context, m api.Mo
 
 		dispatchCtx, cancel := context.WithTimeout(ctx, timeout)
 		status, result, err := r.syncJobDispatcher.DispatchJobSync(dispatchCtx, SyncJobRequest{
-			ModuleName: target, JobType: input.JobType, Payload: input.Payload,
-			TenantID: modCtx.TenantID, TenantSlug: modCtx.TenantSlug, TraceID: modCtx.TraceID,
+			ModuleName: target,
+			JobType:    input.JobType,
+			Payload:    input.Payload,
+			TenantID:   modCtx.TenantID,
+			TenantSlug: modCtx.TenantSlug,
+			TraceID:    modCtx.TraceID,
+			UserID:     modCtx.UserID,
 		})
 		// Only a call that failed counts as timed out: a handler that
 		// returned just as the deadline passed has still run to completion,
