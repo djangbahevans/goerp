@@ -13,6 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/abi"
 	"github.com/djangbahevans/goerp/internal/engine/dbscope"
 	"github.com/djangbahevans/goerp/sdk/go/model"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	"github.com/rs/zerolog/log"
@@ -20,12 +21,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 	pgquery "github.com/wasilibs/go-pgquery"
 )
-
-// host.db.exec (host-abi-reference.md §5 "host.db.exec"): parameterized
-// INSERT/UPDATE/DELETE, with the etag (host_db_exec_etag.go) and audit
-// (host_db_exec_audit.go) mechanisms wired into its own execution path,
-// per goerp#460's own "why this is blocked" note — both were built ahead
-// of this ticket specifically so they didn't need retrofitting in here.
 
 const defaultExecTimeout = defaultQueryTimeout
 
@@ -147,11 +142,7 @@ func returningAllResTarget(stmt execStmt) []*pg_query.Node {
 	return []*pg_query.Node{pg_query.MakeResTargetNodeWithVal(pg_query.MakeColumnRefNode(fields, 0), 0)}
 }
 
-// validateRequestedColumns errors if any of requested doesn't appear in
-// available (the RETURNING * result's own real column set) — otherwise
-// a mistyped or nonexistent opts.returning column would silently project
-// to nil via projectReturning's plain map lookup, indistinguishable from
-// a column whose real value happens to be NULL.
+// Missing columns must not project to nil, which also represents SQL NULL.
 func validateRequestedColumns(requested, available []string) error {
 	availableSet := make(map[string]bool, len(available))
 	for _, c := range available {
@@ -162,6 +153,33 @@ func validateRequestedColumns(requested, available []string) error {
 			return fmt.Errorf("opts.returning: column %q does not exist", c)
 		}
 	}
+	return nil
+}
+
+// A zero-row SELECT resolves the physical columns without writing or scanning
+// data. Its transaction-held relation lock also prevents concurrent column DDL.
+func (p preparedExec) validateReturning(ctx context.Context, tx *sql.Tx) *abiv1.HostError {
+	if p.requestedCols == nil {
+		return nil
+	}
+
+	rows, err := tx.QueryContext(ctx, "SELECT * FROM "+pgx.Identifier{p.table}.Sanitize()+" LIMIT 0")
+	if err != nil {
+		return translateExecError(err)
+	}
+	defer rows.Close()
+
+	available, err := rows.Columns()
+	if err != nil {
+		return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
+	}
+	if err := validateRequestedColumns(p.requestedCols, available); err != nil {
+		return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
+	}
+	if err := rows.Err(); err != nil {
+		return translateExecError(err)
+	}
+
 	return nil
 }
 
@@ -335,22 +353,9 @@ type execRowResult struct {
 	Duration     time.Duration
 }
 
-// execRow runs p — a statement prepareExec already parsed, validated, and
-// deparsed — once against tx with params, applying its etag/audit
-// mechanisms exactly as a single host.db.exec call would. This is the
-// unit both DBExec (once) and DBExecBatch (host_db_exec_batch.go, once
-// per parameter set within a single shared transaction) run — the reuse
-// goerp#461's own scope calls for, rather than either one reimplementing
-// RETURNING construction, constraint-violation translation, or the
-// etag/audit mechanisms itself. Only the capture and statement, which carry
-// module SQL, run as the tenant role.
-//
-// ctx must already carry whatever deadline this row's execution should
-// run under — execRow doesn't derive one itself. DBExec bounds its one
-// call with a single timeout shared with its own transaction's BeginTx;
-// DBExecBatch (host_db_exec_batch.go) instead gives each parameter set
-// its own fresh per-row timeout window, independent of the batch
-// transaction's own lifetime.
+// Module SQL and its pre-write reads run as the tenant role; audit and
+// activity writes run as the login role in the same transaction. The caller
+// supplies the execution deadline, which is per row for sequential batches.
 func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedExec, params []any) (execRowResult, *abiv1.HostError) {
 	var (
 		oldRows      []map[string]any
@@ -359,6 +364,10 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 		duration     time.Duration
 	)
 	hostErr := withTenantRole(ctx, tx, modCtx, func() *abiv1.HostError {
+		if hostErr := p.validateReturning(ctx, tx); hostErr != nil {
+			return hostErr
+		}
+
 		if (p.audited && p.stmt.Operation != "INSERT") || p.tracked {
 			var err error
 			oldRows, err = captureRowsBeforeExec(ctx, tx, auditableExecStmt{
@@ -388,24 +397,7 @@ func execRow(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, p preparedE
 		if execErr != nil {
 			return translateExecError(execErr)
 		}
-		// The internally-executed RETURNING * always includes every
-		// column, so its own result set defines the table's real column
-		// set — available even when zero rows come back, unlike scanning
-		// each row's own map keys. Checked before scanning, since a
-		// mistyped or nonexistent opts.returning column would otherwise
-		// silently project to nil (indistinguishable from a real NULL
-		// value) instead of a clear error.
-		if p.requestedCols != nil {
-			available, err := rows.Columns()
-			if err != nil {
-				_ = rows.Close()
-				return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
-			}
-			if err := validateRequestedColumns(p.requestedCols, available); err != nil {
-				_ = rows.Close()
-				return &abiv1.HostError{Code: abiv1.ErrCodeExecError, Message: err.Error()}
-			}
-		}
+
 		var err error
 		newRows, err = scanRowsToMaps(rows)
 		if err != nil {
