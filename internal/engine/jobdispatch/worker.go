@@ -3,12 +3,14 @@ package jobdispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/schema"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
@@ -33,6 +35,7 @@ type Worker struct {
 	SchemaSyncPool *schema.SchemaSyncPool
 	Runtime        *wasm.Runtime
 	TenantStore    *tenant.Store
+	Roles          *role.Store
 	Deliveries     DeliveryTracker
 }
 
@@ -106,8 +109,11 @@ func (w *Worker) work(ctx context.Context, job *river.Job[jobqueue.WASMJobArgs],
 
 	env := newJobEnvelope(job)
 	env.Payload = payload
-	status, _, err := invokeHandleJob(ctx, w.Runtime, snap, mod, args, t.Slug, env, false)
+	status, _, err := invokeHandleJob(ctx, w.Runtime, w.Roles, snap, mod, args, t.Slug, env, false)
 	if err != nil {
+		if errors.Is(err, role.ErrNotMember) {
+			return river.JobCancel(err)
+		}
 		return err
 	}
 	if status == statusPermanent {
@@ -153,15 +159,41 @@ func readyModule(snap *registry.RegistrySnapshot, moduleName string) (*module.Lo
 	return mod, nil
 }
 
-// invokeHandleJob borrows an instance of mod and runs its handle_job
-// export on env under a ModuleContext for args' tenant — the step
-// Worker.Work and SyncDispatcher.DispatchJobSync share. With captureResult,
-// the value the handler passes to host.jobs.set_result is returned as
-// result; without it set_result is a no-op.
-func invokeHandleJob(ctx context.Context, rt *wasm.Runtime, snap *registry.RegistrySnapshot, mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, env abiv1.JobEnvelope, captureResult bool) (status int32, result []byte, err error) {
+// Session permissions are not captured: both queued and synchronous jobs resolve
+// the acting user's current tenant identity before invoking the handler.
+func invokeHandleJob(
+	ctx context.Context,
+	rt *wasm.Runtime,
+	roles *role.Store,
+	snap *registry.RegistrySnapshot,
+	mod *module.LoadedModule,
+	args jobqueue.WASMJobArgs,
+	tenantSlug string,
+	env abiv1.JobEnvelope,
+	captureResult bool,
+) (status int32, result []byte, err error) {
 	if mod.Pool == nil {
 		return 0, nil, fmt.Errorf("%w: module %q has no WASM instance pool (wasm: false)", wasm.ErrSyncJobTargetUnavailable, args.ModuleName)
 	}
+
+	// Migration jobs have engine-owned execution rules and no acting user.
+	if args.IsDataMigration {
+		args.UserID = ""
+	}
+
+	var actor role.ActingUser
+	if args.UserID != "" {
+		if roles == nil {
+			return 0, nil, fmt.Errorf("resolve job user: identity resolver unavailable")
+		}
+
+		actor, err = roles.ResolveActingUser(ctx, tenantSlug, args.UserID)
+		if err != nil {
+			return 0, nil, fmt.Errorf("resolve job user %s: %w", args.UserID, err)
+		}
+	}
+
+	env.UserID = args.UserID
 
 	envelope, err := msgpack.Marshal(env)
 	if err != nil {
@@ -174,7 +206,7 @@ func invokeHandleJob(ctx context.Context, rt *wasm.Runtime, snap *registry.Regis
 	}
 	defer mod.Pool.Return(inst)
 
-	moduleCtx := newModuleContext(rt, mod, args, tenantSlug, snap)
+	moduleCtx := newModuleContext(rt, mod, args, actor, tenantSlug, snap)
 	if captureResult {
 		moduleCtx.CaptureJobResult()
 	}
@@ -210,8 +242,8 @@ func newJobEnvelope(job *river.Job[jobqueue.WASMJobArgs]) abiv1.JobEnvelope {
 
 // Data-migration context is restricted to dispatched migration jobs so the
 // migration_ddl capability alone cannot authorize DDL from an ordinary job.
-func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.WASMJobArgs, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
-	mc := wasm.NewModuleContext("", mod.Manifest.Name, "", "", nil, nil, args.TenantID, tenantSlug, args.TraceID, mod.Capabilities, rt.TxLimiter(), wasm.ModuleSnapshot{
+func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.WASMJobArgs, actor role.ActingUser, tenantSlug string, snap *registry.RegistrySnapshot) *wasm.ModuleContext {
+	mc := wasm.NewModuleContext("", mod.Manifest.Name, args.UserID, actor.ContactID, actor.Roles, nil, args.TenantID, tenantSlug, args.TraceID, mod.Capabilities, rt.TxLimiter(), wasm.ModuleSnapshot{
 		ModelDecls:          mod.ModelDecls,
 		FieldSecRegistry:    snap.FieldSecRegistry(),
 		EventRegistry:       snap.EventRegistry(),

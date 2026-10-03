@@ -1,16 +1,12 @@
 package abi
 
-// JobEnvelope is the wire shape a handle_job invocation carries, the job
-// counterpart to EventEnvelope. The engine wraps every job in one, so the
-// module's single handle_job export has the job type it needs to route to
-// the handler registered for it. JobID has the same "job_"-prefixed form
-// host.jobs.enqueue returns. A data migration job sets
-// IsDataMigration, and its Payload is then a msgpack MigrationJobPayload
-// whose Handler equals JobType.
+// UserID is the initiating user, empty for anonymous and data-migration jobs.
+// A migration's Payload is a MigrationJobPayload whose Handler equals JobType.
 type JobEnvelope struct {
 	JobID           string `msgpack:"job_id"`
 	JobType         string `msgpack:"job_type"`
 	TenantID        string `msgpack:"tenant_id"`
+	UserID          string `msgpack:"user_id,omitempty"`
 	ModuleName      string `msgpack:"module_name"`
 	TraceID         string `msgpack:"trace_id,omitempty"`
 	Attempt         int    `msgpack:"attempt"`

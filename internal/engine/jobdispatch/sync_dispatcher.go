@@ -7,25 +7,17 @@ import (
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 )
 
-// SyncDispatcher implements wasm.SyncJobDispatcher for
-// host.jobs.dispatch_provider_sync (host-abi-reference.md §10): the target
-// module's handle_job runs in-process, under the calling request's tenant
-// and trace, with no River job inserted. It shares Worker.Work's
-// invocation step (invokeHandleJob), so a provider's handler runs the same
-// way on either path, and is injected via Runtime.SetSyncJobDispatcher for
-// the same import-cycle reason eventdelivery.SyncDispatcher is.
+// Synchronous providers use the same live identity resolution as queued jobs.
 type SyncDispatcher struct {
 	ModuleRegistry *registry.ModuleRegistry
 	Runtime        *wasm.Runtime
+	Roles          *role.Store
 }
 
-// DispatchJobSync runs req.ModuleName's handle_job and returns its status
-// and the value it passed to host.jobs.set_result, if any. ctx carries the
-// dispatch timeout; host.jobs.dispatch_provider_sync has already checked
-// the module provides the category for the tenant.
 func (d *SyncDispatcher) DispatchJobSync(ctx context.Context, req wasm.SyncJobRequest) (int32, []byte, error) {
 	snap := d.ModuleRegistry.Snapshot()
 	if snap == nil {
@@ -42,6 +34,7 @@ func (d *SyncDispatcher) DispatchJobSync(ctx context.Context, req wasm.SyncJobRe
 		JobType:    req.JobType,
 		Payload:    req.Payload,
 		TenantID:   req.TenantID,
+		UserID:     req.UserID,
 		TraceID:    req.TraceID,
 	}
 	// No River job exists, so the envelope has no job ID and a single
@@ -55,5 +48,5 @@ func (d *SyncDispatcher) DispatchJobSync(ctx context.Context, req wasm.SyncJobRe
 		MaxAttempts: 1,
 		Payload:     req.Payload,
 	}
-	return invokeHandleJob(ctx, d.Runtime, snap, mod, args, req.TenantSlug, env, true)
+	return invokeHandleJob(ctx, d.Runtime, d.Roles, snap, mod, args, req.TenantSlug, env, true)
 }

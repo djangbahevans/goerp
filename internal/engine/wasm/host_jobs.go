@@ -149,12 +149,8 @@ func buildJobInsert(modCtx *ModuleContext, jobType string, payload []byte, o abi
 	return buildJobInsertFor(modCtx, jt, modCtx.ModuleName, "", payload, o, now)
 }
 
-// buildJobInsertFor builds the River insert for a jt job handled by
-// moduleName. providerCategory is empty for the calling module's own job
-// types, whose moduleName is the caller itself; for a provider-category job
-// it names the category moduleName was resolved for, and jt carries only
-// the standardized job name, so its options fall straight back to the
-// engine defaults.
+// Provider-category jobs use engine defaults because their standardized job types
+// have no declaration in the calling module's manifest.
 func buildJobInsertFor(modCtx *ModuleContext, jt manifest.JobType, moduleName, providerCategory string, payload []byte, o abiv1.JobEnqueueOptions, now time.Time) (jobqueue.WASMJobArgs, *river.InsertOpts, *abiv1.HostError) {
 	if len(payload) > maxJobPayloadBytes {
 		return jobqueue.WASMJobArgs{}, nil, &abiv1.HostError{
@@ -208,6 +204,7 @@ func buildJobInsertFor(modCtx *ModuleContext, jt manifest.JobType, moduleName, p
 		JobType:          jt.Name,
 		Payload:          payload,
 		TenantID:         modCtx.TenantID,
+		UserID:           modCtx.UserID,
 		Queue:            queue,
 		MaxAttempts:      maxAttempts,
 		IdempotencyKey:   idempotencyKey,

@@ -2,41 +2,21 @@ package jobqueue
 
 import "github.com/riverqueue/river"
 
-// WASMJobArgs is the River job jobdispatch.Worker processes by invoking
-// ModuleName's handle_job WASM export (manifest-spec.md §26). One Kind
-// covers every WASM-dispatched job type, discriminated by
-// ModuleName/JobType.
-//
-// Three callers insert these, across different trust boundaries:
-// host.jobs.enqueue/enqueue_tx, whose JobType must be declared in the
-// enqueuing module's own manifest job_types[] (globally unique, enforced by
-// JobRegistry); host.jobs.enqueue_provider/enqueue_provider_tx, whose
-// JobType is a standardized provider-category name and whose ModuleName is
-// the resolved provider (ProviderCategory); and the engine's data migration
-// dispatch, whose JobType is one of the target module's
-// DataMigrations[].Handler names (scoped per-module, never required to be
-// globally unique).
-//
-// The river:"unique" fields define what River's ByArgs dedup hashes:
-// everything identifying the job except Payload, Queue, MaxAttempts and
-// TraceID, so a re-enqueue under the same IdempotencyKey dedups even when
-// its payload or trace differs.
+// UserID is captured from the enqueuing handler and resolved against live tenant
+// membership on each attempt. It is excluded from deduplication so a repeated key
+// retains the original job's identity.
 type WASMJobArgs struct {
 	ModuleName     string `json:"module_name" river:"unique"`
 	JobType        string `json:"job_type" river:"unique"`
 	Payload        []byte `json:"payload"`
 	TenantID       string `json:"tenant_id" river:"unique"`
+	UserID         string `json:"user_id,omitempty"`
 	Queue          string `json:"queue"`
 	MaxAttempts    int    `json:"max_attempts"`
 	IdempotencyKey string `json:"idempotency_key,omitempty" river:"unique"`
 	TraceID        string `json:"trace_id,omitempty"`
-	// IsDataMigration marks a job the engine itself enqueued to run one of
-	// the target module's declared data migration handlers during an
-	// upgrade (migration-guide.md §4). jobdispatch.Worker checks JobType
-	// against the module's DataMigrations for this class and, once the
-	// handler succeeds, advances the tenant's data_migration_version
-	// watermark to MigrationToVersion and enqueues the next applicable
-	// handler, if any.
+	// Migration handlers are validated against DataMigrations rather than JobRegistry.
+	// Their version watermark advances only after the handler succeeds.
 	IsDataMigration bool `json:"is_data_migration,omitempty" river:"unique"`
 	// MigrationToVersion is the watermark to record once this job
 	// succeeds. Only meaningful when IsDataMigration is true.
@@ -51,10 +31,8 @@ type WASMJobArgs struct {
 	// EnqueuedBy is set only on a provider job, so two modules' idempotency
 	// keys never collide on the same provider.
 	EnqueuedBy string `json:"enqueued_by,omitempty" river:"unique"`
-	// NotificationID is set only on an sms_send or push_send job the
-	// notification pipeline enqueued: the job delivers that notification's
-	// deliveries on its channel, and jobdispatch.Worker records each
-	// attempt's outcome on them. host.jobs.enqueue_provider never sets it.
+	// Engine-created delivery jobs track notification outcomes; module-enqueued
+	// provider jobs do not carry NotificationID.
 	NotificationID string `json:"notification_id,omitempty"`
 }
 
@@ -68,10 +46,7 @@ func (a WASMJobArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: queue, MaxAttempts: a.MaxAttempts}
 }
 
-// JobMetadata is stamped onto every WASMJobArgs job's River metadata, so
-// the job's origin is visible without decoding its args. ModuleName is the
-// module whose handler runs the job; EnqueuedBy is set only for a
-// provider-category job, where that is not the enqueuing module.
+// Provider jobs distinguish the handling module from the module that enqueued them.
 type JobMetadata struct {
 	TenantID   string `json:"tenant_id"`
 	ModuleName string `json:"module_name"`
