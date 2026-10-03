@@ -362,7 +362,7 @@ func TestOffboarding_DropsTenantRole(t *testing.T) {
 
 func TestCreateTenantSchema_SlugTooLongForARoleFailsBeforeCreatingTheSchema(t *testing.T) {
 	schemaSync, _ := openRolePools(t)
-	slug := "a" + strings.Repeat("b", 55) + "c" // 57 characters: valid for system.tenants, too long for tenant_{slug}
+	slug := "a" + strings.Repeat("b", 55) + "c"
 	t.Cleanup(func() { _ = tenantschema.Drop(context.Background(), schemaSync, slug) })
 
 	err := (&Activities{schemaSyncPool: schemaSync}).CreateTenantSchema(t.Context(), slug)
@@ -420,5 +420,36 @@ func TestDrop_RemovesPartmanTemplatesForAHyphenatedSlug(t *testing.T) {
 		if exists {
 			t.Errorf("template %s still exists after Drop", tmpl)
 		}
+	}
+}
+
+func TestCreateTenantSchema_MaximumSlugPreservesSchemaAndRoleNames(t *testing.T) {
+	schemaSync, _ := openRolePools(t)
+	ctx := t.Context()
+
+	slug := uniqueSlug(t)
+	slug += strings.Repeat("a", 56-len(slug))
+	t.Cleanup(func() { _ = tenantschema.Drop(context.Background(), schemaSync, slug) })
+
+	a := &Activities{schemaSyncPool: schemaSync}
+	if err := a.CreateTenantSchema(ctx, slug); err != nil {
+		t.Fatalf("CreateTenantSchema: %v", err)
+	}
+	if err := a.CreateEngineTables(ctx, slug); err != nil {
+		t.Fatalf("CreateEngineTables: %v", err)
+	}
+
+	want := "tenant_" + slug
+	var schemaName, roleName string
+	if err := schemaSync.QueryRowContext(ctx, `SELECT nspname FROM pg_namespace WHERE nspname = $1`, want).Scan(&schemaName); err != nil {
+		t.Fatalf("query tenant schema: %v", err)
+	}
+
+	if err := schemaSync.QueryRowContext(ctx, `SELECT rolname FROM pg_roles WHERE rolname = $1`, want).Scan(&roleName); err != nil {
+		t.Fatalf("query tenant role: %v", err)
+	}
+
+	if schemaName != want || roleName != want {
+		t.Errorf("schema=%q role=%q, want %q for both", schemaName, roleName, want)
 	}
 }

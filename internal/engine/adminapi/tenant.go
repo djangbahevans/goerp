@@ -1,15 +1,3 @@
-// Package adminapi's tenant routes wrap internal/engine/tenant.Store for
-// the reads and status-only writes that are buildable now (list, status,
-// suspend, unsuspend), and gate everything that needs a not-yet-built
-// subsystem — ProvisionTenantWorkflow, the invite system, River,
-// OffboardTenantWorkflow — behind small interfaces (Provisioner,
-// InviteResender, TenantExporter, TenantImporter, Offboarder). A nil
-// dependency isn't a bug: engine.go simply hasn't wired a real
-// implementation in yet, and the handler reports that honestly via
-// writeNotImplemented rather than pretending to succeed. Once the
-// corresponding tracking issue lands, wiring a real implementation into
-// TenantDeps in engine.go is the only change needed — these handlers
-// don't change.
 package adminapi
 
 import (
@@ -225,6 +213,12 @@ func (h *tenantHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "slug and admin_email are required")
 		return
 	}
+
+	if !tenant.ValidSlug(req.Slug) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "slug must contain 3–56 lowercase letters, digits or hyphens, start with a letter and end with a letter or digit")
+		return
+	}
+
 	if h.slugReserved(w, req.Slug) {
 		return
 	}
