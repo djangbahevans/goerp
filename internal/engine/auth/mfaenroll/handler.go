@@ -1,4 +1,4 @@
-// Package mfaenroll confirms tenant-bound TOTP enrollments and issues scoped recovery codes.
+// Package mfaenroll confirms tenant-bound MFA enrollments and issues scoped recovery codes.
 package mfaenroll
 
 import (
@@ -22,6 +22,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa/enforce"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/webauthn"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
@@ -42,9 +43,10 @@ type Handlers struct {
 	totp     *totp.Service
 	recovery *recoverycode.Service
 	audit    AuditRecorder
+	webauthn *webauthn.Service
 }
 
-func NewHandlers(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, mfaStore *mfa.Store, sessions *session.Store, issuer *authtoken.Issuer, totpService *totp.Service, recoveryService *recoverycode.Service, audit AuditRecorder) *Handlers {
+func NewHandlers(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users *user.Store, mfaStore *mfa.Store, sessions *session.Store, issuer *authtoken.Issuer, totpService *totp.Service, recoveryService *recoverycode.Service, audit AuditRecorder, passkeys *webauthn.Service) *Handlers {
 	return &Handlers{
 		tenants:  tenants,
 		auth:     auth,
@@ -55,6 +57,7 @@ func NewHandlers(tenants *tenantresolve.Resolver, auth *authcheck.Checker, users
 		totp:     totpService,
 		recovery: recoveryService,
 		audit:    audit,
+		webauthn: passkeys,
 	}
 }
 
@@ -143,12 +146,22 @@ func (h *Handlers) Begin(w http.ResponseWriter, r *http.Request) {
 }
 
 type confirmRequest struct {
-	EnrollmentID string  `json:"enrollment_id"`
-	Code         string  `json:"code"`
-	Label        *string `json:"label"`
+	EnrollmentID string         `json:"enrollment_id"`
+	Code         string         `json:"code"`
+	Label        *string        `json:"label"`
+	CeremonyID   string         `json:"ceremony_id"`
+	Response     jsontext.Value `json:"response"`
 }
 
 func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
+	h.confirm(w, r, mfa.CredentialTOTP)
+}
+
+func (h *Handlers) ConfirmWebAuthn(w http.ResponseWriter, r *http.Request) {
+	h.confirm(w, r, mfa.CredentialWebAuthn)
+}
+
+func (h *Handlers) confirm(w http.ResponseWriter, r *http.Request, method mfa.CredentialType) {
 	authCtx, ok := h.authenticate(w, r)
 	if !ok {
 		return
@@ -158,8 +171,8 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var req confirmRequest
-	if err := json.UnmarshalRead(r.Body, &req); err != nil || req.EnrollmentID == "" || req.Code == "" {
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", `"enrollment_id" and "code" are required`)
+	if err := json.UnmarshalRead(r.Body, &req); err != nil || (method == mfa.CredentialTOTP && (req.EnrollmentID == "" || req.Code == "")) || (method == mfa.CredentialWebAuthn && (req.CeremonyID == "" || len(req.Response) == 0)) {
+		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", "enrollment identifier and factor response are required")
 		return
 	}
 
@@ -173,13 +186,41 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	verified, err := h.totp.CheckEnrollmentCode(ctx, authCtx.UserID, req.EnrollmentID, req.Code, authCtx.TenantID)
+	var verified *totp.VerifiedEnrollment
+	var registration *webauthn.Registration
+	var passkeys *webauthn.Service
+	if method == mfa.CredentialWebAuthn {
+		if h.webauthn == nil {
+			writeInternal(w, r)
+			return
+		}
+
+		passkeys, err = h.webauthn.ForRequest(r.Host, r.Header.Get("Origin"), "session:"+authCtx.SessionID)
+		if err != nil {
+			httperr.Write(ctx, w, http.StatusBadRequest, "invalid_request", "invalid passkey origin")
+			return
+		}
+
+		u, userErr := h.users.GetByID(ctx, authCtx.UserID)
+		if userErr != nil {
+			writeInternal(w, r)
+			return
+		}
+
+		registration, err = passkeys.CheckRegistration(ctx, authCtx.UserID, req.CeremonyID, u.Email, req.Response, mfa.Scope{TenantID: authCtx.TenantID})
+	} else {
+		verified, err = h.totp.CheckEnrollmentCode(ctx, authCtx.UserID, req.EnrollmentID, req.Code, authCtx.TenantID)
+	}
+
 	switch {
-	case errors.Is(err, totp.ErrEnrollmentNotFound):
-		httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_enrollment_not_found", "enrollment not found or expired; start again")
+	case errors.Is(err, totp.ErrEnrollmentNotFound), errors.Is(err, webauthn.ErrCeremonyExpired), errors.Is(err, webauthn.ErrCeremonyUserMismatch):
+		httperr.Write(ctx, w, http.StatusNotFound, "mfa_enrollment_not_found", "enrollment not found or expired; start again")
 		return
 	case errors.Is(err, totp.ErrInvalidCode):
-		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_mfa_code", "invalid MFA code")
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_mfa_code", "invalid MFA code")
+		return
+	case errors.Is(err, webauthn.ErrInvalidResponse):
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_mfa_response", "invalid passkey response")
 		return
 	case err != nil:
 		writeInternal(w, r)
@@ -231,7 +272,13 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		cred, err := h.mfa.InsertScopedTx(ctx, tx, authCtx.UserID, factorTenant, mfa.CredentialTOTP, verified.Secret, req.Label)
+		var cred *mfa.Credential
+		if method == mfa.CredentialWebAuthn {
+			cred, err = passkeys.InsertRegistrationTx(ctx, tx, registration, authCtx.UserID, factorTenant, req.Label)
+		} else {
+			cred, err = h.mfa.InsertScopedTx(ctx, tx, authCtx.UserID, factorTenant, method, verified.Secret, req.Label)
+		}
+
 		if err != nil {
 			return err
 		}
@@ -257,13 +304,17 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		state, err = h.sessions.UpdateMFAAssuranceTx(ctx, tx, authCtx.SessionID, string(mfa.CredentialTOTP), now, credentialID)
+		state, err = h.sessions.UpdateMFAAssuranceTx(ctx, tx, authCtx.SessionID, string(method), now, credentialID)
 		if err != nil {
 			return err
 		}
 
-		// Last, so a failed write above leaves the enrollment pending for a retry.
-		return h.totp.ClaimEnrollment(ctx, verified)
+		// Claim TOTP last so a preceding database failure leaves its enrollment retryable.
+		if method == mfa.CredentialTOTP {
+			return h.totp.ClaimEnrollment(ctx, verified)
+		}
+
+		return nil
 	})
 	if err != nil {
 		if denial != enforce.Allowed {
@@ -285,13 +336,13 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, string(mfa.CredentialTOTP), &now, state.PasswordChangeRequired, state.ExpiresAt)
+	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, string(method), &now, state.PasswordChangeRequired, state.ExpiresAt)
 	if err != nil {
 		writeInternal(w, r)
 		return
 	}
 
-	h.recordAudit(ctx, r, authCtx, credentialID)
+	h.recordAudit(ctx, r, authCtx, credentialID, method)
 
 	loginsession.WriteReissuedAccessToken(w, r, accessToken, expiresIn, state.Persistent, map[string]any{
 		"recovery_codes": issued,
@@ -317,13 +368,13 @@ func (h *Handlers) stepUpSatisfied(w http.ResponseWriter, r *http.Request, authC
 	return true
 }
 
-func (h *Handlers) recordAudit(ctx context.Context, r *http.Request, authCtx *authcheck.AuthContext, credentialID string) {
+func (h *Handlers) recordAudit(ctx context.Context, r *http.Request, authCtx *authcheck.AuthContext, credentialID string, method mfa.CredentialType) {
 	if h.audit == nil {
 		log.Warn().Msg("mfaenroll: no audit recorder wired, mfa.enrolled not recorded")
 		return
 	}
 
-	metadata, err := json.Marshal(map[string]string{"credential_id": credentialID, "type": string(mfa.CredentialTOTP)})
+	metadata, err := json.Marshal(map[string]string{"credential_id": credentialID, "type": string(method)})
 	if err != nil {
 		log.Warn().Err(err).Msg("mfaenroll: encode audit metadata failed")
 		return
@@ -342,4 +393,48 @@ func (h *Handlers) recordAudit(ctx context.Context, r *http.Request, authCtx *au
 	}); err != nil {
 		log.Warn().Err(err).Msg("mfaenroll: audit insert failed")
 	}
+}
+
+func (h *Handlers) BeginWebAuthn(w http.ResponseWriter, r *http.Request) {
+	authCtx, ok := h.authenticate(w, r)
+	if !ok {
+		return
+	}
+
+	ctx := r.Context()
+	creds, err := h.mfa.ListAccepted(ctx, authCtx.UserID, mfa.Scope{TenantID: authCtx.TenantID})
+	if err != nil {
+		writeInternal(w, r)
+		return
+	}
+
+	if !h.stepUpSatisfied(w, r, authCtx, creds) {
+		return
+	}
+
+	if h.webauthn == nil {
+		writeInternal(w, r)
+		return
+	}
+
+	svc, err := h.webauthn.ForRequest(r.Host, r.Header.Get("Origin"), "session:"+authCtx.SessionID)
+	if err != nil {
+		httperr.Write(ctx, w, http.StatusBadRequest, "invalid_request", "invalid passkey origin")
+		return
+	}
+
+	u, err := h.users.GetByID(ctx, authCtx.UserID)
+	if err != nil {
+		writeInternal(w, r)
+		return
+	}
+
+	options, id, err := svc.BeginRegistration(ctx, authCtx.UserID, u.Email, mfa.Scope{TenantID: authCtx.TenantID})
+	if err != nil {
+		writeInternal(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, map[string]any{"ceremony_id": id, "options": jsontext.Value(options)})
 }

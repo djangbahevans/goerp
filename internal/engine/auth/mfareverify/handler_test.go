@@ -143,7 +143,7 @@ func newFixture(t *testing.T) *fixture {
 	totpService := totp.NewService(mfaStore, rowKeys, cacheClient)
 	recoveryService := recoverycode.NewService(mfaStore)
 	lockoutCounter := lockout.NewCounter(cacheClient)
-	handler := NewHandler(tenantResolver, authChecker, sessionStore, issuer, totpService, recoveryService, lockoutCounter, mfaStore)
+	handler := NewHandler(tenantResolver, authChecker, sessionStore, issuer, totpService, recoveryService, lockoutCounter, mfaStore, nil, nil)
 
 	slug := fmt.Sprintf("mfareverifytest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "MFA Reverify Test Co")

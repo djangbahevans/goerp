@@ -137,7 +137,7 @@ func newFixture(t *testing.T) *fixture {
 	issuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
 	totpService := totp.NewService(mfaStore, rowKeys, cacheClient)
 	recoveryService := recoverycode.NewService(mfaStore)
-	handler := NewHandler(mfaTokens, cacheClient, totpService, recoveryService, tenantStore, issuer, mfaStore)
+	handler := NewHandler(mfaTokens, cacheClient, totpService, recoveryService, tenantStore, issuer, mfaStore, nil, nil)
 
 	slug := fmt.Sprintf("mfaverifytest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "MFA Verify Test Co")

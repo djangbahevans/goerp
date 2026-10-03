@@ -1,30 +1,4 @@
-// Package engine is the composition root: Engine.New runs Stage 1
-// (engine-internals.md §2) — secrets backend, primary/replica Postgres,
-// Redis, Meilisearch (optional), object storage — plus bootstrapping the
-// system-schema tables owned outright by the engine rather than any module
-// (schema.SchemaSyncPool's module_schema_versions, tenant.Store's
-// tenants/tenant_domains) — and wires the results into the HTTP server's
-// injected health/ready checks. Primary Postgres, Redis, and both system-
-// schema bootstraps are fail-hard (New returns an error); replica Postgres,
-// Meilisearch, and object storage failures only warn and continue, per the
-// explicit warn-only list in engine-internals.md §2.
-//
-// New also runs Stage 3 (module discovery/order/cascading load/registry
-// publish, via moduleboot and registry.ModuleRegistry.Update), Stage 4
-// (tenantsync.SyncAll), and Stage 5 (poolwarm.WarmAll). A depends_on cycle
-// is fail-hard; individual modules ending up module.StatusFailed are not.
-//
-// Start runs the rest of Stage 6: opening the HTTP/admin servers, starting
-// the River job queue worker, spawning each workflow-capable module's
-// workflow-worker process, and starting the engine's own in-process
-// Temporal worker for system workflows like tenant provisioning/
-// offboarding (systemworker.Worker; client/manager/worker all built in
-// New, started in Start, same split). Unlike Stage 3/4's per-module
-// failures, any of these three failing to start or register with Temporal
-// is fail-hard — Start returns an error, same as an HTTP/River start
-// failure — since Stage 6 gets no per-module carve-out from
-// engine-internals.md §2's default "any step fails, the process exits
-// non-zero" rule.
+// Package engine constructs and runs the platform services, module runtime, and HTTP servers.
 package engine
 
 import (
@@ -105,6 +79,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/revoke"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/webauthn"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/moduleboot"
 	"github.com/djangbahevans/goerp/internal/engine/moduleinstall"
@@ -183,28 +158,19 @@ type Engine struct {
 	recordSharesStore   *recordshares.Store
 	savedFiltersStore   *savedfilters.Store
 	recordActivityStore *recordactivity.Store
-	// notificationStore backs /_notif/*.
-	notificationStore *notifications.Store
-	// notificationConfig resolves the tenant notification configuration
-	// channel routing consumes.
-	notificationConfig *notifconfig.Service
-	// notifier is the notification delivery pipeline (notify.Send) the
-	// engine's own engine.* sends and host.notify.send go through.
-	notifier engineNotifier
+	notificationStore   *notifications.Store
+	notificationConfig  *notifconfig.Service
+	notifier            engineNotifier
 	// txJobs inserts the engine's own jobs inside a database/sql
 	// transaction, such as a comment's notification job
 	// (record-activity.md §10). Nil in tests that enqueue nothing.
-	txJobs txJobInserter
-	// unsubscribeCodec verifies /_notif/unsubscribe's tokens.
+	txJobs           txJobInserter
 	unsubscribeCodec *notifications.UnsubscribeCodec
 	// tenantLocales resolves a tenant's default locale and timezone, for
 	// work outside a request such as due-date reminders.
-	tenantLocales *tenantl10n.Store
-	// scheduledActivityStore backs /_meta/scheduled-activities.
+	tenantLocales          *tenantl10n.Store
 	scheduledActivityStore *scheduledactivity.Store
-	// activityTypeStore backs /_meta/activity-types and
-	// /admin/activity-types, and the type checks scheduling makes.
-	activityTypeStore *activitytype.Store
+	activityTypeStore      *activitytype.Store
 	// roleStore resolves another user's tenant roles when a route reads a
 	// record with their permissions (record-activity.md §7).
 	roleStore       *role.Store
@@ -293,12 +259,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	tenantStore := tenant.NewStore(primaryPool)
 	tenantStore.AddReservedSlugs(cfg.ReservedSlugs...)
 
-	// billingStore isn't stored as an Engine field or passed to any
-	// adminapi.Register* call — tenantResolver below is its only consumer.
 	billingStore := billing.NewStore(primaryPool)
 
-	// checkpointStore backs goerp tenant export/import's per-module
-	// resumability (goerp#265, goerp#156).
 	checkpointStore := checkpoint.NewStore(primaryPool)
 
 	userStore := user.NewStore(primaryPool)
@@ -308,16 +270,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	scheduledActivityStore := scheduledactivity.NewStore(primaryPool)
 	activityTypeStore := activitytype.NewStore(primaryPool)
 
-	// apiKeyStore isn't stored as an Engine field — authChecker below is
-	// its only consumer.
 	apiKeyStore := apikey.NewStore(primaryPool)
 
 	mfaStore := mfa.NewStore(primaryPool)
 
 	rowCryptStore := rowcrypt.NewStore(primaryPool, secretsBackend)
-	// Loaded (or generated, on first boot) here at startup, same reasoning
-	// as signingKeySet/mfaTokenKeySet below — totp.Service needs a key
-	// ready before it can decrypt any enrolled TOTP secret.
 	rowKeySet, err := rowCryptStore.LoadOrGenerate(ctx)
 	if err != nil {
 		closeDBs()
@@ -347,8 +304,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	sessionStore := session.NewStore(primaryPool)
 
 	signingKeyStore := signingkey.NewStore(primaryPool, secretsBackend)
-	// Loaded (or generated, on first boot) here at startup rather than
-	// lazily on first login, so tokenIssuer below always has a key ready.
 	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		closeDBs()
@@ -362,9 +317,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	tokenIssuer.SetIPAllowlists(ipAllowlists)
 
 	mfaTokenKeyStore := mfatoken.NewStore(primaryPool, secretsBackend)
-	// Loaded (or generated, on first boot) here at startup, same reasoning
-	// as signingKeySet above — loginHandler and mfaVerifyHandler both need
-	// a key ready, and both must agree on the same one.
 	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		closeDBs()
@@ -426,9 +378,6 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	roleCache := permcache.NewRoleCache(cacheClient)
 
-	// adminapi.RegisterTenantRoutes is called further down, once
-	// jobQueueClient exists (tenantoffboard.NewOffboarder needs it).
-
 	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 
 	var searchClient *search.Client
@@ -450,11 +399,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	// temporalClient already use.
 	workflowWorkers := workflowworker.NewManager(storageBackend, temporalClient, filepath.Join(cfg.ModuleDir, ".workflow-worker-cache"))
 
-	// systemWorker hosts the engine's own Temporal workflows (goerp#149,
-	// goerp#150) — distinct from workflowWorkers above, which is
-	// module-scoped. Same New-vs-Start split: constructed here so future
-	// tickets have somewhere to RegisterWorkflow/RegisterActivity before
-	// Start actually begins polling.
 	systemWorker := systemworker.New(temporalClient)
 
 	var e *Engine
@@ -702,10 +646,20 @@ func New(cfg *config.Config) (*Engine, error) {
 	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore, tenantselect.NewStore(cacheClient), ipAllowlists)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
-	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer, mfaStore)
+	passkeyRPID := cfg.WebAuthnRPID
+	if passkeyRPID == "" {
+		passkeyRPID = cfg.PlatformDomain
+	}
+	passkeyService, err := webauthn.NewService(webauthn.Config{RPID: passkeyRPID, RPDisplayName: cfg.WebAuthnRPDisplayName, RPOrigins: cfg.WebAuthnRPOrigins, BaseURL: cfg.AppBaseURL}, mfaStore, rowKeySet, cacheClient, sessionStore)
+	if err != nil {
+		closeOnFailure()
+		return nil, fmt.Errorf("configure passkeys: %w", err)
+	}
+
+	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer, mfaStore, passkeyService, authAuditStore)
 	mfaLockout := lockout.NewCounter(cacheClient)
-	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout, mfaStore)
-	mfaEnrollHandlers := mfaenroll.NewHandlers(tenantResolver, authChecker, userStore, mfaStore, sessionStore, tokenIssuer, totpService, recoveryCodeService, authAuditStore)
+	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout, mfaStore, passkeyService, authAuditStore)
+	mfaEnrollHandlers := mfaenroll.NewHandlers(tenantResolver, authChecker, userStore, mfaStore, sessionStore, tokenIssuer, totpService, recoveryCodeService, authAuditStore, passkeyService)
 	mfaFactorHandlers := mfafactors.NewHandlers(tenantResolver, authChecker, mfaStore, mfaPolicyStore, totpService, recoveryCodeService, mfaLockout, revoke.NewService(mfaStore, sessionRevoker), sessionRevoker, authAuditStore)
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
 	passwordResetRequestHandler := passwordreset.NewRequestHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer, authAuditStore)
@@ -753,6 +707,10 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /auth/mfa/reverify":                  mfaReverifyHandler,
 		"POST /auth/mfa/enroll/totp":               http.HandlerFunc(mfaEnrollHandlers.Begin),
 		"POST /auth/mfa/enroll/totp/confirm":       http.HandlerFunc(mfaEnrollHandlers.Confirm),
+		"POST /auth/mfa/enroll/webauthn":           http.HandlerFunc(mfaEnrollHandlers.BeginWebAuthn),
+		"POST /auth/mfa/enroll/webauthn/confirm":   http.HandlerFunc(mfaEnrollHandlers.ConfirmWebAuthn),
+		"POST /auth/mfa/webauthn/options":          http.HandlerFunc(mfaVerifyHandler.Options),
+		"POST /auth/mfa/reverify/webauthn/options": http.HandlerFunc(mfaReverifyHandler.Options),
 		"GET /auth/mfa/factors":                    http.HandlerFunc(mfaFactorHandlers.List),
 		"POST /auth/mfa/factors/{id}/remove":       http.HandlerFunc(mfaFactorHandlers.Remove),
 		"POST /auth/mfa/recovery-codes/regenerate": http.HandlerFunc(mfaFactorHandlers.RegenerateRecoveryCodes),
@@ -1246,11 +1204,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	builtinRoutes["GET /_ws"] = http.HandlerFunc(e.dispatchWSRoute)
 
-	// goerp#822: a builtinRoutes entry with no matching
-	// registry.registerBuiltinRoutes registration 404s in
-	// routeResolutionMiddleware before dispatch is ever reached — this
-	// caught four routes that had silently regressed that way. Checked
-	// here, once every builtinRoutes entry above has been added.
+	// Every builtin handler needs a registry entry before route resolution can dispatch it.
 	if err := verifyBuiltinRouteParity(builtinRoutes, moduleRegistry.Snapshot().RouteTable()); err != nil {
 		closeOnFailure()
 		return nil, fmt.Errorf("verify builtin route parity: %w", err)
@@ -1266,17 +1220,14 @@ func New(cfg *config.Config) (*Engine, error) {
 	return e, nil
 }
 
-// ModuleRegistry returns the registry Stage 3 published during New.
 func (e *Engine) ModuleRegistry() *registry.ModuleRegistry {
 	return e.moduleRegistry
 }
 
-// JobQueue returns the River client Start begins processing jobs on.
 func (e *Engine) JobQueue() *river.Client[pgx.Tx] {
 	return e.jobQueue
 }
 
-// Tracer returns the OpenTelemetry tracer for the engine.
 func (e *Engine) Tracer() trace.Tracer {
 	return e.tracer
 }

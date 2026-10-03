@@ -601,11 +601,6 @@ func TestBuildRouteTable_FromModules(t *testing.T) {
 	}
 }
 
-// TestBuildRouteTable_IncludesBuiltinRoutes guards goerp#86: /_health,
-// /_ready, and POST /auth/login must resolve through the same RouteTable
-// module routes do, not a second router — and survive every rebuild
-// (module load, hot reload), not just an initial registration step that
-// could fall out of sync.
 func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 	modules := map[string]*module.LoadedModule{
 		"contacts": {Manifest: manifest.Manifest{Type: "standard"}},
@@ -657,6 +652,10 @@ func TestBuildRouteTable_IncludesBuiltinRoutes(t *testing.T) {
 		{"GET", "/auth/me"},
 		{"POST", "/auth/mfa/enroll/totp"},
 		{"POST", "/auth/mfa/enroll/totp/confirm"},
+		{"POST", "/auth/mfa/enroll/webauthn"},
+		{"POST", "/auth/mfa/enroll/webauthn/confirm"},
+		{"POST", "/auth/mfa/webauthn/options"},
+		{"POST", "/auth/mfa/reverify/webauthn/options"},
 		{"GET", "/auth/mfa/factors"},
 		{"POST", "/auth/mfa/factors/0197a4f2-0000-7000-8000-000000000000/remove"},
 		{"POST", "/auth/mfa/recovery-codes/regenerate"},
