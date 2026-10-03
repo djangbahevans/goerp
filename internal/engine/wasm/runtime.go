@@ -127,10 +127,15 @@ func (r *Runtime) SetReplicaDB(db *sql.DB) {
 	r.replicaDB.Store(db)
 }
 
-// SetSchemaSyncDB wires the pool host.db.migration_ddl runs DDL on; unset,
-// migration_ddl returns abi.unavailable.
+// SetSchemaSyncDB supplies the BYPASSRLS pool for migration SQL and DDL.
 func (r *Runtime) SetSchemaSyncDB(db *sql.DB) {
 	r.schemaSyncDB.Store(db)
+}
+
+// SetDataMigrationContext grants unfiltered SQL access to a dispatched migration.
+func (r *Runtime) SetDataMigrationContext(mc *ModuleContext) {
+	mc.IsDataMigrationJob = true
+	mc.dataMigrationDB = r.schemaSyncDB.Load()
 }
 
 // New registers the host ABI against the shared runtime. Postgres must be

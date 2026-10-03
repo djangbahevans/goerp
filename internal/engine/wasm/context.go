@@ -125,14 +125,9 @@ type ModuleContext struct {
 	TraceID    string
 	SpanStack  []trace.Span
 
-	// IsDataMigrationJob is true only for a ModuleContext built around a
-	// data-migration handle_job invocation (internal/engine/jobdispatch,
-	// goerp#500) — never set via NewModuleContext itself, set directly by
-	// the caller afterward the same way SpanStack is. host.db.migration_ddl
-	// (host_db_migration_ddl.go) checks this in addition to
-	// CapDBMigrationDDL, so holding the capability alone doesn't let a
-	// module call it from an ordinary HTTP/event/workflow dispatch.
+	// Migration SQL bypasses ABAC only within a dispatched data migration.
 	IsDataMigrationJob bool
+	dataMigrationDB    *sql.DB
 
 	// jobResult is non-nil only for a handle_job invocation that
 	// host.jobs.dispatch_provider_sync is waiting on (CaptureJobResult):

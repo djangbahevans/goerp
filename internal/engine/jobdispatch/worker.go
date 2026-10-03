@@ -247,6 +247,7 @@ func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.
 		ModelDecls:          mod.ModelDecls,
 		FieldSecRegistry:    snap.FieldSecRegistry(),
 		EventRegistry:       snap.EventRegistry(),
+		DataAuditRegistry:   snap.DataAuditRegistry(),
 		ComputedIndex:       snap.ComputedIndex(),
 		ComputeTargets:      registry.ComputeTargets(snap),
 		PermissionRegistry:  snap.PermissionRegistry(),
@@ -259,7 +260,10 @@ func newModuleContext(rt *wasm.Runtime, mod *module.LoadedModule, args jobqueue.
 		ORMBulkMaxRows:      rt.ORMBulkMaxRows(),
 		ORMStatementTimeout: rt.ORMStatementTimeout(),
 	})
-	mc.IsDataMigrationJob = args.IsDataMigration
+
+	if args.IsDataMigration {
+		rt.SetDataMigrationContext(mc)
+	}
 
 	return mc
 }

@@ -20,11 +20,7 @@ import (
 // "Program Limit Exceeded" class the payload cap might otherwise suggest.
 const invalidParameterValueSQLState = "22023"
 
-// makeDBNotify builds host.db.notify — a tenant-namespaced Postgres
-// NOTIFY, sent immediately against primary if no tx_id is supplied, or on
-// the caller's own open host.db.begin transaction otherwise. Postgres
-// itself defers a transactional NOTIFY's delivery until COMMIT (and drops
-// it on rollback), so this needs no commit-hook mechanism of its own.
+// Postgres delivers transactional NOTIFY only on commit and discards it on rollback.
 func makeDBNotify(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 	return func(ctx context.Context, m api.Module, ptr, length uint32) uint64 {
 		inst := r.InstanceForModule(m)
@@ -63,7 +59,12 @@ func makeDBNotify(r *Runtime, primary *sql.DB) func(ctx context.Context, m api.M
 			}
 			notifyErr = notifyOnTx(qCtx, tx, channel, input.Payload)
 		} else {
-			_, notifyErr = primary.ExecContext(qCtx, "SELECT pg_notify($1, $2)", channel, input.Payload)
+			target, err := modCtx.database(primary)
+			if err != nil {
+				return abi.EncodeHostError(ctx, m, allocate, &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()})
+			}
+
+			_, notifyErr = target.ExecContext(qCtx, "SELECT pg_notify($1, $2)", channel, input.Payload)
 		}
 		if notifyErr != nil {
 			return abi.EncodeHostError(ctx, m, allocate, translateNotifyError(notifyErr))

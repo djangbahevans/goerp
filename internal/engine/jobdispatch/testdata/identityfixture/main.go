@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/db"
 	"github.com/djangbahevans/goerp/sdk/go/engine"
 	"github.com/djangbahevans/goerp/sdk/go/jobs"
+	"github.com/djangbahevans/goerp/sdk/go/model"
 	"github.com/djangbahevans/goerp/sdk/go/orm"
 )
 
@@ -101,6 +103,92 @@ func init() {
 
 		return tx.Commit()
 	})
+}
+
+func init() {
+	engine.OnDataMigration("migration_sql", func(ctx *model.MigrationContext) error {
+		return model.ProcessBatches(ctx, "widget", "seen = 0", 1, func(batch []map[string]any) error {
+			_, err := db.Exec("UPDATE widget SET seen = 1 WHERE id = $1", batch[0]["id"])
+			return err
+		})
+	})
+
+	engine.OnDataMigration("migration_tx", func(_ *model.MigrationContext) error {
+		return db.WithTx(func(tx *db.Tx) error {
+			rows, err := tx.Query[widget]("SELECT name FROM widget", nil)
+			if err != nil {
+				return err
+			}
+
+			if len(rows) != 2 {
+				return fmt.Errorf("transaction sees %d rows, want 2", len(rows))
+			}
+
+			_, err = tx.Exec("UPDATE widget SET seen = 1")
+			return err
+		})
+	})
+
+	engine.OnDataMigration("migration_batch", func(_ *model.MigrationContext) error {
+		rows, err := db.QueryReplica[struct{ ID string }]("SELECT id FROM widget", nil)
+		if err != nil {
+			return err
+		}
+
+		if len(rows) != 2 {
+			return fmt.Errorf("replica query sees %d rows, want 2", len(rows))
+		}
+
+		var params [][]any
+		for _, row := range rows {
+			params = append(params, []any{row.ID})
+		}
+
+		out, err := db.ExecBatch("UPDATE widget SET seen = 1 WHERE id = $1", params)
+		if err != nil {
+			return err
+		}
+
+		if out.TotalRowsAffected != 2 || out.FailedCount != 0 {
+			return fmt.Errorf("batch result: %+v", out)
+		}
+
+		return nil
+	})
+
+	engine.OnDataMigration("migration_orm", func(_ *model.MigrationContext) error { return migrateORM(nil) })
+	engine.OnDataMigration("migration_orm_tx", func(_ *model.MigrationContext) error { return db.WithTx(migrateORM) })
+}
+
+func migrateORM(tx *db.Tx) error {
+	q := orm.From[widget]()
+	if tx != nil {
+		q = q.Tx(tx)
+	}
+
+	ids, err := q.IDs()
+	if err != nil {
+		return err
+	}
+
+	if len(ids) != 2 {
+		return fmt.Errorf("ORM sees %d rows, want 2", len(ids))
+	}
+
+	vals := orm.Set(orm.NewValues[widget](), orm.NewField[widget, int]("seen"), 1)
+	for _, id := range ids {
+		if tx == nil {
+			err = orm.Write(id, vals, nil)
+		} else {
+			err = orm.WriteTx(tx, id, vals, nil)
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 //go:wasmexport handle_job
