@@ -209,6 +209,8 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 		TraceID:       httperr.TraceIDFromContext(ctx),
 		RequestedAt:   time.Now(),
 		PermissionSet: authCtx.PermissionSet,
+		ContactID:     authCtx.ContactID,
+		RolesLive:     authCtx.RolesLive,
 	}
 
 	if entry.Manifest.Name != "" {

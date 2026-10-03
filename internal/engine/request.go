@@ -5,15 +5,12 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/permission"
 )
 
-// EngineRequest is the request invokeHandler marshals for a module's
-// handle_request export: the wire request plus the caller's resolved
-// permission bitfield (authcheck.AuthContext.PermissionSet), threaded
-// through to the module context so host functions can evaluate
-// field-security rules without re-querying permcache (auth-internals.md
-// §13). PermissionSet has no counterpart in the wire request — a module
-// reads its caller's permissions via host.authz — so it is left untagged
-// and the module's decode ignores the extra key.
+// EngineRequest carries the wire request and resolved authorization state.
+// ContactID and RolesLive stay on the host side for ABAC session variables;
+// modules read permissions through host.authz.
 type EngineRequest struct {
 	abiv1.Request
 	PermissionSet permission.PermissionBitfield
+	ContactID     string   `msgpack:"-"`
+	RolesLive     []string `msgpack:"-"`
 }
