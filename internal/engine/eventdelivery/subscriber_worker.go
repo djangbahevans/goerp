@@ -2,6 +2,7 @@ package eventdelivery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,30 +10,19 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/riverqueue/river"
 )
 
-// statusPermanent/statusRetryable mirror the reserved handle_event status
-// codes ModuleInstance.InvokeHandleEvent's doc comment defines (goerp#129)
-// — 0 is success and handled inline below, so only the two failure codes
-// need names here.
 const (
 	statusRetryable = 1
 	statusPermanent = 2
 )
 
-// SubscriberDeliveryWorker processes jobqueue.SubscriberDeliveryArgs jobs —
-// the piece that actually invokes an async subscriber's handler, closing
-// the gap Worker's fan-out (worker.go) leaves: nothing else in this
-// codebase resolves the target module and calls its handle_event export
-// for these jobs. Shares jobdispatch.Worker's exact shape (nil-Snapshot
-// guard, StatusReady/nil-Pool checks, Pool.Borrow/Return) but resolves
-// against the live EventRegistry instead of the JobRegistry, since a
-// subscriber delivery is scoped to (EventName, ModuleName, HandlerName),
-// not a job type.
 type SubscriberDeliveryWorker struct {
 	river.WorkerDefaults[jobqueue.SubscriberDeliveryArgs]
 	ModuleRegistry *registry.ModuleRegistry
+	Invoker        *HandlerInvoker
 }
 
 func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobqueue.SubscriberDeliveryArgs]) error {
@@ -44,10 +34,6 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 	}
 
 	if !isLiveAsyncSubscriber(snap.EventRegistry().Subscribers(args.EventName), args.ModuleName, args.HandlerName) {
-		// The subscription named at insert time is no longer declared (a
-		// manifest change removed or renamed it, or async flipped to
-		// false) — not retryable, the mismatch won't resolve itself on a
-		// later attempt.
 		return fmt.Errorf("subscription %s.%s for event %q is no longer a registered async subscriber", args.ModuleName, args.HandlerName, args.EventName)
 	}
 
@@ -56,32 +42,19 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 		return fmt.Errorf("module %q is not ready", args.ModuleName)
 	}
 	if mod.Pool == nil {
-		// A module manifest can legitimately declare wasm: false (e.g. the
-		// "theme" type requires it) and still reach StatusReady with no
-		// compiled WASM — an async subscription on such a module is a
-		// manifest inconsistency nothing today rejects at load time; this
-		// must not panic on mod.Pool.Borrow if it ever happens.
 		return fmt.Errorf("module %q has no WASM instance pool (wasm: false)", args.ModuleName)
 	}
 
-	inst, err := mod.Pool.Borrow(ctx)
-	if err != nil {
-		return fmt.Errorf("borrow instance for %s: %w", args.ModuleName, err)
-	}
-	defer mod.Pool.Return(inst)
-
-	envelope, err := event.Envelope{
+	status, err := w.Invoker.invoke(ctx, snap, mod, event.Envelope{
 		ID: args.EventID, Name: args.EventName, Version: args.EventVersion,
 		EmitterModule: args.EmitterModule, TenantID: args.TenantID, UserID: args.UserID,
 		TraceID: args.TraceID, EmittedAt: args.EmittedAt, Payload: args.Payload,
-	}.Marshal()
+	})
 	if err != nil {
-		return fmt.Errorf("marshal event envelope: %w", err)
-	}
-
-	status, err := inst.InvokeHandleEvent(ctx, envelope)
-	if err != nil {
-		return fmt.Errorf("invoke handle_event for %s/%s: %w", args.ModuleName, args.HandlerName, err)
+		if errors.Is(err, role.ErrNotMember) {
+			return river.JobCancel(err)
+		}
+		return err
 	}
 	switch status {
 	case 0:
@@ -93,15 +66,7 @@ func (w *SubscriberDeliveryWorker) Work(ctx context.Context, job *river.Job[jobq
 	}
 }
 
-// NextRetry overrides River's client-level retry policy with the
-// subscriber's own declared retry_policy (manifest-spec.md's RetryPolicy
-// object) — looked up by (EventName, ModuleName, HandlerName) against the
-// *current* snapshot, not a value captured at insert time, so a manifest
-// change retroactively affects an in-flight retry the same way Work's own
-// ownership check re-validates against the current snapshot on every
-// attempt. Returns the zero time.Time (deferring to the client-level
-// policy) when the subscription can no longer be found — Work will fail
-// that same attempt with a non-retryable-in-spirit error anyway.
+// Retry policy is resolved from the live subscription so reloads apply to retries.
 func (w *SubscriberDeliveryWorker) NextRetry(job *river.Job[jobqueue.SubscriberDeliveryArgs]) time.Time {
 	snap := w.ModuleRegistry.Snapshot()
 	if snap == nil {

@@ -3,26 +3,21 @@ package eventdelivery
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
-	"github.com/tetratelabs/wazero"
 )
 
-// handleEventEchoModule exports allocate/deallocate/handle_event, where
-// handle_event returns the request length as its i32 status — a payload
-// of length 0 yields status 0 (success), length 1 yields status 1
-// (retryable), length 2 yields status 2 (permanent). Copied from
-// internal/engine/wasm's own instance_test.go fixture of the same name
-// (unexported there, so not reusable directly) — same pattern
-// jobdispatch/worker_test.go already established for handleJobEchoModule.
 var handleEventEchoModule = []byte{
 	0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x11, 0x03, 0x60,
 	0x01, 0x7F, 0x01, 0x7F, 0x60, 0x02, 0x7F, 0x7F, 0x00, 0x60, 0x02, 0x7F,
@@ -36,9 +31,6 @@ var handleEventEchoModule = []byte{
 	0x01, 0x0B, 0x02, 0x00, 0x0B, 0x04, 0x00, 0x20, 0x01, 0x0B,
 }
 
-// handleEventTrapsModule is handleEventEchoModule with handle_event's body
-// replaced by an unconditional unreachable trap. Copied from
-// internal/engine/wasm's own instance_test.go fixture of the same name.
 var handleEventTrapsModule = []byte{
 	0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x11, 0x03, 0x60,
 	0x01, 0x7F, 0x01, 0x7F, 0x60, 0x02, 0x7F, 0x7F, 0x00, 0x60, 0x02, 0x7F,
@@ -52,9 +44,6 @@ var handleEventTrapsModule = []byte{
 	0x01, 0x0B, 0x02, 0x00, 0x0B, 0x03, 0x00, 0x00, 0x0B,
 }
 
-// getDataModule exports get_data (not handle_event) — enough to exercise
-// the "module missing handle_event export" error path without a real
-// module. Copied from internal/engine/wasm's own instance_test.go fixture.
 var getDataModule = []byte{
 	0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0A, 0x02, 0x60,
 	0x00, 0x01, 0x7E, 0x60, 0x02, 0x7F, 0x7F, 0x00, 0x03, 0x03, 0x02, 0x00,
@@ -72,28 +61,29 @@ const (
 	testHandlerName     = "handle_test_event"
 )
 
-// newTestSubscriberWorker builds a real *registry.ModuleRegistry with one
-// loaded module (StatusReady, async-subscribed to testEventName, backed by
-// a real *wasm.InstancePool compiled from wasmBytes) — the same pattern
-// jobdispatch/worker_test.go's newTestWorker establishes.
 func newTestSubscriberWorker(t *testing.T, wasmBytes []byte) *SubscriberDeliveryWorker {
 	t.Helper()
-	ctx := context.Background()
 
-	rt := wazero.NewRuntime(ctx)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	ctx := t.Context()
+	cleanupCtx := context.WithoutCancel(ctx)
+
+	rt, err := wasm.New(&config.Config{CompilationCache: filepath.Join(t.TempDir(), "cache"), PoolMaxMemoryByes: 64 << 20, Environment: string(config.Production)}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close(cleanupCtx) })
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(context.Background()) })
+	t.Cleanup(func() { _ = compiled.Close(cleanupCtx) })
 
-	pool := wasm.NewInstancePool(testEventModuleName, compiled, rt, wasm.PoolConfig{
+	pool := rt.NewPool(testEventModuleName, compiled, wasm.PoolConfig{
 		MaxSize:       2,
 		BorrowTimeout: time.Second,
 	})
-	t.Cleanup(func() { pool.DrainAndClose(context.Background(), time.Second) })
+	t.Cleanup(func() { pool.DrainAndClose(cleanupCtx, time.Second) })
 
 	reg := &registry.ModuleRegistry{}
 	if _, err := reg.Update(map[string]*module.LoadedModule{
@@ -101,7 +91,7 @@ func newTestSubscriberWorker(t *testing.T, wasmBytes []byte) *SubscriberDelivery
 			Status: module.StatusReady,
 			Pool:   pool,
 			Manifest: manifest.Manifest{
-				Type: "standard",
+				Name: testEventModuleName, Type: "standard",
 				Subscribes: []manifest.EventSubscription{
 					{Name: testEventName, Handler: testHandlerName, Async: true},
 				},
@@ -111,12 +101,13 @@ func newTestSubscriberWorker(t *testing.T, wasmBytes []byte) *SubscriberDelivery
 		t.Fatalf("ModuleRegistry.Update: %v", err)
 	}
 
-	return &SubscriberDeliveryWorker{ModuleRegistry: reg}
+	return &SubscriberDeliveryWorker{ModuleRegistry: reg, Invoker: &HandlerInvoker{Runtime: rt, TenantStore: testTenantResolver{}}}
 }
 
 func runSubscriberWork(t *testing.T, w *SubscriberDeliveryWorker, args jobqueue.SubscriberDeliveryArgs) error {
 	t.Helper()
-	return w.Work(context.Background(), &river.Job[jobqueue.SubscriberDeliveryArgs]{JobRow: &rivertype.JobRow{}, Args: args})
+
+	return w.Work(t.Context(), &river.Job[jobqueue.SubscriberDeliveryArgs]{JobRow: &rivertype.JobRow{}, Args: args})
 }
 
 func TestSubscriberWork_ZeroPayloadSucceeds(t *testing.T) {
@@ -202,11 +193,6 @@ func TestSubscriberWork_StaleSubscriptionReturnsError(t *testing.T) {
 	}
 }
 
-// TestSubscriberWork_NilPoolReturnsErrorNotPanic guards against a module
-// manifest that legitimately declares wasm: false reaching StatusReady
-// with a nil Pool — Work must return an error, not panic on
-// mod.Pool.Borrow, the same nil-guard jobdispatch.Worker already proves
-// for job dispatch.
 func TestSubscriberWork_NilPoolReturnsErrorNotPanic(t *testing.T) {
 	reg := &registry.ModuleRegistry{}
 	if _, err := reg.Update(map[string]*module.LoadedModule{
@@ -246,8 +232,6 @@ func TestSubscriberWork_NilSnapshotReturnsError(t *testing.T) {
 
 func TestSubscriberDeliveryWorker_NextRetry_UsesSubscriptionPolicy(t *testing.T) {
 	w := newTestSubscriberWorker(t, handleEventEchoModule)
-	// Override the fixture's default (no retry_policy) with one declaring
-	// a distinctive, easy-to-assert-on delay.
 	if _, err := w.ModuleRegistry.Update(map[string]*module.LoadedModule{
 		testEventModuleName: {
 			Status: module.StatusReady,
@@ -286,4 +270,10 @@ func TestSubscriberDeliveryWorker_NextRetry_UnknownSubscriptionDefersToClientPol
 	if !next.IsZero() {
 		t.Fatalf("expected zero time.Time (defer to client policy) for an unknown subscription, got %v", next)
 	}
+}
+
+type testTenantResolver struct{}
+
+func (testTenantResolver) GetByID(context.Context, string) (*tenant.Tenant, error) {
+	return &tenant.Tenant{Slug: "eventtest"}, nil
 }
