@@ -233,10 +233,8 @@ func writeExecChangeActivity(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 	return insertActivityEntries(ctx, tx, modCtx, qualifiedModel, entries)
 }
 
-// lockConflictRowBeforeUpsert reads, and locks, the existing row an
-// OnConflictUpdate create would overwrite, so its change entry has old
-// values to compare against. nil when md has no tracked fields, the create
-// isn't an OnConflictUpdate, or no row matches the conflict target yet.
+// Lock the conflict row before upsert so tracked changes compare with
+// the values actually replaced by the update.
 func lockConflictRowBeforeUpsert(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *abiv1.ORMOnConflict) (map[string]any, *abiv1.HostError) {
 	if onConflict == nil || onConflict.Policy != "update" || !hasTrackedFields(md) {
 		return nil, nil
@@ -255,7 +253,7 @@ func lockConflictRowBeforeUpsert(ctx context.Context, tx *sql.Tx, md model.Model
 		conds[i] = fmt.Sprintf("%s = $%d", quoteIdentORM(col), i+1)
 		args[i] = v
 	}
-	sqlStr := fmt.Sprintf("SELECT * FROM %s WHERE %s FOR UPDATE", quoteIdentORM(modeltable.Name(md)), strings.Join(conds, " AND "))
+	sqlStr := fmt.Sprintf("SELECT * FROM %s WHERE %s FOR UPDATE", quoteIdentORM(modeltable.Name(md)), activeModelWhere(md, strings.Join(conds, " AND ")))
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, ormSQLError(err)

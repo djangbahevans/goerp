@@ -11,14 +11,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// This file holds DynamicLink field validation for host.orm's write half
-// (goerp#379) — go-sdk-reference.md §22 "DynamicLink". A DynamicLink
-// field has no FK (its target table varies per row, and a Postgres FK
-// can only ever reference one table), so the engine itself enforces what
-// Postgres can't: both reference_type/reference_id present together, and
-// reference_id actually existing in whichever model reference_type
-// names.
-
 // validateDynamicLinkPairs rejects a write that sets a DynamicLink field
 // or its sibling reference-type field without the other — "dynamic link
 // fields must be set together" (go-sdk-reference.md §22). Pure/no DB
@@ -42,15 +34,7 @@ func validateDynamicLinkPairs(md model.ModelDeclaration, record map[string]any) 
 	return nil
 }
 
-// checkDynamicLinkTargets verifies, for every DynamicLink field present in
-// record, that record[ReferenceTypeField] names a known model and
-// record[field] exists as a row in that model's table. The target model
-// can belong to a different module than the one calling host.orm — a
-// Comment/Attachment model's reference_type allowlist can span modules —
-// resolved via resolveAnyModel (modCtx.ComputeTargets(), the same
-// cross-module lookup goerp#377 already established for the Many2One-hop
-// computed-field case). Runs inside tx so a rejection aborts the same
-// transaction as any other write validation failure.
+// DynamicLink targets may belong to any loaded module and have no SQL FK.
 func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, record map[string]any) *abiv1.HostError {
 	for _, f := range md.Fields {
 		if f.Def.Kind != model.KindDynamicLink {
@@ -59,7 +43,7 @@ func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 		idVal, hasID := record[f.Name]
 		typeVal, hasType := record[f.Def.ReferenceTypeField]
 		if !hasID || !hasType {
-			continue // validateDynamicLinkPairs already rejects a lone one.
+			continue
 		}
 		typeName, ok := typeVal.(string)
 		if !ok {
@@ -77,7 +61,7 @@ func checkDynamicLinkTargets(ctx context.Context, tx *sql.Tx, modCtx *ModuleCont
 
 		table := quoteIdentORM(modeltable.Name(targetMD))
 		var exists bool
-		sqlStr := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s = $1)", table, quoteIdentORM(targetPK))
+		sqlStr := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s)", table, activeModelWhere(targetMD, quoteIdentORM(targetPK)+" = $1"))
 		if err := tx.QueryRowContext(ctx, sqlStr, idVal).Scan(&exists); err != nil {
 			return ormSQLError(err)
 		}

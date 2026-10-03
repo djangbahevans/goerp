@@ -10,15 +10,6 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// displayNameField is the literal field name expandRelations falls back
-// to for a related record's label, per the label-field precedence chain
-// documented in view-system.md/host-abi-reference.md §5a's Many2One
-// read-shape ("{field_id, field: {id, display_name}}"). The chain's
-// stronger rungs (a declared list view's `primary: true` column, the
-// model's own `.Primary()` field) aren't available yet — `.Primary()`
-// doesn't exist in the SDK (goerp#352) — so this is the only rung host.orm
-// can consult today. A target model with no field literally named
-// "display_name" still expands, just without a display_name key.
 const displayNameField = "display_name"
 
 // expandRelations resolves every Many2One column present in columns into
@@ -88,8 +79,10 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 		args[i] = v
 	}
 
-	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s IN (%s)",
-		joinQuoted(selectCols), quoteIdentORM(modeltable.Name(targetMD)), quoteIdentORM(targetPK), strings.Join(placeholders, ", "))
+	where := activeModelWhere(targetMD, fmt.Sprintf("%s IN (%s)", quoteIdentORM(targetPK), strings.Join(placeholders, ", ")))
+
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
+		joinQuoted(selectCols), quoteIdentORM(modeltable.Name(targetMD)), where)
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return err
@@ -128,7 +121,7 @@ func expandOneRelation(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, f
 		if rel, found := byPK[fmt.Sprintf("%v", fkVal)]; found {
 			record[readKey] = rel
 		} else {
-			// Missing/RLS-excluded target row — fail closed, not an error.
+			// Missing, deleted or RLS-hidden targets leave the FK intact.
 			record[readKey] = nil
 		}
 	}

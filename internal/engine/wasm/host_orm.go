@@ -54,20 +54,6 @@ func ormSQLErrorRetryable(err error) *abiv1.HostError {
 	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error(), Retry: true}
 }
 
-// registerHostORM attaches host.orm's read half (search/search_read/read,
-// this file), write half (create/write/unlink, host_orm_write.go), and
-// Transient-model routing (host_orm_transient.go) to the runtime. Lives
-// in the wasm package for the same import-cycle reason registerHostDB
-// does (host_db.go) — its closures need direct access to *sql.DB and the
-// Runtime's instance registry. insertClient is the same never-Start()'d
-// river.Client[*sql.Tx] registerHostEvent uses, threaded through so the
-// write half can emit orm.record.* events transactionally
-// (host_orm_write.go's emitRecordEvent) without a second client.
-// cacheClient backs Transient-model create/read/write/unlink
-// (host_orm_transient.go) — Table-backed models never touch it.
-//
-// dispatchORMRoute (goerp#346, EnableOps' HTTP entry point) is a separate
-// ticket — nothing here derives or serves an HTTP route.
 func registerHostORM(ctx context.Context, rt wazero.Runtime, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client) error {
 	_, err := rt.NewHostModuleBuilder("host.orm").
 		NewFunctionBuilder().WithFunc(makeORMSearch(r, db)).Export("search").
@@ -109,12 +95,8 @@ func makeORMSearch(r *Runtime, db *sql.DB) func(ctx context.Context, m api.Modul
 	}
 }
 
-// ORMSearch is host.orm search's plain-Go core, callable without a WASM
-// instance in the loop — the shared entry point for both the WASM
-// closure above and dispatchORMRoute (goerp#346, HTTP-served EnableOps
-// routes). Enforces db.read the same way regardless of caller, since
-// modCtx.Capabilities() reflects the calling module's own declared
-// capabilities, not the transport that reached it.
+// The WASM imports and engine-served CRUD routes share these cores,
+// so capability and model checks apply to both transports.
 func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.ORMSearchInput) (abiv1.ORMSearchOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
 		return abiv1.ORMSearchOutput{}, abi.CapabilityDenied("db.read")
@@ -137,6 +119,8 @@ func ORMSearch(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abi
 	if !ok {
 		return abiv1.ORMSearchOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeModelNotFound, Message: "model " + input.Model + " declares no primary key field"}
 	}
+
+	whereFrag = activeModelWhere(md, whereFrag)
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
@@ -198,8 +182,6 @@ func makeORMSearchRead(r *Runtime, db *sql.DB) func(ctx context.Context, m api.M
 	}
 }
 
-// ORMSearchRead is host.orm search_read's plain-Go core — see ORMSearch's
-// doc comment for the shared-entry-point rationale.
 func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.ORMSearchReadInput) (abiv1.ORMSearchReadOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
 		return abiv1.ORMSearchReadOutput{}, abi.CapabilityDenied("db.read")
@@ -232,6 +214,8 @@ func ORMSearchRead(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input
 		args = append(args, input.Cursor)
 		whereFrag = fmt.Sprintf("(%s) AND (%s > $%d)", whereFrag, quoteIdentORM(pkCol), len(args))
 	}
+
+	whereFrag = activeModelWhere(md, whereFrag)
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
@@ -340,20 +324,8 @@ type ORMPivotOutput struct {
 	Cells []map[string]any
 }
 
-// ORMPivot is the engine-native counterpart to ORMSearchRead for a
-// Pivot-enabled model's GET {resource}/pivot route (dispatchORMPivot) —
-// there is no WASM-guest-callable host.orm import for this, unlike every
-// other function in this file: a module has no way to run a real
-// Postgres-side GROUP BY today (sdk/go/orm only exposes row-shaped
-// Search/SearchRead/Read and, for a single ungrouped total,
-// host.orm.aggregate), so grouped aggregation is engine-native only,
-// gated behind EnableOps(model.Pivot) the same way List/Get already are.
-//
-// One query produces every row/column subtotal a collapsed PivotGrid
-// group needs: GROUP BY ROLLUP(rows...), ROLLUP(columns...) generates the
-// finest-grain groups plus every coarser rollup (including the grand
-// total) in a single pass, and GROUPING() on each dimension column
-// disambiguates "rolled up" from "genuinely NULL in the data".
+// ROLLUP produces subtotals in one pass. GROUPING distinguishes rolled-up
+// dimensions from real null values in the data.
 func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMPivotInput) (ORMPivotOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
 		return ORMPivotOutput{}, abi.CapabilityDenied("db.read")
@@ -424,6 +396,8 @@ func ORMPivot(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input ORMP
 	if hostErr != nil {
 		return ORMPivotOutput{}, hostErr
 	}
+
+	whereFrag = activeModelWhere(md, whereFrag)
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, "")
 	if hostErr != nil {
@@ -562,10 +536,6 @@ func SkipFieldSecurity() ORMReadOption {
 	return func(o *ormReadOptions) { o.skipFieldSecurity = true }
 }
 
-// ORMRead is host.orm read's plain-Go core — see ORMSearch's doc comment
-// for the shared-entry-point rationale. Branches to transientRead
-// (host_orm_transient.go) for Transient-backed models internally, so
-// callers never need to know a model's backend before calling in.
 func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMReadInput, opts ...ORMReadOption) (abiv1.ORMReadOutput, *abiv1.HostError) {
 	var o ormReadOptions
 	for _, opt := range opts {
@@ -622,8 +592,10 @@ func ORMRead(ctx context.Context, db *sql.DB, cacheClient *cache.Client, modCtx 
 		args[i] = id
 	}
 
-	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s IN (%s)",
-		strings.Join(selectCols, ", "), table, quoteIdentORM(pkCol), strings.Join(placeholders, ", "))
+	where := activeModelWhere(md, fmt.Sprintf("%s IN (%s)", quoteIdentORM(pkCol), strings.Join(placeholders, ", ")))
+
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
+		strings.Join(selectCols, ", "), table, where)
 	rows, err := tx.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return abiv1.ORMReadOutput{}, ormSQLError(err)
@@ -658,6 +630,14 @@ func resolveModel(modCtx *ModuleContext, qualifiedName string) (model.ModelDecla
 	return model.ModelDeclaration{}, false
 }
 
+func activeModelWhere(md model.ModelDeclaration, where string) string {
+	if hasField(md, "deleted_at") {
+		return "(" + where + `) AND "deleted_at" IS NULL`
+	}
+
+	return where
+}
+
 func primaryKeyColumn(md model.ModelDeclaration) (string, bool) {
 	for _, f := range md.Fields {
 		if f.Def.IsPrimaryKey {
@@ -667,10 +647,6 @@ func primaryKeyColumn(md model.ModelDeclaration) (string, bool) {
 	return "", false
 }
 
-// compileDomain parses and compiles a caller-supplied search domain to a
-// parameterized SQL WHERE fragment, mapping a parse/compile failure to
-// orm.domain_invalid (host-abi-reference.md §5a) rather than surfacing
-// the raw parser error.
 func compileDomain(src string) (string, []any, *abiv1.HostError) {
 	if src == "" {
 		return "true", nil, nil

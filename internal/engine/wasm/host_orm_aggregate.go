@@ -43,12 +43,7 @@ func aggregateValueAlias(v abiv1.ORMAggregateValue) string {
 	return v.Field + "_" + v.Aggregation
 }
 
-// ORMAggregate is host.orm.aggregate's plain-Go core: the ungrouped grand
-// total of one or more {field, aggregation} values over a model — the SDK
-// wrappers orm.Count/Sum/Min/Max/Avg each send exactly one. It shares
-// ORMPivot's capability check, tenant-scoped read transaction and
-// per-field read-permission check, but runs no GROUP BY at all, so a
-// single row always comes back regardless of how many rows match.
+// An ungrouped aggregate returns one row even when no records match.
 func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input abiv1.ORMAggregateInput) (abiv1.ORMAggregateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBRead) {
 		return abiv1.ORMAggregateOutput{}, abi.CapabilityDenied("db.read")
@@ -119,6 +114,8 @@ func ORMAggregate(ctx context.Context, db *sql.DB, modCtx *ModuleContext, input 
 	if hostErr != nil {
 		return abiv1.ORMAggregateOutput{}, hostErr
 	}
+
+	whereFrag = activeModelWhere(md, whereFrag)
 
 	tx, finish, hostErr := resolveORMReadTx(ctx, db, modCtx, input.TxID)
 	if hostErr != nil {
