@@ -314,11 +314,6 @@ func TestKindProbe_RelationRoundTrip(t *testing.T) {
 	}
 }
 
-// TestGadget_QueryAndDelete pins goerp#980's own AC: Gadget{}.Query()
-// produces identical results to orm.From[models.Gadget](), and Delete()
-// actually soft-deletes the record via orm.Unlink — Gadget has a
-// deleted_at column (WithStandardFields), so Unlink sets it rather than
-// removing the row outright.
 func TestGadget_QueryAndDelete(t *testing.T) {
 	h := modeltest.NewHarness(t)
 
@@ -336,7 +331,15 @@ func TestGadget_QueryAndDelete(t *testing.T) {
 		t.Errorf("Gadget{}.Query() ids = %v, orm.From[models.Gadget]() ids = %v, want identical", queryMethodIDs, fromFuncIDs)
 	}
 
-	if got := resp.JSON("soft_deleted"); got != true {
-		t.Errorf("soft_deleted = %v, want true (Delete() should have set deleted_at)", got)
+	if got := resp.JSON("hidden_after_delete"); got != true {
+		t.Errorf("hidden_after_delete = %v, want true", got)
+	}
+
+	var row struct {
+		SoftDeleted bool `db:"soft_deleted"`
+	}
+	h.DB.QueryOne(&row, "SELECT deleted_at IS NOT NULL AS soft_deleted FROM widgets_gadget WHERE id = $1", resp.JSON("gadget_id"))
+	if !row.SoftDeleted {
+		t.Error("Delete() must retain the gadget row with deleted_at set")
 	}
 }

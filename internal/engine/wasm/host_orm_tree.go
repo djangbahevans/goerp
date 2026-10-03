@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"uuid"
@@ -12,43 +13,14 @@ import (
 	"github.com/djangbahevans/goerp/sdk/go/model"
 )
 
-// This file holds .Tree() companion-path maintenance for host.orm's write
-// half (goerp#379) — go-sdk-reference.md §22 "Tree". Engine-native, not a
-// registered WASM hook: "purely structural maintenance derived from the
-// parent chain, no business logic a module needs to supply" (the same
-// reasoning the doc gives for model.Sequence being engine-native rather
-// than hook-based).
-//
-// A row's label is its own primary key with hyphens stripped — ltree
-// labels can't contain hyphens, and this codebase's UUID primary keys
-// always do.
-
-// ltreeLabel converts a caller-supplied primary key value into a valid
-// ltree label.
+// UUID hyphens are invalid in ltree labels.
 func ltreeLabel(pkValue any) string {
 	s := fmt.Sprint(pkValue)
 	return strings.ReplaceAll(s, "-", "")
 }
 
-// injectTreePathOnCreate computes and injects the {field}_path value for
-// every .Tree() field on md directly into record, before the INSERT —
-// the same "inject a value the caller didn't supply, immediately before
-// createOneRecordTx" shape acquireSequenceFields (host_orm_write.go,
-// goerp#340) already uses for Sequence fields. A self-referencing label
-// needs the row's own primary key before the row exists (no follow-up
-// UPDATE) — the primary key itself is Readonly (goerp#992) and normally
-// left to Postgres's own DEFAULT, but that default only resolves at
-// INSERT time, too late for this function's own needs, so a model that
-// declares any .Tree() field gets its primary key generated here in Go
-// instead (the same uuid.NewV7 rotation already used for etag) whenever
-// the caller omitted it — genPK is that value when generated, "" when
-// record already had its own (this function has no legitimate reason to
-// ever see a client-populated pkCol under #992, but doesn't assume so
-// either), for the caller to fold into its own serverFilled list. If a
-// declared parent doesn't exist, this leaves the path unset and lets
-// the Many2One field's own FK constraint (Tree is just a modifier on
-// Many2One) surface the real error at INSERT time, rather than
-// duplicating that check here.
+// Tree paths include the new row's primary key, so it must be generated
+// before INSERT can evaluate the database default.
 func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, record map[string]any) (genPK string, hostErr *abiv1.HostError) {
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
@@ -87,21 +59,13 @@ func injectTreePathOnCreate(ctx context.Context, tx *sql.Tx, md model.ModelDecla
 			return genPK, lookupErr
 		}
 		if parentPath == "" {
-			// No such parent row — leave the path unset; the ordinary
-			// Many2One FK constraint rejects the INSERT with a clearer,
-			// standard foreign_key_violation.
-			continue
+			return genPK, &abiv1.HostError{Code: abiv1.ErrCodeForeignKeyViolation, Message: "tree parent not found", Details: map[string]any{"field": f.Name}}
 		}
 		record[f.Name+"_path"] = parentPath + "." + ownLabel
 	}
 	return genPK, nil
 }
 
-// maintainTreePathOnWrite reparents a single row: cycle-checks the new
-// parent against the record's own current path, then rewrites the moved
-// row and every descendant's path in one UPDATE — go-sdk-reference.md
-// §22's own formula. Only called when the tree field's own column key is
-// present in the write diff; a write that doesn't touch it is a no-op.
 func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol, id string, record map[string]any) *abiv1.HostError {
 	pkColQuoted := quoteIdentORM(pkCol)
 	table := quoteIdentORM(modeltable.Name(md))
@@ -115,13 +79,11 @@ func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 			continue
 		}
 
-		oldPath, hostErr := lookupOwnTreePath(ctx, tx, table, pkColQuoted, f.Name, id)
+		oldPath, hostErr := lookupOwnTreePath(ctx, tx, md, table, pkColQuoted, f.Name, id)
 		if hostErr != nil {
 			return hostErr
 		}
 		if oldPath == "" {
-			// No existing path recorded (e.g. this row predates the
-			// field, or was never given a parent) — nothing to move.
 			continue
 		}
 
@@ -134,7 +96,7 @@ func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 				return hostErr
 			}
 			if newParentPath == "" {
-				continue // dangling parent — let the FK constraint reject it.
+				return &abiv1.HostError{Code: abiv1.ErrCodeForeignKeyViolation, Message: "tree parent not found", Details: map[string]any{"field": f.Name}}
 			}
 
 			var wouldCycle bool
@@ -149,8 +111,8 @@ func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 
 		pathCol := quoteIdentORM(f.Name + "_path")
 		updateSQL := fmt.Sprintf(
-			"UPDATE %s SET %s = CASE WHEN %s = $1::ltree THEN $2::ltree ELSE $2::ltree || subpath(%s, nlevel($1::ltree)) END WHERE %s <@ $1::ltree",
-			table, pathCol, pathCol, pathCol, pathCol,
+			"UPDATE %s SET %s = CASE WHEN %s = $1::ltree THEN $2::ltree ELSE $2::ltree || subpath(%s, nlevel($1::ltree)) END WHERE %s",
+			table, pathCol, pathCol, pathCol, activeModelWhere(md, pathCol+" <@ $1::ltree"),
 		)
 		if _, err := tx.ExecContext(ctx, updateSQL, oldPath, newPrefix); err != nil {
 			return ormSQLError(err)
@@ -159,28 +121,22 @@ func maintainTreePathOnWrite(ctx context.Context, tx *sql.Tx, md model.ModelDecl
 	return nil
 }
 
-// lookupTreePath returns treeField's "_path" companion column value for
-// the row identified by pkValue on md's own table — "" if no such row
-// exists.
 func lookupTreePath(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, treeField string, pkValue any) (string, *abiv1.HostError) {
 	pkCol, ok := primaryKeyColumn(md)
 	if !ok {
 		return "", nil
 	}
 	table := quoteIdentORM(modeltable.Name(md))
-	return lookupOwnTreePath(ctx, tx, table, quoteIdentORM(pkCol), treeField, pkValue)
+	return lookupOwnTreePath(ctx, tx, md, table, quoteIdentORM(pkCol), treeField, pkValue)
 }
 
-// lookupOwnTreePath is lookupTreePath's shared core, taking an
-// already-quoted table/pk column pair so maintainTreePathOnWrite can
-// reuse it for the record being written without re-deriving them.
-func lookupOwnTreePath(ctx context.Context, tx *sql.Tx, table, pkColQuoted, treeField string, pkValue any) (string, *abiv1.HostError) {
+func lookupOwnTreePath(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, table, pkColQuoted, treeField string, pkValue any) (string, *abiv1.HostError) {
 	pathCol := quoteIdentORM(treeField + "_path")
-	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", pathCol, table, pkColQuoted)
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s", pathCol, table, activeModelWhere(md, pkColQuoted+" = $1"))
 	var path sql.NullString
 	err := tx.QueryRowContext(ctx, sqlStr, pkValue).Scan(&path)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
 		return "", ormSQLError(err)

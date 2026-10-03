@@ -27,31 +27,6 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// This file holds host.orm's write half — create/create_batch/
-// first_or_create/write/write_many/write_where/unlink (goerp#343/#380),
-// Store(true)/.Depends() computed-field recompute (goerp#377) for
-// Table-backed models (recomputeAfterWrite runs inside the same
-// transaction as the triggering create/write, for same-record, one-hop
-// Many2One, and one-hop One2Many dependencies alike — goerp#388's
-// One2Many case additionally recomputes from ORMUnlink via
-// recomputeParentsAfterChildUnlink, since a child's own deletion is a
-// valid recompute trigger the other two hop kinds never need), and
-// orm.RegisterConstraint hooks (goerp#378, runConstraintHook —
-// host_orm_constraint.go), which run after recomputeAfterWrite so a hook
-// sees the fully-recomputed row, and before event emission so a
-// rejection aborts the whole transaction. Also writes one audit_log row
-// per create/write/unlink on a module's own audited_tables[] (goerp#363,
-// writeAuditLogEntry) — after recomputeAfterWrite/runConstraintHook so
-// the row reflects the fully committed values, before event emission,
-// in the same transaction.
-//
-// create_batch/first_or_create/write_many/write_where are not supported
-// for Transient-backed models (a Redis-backed key has no domain-query or
-// multi-row-transaction story the way a Postgres table does) — each
-// returns a descriptive error rather than silently misbehaving. Computed
-// fields on a Transient model are likewise out of scope here — recompute
-// is wired only for the Postgres-backed create/write cores below.
-
 // batchTooLargeHostError rejects a call whose records/IDs/matched rows
 // exceed GOERP_ORM_BULK_MAX_ROWS, before any write.
 func batchTooLargeHostError(limit, count int) *abiv1.HostError {
@@ -85,13 +60,6 @@ func makeORMCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], 
 	}
 }
 
-// ORMCreate is host.orm create's plain-Go core — see ORMSearch's doc
-// comment (host_orm.go) for the shared-entry-point rationale. Branches to
-// transientCreate (host_orm_transient.go) for Transient-backed models
-// internally. The single-row insert itself is createOneRecordTx, shared
-// with ORMCreateBatch/ORMFirstOrCreate below. r is only used for
-// recomputeAfterWrite's cross-module compute dispatch — every other
-// dependency stays a plain arg, matching this file's existing style.
 func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], cacheClient *cache.Client, modCtx *ModuleContext, input abiv1.ORMCreateInput) (abiv1.ORMCreateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMCreateOutput{}, abi.CapabilityDenied("db.write")
@@ -146,10 +114,6 @@ func ORMCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return abiv1.ORMCreateOutput{}, hostErr
 	}
 	if row == nil {
-		// OnConflictIgnore skipped this row — nothing was created, so
-		// there's nothing to return and no event to emit. Matches the
-		// doc's own framing: a successful create call looks identical
-		// whether it inserted or hit the conflict target.
 		if err := commit(); err != nil {
 			return abiv1.ORMCreateOutput{}, &abiv1.HostError{Code: abiv1.ErrCodeCommitFailed, Message: err.Error()}
 		}
@@ -372,30 +336,10 @@ func makeORMFirstOrCreate(r *Runtime, db *sql.DB, insertClient *river.Client[*sq
 	}
 }
 
-// ORMFirstOrCreate matches an existing record by input.UniqueVals —
-// validated against md's own declared unique indexes the same way
-// validateOnConflictTarget validates OnConflictIgnore/OnConflictUpdate's
-// target — and creates input.CreateVals merged with input.UniqueVals
-// (UniqueVals wins on any overlapping key, so the inserted row always
-// satisfies the same match a later call will look for) only on a miss,
-// inside one transaction. Race-safety for concurrent callers racing the
-// identical match uses a transaction-scoped Postgres advisory lock keyed
-// by hash(tenant, model, msgpack-encoded sorted unique-vals pairs) — the
-// general-condition counterpart to AcquireNext's (internal/engine/orm)
-// keyed INSERT...ON CONFLICT DO UPDATE upsert pattern. msgpack encoding
-// (rather than a naive "field=value" string join) keeps distinct
-// unique-vals combinations from ever formatting to the same key, since
-// separators can appear inside a field's own value. The lock only
-// serializes callers racing the identical (tenant, model, unique-vals)
-// triple; it's released automatically at commit/rollback.
-//
-// Kept as this SELECT-then-INSERT shape rather than createOneRecordTx's
-// INSERT...ON CONFLICT DO NOTHING (used by OnConflictIgnore) deliberately:
-// go-sdk-reference.md §6a documents CreateVals as "only used when
-// created," meaning a hit must never run validateRequired/DynamicLink/
-// sequence-acquisition against a CreateVals map that's allowed to be
-// incomplete when the record already exists — an INSERT-first attempt
-// can't know that until after already running them.
+// An advisory lock serializes identical tenant/model/unique-value lookups.
+// Msgpack encoding prevents separator characters in values from aliasing keys.
+// The lookup precedes insert validation because CreateVals may be incomplete
+// when the unique values already match an active record.
 func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMFirstOrCreateInput) (abiv1.ORMFirstOrCreateOutput, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMFirstOrCreateOutput{}, abi.CapabilityDenied("db.write")
@@ -443,6 +387,8 @@ func ORMFirstOrCreate(ctx context.Context, r *Runtime, db *sql.DB, insertClient 
 	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
 		return abiv1.ORMFirstOrCreateOutput{}, ormSQLErrorRetryable(err)
 	}
+
+	whereFrag = activeModelWhere(md, whereFrag)
 
 	table := quoteIdentORM(modeltable.Name(md))
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1", table, whereFrag), whereArgs...)
@@ -735,13 +681,6 @@ func makeORMWriteWhere(r *Runtime, db *sql.DB, insertClient *river.Client[*sql.T
 	}
 }
 
-// ORMWriteWhere resolves matching IDs server-side (compileDomain, the
-// same domain-to-SQL compiler the read pipeline already uses — never
-// string-interpolating the caller's domain) and applies input.Record to
-// each inside one transaction, sharing writeManyIDsTx with ORMWriteMany.
-// A domain matching zero rows is a legitimate, non-error result
-// (ORMExecResult{Count: 0}) — unlike single write-by-ID, a bulk "where" that
-// happens to match nothing isn't exceptional.
 func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, input abiv1.ORMWriteWhereInput) (abiv1.ORMExecResult, *abiv1.HostError) {
 	if !modCtx.Capabilities().Has(abi.CapDBWrite) {
 		return abiv1.ORMExecResult{}, abi.CapabilityDenied("db.write")
@@ -783,11 +722,10 @@ func ORMWriteWhere(ctx context.Context, r *Runtime, db *sql.DB, insertClient *ri
 	}
 	defer rollback()
 
-	// Selects at most maxRows+1 IDs — enough to tell "exactly at the
-	// limit" apart from "over it" without pulling an unbounded result set
-	// into memory first, the same reasoning ORMSearch's own Limit option
-	// follows.
+	// One extra ID detects overflow without an unbounded result set.
 	maxRows := modCtx.ormBulkMaxRows()
+	whereFrag = activeModelWhere(md, whereFrag)
+
 	table := quoteIdentORM(modeltable.Name(md))
 	pkColQuoted := quoteIdentORM(pkCol)
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT %d", pkColQuoted, table, whereFrag, maxRows+1), whereArgs...)
@@ -1172,24 +1110,8 @@ func writeDeniedBy(modCtx *ModuleContext, qualifiedModel, field string) (fieldse
 	return rule, true
 }
 
-// createOneRecordTx inserts one row on tx — the shared core of
-// ORMCreate/ORMCreateBatch/ORMFirstOrCreate. Caller is responsible for
-// validateRequired/acquireSequenceFields beforehand and event emission
-// afterward (the three callers emit differently: single, per-record, or
-// batched). When onConflict is set, its target is validated against a
-// real declared unique index (primaryKeyColumn or an IsUnique md.Indexes
-// entry) before building the INSERT — an unmatched target is
-// orm.conflict_target_invalid, never a silent full-table-scan fallback.
-//
-// RETURNING includes "(xmax = 0) AS __inserted" — the standard Postgres
-// idiom for "this row was inserted by this command, not updated via the
-// ON CONFLICT DO UPDATE arm" (xmax is 0 only for a row this exact command
-// just inserted). inserted tells the caller which event type to emit for
-// this row; updatedFields is nil when inserted is true, and otherwise the
-// sorted fields the DO UPDATE arm actually overwrote (excluding
-// serverFilled), for that event's changed_fields. An OnConflictIgnore hit
-// returns (nil, false, nil, nil) — a skipped conflict is not an error,
-// just nothing to report.
+// Postgres xmax distinguishes insert from conflict update for lifecycle events.
+// A skipped OnConflictIgnore returns no record and emits no event.
 func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel string, record map[string]any, onConflict *abiv1.ORMOnConflict, serverFilled []string) (row map[string]any, inserted bool, updatedFields []string, hostErr *abiv1.HostError) {
 	fields, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record, serverFilled)
 	if hostErr != nil {
@@ -1245,6 +1167,9 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 			}
 			slices.Sort(updatedFields)
 			insertSQL += fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", strings.Join(quotedTarget, ", "), strings.Join(setClauses, ", "))
+			if hasField(md, "deleted_at") {
+				insertSQL += " WHERE " + table + `."deleted_at" IS NULL`
+			}
 		default:
 			return nil, false, nil, &abiv1.HostError{Code: abiv1.ErrCodeValidationFailed, Message: "on_conflict.policy must be \"ignore\" or \"update\", got " + onConflict.Policy}
 		}
@@ -1261,6 +1186,10 @@ func createOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, m
 		return nil, false, nil, ormSQLError(err)
 	}
 	if len(created) == 0 {
+		if onConflict != nil && onConflict.Policy == "update" {
+			return nil, false, nil, &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
+		}
+
 		return nil, false, nil, nil
 	}
 	if len(created) != 1 {
@@ -1307,16 +1236,8 @@ func validateOnConflictTarget(md model.ModelDeclaration, qualifiedModel string, 
 	return nil, &abiv1.HostError{Code: abiv1.ErrCodeConflictTargetInvalid, Message: paramName + " " + strings.Join(fields, ", ") + " does not match any declared unique index on " + qualifiedModel}
 }
 
-// writeOneRecordTx updates the row identified by id on tx — the shared
-// core of ORMWrite/ORMWriteMany/ORMWriteWhere. expectedEtag == nil skips
-// the etag-scoped WHERE clause entirely (the bulk callers' "no etag
-// check" semantics); a non-nil expectedEtag adds it — including when it
-// points to "", which requires the stored etag to still be its
-// never-written default rather than silently matching anything.
+// A non-nil expectedEtag, including an empty string, is a precondition.
 func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md model.ModelDeclaration, qualifiedModel, pkCol, id string, record map[string]any, expectedEtag *string, serverFilled []string) (map[string]any, []string, *abiv1.HostError) {
-	// serverFilled names the etag key its own caller already rotated into
-	// record (goerp#992 made etag Readonly) — exempted here for the same
-	// reason fillCreateServerFields's tenant_id/created_by are on create.
 	assigned, args, hostErr := buildAssignment(modCtx, qualifiedModel, md, record, serverFilled)
 	if hostErr != nil {
 		return nil, nil, hostErr
@@ -1340,6 +1261,8 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 		whereClause += fmt.Sprintf(" AND %s = $%d", quoteIdentORM("etag"), len(args))
 	}
 
+	whereClause = activeModelWhere(md, whereClause)
+
 	updateSQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s RETURNING *",
 		table, strings.Join(setClauses, ", "), whereClause)
 
@@ -1353,16 +1276,11 @@ func writeOneRecordTx(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, md
 	}
 
 	if len(updated) == 0 {
-		return nil, nil, diagnoseZeroRowWrite(ctx, tx, table, pkColQuoted, id, expectedEtag)
+		return nil, nil, diagnoseZeroRowWrite(ctx, tx, md, table, pkColQuoted, id, expectedEtag)
 	}
 	return updated[0], callerWrittenFields(md, assigned), nil
 }
 
-// writeManyIDsTx applies record to every id on tx, emitting one
-// orm.record.updated event per affected record (not batched) — shared by
-// ORMWriteMany (caller-supplied IDs) and ORMWriteWhere (IDs resolved from
-// a domain first). A missing ID or validation failure aborts the whole
-// transaction, matching the AC's all-or-nothing requirement.
 func writeManyIDsTx(ctx context.Context, tx *sql.Tx, r *Runtime, insertClient *river.Client[*sql.Tx], modCtx *ModuleContext, md model.ModelDeclaration, pkCol, qualifiedModel string, ids []string, record map[string]any) (abiv1.ORMExecResult, *abiv1.HostError) {
 	affected := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -1520,14 +1438,7 @@ func recomputeAfterWrite(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *Mo
 	return nil
 }
 
-// recomputeParentViaChild resolves and recomputes dep's single parent
-// record directly from row's own inverse-FK column value — the One2Many
-// hop's counterpart to the Many2One-hop branch above, with no query
-// needed since a child row always names its one parent directly
-// (go-sdk-reference.md §22 "One2Many" / "Computed field recomputation").
-// If row's own inverse-FK value changes on write (reparenting to a
-// different parent), only the new parent recomputes here — the old
-// parent's dependents are not recomputed to reflect the child's removal.
+// Reparenting recomputes the new parent only.
 func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx *ModuleContext, dep computed.Dependent, row map[string]any) *abiv1.HostError {
 	depPK, ok := primaryKeyColumn(dep.ModelDecl)
 	if !ok {
@@ -1535,11 +1446,13 @@ func recomputeParentViaChild(ctx context.Context, tx *sql.Tx, r *Runtime, modCtx
 	}
 	parentID, ok := row[dep.ViaChildFKField]
 	if !ok || parentID == nil {
-		// Child not (yet) linked to any parent — nothing to recompute.
 		return nil
 	}
 
 	depRow, hostErr := fetchRowByPK(ctx, tx, dep.ModelDecl, depPK, parentID)
+	if hostErr != nil && hostErr.Code == abiv1.ErrCodeNotFound && hasField(dep.ModelDecl, "deleted_at") {
+		return nil
+	}
 	if hostErr != nil {
 		return hostErr
 	}
@@ -1579,18 +1492,8 @@ func recomputeParentsAfterChildUnlink(ctx context.Context, tx *sql.Tx, r *Runtim
 // something resolveModel ever sees.
 const auditLogTableName = "audit_log"
 
-// writeAuditLogEntry inserts one audit_log row if qualifiedModel is
-// declared in its owning module's own audited_tables[] (manifest-spec.md
-// §19 "Audited Tables"); a no-op otherwise, and also a no-op if modCtx
-// carries no DataAuditRegistry at all (mirrors recomputeAfterWrite's own
-// nil-ComputedIndex guard — a test fixture that never wires one). This
-// only ever covers writes that go through host.orm: the only write path
-// any module has today, since host.db exposes no raw query/exec to WASM
-// modules, so "every INSERT/UPDATE/DELETE" is fully satisfied here, not
-// a partial mechanism. oldData/newData pass as nil for create's/delete's
-// absent half respectively, stored as SQL NULL. Runs inside tx, so a
-// later failure in the same request's write rolls the audit entry back
-// too — no lost or orphaned audit entries on partial failure.
+// Audit insertion shares the mutation transaction, so later failures
+// roll back both the record change and its audit entry.
 func writeAuditLogEntry(ctx context.Context, tx *sql.Tx, modCtx *ModuleContext, qualifiedModel string, md model.ModelDeclaration, operation string, oldData, newData map[string]any) *abiv1.HostError {
 	reg := modCtx.DataAuditRegistry()
 	if reg == nil {
@@ -1759,12 +1662,9 @@ func auditJSON(data map[string]any, excludeCols map[string]bool) (any, error) {
 	return json.Marshal(filtered)
 }
 
-// fkReferencingIDs returns every depMD row's primary key where its fkCol
-// equals fkValue — the Many2One-hop case's "which dependent records point
-// at the record that just changed" query.
 func fkReferencingIDs(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclaration, depPK, fkCol string, fkValue any) ([]any, error) {
 	table := quoteIdentORM(modeltable.Name(depMD))
-	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", quoteIdentORM(depPK), table, quoteIdentORM(fkCol))
+	sqlStr := fmt.Sprintf("SELECT %s FROM %s WHERE %s", quoteIdentORM(depPK), table, activeModelWhere(depMD, quoteIdentORM(fkCol)+" = $1"))
 	rows, err := tx.QueryContext(ctx, sqlStr, fkValue)
 	if err != nil {
 		return nil, err
@@ -1782,18 +1682,13 @@ func fkReferencingIDs(ctx context.Context, tx *sql.Tx, depMD model.ModelDeclarat
 	return ids, rows.Err()
 }
 
-// fetchRowByPK re-selects one full row by primary key on tx, so a
-// Many2One-hop compute function sees the dependent record's current
-// column values rather than a stale copy.
 func fetchRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any) (map[string]any, *abiv1.HostError) {
 	return selectRowByPK(ctx, tx, md, pkCol, pkValue, "")
 }
 
-// selectRowByPK reads one row by primary key; lockClause (e.g. "FOR
-// UPDATE") is appended verbatim.
 func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, lockClause string) (map[string]any, *abiv1.HostError) {
 	table := quoteIdentORM(modeltable.Name(md))
-	sqlStr := strings.TrimSpace(fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 %s", table, quoteIdentORM(pkCol), lockClause))
+	sqlStr := strings.TrimSpace(fmt.Sprintf("SELECT * FROM %s WHERE %s %s", table, activeModelWhere(md, quoteIdentORM(pkCol)+" = $1"), lockClause))
 	rows, err := tx.QueryContext(ctx, sqlStr, pkValue)
 	if err != nil {
 		return nil, ormSQLError(err)
@@ -1808,18 +1703,8 @@ func selectRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, p
 	return records[0], nil
 }
 
-// applyComputedValue writes a single computed field's new value directly
-// — never routed back through writeOneRecordTx, which would rotate the
-// row's etag, re-emit orm.record.updated, and re-trigger recompute
-// (single-hop only, no cascading, per the AC). If the table carries the
-// engine's update_etag() trigger (internal/engine/schema/etag_trigger.go,
-// installed for any table in a module's audited_tables[]), that BEFORE
-// UPDATE trigger would otherwise rotate etag/updated_at on this UPDATE
-// regardless of which column is in its SET clause — app.skip_etag_trigger
-// tells it to skip, the same set_config-based session-variable mechanism
-// applyTenantScope uses for app.current_user_id etc. (tenant_scope.go).
-// Scoped SET LOCAL (is_local=true), so it can't leak past this
-// transaction or suppress etag rotation on any other write in it.
+// Computed assignments must not rotate etags or trigger another recompute.
+// The transaction-local trigger bypass is cleared before another write can run.
 func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkCol string, pkValue any, field string, value any) *abiv1.HostError {
 	table := quoteIdentORM(modeltable.Name(md))
 
@@ -1827,7 +1712,7 @@ func applyComputedValue(ctx context.Context, tx *sql.Tx, md model.ModelDeclarati
 		return ormSQLError(err)
 	}
 
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2", table, quoteIdentORM(field), quoteIdentORM(pkCol))
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s", table, quoteIdentORM(field), activeModelWhere(md, quoteIdentORM(pkCol)+" = $2"))
 	if _, err := tx.ExecContext(ctx, sqlStr, value, pkValue); err != nil {
 		return translateWriteError(err, md)
 	}
@@ -1864,18 +1749,13 @@ func translateWriteError(err error, md model.ModelDeclaration) *abiv1.HostError 
 	return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 }
 
-// diagnoseZeroRowWrite disambiguates a 0-row etag-scoped UPDATE:
-// re-selecting by ID alone (still inside tx, so this sees the same
-// RLS-filtered view) tells apart a stale etag (row exists,
-// orm.etag_mismatch) from a genuinely missing or RLS-filtered row
-// (orm.not_found) — the same 404-shaped-denial rule this codebase's read
-// paths already follow (security-model.md).
-func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, table, pkColQuoted, id string, expectedEtag *string) *abiv1.HostError {
+// Only a visible active row can distinguish a stale etag from not-found.
+func diagnoseZeroRowWrite(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, table, pkColQuoted, id string, expectedEtag *string) *abiv1.HostError {
 	if expectedEtag == nil {
 		return &abiv1.HostError{Code: abiv1.ErrCodeNotFound, Message: "record not found"}
 	}
 	var exists bool
-	checkSQL := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s = $1)", table, pkColQuoted)
+	checkSQL := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s)", table, activeModelWhere(md, pkColQuoted+" = $1"))
 	if err := tx.QueryRowContext(ctx, checkSQL, id).Scan(&exists); err != nil {
 		return ormSQLError(err)
 	}

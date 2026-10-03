@@ -109,6 +109,8 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		where += " AND (" + guardFrag + ")"
 	}
 
+	where = activeModelWhere(md, where)
+
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("UPDATE %s SET %s WHERE %s RETURNING *", table, strings.Join(sets, ", "), where), args...)
 	if err != nil {
 		return abiv1.ORMMutateOutput{}, translateMutateError(err, md)
@@ -118,7 +120,7 @@ func ORMMutate(ctx context.Context, r *Runtime, db *sql.DB, insertClient *river.
 		return abiv1.ORMMutateOutput{}, translateMutateError(err, md)
 	}
 	if len(updatedRows) == 0 {
-		return abiv1.ORMMutateOutput{}, diagnoseZeroRowMutation(ctx, tx, table, pkColQuoted, input.ID)
+		return abiv1.ORMMutateOutput{}, diagnoseZeroRowMutation(ctx, tx, md, table, pkColQuoted, input.ID)
 	}
 	updated := updatedRows[0]
 
@@ -287,11 +289,10 @@ func lockRowByPK(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, pkC
 	return row, hostErr
 }
 
-// diagnoseZeroRowMutation separates a missing or RLS-hidden row
-// (orm.not_found, as diagnoseZeroRowWrite) from a false guard.
-func diagnoseZeroRowMutation(ctx context.Context, tx *sql.Tx, table, pkColQuoted, id string) *abiv1.HostError {
+// A false guard is reported only when a visible active row exists.
+func diagnoseZeroRowMutation(ctx context.Context, tx *sql.Tx, md model.ModelDeclaration, table, pkColQuoted, id string) *abiv1.HostError {
 	var exists bool
-	if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s = $1)", table, pkColQuoted), id).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM %s WHERE %s)", table, activeModelWhere(md, pkColQuoted+" = $1")), id).Scan(&exists); err != nil {
 		return &abiv1.HostError{Code: abiv1.ErrCodeUnavailable, Message: err.Error()}
 	}
 	if !exists {
