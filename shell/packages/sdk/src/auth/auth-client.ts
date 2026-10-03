@@ -442,6 +442,7 @@ export async function reverifyMFA(input: MFACodeConfirmation): Promise<void> {
 
 interface MFAFactorsWire {
   factors: {
+    tenant_only: boolean;
     id: string;
     type: "totp" | "webauthn";
     label: string | null;
@@ -452,14 +453,13 @@ interface MFAFactorsWire {
   required_by_policy: boolean;
 }
 
-// fetchMFAFactors backs GET /auth/mfa/factors (auth-internals.md §8
-// "Managing factors").
 export async function fetchMFAFactors(signal?: AbortSignal): Promise<MFAFactors> {
   const response = await fetch("/auth/mfa/factors", { credentials: "include", ...(signal ? { signal } : {}) });
   if (!response.ok) throw await readError(response);
   const body = (await response.json()) as MFAFactorsWire;
   return {
     factors: body.factors.map((f) => ({
+      tenantOnly: f.tenant_only,
       id: f.id,
       type: f.type,
       label: f.label,
@@ -471,8 +471,8 @@ export async function fetchMFAFactors(signal?: AbortSignal): Promise<MFAFactors>
   };
 }
 
-// removeMFAFactor backs POST /auth/mfa/factors/{id}/remove. Success revokes
-// every one of the user's sessions, this one included. Rejects with
+// Removing a platform factor revokes sessions in every tenant; a tenant
+// factor revokes sessions in its tenant. Rejects with
 // mfa_factor_not_found (404), invalid_mfa_code (401),
 // mfa_required_by_policy (409), or mfa_locked (423).
 export async function removeMFAFactor(id: string, confirmation: MFACodeConfirmation): Promise<void> {

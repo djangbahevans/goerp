@@ -43,14 +43,16 @@ const testCallerPassword = "correct horse battery staple"
 
 // spyMailer records SendMFAReset calls instead of sending real email.
 type spyMailer struct {
-	mu     sync.Mutex
-	emails []string
+	mu      sync.Mutex
+	emails  []string
+	tenants []string
 }
 
-func (m *spyMailer) SendMFAReset(ctx context.Context, email string) error {
+func (m *spyMailer) SendMFAReset(ctx context.Context, email, tenantName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.emails = append(m.emails, email)
+	m.tenants = append(m.tenants, tenantName)
 	return nil
 }
 
@@ -83,10 +85,12 @@ func (a *spyAudit) assertLast(t *testing.T, eventName, userID, actorUserID strin
 	if len(a.events) == 0 {
 		t.Fatalf("no audit events, want %s", eventName)
 	}
+
 	got := a.events[len(a.events)-1]
 	if got["event"] != eventName || got["user_id"] != userID || got["actor_user_id"] != actorUserID {
 		t.Errorf("last audit event = %v/%v/%v, want %s/%q/%q", got["event"], got["user_id"], got["actor_user_id"], eventName, userID, actorUserID)
 	}
+
 	if payload, _ := got["payload"].(map[string]any); payload != nil {
 		if _, ok := payload["performed_by"]; ok {
 			t.Errorf("audit payload %v contains performed_by", payload)
@@ -111,42 +115,53 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
 	lockSharedKeyTable(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {
 		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
 	}
-	t.Cleanup(func() { _ = cacheClient.Close() })
+
+	t.Cleanup(func() {
+		_ = cacheClient.Close()
+	})
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenant Bootstrap() error: %v", err)
 	}
+
 	userStore := user.NewStore(conn)
 	if err := userStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("user Bootstrap() error: %v", err)
 	}
+
 	sessionStore := session.NewStore(conn)
 	if err := sessionStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("session Bootstrap() error: %v", err)
 	}
+
 	mfaStore := mfa.NewStore(conn)
 	if err := mfaStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
+
 	roleStore := role.NewStore(conn)
 	apiKeys := apikey.NewStore(conn)
 	if err := apiKeys.Bootstrap(ctx); err != nil {
 		t.Fatalf("apikey Bootstrap() error: %v", err)
 	}
+
 	billingStore := billing.NewStore(conn)
 	if err := billingStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("billing Bootstrap() error: %v", err)
@@ -156,6 +171,7 @@ func newFixture(t *testing.T) *fixture {
 	if err := signingKeyStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("signingkey Bootstrap() error: %v", err)
 	}
+
 	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("signingkey LoadOrGenerate() error: %v", err)
@@ -177,7 +193,10 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID)
+	})
 	if _, err := tenantStore.UpdateStatus(ctx, slug, tenant.StatusActive, nil); err != nil {
 		t.Fatalf("activate fixture tenant: %v", err)
 	}
@@ -191,10 +210,14 @@ func newFixture(t *testing.T) *fixture {
 	if _, err := conn.Exec("CREATE SCHEMA " + schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", schema)) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", schema))
+	})
 	if err := roleStore.Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
+
 	if err := roleStore.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
@@ -221,16 +244,18 @@ func newFixture(t *testing.T) *fixture {
 
 func lockSharedKeyTable(t *testing.T, pool *sql.DB) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	key := db.AdvisoryLockKey("test.jwt_signing_keys_table")
 
 	conn, err := pool.Conn(ctx)
 	if err != nil {
 		t.Fatalf("acquire dedicated connection for signing-key lock: %v", err)
 	}
+
 	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
 		t.Fatalf("acquire signing-key advisory lock: %v", err)
 	}
+
 	t.Cleanup(func() {
 		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
 		_ = conn.Close()
@@ -241,7 +266,7 @@ func lockSharedKeyTable(t *testing.T, pool *sql.DB) {
 // fixture's tenant, and registers cleanup.
 func (f *fixture) createUserWithRole(t *testing.T, roleName string) (userID, email string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	userStore := user.NewStore(f.conn)
 	email = fmt.Sprintf("mfaresettest%d@example.com", time.Now().UnixNano())
@@ -249,17 +274,26 @@ func (f *fixture) createUserWithRole(t *testing.T, roleName string) (userID, ema
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
+
+	t.Cleanup(func() {
+		_, _ = f.conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID)
+	})
 	if _, err := f.conn.Exec(`UPDATE system.users SET status = 'active' WHERE id = $1`, userID); err != nil {
 		t.Fatalf("activate fixture user: %v", err)
 	}
-	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, userID) })
-	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.sessions WHERE user_id = $1`, userID) })
+
+	t.Cleanup(func() {
+		_, _ = f.conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, userID)
+	})
+	t.Cleanup(func() {
+		_, _ = f.conn.Exec(`DELETE FROM system.sessions WHERE user_id = $1`, userID)
+	})
 
 	roleID, err := f.roles.GetRoleByName(ctx, f.tenantSlug, roleName)
 	if err != nil {
 		t.Fatalf("GetRoleByName(%q) error: %v", roleName, err)
 	}
+
 	schema := tenantschema.Name(f.tenantSlug)
 	if _, err := f.conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
 		t.Fatalf("grant role %q: %v", roleName, err)
@@ -277,15 +311,17 @@ func (f *fixture) createCallerWithPassword(t *testing.T) (userID string) {
 	if err != nil {
 		t.Fatalf("CreateHash() error: %v", err)
 	}
+
 	if _, err := f.conn.Exec(`UPDATE system.users SET password_hash = $2 WHERE id = $1`, userID, hash); err != nil {
 		t.Fatalf("set caller password: %v", err)
 	}
+
 	return userID
 }
 
 func (f *fixture) issueAccessToken(t *testing.T, userID string) string {
 	t.Helper()
-	tokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+	tokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID:     userID,
 		TenantSlug: f.tenantSlug,
 		DeviceID:   uuid.New().String(),
@@ -293,6 +329,7 @@ func (f *fixture) issueAccessToken(t *testing.T, userID string) string {
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
+
 	return tokens.AccessToken
 }
 
@@ -302,12 +339,14 @@ func (f *fixture) doReset(t *testing.T, accessToken, targetID string, body map[s
 	if err != nil {
 		t.Fatalf("marshal request body: %v", err)
 	}
+
 	req := httptest.NewRequest(http.MethodPost, "/admin/users/"+targetID+"/mfa/reset", bytes.NewReader(b))
 	req.Host = f.domain
 	req.RemoteAddr = "203.0.113.7:54321"
 	if accessToken != "" {
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 	}
+
 	req = req.WithContext(route.WithParams(req.Context(), map[string]string{"id": targetID}))
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
@@ -320,16 +359,22 @@ func TestServeHTTP_Success_RevokesFactorsAndTenantSessionsNotifiesAndAudits(t *t
 	callerToken := f.issueAccessToken(t, callerID)
 	targetID, targetEmail := f.createUserWithRole(t, "user")
 
-	cred, err := f.mfa.Insert(context.Background(), targetID, mfa.CredentialTOTP, []byte("x"), nil)
+	cred, err := f.mfa.Insert(t.Context(), targetID, mfa.CredentialTOTP, []byte("x"), nil)
 	if err != nil {
 		t.Fatalf("Insert() mfa credential error: %v", err)
 	}
-	targetSessionTokens, err := f.issuer.Issue(context.Background(), authtoken.LoginParams{
+
+	if _, err := f.conn.ExecContext(t.Context(), `UPDATE system.user_mfa SET tenant_id = $1 WHERE id = $2`, f.tenantID, cred.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	targetSessionTokens, err := f.issuer.Issue(t.Context(), authtoken.LoginParams{
 		UserID: targetID, TenantSlug: f.tenantSlug, DeviceID: uuid.New().String(),
 	})
 	if err != nil {
 		t.Fatalf("Issue() target session error: %v", err)
 	}
+
 	_ = targetSessionTokens
 
 	rec := f.doReset(t, callerToken, targetID, map[string]any{"password": testCallerPassword})
@@ -339,22 +384,24 @@ func TestServeHTTP_Success_RevokesFactorsAndTenantSessionsNotifiesAndAudits(t *t
 	}
 
 	var revokedAt sql.NullTime
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		"SELECT revoked_at FROM system.user_mfa WHERE id = $1", cred.ID,
 	).Scan(&revokedAt); err != nil {
 		t.Fatalf("query mfa credential: %v", err)
 	}
+
 	if !revokedAt.Valid {
 		t.Error("target's mfa credential revoked_at is NULL, want set")
 	}
 
 	var sessionRevokedCount int
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		"SELECT count(*) FROM system.sessions WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NOT NULL",
 		targetID, f.tenantID,
 	).Scan(&sessionRevokedCount); err != nil {
 		t.Fatalf("count revoked sessions: %v", err)
 	}
+
 	if sessionRevokedCount == 0 {
 		t.Error("target has no revoked sessions in this tenant, want at least one")
 	}
@@ -362,6 +409,7 @@ func TestServeHTTP_Success_RevokesFactorsAndTenantSessionsNotifiesAndAudits(t *t
 	if !f.mailer.sentTo(targetEmail) {
 		t.Errorf("mailer did not send to %q", targetEmail)
 	}
+
 	f.audit.assertLast(t, "mfa.admin_reset", targetID, callerID)
 }
 
@@ -385,9 +433,11 @@ func TestServeHTTP_NonAdminCallerRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateHash() error: %v", err)
 	}
+
 	if _, err := f.conn.Exec(`UPDATE system.users SET password_hash = $2 WHERE id = $1`, callerID, hash); err != nil {
 		t.Fatalf("set caller password: %v", err)
 	}
+
 	callerToken := f.issueAccessToken(t, callerID)
 	targetID, _ := f.createUserWithRole(t, "user")
 
@@ -406,11 +456,14 @@ func TestServeHTTP_TargetNotMemberOfTenantRejected(t *testing.T) {
 	// A user who exists but was never granted any role in this tenant.
 	userStore := user.NewStore(f.conn)
 	email := fmt.Sprintf("outsider%d@example.com", time.Now().UnixNano())
-	outsiderID, err := userStore.FindOrCreateInvited(context.Background(), email)
+	outsiderID, err := userStore.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = f.conn.Exec(`DELETE FROM system.users WHERE id = $1`, outsiderID) })
+
+	t.Cleanup(func() {
+		_, _ = f.conn.Exec(`DELETE FROM system.users WHERE id = $1`, outsiderID)
+	})
 
 	rec := f.doReset(t, callerToken, outsiderID, map[string]any{"password": testCallerPassword})
 
@@ -458,6 +511,7 @@ func saturatedHasher(t *testing.T) *password.Hasher {
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
 	}
+
 	t.Cleanup(slot.Release)
 	return h
 }
@@ -467,6 +521,7 @@ func assertOverloaded(t *testing.T, rec *httptest.ResponseRecorder) {
 	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != "overloaded" {
 		t.Fatalf("status = %d, body = %s, want 503 overloaded", rec.Code, rec.Body.String())
 	}
+
 	if got := rec.Header().Get("Retry-After"); got != "1" {
 		t.Errorf("Retry-After = %q, want \"1\"", got)
 	}
@@ -479,9 +534,11 @@ func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 			Code string `json:"code"`
 		} `json:"error"`
 	}
+
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
+
 	return body.Error.Code
 }
 

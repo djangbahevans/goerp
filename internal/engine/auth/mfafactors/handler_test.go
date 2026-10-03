@@ -79,6 +79,7 @@ func (a *recordingAudit) events() []string {
 	for i, r := range a.rows {
 		out[i] = r.EventType
 	}
+
 	return out
 }
 
@@ -109,40 +110,52 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
 	lockSharedKeyTables(t, conn)
 
 	cacheClient, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", DB: 0, MaxRetries: 1})
 	if err != nil {
 		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
 	}
-	t.Cleanup(func() { _ = cacheClient.Close() })
+
+	t.Cleanup(func() {
+		_ = cacheClient.Close()
+	})
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenant Bootstrap() error: %v", err)
 	}
+
 	userStore := user.NewStore(conn)
 	if err := userStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("user Bootstrap() error: %v", err)
 	}
+
 	sessionStore := session.NewStore(conn)
 	if err := sessionStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("session Bootstrap() error: %v", err)
 	}
+
 	mfaStore := mfa.NewStore(conn)
 	if err := mfaStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
+
 	configStore := tenantconfig.NewStore(conn)
 	if err := configStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenantconfig Bootstrap() error: %v", err)
 	}
+
 	roleStore := role.NewStore(conn)
 	apiKeys := apikey.NewStore(conn)
 	if err := apiKeys.Bootstrap(ctx); err != nil {
 		t.Fatalf("apikey Bootstrap() error: %v", err)
 	}
+
 	billingStore := billing.NewStore(conn)
 	if err := billingStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("billing Bootstrap() error: %v", err)
@@ -152,15 +165,20 @@ func newFixture(t *testing.T) *fixture {
 	if err := signingKeyStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("signingkey Bootstrap() error: %v", err)
 	}
+
 	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("signingkey LoadOrGenerate() error: %v", err)
 	}
+
 	rowCryptStore := rowcrypt.NewStore(conn, &secrets.EnvBackend{})
 	if err := rowCryptStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("rowcrypt Bootstrap() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.row_encryption_keys`) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.row_encryption_keys`)
+	})
 	rowKeys, err := rowCryptStore.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("rowcrypt LoadOrGenerate() error: %v", err)
@@ -182,10 +200,14 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID)
+	})
 	if _, err := tenantStore.UpdateStatus(ctx, slug, tenant.StatusActive, nil); err != nil {
 		t.Fatalf("activate fixture tenant: %v", err)
 	}
+
 	domain := slug + ".goerp.test"
 	if _, err := tenantStore.CreateDomain(ctx, tt.ID, domain, tenant.DomainSubdomain, true); err != nil {
 		t.Fatalf("CreateDomain() error: %v", err)
@@ -195,17 +217,23 @@ func newFixture(t *testing.T) *fixture {
 	if _, err := conn.Exec("CREATE SCHEMA " + schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", schema)) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", schema))
+	})
 	if err := roleStore.Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
+
 	if err := roleStore.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
+
 	roleID, err := roleStore.GetRoleByName(ctx, slug, "admin")
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
+
 	if err := roleMap.RebuildAll(ctx, tenantStore, roleStore, permission.NewPermissionRegistry()); err != nil {
 		t.Fatalf("RebuildAll() error: %v", err)
 	}
@@ -227,6 +255,7 @@ func newFixture(t *testing.T) *fixture {
 		adminRole:  roleID,
 		conn:       conn,
 	}
+
 	f.userID = f.createMember(t)
 	return f
 }
@@ -240,9 +269,11 @@ func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
 		if err != nil {
 			t.Fatalf("acquire dedicated connection for %s lock: %v", name, err)
 		}
+
 		if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
 			t.Fatalf("acquire %s advisory lock: %v", name, err)
 		}
+
 		t.Cleanup(func() {
 			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
 			_ = conn.Close()
@@ -259,6 +290,7 @@ func (f *fixture) createMember(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
+
 	t.Cleanup(func() {
 		_, _ = f.conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, userID)
 		_, _ = f.conn.Exec(`DELETE FROM system.sessions WHERE user_id = $1`, userID)
@@ -267,9 +299,11 @@ func (f *fixture) createMember(t *testing.T) string {
 	if _, err := f.conn.Exec(`UPDATE system.users SET status = 'active' WHERE id = $1`, userID); err != nil {
 		t.Fatalf("activate user: %v", err)
 	}
+
 	if _, err := f.conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", f.schema), userID, f.adminRole); err != nil {
 		t.Fatalf("grant admin role: %v", err)
 	}
+
 	return userID
 }
 
@@ -292,6 +326,7 @@ func (f *fixture) login(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
+
 	return tokens.AccessToken
 }
 
@@ -309,18 +344,22 @@ func (f *fixture) seedTOTP(t *testing.T, label string) (*mfa.Credential, string)
 	if err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
+
 	ciphertext, err := f.rowKeys.Encrypt([]byte(key.Secret()))
 	if err != nil {
 		t.Fatalf("encrypt totp secret: %v", err)
 	}
+
 	cred, err := f.mfa.Insert(t.Context(), f.userID, mfa.CredentialTOTP, ciphertext, &label)
 	if err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
+
 	code, err := pquernatotp.GenerateCode(key.Secret(), time.Now())
 	if err != nil {
 		t.Fatalf("GenerateCode() error: %v", err)
 	}
+
 	return cred, code
 }
 
@@ -332,6 +371,7 @@ func (f *fixture) seedRecoveryCode(t *testing.T, code string) {
 	if err != nil {
 		t.Fatalf("hash recovery code: %v", err)
 	}
+
 	if _, err := f.mfa.Insert(t.Context(), f.userID, mfa.CredentialRecoveryCode, hash, nil); err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
@@ -343,6 +383,7 @@ func (f *fixture) countActive(t *testing.T, credType mfa.CredentialType) int {
 	if err := f.conn.QueryRow(`SELECT count(*) FROM system.user_mfa WHERE user_id = $1 AND type = $2 AND revoked_at IS NULL`, f.userID, credType).Scan(&n); err != nil {
 		t.Fatalf("count user_mfa rows: %v", err)
 	}
+
 	return n
 }
 
@@ -356,8 +397,10 @@ func (f *fixture) do(t *testing.T, handler http.HandlerFunc, method, path, acces
 		if err != nil {
 			t.Fatalf("marshal body: %v", err)
 		}
+
 		reader = bytes.NewReader(b)
 	}
+
 	req := httptest.NewRequest(method, path, reader)
 	req.Host = f.domain
 	req.RemoteAddr = "203.0.113.7:54321"
@@ -365,9 +408,11 @@ func (f *fixture) do(t *testing.T, handler http.HandlerFunc, method, path, acces
 	if accessToken != "" {
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 	}
+
 	if params != nil {
 		req = req.WithContext(route.WithParams(req.Context(), params))
 	}
+
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 	var resp map[string]any
@@ -376,6 +421,7 @@ func (f *fixture) do(t *testing.T, handler http.HandlerFunc, method, path, acces
 			t.Fatalf("unmarshal response %q: %v", rec.Body.String(), err)
 		}
 	}
+
 	return rec.Code, resp
 }
 
@@ -385,6 +431,7 @@ func (f *fixture) list(t *testing.T, accessToken string) map[string]any {
 	if status != http.StatusOK {
 		t.Fatalf("List status = %d, want 200; body = %v", status, resp)
 	}
+
 	return resp
 }
 
@@ -416,16 +463,20 @@ func TestList_ReturnsFactorsRecoveryCountAndPolicy(t *testing.T) {
 	if len(factors) != 1 {
 		t.Fatalf("factors = %v, want the one TOTP factor", resp["factors"])
 	}
+
 	factor, _ := factors[0].(map[string]any)
 	if factor["id"] != cred.ID || factor["type"] != "totp" || factor["label"] != "iPhone" || factor["created_at"] == nil {
 		t.Errorf("factor = %v, want id %s, type totp, label iPhone, created_at set", factor, cred.ID)
 	}
+
 	if v, ok := factor["last_used_at"]; !ok || v != nil {
 		t.Errorf("last_used_at = %v (present %v), want null", v, ok)
 	}
+
 	if resp["recovery_codes_remaining"] != float64(2) {
 		t.Errorf("recovery_codes_remaining = %v, want 2", resp["recovery_codes_remaining"])
 	}
+
 	if resp["required_by_policy"] != false {
 		t.Errorf("required_by_policy = %v, want false under the default optional policy", resp["required_by_policy"])
 	}
@@ -459,15 +510,19 @@ func TestRemove_LastFactorUnderOptionalPolicyRevokesCodesAndEverySession(t *test
 	if n := f.countActive(t, mfa.CredentialTOTP); n != 0 {
 		t.Errorf("active totp factors = %d, want 0", n)
 	}
+
 	if n := f.countActive(t, mfa.CredentialRecoveryCode); n != 0 {
 		t.Errorf("active recovery codes = %d, want 0 after removing the last factor", n)
 	}
+
 	if f.sessionValid(t, caller) || f.sessionValid(t, other) {
 		t.Error("a session still authenticates after removing a factor, want every session revoked")
 	}
+
 	if got := f.audit.events(); !slices.Equal(got, []string{"mfa.revoked"}) {
 		t.Errorf("audit events = %v, want [mfa.revoked]", got)
 	}
+
 	f.audit.assertSelf(t, f.userID)
 
 	fresh := f.login(t)
@@ -475,10 +530,12 @@ func TestRemove_LastFactorUnderOptionalPolicyRevokesCodesAndEverySession(t *test
 	if err != nil {
 		t.Fatalf("Authenticate() error: %v", err)
 	}
+
 	setupRequired, err := f.checker.MFASetupRequired(t.Context(), f.tenantID, authCtx)
 	if err != nil || setupRequired {
 		t.Errorf("MFASetupRequired() = %v, %v; want false, nil", setupRequired, err)
 	}
+
 	if factors, _ := f.list(t, fresh)["factors"].([]any); len(factors) != 0 {
 		t.Errorf("factors after removal = %v, want none", factors)
 	}
@@ -496,12 +553,15 @@ func TestRemove_WithRecoveryCodeKeepsOtherFactorAndCodes(t *testing.T) {
 	if status != http.StatusNoContent {
 		t.Fatalf("Remove status = %d, want 204; body = %v", status, resp)
 	}
+
 	if n := f.countActive(t, mfa.CredentialTOTP); n != 1 {
 		t.Errorf("active totp factors = %d, want the other 1", n)
 	}
+
 	if n := f.countActive(t, mfa.CredentialRecoveryCode); n != 1 {
 		t.Errorf("active recovery codes = %d, want 1 (the used one consumed, the other kept)", n)
 	}
+
 	if f.sessionValid(t, token) {
 		t.Error("caller's session still authenticates after removing a factor, want revoked")
 	}
@@ -518,12 +578,15 @@ func TestRemove_LastFactorUnderRequiredPolicyChangesNothing(t *testing.T) {
 	if status != http.StatusConflict || errorCode(resp) != "mfa_required_by_policy" {
 		t.Fatalf("Remove = %d %v, want 409 mfa_required_by_policy", status, resp)
 	}
+
 	if f.countActive(t, mfa.CredentialTOTP) != 1 || f.countActive(t, mfa.CredentialRecoveryCode) != 1 {
 		t.Error("a credential was revoked or the recovery code consumed, want nothing changed")
 	}
+
 	if !f.sessionValid(t, token) {
 		t.Error("session revoked by a refused removal, want untouched")
 	}
+
 	if got := f.audit.events(); len(got) != 0 {
 		t.Errorf("audit events = %v, want none", got)
 	}
@@ -545,6 +608,7 @@ func TestRemove_UnknownOrForeignFactorIsNotFound(t *testing.T) {
 			t.Errorf("Remove(%s) = %d %v, want 404 mfa_factor_not_found", id, status, resp)
 		}
 	}
+
 	if !f.sessionValid(t, token) {
 		t.Error("session revoked by a failed removal, want untouched")
 	}
@@ -561,14 +625,17 @@ func TestRemove_WrongCodeCountsTowardReverifyLockout(t *testing.T) {
 			t.Fatalf("attempt %d: Remove = %d %v, want 401 invalid_mfa_code", i+1, status, resp)
 		}
 	}
+
 	locked, err := f.lockout.Locked(t.Context(), f.userID, f.tenantID)
 	if err != nil || !locked {
 		t.Fatalf("lockout.Locked() = %v, %v; want true after 5 failures", locked, err)
 	}
+
 	status, resp := f.remove(t, token, cred.ID, map[string]any{"type": "totp", "code": "000000"})
 	if status != http.StatusLocked || errorCode(resp) != "mfa_locked" {
 		t.Errorf("Remove once locked = %d %v, want 423 mfa_locked", status, resp)
 	}
+
 	if n := f.countActive(t, mfa.CredentialTOTP); n != 1 {
 		t.Errorf("active totp factors = %d, want 1", n)
 	}
@@ -585,6 +652,7 @@ func TestRegenerate_ReplacesCodesAndRevokesOnlyOtherSessions(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("Regenerate status = %d, want 200; body = %v", status, resp)
 	}
+
 	codes, _ := resp["recovery_codes"].([]any)
 	if len(codes) != 10 {
 		t.Fatalf("recovery_codes = %v, want ten codes", resp["recovery_codes"])
@@ -595,22 +663,27 @@ func TestRegenerate_ReplacesCodesAndRevokesOnlyOtherSessions(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	if ok, _, _ := f.recovery.Verify(ctx, f.userID, "AAAAA-BBBBB"); ok {
+	if ok, _, _ := f.recovery.Verify(ctx, f.userID, "AAAAA-BBBBB", mfa.Scope{TenantID: f.tenantID}); ok {
 		t.Error("old recovery code still verifies, want revoked")
 	}
+
 	newCode, _ := codes[0].(string)
-	if ok, _, err := f.recovery.Verify(ctx, f.userID, newCode); err != nil || !ok {
+	if ok, _, err := f.recovery.Verify(ctx, f.userID, newCode, mfa.Scope{TenantID: f.tenantID}); err != nil || !ok {
 		t.Errorf("new recovery code Verify() = %v, %v; want true", ok, err)
 	}
+
 	if !f.sessionValid(t, caller) {
 		t.Error("caller's session revoked by regeneration, want kept")
 	}
+
 	if f.sessionValid(t, other) {
 		t.Error("other session still authenticates after regeneration, want revoked")
 	}
+
 	if got := f.audit.events(); !slices.Equal(got, []string{"mfa.recovery_codes_regenerated"}) {
 		t.Errorf("audit events = %v, want [mfa.recovery_codes_regenerated]", got)
 	}
+
 	f.audit.assertSelf(t, f.userID)
 }
 
@@ -624,6 +697,7 @@ func TestRegenerate_RecoveryCodeIsConsumed(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("Regenerate status = %d, want 200; body = %v", status, resp)
 	}
+
 	status, resp = f.regenerate(t, token, map[string]any{"type": "recovery_code", "code": "AAAAA-BBBBB"})
 	if status != http.StatusUnauthorized || errorCode(resp) != "invalid_mfa_code" {
 		t.Errorf("reusing the recovery code = %d %v, want 401 invalid_mfa_code", status, resp)
@@ -639,6 +713,7 @@ func TestRegenerate_WithoutFactorIsNotEnrolled(t *testing.T) {
 	if status != http.StatusConflict || errorCode(resp) != "mfa_not_enrolled" {
 		t.Fatalf("Regenerate = %d %v, want 409 mfa_not_enrolled", status, resp)
 	}
+
 	if n := f.countActive(t, mfa.CredentialRecoveryCode); n != 1 {
 		t.Errorf("active recovery codes = %d, want the original 1 unconsumed", n)
 	}
@@ -651,9 +726,11 @@ func TestHandlers_RequireAccessTokenAndCodeBody(t *testing.T) {
 	if status, _ := f.do(t, f.handlers.List, http.MethodGet, "/auth/mfa/factors", "", nil, nil); status != http.StatusUnauthorized {
 		t.Errorf("List without a token = %d, want 401", status)
 	}
+
 	if status, _ := f.remove(t, "", cred.ID, map[string]any{"type": "totp", "code": "123456"}); status != http.StatusUnauthorized {
 		t.Errorf("Remove without a token = %d, want 401", status)
 	}
+
 	token := f.login(t)
 	if status, resp := f.regenerate(t, token, map[string]any{"type": "totp"}); status != http.StatusBadRequest || errorCode(resp) != "invalid_request" {
 		t.Errorf("Regenerate without a code = %d %v, want 400 invalid_request", status, resp)

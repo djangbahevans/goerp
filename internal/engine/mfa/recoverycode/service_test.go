@@ -1,7 +1,6 @@
 package recoverycode
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -13,12 +12,14 @@ import (
 
 	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
+	"github.com/djangbahevans/goerp/internal/engine/mfa/mfatest"
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
 const localPostgresDSN = "postgres://goerp:dev@localhost:15432/goerp"
 
 type testEnv struct {
+	tenant  mfatest.Tenant
 	service *Service
 	conn    *sql.DB
 	users   *user.Store
@@ -26,25 +27,30 @@ type testEnv struct {
 
 func openTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
 
 	userStore := user.NewStore(conn)
 	if err := userStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("user Bootstrap() error: %v", err)
 	}
 
+	tt := mfatest.NewTenant(t, conn)
 	mfaStore := mfa.NewStore(conn)
 	if err := mfaStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
 
 	return &testEnv{
+		tenant:  tt,
 		service: NewService(mfaStore),
 		conn:    conn,
 		users:   userStore,
@@ -54,11 +60,15 @@ func openTestEnv(t *testing.T) *testEnv {
 func (e *testEnv) createUser(t *testing.T) string {
 	t.Helper()
 	email := fmt.Sprintf("recoverycodetest%d@example.com", time.Now().UnixNano())
-	userID, err := e.users.FindOrCreateInvited(context.Background(), email)
+	userID, err := e.users.FindOrCreateInvited(t.Context(), email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited(%q) error: %v", email, err)
 	}
-	t.Cleanup(func() { _, _ = e.conn.Exec("DELETE FROM system.users WHERE id = $1", userID) })
+
+	t.Cleanup(func() {
+		_, _ = e.conn.Exec("DELETE FROM system.users WHERE id = $1", userID)
+	})
+	mfatest.AddMember(t, e.conn, e.tenant, userID)
 	return userID
 }
 
@@ -74,10 +84,12 @@ func (e *testEnv) insertCode(t *testing.T, userID, code string) *mfa.Credential 
 	if err != nil {
 		t.Fatalf("hash code: %v", err)
 	}
-	cred, err := e.service.store.Insert(context.Background(), userID, mfa.CredentialRecoveryCode, hash, nil)
+
+	cred, err := e.service.store.Insert(t.Context(), userID, mfa.CredentialRecoveryCode, hash, nil)
 	if err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
+
 	return cred
 }
 
@@ -85,30 +97,33 @@ func TestEnroll_StoresTenBcryptHashedRows(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	codes, err := env.service.Enroll(context.Background(), userID)
+	codes, err := env.service.Enroll(t.Context(), userID)
 	if err != nil {
 		t.Fatalf("Enroll() error: %v", err)
 	}
+
 	if len(codes) != codeCount {
 		t.Fatalf("len(codes) = %d, want %d", len(codes), codeCount)
 	}
 
 	var rowCount int
-	if err := env.conn.QueryRowContext(context.Background(),
+	if err := env.conn.QueryRowContext(t.Context(),
 		"SELECT count(*) FROM system.user_mfa WHERE user_id = $1 AND type = 'recovery_code'", userID,
 	).Scan(&rowCount); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
+
 	if rowCount != codeCount {
 		t.Errorf("stored row count = %d, want %d", rowCount, codeCount)
 	}
 
 	var credential []byte
-	if err := env.conn.QueryRowContext(context.Background(),
+	if err := env.conn.QueryRowContext(t.Context(),
 		"SELECT credential FROM system.user_mfa WHERE user_id = $1 AND type = 'recovery_code' LIMIT 1", userID,
 	).Scan(&credential); err != nil {
 		t.Fatalf("query credential: %v", err)
 	}
+
 	// Stored bcrypt hashes must not be recoverable to the plaintext code
 	// by inspection — a bcrypt hash starts with "$2".
 	if len(credential) == 0 || credential[0] != '$' {
@@ -121,10 +136,11 @@ func TestVerify_AcceptsAnEnrolledCode(t *testing.T) {
 	userID := env.createUser(t)
 	env.insertCode(t, userID, "AAAAA-AAAAA")
 
-	ok, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+	ok, _, err := env.service.Verify(t.Context(), userID, "AAAAA-AAAAA", mfa.Scope{TenantID: env.tenant.ID})
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
+
 	if !ok {
 		t.Error("Verify() = false for a freshly enrolled code, want true")
 	}
@@ -135,10 +151,11 @@ func TestVerify_RejectsWrongCode(t *testing.T) {
 	userID := env.createUser(t)
 	env.insertCode(t, userID, "AAAAA-AAAAA")
 
-	ok, _, err := env.service.Verify(context.Background(), userID, "BBBBB-BBBBB")
+	ok, _, err := env.service.Verify(t.Context(), userID, "BBBBB-BBBBB", mfa.Scope{TenantID: env.tenant.ID})
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
+
 	if ok {
 		t.Error("Verify() = true for an arbitrary wrong code, want false")
 	}
@@ -149,18 +166,20 @@ func TestVerify_ConsumesTheCodeSoItCannotBeReused(t *testing.T) {
 	userID := env.createUser(t)
 	env.insertCode(t, userID, "AAAAA-AAAAA")
 
-	first, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+	first, _, err := env.service.Verify(t.Context(), userID, "AAAAA-AAAAA", mfa.Scope{TenantID: env.tenant.ID})
 	if err != nil {
 		t.Fatalf("first Verify() error: %v", err)
 	}
+
 	if !first {
 		t.Fatal("first Verify() = false, want true")
 	}
 
-	second, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+	second, _, err := env.service.Verify(t.Context(), userID, "AAAAA-AAAAA", mfa.Scope{TenantID: env.tenant.ID})
 	if err != nil {
 		t.Fatalf("second Verify() error: %v", err)
 	}
+
 	if second {
 		t.Error("second Verify() with the same code = true, want false (already consumed)")
 	}
@@ -172,14 +191,15 @@ func TestVerify_ConsumingOneCodeDoesNotAffectOthers(t *testing.T) {
 	env.insertCode(t, userID, "AAAAA-AAAAA")
 	env.insertCode(t, userID, "BBBBB-BBBBB")
 
-	if ok, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA"); err != nil || !ok {
+	if ok, _, err := env.service.Verify(t.Context(), userID, "AAAAA-AAAAA", mfa.Scope{TenantID: env.tenant.ID}); err != nil || !ok {
 		t.Fatalf("Verify(AAAAA-AAAAA) = %v, %v, want true, nil", ok, err)
 	}
 
-	ok, _, err := env.service.Verify(context.Background(), userID, "BBBBB-BBBBB")
+	ok, _, err := env.service.Verify(t.Context(), userID, "BBBBB-BBBBB", mfa.Scope{TenantID: env.tenant.ID})
 	if err != nil {
 		t.Fatalf("Verify(BBBBB-BBBBB) error: %v", err)
 	}
+
 	if !ok {
 		t.Error("Verify(BBBBB-BBBBB) = false after consuming a different code, want true — each code is independent")
 	}
@@ -197,10 +217,11 @@ func TestVerify_ConcurrentCallsWithSameCodeOnlyOneSucceeds(t *testing.T) {
 	results := make(chan bool, 10)
 	for range 10 {
 		wg.Go(func() {
-			ok, _, _ := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+			ok, _, _ := env.service.Verify(t.Context(), userID, "AAAAA-AAAAA", mfa.Scope{TenantID: env.tenant.ID})
 			results <- ok
 		})
 	}
+
 	wg.Wait()
 	close(results)
 
@@ -210,6 +231,7 @@ func TestVerify_ConcurrentCallsWithSameCodeOnlyOneSucceeds(t *testing.T) {
 			successes++
 		}
 	}
+
 	if successes != 1 {
 		t.Errorf("successes = %d across 10 concurrent Verify() calls with the same code, want exactly 1", successes)
 	}
@@ -219,10 +241,11 @@ func TestVerify_NoEnrolledCodesReturnsFalse(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	ok, _, err := env.service.Verify(context.Background(), userID, "AAAAA-AAAAA")
+	ok, _, err := env.service.Verify(t.Context(), userID, "AAAAA-AAAAA", mfa.Scope{TenantID: env.tenant.ID})
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
+
 	if ok {
 		t.Error("Verify() = true for a user with no enrolled codes, want false")
 	}
@@ -237,6 +260,7 @@ func (e *testEnv) activeCodeCount(t *testing.T, userID string) int {
 	`, userID).Scan(&n); err != nil {
 		t.Fatalf("count recovery codes: %v", err)
 	}
+
 	return n
 }
 
@@ -247,17 +271,21 @@ func TestRegenerate_ReplacesEveryActiveCode(t *testing.T) {
 	if _, err := env.service.store.Insert(ctx, userID, mfa.CredentialTOTP, []byte("x"), nil); err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
+
 	old := env.insertCode(t, userID, "AAAAA-BBBBB")
 
 	set := Set{Codes: []string{"CCCCC-DDDDD"}, Hashes: [][]byte{mustHash(t, "CCCCC-DDDDD")}}
-	if err := env.service.store.WithTx(ctx, func(tx *sql.Tx) error { return env.service.RegenerateTx(ctx, tx, userID, set) }); err != nil {
+	if err := env.service.store.WithTx(ctx, func(tx *sql.Tx) error {
+		return env.service.RegenerateTx(ctx, tx, userID, nil, set)
+	}); err != nil {
 		t.Fatalf("RegenerateTx() error: %v", err)
 	}
 
-	if ok, _, _ := env.service.Verify(ctx, userID, "AAAAA-BBBBB"); ok {
+	if ok, _, _ := env.service.Verify(ctx, userID, "AAAAA-BBBBB", mfa.Scope{TenantID: env.tenant.ID}); ok {
 		t.Errorf("old code %s still verifies after RegenerateTx(), want rejected", old.ID)
 	}
-	if ok, _, err := env.service.Verify(ctx, userID, "CCCCC-DDDDD"); err != nil || !ok {
+
+	if ok, _, err := env.service.Verify(ctx, userID, "CCCCC-DDDDD", mfa.Scope{TenantID: env.tenant.ID}); err != nil || !ok {
 		t.Errorf("new code Verify() = %v, %v, want true, nil", ok, err)
 	}
 }
@@ -269,9 +297,12 @@ func TestRegenerate_WithoutFactorReturnsErrNotEnrolled(t *testing.T) {
 	env.insertCode(t, userID, "AAAAA-BBBBB")
 
 	set := Set{Codes: []string{"CCCCC-DDDDD"}, Hashes: [][]byte{mustHash(t, "CCCCC-DDDDD")}}
-	if err := env.service.store.WithTx(ctx, func(tx *sql.Tx) error { return env.service.RegenerateTx(ctx, tx, userID, set) }); !errors.Is(err, ErrNotEnrolled) {
+	if err := env.service.store.WithTx(ctx, func(tx *sql.Tx) error {
+		return env.service.RegenerateTx(ctx, tx, userID, nil, set)
+	}); !errors.Is(err, ErrNotEnrolled) {
 		t.Fatalf("RegenerateTx() error = %v, want ErrNotEnrolled", err)
 	}
+
 	if n := env.activeCodeCount(t, userID); n != 1 {
 		t.Errorf("active recovery codes = %d, want the original 1 untouched", n)
 	}
@@ -283,5 +314,6 @@ func mustHash(t *testing.T, code string) []byte {
 	if err != nil {
 		t.Fatalf("hash code: %v", err)
 	}
+
 	return hash
 }

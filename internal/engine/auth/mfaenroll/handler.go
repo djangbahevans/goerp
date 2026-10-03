@@ -1,12 +1,4 @@
-// Package mfaenroll implements TOTP enrollment — auth-internals.md §8 "MFA
-// enrollment": POST /auth/mfa/enroll/totp holds a new secret pending, and
-// POST /auth/mfa/enroll/totp/confirm stores it once the user proves their
-// authenticator produces valid codes, issuing recovery codes with the
-// user's first factor and marking the current session MFA-verified.
-//
-// Both routes run on the user's normal session and resolve tenant and
-// token themselves, the same way mfareverify does. Step 9 exempts
-// /auth/mfa/enroll*, so a user facing mfa_setup_required can reach them.
+// Package mfaenroll confirms tenant-bound TOTP enrollments and issues scoped recovery codes.
 package mfaenroll
 
 import (
@@ -16,7 +8,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -37,7 +28,6 @@ import (
 
 const maxBodyBytes = 64 * 1024
 
-// AuditRecorder is satisfied by authaudit.Store.
 type AuditRecorder interface {
 	Insert(ctx context.Context, row authaudit.Row) error
 }
@@ -76,8 +66,6 @@ func writeInternal(w http.ResponseWriter, r *http.Request) {
 	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa enrollment failed")
 }
 
-// authenticate resolves the tenant from Host and validates the access
-// token, writing the error response itself when either fails.
 func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authcheck.AuthContext, bool) {
 	ctx := r.Context()
 	tenantCtx, err := h.tenants.ResolveByHost(ctx, r.Host)
@@ -92,6 +80,7 @@ func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authch
 		default:
 			writeInternal(w, r)
 		}
+
 		return nil, false
 	}
 
@@ -100,20 +89,22 @@ func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authch
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
 	}
+
 	authCtx, err := h.auth.AuthenticateAllowingPasswordChange(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated || authCtx.AuthMethod != "jwt" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
 	}
+
 	return authCtx, true
 }
 
-// Begin serves POST /auth/mfa/enroll/totp.
 func (h *Handlers) Begin(w http.ResponseWriter, r *http.Request) {
 	authCtx, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
+
 	ctx := r.Context()
 
 	u, err := h.users.GetByID(ctx, authCtx.UserID)
@@ -122,20 +113,22 @@ func (h *Handlers) Begin(w http.ResponseWriter, r *http.Request) {
 			httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 			return
 		}
+
 		writeInternal(w, r)
 		return
 	}
 
-	creds, err := h.mfa.ListActiveByUser(ctx, authCtx.UserID)
+	creds, err := h.mfa.ListAccepted(ctx, authCtx.UserID, mfa.Scope{TenantID: authCtx.TenantID})
 	if err != nil {
 		writeInternal(w, r)
 		return
 	}
+
 	if !h.stepUpSatisfied(w, r, authCtx, creds) {
 		return
 	}
 
-	pending, err := h.totp.BeginEnrollment(ctx, authCtx.UserID, u.Email)
+	pending, err := h.totp.BeginEnrollment(ctx, authCtx.UserID, u.Email, authCtx.TenantID)
 	if err != nil {
 		writeInternal(w, r)
 		return
@@ -155,12 +148,12 @@ type confirmRequest struct {
 	Label        *string `json:"label"`
 }
 
-// Confirm serves POST /auth/mfa/enroll/totp/confirm.
 func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 	authCtx, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
+
 	ctx := r.Context()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
@@ -170,16 +163,17 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	creds, err := h.mfa.ListActiveByUser(ctx, authCtx.UserID)
+	creds, err := h.mfa.ListAccepted(ctx, authCtx.UserID, mfa.Scope{TenantID: authCtx.TenantID})
 	if err != nil {
 		writeInternal(w, r)
 		return
 	}
+
 	if !h.stepUpSatisfied(w, r, authCtx, creds) {
 		return
 	}
 
-	verified, err := h.totp.CheckEnrollmentCode(ctx, authCtx.UserID, req.EnrollmentID, req.Code)
+	verified, err := h.totp.CheckEnrollmentCode(ctx, authCtx.UserID, req.EnrollmentID, req.Code, authCtx.TenantID)
 	switch {
 	case errors.Is(err, totp.ErrEnrollmentNotFound):
 		httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_enrollment_not_found", "enrollment not found or expired; start again")
@@ -192,16 +186,12 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// bcrypt for ten codes takes seconds, so hash before the transaction
-	// when the user looks to need codes; the locked re-check inside decides.
-	var codes *recoverycode.Set
-	if !slices.ContainsFunc(creds, func(c *mfa.Credential) bool { return c.Type == mfa.CredentialRecoveryCode }) {
-		set, err := recoverycode.Prepare()
-		if err != nil {
-			writeInternal(w, r)
-			return
-		}
-		codes = &set
+	// Hash outside the account lock; the locked check decides whether the
+	// matching scope needs this set.
+	codes, err := recoverycode.Prepare()
+	if err != nil {
+		writeInternal(w, r)
+		return
 	}
 
 	now := time.Now()
@@ -210,43 +200,87 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 	// uses null for "the user already had recovery codes".
 	var issued any
 	var state session.ReissueState
+	var denial enforce.Decision
 	err = h.mfa.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := h.mfa.LockUserTx(ctx, tx, authCtx.UserID); err != nil {
 			return err
 		}
-		cred, err := h.mfa.InsertTx(ctx, tx, authCtx.UserID, mfa.CredentialTOTP, verified.Secret, req.Label)
-		if err != nil {
-			return err
-		}
-		credentialID = cred.ID
 
-		hasCodes, err := h.mfa.HasActiveOfTypeTx(ctx, tx, authCtx.UserID, mfa.CredentialRecoveryCode)
+		accepted, err := h.mfa.ListAcceptedTx(ctx, tx, authCtx.UserID, mfa.Scope{TenantID: authCtx.TenantID})
 		if err != nil {
 			return err
 		}
-		if !hasCodes && codes != nil {
-			if err := h.recovery.InsertTx(ctx, tx, authCtx.UserID, *codes); err != nil {
+
+		if mfa.HasFactor(accepted) {
+			denial, err = h.auth.StepUpDecision(ctx, authCtx.TenantID, authCtx)
+			if err != nil {
 				return err
 			}
+
+			if denial != enforce.Allowed {
+				return errors.New("mfa enrollment requires step-up")
+			}
+		}
+
+		factorTenant, err := h.mfa.EnrollmentTenantTx(ctx, tx, authCtx.UserID, authCtx.TenantID, authCtx.SessionID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return session.ErrSessionNotFound
+		}
+
+		if err != nil {
+			return err
+		}
+
+		cred, err := h.mfa.InsertScopedTx(ctx, tx, authCtx.UserID, factorTenant, mfa.CredentialTOTP, verified.Secret, req.Label)
+		if err != nil {
+			return err
+		}
+
+		credentialID = cred.ID
+
+		hasCodes, err := h.mfa.HasRecoveryCodesTx(ctx, tx, authCtx.UserID, factorTenant)
+		if err != nil {
+			return err
+		}
+
+		if !hasCodes {
+			if err := h.recovery.InsertTx(ctx, tx, authCtx.UserID, factorTenant, codes); err != nil {
+				return err
+			}
+
 			issued = codes.Codes
+		}
+
+		if factorTenant != nil {
+			if err := h.mfa.SetResetTx(ctx, tx, authCtx.UserID, authCtx.TenantID, false); err != nil {
+				return err
+			}
 		}
 
 		state, err = h.sessions.UpdateMFAAssuranceTx(ctx, tx, authCtx.SessionID, string(mfa.CredentialTOTP), now, credentialID)
 		if err != nil {
 			return err
 		}
+
 		// Last, so a failed write above leaves the enrollment pending for a retry.
 		return h.totp.ClaimEnrollment(ctx, verified)
 	})
 	if err != nil {
+		if denial != enforce.Allowed {
+			httperr.Write(ctx, w, http.StatusForbidden, string(denial), "verify your existing MFA factor before adding another")
+			return
+		}
+
 		if errors.Is(err, totp.ErrEnrollmentNotFound) {
 			httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_enrollment_not_found", "enrollment not found or expired; start again")
 			return
 		}
+
 		if errors.Is(err, session.ErrSessionNotFound) {
 			httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 			return
 		}
+
 		writeInternal(w, r)
 		return
 	}
@@ -264,26 +298,22 @@ func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// stepUpSatisfied requires a user who already holds a TOTP or WebAuthn
-// factor to have verified MFA recently in this session before adding
-// another, writing the 403 itself when they haven't. First-factor setup,
-// the forced-enrollment case, needs no step-up.
 func (h *Handlers) stepUpSatisfied(w http.ResponseWriter, r *http.Request, authCtx *authcheck.AuthContext, creds []*mfa.Credential) bool {
-	enrolled := slices.ContainsFunc(creds, func(c *mfa.Credential) bool {
-		return c.Type == mfa.CredentialTOTP || c.Type == mfa.CredentialWebAuthn
-	})
-	if !enrolled {
+	if !mfa.HasFactor(creds) {
 		return true
 	}
+
 	decision, err := h.auth.StepUpDecision(r.Context(), authCtx.TenantID, authCtx)
 	if err != nil {
 		writeInternal(w, r)
 		return false
 	}
+
 	if decision != enforce.Allowed {
 		httperr.Write(r.Context(), w, http.StatusForbidden, string(decision), "verify your existing MFA factor before adding another")
 		return false
 	}
+
 	return true
 }
 
@@ -292,11 +322,13 @@ func (h *Handlers) recordAudit(ctx context.Context, r *http.Request, authCtx *au
 		log.Warn().Msg("mfaenroll: no audit recorder wired, mfa.enrolled not recorded")
 		return
 	}
+
 	metadata, err := json.Marshal(map[string]string{"credential_id": credentialID, "type": string(mfa.CredentialTOTP)})
 	if err != nil {
 		log.Warn().Err(err).Msg("mfaenroll: encode audit metadata failed")
 		return
 	}
+
 	if err := h.audit.Insert(ctx, authaudit.Row{
 		EventType:   "mfa.enrolled",
 		TenantID:    authCtx.TenantID,

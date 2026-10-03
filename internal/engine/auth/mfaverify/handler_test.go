@@ -50,37 +50,45 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
 		t.Skipf("postgres not reachable at %s (start compose.dev.yml): %v", localPostgresDSN, err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
 	lockSharedKeyTables(t, conn)
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("tenant Bootstrap() error: %v", err)
 	}
+
 	userStore := user.NewStore(conn)
 	if err := userStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("user Bootstrap() error: %v", err)
 	}
+
 	sessionStore := session.NewStore(conn)
 	if err := sessionStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("session Bootstrap() error: %v", err)
 	}
+
 	mfaStore := mfa.NewStore(conn)
 	if err := mfaStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfa Bootstrap() error: %v", err)
 	}
+
 	roleStore := role.NewStore(conn)
 
 	signingKeyStore := signingkey.NewStore(conn, &secrets.EnvBackend{})
 	if err := signingKeyStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("signingkey Bootstrap() error: %v", err)
 	}
+
 	signingKeySet, err := signingKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("signingkey LoadOrGenerate() error: %v", err)
@@ -90,10 +98,12 @@ func newFixture(t *testing.T) *fixture {
 	if err := mfaTokenKeyStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("mfatoken Bootstrap() error: %v", err)
 	}
+
 	mfaTokenKeySet, err := mfaTokenKeyStore.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("mfatoken LoadOrGenerate() error: %v", err)
 	}
+
 	mfaTokens := mfatoken.NewCodec(&mfaTokenKeySet.Active)
 
 	// EnvBackend (ephemeral, never persists) — same reasoning as
@@ -106,7 +116,10 @@ func newFixture(t *testing.T) *fixture {
 	if err := rowCryptStore.Bootstrap(ctx); err != nil {
 		t.Fatalf("rowcrypt Bootstrap() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.row_encryption_keys`) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.row_encryption_keys`)
+	})
 	rowKeys, err := rowCryptStore.LoadOrGenerate(ctx)
 	if err != nil {
 		t.Fatalf("rowcrypt LoadOrGenerate() error: %v", err)
@@ -116,47 +129,67 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Skipf("redis not reachable at localhost:6379 (start compose.dev.yml): %v", err)
 	}
-	t.Cleanup(func() { _ = cacheClient.Close() })
+
+	t.Cleanup(func() {
+		_ = cacheClient.Close()
+	})
 
 	issuer := authtoken.NewIssuer(&signingKeySet.Active, tenantStore, roleStore, sessionStore)
 	totpService := totp.NewService(mfaStore, rowKeys, cacheClient)
 	recoveryService := recoverycode.NewService(mfaStore)
-	handler := NewHandler(mfaTokens, cacheClient, totpService, recoveryService, tenantStore, issuer)
+	handler := NewHandler(mfaTokens, cacheClient, totpService, recoveryService, tenantStore, issuer, mfaStore)
 
 	slug := fmt.Sprintf("mfaverifytest%d", time.Now().UnixNano())
 	tt, err := tenantStore.CreateTenant(ctx, slug, "MFA Verify Test Co")
 	if err != nil {
 		t.Fatalf("CreateTenant() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.tenants WHERE id = $1`, tt.ID)
+	})
 
 	email := slug + "@example.com"
 	userID, err := userStore.FindOrCreateInvited(ctx, email)
 	if err != nil {
 		t.Fatalf("FindOrCreateInvited() error: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.users WHERE id = $1`, userID)
+	})
 	if _, err := conn.Exec(`UPDATE system.users SET status = 'active' WHERE id = $1`, userID); err != nil {
 		t.Fatalf("activate fixture user: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, userID) })
-	t.Cleanup(func() { _, _ = conn.Exec(`DELETE FROM system.sessions WHERE user_id = $1`, userID) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.user_mfa WHERE user_id = $1`, userID)
+	})
+	t.Cleanup(func() {
+		_, _ = conn.Exec(`DELETE FROM system.sessions WHERE user_id = $1`, userID)
+	})
 
 	schema := tenantschema.Name(slug)
 	if _, err := conn.Exec("CREATE SCHEMA " + schema); err != nil {
 		t.Fatalf("create fixture schema: %v", err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", schema)) })
+
+	t.Cleanup(func() {
+		_, _ = conn.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", schema))
+	})
 	if err := roleStore.Bootstrap(ctx, slug); err != nil {
 		t.Fatalf("role Bootstrap() error: %v", err)
 	}
+
 	if err := roleStore.SeedBuiltinRoles(ctx, slug); err != nil {
 		t.Fatalf("SeedBuiltinRoles() error: %v", err)
 	}
+
 	roleID, err := roleStore.GetRoleByName(ctx, slug, "admin")
 	if err != nil {
 		t.Fatalf("GetRoleByName() error: %v", err)
 	}
+
 	if _, err := conn.Exec(fmt.Sprintf("WITH m AS (INSERT INTO %[1]s.tenant_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING) INSERT INTO %[1]s.user_roles (user_id, role_id) VALUES ($1, $2)", schema), userID, roleID); err != nil {
 		t.Fatalf("grant admin role: %v", err)
 	}
@@ -180,7 +213,7 @@ func newFixture(t *testing.T) *fixture {
 // tables.
 func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	for _, name := range []string{
 		"test.jwt_signing_keys_table",
 		"test.row_encryption_keys_table",
@@ -191,9 +224,11 @@ func lockSharedKeyTables(t *testing.T, pool *sql.DB) {
 		if err != nil {
 			t.Fatalf("acquire dedicated connection for %s lock: %v", name, err)
 		}
+
 		if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key); err != nil {
 			t.Fatalf("acquire %s advisory lock: %v", name, err)
 		}
+
 		t.Cleanup(func() {
 			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", key)
 			_ = conn.Close()
@@ -207,17 +242,21 @@ func (f *fixture) enrollTOTP(t *testing.T) (code string) {
 	if err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
+
 	ciphertext, err := f.rowKeys.Encrypt([]byte(key.Secret()))
 	if err != nil {
 		t.Fatalf("encrypt totp secret: %v", err)
 	}
+
 	if _, err := mfa.NewStore(f.conn).Insert(context.Background(), f.userID, mfa.CredentialTOTP, ciphertext, nil); err != nil {
 		t.Fatalf("Insert() error: %v", err)
 	}
+
 	code, err = pquernatotp.GenerateCode(key.Secret(), time.Now())
 	if err != nil {
 		t.Fatalf("GenerateCode() error: %v", err)
 	}
+
 	return code
 }
 
@@ -227,6 +266,7 @@ func (f *fixture) issueMFAToken(t *testing.T, origin string) (token, txn string)
 	if err != nil {
 		t.Fatalf("Issue() error: %v", err)
 	}
+
 	return token, txn
 }
 
@@ -236,11 +276,13 @@ func (f *fixture) doVerify(t *testing.T, body map[string]any, headers map[string
 	if err != nil {
 		t.Fatalf("marshal request body: %v", err)
 	}
+
 	req := httptest.NewRequest(http.MethodPost, "/auth/mfa/verify", bytes.NewReader(b))
 	req.RemoteAddr = "203.0.113.7:54321"
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 	return rec
@@ -265,13 +307,16 @@ func TestServeHTTP_ValidTOTPCodeIssuesSession(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
+
 	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
+
 	if resp["access_token"] == "" || resp["access_token"] == nil {
 		t.Error("access_token missing or empty")
 	}
+
 	if resp["refresh_token"] == "" || resp["refresh_token"] == nil {
 		t.Error("refresh_token missing or empty")
 	}
@@ -279,24 +324,29 @@ func TestServeHTTP_ValidTOTPCodeIssuesSession(t *testing.T) {
 	var mfaMethod string
 	var mfaVerifiedAt sql.NullTime
 	var mfaCredentialID sql.NullString
-	if err := f.conn.QueryRowContext(context.Background(),
+	if err := f.conn.QueryRowContext(t.Context(),
 		`SELECT mfa_method, mfa_verified_at, mfa_credential_id FROM system.sessions WHERE user_id = $1`, f.userID,
 	).Scan(&mfaMethod, &mfaVerifiedAt, &mfaCredentialID); err != nil {
 		t.Fatalf("query session row: %v", err)
 	}
+
 	if mfaMethod != "totp" {
 		t.Errorf("sessions.mfa_method = %q, want %q", mfaMethod, "totp")
 	}
+
 	if !mfaVerifiedAt.Valid {
 		t.Error("sessions.mfa_verified_at is NULL, want set")
 	}
+
 	if !mfaCredentialID.Valid || mfaCredentialID.String == "" {
 		t.Error("sessions.mfa_credential_id is NULL/empty, want the matched credential's id")
 	}
 }
 
 func TestServeHTTP_WebSessionPersistenceFollowsTokenRemember(t *testing.T) {
-	for _, remember := range []bool{true, false} {
+	for _, remember := range []bool{
+		true, false,
+	} {
 		t.Run(fmt.Sprintf("remember=%v", remember), func(t *testing.T) {
 			f := newFixture(t)
 			code := f.enrollTOTP(t)
@@ -317,6 +367,7 @@ func TestServeHTTP_WebSessionPersistenceFollowsTokenRemember(t *testing.T) {
 			).Scan(&persistent); err != nil {
 				t.Fatalf("query session row: %v", err)
 			}
+
 			if persistent != remember {
 				t.Errorf("sessions.persistent = %v, want %v", persistent, remember)
 			}
@@ -327,10 +378,11 @@ func TestServeHTTP_WebSessionPersistenceFollowsTokenRemember(t *testing.T) {
 func TestServeHTTP_ValidRecoveryCodeConsumesItAndIssuesSession(t *testing.T) {
 	f := newFixture(t)
 	svc := recoverycode.NewService(mfa.NewStore(f.conn))
-	codes, err := svc.Enroll(context.Background(), f.userID)
+	codes, err := svc.Enroll(t.Context(), f.userID)
 	if err != nil {
 		t.Fatalf("Enroll() error: %v", err)
 	}
+
 	token, _ := f.issueMFAToken(t, testOrigin)
 
 	rec := f.doVerify(t, map[string]any{
@@ -455,6 +507,7 @@ func TestServeHTTP_TokenPasswordPolicyResultReachesSession(t *testing.T) {
 		{"recommended", password.Result{Outcome: password.UpdateRecommended, Deadline: &deadline}, "password_update_deadline", false},
 		{"required", password.Result{Outcome: password.ChangeRequired}, "password_change_required", true},
 	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
@@ -474,18 +527,24 @@ func TestServeHTTP_TokenPasswordPolicyResultReachesSession(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatalf("decode body: %v", err)
 			}
-			for _, key := range []string{"password_update_deadline", "password_change_required"} {
+
+			for _, key := range []string{
+				"password_update_deadline", "password_change_required",
+			} {
 				if _, got := body[key]; got != (key == tc.wantKey) {
 					t.Errorf("%s present = %v, want %v; body = %s", key, got, key == tc.wantKey, rec.Body.String())
 				}
 			}
+
 			if tc.wantKey == "password_update_deadline" && body[tc.wantKey] != deadline.Format(time.RFC3339) {
 				t.Errorf("password_update_deadline = %v, want %s", body[tc.wantKey], deadline.Format(time.RFC3339))
 			}
+
 			var restricted bool
 			if err := f.conn.QueryRow(`SELECT password_change_required FROM system.sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, f.userID).Scan(&restricted); err != nil {
 				t.Fatalf("read session: %v", err)
 			}
+
 			if restricted != tc.wantRestricted {
 				t.Errorf("session password_change_required = %v, want %v", restricted, tc.wantRestricted)
 			}
@@ -512,6 +571,7 @@ func TestServeHTTP_IPAllowlistRejectsTheSession(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, body = %s, want 403", rec.Code, rec.Body.String())
 	}
+
 	if !strings.Contains(rec.Body.String(), `"ip_not_allowed"`) {
 		t.Errorf("body = %s, want ip_not_allowed", rec.Body.String())
 	}

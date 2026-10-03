@@ -78,6 +78,7 @@ function memoryClient(initial: ActiveSession[]): SessionsClient {
 const VALID_CODE = "123456";
 
 const IPHONE: MFAFactor = {
+  tenantOnly: false,
   id: "f-iphone",
   type: "totp",
   label: "iPhone",
@@ -86,6 +87,7 @@ const IPHONE: MFAFactor = {
 };
 
 const WORK_PHONE: MFAFactor = {
+  tenantOnly: true,
   id: "f-work",
   type: "totp",
   label: null,

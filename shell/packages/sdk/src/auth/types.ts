@@ -270,6 +270,7 @@ export interface TOTPEnrollmentConfirmation {
 // One enrolled sign-in factor from GET /auth/mfa/factors (auth-internals.md
 // §8 "Managing factors"). Recovery codes are counted, not listed.
 export interface MFAFactor {
+  tenantOnly: boolean;
   id: string;
   type: "totp" | "webauthn";
   label: string | null;

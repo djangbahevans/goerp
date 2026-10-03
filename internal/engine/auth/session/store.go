@@ -1,9 +1,4 @@
-// Package session bootstraps the system.sessions table, inserts a
-// session's first row, and revokes rows — the table backing
-// JWT/refresh-token issuance, rotation, and revocation (auth-internals.md
-// §4 "Session table"). Rotation (successor rows on refresh) is a separate,
-// unbuilt ticket; revocation only marks a row, it doesn't check any
-// blocklist — that's internal/engine/sessionrevoke.
+// Package session stores, rotates and revokes authentication sessions.
 package session
 
 import (
@@ -18,13 +13,6 @@ import (
 
 var ErrSessionNotFound = errors.New("session not found")
 
-// createSessionsTable matches auth-internals.md §4's schema exactly,
-// except mfa_credential_id drops the documented "REFERENCES user_mfa(id)"
-// — no system.user_mfa table exists in this repo yet (a separate, unfiled
-// ticket). The column stays a plain UUID so that constraint can be added
-// via ALTER TABLE once user_mfa lands, the same reasoning system.tenants'
-// suspended_by column already applies to a users(id) FK that didn't exist
-// yet when tenants was bootstrapped.
 const createSessionsTable = `
 CREATE TABLE IF NOT EXISTS system.sessions (
     id                UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -82,15 +70,19 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 		if err := db.EnsureSystemSchema(ctx, tx); err != nil {
 			return err
 		}
+
 		if _, err := tx.ExecContext(ctx, createSessionsTable); err != nil {
 			return fmt.Errorf("create sessions table: %w", err)
 		}
+
 		if _, err := tx.ExecContext(ctx, createSessionsRefreshHashIndex); err != nil {
 			return fmt.Errorf("create sessions refresh_hash index: %w", err)
 		}
+
 		if _, err := tx.ExecContext(ctx, createSessionsUserIndex); err != nil {
 			return fmt.Errorf("create sessions user index: %w", err)
 		}
+
 		if _, err := tx.ExecContext(ctx, createSessionsFamilyIndex); err != nil {
 			return fmt.Errorf("create sessions family index: %w", err)
 		}
@@ -139,7 +131,15 @@ type Row struct {
 // the MFA fields store as SQL NULL when empty, same convention
 // auditlog.Store.Write uses.
 func (s *Store) Insert(ctx context.Context, row Row) error {
-	_, err := s.db.ExecContext(ctx, `
+	return insert(ctx, s.db, row)
+}
+
+func (s *Store) InsertTx(ctx context.Context, tx *sql.Tx, row Row) error {
+	return insert(ctx, tx, row)
+}
+
+func insert(ctx context.Context, q db.Execer, row Row) error {
+	_, err := q.ExecContext(ctx, `
 		INSERT INTO system.sessions
 			(id, user_id, tenant_id, family_id, device_id, refresh_hash, user_agent, ip_address, country_code, expires_at, mfa_verified_at, mfa_method, mfa_credential_id, persistent, password_change_required)
 		VALUES ($1, $2, $3, $1, $4, $5, NULLIF($6, ''), NULLIF($7, '')::inet, NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, '')::uuid, $13, $14)
@@ -161,13 +161,16 @@ func (s *Store) Revoke(ctx context.Context, id, reason string) error {
 	if err != nil {
 		return fmt.Errorf("revoke session: %w", err)
 	}
+
 	n, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("revoke session: %w", err)
 	}
+
 	if n == 0 {
 		return ErrSessionNotFound
 	}
+
 	return nil
 }
 
@@ -181,7 +184,10 @@ func (s *Store) ClearPasswordChangeRequired(ctx context.Context, id string) (Rei
 	if err != nil {
 		return ReissueState{}, fmt.Errorf("begin clear password_change_required: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	var familyID string
 	var state ReissueState
@@ -192,23 +198,28 @@ func (s *Store) ClearPasswordChangeRequired(ctx context.Context, id string) (Rei
 	if errors.Is(err, sql.ErrNoRows) {
 		return ReissueState{}, ErrSessionNotFound
 	}
+
 	if err != nil {
 		return ReissueState{}, fmt.Errorf("look up session: %w", err)
 	}
+
 	if _, err := tx.ExecContext(ctx, `
 		SELECT 1 FROM system.sessions WHERE family_id = $1 AND revoked_at IS NULL FOR UPDATE
 	`, familyID); err != nil {
 		return ReissueState{}, fmt.Errorf("lock session family: %w", err)
 	}
+
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE system.sessions SET password_change_required = FALSE
 		WHERE family_id = $1 AND revoked_at IS NULL
 	`, familyID); err != nil {
 		return ReissueState{}, fmt.Errorf("clear session password_change_required: %w", err)
 	}
+
 	if err := tx.Commit(); err != nil {
 		return ReissueState{}, fmt.Errorf("commit clear password_change_required: %w", err)
 	}
+
 	return state, nil
 }
 
@@ -246,9 +257,11 @@ func updateMFAAssurance(ctx context.Context, q db.Execer, id, mfaMethod string, 
 	if errors.Is(err, sql.ErrNoRows) {
 		return ReissueState{}, ErrSessionNotFound
 	}
+
 	if err != nil {
 		return ReissueState{}, fmt.Errorf("update session mfa assurance: %w", err)
 	}
+
 	return state, nil
 }
 
@@ -264,7 +277,10 @@ func (s *Store) NonRevokedIDsForUser(ctx context.Context, userID string) ([]stri
 	if err != nil {
 		return nil, fmt.Errorf("query non-revoked sessions: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	ids := []string{}
 	for rows.Next() {
@@ -272,8 +288,10 @@ func (s *Store) NonRevokedIDsForUser(ctx context.Context, userID string) ([]stri
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan session id: %w", err)
 		}
+
 		ids = append(ids, id)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate session ids: %w", err)
 	}
@@ -290,6 +308,7 @@ func (s *Store) RevokeAllForUser(ctx context.Context, userID, reason string) err
 	if err != nil {
 		return fmt.Errorf("revoke all sessions for user: %w", err)
 	}
+
 	return nil
 }
 
@@ -303,6 +322,7 @@ func (s *Store) RevokeAllForUserTx(ctx context.Context, tx *sql.Tx, userID, reas
 	if err != nil {
 		return nil, fmt.Errorf("revoke all sessions for user: %w", err)
 	}
+
 	return rowIDs(rows), nil
 }
 
@@ -318,6 +338,7 @@ func (s *Store) RevokeOthersForUser(ctx context.Context, userID, keepSessionID, 
 	if err != nil {
 		return nil, fmt.Errorf("revoke other sessions for user: %w", err)
 	}
+
 	return rowIDs(rows), nil
 }
 
@@ -336,7 +357,10 @@ func (s *Store) NonRevokedIDsForUserInTenant(ctx context.Context, userID, tenant
 	if err != nil {
 		return nil, fmt.Errorf("query non-revoked sessions: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	ids := []string{}
 	for rows.Next() {
@@ -344,8 +368,10 @@ func (s *Store) NonRevokedIDsForUserInTenant(ctx context.Context, userID, tenant
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan session id: %w", err)
 		}
+
 		ids = append(ids, id)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate session ids: %w", err)
 	}
@@ -364,6 +390,7 @@ func (s *Store) RevokeAllForUserInTenant(ctx context.Context, userID, tenantID, 
 	if err != nil {
 		return fmt.Errorf("revoke all sessions for user in tenant: %w", err)
 	}
+
 	return nil
 }
 
@@ -378,7 +405,10 @@ func (s *Store) NonRevokedIDsForTenant(ctx context.Context, tenantID string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("query non-revoked sessions: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	ids := []string{}
 	for rows.Next() {
@@ -386,8 +416,10 @@ func (s *Store) NonRevokedIDsForTenant(ctx context.Context, tenantID string) ([]
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan session id: %w", err)
 		}
+
 		ids = append(ids, id)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate session ids: %w", err)
 	}
@@ -406,5 +438,18 @@ func (s *Store) RevokeAllForTenant(ctx context.Context, tenantID, reason string)
 	if err != nil {
 		return fmt.Errorf("revoke all sessions for tenant: %w", err)
 	}
+
 	return nil
+}
+
+func (s *Store) RevokeAllForUserInTenantTx(ctx context.Context, tx *sql.Tx, userID, tenantID, reason string) ([]string, error) {
+	rows, err := revokeUntilSettled(ctx, tx, `UPDATE system.sessions
+ SET revoked_at = NOW(), revoke_reason = $3
+ WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+ RETURNING `+revokedColumns, userID, tenantID, reason)
+	if err != nil {
+		return nil, fmt.Errorf("revoke tenant sessions for user: %w", err)
+	}
+
+	return rowIDs(rows), nil
 }

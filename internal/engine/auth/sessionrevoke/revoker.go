@@ -50,9 +50,11 @@ func (r *Revoker) Revoke(ctx context.Context, sessionID, reason string) error {
 	if err := r.sessions.Revoke(ctx, sessionID, reason); err != nil {
 		return err
 	}
+
 	if err := r.cache.SetWithTTL(ctx, blocklistKey(sessionID), "1", blocklistTTL); err != nil {
 		return fmt.Errorf("blocklist session %s: %w", sessionID, err)
 	}
+
 	return nil
 }
 
@@ -63,11 +65,13 @@ func (r *Revoker) RevokeFamily(ctx context.Context, familyID, reason string) err
 	if err != nil {
 		return err
 	}
+
 	for _, id := range ids {
 		if err := r.cache.SetWithTTL(ctx, blocklistKey(id), "1", blocklistTTL); err != nil {
 			return fmt.Errorf("blocklist session %s: %w", id, err)
 		}
 	}
+
 	return nil
 }
 
@@ -109,6 +113,7 @@ func (r *Revoker) Blocklist(ctx context.Context, ids []string) error {
 			return fmt.Errorf("blocklist session %s: %w", id, err)
 		}
 	}
+
 	return nil
 }
 
@@ -120,11 +125,13 @@ func (r *Revoker) RevokeOthersForUser(ctx context.Context, userID, keepSessionID
 	if err != nil {
 		return err
 	}
+
 	for _, id := range ids {
 		if err := r.cache.SetWithTTL(ctx, blocklistKey(id), "1", blocklistTTL); err != nil {
 			return fmt.Errorf("blocklist session %s: %w", id, err)
 		}
 	}
+
 	return nil
 }
 
@@ -138,6 +145,7 @@ func (r *Revoker) RevokeOtherFamiliesForUserInTenant(ctx context.Context, userID
 	if err != nil {
 		return nil, err
 	}
+
 	for _, f := range families {
 		for _, id := range f.RowIDs {
 			if err := r.cache.SetWithTTL(ctx, blocklistKey(id), "1", blocklistTTL); err != nil {
@@ -145,6 +153,7 @@ func (r *Revoker) RevokeOtherFamiliesForUserInTenant(ctx context.Context, userID
 			}
 		}
 	}
+
 	return families, nil
 }
 
@@ -209,6 +218,7 @@ func (r *Revoker) IsBlocked(ctx context.Context, sessionID string) (bool, error)
 	if err != nil {
 		return false, fmt.Errorf("check blocklist for session %s: %w", sessionID, err)
 	}
+
 	return blocked, nil
 }
 
@@ -222,6 +232,7 @@ func (r *Revoker) MarkRolesStale(ctx context.Context, sessionID string) error {
 	if err := r.cache.SetWithTTL(ctx, staleRolesKey(sessionID), "1", staleRolesTTL); err != nil {
 		return fmt.Errorf("mark roles stale for session %s: %w", sessionID, err)
 	}
+
 	return nil
 }
 
@@ -254,5 +265,10 @@ func (r *Revoker) IsRolesStale(ctx context.Context, sessionID string) (bool, err
 	if err != nil {
 		return false, fmt.Errorf("check stale-roles marker for session %s: %w", sessionID, err)
 	}
+
 	return stale, nil
+}
+
+func (r *Revoker) RevokeAllForUserInTenantTx(ctx context.Context, tx *sql.Tx, userID, tenantID, reason string) ([]string, error) {
+	return r.sessions.RevokeAllForUserInTenantTx(ctx, tx, userID, tenantID, reason)
 }

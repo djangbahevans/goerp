@@ -51,6 +51,7 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			httperr.Write(r.Context(), w, http.StatusNotFound, "invalid_token", "verification link is invalid or has expired")
 			return
 		}
+
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "email verification failed")
 		return
 	}
@@ -77,10 +78,12 @@ func (h *ConfirmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusForbidden, "ip_not_allowed", "your email is verified, but signing in to this tenant is not allowed from your network")
 		return
 	}
+
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "email verification failed")
 		return
 	}
+
 	if err := h.users.ResetLoginState(ctx, u.ID); err != nil {
 		log.Error().Err(err).Str("user_id", u.ID).Msg("emailverify: updating login state failed")
 	}
@@ -97,25 +100,31 @@ func (h *ConfirmHandler) signInTenant(ctx context.Context, u *user.User, tenantS
 	if u.Status != user.StatusActive || tenantSlug == "" {
 		return nil, false
 	}
+
 	t, err := h.tenants.GetBySlug(ctx, tenantSlug)
 	if err != nil {
 		if !errors.Is(err, tenant.ErrTenantNotFound) {
 			log.Error().Err(err).Str("user_id", u.ID).Msg("emailverify: tenant lookup failed")
 		}
+
 		return nil, false
 	}
+
 	isMember, err := h.roles.IsMember(ctx, t.Slug, u.ID)
 	if err != nil {
 		log.Error().Err(err).Str("user_id", u.ID).Msg("emailverify: membership check failed")
 		return nil, false
 	}
+
 	if !isMember {
 		return nil, false
 	}
-	factors, err := h.mfa.ListActiveByUser(ctx, u.ID)
+
+	factors, err := h.mfa.ListAccepted(ctx, u.ID, mfa.Scope{TenantID: t.ID})
 	if err != nil {
 		log.Error().Err(err).Str("user_id", u.ID).Msg("emailverify: mfa enrollment check failed")
 		return nil, false
 	}
-	return t, len(factors) == 0
+
+	return t, !mfa.HasFactor(factors)
 }

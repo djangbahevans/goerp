@@ -1,19 +1,9 @@
-// Package mfaverify implements POST /auth/mfa/verify — auth-internals.md
-// §8 "MFA token flow"'s 8-step order: validate the mfa_token's signature
-// and expiry, check its Origin claim against the request, atomically
-// consume it (single-use), check the (user_id, tenant_id) lockout
-// counter, verify the submitted code against an enrolled factor, and on
-// success issue the full session with real MFA assurance columns set.
-//
-// Verifying against a specific factor type is delegated to totp.Service
-// and recoverycode.Service — this handler only dispatches on the
-// request's type field and composes their result into a session. WebAuthn
-// verification (goerp#301) isn't built yet; a request with type=webauthn
-// is rejected the same way an unrecognized type is, until that lands.
+// Package mfaverify completes an MFA login challenge with a factor accepted by its tenant.
 package mfaverify
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/v2"
 	"errors"
 	"net/http"
@@ -32,12 +22,10 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 )
 
-// maxBodyBytes bounds the request body before JSON parsing — no shared
-// config field or middleware covers builtin routes yet (buildDispatchHandler
-// runs no middleware ahead of them), same reasoning as loginflow's own cap.
 const maxBodyBytes = 64 * 1024
 
 type Handler struct {
+	mfa       *mfa.Store
 	mfaTokens *mfatoken.Codec
 	cache     *cache.Client
 	totp      *totp.Service
@@ -47,8 +35,9 @@ type Handler struct {
 	lockout   *lockout.Counter
 }
 
-func NewHandler(mfaTokens *mfatoken.Codec, cacheClient *cache.Client, totpService *totp.Service, recoveryService *recoverycode.Service, tenants *tenant.Store, issuer *authtoken.Issuer) *Handler {
+func NewHandler(mfaTokens *mfatoken.Codec, cacheClient *cache.Client, totpService *totp.Service, recoveryService *recoverycode.Service, tenants *tenant.Store, issuer *authtoken.Issuer, mfaStore *mfa.Store) *Handler {
 	return &Handler{
+		mfa:       mfaStore,
 		mfaTokens: mfaTokens,
 		cache:     cacheClient,
 		totp:      totpService,
@@ -84,81 +73,48 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Steps 1-2: validate HMAC signature + expiry, extract claims.
 	claims, err := h.mfaTokens.Verify(req.MFAToken)
 	if err != nil {
 		writeInvalidToken(w, r)
 		return
 	}
 
-	// Step 3: Origin check — rejects a captured token being submitted
-	// from a different origin than the one that requested it.
 	if r.Header.Get("Origin") != claims.Origin {
 		writeInvalidToken(w, r)
 		return
 	}
 
-	// Step 4: atomic single-use consumption. TTL matches the token's own
-	// remaining life, not a fixed window — the consumption marker only
-	// needs to outlive the token it's guarding.
 	remaining := time.Until(claims.ExpiresAt.Time)
 	if remaining <= 0 {
 		writeInvalidToken(w, r)
 		return
 	}
+
 	claimed, err := h.cache.SetNXWithTTL(ctx, consumedKey(claims.Txn), "1", remaining)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
+
 	if !claimed {
 		writeInvalidToken(w, r)
 		return
 	}
 
-	// Step 5: lockout check, before spending effort verifying the code.
 	locked, err := h.lockout.Locked(ctx, claims.Subject, claims.TenantID)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
+
 	if locked {
 		httperr.Write(r.Context(), w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
 		return
 	}
 
-	// Step 6: verify the submitted code against an enrolled factor of the
-	// requested type.
-	valid, credentialID, err := VerifyCode(ctx, h.totp, h.recovery, req.Type, claims.Subject, req.Code)
-	if err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
-		return
-	}
-	if !valid {
-		// Step 8: on failure, increment the (user_id, tenant_id) attempt
-		// counter — never the already-consumed txn from step 4.
-		if err := h.lockout.RecordFailure(ctx, claims.Subject, claims.TenantID); err != nil {
-			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
-			return
-		}
-		httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
-		return
-	}
-
-	// Step 7: full session issuance, with MFA assurance columns set. A
-	// recovery-code Verify above already consumed that specific row
-	// (mfa.Store.ConsumeOnce, called from inside recoverycode.Service) —
-	// not literally in the same database transaction as the session
-	// insert below, since they're separate stores with no shared *sql.Tx
-	// today. If Issue fails here, the code is already spent and the
-	// caller must retry with a different enrolled factor; this is a
-	// narrower guarantee than a single atomic transaction would give, but
-	// the security property that matters — a recovery code can't be used
-	// twice — still holds, since ConsumeOnce's own atomicity is what
-	// prevents reuse, not the transaction boundary.
 	t, err := h.tenants.GetByID(ctx, claims.TenantID)
 	if err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
 		return
 	}
 
@@ -166,26 +122,52 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	deviceID, deviceIDIsFresh := loginsession.ResolveDeviceID(r, req.DeviceID, nonBrowser)
 	now := time.Now()
 	passwordPolicy := claims.PasswordPolicyResult()
+	var valid bool
+	var tokens *authtoken.Tokens
+	err = h.mfa.WithTx(ctx, func(tx *sql.Tx) error {
+		if err := h.mfa.LockUserTx(ctx, tx, claims.Subject); err != nil {
+			return err
+		}
 
-	tokens, err := h.issuer.Issue(ctx, authtoken.LoginParams{
-		UserID:          claims.Subject,
-		TenantSlug:      t.Slug,
-		DeviceID:        deviceID,
-		UserAgent:       r.UserAgent(),
-		IPAddress:       loginsession.ClientIP(r),
-		Persistent:      nonBrowser || claims.Remember,
-		MFAMethod:       req.Type,
-		MFAVerifiedAt:   &now,
-		MFACredentialID: credentialID,
+		var credentialID string
+		var err error
+		valid, credentialID, err = VerifyCodeTx(ctx, tx, h.totp, h.recovery, req.Type, claims.Subject, req.Code, mfa.Scope{TenantID: claims.TenantID})
+		if err != nil || !valid {
+			return err
+		}
 
-		PasswordChangeRequired: passwordPolicy.Outcome == password.ChangeRequired,
+		tokens, err = h.issuer.IssueTx(ctx, tx, authtoken.LoginParams{
+			UserID:          claims.Subject,
+			TenantSlug:      t.Slug,
+			DeviceID:        deviceID,
+			UserAgent:       r.UserAgent(),
+			IPAddress:       loginsession.ClientIP(r),
+			Persistent:      nonBrowser || claims.Remember,
+			MFAMethod:       req.Type,
+			MFAVerifiedAt:   &now,
+			MFACredentialID: credentialID,
+
+			PasswordChangeRequired: passwordPolicy.Outcome == password.ChangeRequired,
+		})
+		return err
 	})
 	if errors.Is(err, authtoken.ErrIPNotAllowed) {
 		httperr.Write(r.Context(), w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
 		return
 	}
+
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+		return
+	}
+
+	if !valid {
+		if err := h.lockout.RecordFailure(ctx, claims.Subject, claims.TenantID); err != nil {
+			httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "mfa verification failed")
+			return
+		}
+
+		httperr.Write(ctx, w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
 		return
 	}
 
@@ -199,24 +181,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	loginsession.WriteResponse(w, tokens, deviceID, deviceIDIsFresh, nonBrowser, passwordPolicy)
 }
 
-// VerifyCode dispatches to whichever Service matches mfaType. totp and
-// recoverycode share the same (bool, credentialID, error) shape by
-// design, so both branches compose identically; webauthn (goerp#301)
-// isn't built yet. Exported so mfareverify (goerp#307) can reuse the same
-// dispatch instead of a second copy of this switch.
-func VerifyCode(ctx context.Context, totpSvc *totp.Service, recoverySvc *recoverycode.Service, mfaType, userID, code string) (valid bool, credentialID string, err error) {
+func VerifyCode(ctx context.Context, totpSvc *totp.Service, recoverySvc *recoverycode.Service, mfaType, userID, code string, scope mfa.Scope) (valid bool, credentialID string, err error) {
 	switch mfa.CredentialType(mfaType) {
 	case mfa.CredentialTOTP:
-		return totpSvc.Verify(ctx, userID, code)
+		return totpSvc.Verify(ctx, userID, code, scope)
 	case mfa.CredentialRecoveryCode:
-		return recoverySvc.Verify(ctx, userID, code)
+		return recoverySvc.Verify(ctx, userID, code, scope)
 	default:
 		return false, "", nil
 	}
 }
 
-// consumedKey matches auth-internals.md §8's own
-// auth:mfa_token:consumed:{txn} format exactly.
+func VerifyCodeTx(ctx context.Context, tx *sql.Tx, totpSvc *totp.Service, recoverySvc *recoverycode.Service, mfaType, userID, code string, scope mfa.Scope) (bool, string, error) {
+	if mfa.CredentialType(mfaType) == mfa.CredentialRecoveryCode {
+		return recoverySvc.VerifyTx(ctx, tx, userID, code, scope)
+	}
+
+	return VerifyCode(ctx, totpSvc, recoverySvc, mfaType, userID, code, scope)
+}
+
 func consumedKey(txn string) string {
 	return "auth:mfa_token:consumed:" + txn
 }

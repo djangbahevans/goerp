@@ -31,8 +31,8 @@ type Context struct {
 	// UserRoles is the requesting user's current live roles, checked
 	// against Policy.RequiredRoles for ModeRequiredForRoles.
 	UserRoles []string
-	// Enrolled reports whether the user has any active MFA factor at
-	// all (mfa.Store.ListActiveByUser non-empty).
+	// Enrolled counts sign-in factors accepted by the current tenant,
+	// excluding recovery codes and factors behind its reset barrier.
 	Enrolled bool
 	// AMRHasFactor reports whether this session's own amr claim already
 	// includes an MFA method — distinct from Enrolled, see FactorRequired.
