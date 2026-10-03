@@ -19,19 +19,16 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/manifest"
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 )
 
-// compileActivityFixture compiles testdata/activityfixture — a real module
-// built on the actual SDK (engine.OnActivity/engine.DispatchActivity), not
-// hand-assembled bytecode — to wasip1 WASM, the same way loader's
-// realmodule_test.go compiles testdata/realfixture.
 func compileActivityFixture(t *testing.T) []byte {
 	t.Helper()
 
 	wasmPath := filepath.Join(t.TempDir(), "activityfixture.wasm")
-	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/activityfixture")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-buildmode=c-shared", "-o", wasmPath, "./testdata/activityfixture")
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("compile testdata/activityfixture: %v\n%s", err, out)
@@ -44,12 +41,10 @@ func compileActivityFixture(t *testing.T) []byte {
 	return data
 }
 
-// newActivityDispatchMux compiles and loads testdata/activityfixture into a
-// real wasm.Runtime/InstancePool, registers it in a ModuleRegistry, and
-// wires the route onto a fresh mux.
 func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.DB) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
+	cleanupCtx := context.WithoutCancel(ctx)
 
 	conn, err := db.New(localPostgresDSN)
 	if err != nil {
@@ -72,17 +67,16 @@ func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.D
 	if err != nil {
 		t.Fatalf("wasm.New: %v", err)
 	}
-	t.Cleanup(func() { _ = rt.Close(ctx) })
+	t.Cleanup(func() { _ = rt.Close(cleanupCtx) })
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		t.Fatalf("CompileModule: %v", err)
 	}
-	t.Cleanup(func() { _ = compiled.Close(ctx) })
+	t.Cleanup(func() { _ = compiled.Close(cleanupCtx) })
 
 	pool := rt.NewPool("activityfixture", compiled, wasm.PoolConfig{MaxSize: 1, WarmSize: 1, BorrowTimeout: time.Second})
-	// Registered after rt.Close's cleanup so LIFO drains the pool first.
-	t.Cleanup(func() { pool.DrainAndClose(ctx, 5*time.Second) })
+	t.Cleanup(func() { pool.DrainAndClose(cleanupCtx, 5*time.Second) })
 
 	reg := &registry.ModuleRegistry{}
 	if _, err := reg.Update(map[string]*module.LoadedModule{
@@ -100,7 +94,8 @@ func newActivityDispatchMux(t *testing.T) (*http.ServeMux, *tenant.Store, *sql.D
 	RegisterActivityDispatchRoute(mux, ActivityDispatchDeps{
 		Registry:    reg,
 		Tenants:     tenants,
-		TxLimiter:   rt.TxLimiter(),
+		Runtime:     rt,
+		Roles:       role.NewStore(conn),
 		Credentials: fakeValidator{token: testWorkflowWorkerToken},
 	})
 
