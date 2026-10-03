@@ -13,14 +13,15 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/module"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivertest"
 	"github.com/riverqueue/river/rivertype"
 )
 
 // getDataModule exports get_data (not handle_job) — enough to exercise
-// the "module missing handle_job export" error path without a real
-// module. Copied from internal/engine/wasm's own instance_test.go fixture
-// of the same name (unexported there, so not reusable directly).
+// missing-export error path.
 var getDataModule = []byte{
 	0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0A, 0x02, 0x60,
 	0x00, 0x01, 0x7E, 0x60, 0x02, 0x7F, 0x7F, 0x00, 0x03, 0x03, 0x02, 0x00,
@@ -33,8 +34,7 @@ var getDataModule = []byte{
 }
 
 // handleJobTrapsModule exports allocate/deallocate/handle_job, where
-// handle_job's body is an unconditional unreachable trap. Copied from
-// internal/engine/wasm's own instance_test.go fixture of the same name.
+// handle_job's body is an unconditional unreachable trap.
 var handleJobTrapsModule = []byte{
 	0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x11, 0x03, 0x60,
 	0x01, 0x7F, 0x01, 0x7F, 0x60, 0x02, 0x7F, 0x7F, 0x00, 0x60, 0x02, 0x7F,
@@ -51,19 +51,9 @@ var handleJobTrapsModule = []byte{
 const testModuleName = "testmodule"
 const testJobType = "test_job"
 
-// newTestWorker builds a real *registry.ModuleRegistry with one loaded
-// module (StatusReady, declaring testJobType, backed by a real
-// *wasm.InstancePool compiled from wasmBytes) — going through the real
-// ModuleRegistry.Update pipeline, the same pattern
-// eventdelivery/worker_test.go's newTestModuleRegistry establishes,
-// extended with a real WASM pool since (unlike eventdelivery.Worker) this
-// worker actually invokes WASM. Also wires a real Runtime/TenantStore and
-// returns a real fixture tenant's ID (goerp#500): Work now resolves the
-// tenant slug through TenantStore.GetByID before invoking handle_job, so
-// every test job needs a real tenant row, not just a module registry.
 func newTestWorker(t *testing.T, wasmBytes []byte) (*Worker, string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	conn, tenantStore := newTestTenantStore(t)
 	tt := newFixtureTenant(t, conn, tenantStore)
@@ -100,7 +90,7 @@ func newTestWorker(t *testing.T, wasmBytes []byte) (*Worker, string) {
 
 func runWork(t *testing.T, w *Worker, args jobqueue.WASMJobArgs) error {
 	t.Helper()
-	return w.Work(context.Background(), &river.Job[jobqueue.WASMJobArgs]{JobRow: &rivertype.JobRow{}, Args: args})
+	return w.Work(t.Context(), &river.Job[jobqueue.WASMJobArgs]{JobRow: new(rivertype.JobRow{}), Args: args})
 }
 
 func TestWork_SuccessStatusSucceeds(t *testing.T) {
@@ -137,7 +127,7 @@ func TestWork_PermanentStatusReturnsJobCancel(t *testing.T) {
 
 func TestNewJobEnvelope_CarriesRiverJobMetadata(t *testing.T) {
 	job := &river.Job[jobqueue.WASMJobArgs]{
-		JobRow: &rivertype.JobRow{ID: 42, Attempt: 2, MaxAttempts: 5},
+		JobRow: new(rivertype.JobRow{ID: 42, Attempt: 2, MaxAttempts: 5}),
 		Args: jobqueue.WASMJobArgs{
 			ModuleName: testModuleName, JobType: testJobType, TenantID: "tenant-1",
 			TraceID: "trace-1", Payload: []byte("p"),
@@ -181,39 +171,129 @@ func TestWork_UnknownModuleReturnsError(t *testing.T) {
 	}
 }
 
-// TestWork_NilPoolReturnsErrorNotPanic guards against a module manifest
-// that legitimately declares wasm: false (manifest/module_type.go's
-// "theme" type requires exactly that) reaching StatusReady with a nil
-// Pool — job_types on such a module is a real, currently-unvalidated
-// manifest inconsistency; Work must return an error, not panic on
-// mod.Pool.Borrow.
-func TestWork_NilPoolReturnsErrorNotPanic(t *testing.T) {
-	reg := &registry.ModuleRegistry{}
-	if _, err := reg.Update(map[string]*module.LoadedModule{
-		testModuleName: {
-			Status: module.StatusReady,
-			Pool:   nil,
-			Manifest: manifest.Manifest{
-				Type:     "standard",
-				JobTypes: []manifest.JobType{{Name: testJobType, Handler: "handle_test_job"}},
-			},
-		},
-	}); err != nil {
-		t.Fatalf("ModuleRegistry.Update: %v", err)
-	}
-	w := &Worker{ModuleRegistry: reg}
+func runRiverWork(t *testing.T, w *Worker, args jobqueue.WASMJobArgs) (*rivertest.WorkResult, error) {
+	t.Helper()
 
-	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType})
-	if err == nil {
-		t.Fatal("expected an error for a module with a nil Pool")
+	pool, err := pgxpool.New(t.Context(), jobsTestDSN)
+	if err != nil {
+		t.Fatalf("create job test pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	if err := jobqueue.Migrate(t.Context(), pool); err != nil {
+		t.Fatalf("initialize job test schema: %v", err)
+	}
+
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatalf("begin job test transaction: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+
+	tester := rivertest.NewWorker(t, riverpgxv5.New(pool), &river.Config{Schema: jobqueue.Schema}, w)
+	args.MaxAttempts = 5
+	return tester.Work(t.Context(), t, tx, args, nil)
+}
+
+func TestWork_InvalidJobCancelsAfterOneAttempt(t *testing.T) {
+	for _, name := range []string{"nil_pool", "undeclared_job_type", "wrong_owner", "undeclared_migration", "removed_provider_category"} {
+		t.Run(name, func(t *testing.T) {
+			w, tenantID := newTestWorker(t, buildHandleJobConstStatusModule(0))
+			mod := w.ModuleRegistry.Snapshot().Modules()[testModuleName]
+			modules := map[string]*module.LoadedModule{testModuleName: mod}
+			args := jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType, TenantID: tenantID}
+
+			switch name {
+			case "nil_pool":
+				mod.Pool = nil
+			case "undeclared_job_type":
+				args.JobType = "not_a_declared_job_type"
+			case "wrong_owner":
+				mod.Manifest.JobTypes = nil
+				modules["other_module"] = &module.LoadedModule{
+					Status: module.StatusReady,
+					Manifest: manifest.Manifest{
+						Type:     "standard",
+						JobTypes: []manifest.JobType{{Name: testJobType, Handler: "handle_test_job"}},
+					},
+				}
+			case "undeclared_migration":
+				args.IsDataMigration = true
+			case "removed_provider_category":
+				args.ProviderCategory = "payment_provider"
+			}
+			if _, err := w.ModuleRegistry.Update(modules); err != nil {
+				t.Fatalf("update job registry: %v", err)
+			}
+
+			result, err := runRiverWork(t, w, args)
+			if err != nil {
+				t.Fatalf("work invalid job: %v", err)
+			}
+			if result.Job.State != rivertype.JobStateCancelled || result.Job.Attempt != 1 {
+				t.Fatalf("state = %s, attempt = %d; want cancelled after one attempt", result.Job.State, result.Job.Attempt)
+			}
+		})
 	}
 }
 
-func TestWork_JobTypeNotOwnedByModuleReturnsError(t *testing.T) {
-	w, _ := newTestWorker(t, buildHandleJobConstStatusModule(0))
+func TestWork_TransientDispatchFailureRemainsRetryable(t *testing.T) {
+	for _, name := range []string{"no_snapshot", "unknown_module", "module_not_ready", "borrow_failure", "tenant_lookup_failure"} {
+		t.Run(name, func(t *testing.T) {
+			w, tenantID := newTestWorker(t, buildHandleJobConstStatusModule(0))
+			args := jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: testJobType, TenantID: tenantID}
+			mod := w.ModuleRegistry.Snapshot().Modules()[testModuleName]
 
-	err := runWork(t, w, jobqueue.WASMJobArgs{ModuleName: testModuleName, JobType: "not_a_declared_job_type"})
-	if err == nil {
-		t.Fatal("expected an error for a job type not owned by the target module")
+			switch name {
+			case "no_snapshot":
+				w.ModuleRegistry = &registry.ModuleRegistry{}
+			case "unknown_module":
+				args.ModuleName = "does-not-exist"
+			case "module_not_ready":
+				mod.Status = module.StatusWarming
+				if _, err := w.ModuleRegistry.Update(map[string]*module.LoadedModule{testModuleName: mod}); err != nil {
+					t.Fatalf("update warming module: %v", err)
+				}
+			case "borrow_failure":
+				for range 2 {
+					inst, err := mod.Pool.Borrow(t.Context())
+					if err != nil {
+						t.Fatalf("occupy job instance: %v", err)
+					}
+					t.Cleanup(func() { mod.Pool.Return(inst) })
+				}
+			case "tenant_lookup_failure":
+				args.TenantID = "00000000-0000-0000-0000-000000000000"
+			}
+
+			result, err := runRiverWork(t, w, args)
+			if err == nil {
+				t.Fatal("expected a retryable dispatch error")
+			}
+			if _, cancelled := errors.AsType[*river.JobCancelError](err); cancelled {
+				t.Fatalf("transient error cancelled the job: %v", err)
+			}
+			if (result.Job.State != rivertype.JobStateRetryable && result.Job.State != rivertype.JobStateAvailable) || result.Job.Attempt != 1 {
+				t.Fatalf("state = %s, attempt = %d; want retryable after one attempt", result.Job.State, result.Job.Attempt)
+			}
+		})
+	}
+}
+
+func TestSyncDispatcher_NilPoolReturnsTargetUnavailable(t *testing.T) {
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(map[string]*module.LoadedModule{
+		testModuleName: {Status: module.StatusReady, Manifest: manifest.Manifest{Type: "standard"}},
+	}); err != nil {
+		t.Fatalf("update module registry: %v", err)
+	}
+	d := &SyncDispatcher{ModuleRegistry: reg}
+
+	_, _, err := d.DispatchJobSync(t.Context(), wasm.SyncJobRequest{ModuleName: testModuleName})
+	if !errors.Is(err, wasm.ErrSyncJobTargetUnavailable) {
+		t.Fatalf("error = %v; want ErrSyncJobTargetUnavailable", err)
+	}
+	if _, cancelled := errors.AsType[*river.JobCancelError](err); cancelled {
+		t.Fatalf("synchronous dispatch returned a River cancellation: %v", err)
 	}
 }
