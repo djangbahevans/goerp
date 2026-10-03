@@ -84,6 +84,10 @@ export const NetworkFailure: Story = {
   },
 };
 
-export const UnsupportedMethod: Story = {
+export const PasskeyOnly: Story = {
   decorators: [withProviders(authWith(["webauthn"]))],
+};
+
+export const PasskeyAndAuthenticator: Story = {
+  decorators: [withProviders(authWith(["webauthn", "totp", "recovery_code"]))],
 };

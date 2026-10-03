@@ -10,9 +10,9 @@ import {
   login as loginRequest,
   logout as logoutRequest,
   selectTenant as selectTenantRequest,
-  submitMFACode,
   updatePreferences as updatePreferencesRequest,
   updateProfile as updateProfileRequest,
+  verifyMFA,
 } from "./auth-client.js";
 import { authMachine, sessionIdentity } from "./auth-machine.js";
 import { passwordUpdateNotice } from "./password-update-notice.js";
@@ -22,7 +22,7 @@ import type {
   CurrentTenant,
   CurrentUser,
   LoginCredentials,
-  MFAMethod,
+  MFAVerification,
   SignInHandoff,
   UpdatePreferencesInput,
   UpdateProfileInput,
@@ -46,14 +46,7 @@ function applySessionPreferences(session: { user: CurrentUser; tenant: CurrentTe
 export function AuthProvider({ children }: { children: ReactNode }) {
   const state = useSyncExternalStore(authMachine.subscribe, authMachine.getState);
 
-  // Mount-time session check — idle → checking → authenticated/unauthenticated.
-  // check_session only ever applies once (nothing transitions back into
-  // "idle"), so gating on its own return value — rather than a stale
-  // `state` read from the render that scheduled this effect — is also
-  // what makes StrictMode's dev-mode double-invocation a no-op instead of
-  // firing GET /auth/me twice: the second invocation's transition call
-  // reads the machine's real current state ("checking" by then) and is
-  // rejected.
+  // The machine transition rejects the second StrictMode effect before it can issue another session request.
   useEffect(() => {
     if (!authMachine.transition({ type: "check_session" })) return;
     void fetchCurrentSession().then((session) => {
@@ -66,19 +59,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Logout, an expired session and a failed MFA challenge all end here.
   useEffect(() => {
     if (state.status === "unauthenticated") passwordUpdateNotice.set(false);
   }, [state.status]);
 
-  // signIn runs one sign-in request through the auth machine: a login, or
-  // a handoff exchange on the tenant's host. It resolves to the handoff
-  // when the sign-in must continue on another host.
   const signIn = useCallback(async (request: () => Promise<LoginResult>): Promise<SignInHandoff | null> => {
-    // login_started only applies from "unauthenticated" (or an abandoned
-    // "mfa_required" challenge) — rejects outright
-    // if the mount-time session check (or another login) hasn't finished,
-    // instead of proceeding to race its own session check against it.
     if (!authMachine.transition({ type: "login_started" })) {
       throw new Error("login() called while the auth machine wasn't unauthenticated or mfa_required");
     }
@@ -89,7 +74,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (result.kind === "handoff") {
-      // No session here; the tenant's host completes the sign-in.
       authMachine.transition({ type: "login_failed" });
       return result.handoff;
     }
@@ -102,8 +86,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
-    // Every sign-in writes the flag, set or cleared, so a later user in this
-    // tab never inherits it.
     passwordUpdateNotice.set(result.passwordUpdateRecommended);
     const session = await fetchCurrentSession();
     if (!session) {
@@ -133,14 +115,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [signIn],
   );
 
-  // mfaInFlight guards against a double-submit racing two verify calls for
-  // the same challenge: auth-internals.md §8 step 4 consumes the mfa_token
-  // atomically on whichever request reaches the server first, so a second
-  // concurrent call would otherwise be rejected as already-consumed and
-  // could report failure before the first call's own success is applied.
+  // Concurrent verification can consume the single-use token before the first response updates auth state.
   const mfaInFlight = useRef(false);
 
-  const submitMFA = useCallback(async (code: string, method: MFAMethod = "totp"): Promise<void> => {
+  const submitMFA = useCallback(async (confirmation: MFAVerification): Promise<void> => {
     if (mfaInFlight.current) {
       throw new Error("submitMFA() is already in progress");
     }
@@ -153,14 +131,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mfaInFlight.current = true;
     try {
       try {
-        passwordUpdateNotice.set(await submitMFACode(challengeToken, code, method));
+        passwordUpdateNotice.set(await verifyMFA(challengeToken, confirmation));
       } catch (err) {
-        // The mfa_token is only consumed once the server actually
-        // receives and processes the request (auth-internals.md §8 step
-        // 4 runs before code verification, so this holds for a wrong
-        // code too) — a network failure that never reached the server
-        // leaves it valid, so only a genuine server rejection (AppError)
-        // forces the unauthenticated/fresh-login path.
+        // A server rejection spends the MFA token; a request that never reaches the server leaves it usable.
         if (err instanceof AppError) {
           authMachine.transition({ type: "mfa_failed" });
         }

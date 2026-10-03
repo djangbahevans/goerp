@@ -1,4 +1,4 @@
-import type { AuthContextValue, AuthState, MFAMethod } from "@goerp/sdk/auth";
+import type { AuthContextValue, AuthState, MFAMethod, MFAVerification } from "@goerp/sdk/auth";
 import { AuthContext, createPermissionContextValue, PermissionContext, permissionDataRef } from "@goerp/sdk/auth";
 import { AppError } from "@goerp/sdk/error";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -37,7 +37,7 @@ const FAKE_TENANT = {
   passwordMinLength: 12,
 };
 
-type SubmitImpl = (code: string, method: MFAMethod, setState: (state: AuthState) => void) => Promise<void>;
+type SubmitImpl = (confirmation: MFAVerification, setState: (state: AuthState) => void) => Promise<void>;
 
 function challenge(methods: MFAMethod[] = ["totp", "recovery_code"]): AuthState {
   return { status: "mfa_required", challengeToken: "tok", methods };
@@ -65,7 +65,7 @@ function FakeAuthProvider({
     completeHandoff: async () => {},
     selectTenant: async () => null,
     logout: async () => {},
-    submitMFA: (code, method = "totp") => submitImpl(code, method, setState),
+    submitMFA: (confirmation) => submitImpl(confirmation, setState),
     updateProfile: async () => {},
     updatePreferences: async () => {},
     changePassword: async () => {},
@@ -75,11 +75,11 @@ function FakeAuthProvider({
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-const succeed: SubmitImpl = async (_code, _method, setState) =>
+const succeed: SubmitImpl = async (_confirmation, setState) =>
   setState({ status: "authenticated", user: FAKE_USER, tenant: FAKE_TENANT });
 
 function rejectWith(err: AppError): SubmitImpl {
-  return async (_code, _method, setState) => {
+  return async (_confirmation, setState) => {
     setState({ status: "unauthenticated" });
     throw err;
   };
@@ -149,7 +149,7 @@ describe("/auth/mfa", () => {
     fireEvent.change(codeInput(), { target: { value: "123456" } });
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings/profile"));
-    expect(submitImpl).toHaveBeenCalledWith("123456", "totp", expect.any(Function));
+    expect(submitImpl).toHaveBeenCalledWith({ type: "totp", code: "123456" }, expect.any(Function));
   });
 
   it("auto-submits a pasted code with a separator", async () => {
@@ -158,7 +158,9 @@ describe("/auth/mfa", () => {
 
     fireEvent.change(codeInput(), { target: { value: "123 456" } });
 
-    await waitFor(() => expect(submitImpl).toHaveBeenCalledWith("123456", "totp", expect.any(Function)));
+    await waitFor(() =>
+      expect(submitImpl).toHaveBeenCalledWith({ type: "totp", code: "123456" }, expect.any(Function)),
+    );
   });
 
   it("redirects to / when no redirect param is given", async () => {
@@ -180,7 +182,7 @@ describe("/auth/mfa", () => {
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings/profile"));
-    expect(submitImpl).toHaveBeenCalledWith("ABCDE-FGHIJ", "recovery_code", expect.any(Function));
+    expect(submitImpl).toHaveBeenCalledWith({ type: "recovery_code", code: "ABCDE-FGHIJ" }, expect.any(Function));
   });
 
   it("rejects a malformed recovery code locally without spending the challenge", async () => {
@@ -232,7 +234,7 @@ describe("/auth/mfa", () => {
 
   it("doesn't blame the code when verification succeeds but the session check fails", async () => {
     const { router } = await renderMFA({
-      submitImpl: async (_code, _method, setState) => {
+      submitImpl: async (_confirmation, setState) => {
         setState({ status: "unauthenticated" });
         throw new Error("mfa verification succeeded but the session check that follows it failed");
       },

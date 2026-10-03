@@ -10,6 +10,8 @@
     "build:types": "npm run generate-route-tree && tsc -p tsconfig.json",
     "typecheck": "npm run generate-route-tree && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "pretest-passkeys": "npm run build -w @goerp/sdk",
+    "test-passkeys": "node scripts/test-passkeys.mjs",
     "pretest-module-runtime": "npm run build -w @goerp/sdk",
     "test-module-runtime": "node scripts/test-module-runtime.mjs"
   },

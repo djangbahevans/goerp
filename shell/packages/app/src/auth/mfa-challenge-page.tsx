@@ -1,4 +1,10 @@
-import { type MFAMethod, useAuth } from "@goerp/sdk/auth";
+import {
+  type MFAMethod,
+  type MFAVerification,
+  requestPasskeyAssertion,
+  supportsPasskeys,
+  useAuth,
+} from "@goerp/sdk/auth";
 import { Button, FieldWrapper, TextInput, TextLink } from "@goerp/sdk/components";
 import { isAppError } from "@goerp/sdk/error";
 import { useNavigate } from "@tanstack/react-router";
@@ -17,10 +23,7 @@ type Mode = "totp" | "recovery_code";
 const TOTP_LENGTH = 6;
 const RECOVERY_CODE_PATTERN = /^[A-Z2-7]{10}$/;
 
-// Recovery codes are hashed exactly as generated — uppercase base32 as
-// XXXXX-XXXXX — so typed input is normalized to that form before sending.
-// Returns null for anything that can't be a recovery code, which is never
-// sent: every submitted attempt spends the single-use mfa_token.
+// Recovery codes are hashed in XXXXX-XXXXX form; malformed input must not spend the single-use MFA token.
 export function normalizeRecoveryCode(raw: string): string | null {
   const symbols = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!RECOVERY_CODE_PATTERN.test(symbols)) return null;
@@ -42,20 +45,31 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
   const methods: MFAMethod[] = state.status === "mfa_required" ? state.methods : [];
   const canTOTP = methods.includes("totp");
   const canRecovery = methods.includes("recovery_code");
+  const canPasskey = methods.includes("webauthn") && supportsPasskeys();
+  const passkeyAbort = useRef<AbortController | null>(null);
+  const passkeyButton = useRef<HTMLButtonElement>(null);
+  const restorePasskeyFocus = useRef(false);
+
+  useEffect(() => () => passkeyAbort.current?.abort(), []);
 
   const [mode, setMode] = useState<Mode>(canTOTP ? "totp" : "recovery_code");
   const [code, setCode] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
+  const [passkeyError, setPasskeyError] = useState<string | undefined>();
   const [verifying, setVerifying] = useState(false);
-  // Where a rejected attempt sends the user once the machine has left
-  // mfa_required; set before verifying clears so the redirect below sees it.
+  const [awaitingPasskey, setAwaitingPasskey] = useState(false);
+  useEffect(() => {
+    if (!verifying && restorePasskeyFocus.current) {
+      restorePasskeyFocus.current = false;
+      passkeyButton.current?.focus();
+    }
+  }, [verifying]);
+  // The failure notice must be set before navigation observes the unauthenticated state.
   const failureNotice = useRef<LoginNotice | undefined>(undefined);
   const [focusRequest, setFocusRequest] = useState(0);
 
-  // Success lands in authenticated; a rejected attempt (or a visit with no
-  // pending challenge) lands in unauthenticated. Held off while a verify is
-  // in flight so the failure notice is known before navigating.
+  // Navigation waits for verification cleanup so the failure notice is available.
   useEffect(() => {
     if (verifying) return;
     if (state.status === "authenticated" || state.status === "refreshing") {
@@ -70,28 +84,61 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
     (mode === "totp" ? codeRef : recoveryRef).current?.focus();
   }, [focusRequest, mode]);
 
-  const verify = async (value: string, method: MFAMethod) => {
-    if (verifying) return;
-    setError(undefined);
-    setVerifying(true);
+  const submit = async (confirmation: MFAVerification) => {
     try {
-      await submitMFA(value, method);
+      await submitMFA(confirmation);
     } catch (err) {
-      // A non-AppError reached here either never left the browser (the
-      // challenge is still pending, so this notice goes unused) or came
-      // from the session check after a successful verify — not a bad code.
+      // Session-reload failure after successful verification must not be reported as an invalid factor.
       if (!isAppError(err)) failureNotice.current = "session_failed";
       else failureNotice.current = err.httpStatus === 423 ? "mfa_locked" : "mfa_failed";
-      // A server rejection has spent the token and moved the machine to
-      // unauthenticated; the redirect effect takes over. Only a request that
-      // never reached the server leaves the challenge pending to retry.
+      // Server rejection spends the token; a request that never reaches the server can be retried.
       if (!isAppError(err)) {
-        setCode("");
-        setError("Couldn't verify the code. Check your connection and try again.");
-        setFocusRequest((n) => n + 1);
+        if (confirmation.type === "webauthn") {
+          setPasskeyError("Couldn't verify the passkey. Check your connection and try again.");
+        } else {
+          setCode("");
+          setError("Couldn't verify the code. Check your connection and try again.");
+          setFocusRequest((n) => n + 1);
+        }
       }
+    }
+  };
+
+  const verify = async (value: string, method: "totp" | "recovery_code") => {
+    if (verifying) return;
+    setError(undefined);
+    setPasskeyError(undefined);
+    setVerifying(true);
+    try {
+      await submit({ type: method, code: value });
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const verifyPasskey = async () => {
+    if (verifying || state.status !== "mfa_required") return;
+    setError(undefined);
+    setPasskeyError(undefined);
+    setVerifying(true);
+    const controller = new AbortController();
+    passkeyAbort.current = controller;
+    restorePasskeyFocus.current = true;
+    setAwaitingPasskey(true);
+    try {
+      const assertion = await requestPasskeyAssertion({ mfaToken: state.challengeToken, signal: controller.signal });
+      setAwaitingPasskey(false);
+      if (assertion && !controller.signal.aborted) await submit(assertion);
+    } catch (err) {
+      setPasskeyError(
+        isAppError(err) && err.code === "mfa_locked"
+          ? "Too many failed verification attempts. Try again later."
+          : "Couldn't use your passkey. Try again or choose another method.",
+      );
+    } finally {
+      setVerifying(false);
+      setAwaitingPasskey(false);
+      passkeyAbort.current = null;
     }
   };
 
@@ -121,7 +168,7 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
 
   if (state.status !== "mfa_required") return null;
 
-  if (!canTOTP && !canRecovery) {
+  if (!canTOTP && !canRecovery && !canPasskey) {
     return (
       <AuthLayout>
         <h1 className="mb-4 font-semibold text-text text-xl">Two-factor authentication</h1>
@@ -137,67 +184,95 @@ export function MFAChallengePage({ redirectTo }: MFAChallengePageProps): ReactNo
 
   return (
     <AuthLayout>
-      <h1 className="mb-6 font-semibold text-text text-xl">Enter your verification code</h1>
+      <h1 className="mb-6 font-semibold text-text text-xl">
+        {canTOTP || canRecovery ? "Enter your verification code" : "Two-factor authentication"}
+      </h1>
 
-      <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
-        {mode === "totp" ? (
-          <VerificationCodeInput
-            ref={codeRef}
-            label="Verification code"
-            description="Enter the 6-digit code from your authenticator app."
-            value={code}
-            onChange={(next) => {
-              setCode(next);
-              setError(undefined);
-            }}
-            onComplete={(completed) => void verify(completed, "totp")}
-            error={error}
-            disabled={verifying}
-            autoFocus
-          />
-        ) : (
-          <FieldWrapper
-            label="Recovery code"
-            description="Enter one of the recovery codes you saved when you set up two-factor authentication."
-            error={error || undefined}
+      {canPasskey && (
+        <div className="mb-4 flex flex-col gap-3">
+          <Button
+            ref={passkeyButton}
+            variant="primary"
+            fullWidth
+            loading={verifying}
+            onClick={() => void verifyPasskey()}
           >
-            <TextInput
-              ref={recoveryRef}
-              autoFocus
-              autoComplete="one-time-code"
-              autoCorrect="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              value={recoveryCode}
-              disabled={verifying}
+            Use a passkey
+          </Button>
+          {awaitingPasskey && (
+            <Button variant="ghost" onClick={() => passkeyAbort.current?.abort()}>
+              Cancel passkey
+            </Button>
+          )}
+          {passkeyError && (
+            <p role="alert" className="text-danger text-sm">
+              {passkeyError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {(canTOTP || canRecovery) && (
+        <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {mode === "totp" ? (
+            <VerificationCodeInput
+              ref={codeRef}
+              label="Verification code"
+              description="Enter the 6-digit code from your authenticator app."
+              value={code}
               onChange={(next) => {
-                setRecoveryCode(next);
+                setCode(next);
                 setError(undefined);
               }}
-            />
-          </FieldWrapper>
-        )}
-
-        <div role="status" aria-live="polite" className="text-sm text-text-secondary empty:hidden">
-          {verifying ? "Verifying…" : null}
-        </div>
-
-        <Button type="submit" variant="primary" fullWidth loading={verifying}>
-          Verify
-        </Button>
-
-        {canTOTP && canRecovery && (
-          <div className="flex justify-center text-sm">
-            <Button
-              variant="link"
+              onComplete={(completed) => void verify(completed, "totp")}
+              error={error}
               disabled={verifying}
-              onClick={() => switchMode(mode === "totp" ? "recovery_code" : "totp")}
+              autoFocus
+            />
+          ) : (
+            <FieldWrapper
+              label="Recovery code"
+              description="Enter one of the recovery codes you saved when you set up two-factor authentication."
+              error={error || undefined}
             >
-              {mode === "totp" ? "Use a recovery code instead" : "Use your authenticator app instead"}
-            </Button>
+              <TextInput
+                ref={recoveryRef}
+                autoFocus
+                autoComplete="one-time-code"
+                autoCorrect="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                value={recoveryCode}
+                disabled={verifying}
+                onChange={(next) => {
+                  setRecoveryCode(next);
+                  setError(undefined);
+                }}
+              />
+            </FieldWrapper>
+          )}
+
+          <div role="status" aria-live="polite" className="text-sm text-text-secondary empty:hidden">
+            {verifying ? "Verifying…" : null}
           </div>
-        )}
-      </form>
+
+          <Button type="submit" variant="primary" fullWidth loading={verifying}>
+            Verify
+          </Button>
+
+          {canTOTP && canRecovery && (
+            <div className="flex justify-center text-sm">
+              <Button
+                variant="link"
+                disabled={verifying}
+                onClick={() => switchMode(mode === "totp" ? "recovery_code" : "totp")}
+              >
+                {mode === "totp" ? "Use a recovery code instead" : "Use your authenticator app instead"}
+              </Button>
+            </div>
+          )}
+        </form>
+      )}
     </AuthLayout>
   );
 }

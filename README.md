@@ -105,6 +105,12 @@ A healthy response looks like:
 
 `postgres_replica`/`meilisearch` read `"ok"` with `0` latency when they're simply unconfigured (`GOERP_DB_REPLICA_DSN`/`GOERP_MEILISEARCH_URL` unset) — not because they were actually checked. `GET localhost:8080/_ready` reports whether the full startup sequence has completed and is what a Kubernetes readiness probe would check.
 
+### Passkey browser tests
+
+Run the dev engine with `GOERP_WEBAUTHN_RP_ID=goerp.test make engine`, and start the shell with `make shell`. Browsers reject `localhost` as a shared relying-party ID for tenant subdomains. Setting a platform RP ID outside `.localhost` lets the engine use each tenant hostname as its RP ID, matching its custom-domain behavior.
+
+From `shell/`, run `npm run test-passkeys -w @goerp/shell-app`. The test uses Chromium's virtual authenticator with the real engine, creates two dedicated dev tenants and verifies enrollment, sign-in, native cancellation, step-up, required-MFA setup, recovery-code acknowledgment, focus and mobile scrolling. It ages only its own browser session to exercise expired assurance and enables required MFA only for its setup tenant. Screenshot paths are printed on completion or failure. The compose stack, Mailpit, the Go toolchain and Playwright Chromium must be available.
+
 ## Operational scripts
 
 `scripts/generate-ghana-pmtiles.sh` extracts a Ghana-region [PMTiles](https://docs.protomaps.com/) basemap archive from Protomaps' daily basemap build and uploads it to object storage (SeaweedFS by default, matching the stack above) — the file `LocationField`'s `tileUrl` points at (`docs/components/location-field.md` in nexus-docs). Requires the `go-pmtiles` CLI (`go install github.com/protomaps/go-pmtiles@latest`) and the AWS CLI. Re-run it whenever the archive needs refreshing; it isn't part of any build or CI pipeline.

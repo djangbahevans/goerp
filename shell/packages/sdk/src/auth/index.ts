@@ -2,6 +2,7 @@ export {
   acceptInvite,
   beginTOTPEnrollment,
   checkSlug,
+  confirmPasskeyEnrollment,
   confirmPasswordReset,
   confirmTOTPEnrollment,
   exchangeHandoff,
@@ -21,6 +22,7 @@ export {
   revokeSession,
   tenantSelectionFrom,
   verifyEmail,
+  verifyMFA,
 } from "./auth-client.js";
 export {
   AuthMachine,
@@ -32,6 +34,7 @@ export {
 } from "./auth-machine.js";
 export { AuthContext, AuthProvider } from "./auth-provider.js";
 export { Can, type CanProps } from "./can.js";
+export { beginPasskeyEnrollment, requestPasskeyAssertion, supportsPasskeys } from "./passkeys.js";
 export {
   type PasswordUpdateNotice,
   PasswordUpdateNoticeStore,
@@ -76,6 +79,10 @@ export type {
   MFAFactor,
   MFAFactors,
   MFAMethod,
+  MFAPasskeyConfirmation,
+  MFAVerification,
+  PasskeyEnrollment,
+  PasskeyEnrollmentConfirmation,
   PasswordResetConfirmation,
   PasswordResetOutcome,
   PasswordResetRequest,

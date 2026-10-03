@@ -8,6 +8,7 @@ import {
   regenerateRecoveryCodes,
   removeMFAFactor,
   reverifyMFA,
+  supportsPasskeys,
   useAuth,
 } from "@goerp/sdk/auth";
 import {
@@ -25,12 +26,13 @@ import { toast } from "@goerp/sdk/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import { defaultPasskeyEnrollmentClient, type PasskeyEnrollmentClient } from "../auth/passkey-enrollment-form.js";
 import { RecoveryCodesList } from "../auth/totp-enrollment-parts.js";
 import { type AddAuthenticatorClient, AddAuthenticatorSheet } from "./add-authenticator-sheet.js";
+import { AddPasskeySheet } from "./add-passkey-sheet.js";
 import { MFACodeForm, MFADialog } from "./mfa-code-dialog.js";
 import { mfaFactorsQueryKey, sessionsQueryKey } from "./query-keys.js";
 
-// Injectable for stories; the route uses the real auth client.
 export interface TwoFactorClient extends AddAuthenticatorClient {
   list: (signal?: AbortSignal) => Promise<MFAFactors>;
   remove: (id: string, confirmation: MFACodeConfirmation) => Promise<void>;
@@ -72,11 +74,18 @@ function factorName(factor: MFAFactor): string {
   return factor.label ?? FACTOR_TYPE_LABELS[factor.type].toLowerCase();
 }
 
-// shell-ux.md §4.3 "Two-factor authentication".
-export function TwoFactorSection({ client = defaultTwoFactorClient }: { client?: TwoFactorClient }): ReactNode {
+export function TwoFactorSection({
+  client = defaultTwoFactorClient,
+  passkeyClient = defaultPasskeyEnrollmentClient,
+}: {
+  client?: TwoFactorClient;
+  passkeyClient?: PasskeyEnrollmentClient;
+}): ReactNode {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: mfaFactorsQueryKey, queryFn: ({ signal }) => client.list(signal) });
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [passkeyOpen, setPasskeyOpen] = useState(false);
+  const [passkeyRun, setPasskeyRun] = useState(0);
   const [removeOpen, setRemoveOpen] = useState(false);
   // Kept after the dialog closes, so its title holds through the exit animation.
   const [removeTarget, setRemoveTarget] = useState<MFAFactor | null>(null);
@@ -137,8 +146,8 @@ export function TwoFactorSection({ client = defaultTwoFactorClient }: { client?:
             <Badge label={enabled ? "On" : "Off"} color={enabled ? "green" : "gray"} />
             <span className="text-text-secondary">
               {enabled
-                ? `Signing in asks for a code from ${enabledSummary(factors)}.`
-                : "Add an authenticator app to ask for a code each time you sign in."}
+                ? `Signing in uses ${enabledSummary(factors)}.`
+                : "Add a two-factor method to protect your account when you sign in."}
             </span>
           </div>
         )}
@@ -148,10 +157,21 @@ export function TwoFactorSection({ client = defaultTwoFactorClient }: { client?:
         )}
 
         {!query.isLoading && (
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button variant={enabled ? "secondary" : "primary"} onClick={() => setSheetOpen(true)}>
               Add authenticator app
             </Button>
+            {supportsPasskeys() && (
+              <Button
+                variant={enabled ? "secondary" : "primary"}
+                onClick={() => {
+                  setPasskeyRun((run) => run + 1);
+                  setPasskeyOpen(true);
+                }}
+              >
+                Add passkey
+              </Button>
+            )}
           </div>
         )}
 
@@ -160,7 +180,7 @@ export function TwoFactorSection({ client = defaultTwoFactorClient }: { client?:
             <h3 className="font-medium text-sm text-text">Recovery codes</h3>
             <p className="text-sm text-text-secondary">
               {plural(data.recoveryCodesRemaining, "recovery code", "recovery codes")} left. Each one signs you in once
-              if you can't use your authenticator app.
+              if you can't use your two-factor method.
             </p>
             <Button variant="secondary" size="sm" onClick={() => setRegenerateOpen(true)}>
               Generate new codes
@@ -172,11 +192,26 @@ export function TwoFactorSection({ client = defaultTwoFactorClient }: { client?:
       <AddAuthenticatorSheet
         open={sheetOpen}
         client={client}
+        canReverifyPasskey={factors.some((factor) => factor.type === "webauthn")}
         onEnrolled={() => {
           toast.success("Authenticator app added.");
           void refresh();
         }}
         onClose={() => setSheetOpen(false)}
+      />
+
+      <AddPasskeySheet
+        key={passkeyRun}
+        open={passkeyOpen}
+        client={passkeyClient}
+        canReverifyPasskey={factors.some((factor) => factor.type === "webauthn")}
+        onEnrolled={() => {
+          void refresh();
+        }}
+        onClose={(enrolled) => {
+          setPasskeyOpen(false);
+          if (enrolled) toast.success("Passkey added.");
+        }}
       />
 
       <RemoveFactorDialog
@@ -256,13 +291,10 @@ function RemoveFactorDialog({
         onSubmit={async (confirmation) => {
           if (!factor) return;
           await client.remove(factor.id, confirmation);
-          // Every session is revoked, this one included (shell-ux.md §4.3).
-          // Nothing cached for this account is current any more.
+          // Factor removal revokes this session, so its cached account data is no longer usable.
           queryClient.removeQueries({ queryKey: mfaFactorsQueryKey });
           queryClient.removeQueries({ queryKey: sessionsQueryKey });
-          // Started first, so the session-expired modal sees an auth page
-          // pending and stays hidden; expired before it lands, so the sign-in
-          // page doesn't send a still-signed-in user straight back.
+          // Starting navigation before expiry prevents the sign-in modal from obscuring the login route.
           const landed = navigate({
             to: "/auth/login",
             search: { redirect: "/settings/security", notice: "mfa_factor_removed" },
