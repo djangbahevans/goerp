@@ -141,6 +141,7 @@ func (h *Handler) allowedFrom(w http.ResponseWriter, r *http.Request, tenantID s
 	if h.allowlists == nil {
 		return true
 	}
+
 	ip := loginsession.ClientIP(r)
 	ok, err := h.allowlists.Check(r.Context(), tenantID, ip)
 	if err != nil {
@@ -148,11 +149,13 @@ func (h *Handler) allowedFrom(w http.ResponseWriter, r *http.Request, tenantID s
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return false
 	}
+
 	if !ok {
 		log.Info().Str("tenant_id", tenantID).Str("ip", ip).Msg("loginflow: sign-in from an address outside the tenant's ip allowlist")
 		httperr.Write(r.Context(), w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
 		return false
 	}
+
 	return true
 }
 
@@ -176,6 +179,7 @@ func (h *Handler) allow(ctx context.Context, limiter, key string, limit int, win
 		log.Warn().Err(err).Str("limiter", limiter).Msg("loginflow: login rate limit check failed, failing open")
 		return true, 0
 	}
+
 	return allowed, retryAfter
 }
 
@@ -199,6 +203,7 @@ func (h *Handler) checkClientLimits(w http.ResponseWriter, r *http.Request, emai
 		writeRateLimited(w, r, retryAfter)
 		return false
 	}
+
 	return true
 }
 
@@ -222,19 +227,23 @@ func (h *Handler) detectTenantFlood(ctx context.Context, tenantID string) {
 	if ok, _ := h.allow(ctx, "tenant", "ratelimit:login:tenant:"+tenantID, tenantLimit, tenantWindow); ok {
 		return
 	}
+
 	guardKey := "ratelimit:login:tenant_alerted:" + tenantID
 	first, err := h.cache.SetNXWithTTL(ctx, guardKey, "1", tenantWindow)
 	if err != nil {
 		log.Warn().Err(err).Str("tenant_id", tenantID).Msg("loginflow: per-tenant login rate exceeded; alert guard failed, audit event skipped")
 		return
 	}
+
 	if !first {
 		return
 	}
+
 	log.Warn().Str("tenant_id", tenantID).Msg("loginflow: per-tenant login rate exceeded")
 	if h.audit == nil {
 		return
 	}
+
 	row := authaudit.Row{EventType: "login.tenant_rate_exceeded", TenantID: tenantID, Success: true, Metadata: tenantRateExceededMetadata}
 	if err := h.audit.Insert(ctx, row); err != nil {
 		log.Error().Err(err).Str("tenant_id", tenantID).Msg("loginflow: write login.tenant_rate_exceeded audit event")
@@ -280,6 +289,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 			return
 		}
+
 		if tenantErr == nil {
 			h.detectTenantFlood(ctx, t.ID)
 		}
@@ -292,6 +302,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeOverloaded(w, r)
 		return
 	}
+
 	defer slot.Release()
 
 	// Step 2/3: look up user, check status. "invited" (no password ever
@@ -304,14 +315,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeInvalidCredentials(w, r)
 			return
 		}
+
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	if u.PasswordHash == nil {
 		slot.VerifyDummy(req.Password)
 		writeInvalidCredentials(w, r)
 		return
 	}
+
 	switch u.Status {
 	case user.StatusSuspended, user.StatusDeleted:
 		writeInvalidCredentials(w, r)
@@ -339,11 +353,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeInvalidCredentials(w, r)
 			return
 		}
+
 		isMember, err := h.roles.IsMember(ctx, req.Tenant, u.ID)
 		if err != nil {
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 			return
 		}
+
 		if !isMember {
 			writeInvalidCredentials(w, r)
 			return
@@ -365,20 +381,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err == nil && needsRehash {
 		newHash, rehashErr = slot.Hash(req.Password)
 	}
+
 	// Nothing below hashes; the slot guards memory, not database latency.
 	slot.Release()
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	if !match {
 		if incErr := h.users.IncrementFailedLogins(ctx, u.ID); incErr != nil {
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 			return
 		}
+
 		writeInvalidCredentials(w, r)
 		return
 	}
+
 	if needsRehash && rehashErr == nil {
 		// A re-hash failure or update failure here doesn't fail the
 		// login — the password was already verified correct; the
@@ -396,6 +416,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 			return
 		}
+
 		switch len(memberships) {
 		case 0:
 			writeInvalidCredentials(w, r)
@@ -409,6 +430,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			for _, m := range memberships {
 				results[m.ID] = h.policies.CheckSignIn(ctx, m.ID, m.Slug, u.ID, req.Password, u.Email)
 			}
+
 			h.writeTenantRequired(w, r, u.ID, memberships, results, req)
 			return
 		}
@@ -437,10 +459,12 @@ func (h *Handler) writeTenantRequired(w http.ResponseWriter, r *http.Request, us
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	choices := make([]tenantChoice, len(memberships))
 	for i, t := range memberships {
 		choices[i] = tenantChoice{Slug: t.Slug, Name: t.Name}
 	}
+
 	httperr.WriteDetails(r.Context(), w, http.StatusConflict, "tenant_required", "choose a tenant to sign in to", map[string]any{"tenants": choices, "selection_token": token})
 }
 
@@ -470,6 +494,7 @@ func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, u *user.User, t
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		writeJSON(w, map[string]any{"handoff": resp})
 		return
@@ -514,6 +539,7 @@ func (h *Handler) ServeSelectTenant(w http.ResponseWriter, r *http.Request) {
 		writeSelectionTokenInvalid(w, r)
 		return
 	}
+
 	if err != nil {
 		log.Error().Err(err).Msg("loginflow: consume selection token")
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
@@ -527,10 +553,12 @@ func (h *Handler) ServeSelectTenant(w http.ResponseWriter, r *http.Request) {
 		writeSelectionTokenInvalid(w, r)
 		return
 	}
+
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	if u.Status != user.StatusActive {
 		writeSelectionTokenInvalid(w, r)
 		return
@@ -543,15 +571,18 @@ func (h *Handler) ServeSelectTenant(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_membership_required", "not a member of this tenant")
 		return
 	}
+
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	isMember, err := h.roles.IsMember(ctx, t.Slug, u.ID)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	if !isMember {
 		httperr.Write(r.Context(), w, http.StatusForbidden, "tenant_membership_required", "not a member of this tenant")
 		return
@@ -568,22 +599,16 @@ func (h *Handler) ServeSelectTenant(w http.ResponseWriter, r *http.Request) {
 	h.signIn(w, r, u, t, grant.DeviceID, grant.Remember, policy)
 }
 
-// completeLogin is login steps 10-11: an mfa_required challenge when the
-// user has a factor enrolled, otherwise the session, with policy (step
-// 8a's result) applied.
 func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, tenantID, tenantSlug, bodyDeviceID string, remember bool, policy password.Result) {
 	ctx := r.Context()
 
-	// Step 10: MFA gating. Whether MFA is enrolled is the only signal
-	// available today — the per-tenant enforcement-mode policy
-	// (optional/required/required_for_roles, goerp#308) doesn't exist
-	// yet, so any enrolled factor is treated as required.
-	factors, err := h.mfa.ListActiveByUser(ctx, userID)
+	factors, err := h.mfa.ListAccepted(ctx, userID, mfa.Scope{TenantID: tenantID})
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
-	if len(factors) > 0 {
+
+	if mfa.HasFactor(factors) {
 		mfaToken, _, err := h.mfaTokens.Issue(userID, tenantID, r.Header.Get("Origin"), mfatoken.IssueOptions{
 			Remember:       remember,
 			PasswordPolicy: policy,
@@ -592,6 +617,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		writeJSON(w, map[string]any{
 			"mfa_required": true,
@@ -601,7 +627,6 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		return
 	}
 
-	// Step 11: full session issuance.
 	nonBrowser := loginsession.IsNonBrowser(r)
 	deviceID, deviceIDIsFresh := loginsession.ResolveDeviceID(r, bodyDeviceID, nonBrowser)
 
@@ -620,10 +645,12 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		httperr.Write(r.Context(), w, http.StatusForbidden, "ip_not_allowed", "signing in to this tenant is not allowed from your network")
 		return
 	}
+
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	if err := h.users.ResetLoginState(ctx, userID); err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
@@ -658,6 +685,7 @@ func (h *Handler) ServeHandoff(w http.ResponseWriter, r *http.Request) {
 		default:
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		}
+
 		return
 	}
 
@@ -673,11 +701,13 @@ func (h *Handler) ServeHandoff(w http.ResponseWriter, r *http.Request) {
 		writeHandoffInvalid(w, r)
 		return
 	}
+
 	if err != nil {
 		log.Error().Err(err).Msg("loginflow: consume handoff code")
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	if grant.TenantID != tc.TenantID {
 		writeHandoffInvalid(w, r)
 		return
@@ -690,23 +720,28 @@ func (h *Handler) ServeHandoff(w http.ResponseWriter, r *http.Request) {
 		writeHandoffInvalid(w, r)
 		return
 	}
+
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	if u.Status != user.StatusActive {
 		writeHandoffInvalid(w, r)
 		return
 	}
+
 	isMember, err := h.roles.IsMember(ctx, tc.Slug, u.ID)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "login failed")
 		return
 	}
+
 	if !isMember {
 		writeHandoffInvalid(w, r)
 		return
 	}
+
 	// completeLogin's Issue re-checks the IP allowlist against this
 	// request, which can come from another network than the login did.
 	h.completeLogin(w, r, u.ID, tc.TenantID, tc.Slug, "", grant.Remember, grant.PasswordPolicyResult)
@@ -729,5 +764,6 @@ func enrolledMethods(factors []*mfa.Credential) []string {
 			methods = append(methods, string(t))
 		}
 	}
+
 	return methods
 }

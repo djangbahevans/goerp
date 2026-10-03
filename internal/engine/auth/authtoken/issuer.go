@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -40,6 +41,7 @@ func refreshTTL(persistent bool) time.Duration {
 	if persistent {
 		return PersistentRefreshTTL
 	}
+
 	return NonPersistentRefreshTTL
 }
 
@@ -117,6 +119,7 @@ func (i *Issuer) expiresAt(ctx context.Context, tenantID string, persistent bool
 			return time.Time{}, err
 		}
 	}
+
 	return policy.ExpiresAt(now, familyStart, refreshTTL(persistent)), nil
 }
 
@@ -176,15 +179,29 @@ type Tokens struct {
 // token's hash as a new sessions row (id == family_id: this is always a
 // fresh family's first row, never a rotation).
 func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
+	return i.issue(ctx, p, i.sessions.Insert)
+}
+
+// IssueTx keeps MFA verification and session creation under the account
+// lock held by the caller, so a tenant reset cannot miss the new session.
+func (i *Issuer) IssueTx(ctx context.Context, tx *sql.Tx, p LoginParams) (*Tokens, error) {
+	return i.issue(ctx, p, func(ctx context.Context, row session.Row) error {
+		return i.sessions.InsertTx(ctx, tx, row)
+	})
+}
+
+func (i *Issuer) issue(ctx context.Context, p LoginParams, insertSession func(context.Context, session.Row) error) (*Tokens, error) {
 	t, err := i.tenants.GetBySlug(ctx, p.TenantSlug)
 	if err != nil {
 		return nil, fmt.Errorf("resolve tenant %q: %w", p.TenantSlug, err)
 	}
+
 	if i.allowlists != nil {
 		ok, err := i.allowlists.Check(ctx, t.ID, p.IPAddress)
 		if err != nil {
 			return nil, fmt.Errorf("check ip allowlist: %w", err)
 		}
+
 		if !ok {
 			return nil, ErrIPNotAllowed
 		}
@@ -212,7 +229,7 @@ func (i *Issuer) Issue(ctx context.Context, p LoginParams) (*Tokens, error) {
 		return nil, fmt.Errorf("resolve session expiry: %w", err)
 	}
 
-	if err := i.sessions.Insert(ctx, session.Row{
+	if err := insertSession(ctx, session.Row{
 		ID:              sessionID,
 		UserID:          p.UserID,
 		TenantID:        t.ID,
@@ -269,6 +286,7 @@ func (i *Issuer) ReissueAccessToken(sessionID, tenantID, userID string, roleName
 	if err != nil {
 		return "", 0, fmt.Errorf("sign access token: %w", err)
 	}
+
 	return accessToken, expiresIn, nil
 }
 
@@ -290,6 +308,7 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 	if mfaMethod != "" {
 		amr = append(amr, mfaMethod)
 	}
+
 	if mfaVerifiedAt != nil {
 		unix := mfaVerifiedAt.Unix()
 		mfaVerifiedAtClaim = &unix
@@ -317,6 +336,7 @@ func (i *Issuer) signAccessToken(sessionID, tenantID, userID string, roleNames [
 	if err != nil {
 		return "", 0, err
 	}
+
 	return token, int(exp.Sub(now).Seconds()), nil
 }
 
@@ -328,6 +348,7 @@ func newRefreshToken() (token, hash string, err error) {
 	if _, err := rand.Read(buf); err != nil {
 		return "", "", err
 	}
+
 	token = base64.RawURLEncoding.EncodeToString(buf)
 	return token, hashRefreshToken(token), nil
 }
@@ -378,16 +399,19 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 	if err != nil {
 		return nil, 0, fmt.Errorf("generate refresh token: %w", err)
 	}
+
 	newSessionID := uuid.New().String()
 
 	now := i.now()
 	newExpiresAt := func(tenantID string, persistent bool, familyStart time.Time) (time.Time, error) {
 		return i.expiresAt(ctx, tenantID, persistent, now, familyStart)
 	}
+
 	result, err := i.sessions.Rotate(ctx, presentedHash, newSessionID, newHash, p.DeviceID, now, newExpiresAt, p.UserAgent, p.IPAddress, p.CountryCode)
 	if err != nil {
 		return nil, 0, fmt.Errorf("rotate session: %w", err)
 	}
+
 	if result.Outcome != session.RotateOK {
 		return nil, result.Outcome, nil
 	}
@@ -396,6 +420,7 @@ func (i *Issuer) Refresh(ctx context.Context, presentedRefreshToken string, p Re
 	if err != nil {
 		return nil, 0, fmt.Errorf("resolve tenant %s: %w", result.TenantID, err)
 	}
+
 	roleNames, err := i.roles.RoleNamesForUser(ctx, t.Slug, result.UserID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("look up roles for user %s: %w", result.UserID, err)

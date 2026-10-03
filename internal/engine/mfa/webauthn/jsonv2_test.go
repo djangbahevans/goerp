@@ -1,9 +1,10 @@
 package webauthn
 
 import (
-	"context"
 	"strings"
 	"testing"
+
+	"github.com/djangbahevans/goerp/internal/engine/mfa"
 )
 
 // encoding/json/v2's Marshal doesn't escape HTML/JS-unsafe characters by
@@ -14,7 +15,7 @@ func TestBeginRegistration_EscapesHTMLUnsafeAccountName(t *testing.T) {
 	env := openTestEnv(t)
 	userID := env.createUser(t)
 
-	optionsJSON, _, err := env.service.BeginRegistration(context.Background(), userID, "<script>&alice</script>")
+	optionsJSON, _, err := env.service.BeginRegistration(t.Context(), userID, "<script>&alice</script>", mfa.Scope{TenantID: env.tenant.ID})
 	if err != nil {
 		t.Fatalf("BeginRegistration() error: %v", err)
 	}

@@ -8,15 +8,11 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/db"
 )
 
-// createUserMFATable matches auth-internals.md §2's user_mfa schema
-// exactly, schema-qualified against system (same convention tenant.Store's
-// own DDL uses). sign_count isn't a column here — WebAuthn's sign count
-// lives inside the encrypted Credential blob itself, updated by
-// goerp#301's own logic re-writing that column, not tracked separately.
 const createUserMFATable = `
 CREATE TABLE IF NOT EXISTS system.user_mfa (
     id           UUID PRIMARY KEY DEFAULT uuidv7(),
     user_id      UUID NOT NULL REFERENCES system.users(id) ON DELETE CASCADE,
+    tenant_id    UUID REFERENCES system.tenants(id) ON DELETE CASCADE,
     type         TEXT NOT NULL CHECK (type IN ('totp', 'webauthn', 'recovery_code')),
     credential   BYTEA NOT NULL,
     label        TEXT,
@@ -40,40 +36,38 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Bootstrap creates system.user_mfa and its partial user_id index if they
-// don't already exist. Idempotent and concurrent-safe against other
-// processes calling Bootstrap at the same time, same convention
-// tenant.Store.Bootstrap uses (goerp#171).
 func (s *Store) Bootstrap(ctx context.Context) error {
 	keys := []int64{db.SystemSchemaLockKey, db.AdvisoryLockKey("mfa.Bootstrap")}
 	return db.WithAdvisoryLock(ctx, s.db, keys, func(tx *sql.Tx) error {
 		if err := db.EnsureSystemSchema(ctx, tx); err != nil {
 			return err
 		}
+
 		if _, err := tx.ExecContext(ctx, createUserMFATable); err != nil {
 			return fmt.Errorf("create user_mfa table: %w", err)
 		}
+
 		if _, err := tx.ExecContext(ctx, createUserMFAUserIDIndex); err != nil {
 			return fmt.Errorf("create user_mfa user_id index: %w", err)
 		}
+
 		return nil
 	})
 }
 
-const userMFAColumns = `id, user_id, type, credential, label, is_primary, created_at, last_used_at, revoked_at`
+const userMFAColumns = `id, user_id, tenant_id, type, credential, label, is_primary, created_at, last_used_at, revoked_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-// scanCredential unpacks one userMFAColumns row.
 func scanCredential(sc rowScanner) (*Credential, error) {
 	var c Credential
 	var label sql.NullString
 	var lastUsedAt, revokedAt sql.NullTime
 
 	if err := sc.Scan(
-		&c.ID, &c.UserID, &c.Type, &c.Credential, &label, &c.IsPrimary,
+		&c.ID, &c.UserID, &c.TenantID, &c.Type, &c.Credential, &label, &c.IsPrimary,
 		&c.CreatedAt, &lastUsedAt, &revokedAt,
 	); err != nil {
 		return nil, err
@@ -82,9 +76,11 @@ func scanCredential(sc rowScanner) (*Credential, error) {
 	if label.Valid {
 		c.Label = &label.String
 	}
+
 	if lastUsedAt.Valid {
 		c.LastUsedAt = &lastUsedAt.Time
 	}
+
 	if revokedAt.Valid {
 		c.RevokedAt = &revokedAt.Time
 	}
@@ -92,63 +88,66 @@ func scanCredential(sc rowScanner) (*Credential, error) {
 	return &c, nil
 }
 
-// Insert creates a new MFA factor row for userID. credential must already
-// be encrypted by the caller (goerp#297) — this store treats it as opaque
-// bytes.
 func (s *Store) Insert(ctx context.Context, userID string, credType CredentialType, credential []byte, label *string) (*Credential, error) {
-	return insert(ctx, s.db, userID, credType, credential, label)
+	return insert(ctx, s.db, userID, nil, credType, credential, label)
 }
 
-// InsertTx is Insert inside the caller's transaction.
 func (s *Store) InsertTx(ctx context.Context, tx *sql.Tx, userID string, credType CredentialType, credential []byte, label *string) (*Credential, error) {
-	return insert(ctx, tx, userID, credType, credential, label)
+	return insert(ctx, tx, userID, nil, credType, credential, label)
 }
 
-func insert(ctx context.Context, q db.Execer, userID string, credType CredentialType, credential []byte, label *string) (*Credential, error) {
+func (s *Store) InsertScopedTx(ctx context.Context, tx *sql.Tx, userID string, tenantID *string, credType CredentialType, credential []byte, label *string) (*Credential, error) {
+	return insert(ctx, tx, userID, tenantID, credType, credential, label)
+}
+
+func insert(ctx context.Context, q db.Execer, userID string, tenantID *string, credType CredentialType, credential []byte, label *string) (*Credential, error) {
 	row := q.QueryRowContext(ctx, `
-		INSERT INTO system.user_mfa (user_id, type, credential, label)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO system.user_mfa (user_id, tenant_id, type, credential, label)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING `+userMFAColumns,
-		userID, credType, credential, label,
+		userID, tenantID, credType, credential, label,
 	)
 	c, err := scanCredential(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert mfa credential: %w", err)
 	}
+
 	return c, nil
 }
 
-// WithTx runs fn in one transaction on the store's pool, committing only
-// if fn returns nil.
 func (s *Store) WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin mfa transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
 	if err := fn(tx); err != nil {
 		return err
 	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit mfa transaction: %w", err)
 	}
+
 	return nil
 }
 
-// LockUserTx row-locks userID's system.users row until tx ends, so two
-// concurrent enrollment confirms for one user serialize their "does the
-// user already hold recovery codes" check.
+// LockUserTx serializes MFA changes without blocking session inserts' foreign-key
+// locks. A key-changing lock would deadlock with rotation holding a session row
+// while MFA revocation waits for that row.
 func (s *Store) LockUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
 	var id string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM system.users WHERE id = $1 FOR UPDATE`, userID).Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM system.users WHERE id = $1 FOR NO KEY UPDATE`, userID).Scan(&id)
 	if err != nil {
 		return fmt.Errorf("lock user for mfa change: %w", err)
 	}
+
 	return nil
 }
 
-// HasActiveOfTypeTx reports whether userID holds any non-revoked factor of
-// credType, read inside the caller's transaction.
 func (s *Store) HasActiveOfTypeTx(ctx context.Context, tx *sql.Tx, userID string, credType CredentialType) (bool, error) {
 	var exists bool
 	err := tx.QueryRowContext(ctx, `
@@ -160,15 +159,14 @@ func (s *Store) HasActiveOfTypeTx(ctx context.Context, tx *sql.Tx, userID string
 	if err != nil {
 		return false, fmt.Errorf("check active mfa credentials: %w", err)
 	}
+
 	return exists, nil
 }
 
-// ListActiveByUser returns userID's non-revoked MFA factors.
 func (s *Store) ListActiveByUser(ctx context.Context, userID string) ([]*Credential, error) {
 	return listActiveByUser(ctx, s.db, userID)
 }
 
-// ListActiveByUserTx is ListActiveByUser inside the caller's transaction.
 func (s *Store) ListActiveByUserTx(ctx context.Context, tx *sql.Tx, userID string) ([]*Credential, error) {
 	return listActiveByUser(ctx, tx, userID)
 }
@@ -187,7 +185,10 @@ func listActiveByUser(ctx context.Context, q querier, userID string) ([]*Credent
 	if err != nil {
 		return nil, fmt.Errorf("list mfa credentials: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var creds []*Credential
 	for rows.Next() {
@@ -195,21 +196,18 @@ func listActiveByUser(ctx context.Context, q querier, userID string) ([]*Credent
 		if err != nil {
 			return nil, fmt.Errorf("list mfa credentials: %w", err)
 		}
+
 		creds = append(creds, c)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list mfa credentials: %w", err)
 	}
+
 	return creds, nil
 }
 
-// Revoke marks id revoked. Returns ErrCredentialNotFound if id doesn't
-// match any row — same RowsAffected-checking convention
-// session.Store.Revoke/apikey.Store.Revoke already use in this codebase,
-// so a typo'd id doesn't silently report success. Revoking an
-// already-revoked id still succeeds (re-sets revoked_at), matching those
-// two Revoke methods' own idempotency — neither guards on the column's
-// current value either.
+// Revoke is idempotent; single-use proofs require ConsumeOnce instead.
 func (s *Store) Revoke(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE system.user_mfa SET revoked_at = NOW()
@@ -218,18 +216,19 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("revoke mfa credential: %w", err)
 	}
+
 	n, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("revoke mfa credential: %w", err)
 	}
+
 	if n == 0 {
 		return ErrCredentialNotFound
 	}
+
 	return nil
 }
 
-// RevokeTx revokes id inside the caller's transaction, returning
-// ErrCredentialNotFound unless id is one of userID's non-revoked factors.
 func (s *Store) RevokeTx(ctx context.Context, tx *sql.Tx, userID, id string) error {
 	result, err := tx.ExecContext(ctx, `
 		UPDATE system.user_mfa SET revoked_at = NOW()
@@ -238,18 +237,19 @@ func (s *Store) RevokeTx(ctx context.Context, tx *sql.Tx, userID, id string) err
 	if err != nil {
 		return fmt.Errorf("revoke mfa credential: %w", err)
 	}
+
 	n, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("revoke mfa credential: %w", err)
 	}
+
 	if n == 0 {
 		return ErrCredentialNotFound
 	}
+
 	return nil
 }
 
-// RevokeAllOfTypeTx revokes every one of userID's non-revoked factors of
-// credType inside the caller's transaction.
 func (s *Store) RevokeAllOfTypeTx(ctx context.Context, tx *sql.Tx, userID string, credType CredentialType) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE system.user_mfa SET revoked_at = NOW()
@@ -258,23 +258,19 @@ func (s *Store) RevokeAllOfTypeTx(ctx context.Context, tx *sql.Tx, userID string
 	if err != nil {
 		return fmt.Errorf("revoke mfa credentials of type %s: %w", credType, err)
 	}
+
 	return nil
 }
 
-// TouchLastUsed sets id's last_used_at to NOW().
 func (s *Store) TouchLastUsed(ctx context.Context, id string) error {
 	if _, err := s.db.ExecContext(ctx, `UPDATE system.user_mfa SET last_used_at = NOW() WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("touch mfa credential: %w", err)
 	}
+
 	return nil
 }
 
-// UpdateCredentialAfterUse overwrites id's credential bytes — the
-// caller's freshly re-serialized/re-encrypted blob, reflecting updated
-// internal state such as WebAuthn's sign count (goerp#301) — and sets
-// last_used_at = NOW(), in one statement. Returns ErrCredentialNotFound
-// if id doesn't match any non-revoked row, same RowsAffected-checking
-// convention Revoke/ConsumeOnce use.
+// UpdateCredentialAfterUse preserves the encrypted WebAuthn payload while updating its sign count and last use.
 func (s *Store) UpdateCredentialAfterUse(ctx context.Context, id string, credential []byte) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE system.user_mfa SET credential = $2, last_used_at = NOW()
@@ -283,20 +279,19 @@ func (s *Store) UpdateCredentialAfterUse(ctx context.Context, id string, credent
 	if err != nil {
 		return fmt.Errorf("update mfa credential: %w", err)
 	}
+
 	n, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("update mfa credential: %w", err)
 	}
+
 	if n == 0 {
 		return ErrCredentialNotFound
 	}
+
 	return nil
 }
 
-// RevokeAllForUser marks every one of userID's non-revoked user_mfa rows
-// revoked, regardless of type — goerp#306's admin MFA reset, which
-// revokes every enrolled factor at once. Unlike single-row Revoke, a
-// no-op (a user with no enrolled factors) is not an error.
 func (s *Store) RevokeAllForUser(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE system.user_mfa SET revoked_at = NOW()
@@ -305,33 +300,45 @@ func (s *Store) RevokeAllForUser(ctx context.Context, userID string) error {
 	if err != nil {
 		return fmt.Errorf("revoke all mfa credentials for user: %w", err)
 	}
+
 	return nil
 }
 
-// ConsumeOnce atomically revokes id only if it isn't already revoked,
-// returning ErrCredentialNotFound both when id doesn't exist and when
-// it's already been consumed — a caller can't tell the two apart, which
-// is exactly the point: two concurrent callers racing to consume the same
-// single-use credential (e.g. a recovery code) via ConsumeOnce can never
-// both succeed. This is the opposite guarantee from Revoke, which is
-// deliberately idempotent (an administrative action where a second call
-// succeeding harmlessly, e.g. an admin double-clicking "revoke", is the
-// desired behavior) — ConsumeOnce is for tokens where a second "success"
-// would be a replay.
+// ConsumeOnce rejects an already revoked row, preventing concurrent reuse of a recovery code.
 func (s *Store) ConsumeOnce(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `
+	return consumeOnce(ctx, s.db, id)
+}
+
+func (s *Store) ConsumeOnceTx(ctx context.Context, tx *sql.Tx, id string) error {
+	return consumeOnce(ctx, tx, id)
+}
+
+func consumeOnce(ctx context.Context, q db.Execer, id string) error {
+	result, err := q.ExecContext(ctx, `
 		UPDATE system.user_mfa SET revoked_at = NOW()
 		WHERE id = $1 AND revoked_at IS NULL
 	`, id)
 	if err != nil {
 		return fmt.Errorf("consume mfa credential: %w", err)
 	}
+
 	n, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("consume mfa credential: %w", err)
 	}
+
 	if n == 0 {
 		return ErrCredentialNotFound
 	}
+
 	return nil
+}
+
+func (s *Store) GetByID(ctx context.Context, userID, id string) (*Credential, error) {
+	c, err := scanCredential(s.db.QueryRowContext(ctx, `SELECT `+userMFAColumns+` FROM system.user_mfa WHERE user_id = $1 AND id = $2`, userID, id))
+	if err != nil {
+		return nil, fmt.Errorf("get mfa credential: %w", err)
+	}
+
+	return c, nil
 }

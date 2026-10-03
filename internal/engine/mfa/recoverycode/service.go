@@ -1,6 +1,4 @@
-// Package recoverycode implements MFA recovery-code generation and
-// consumption — auth-internals.md §8's "Recovery codes" section — on top
-// of mfa.Store (the user_mfa row store, goerp#296).
+// Package recoverycode generates and consumes scoped MFA recovery codes.
 package recoverycode
 
 import (
@@ -15,9 +13,7 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 )
 
-// bcryptCost matches auth-internals.md §8's own example — a one-time-use
-// credential, so bcrypt's slowness (unlike a login-path password hash) is
-// an acceptable, deliberate cost rather than something to tune down.
+// Recovery codes are one-time credentials; bcrypt cost 12 bounds offline guessing.
 const bcryptCost = 12
 
 type Service struct {
@@ -37,11 +33,13 @@ func (s *Service) Enroll(ctx context.Context, userID string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	for _, hash := range set.Hashes {
 		if _, err := s.store.Insert(ctx, userID, mfa.CredentialRecoveryCode, hash, nil); err != nil {
 			return nil, fmt.Errorf("store recovery code: %w", err)
 		}
 	}
+
 	return set.Codes, nil
 }
 
@@ -60,6 +58,7 @@ func Prepare() (Set, error) {
 	if err != nil {
 		return Set{}, err
 	}
+
 	hashes := make([][]byte, len(codes))
 	for i, code := range codes {
 		hashes[i], err = bcrypt.GenerateFromPassword([]byte(code), bcryptCost)
@@ -67,17 +66,17 @@ func Prepare() (Set, error) {
 			return Set{}, fmt.Errorf("hash recovery code: %w", err)
 		}
 	}
+
 	return Set{Codes: codes, Hashes: hashes}, nil
 }
 
-// InsertTx stores set's hashes as userID's recovery codes inside the
-// caller's transaction.
-func (s *Service) InsertTx(ctx context.Context, tx *sql.Tx, userID string, set Set) error {
+func (s *Service) InsertTx(ctx context.Context, tx *sql.Tx, userID string, tenantID *string, set Set) error {
 	for _, hash := range set.Hashes {
-		if _, err := s.store.InsertTx(ctx, tx, userID, mfa.CredentialRecoveryCode, hash, nil); err != nil {
+		if _, err := s.store.InsertScopedTx(ctx, tx, userID, tenantID, mfa.CredentialRecoveryCode, hash, nil); err != nil {
 			return fmt.Errorf("store recovery code: %w", err)
 		}
 	}
+
 	return nil
 }
 
@@ -85,60 +84,81 @@ func (s *Service) InsertTx(ctx context.Context, tx *sql.Tx, userID string, set S
 // TOTP or WebAuthn factor.
 var ErrNotEnrolled = errors.New("mfa not enrolled")
 
-// RegenerateTx replaces userID's recovery codes with set inside the
-// caller's transaction (auth-internals.md §8 "Managing factors"). It
-// returns ErrNotEnrolled, changing nothing, unless the user still holds a
-// TOTP or WebAuthn factor once their row is locked, so a concurrent
-// removal of their last factor can't leave them with recovery codes alone.
-func (s *Service) RegenerateTx(ctx context.Context, tx *sql.Tx, userID string, set Set) error {
+// RegenerateTx requires a remaining sign-in factor in the same scope.
+// The account lock prevents concurrent removal from leaving recovery codes alone.
+func (s *Service) RegenerateTx(ctx context.Context, tx *sql.Tx, userID string, tenantID *string, set Set) error {
 	if err := s.store.LockUserTx(ctx, tx, userID); err != nil {
 		return err
 	}
+
 	creds, err := s.store.ListActiveByUserTx(ctx, tx, userID)
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(creds, func(c *mfa.Credential) bool { return c.Type.IsFactor() }) {
+
+	if !slices.ContainsFunc(creds, func(c *mfa.Credential) bool {
+		return c.Type.IsFactor() && sameScope(c.TenantID, tenantID)
+	}) {
 		return ErrNotEnrolled
 	}
-	if err := s.store.RevokeAllOfTypeTx(ctx, tx, userID, mfa.CredentialRecoveryCode); err != nil {
+
+	if err := s.store.RevokeRecoveryCodesTx(ctx, tx, userID, tenantID); err != nil {
 		return err
 	}
-	return s.InsertTx(ctx, tx, userID, set)
+
+	return s.InsertTx(ctx, tx, userID, tenantID, set)
 }
 
-// Verify checks code against userID's enrolled, non-revoked recovery
-// codes, and if matched, consumes it and returns its user_mfa row ID —
-// the caller's mfa_credential_id (session row and access token claim,
-// auth-internals.md §4/§8). The match is consumed atomically via
-// mfa.Store.ConsumeOnce, so two concurrent Verify calls for the same code
-// cannot both succeed — see ConsumeOnce's own doc comment for why this
-// differs from Store.Revoke.
-func (s *Service) Verify(ctx context.Context, userID, code string) (valid bool, credentialID string, err error) {
-	creds, err := s.store.ListActiveByUser(ctx, userID)
+// Verify consumes a matching accepted code atomically; concurrent callers cannot both succeed.
+func (s *Service) Verify(ctx context.Context, userID, code string, scope mfa.Scope) (valid bool, credentialID string, err error) {
+	creds, err := s.store.ListAccepted(ctx, userID, scope)
 	if err != nil {
 		return false, "", fmt.Errorf("list mfa credentials: %w", err)
 	}
 
+	return verify(ctx, creds, code, s.store.ConsumeOnce)
+}
+
+// VerifyTx consumes the proof in the transaction that creates or updates
+// the session, so a failed session write leaves the code usable.
+func (s *Service) VerifyTx(ctx context.Context, tx *sql.Tx, userID, code string, scope mfa.Scope) (bool, string, error) {
+	creds, err := s.store.ListAcceptedTx(ctx, tx, userID, scope)
+	if err != nil {
+		return false, "", fmt.Errorf("list mfa credentials: %w", err)
+	}
+
+	return verify(ctx, creds, code, func(ctx context.Context, id string) error {
+		return s.store.ConsumeOnceTx(ctx, tx, id)
+	})
+}
+
+func verify(ctx context.Context, creds []*mfa.Credential, code string, consume func(context.Context, string) error) (bool, string, error) {
 	for _, c := range creds {
 		if c.Type != mfa.CredentialRecoveryCode {
 			continue
 		}
+
 		if err := bcrypt.CompareHashAndPassword(c.Credential, []byte(code)); err != nil {
 			continue
 		}
 
-		if err := s.store.ConsumeOnce(ctx, c.ID); err != nil {
+		if err := consume(ctx, c.ID); err != nil {
 			if errors.Is(err, mfa.ErrCredentialNotFound) {
 				// Consumed by a concurrent Verify call between our list
 				// and this ConsumeOnce — the code was raced away, not a
 				// system failure.
 				return false, "", nil
 			}
+
 			return false, "", fmt.Errorf("consume recovery code: %w", err)
 		}
+
 		return true, c.ID, nil
 	}
 
 	return false, "", nil
+}
+
+func sameScope(a, b *string) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }

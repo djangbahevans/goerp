@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"html"
 	"net"
 	"net/smtp"
 	"net/url"
@@ -50,10 +51,12 @@ func TenantBaseURL(baseURL, platformDomain, tenantSlug string) string {
 	if err != nil || u.Host == "" {
 		return baseURL
 	}
+
 	host := tenantSlug + "." + platformDomain
 	if port := u.Port(); port != "" {
 		host = net.JoinHostPort(host, port)
 	}
+
 	return u.Scheme + "://" + host + strings.TrimSuffix(u.Path, "/")
 }
 
@@ -77,20 +80,16 @@ func (m *SMTPMailer) SendInvite(ctx context.Context, email, tenantSlug, rawToken
 	return m.send(ctx, email, subject, text, html)
 }
 
-// SendMFAReset notifies email that an administrator reset their MFA
-// enrollment — auth-internals.md §8 "Account recovery when all factors
-// are lost" step 4. One hardcoded template, same minimal-slice approach
-// SendInvite already takes for this package.
-func (m *SMTPMailer) SendMFAReset(ctx context.Context, email string) error {
-	const subject = "Your multi-factor authentication has been reset"
-	text := "An administrator has reset your multi-factor authentication (MFA) settings.\n\n" +
-		"You'll need to enroll a new MFA factor the next time this is required.\n\n" +
+func (m *SMTPMailer) SendMFAReset(ctx context.Context, email, tenantName string) error {
+	const subject = "Your two-factor authentication has been reset"
+	text := "An administrator of " + tenantName + " has reset your two-factor authentication for this organisation.\n\n" +
+		"You'll need to enroll a new factor when this organisation requires MFA. Other organisations you belong to are unaffected.\n\n" +
 		"If you did not expect this, contact your administrator immediately.\n"
-	html := "<p>An administrator has reset your multi-factor authentication (MFA) settings.</p>" +
-		"<p>You'll need to enroll a new MFA factor the next time this is required.</p>" +
+	bodyHTML := "<p>An administrator of " + html.EscapeString(tenantName) + " has reset your two-factor authentication for this organisation.</p>" +
+		"<p>You'll need to enroll a new factor when this organisation requires MFA. Other organisations you belong to are unaffected.</p>" +
 		"<p>If you did not expect this, contact your administrator immediately.</p>"
 
-	return m.send(ctx, email, subject, text, html)
+	return m.send(ctx, email, subject, text, bodyHTML)
 }
 
 // SendPasswordReset carries the reset link — auth-internals.md §3
@@ -163,13 +162,19 @@ func (m *SMTPMailer) send(ctx context.Context, to, subject, text, html string) e
 	if err != nil {
 		return fmt.Errorf("dial smtp server: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
+
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	client, err := smtp.NewClient(conn, m.cfg.Host)
 	if err != nil {
 		return fmt.Errorf("create smtp client: %w", err)
 	}
-	defer func() { _ = client.Close() }()
+
+	defer func() {
+		_ = client.Close()
+	}()
 
 	if m.cfg.User != "" {
 		if err := client.Auth(smtp.PlainAuth("", m.cfg.User, m.cfg.Pass, m.cfg.Host)); err != nil {
@@ -180,16 +185,20 @@ func (m *SMTPMailer) send(ctx context.Context, to, subject, text, html string) e
 	if err := client.Mail(m.cfg.From); err != nil {
 		return fmt.Errorf("smtp MAIL: %w", err)
 	}
+
 	if err := client.Rcpt(to); err != nil {
 		return fmt.Errorf("smtp RCPT: %w", err)
 	}
+
 	w, err := client.Data()
 	if err != nil {
 		return fmt.Errorf("smtp DATA: %w", err)
 	}
+
 	if _, err := w.Write(buildMessage(m.cfg.From, to, subject, text, html)); err != nil {
 		return fmt.Errorf("write smtp message: %w", err)
 	}
+
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("close smtp writer: %w", err)
 	}

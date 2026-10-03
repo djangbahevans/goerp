@@ -1,9 +1,4 @@
-// Package totp implements TOTP MFA setup and verification —
-// auth-internals.md §8's "TOTP" section — on top of mfa.Store (the
-// user_mfa row store, goerp#296) and rowcrypt (credential-at-rest
-// encryption, goerp#297). Uses github.com/pquerna/otp, the library the
-// doc's own reference implementation names, rather than a hand-rolled
-// RFC 6238 implementation.
+// Package totp implements TOTP enrollment, tenant-scoped verification and replay protection.
 package totp
 
 import (
@@ -23,9 +18,6 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 )
 
-// issuer is the "GoERP" literal auth-internals.md §8's own TOTP example
-// hardcodes as GenerateOpts.Issuer — not made configurable since nothing
-// in the doc suggests it varies per tenant or deployment.
 const issuer = "GoERP"
 
 const (
@@ -54,8 +46,6 @@ var validateOpts = totp.ValidateOpts{
 	Algorithm: otp.AlgorithmSHA1,
 }
 
-// Service ties together credential storage, at-rest encryption, and Redis
-// replay protection to implement TOTP enrollment and verification.
 type Service struct {
 	store *mfa.Store
 	keys  *rowcrypt.RowKeySet
@@ -76,15 +66,13 @@ type PendingEnrollment struct {
 }
 
 type pendingRecord struct {
-	UserID string `json:"user_id"`
-	Secret []byte `json:"secret"`
+	UserID   string `json:"user_id"`
+	TenantID string `json:"tenant_id"`
+	Secret   []byte `json:"secret"`
 }
 
-// BeginEnrollment generates a TOTP secret for userID and holds it,
-// encrypted, in Redis for enrollmentTTL. Nothing is written to user_mfa
-// until ConfirmEnrollment succeeds, so an abandoned setup never counts as
-// an enrolled factor.
-func (s *Service) BeginEnrollment(ctx context.Context, userID, accountName string) (*PendingEnrollment, error) {
+// BeginEnrollment keeps the secret pending so abandoned setup never counts as an enrolled factor.
+func (s *Service) BeginEnrollment(ctx context.Context, userID, accountName, tenantID string) (*PendingEnrollment, error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      issuer,
 		AccountName: accountName,
@@ -101,7 +89,8 @@ func (s *Service) BeginEnrollment(ctx context.Context, userID, accountName strin
 	if err != nil {
 		return nil, fmt.Errorf("encrypt totp secret: %w", err)
 	}
-	record, err := json.Marshal(pendingRecord{UserID: userID, Secret: ciphertext})
+
+	record, err := json.Marshal(pendingRecord{UserID: userID, TenantID: tenantID, Secret: ciphertext})
 	if err != nil {
 		return nil, fmt.Errorf("encode pending enrollment: %w", err)
 	}
@@ -127,26 +116,24 @@ type VerifiedEnrollment struct {
 	Secret []byte // rowcrypt-encrypted, ready to store as user_mfa.credential
 }
 
-// CheckEnrollmentCode checks code against userID's pending enrollment.
-// ErrEnrollmentNotFound covers a missing, expired, or other user's
-// enrollment; ErrInvalidCode a wrong or replayed code. The
-// maxConfirmAttempts-th wrong code discards the enrollment. A match leaves
-// the enrollment pending: the caller stores the factor and calls
-// ClaimEnrollment inside the same transaction, so a failed write can be
-// retried with the same enrollment.
-func (s *Service) CheckEnrollmentCode(ctx context.Context, userID, enrollmentID, code string) (*VerifiedEnrollment, error) {
+// CheckEnrollmentCode leaves the enrollment pending until ClaimEnrollment.
+// A failed database write can then retry with the next authenticator code.
+func (s *Service) CheckEnrollmentCode(ctx context.Context, userID, enrollmentID, code, tenantID string) (*VerifiedEnrollment, error) {
 	raw, found, err := s.cache.Get(ctx, enrollmentKey(enrollmentID))
 	if err != nil {
 		return nil, fmt.Errorf("load pending enrollment: %w", err)
 	}
+
 	if !found {
 		return nil, ErrEnrollmentNotFound
 	}
+
 	var record pendingRecord
 	if err := json.Unmarshal([]byte(raw), &record); err != nil {
 		return nil, fmt.Errorf("decode pending enrollment: %w", err)
 	}
-	if record.UserID != userID {
+
+	if record.UserID != userID || record.TenantID != tenantID {
 		return nil, ErrEnrollmentNotFound
 	}
 
@@ -154,20 +141,24 @@ func (s *Service) CheckEnrollmentCode(ctx context.Context, userID, enrollmentID,
 	if err != nil {
 		return nil, fmt.Errorf("decrypt pending totp secret: %w", err)
 	}
+
 	valid, err := validate(code, string(secret), time.Now())
 	if err != nil {
 		return nil, err
 	}
+
 	if !valid {
 		attempts, err := s.cache.IncrWithTTL(ctx, attemptsKey(enrollmentID), enrollmentTTL)
 		if err != nil {
 			return nil, fmt.Errorf("count enrollment attempts: %w", err)
 		}
+
 		if attempts >= maxConfirmAttempts {
 			if err := s.discardEnrollment(ctx, enrollmentID); err != nil {
 				return nil, err
 			}
 		}
+
 		return nil, ErrInvalidCode
 	}
 
@@ -175,9 +166,11 @@ func (s *Service) CheckEnrollmentCode(ctx context.Context, userID, enrollmentID,
 	if err != nil {
 		return nil, fmt.Errorf("claim totp replay slot: %w", err)
 	}
+
 	if !claimed {
 		return nil, ErrInvalidCode
 	}
+
 	return &VerifiedEnrollment{id: enrollmentID, raw: raw, Secret: record.Secret}, nil
 }
 
@@ -188,12 +181,15 @@ func (s *Service) ClaimEnrollment(ctx context.Context, v *VerifiedEnrollment) er
 	if err != nil {
 		return fmt.Errorf("claim pending enrollment: %w", err)
 	}
+
 	if !won {
 		return ErrEnrollmentNotFound
 	}
+
 	if err := s.cache.Delete(ctx, attemptsKey(v.id)); err != nil {
 		return fmt.Errorf("clear enrollment attempts: %w", err)
 	}
+
 	return nil
 }
 
@@ -201,9 +197,11 @@ func (s *Service) discardEnrollment(ctx context.Context, enrollmentID string) er
 	if err := s.cache.Delete(ctx, enrollmentKey(enrollmentID)); err != nil {
 		return fmt.Errorf("discard pending enrollment: %w", err)
 	}
+
 	if err := s.cache.Delete(ctx, attemptsKey(enrollmentID)); err != nil {
 		return fmt.Errorf("discard enrollment attempts: %w", err)
 	}
+
 	return nil
 }
 
@@ -214,28 +212,26 @@ func validate(code, secret string, now time.Time) (bool, error) {
 	if errors.Is(err, otp.ErrValidateInputInvalidLength) {
 		return false, nil
 	}
+
 	if err != nil {
 		return false, fmt.Errorf("validate totp code: %w", err)
 	}
+
 	return valid, nil
 }
 
-func enrollmentKey(id string) string { return "mfa:enroll:totp:" + id }
+func enrollmentKey(id string) string {
+	return "mfa:enroll:totp:" + id
+}
 
-func attemptsKey(id string) string { return "mfa:enroll:totp:" + id + ":attempts" }
+func attemptsKey(id string) string {
+	return "mfa:enroll:totp:" + id + ":attempts"
+}
 
-// Verify reports whether code matches one of userID's enrolled TOTP
-// factors within the current ±1 window, and if so, the matched
-// credential's user_mfa row ID — the caller's mfa_credential_id (session
-// row and access token claim, auth-internals.md §4/§8). A code already
-// accepted within the last 90 seconds is rejected even if it's still
-// cryptographically valid — auth-internals.md §8's replay window, claimed
-// atomically via Redis SETNX so two concurrent verify calls for the same
-// code can't both succeed. The bool return carries the verification
-// outcome; error is reserved for infrastructure failures
-// (DB/Redis/decrypt), not a wrong or replayed code.
-func (s *Service) Verify(ctx context.Context, userID, code string) (valid bool, credentialID string, err error) {
-	creds, err := s.store.ListActiveByUser(ctx, userID)
+// Verify claims a per-account replay key before accepting a TOTP code.
+// The replay window spans the current counter and both adjacent counters.
+func (s *Service) Verify(ctx context.Context, userID, code string, scope mfa.Scope) (valid bool, credentialID string, err error) {
+	creds, err := s.store.ListAccepted(ctx, userID, scope)
 	if err != nil {
 		return false, "", fmt.Errorf("list mfa credentials: %w", err)
 	}
@@ -264,6 +260,7 @@ func (s *Service) Verify(ctx context.Context, userID, code string) (valid bool, 
 		if err != nil {
 			return false, "", err
 		}
+
 		if !validCode {
 			continue
 		}
@@ -272,14 +269,17 @@ func (s *Service) Verify(ctx context.Context, userID, code string) (valid bool, 
 		if err != nil {
 			return false, "", fmt.Errorf("claim totp replay slot: %w", err)
 		}
+
 		if !claimed {
 			return false, "", nil
 		}
+
 		// Bookkeeping only: the code is already claimed, so failing here
 		// would burn a valid code.
 		if err := s.store.TouchLastUsed(ctx, c.ID); err != nil {
 			log.Warn().Err(err).Str("credential_id", c.ID).Msg("totp: record last use failed")
 		}
+
 		return true, c.ID, nil
 	}
 

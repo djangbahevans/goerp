@@ -1,26 +1,9 @@
-// Package mfareset implements POST /admin/users/{id}/mfa/reset —
-// auth-internals.md §8 "Account recovery when all factors are lost": a
-// tenant admin resetting a target user's MFA enrollment and sessions when
-// that user has lost every enrolled factor and has no self-service path
-// back in.
-//
-// Despite the "/admin/" path prefix, this is a tenant-facing route, not
-// the operator-only internal/engine/adminapi surface (which runs on a
-// separate loopback listener authenticated by the platform static
-// token). auth-internals.md itself uses "/admin/" for both meanings —
-// compare "POST /admin/tenants (operator)" against "POST
-// /admin/users/{id}/suspend (tenant-admin action, requires admin role in
-// this tenant)" a few lines later in the same doc. This route is the
-// latter: Class A per §9's route classes table (Host-header tenant
-// resolution, JWT/session authentication, admin-role authorization), the
-// same shape goerp#307's /auth/mfa/reverify already established — calling
-// tenantresolve.Resolver.ResolveByHost and authcheck.Checker.Authenticate
-// directly since the generic middleware chain (goerp#91) that would
-// normally run them doesn't exist yet.
+// Package mfareset lets tenant administrators reset member MFA and sessions in their own tenant.
 package mfareset
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -42,29 +25,14 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/user"
 )
 
-// maxBodyBytes bounds the request body before JSON parsing — no shared
-// config field or middleware covers builtin routes yet, same reasoning
-// loginflow/mfaverify/mfareverify's own caps use.
 const maxBodyBytes = 64 * 1024
 
-// adminRoleName is the built-in role auth-internals.md §8's own wording
-// ("requires the caller's own admin role") checks for — no shared
-// constant exists for it anywhere in this codebase yet; role.Store's own
-// SeedBuiltinRoles and every fixture that grants it use this same literal.
 const adminRoleName = "admin"
 
-// Mailer is the minimal interface this package needs — satisfied by
-// mailer.SMTPMailer.SendMFAReset — defined here rather than imported from
-// internal/engine/mailer, matching internal/engine/invite's own
-// accept-an-interface-where-used convention.
 type Mailer interface {
-	SendMFAReset(ctx context.Context, email string) error
+	SendMFAReset(ctx context.Context, email, tenantName string) error
 }
 
-// AuditEmitter is the minimal interface this package needs for the
-// mfa.admin_reset event, satisfied by authaudit.Store. A nil AuditEmitter
-// is logged as a warning rather than failing the request, the same way
-// internal/engine/invite.Store's own optional AuditEmitter is.
 type AuditEmitter interface {
 	Emit(ctx context.Context, tenantSlug, eventName, userID, actorUserID string, payload map[string]any) error
 }
@@ -102,9 +70,6 @@ type resetRequest struct {
 	Password string `json:"password"`
 }
 
-// writeJSON matches encoding/json v1's Encoder defaults, which
-// json.MarshalWrite doesn't apply on its own: '<', '>', '&' escaped for
-// safe HTML embedding, and U+2028/U+2029 escaped for safe JS embedding.
 func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.MarshalWrite(w, v, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 }
@@ -112,7 +77,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Step 5 (Class A): Host-header tenant resolution.
 	tenantCtx, err := h.tenants.ResolveByHost(ctx, r.Host)
 	if err != nil {
 		switch {
@@ -125,21 +89,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
 		}
+
 		return
 	}
 
-	// Step 7 (Class A, JWT branch): requires a currently-valid access
-	// token — this is a real tenant-session user, never the platform
-	// static admin token.
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
+
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if authcheck.WritePasswordChangeRequired(r.Context(), w, err) {
 		return
 	}
+
 	if err != nil || !authCtx.IsAuthenticated {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
@@ -163,6 +127,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusServiceUnavailable, "overloaded", "too many password checks in progress, retry shortly")
 		return
 	}
+
 	if !confirmed {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_password", "current password confirmation failed")
 		return
@@ -183,6 +148,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
 		return
 	}
+
 	if !isMember {
 		httperr.Write(r.Context(), w, http.StatusNotFound, "not_found", "not found")
 		return
@@ -194,43 +160,52 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// user_mfa has no tenant scoping at all (a factor belongs to the
-	// user globally) — this genuinely revokes every enrolled factor
-	// regardless of which tenant it was enrolled through, matching the
-	// doc's own "Revoke every enrolled user_mfa row for {id}" wording.
-	if err := h.mfa.RevokeAllForUser(ctx, targetID); err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
-		return
-	}
-	// Sessions, unlike user_mfa, are tenant-scoped — only this tenant's
-	// sessions for the target are revoked, per the doc's own "all their
-	// active sessions in the tenant" wording.
-	if err := h.sessions.RevokeAllForUserInTenant(ctx, targetID, tenantCtx.TenantID, "admin_mfa_reset"); err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reset failed")
+	var revokedIDs []string
+	err = h.mfa.WithTx(ctx, func(tx *sql.Tx) error {
+		if err := h.mfa.LockUserTx(ctx, tx, targetID); err != nil {
+			return err
+		}
+
+		if err := h.mfa.RevokeTenantTx(ctx, tx, targetID, tenantCtx.TenantID); err != nil {
+			return err
+		}
+
+		if err := h.mfa.SetResetTx(ctx, tx, targetID, tenantCtx.TenantID, true); err != nil {
+			return err
+		}
+
+		var err error
+		revokedIDs, err = h.sessions.RevokeAllForUserInTenantTx(ctx, tx, targetID, tenantCtx.TenantID, "admin_mfa_reset")
+		return err
+	})
+	if err != nil {
+		httperr.Write(ctx, w, http.StatusInternalServerError, "internal_error", "reset failed")
 		return
 	}
 
+	if err := h.sessions.Blocklist(ctx, revokedIDs); err != nil {
+		log.Error().Err(err).Msg("mfareset: blocklist sessions after tenant reset failed")
+	}
+
 	h.emitAudit(ctx, tenantCtx.Slug, authCtx.UserID, targetID)
-	h.notify(ctx, target.Email)
+	h.notify(ctx, target.Email, tenantCtx.Name)
 
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]any{"status": "ok"})
 }
 
-// confirmCallerPassword re-verifies the caller's own current password —
-// never the target's. A nil PasswordHash (shouldn't happen for a caller
-// who just authenticated via a real access token, since password login
-// requires one) is treated as a failed confirmation, not a system error.
-// The only error it returns is from acquiring an Argon2id slot.
+// Accounts created through federated sign-in can have no password hash; confirmation then fails.
 func (h *Handler) confirmCallerPassword(ctx context.Context, callerID, plain string) (bool, error) {
 	caller, err := h.users.GetByID(ctx, callerID)
 	if err != nil || caller.PasswordHash == nil {
 		return false, nil
 	}
+
 	slot, err := h.hasher.Acquire(ctx)
 	if err != nil {
 		return false, err
 	}
+
 	defer slot.Release()
 	match, _, err := slot.Verify(plain, *caller.PasswordHash)
 	return err == nil && match, nil
@@ -241,17 +216,19 @@ func (h *Handler) emitAudit(ctx context.Context, tenantSlug, performedBy, target
 		log.Warn().Str("tenant", tenantSlug).Str("event", "mfa.admin_reset").Msg("mfareset: no audit emitter wired, event not recorded")
 		return
 	}
+
 	if err := h.audit.Emit(ctx, tenantSlug, "mfa.admin_reset", targetUserID, performedBy, nil); err != nil {
 		log.Warn().Err(err).Str("tenant", tenantSlug).Str("event", "mfa.admin_reset").Msg("mfareset: audit emit failed")
 	}
 }
 
-func (h *Handler) notify(ctx context.Context, email string) {
+func (h *Handler) notify(ctx context.Context, email, tenantName string) {
 	if h.mailer == nil {
 		log.Warn().Str("email", email).Msg("mfareset: no mailer wired, notification email not sent")
 		return
 	}
-	if err := h.mailer.SendMFAReset(ctx, email); err != nil {
+
+	if err := h.mailer.SendMFAReset(ctx, email, tenantName); err != nil {
 		log.Warn().Err(err).Str("email", email).Msg("mfareset: notification email failed")
 	}
 }

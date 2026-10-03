@@ -1,9 +1,4 @@
-// Package mfa owns the MFA credential data model — auth-internals.md §2's
-// user_mfa table: enrolled TOTP/WebAuthn/recovery-code factors per user.
-// TOTP/WebAuthn/recovery-code-specific enrollment and verification logic
-// (secret generation, ceremony handling, code hashing) is
-// goerp#300/#301/#302's scope, not this package's — this package only
-// provides the row store those tickets build on.
+// Package mfa stores platform and tenant MFA credentials and applies tenant acceptance rules.
 package mfa
 
 import (
@@ -13,7 +8,6 @@ import (
 
 var ErrCredentialNotFound = errors.New("mfa credential not found")
 
-// CredentialType is a system.user_mfa row's type column.
 type CredentialType string
 
 const (
@@ -22,13 +16,12 @@ const (
 	CredentialRecoveryCode CredentialType = "recovery_code"
 )
 
-// Credential is one system.user_mfa row. Credential holds opaque,
-// already-encrypted bytes (AES-256-GCM per auth-internals.md §8) —
-// encrypting/decrypting it is the caller's job (goerp#297), not this
-// store's, the same boundary session.Store draws around refresh_hash.
+// Credential.Credential holds an encrypted factor payload or a bcrypt recovery-code hash.
+// TenantID is nil for a platform credential.
 type Credential struct {
 	ID         string
 	UserID     string
+	TenantID   *string
 	Type       CredentialType
 	Credential []byte
 	Label      *string
@@ -38,8 +31,11 @@ type Credential struct {
 	RevokedAt  *time.Time
 }
 
-// IsFactor reports whether t is a sign-in factor (TOTP or WebAuthn), as
-// opposed to a recovery code.
+type Scope struct {
+	TenantID     string
+	PlatformOnly bool
+}
+
 func (t CredentialType) IsFactor() bool {
 	return t == CredentialTOTP || t == CredentialWebAuthn
 }

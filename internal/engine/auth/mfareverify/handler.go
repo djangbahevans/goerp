@@ -1,25 +1,8 @@
-// Package mfareverify implements POST /auth/mfa/reverify — auth-internals.md
-// §8 "Step-up re-verification": refreshing an already-`Authenticated`
-// session's MFA assurance without a full re-login, when its assurance has
-// simply aged past `mfa_max_assurance_age` rather than never having
-// existed.
-//
-// Unlike /auth/mfa/verify (goerp#304), this route requires a currently-
-// valid access token, not an mfa_token — auth-internals.md §9 "Route
-// classes" places it in Class A (the standard Host-header tenant
-// resolution, JWT token validation). The generic middleware pipeline that
-// would normally run tenant resolution and JWT validation ahead of every
-// Class A route doesn't exist yet (goerp#91, still blocked); this handler
-// calls the same underlying primitives directly instead —
-// tenantresolve.Resolver.ResolveByHost for step 5, authcheck.Checker for
-// step 7 — the same "call the primitive directly, skip the not-yet-built
-// generic middleware" pattern loginflow and mfaverify already use for
-// authtoken.Issuer and authcheck's sibling pieces. goerp#91/#224 will
-// later lift this same logic into the automatic per-request pipeline;
-// nothing here needs to be unwound when that happens.
+// Package mfareverify refreshes an authenticated session with a factor accepted by its tenant.
 package mfareverify
 
 import (
+	"database/sql"
 	"encoding/json/v2"
 	"errors"
 	"net/http"
@@ -31,18 +14,17 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/auth/mfaverify"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/httperr"
+	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/lockout"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/recoverycode"
 	"github.com/djangbahevans/goerp/internal/engine/mfa/totp"
 	tenantresolve "github.com/djangbahevans/goerp/internal/engine/tenant/resolve"
 )
 
-// maxBodyBytes bounds the request body before JSON parsing — no shared
-// config field or middleware covers builtin routes yet, same reasoning
-// loginflow/mfaverify's own caps use.
 const maxBodyBytes = 64 * 1024
 
 type Handler struct {
+	mfa      *mfa.Store
 	tenants  *tenantresolve.Resolver
 	auth     *authcheck.Checker
 	sessions *session.Store
@@ -52,8 +34,9 @@ type Handler struct {
 	lockout  *lockout.Counter
 }
 
-func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, sessions *session.Store, issuer *authtoken.Issuer, totpService *totp.Service, recoveryService *recoverycode.Service, lockoutCounter *lockout.Counter) *Handler {
+func NewHandler(tenants *tenantresolve.Resolver, auth *authcheck.Checker, sessions *session.Store, issuer *authtoken.Issuer, totpService *totp.Service, recoveryService *recoverycode.Service, lockoutCounter *lockout.Counter, mfaStore *mfa.Store) *Handler {
 	return &Handler{
+		mfa:      mfaStore,
 		tenants:  tenants,
 		auth:     auth,
 		sessions: sessions,
@@ -72,7 +55,6 @@ type reverifyRequest struct {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Step 5 (Class A): Host-header tenant resolution.
 	tenantCtx, err := h.tenants.ResolveByHost(ctx, r.Host)
 	if err != nil {
 		switch {
@@ -85,16 +67,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		}
+
 		return
 	}
 
-	// Step 7 (Class A, JWT branch): requires a currently-valid access
-	// token — auth-internals.md §8's own distinction from /auth/mfa/verify.
 	rawToken := authcheck.ExtractToken(r)
 	if rawToken == "" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return
 	}
+
 	authCtx, err := h.auth.AuthenticateAllowingPasswordChange(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if err != nil || !authCtx.IsAuthenticated {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
@@ -108,45 +90,50 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5 of §8's re-verification flow: lockout check, before spending
-	// effort verifying the code — same counter and threshold
-	// /auth/mfa/verify uses, scoped the same way (user_id, tenant_id).
 	locked, err := h.lockout.Locked(ctx, authCtx.UserID, authCtx.TenantID)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
+
 	if locked {
 		httperr.Write(r.Context(), w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
 		return
 	}
 
-	// Step 1: verify the submitted code against any of the user's
-	// enrolled factors — not necessarily the one originally used for this
-	// session, per auth-internals.md §8's own wording.
-	valid, credentialID, err := mfaverify.VerifyCode(ctx, h.totp, h.recovery, req.Type, authCtx.UserID, req.Code)
+	now := time.Now()
+	var valid bool
+	var state session.ReissueState
+	err = h.mfa.WithTx(ctx, func(tx *sql.Tx) error {
+		if err := h.mfa.LockUserTx(ctx, tx, authCtx.UserID); err != nil {
+			return err
+		}
+
+		var credentialID string
+		var err error
+		valid, credentialID, err = mfaverify.VerifyCodeTx(ctx, tx, h.totp, h.recovery, req.Type, authCtx.UserID, req.Code, mfa.Scope{TenantID: authCtx.TenantID})
+		if err != nil || !valid {
+			return err
+		}
+
+		state, err = h.sessions.UpdateMFAAssuranceTx(ctx, tx, authCtx.SessionID, req.Type, now, credentialID)
+		return err
+	})
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 		return
 	}
+
 	if !valid {
 		if err := h.lockout.RecordFailure(ctx, authCtx.UserID, authCtx.TenantID); err != nil {
 			httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
 			return
 		}
+
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
 		return
 	}
 
-	// Step 2: update the session's MFA assurance columns, then issue a
-	// fresh access token carrying the updated amr/mfa_verified_at claims
-	// — same session, refresh token unchanged.
-	now := time.Now()
-	state, err := h.sessions.UpdateMFAAssurance(ctx, authCtx.SessionID, req.Type, now, credentialID)
-	if err != nil {
-		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")
-		return
-	}
 	accessToken, expiresIn, err := h.issuer.ReissueAccessToken(authCtx.SessionID, authCtx.TenantID, authCtx.UserID, authCtx.RolesLive, req.Type, &now, state.PasswordChangeRequired, state.ExpiresAt)
 	if err != nil {
 		httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "reverification failed")

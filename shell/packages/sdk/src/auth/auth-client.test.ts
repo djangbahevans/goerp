@@ -238,7 +238,22 @@ describe("MFA factor management", () => {
       vi.fn(async () =>
         jsonResponse(200, {
           factors: [
-            { id: "f1", type: "totp", label: "iPhone", created_at: "2026-08-01T10:00:00Z", last_used_at: null },
+            {
+              id: "f1",
+              type: "totp",
+              tenant_only: false,
+              label: "iPhone",
+              created_at: "2026-08-01T10:00:00Z",
+              last_used_at: null,
+            },
+            {
+              id: "f2",
+              type: "totp",
+              tenant_only: true,
+              label: "Work phone",
+              created_at: "2026-08-02T10:00:00Z",
+              last_used_at: null,
+            },
           ],
           recovery_codes_remaining: 7,
           required_by_policy: true,
@@ -247,7 +262,24 @@ describe("MFA factor management", () => {
     );
 
     expect(await fetchMFAFactors()).toEqual({
-      factors: [{ id: "f1", type: "totp", label: "iPhone", createdAt: "2026-08-01T10:00:00Z", lastUsedAt: null }],
+      factors: [
+        {
+          id: "f1",
+          type: "totp",
+          tenantOnly: false,
+          label: "iPhone",
+          createdAt: "2026-08-01T10:00:00Z",
+          lastUsedAt: null,
+        },
+        {
+          id: "f2",
+          type: "totp",
+          tenantOnly: true,
+          label: "Work phone",
+          createdAt: "2026-08-02T10:00:00Z",
+          lastUsedAt: null,
+        },
+      ],
       recoveryCodesRemaining: 7,
       requiredByPolicy: true,
     });

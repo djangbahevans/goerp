@@ -1,22 +1,10 @@
-// Package webauthn implements WebAuthn/Passkey registration and login
-// ceremonies — auth-internals.md §8's "WebAuthn / Passkeys" section — on
-// top of mfa.Store (the user_mfa row store, goerp#296), rowcrypt
-// (credential-at-rest encryption, goerp#297), and
-// github.com/go-webauthn/webauthn (the library the doc's own
-// BeginRegistration/FinishRegistration/BeginLogin/FinishLogin pseudocode
-// names, the same reference-implementation-naming convention the TOTP
-// ticket's doc pseudocode used for pquerna/otp).
-//
-// Like totp.Service and recoverycode.Service (goerp#300/#302), this
-// package is Go-level only — no HTTP routes. A caller (a future ticket)
-// is expected to expose Begin/Finish over HTTP, JSON-encoding the
-// options this package returns and passing the client's raw JSON
-// response bytes back in.
+// Package webauthn implements tenant-bound WebAuthn registration and login ceremonies.
 package webauthn
 
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -29,21 +17,17 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
+	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 )
 
-// Config is this package's own Relying Party configuration — per-subsystem
-// env-var ownership, same convention cache/db/search/secrets/storage/
-// temporal already use, not fields grown onto the central config.Config.
 type Config struct {
 	RPID          string   `env:"GOERP_WEBAUTHN_RP_ID,required"`
 	RPDisplayName string   `env:"GOERP_WEBAUTHN_RP_DISPLAY_NAME" envDefault:"GoERP"`
 	RPOrigins     []string `env:"GOERP_WEBAUTHN_RP_ORIGINS,required" envSeparator:","`
 }
 
-// ceremonyTTL matches auth-internals.md §8's own 5-minute window for both
-// registration and login challenges.
 const ceremonyTTL = 5 * time.Minute
 
 var (
@@ -53,7 +37,7 @@ var (
 	ErrCeremonyExpired = errors.New("webauthn ceremony expired or not found")
 	// ErrCeremonyUserMismatch means ceremonyID exists but was started for
 	// a different user — never trust the caller-supplied userID alone.
-	ErrCeremonyUserMismatch = errors.New("webauthn ceremony does not belong to this user")
+	ErrCeremonyUserMismatch = errors.New("webauthn ceremony does not belong to this user and tenant")
 	// ErrNoEnrolledCredentials means the user has no active WebAuthn
 	// factor to authenticate a login ceremony against.
 	ErrNoEnrolledCredentials = errors.New("user has no enrolled webauthn credentials")
@@ -78,9 +62,10 @@ type Service struct {
 	store    *mfa.Store
 	keys     *rowcrypt.RowKeySet
 	cache    *cache.Client
+	sessions *session.Store
 }
 
-func NewService(cfg Config, store *mfa.Store, keys *rowcrypt.RowKeySet, cacheClient *cache.Client) (*Service, error) {
+func NewService(cfg Config, store *mfa.Store, keys *rowcrypt.RowKeySet, cacheClient *cache.Client, sessions *session.Store) (*Service, error) {
 	webAuthn, err := wan.New(&wan.Config{
 		RPID:          cfg.RPID,
 		RPDisplayName: cfg.RPDisplayName,
@@ -89,16 +74,13 @@ func NewService(cfg Config, store *mfa.Store, keys *rowcrypt.RowKeySet, cacheCli
 	if err != nil {
 		return nil, fmt.Errorf("configure webauthn relying party: %w", err)
 	}
-	return &Service{webAuthn: webAuthn, store: store, keys: keys, cache: cacheClient}, nil
+
+	return &Service{webAuthn: webAuthn, store: store, keys: keys, cache: cacheClient, sessions: sessions}, nil
 }
 
-// BeginRegistration starts a registration ceremony for userID, excluding
-// their already-enrolled WebAuthn credentials (so re-registering the same
-// authenticator is rejected client-side rather than silently duplicated).
-// optionsJSON is the CredentialCreationOptions to serialize straight to
-// the client; ceremonyID must be round-tripped back to FinishRegistration.
-func (s *Service) BeginRegistration(ctx context.Context, userID, accountName string) (optionsJSON []byte, ceremonyID string, err error) {
-	user, err := s.loadUser(ctx, userID, accountName)
+// BeginRegistration excludes already accepted credentials to prevent duplicate device registration.
+func (s *Service) BeginRegistration(ctx context.Context, userID, accountName string, scope mfa.Scope) (optionsJSON []byte, ceremonyID string, err error) {
+	user, err := s.loadUser(ctx, userID, accountName, scope)
 	if err != nil {
 		return nil, "", err
 	}
@@ -114,7 +96,7 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, accountName str
 	}
 
 	ceremonyID = uuid.New().String()
-	if err := s.storeSession(ctx, regKey(ceremonyID), userID, *sessionData); err != nil {
+	if err := s.storeSession(ctx, regKey(ceremonyID), userID, *sessionData, scope.TenantID); err != nil {
 		return nil, "", err
 	}
 
@@ -125,27 +107,26 @@ func (s *Service) BeginRegistration(ctx context.Context, userID, accountName str
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal webauthn registration options: %w", err)
 	}
+
 	return optionsJSON, ceremonyID, nil
 }
 
-// FinishRegistration completes a registration ceremony started by
-// BeginRegistration, verifying responseJSON (the client's raw
-// CredentialCreationResponse JSON) against the stored ceremony session,
-// then persisting the new credential as an encrypted system.user_mfa row.
-// The ceremony session is deleted whether this succeeds or fails —
-// single-use, per auth-internals.md §8.
-func (s *Service) FinishRegistration(ctx context.Context, userID, ceremonyID, accountName string, responseJSON []byte, label *string) (*mfa.Credential, error) {
+// FinishRegistration consumes the account-and-tenant-bound ceremony on every completion attempt.
+func (s *Service) FinishRegistration(ctx context.Context, userID, ceremonyID, accountName string, responseJSON []byte, label *string, scope mfa.Scope, sessionID string) (*mfa.Credential, error) {
 	key := regKey(ceremonyID)
 	sess, sessErr := s.loadSession(ctx, key)
-	defer func() { _ = s.cache.Delete(ctx, key) }()
+	defer func() {
+		_ = s.cache.Delete(ctx, key)
+	}()
 	if sessErr != nil {
 		return nil, sessErr
 	}
-	if sess.UserID != userID {
+
+	if sess.UserID != userID || sess.TenantID != scope.TenantID {
 		return nil, ErrCeremonyUserMismatch
 	}
 
-	user, err := s.loadUser(ctx, userID, accountName)
+	user, err := s.loadUser(ctx, userID, accountName, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -165,20 +146,44 @@ func (s *Service) FinishRegistration(ctx context.Context, userID, ceremonyID, ac
 		return nil, err
 	}
 
-	row, err := s.store.Insert(ctx, userID, mfa.CredentialWebAuthn, ciphertext, label)
+	var row *mfa.Credential
+	err = s.store.WithTx(ctx, func(tx *sql.Tx) error {
+		if err := s.store.LockUserTx(ctx, tx, userID); err != nil {
+			return err
+		}
+
+		factorTenant, err := s.store.EnrollmentTenantTx(ctx, tx, userID, scope.TenantID, sessionID)
+		if err != nil {
+			return err
+		}
+
+		row, err = s.store.InsertScopedTx(ctx, tx, userID, factorTenant, mfa.CredentialWebAuthn, ciphertext, label)
+		if err != nil {
+			return err
+		}
+
+		if factorTenant != nil {
+			if err := s.store.SetResetTx(ctx, tx, userID, scope.TenantID, false); err != nil {
+				return err
+			}
+		}
+
+		_, err = s.sessions.UpdateMFAAssuranceTx(ctx, tx, sessionID, "webauthn", time.Now(), row.ID)
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("store webauthn credential: %w", err)
 	}
+
 	return row, nil
 }
 
-// BeginLogin starts a login ceremony for userID against their enrolled
-// WebAuthn credentials.
-func (s *Service) BeginLogin(ctx context.Context, userID, accountName string) (optionsJSON []byte, ceremonyID string, err error) {
-	user, err := s.loadUser(ctx, userID, accountName)
+func (s *Service) BeginLogin(ctx context.Context, userID, accountName string, scope mfa.Scope) (optionsJSON []byte, ceremonyID string, err error) {
+	user, err := s.loadUser(ctx, userID, accountName, scope)
 	if err != nil {
 		return nil, "", err
 	}
+
 	if len(user.records) == 0 {
 		return nil, "", ErrNoEnrolledCredentials
 	}
@@ -189,7 +194,7 @@ func (s *Service) BeginLogin(ctx context.Context, userID, accountName string) (o
 	}
 
 	ceremonyID = uuid.New().String()
-	if err := s.storeSession(ctx, authKey(ceremonyID), userID, *sessionData); err != nil {
+	if err := s.storeSession(ctx, authKey(ceremonyID), userID, *sessionData, scope.TenantID); err != nil {
 		return nil, "", err
 	}
 
@@ -198,29 +203,27 @@ func (s *Service) BeginLogin(ctx context.Context, userID, accountName string) (o
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal webauthn login options: %w", err)
 	}
+
 	return optionsJSON, ceremonyID, nil
 }
 
-// FinishLogin completes a login ceremony started by BeginLogin, verifying
-// responseJSON (the client's raw CredentialAssertionResponse JSON)
-// against the stored ceremony session. On success it returns the matched
-// credential's system.user_mfa row id, having already updated that row's
-// sign count and last_used_at. On a detected clone/replay it revokes the
-// matched credential and returns *CloneDetectedError instead of a
-// credential id. The ceremony session is deleted whether this succeeds or
-// fails — single-use, per auth-internals.md §8.
-func (s *Service) FinishLogin(ctx context.Context, userID, ceremonyID, accountName string, responseJSON []byte) (credentialID string, err error) {
+// FinishLogin consumes the ceremony on every completion attempt.
+// A clone warning revokes the matched credential before returning CloneDetectedError.
+func (s *Service) FinishLogin(ctx context.Context, userID, ceremonyID, accountName string, responseJSON []byte, scope mfa.Scope) (credentialID string, err error) {
 	key := authKey(ceremonyID)
 	sess, sessErr := s.loadSession(ctx, key)
-	defer func() { _ = s.cache.Delete(ctx, key) }()
+	defer func() {
+		_ = s.cache.Delete(ctx, key)
+	}()
 	if sessErr != nil {
 		return "", sessErr
 	}
-	if sess.UserID != userID {
+
+	if sess.UserID != userID || sess.TenantID != scope.TenantID {
 		return "", ErrCeremonyUserMismatch
 	}
 
-	user, err := s.loadUser(ctx, userID, accountName)
+	user, err := s.loadUser(ctx, userID, accountName, scope)
 	if err != nil {
 		return "", err
 	}
@@ -244,9 +247,7 @@ func (s *Service) FinishLogin(ctx context.Context, userID, ceremonyID, accountNa
 		if revokeErr := s.store.Revoke(ctx, mfaID); revokeErr != nil {
 			return "", fmt.Errorf("revoke suspected-cloned webauthn credential: %w", revokeErr)
 		}
-		// auth-internals.md §8 records mfa.clone_suspected here. Service
-		// has no audit recorder wired yet, so this logs structurally; the
-		// revoke above is the actual security control.
+
 		log.Warn().
 			Str("event", "mfa.clone_suspected").
 			Str("user_id", userID).
@@ -259,6 +260,7 @@ func (s *Service) FinishLogin(ctx context.Context, userID, ceremonyID, accountNa
 	if err != nil {
 		return "", err
 	}
+
 	if err := s.store.UpdateCredentialAfterUse(ctx, mfaID, ciphertext); err != nil {
 		return "", fmt.Errorf("update webauthn credential after login: %w", err)
 	}
@@ -266,19 +268,17 @@ func (s *Service) FinishLogin(ctx context.Context, userID, ceremonyID, accountNa
 	return mfaID, nil
 }
 
-// encryptCredential's own JSON never leaves this process unencrypted —
-// unlike optionsJSON above, it's decrypted and Unmarshaled only by
-// loadUser, so it doesn't need the HTML/JS-escape parity a client-facing
-// encode does.
 func (s *Service) encryptCredential(credential *wan.Credential) ([]byte, error) {
 	blob, err := json.Marshal(credential)
 	if err != nil {
 		return nil, fmt.Errorf("marshal webauthn credential: %w", err)
 	}
+
 	ciphertext, err := s.keys.Encrypt(blob)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt webauthn credential: %w", err)
 	}
+
 	return ciphertext, nil
 }
 
@@ -291,39 +291,45 @@ type credentialRecord struct {
 	credential wan.Credential
 }
 
-// webauthnUser adapts one goerp user to the library's User interface.
 type webauthnUser struct {
 	id          string
 	accountName string
 	records     []credentialRecord
 }
 
-func (u *webauthnUser) WebAuthnID() []byte          { return []byte(u.id) }
-func (u *webauthnUser) WebAuthnName() string        { return u.accountName }
-func (u *webauthnUser) WebAuthnDisplayName() string { return u.accountName }
+func (u *webauthnUser) WebAuthnID() []byte {
+	return []byte(u.id)
+}
+
+func (u *webauthnUser) WebAuthnName() string {
+	return u.accountName
+}
+
+func (u *webauthnUser) WebAuthnDisplayName() string {
+	return u.accountName
+}
+
 func (u *webauthnUser) WebAuthnCredentials() []wan.Credential {
 	creds := make([]wan.Credential, len(u.records))
 	for i, r := range u.records {
 		creds[i] = r.credential
 	}
+
 	return creds
 }
 
-// mfaIDFor returns the system.user_mfa row id for the credential whose ID
-// matches credentialID, or "" if none of this user's loaded records match.
 func (u *webauthnUser) mfaIDFor(credentialID []byte) string {
 	for _, r := range u.records {
 		if bytes.Equal(r.credential.ID, credentialID) {
 			return r.mfaID
 		}
 	}
+
 	return ""
 }
 
-// loadUser fetches userID's active WebAuthn credentials, decrypting and
-// unmarshaling each into a wan.Credential.
-func (s *Service) loadUser(ctx context.Context, userID, accountName string) (*webauthnUser, error) {
-	creds, err := s.store.ListActiveByUser(ctx, userID)
+func (s *Service) loadUser(ctx context.Context, userID, accountName string, scope mfa.Scope) (*webauthnUser, error) {
+	creds, err := s.store.ListAccepted(ctx, userID, scope)
 	if err != nil {
 		return nil, fmt.Errorf("list mfa credentials: %w", err)
 	}
@@ -333,42 +339,47 @@ func (s *Service) loadUser(ctx context.Context, userID, accountName string) (*we
 		if c.Type != mfa.CredentialWebAuthn {
 			continue
 		}
+
 		plaintext, err := s.keys.Decrypt(c.Credential)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt webauthn credential %s: %w", c.ID, err)
 		}
+
 		var wc wan.Credential
 		if err := json.Unmarshal(plaintext, &wc); err != nil {
 			return nil, fmt.Errorf("unmarshal webauthn credential %s: %w", c.ID, err)
 		}
+
 		user.records = append(user.records, credentialRecord{mfaID: c.ID, credential: wc})
 	}
+
 	return user, nil
 }
 
-// ceremonySession is what's actually stored in Redis under a ceremony
-// key — the session data the library needs to Finish the ceremony, plus
-// the user_id it was started for (so FinishRegistration/FinishLogin can
-// reject a ceremonyID being replayed against a different user).
 type ceremonySession struct {
-	UserID string          `json:"user_id"`
-	Data   wan.SessionData `json:"data"`
+	UserID   string          `json:"user_id"`
+	TenantID string          `json:"tenant_id"`
+	Data     wan.SessionData `json:"data"`
 }
 
-func regKey(ceremonyID string) string  { return "webauthn:reg:" + ceremonyID }
-func authKey(ceremonyID string) string { return "webauthn:auth:" + ceremonyID }
+func regKey(ceremonyID string) string {
+	return "webauthn:reg:" + ceremonyID
+}
 
-// Same reasoning as encryptCredential: this JSON only round-trips through
-// Redis back to loadSession, never to a client, so it skips the
-// HTML/JS-escape parity optionsJSON needs.
-func (s *Service) storeSession(ctx context.Context, key, userID string, data wan.SessionData) error {
-	blob, err := json.Marshal(ceremonySession{UserID: userID, Data: data})
+func authKey(ceremonyID string) string {
+	return "webauthn:auth:" + ceremonyID
+}
+
+func (s *Service) storeSession(ctx context.Context, key, userID string, data wan.SessionData, tenantID string) error {
+	blob, err := json.Marshal(ceremonySession{UserID: userID, TenantID: tenantID, Data: data})
 	if err != nil {
 		return fmt.Errorf("marshal webauthn ceremony session: %w", err)
 	}
+
 	if err := s.cache.SetWithTTL(ctx, key, string(blob), ceremonyTTL); err != nil {
 		return fmt.Errorf("store webauthn ceremony session: %w", err)
 	}
+
 	return nil
 }
 
@@ -377,12 +388,15 @@ func (s *Service) loadSession(ctx context.Context, key string) (*ceremonySession
 	if err != nil {
 		return nil, fmt.Errorf("load webauthn ceremony session: %w", err)
 	}
+
 	if !found {
 		return nil, ErrCeremonyExpired
 	}
+
 	var sess ceremonySession
 	if err := json.Unmarshal([]byte(value), &sess); err != nil {
 		return nil, fmt.Errorf("unmarshal webauthn ceremony session: %w", err)
 	}
+
 	return &sess, nil
 }

@@ -240,6 +240,7 @@ func New(cfg *config.Config) (*Engine, error) {
 			return nil, fmt.Errorf("load shell build: %w", err)
 		}
 	}
+
 	ctx := context.Background()
 
 	secretsBackend, err := secrets.New(cfg.SecretsBackend)
@@ -271,6 +272,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		if replicaPool != nil {
 			_ = replicaPool.Close()
 		}
+
 		return nil, fmt.Errorf("connect to schema sync database: %w", err)
 	}
 
@@ -310,13 +312,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	// its only consumer.
 	apiKeyStore := apikey.NewStore(primaryPool)
 
-	// mfaStore isn't stored as an Engine field — loginHandler,
-	// totpService, recoveryCodeService, mfaResetHandler, and authChecker
-	// below are its consumers.
 	mfaStore := mfa.NewStore(primaryPool)
 
-	// rowCryptStore isn't stored as an Engine field — goerp#304's
-	// mfaverify.Handler (via totp.Service) is its first real caller.
 	rowCryptStore := rowcrypt.NewStore(primaryPool, secretsBackend)
 	// Loaded (or generated, on first boot) here at startup, same reasoning
 	// as signingKeySet/mfaTokenKeySet below — totp.Service needs a key
@@ -327,8 +324,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("load row encryption key: %w", err)
 	}
 
-	// tenantConfigStore isn't stored as an Engine field — adminapi's config
-	// route below and MFA enforcement (goerp#308) are its only consumers.
 	tenantConfigStore := tenantconfig.NewStore(primaryPool)
 
 	// roleStore's tables are per-tenant (roles/role_permissions/user_roles
@@ -344,7 +339,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		BaseURL:        cfg.AppBaseURL,
 		PlatformDomain: cfg.PlatformDomain,
 	})
-	// authAuditStore satisfies invite.AuditEmitter directly (goerp#400).
 	authAuditStore := authaudit.NewStore(primaryPool, tenantStore)
 	inviteStore := invite.NewStore(primaryPool, userStore, roleStore, authAuditStore, inviteMailer)
 
@@ -376,6 +370,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeDBs()
 		return nil, fmt.Errorf("load mfa token signing key: %w", err)
 	}
+
 	mfaTokenCodec := mfatoken.NewCodec(&mfaTokenKeySet.Active)
 
 	// PKI issuance/revocation only makes sense with a real PKI backend
@@ -419,6 +414,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeDBs()
 		return nil, fmt.Errorf("connect to redis: %w", err)
 	}
+
 	notificationStore := notifications.NewStore(primaryPool).WithCache(cacheClient)
 
 	temporalClient, err := temporal.New(ctx)
@@ -428,17 +424,11 @@ func New(cfg *config.Config) (*Engine, error) {
 
 	sessionRevoker := sessionrevoke.NewRevoker(sessionStore, cacheClient)
 
-	// roleCache (auth-internals.md §14 cache layer 2) only needs
-	// cacheClient, so it's built here even though its consumer, authChecker
-	// below, isn't constructed until rolePermissionMap (layer 3) exists.
 	roleCache := permcache.NewRoleCache(cacheClient)
 
 	// adminapi.RegisterTenantRoutes is called further down, once
 	// jobQueueClient exists (tenantoffboard.NewOffboarder needs it).
 
-	// tenantResolver isn't stored as an Engine field — mfareverifyHandler,
-	// mfaResetHandler, and buildChain's tenantResolutionMiddleware below
-	// are its consumers.
 	tenantResolver := tenantresolve.NewResolver(tenantStore, cacheClient, billingStore)
 
 	var searchClient *search.Client
@@ -475,6 +465,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 		return primaryPool.Ping()
 	}
+
 	server := httpx.NewServer(&httpx.Config{
 		ListenAddr:        cfg.ListenAddr,
 		ReadTimeout:       cfg.ServerReadTimeout,
@@ -497,6 +488,7 @@ func New(cfg *config.Config) (*Engine, error) {
 			if replicaPool == nil {
 				return nil
 			}
+
 			return replicaPool.Ping()
 		})
 		checks["redis"] = httpx.ProbeCheck(ctx, func(ctx context.Context) error {
@@ -506,12 +498,14 @@ func New(cfg *config.Config) (*Engine, error) {
 			if searchClient == nil {
 				return nil
 			}
+
 			return searchClient.Ping()
 		})
 		checks["object_storage"] = httpx.ProbeCheck(ctx, func(ctx context.Context) error {
 			if storageBackend == nil {
 				return nil
 			}
+
 			_, err := storageBackend.Exists(ctx, "healthcheck")
 			return err
 		})
@@ -519,6 +513,7 @@ func New(cfg *config.Config) (*Engine, error) {
 			if temporalClient == nil {
 				return nil
 			}
+
 			return temporalClient.Ping(ctx)
 		})
 
@@ -545,6 +540,7 @@ func New(cfg *config.Config) (*Engine, error) {
 
 		return nil, fmt.Errorf("create wasm runtime: %w", err)
 	}
+
 	// replicaPool is warn-only (nil on a failed connect, per Stage 1 above)
 	// — SetReplicaDB tolerates that, and host.db.query/query_replica's own
 	// nil-guard turns a replica-requiring call into db.replica_unavailable
@@ -581,6 +577,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		if tracerProvider != nil {
 			_ = tracerProvider.Shutdown(ctx)
 		}
+
 		_ = runtime.Close(ctx)
 		_ = cacheClient.Close()
 		closeDBs()
@@ -603,6 +600,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		MaxSize:       cfg.PoolMaxSize,
 		BorrowTimeout: cfg.PoolBorrowTimeout,
 	}
+
 	loadedModules := moduleboot.LoadCascading(ctx, runtime, poolCfg, storageBackend, ordered)
 
 	moduleRegistry := &registry.ModuleRegistry{}
@@ -633,11 +631,6 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("build role permission map: %w", err)
 	}
 
-	// tenantConfigResolver isn't stored as an Engine field, matching
-	// tenantConfigStore's own convention above — runtime.SetTenantConfig
-	// below is its only consumer besides Listener. tenantConfigListener is
-	// kept, since Start/Shutdown (below, and *Engine methods, so outside
-	// New's own scope) need it to start and stop the LISTEN goroutine.
 	tenantConfigResolver := tenantconfig.NewResolver(tenantConfigStore, tenantStore, moduleRegistry)
 	tenantConfigListener := tenantconfig.NewListener(primaryPool, tenantConfigResolver)
 	// Wires host.config.get/set (host_config.go) to the same resolver and
@@ -654,17 +647,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		if snap := moduleRegistry.Snapshot(); snap != nil && snap.PermissionRegistry() != nil {
 			return snap.PermissionRegistry()
 		}
+
 		return permission.NewPermissionRegistry()
 	}
+
 	rolesListener := permcache.NewListener(primaryPool, tenantStore, roleStore, currentPermissionRegistry, rolePermissionMap)
 
-	// authChecker isn't consumed yet — wiring it into an actual HTTP
-	// middleware chain is goerp#91, which also owns resolving the current
-	// registry.RegistrySnapshot's PermissionRegistry to pass into
-	// Authenticate per request (this package deliberately doesn't hold one
-	// itself, since it's rebuilt on every module hot reload). Constructed
-	// here, after rolePermissionMap, since its permission-context hydration
-	// step needs both roleCache and rolePermissionMap.
 	mfaPolicyStore := enforce.NewStore(tenantConfigStore)
 	authChecker := authcheck.NewChecker(&signingKeySet.Active, sessionRevoker, userStore, roleStore, roleCache, rolePermissionMap, apiKeyStore, cfg.EnableAPIKeys, mfaTokenCodec, mfaStore, mfaPolicyStore)
 
@@ -691,8 +679,10 @@ func New(cfg *config.Config) (*Engine, error) {
 				failed = append(failed, httpx.FailedModule{Name: name, Reason: m.FailureReason})
 				continue
 			}
+
 			report.Ready++
 		}
+
 		return report, failed
 	})
 
@@ -712,9 +702,9 @@ func New(cfg *config.Config) (*Engine, error) {
 	loginHandler := loginflow.NewHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer, mfaTokenCodec, passwordPolicies, passwordHasher, cacheClient, authAuditStore, tenantResolver, handoffStore, tenantselect.NewStore(cacheClient), ipAllowlists)
 	totpService := totp.NewService(mfaStore, rowKeySet, cacheClient)
 	recoveryCodeService := recoverycode.NewService(mfaStore)
-	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer)
+	mfaVerifyHandler := mfaverify.NewHandler(mfaTokenCodec, cacheClient, totpService, recoveryCodeService, tenantStore, tokenIssuer, mfaStore)
 	mfaLockout := lockout.NewCounter(cacheClient)
-	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout)
+	mfaReverifyHandler := mfareverify.NewHandler(tenantResolver, authChecker, sessionStore, tokenIssuer, totpService, recoveryCodeService, mfaLockout, mfaStore)
 	mfaEnrollHandlers := mfaenroll.NewHandlers(tenantResolver, authChecker, userStore, mfaStore, sessionStore, tokenIssuer, totpService, recoveryCodeService, authAuditStore)
 	mfaFactorHandlers := mfafactors.NewHandlers(tenantResolver, authChecker, mfaStore, mfaPolicyStore, totpService, recoveryCodeService, mfaLockout, revoke.NewService(mfaStore, sessionRevoker), sessionRevoker, authAuditStore)
 	mfaResetHandler := mfareset.NewHandler(tenantResolver, authChecker, userStore, roleStore, mfaStore, sessionRevoker, inviteMailer, authAuditStore, passwordHasher)
@@ -722,10 +712,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	passwordResetConfirmHandler := passwordreset.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, sessionRevoker, tokenIssuer, passwordPolicies, inviteMailer, authAuditStore, passwordHasher)
 	verifyEmailConfirmHandler := emailverify.NewConfirmHandler(userStore, tenantStore, roleStore, mfaStore, tokenIssuer)
 	verifyEmailResendHandler := emailverify.NewResendHandler(userStore, tenantStore, roleStore, cacheClient, inviteMailer)
-	// filesStore is constructed here (rather than down by
-	// offboardActivities, which also needs it) since authMeHandler
-	// (avatar URL resolution, goerp#819) and storageUploadHandler both
-	// need it before builtinRoutes is built.
 	filesStore := files.NewStore(primaryPool)
 	tenantLocales := tenantl10n.NewStore(tenantConfigStore, cfg.AvailableLocales)
 	authMeHandler := authme.NewHandler(tenantResolver, authChecker, userStore, roleStore, filesStore, storageBackend, tenantLocales, passwordPolicies)
@@ -773,12 +759,14 @@ func New(cfg *config.Config) (*Engine, error) {
 		"POST /admin/users/{id}/mfa/reset":         mfaResetHandler,
 		"POST /storage/upload":                     storageUploadHandler,
 	}
+
 	defaultRateLimit := route.RateLimitConfig{Requests: cfg.RateLimitMax, WindowSeconds: int(cfg.RateLimitWindow.Seconds()), Scope: "ip"}
 
 	orderedModules := make([]*module.LoadedModule, len(ordered))
 	for i, src := range ordered {
 		orderedModules[i] = loadedModules[src.Name]
 	}
+
 	diffEngine := schema.NewSchemaDiffEngine(&schema.Config{DDLStatementTimeout: cfg.SchemaSyncDDLStatementTimeout, ModelSource: moduleRegistry})
 	if err := tenantsync.SyncAll(ctx, syncPool, diffEngine, tenantStore, orderedModules, cfg.SchemaSyncConcurrency); err != nil {
 		closeOnFailure()
@@ -817,10 +805,12 @@ func New(cfg *config.Config) (*Engine, error) {
 		closeOnFailure()
 		return nil, fmt.Errorf("connect job queue pool: %w", err)
 	}
+
 	closeOnFailure = func() {
 		if tracerProvider != nil {
 			_ = tracerProvider.Shutdown(ctx)
 		}
+
 		jobQueuePool.Close()
 		_ = runtime.Close(ctx)
 		_ = cacheClient.Close()
@@ -861,6 +851,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Pool:        syncPool,
 		DiffEngine:  diffEngine,
 	}
+
 	river.AddWorker(jobWorkers, syncWorker)
 	acceptResyncWorker := &tenantsync.AcceptResyncWorker{
 		TenantStore: tenantStore,
@@ -868,10 +859,8 @@ func New(cfg *config.Config) (*Engine, error) {
 		Pool:        syncPool,
 		DiffEngine:  diffEngine,
 	}
+
 	river.AddWorker(jobWorkers, acceptResyncWorker)
-	// Hoisted out of the Engine{...} literal below (still the sole
-	// construction site) so moduleInstallWorker can be wired with it here,
-	// before the literal exists.
 	wsHub := ws.NewHub()
 	// Added to builtinRoutes here rather than the literal above: unlike
 	// mfaResetHandler, roleAssignHandler needs wsHub, which doesn't exist
@@ -884,6 +873,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		if snap == nil {
 			return "", false
 		}
+
 		return snap.ModelForTable(table)
 	})
 	builtinRoutes["GET /admin/users"] = http.HandlerFunc(adminUsersHandler.ServeList)
@@ -963,6 +953,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		Workers:     workflowWorkers,
 		Hub:         wsHub,
 	}
+
 	river.AddWorker(jobWorkers, moduleInstallWorker)
 	river.AddWorker(jobWorkers, &eventdelivery.Worker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
 	river.AddWorker(jobWorkers, &eventdelivery.EventsReplayWorker{ModuleRegistry: moduleRegistry, TenantStore: tenantStore, Pool: primaryPool})
@@ -1084,6 +1075,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		RiverClient: jobQueueClient,
 		Hub:         wsHub,
 	}
+
 	reloadFollower := &modulereload.Follower{
 		Runtime:     runtime,
 		PoolCfg:     poolCfg,
@@ -1183,6 +1175,7 @@ func New(cfg *config.Config) (*Engine, error) {
 		tenantConfigListener: tenantConfigListener,
 		rolesListener:        rolesListener,
 	}
+
 	// Registered with River before e existed; River only starts working
 	// jobs once the engine starts.
 	activityDue.engine = e
@@ -1195,24 +1188,15 @@ func New(cfg *config.Config) (*Engine, error) {
 	// *Engine method, which doesn't exist until the literal above runs.
 	builtinRoutes["GET /_meta/permissions"] = http.HandlerFunc(e.dispatchPermissionsRoute)
 
-	// /_meta/shares (goerp#475) follows the identical EngineNative,
-	// not-EngineBuiltin pattern /_meta/permissions establishes just
-	// above — same reason: dispatchSharesCreateRoute/ListRoute/
-	// DeleteRoute are *Engine methods that don't exist until the
-	// literal above runs.
 	builtinRoutes["POST /_meta/shares"] = http.HandlerFunc(e.dispatchSharesCreateRoute)
 	builtinRoutes["GET /_meta/shares"] = http.HandlerFunc(e.dispatchSharesListRoute)
 	builtinRoutes["DELETE /_meta/shares/{id}"] = http.HandlerFunc(e.dispatchSharesDeleteRoute)
 
-	// /_meta/saved-filters (goerp#635) follows the identical EngineNative,
-	// not-EngineBuiltin pattern /_meta/shares establishes just above.
 	builtinRoutes["POST /_meta/saved-filters"] = http.HandlerFunc(e.dispatchSavedFiltersCreateRoute)
 	builtinRoutes["GET /_meta/saved-filters"] = http.HandlerFunc(e.dispatchSavedFiltersListRoute)
 	builtinRoutes["PATCH /_meta/saved-filters/{id}"] = http.HandlerFunc(e.dispatchSavedFiltersUpdateRoute)
 	builtinRoutes["DELETE /_meta/saved-filters/{id}"] = http.HandlerFunc(e.dispatchSavedFiltersDeleteRoute)
 
-	// /_meta/activity follows the identical EngineNative, not-EngineBuiltin
-	// pattern /_meta/shares establishes above.
 	builtinRoutes["GET /_meta/activity"] = http.HandlerFunc(e.dispatchActivityListRoute)
 	builtinRoutes["POST /_meta/activity"] = http.HandlerFunc(e.dispatchActivityCreateRoute)
 	builtinRoutes["DELETE /_meta/activity/{id}"] = http.HandlerFunc(e.dispatchActivityDeleteRoute)
@@ -1220,10 +1204,8 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["PUT /_meta/activity/followers"] = http.HandlerFunc(e.dispatchActivityFollowRoute)
 	builtinRoutes["DELETE /_meta/activity/followers"] = http.HandlerFunc(e.dispatchActivityUnfollowRoute)
 
-	// /_meta/record-readers (record-activity.md §6) follows the same pattern.
 	builtinRoutes["GET /_meta/record-readers"] = http.HandlerFunc(e.dispatchRecordReadersRoute)
 
-	// /_meta/scheduled-activities follows the same pattern.
 	builtinRoutes["GET /_meta/scheduled-activities"] = http.HandlerFunc(e.dispatchScheduledActivityListRoute)
 	builtinRoutes["GET /_meta/scheduled-activities/mine"] = http.HandlerFunc(e.dispatchScheduledActivityMineRoute)
 	builtinRoutes["POST /_meta/scheduled-activities"] = http.HandlerFunc(e.dispatchScheduledActivityCreateRoute)
@@ -1231,8 +1213,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["POST /_meta/scheduled-activities/{id}/done"] = http.HandlerFunc(e.dispatchScheduledActivityDoneRoute)
 	builtinRoutes["DELETE /_meta/scheduled-activities/{id}"] = http.HandlerFunc(e.dispatchScheduledActivityCancelRoute)
 
-	// /_meta/activity-types and /admin/activity-types
-	// (scheduled-activities.md §9) follow the same pattern.
 	builtinRoutes["GET /_meta/activity-types"] = http.HandlerFunc(e.dispatchActivityTypeListRoute)
 	builtinRoutes["GET /admin/activity-types"] = http.HandlerFunc(e.dispatchAdminActivityTypeListRoute)
 	builtinRoutes["POST /admin/activity-types"] = http.HandlerFunc(e.dispatchAdminActivityTypeCreateRoute)
@@ -1240,7 +1220,6 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["PUT /admin/activity-types/order"] = http.HandlerFunc(e.dispatchAdminActivityTypeReorderRoute)
 	builtinRoutes["DELETE /admin/activity-types/{key}"] = http.HandlerFunc(e.dispatchAdminActivityTypeDeleteRoute)
 
-	// /_notif/* (notification-system.md §9) follows the same pattern.
 	builtinRoutes["GET /_notif/feed"] = http.HandlerFunc(e.dispatchNotifFeedRoute)
 	builtinRoutes["GET /_notif/count"] = http.HandlerFunc(e.dispatchNotifCountRoute)
 	builtinRoutes["POST /_notif/{id}/read"] = http.HandlerFunc(e.dispatchNotifReadRoute)
@@ -1253,21 +1232,11 @@ func New(cfg *config.Config) (*Engine, error) {
 	builtinRoutes["GET /_notif/unsubscribe"] = http.HandlerFunc(e.dispatchNotifUnsubscribeRoute)
 	builtinRoutes["POST /_notif/unsubscribe"] = http.HandlerFunc(e.dispatchNotifUnsubscribeConfirmRoute)
 
-	// GET /_meta/schema (goerp#573) — same reason as /_meta/permissions
-	// and /_meta/shares above: dispatchSchemaRoute is an *Engine method.
 	builtinRoutes["GET /_meta/schema"] = http.HandlerFunc(e.dispatchSchemaRoute)
 
-	// GET /modules/{module}/frontend/{file} (goerp#588) — same reason as
-	// /_meta/schema above: dispatchFrontendBundleRoute is an *Engine
-	// method (it reads e.storageBackend).
 	builtinRoutes["GET /modules/{module}/frontend/{file}"] = http.HandlerFunc(e.dispatchFrontendBundleRoute)
-	// GET /modules/{module}/translations/{file} (goerp#1121), serving
-	// {locale}.json — same reason: it reads e.moduleRegistry and
-	// e.storageBackend.
 	builtinRoutes["GET /modules/{module}/translations/{file}"] = http.HandlerFunc(e.dispatchFrontendTranslationsRoute)
 
-	// GET /_ws (goerp#616) — same reason as /_meta/permissions above:
-	// dispatchWSRoute is an *Engine method.
 	builtinRoutes["GET /_ws"] = http.HandlerFunc(e.dispatchWSRoute)
 
 	// goerp#822: a builtinRoutes entry with no matching
@@ -1284,6 +1253,7 @@ func New(cfg *config.Config) (*Engine, error) {
 	if shell != nil {
 		handler = shell.Wrap(handler)
 	}
+
 	server.SetHandler(handler)
 
 	return e, nil
@@ -1317,6 +1287,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	if err := e.server.Listen(); err != nil {
 		return err
 	}
+
 	if err := e.adminServer.Listen(); err != nil {
 		_ = e.server.Close()
 		return err
@@ -1387,6 +1358,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	if err := e.jobQueue.Stop(ctx); err != nil {
 		log.Warn().Err(err).Msg("could not stop job queue worker")
 	}
+
 	e.jobQueuePool.Close()
 
 	e.workflowWorkers.StopAll(ctx)
@@ -1468,6 +1440,7 @@ func (e *Engine) invokeHandler(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return EngineResponse{}, fmt.Errorf("handler %s: %w", handlerName, ctxErr)
 		}
+
 		return EngineResponse{}, fmt.Errorf("handler %s trapped: %w", handlerName, err)
 	}
 
@@ -1475,10 +1448,12 @@ func (e *Engine) invokeHandler(
 	if err := msgpack.Unmarshal(respBytes, &wire); err != nil {
 		return EngineResponse{}, fmt.Errorf("unmarshal response: %w", err)
 	}
+
 	bodyBytes, err := handlerResponseBody(wire)
 	if err != nil {
 		return EngineResponse{}, err
 	}
+
 	return EngineResponse{StatusCode: wire.StatusCode, Headers: wire.Headers, Body: bodyBytes}, nil
 }
 
@@ -1489,9 +1464,11 @@ func handlerResponseBody(wire abiv1.Response) ([]byte, error) {
 	if len(wire.Body) == 0 {
 		return nil, nil
 	}
+
 	body := jsontext.Value(wire.Body)
 	if err := body.Format(jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)); err != nil {
 		return nil, fmt.Errorf("validate response body: %w", err)
 	}
+
 	return body, nil
 }

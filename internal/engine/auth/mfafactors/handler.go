@@ -1,12 +1,4 @@
-// Package mfafactors implements a user's own MFA factor management —
-// auth-internals.md §8 "Managing factors": GET /auth/mfa/factors, POST
-// /auth/mfa/factors/{id}/remove and POST
-// /auth/mfa/recovery-codes/regenerate. Both changes are confirmed with a
-// current MFA code, verified the same way POST /auth/mfa/reverify verifies
-// one and counted against the same lockout.
-//
-// Class A routes that resolve the tenant from Host and authenticate the
-// access token themselves, like internal/engine/auth/mfaenroll.
+// Package mfafactors implements tenant-scoped MFA factor listing, removal and recovery-code regeneration.
 package mfafactors
 
 import (
@@ -41,11 +33,8 @@ import (
 
 const maxBodyBytes = 64 * 1024
 
-// regenerateRevokeReason matches auth-internals.md §4's revoke_reason
-// vocabulary.
 const regenerateRevokeReason = "security_event"
 
-// AuditRecorder is satisfied by authaudit.Store.
 type AuditRecorder interface {
 	Insert(ctx context.Context, row authaudit.Row) error
 }
@@ -89,8 +78,6 @@ func writeInternalError(w http.ResponseWriter, r *http.Request, err error, msg s
 	httperr.Write(r.Context(), w, http.StatusInternalServerError, "internal_error", "request failed")
 }
 
-// authenticate resolves the tenant from Host and validates the access
-// token, writing the error response itself when either fails.
 func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authcheck.AuthContext, bool) {
 	ctx := r.Context()
 	tenantCtx, err := h.tenants.ResolveByHost(ctx, r.Host)
@@ -105,6 +92,7 @@ func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authch
 		default:
 			writeInternalError(w, r, err, "tenant resolution failed")
 		}
+
 		return nil, false
 	}
 
@@ -113,14 +101,17 @@ func (h *Handlers) authenticate(w http.ResponseWriter, r *http.Request) (*authch
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
 	}
+
 	authCtx, err := h.auth.Authenticate(ctx, rawToken, tenantCtx.TenantID, tenantCtx.Slug, loginsession.ClientIP(r), nil, nil)
 	if authcheck.WritePasswordChangeRequired(r.Context(), w, err) {
 		return nil, false
 	}
+
 	if err != nil || !authCtx.IsAuthenticated || authCtx.AuthMethod != "jwt" {
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "unauthenticated", "a valid access token is required")
 		return nil, false
 	}
+
 	return authCtx, true
 }
 
@@ -129,6 +120,7 @@ func (h *Handlers) policyApplies(ctx context.Context, authCtx *authcheck.AuthCon
 	if err != nil {
 		return false, err
 	}
+
 	return policy.Applies(authCtx.RolesLive), nil
 }
 
@@ -138,21 +130,23 @@ type factorJSON struct {
 	Label      *string    `json:"label"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at"`
+	TenantOnly bool       `json:"tenant_only"`
 }
 
-// List serves GET /auth/mfa/factors.
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	authCtx, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
+
 	ctx := r.Context()
 
-	creds, err := h.mfa.ListActiveByUser(ctx, authCtx.UserID)
+	creds, err := h.mfa.ListAccepted(ctx, authCtx.UserID, mfa.Scope{TenantID: authCtx.TenantID})
 	if err != nil {
 		writeInternalError(w, r, err, "list mfa factors failed")
 		return
 	}
+
 	required, err := h.policyApplies(ctx, authCtx)
 	if err != nil {
 		writeInternalError(w, r, err, "load mfa policy failed")
@@ -166,14 +160,17 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 			codesRemaining++
 			continue
 		}
+
 		factors = append(factors, factorJSON{
 			ID:         c.ID,
 			Type:       string(c.Type),
 			Label:      c.Label,
 			CreatedAt:  c.CreatedAt,
 			LastUsedAt: c.LastUsedAt,
+			TenantOnly: c.TenantID != nil,
 		})
 	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"factors":                  factors,
 		"recovery_codes_remaining": codesRemaining,
@@ -193,50 +190,56 @@ func readCodeRequest(w http.ResponseWriter, r *http.Request) (codeRequest, bool)
 		httperr.Write(r.Context(), w, http.StatusBadRequest, "invalid_request", `"type" and "code" are required`)
 		return codeRequest{}, false
 	}
+
 	return req, true
 }
 
 // verifyCode checks req against the caller's enrolled factors under the
 // same lockout as POST /auth/mfa/reverify, writing the error response
 // itself on failure. A recovery code that verifies is consumed.
-func (h *Handlers) verifyCode(w http.ResponseWriter, r *http.Request, authCtx *authcheck.AuthContext, req codeRequest) bool {
+func (h *Handlers) verifyCode(w http.ResponseWriter, r *http.Request, authCtx *authcheck.AuthContext, req codeRequest, platformOnly bool) (string, bool) {
 	ctx := r.Context()
 	locked, err := h.lockout.Locked(ctx, authCtx.UserID, authCtx.TenantID)
 	if err != nil {
 		writeInternalError(w, r, err, "mfa lockout check failed")
-		return false
-	}
-	if locked {
-		httperr.Write(r.Context(), w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
-		return false
+		return "", false
 	}
 
-	valid, _, err := mfaverify.VerifyCode(ctx, h.totp, h.recovery, req.Type, authCtx.UserID, req.Code)
+	if locked {
+		httperr.Write(r.Context(), w, http.StatusLocked, "mfa_locked", "too many failed MFA attempts; try again later")
+		return "", false
+	}
+
+	valid, credentialID, err := mfaverify.VerifyCode(ctx, h.totp, h.recovery, req.Type, authCtx.UserID, req.Code, mfa.Scope{TenantID: authCtx.TenantID, PlatformOnly: platformOnly})
 	if err != nil {
 		writeInternalError(w, r, err, "mfa code verification failed")
-		return false
+		return "", false
 	}
+
 	if !valid {
 		if err := h.lockout.RecordFailure(ctx, authCtx.UserID, authCtx.TenantID); err != nil {
 			writeInternalError(w, r, err, "record mfa failure failed")
-			return false
+			return "", false
 		}
+
 		httperr.Write(r.Context(), w, http.StatusUnauthorized, "invalid_mfa_code", "invalid MFA code")
-		return false
+		return "", false
 	}
+
 	if err := h.lockout.Reset(ctx, authCtx.UserID, authCtx.TenantID); err != nil {
 		writeInternalError(w, r, err, "reset mfa lockout failed")
-		return false
+		return "", false
 	}
-	return true
+
+	return credentialID, true
 }
 
-// Remove serves POST /auth/mfa/factors/{id}/remove.
 func (h *Handlers) Remove(w http.ResponseWriter, r *http.Request) {
 	authCtx, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
+
 	ctx := r.Context()
 
 	req, ok := readCodeRequest(w, r)
@@ -249,21 +252,30 @@ func (h *Handlers) Remove(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
 		return
 	}
-	creds, err := h.mfa.ListActiveByUser(ctx, authCtx.UserID)
+
+	creds, err := h.mfa.ListAccepted(ctx, authCtx.UserID, mfa.Scope{TenantID: authCtx.TenantID})
 	if err != nil {
 		writeInternalError(w, r, err, "list mfa factors failed")
 		return
 	}
-	factors := slices.DeleteFunc(creds, func(c *mfa.Credential) bool { return !c.Type.IsFactor() })
-	if !slices.ContainsFunc(factors, func(c *mfa.Credential) bool { return c.ID == factorID }) {
+
+	factors := slices.DeleteFunc(creds, func(c *mfa.Credential) bool {
+		return !c.Type.IsFactor()
+	})
+	index := slices.IndexFunc(factors, func(c *mfa.Credential) bool {
+		return c.ID == factorID
+	})
+	if index < 0 {
 		httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
 		return
 	}
+
 	required, err := h.policyApplies(ctx, authCtx)
 	if err != nil {
 		writeInternalError(w, r, err, "load mfa policy failed")
 		return
 	}
+
 	// Checked before the code, so a refused removal spends no recovery code
 	// and no lockout attempt.
 	if required && len(factors) == 1 {
@@ -271,11 +283,12 @@ func (h *Handlers) Remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.verifyCode(w, r, authCtx, req) {
+	platformOnly := factors[index].TenantID == nil
+	if _, ok := h.verifyCode(w, r, authCtx, req, platformOnly); !ok {
 		return
 	}
 
-	switch err := h.factors.RevokeFactor(ctx, authCtx.UserID, factorID, required); {
+	switch err := h.factors.RevokeFactor(ctx, authCtx.UserID, authCtx.TenantID, factorID, required); {
 	case errors.Is(err, mfa.ErrCredentialNotFound):
 		httperr.Write(r.Context(), w, http.StatusNotFound, "mfa_factor_not_found", "MFA factor not found")
 		return
@@ -295,12 +308,12 @@ func writeRequiredByPolicy(w http.ResponseWriter, r *http.Request) {
 	httperr.Write(r.Context(), w, http.StatusConflict, "mfa_required_by_policy", "your organisation requires two-factor authentication")
 }
 
-// RegenerateRecoveryCodes serves POST /auth/mfa/recovery-codes/regenerate.
 func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	authCtx, ok := h.authenticate(w, r)
 	if !ok {
 		return
 	}
+
 	ctx := r.Context()
 
 	req, ok := readCodeRequest(w, r)
@@ -308,17 +321,25 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	creds, err := h.mfa.ListActiveByUser(ctx, authCtx.UserID)
+	creds, err := h.mfa.ListAccepted(ctx, authCtx.UserID, mfa.Scope{TenantID: authCtx.TenantID})
 	if err != nil {
 		writeInternalError(w, r, err, "list mfa factors failed")
 		return
 	}
-	if !slices.ContainsFunc(creds, func(c *mfa.Credential) bool { return c.Type.IsFactor() }) {
+
+	if !mfa.HasFactor(creds) {
 		writeNotEnrolled(w, r)
 		return
 	}
 
-	if !h.verifyCode(w, r, authCtx, req) {
+	credentialID, ok := h.verifyCode(w, r, authCtx, req, false)
+	if !ok {
+		return
+	}
+
+	verifying, err := h.mfa.GetByID(ctx, authCtx.UserID, credentialID)
+	if err != nil {
+		writeInternalError(w, r, err, "load verifying mfa factor failed")
 		return
 	}
 
@@ -327,13 +348,28 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 		writeInternalError(w, r, err, "generate recovery codes failed")
 		return
 	}
+
 	// The other sessions are revoked in the same transaction, so a failure
 	// can't replace the codes without the caller ever seeing the new set.
 	var revoked []session.RevokedFamily
 	err = h.mfa.WithTx(ctx, func(tx *sql.Tx) error {
-		if err := h.recovery.RegenerateTx(ctx, tx, authCtx.UserID, set); err != nil {
+		if err := h.mfa.LockUserTx(ctx, tx, authCtx.UserID); err != nil {
 			return err
 		}
+
+		accepted, err := h.mfa.ListAcceptedTx(ctx, tx, authCtx.UserID, mfa.Scope{TenantID: authCtx.TenantID})
+		if err != nil {
+			return err
+		}
+
+		if !mfa.HasFactor(accepted) {
+			return recoverycode.ErrNotEnrolled
+		}
+
+		if err := h.recovery.RegenerateTx(ctx, tx, authCtx.UserID, verifying.TenantID, set); err != nil {
+			return err
+		}
+
 		revoked, err = h.sessions.RevokeOtherFamiliesForUserInTenantTx(ctx, tx, authCtx.UserID, authCtx.TenantID, authCtx.SessionID, regenerateRevokeReason)
 		return err
 	})
@@ -345,10 +381,12 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 		writeInternalError(w, r, err, "regenerate recovery codes failed")
 		return
 	}
+
 	var revokedIDs []string
 	for _, f := range revoked {
 		revokedIDs = append(revokedIDs, f.RowIDs...)
 	}
+
 	// The codes are already committed, so they're returned even if an
 	// already-revoked session's access token can't be blocklisted.
 	if err := h.sessions.Blocklist(ctx, revokedIDs); err != nil {
@@ -369,6 +407,7 @@ func (h *Handlers) recordAudit(r *http.Request, authCtx *authcheck.AuthContext, 
 		log.Warn().Str("event", eventType).Msg("mfafactors: no audit recorder wired, event not recorded")
 		return
 	}
+
 	var raw []byte
 	if metadata != nil {
 		var err error
@@ -377,6 +416,7 @@ func (h *Handlers) recordAudit(r *http.Request, authCtx *authcheck.AuthContext, 
 			return
 		}
 	}
+
 	if err := h.audit.Insert(r.Context(), authaudit.Row{
 		EventType:   eventType,
 		TenantID:    authCtx.TenantID,

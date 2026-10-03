@@ -74,9 +74,11 @@ func ExtractToken(r *http.Request) string {
 	if auth := r.Header.Get("Authorization"); auth != "" {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
+
 	if cookie, err := r.Cookie(accessTokenCookieName); err == nil {
 		return cookie.Value
 	}
+
 	return ""
 }
 
@@ -225,6 +227,7 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 	if err != nil {
 		return nil, fmt.Errorf("check session blocklist: %w", err)
 	}
+
 	if blocked {
 		return nil, ErrSessionRevoked
 	}
@@ -234,8 +237,10 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		if errors.Is(err, user.ErrUserNotFound) {
 			return nil, ErrUserNotActive
 		}
+
 		return nil, fmt.Errorf("load user: %w", err)
 	}
+
 	if u.Status != user.StatusActive {
 		return nil, ErrUserNotActive
 	}
@@ -244,9 +249,11 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 	if err != nil {
 		return nil, fmt.Errorf("check tenant membership: %w", err)
 	}
+
 	if !isMember {
 		return nil, ErrNotTenantMember
 	}
+
 	// Ahead of the permission check, so a restricted session is sent to the
 	// change-password page rather than told it lacks a permission.
 	if claims.PasswordChangeRequired && !allowPasswordChange {
@@ -258,6 +265,7 @@ func (c *Checker) authenticate(ctx context.Context, rawToken, tenantID, tenantSl
 		if errors.Is(err, role.ErrNotMember) {
 			return nil, ErrNotTenantMember
 		}
+
 		return nil, fmt.Errorf("resolve acting user: %w", err)
 	}
 
@@ -318,6 +326,7 @@ func (c *Checker) AuthenticateMFAToken(rawToken, tenantID string) (*AuthContext,
 	if err != nil {
 		return nil, err
 	}
+
 	if claims.TenantID != tenantID {
 		return nil, ErrMFATokenTenantMismatch
 	}
@@ -348,17 +357,18 @@ func (c *Checker) EnforceMFA(ctx context.Context, path, tenantID string, authCtx
 		return "", fmt.Errorf("load mfa policy: %w", err)
 	}
 
-	creds, err := c.mfaCreds.ListActiveByUser(ctx, authCtx.UserID)
+	creds, err := c.mfaCreds.ListAccepted(ctx, authCtx.UserID, mfa.Scope{TenantID: tenantID})
 	if err != nil {
 		return "", fmt.Errorf("load mfa credentials: %w", err)
 	}
 
 	evalCtx := enforce.Context{
 		UserRoles:     authCtx.RolesLive,
-		Enrolled:      len(creds) > 0,
+		Enrolled:      mfa.HasFactor(creds),
 		AMRHasFactor:  hasMFAFactor(authCtx.AMR),
 		MFAVerifiedAt: authCtx.MFAVerifiedAt,
 	}
+
 	return enforce.Evaluate(policy, evalCtx, time.Now()), nil
 }
 
@@ -375,8 +385,10 @@ func (c *Checker) StepUpDecision(ctx context.Context, tenantID string, authCtx *
 		if err != nil {
 			return "", fmt.Errorf("load mfa policy: %w", err)
 		}
+
 		policy.MaxAssuranceAge = tenantPolicy.MaxAssuranceAge
 	}
+
 	return enforce.Evaluate(policy, enforce.Context{
 		UserRoles:     authCtx.RolesLive,
 		Enrolled:      true,
@@ -393,18 +405,22 @@ func (c *Checker) MFASetupRequired(ctx context.Context, tenantID string, authCtx
 	if c.mfaPolicies == nil || c.mfaCreds == nil {
 		return false, nil
 	}
+
 	policy, err := c.mfaPolicies.LoadPolicy(ctx, tenantID)
 	if err != nil {
 		return false, fmt.Errorf("load mfa policy: %w", err)
 	}
+
 	if !policy.Applies(authCtx.RolesLive) {
 		return false, nil
 	}
-	creds, err := c.mfaCreds.ListActiveByUser(ctx, authCtx.UserID)
+
+	creds, err := c.mfaCreds.ListAccepted(ctx, authCtx.UserID, mfa.Scope{TenantID: tenantID})
 	if err != nil {
 		return false, fmt.Errorf("load mfa credentials: %w", err)
 	}
-	return len(creds) == 0, nil
+
+	return !mfa.HasFactor(creds), nil
 }
 
 // authenticateAPIKey validates an erp_-prefixed rawToken per
@@ -419,15 +435,18 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 		if errors.Is(err, apikey.ErrAPIKeyNotFound) {
 			return nil, ErrAPIKeyInvalid
 		}
+
 		return nil, fmt.Errorf("look up api key: %w", err)
 	}
 
 	if key.TenantID != tenantID {
 		return nil, ErrTenantMismatch
 	}
+
 	if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
 		return nil, ErrAPIKeyExpired
 	}
+
 	if !ipAllowed(key.AllowedIPs, remoteIP) {
 		return nil, ErrAPIKeyIPNotAllowed
 	}
@@ -440,8 +459,10 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 			if errors.Is(err, user.ErrUserNotFound) {
 				return nil, ErrUserNotActive
 			}
+
 			return nil, fmt.Errorf("load user: %w", err)
 		}
+
 		if u.Status != user.StatusActive {
 			return nil, ErrUserNotActive
 		}
@@ -450,6 +471,7 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 		if err != nil {
 			return nil, fmt.Errorf("check tenant membership: %w", err)
 		}
+
 		if !isMember {
 			return nil, ErrNotTenantMember
 		}
@@ -459,6 +481,7 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 			if errors.Is(err, role.ErrNotMember) {
 				return nil, ErrNotTenantMember
 			}
+
 			return nil, fmt.Errorf("resolve acting user: %w", err)
 		}
 
@@ -466,6 +489,7 @@ func (c *Checker) authenticateAPIKey(ctx context.Context, rawToken, tenantID, te
 		if err != nil {
 			return nil, fmt.Errorf("hydrate permission set: %w", err)
 		}
+
 		permSet.And(scopesToBitfield(key.Scopes, permissions))
 	} else {
 		permSet = scopesToBitfield(key.Scopes, permissions)
@@ -523,12 +547,15 @@ func ipAllowed(allowed []string, remoteIP string) bool {
 			if _, cidr, err := net.ParseCIDR(a); err == nil && cidr.Contains(ip) {
 				return true
 			}
+
 			continue
 		}
+
 		if candidate := net.ParseIP(a); candidate != nil && candidate.Equal(ip) {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -545,8 +572,10 @@ func scopesToBitfield(scopes []string, reg *permission.PermissionRegistry) permi
 			log.Warn().Str("scope", scope).Msg("authcheck: unknown api key scope, skipping")
 			continue
 		}
+
 		bits.Set(idx)
 	}
+
 	return bits
 }
 
@@ -586,11 +615,13 @@ func (c *Checker) hydratePermissionSet(ctx context.Context, tenantID, tenantSlug
 	if !stale {
 		roleIDs, found = c.roleCache.Get(ctx, tenantID, userID)
 	}
+
 	if !found {
 		roleIDs, err = c.roles.RoleIDsForUser(ctx, tenantSlug, userID)
 		if err != nil {
 			return nil, fmt.Errorf("load role ids: %w", err)
 		}
+
 		c.roleCache.Set(ctx, tenantID, userID, roleIDs)
 	}
 
@@ -600,6 +631,7 @@ func (c *Checker) hydratePermissionSet(ctx context.Context, tenantID, tenantSlug
 			bits.Or(roleBits)
 		}
 	}
+
 	return bits, nil
 }
 
@@ -616,6 +648,7 @@ func hasMFAFactor(amr []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -627,6 +660,7 @@ func (c *Checker) keyFunc(token *jwt.Token) (any, error) {
 	if !ok || kid != c.signingKey.KID {
 		return nil, fmt.Errorf("unrecognized signing key kid %v", token.Header["kid"])
 	}
+
 	return c.signingKey.Public, nil
 }
 
@@ -638,6 +672,7 @@ func WritePasswordChangeRequired(ctx context.Context, w http.ResponseWriter, err
 	if !errors.Is(err, ErrPasswordChangeRequired) {
 		return false
 	}
+
 	httperr.Write(ctx, w, http.StatusForbidden, "password_change_required", "change your password to continue")
 	return true
 }
