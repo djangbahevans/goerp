@@ -1,6 +1,4 @@
-// Package mailer is the minimum SMTP sender goerp#148's invite flow needs
-// (auth-internals.md §3, template auth.user_invited) — one hardcoded
-// template, one SMTP adapter, no tenant-configurable provider selection.
+// Package mailer sends account and invitation emails through SMTP.
 // Notification emails (notification-system.md §10) go through
 // notify.EmailWorker and internal/engine/emailprovider instead.
 package mailer
@@ -30,7 +28,6 @@ type Config struct {
 	PlatformDomain string
 }
 
-// SMTPMailer implements internal/engine/invite.Mailer.
 type SMTPMailer struct {
 	cfg Config
 }
@@ -88,6 +85,20 @@ func (m *SMTPMailer) SendMFAReset(ctx context.Context, email, tenantName string)
 	bodyHTML := "<p>An administrator of " + html.EscapeString(tenantName) + " has reset your two-factor authentication for this organisation.</p>" +
 		"<p>You'll need to enroll a new factor when this organisation requires MFA. Other organisations you belong to are unaffected.</p>" +
 		"<p>If you did not expect this, contact your administrator immediately.</p>"
+
+	return m.send(ctx, email, subject, text, bodyHTML)
+}
+
+func (m *SMTPMailer) SendOperatorMFAReset(ctx context.Context, email string) error {
+	const subject = "Your two-factor authentication has been reset"
+
+	const text = "Platform support has reset your two-factor authentication across all organisations and signed you out everywhere.\n\n" +
+		"Sign in with your password and enroll a new factor where your organisation requires MFA.\n\n" +
+		"If you did not expect this, contact platform support immediately.\n"
+
+	const bodyHTML = "<p>Platform support has reset your two-factor authentication across all organisations and signed you out everywhere.</p>" +
+		"<p>Sign in with your password and enroll a new factor where your organisation requires MFA.</p>" +
+		"<p>If you did not expect this, contact platform support immediately.</p>"
 
 	return m.send(ctx, email, subject, text, bodyHTML)
 }
