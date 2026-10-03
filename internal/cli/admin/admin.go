@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"github.com/djangbahevans/goerp/internal/cli/admin/accounts"
 	"github.com/djangbahevans/goerp/internal/cli/admin/operators"
 	"github.com/spf13/cobra"
 )
@@ -12,6 +13,7 @@ func NewCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(operators.NewCmd())
+	cmd.AddCommand(accounts.NewCmd())
 
 	return cmd
 }

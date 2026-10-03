@@ -1112,6 +1112,13 @@ func New(cfg *config.Config) (*Engine, error) {
 		Tenants: tenantStore,
 		Config:  tenantConfigStore,
 	})
+	adminapi.RegisterAccountRoutes(adminServer.Router(), adminapi.AccountDeps{
+		DB:       primaryPool,
+		Audit:    authAuditStore,
+		Sessions: sessionRevoker,
+		Jobs:     runtime.EventInsertClient(),
+		Mailer:   inviteMailer,
+	})
 
 	notifier := notify.NewSender(notify.Deps{
 		DB:        primaryPool,

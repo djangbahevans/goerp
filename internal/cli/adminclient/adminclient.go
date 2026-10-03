@@ -199,14 +199,16 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (jsontex
 	return c.send(req)
 }
 
-// send issues req and decodes the admin API's envelope response — the
-// part Do and UploadFile share once their own request bodies are built.
 func (c *Client) send(req *http.Request) (jsontext.Value, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, &clierr.Error{Code: 1, Err: fmt.Errorf("admin API request failed: %w", err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNoContent {
+		return jsontext.Value("null"), nil
+	}
 
 	var env envelope
 	if err := json.UnmarshalRead(resp.Body, &env); err != nil {
