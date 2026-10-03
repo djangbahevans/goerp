@@ -6,36 +6,28 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
+	"github.com/djangbahevans/goerp/internal/engine/role"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
 	"github.com/djangbahevans/goerp/internal/engine/wasm"
 	"github.com/rs/zerolog/log"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// CredentialValidator is satisfied by *workflowworker.Manager. Declared
-// here rather than imported so this package doesn't need workflowworker's
-// os/exec/storage/Temporal dependencies just to register this route or
-// test it — a small consumer-defined interface, not the concrete type.
 type CredentialValidator interface {
 	// Validate reports whether token is currently live and authorized to
 	// dispatch activities for moduleName.
 	Validate(token, moduleName string) bool
 }
 
-// ActivityDispatchDeps are the collaborators dispatch needs to resolve a
-// module's WASM pool, build its execution context, and authenticate the
-// calling workflow-worker process.
 type ActivityDispatchDeps struct {
-	Registry            *registry.ModuleRegistry
-	Tenants             *tenant.Store
-	TxLimiter           *wasm.TransactionLimiter
-	Credentials         CredentialValidator
-	ORMBulkMaxRows      int
-	ORMStatementTimeout time.Duration
+	Registry    *registry.ModuleRegistry
+	Tenants     *tenant.Store
+	Roles       *role.Store
+	Runtime     *wasm.Runtime
+	Credentials CredentialValidator
 }
 
 // RegisterActivityDispatchRoute wires POST /admin/_internal/activity-dispatch
@@ -108,8 +100,6 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "module_not_found", "no loaded module named "+req.Module)
 		return
 	}
-	// A module that failed to load (bad manifest/checksum) is still
-	// published with Pool nil — guard against it rather than panic.
 	if mod.Pool == nil {
 		writeError(w, http.StatusServiceUnavailable, "module_unavailable", "module "+req.Module+" failed to load: "+mod.FailureReason)
 		return
@@ -138,6 +128,16 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	actor, err := h.deps.Roles.ResolveActingUser(r.Context(), t.Slug, req.UserID)
+	if err != nil {
+		if errors.Is(err, role.ErrNotMember) {
+			writeError(w, http.StatusForbidden, "permission_denied", "workflow user is not an active tenant member")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "resolve workflow user: "+err.Error())
+		return
+	}
+
 	inst, err := mod.Pool.Borrow(r.Context())
 	if err != nil {
 		if errors.Is(err, wasm.ErrPoolDraining) {
@@ -153,10 +153,8 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 	}
 	defer mod.Pool.Return(inst)
 
-	// No live AuthContext for a workflow-worker-dispatched activity (bearer
-	// credential auth, not a user session) — permSet stays nil, same as
-	// Roles above.
-	moduleCtx := wasm.NewModuleContext(req.WorkflowID, mod.Manifest.Name, req.UserID, "", nil, nil, req.TenantID, t.Slug, req.TraceID, mod.Capabilities, h.deps.TxLimiter, wasm.ModuleSnapshot{
+	// Workflow-worker credentials do not carry a permission bitfield.
+	moduleCtx := wasm.NewModuleContext(req.WorkflowID, mod.Manifest.Name, req.UserID, actor.ContactID, actor.Roles, nil, req.TenantID, t.Slug, req.TraceID, mod.Capabilities, h.deps.Runtime.TxLimiter(), wasm.ModuleSnapshot{
 		ModelDecls:          mod.ModelDecls,
 		FieldSecRegistry:    snap.FieldSecRegistry(),
 		EventRegistry:       snap.EventRegistry(),
@@ -169,11 +167,13 @@ func (h *activityDispatchHandler) dispatch(w http.ResponseWriter, r *http.Reques
 		ConfigSchema:        mod.Manifest.ConfigSchema,
 		JobTypes:            mod.Manifest.JobTypes,
 		HTTPAllowlist:       mod.Manifest.HTTPAllowlist,
-		ORMBulkMaxRows:      h.deps.ORMBulkMaxRows,
-		ORMStatementTimeout: h.deps.ORMStatementTimeout,
+		ORMBulkMaxRows:      h.deps.Runtime.ORMBulkMaxRows(),
+		ORMStatementTimeout: h.deps.Runtime.ORMStatementTimeout(),
 	})
 	inst.SetModuleContext(moduleCtx)
+	h.deps.Runtime.RegisterInstance(inst)
 	defer func() {
+		h.deps.Runtime.UnregisterInstance(inst)
 		moduleCtx.RollbackAll()
 		inst.SetModuleContext(nil)
 	}()
