@@ -186,10 +186,7 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 	// namespace RegisterModuleRoutes prepends for the engine's own
 	// RouteTable (route.ModulePathPrefix) has to come back off before the
 	// module sees this request's path, or its router can never match.
-	modulePath := strings.TrimPrefix(r.URL.Path, route.ModulePathPrefix(entry.ModuleName, mod.Manifest.Type))
-	if modulePath == "" {
-		modulePath = "/"
-	}
+	modulePath := moduleRelativePath(r.URL.EscapedPath(), route.ModulePathPrefix(entry.ModuleName, mod.Manifest.Type))
 
 	req := EngineRequest{
 		ID:            requestIDFromContext(ctx),
@@ -228,6 +225,28 @@ func (e *Engine) dispatchWASMRoute(ctx context.Context, w http.ResponseWriter, r
 	}
 
 	writeResponse(ctx, w, resp)
+}
+
+// moduleRelativePath drops prefix's segments from the front of a matched
+// request's escaped path, keeping the remainder percent-encoded so the
+// module's router splits it the way RouteTable.Lookup did: an encoded %2F
+// inside a parameter stays one segment. The prefix is removed by segment
+// count rather than by string match because Lookup also accepted the
+// prefix if it was percent-encoded or contained duplicate slashes.
+func moduleRelativePath(escapedPath, prefix string) string {
+	skip := strings.Count(prefix, "/")
+	var rest []string
+	for segment := range strings.SplitSeq(escapedPath, "/") {
+		if segment == "" {
+			continue
+		}
+		if skip > 0 {
+			skip--
+			continue
+		}
+		rest = append(rest, segment)
+	}
+	return "/" + strings.Join(rest, "/")
 }
 
 // writeResponse is the one place either dispatch path — dispatchORMRoute

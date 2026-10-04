@@ -56,7 +56,10 @@ func routeResolutionMiddleware(reg *registry.ModuleRegistry) func(http.Handler) 
 				return
 			}
 
-			entry, params, result, allowedMethods := snap.RouteTable().Lookup(r.Method, r.URL.Path)
+			// Lookup splits on literal "/" before decoding each segment, so
+			// it needs the escaped path: r.URL.Path has already turned an
+			// encoded %2F inside a parameter into a separator.
+			entry, params, result, allowedMethods := snap.RouteTable().Lookup(r.Method, r.URL.EscapedPath())
 			switch result {
 			case route.RouteNotFound, route.RouteBadPath:
 				httperr.Write(r.Context(), w, http.StatusNotFound, "route_not_found", "No route matches this path")

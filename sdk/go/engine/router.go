@@ -2,6 +2,7 @@ package engine
 
 import (
 	"maps"
+	"net/url"
 	"strings"
 )
 
@@ -102,7 +103,10 @@ func (r *Router) Handle(req *Request) *Response {
 		return r.handleAction(req)
 	}
 
-	reqSegments := strings.Split(strings.Trim(req.Path, "/"), "/")
+	reqSegments, ok := splitEscapedPath(req.Path)
+	if !ok {
+		return notFound()
+	}
 
 	for _, rt := range r.routes {
 		if rt.isAction() || rt.method != req.Method {
@@ -140,6 +144,22 @@ func (r *Router) handleAction(req *Request) *Response {
 
 func (rt route) isAction() bool {
 	return rt.name != ""
+}
+
+// splitEscapedPath splits a percent-encoded request path on literal "/"
+// and only then decodes each segment, the order the engine's own route
+// lookup uses, so an encoded %2F inside a parameter value stays part of
+// that one segment. ok is false for a malformed escape.
+func splitEscapedPath(path string) (segments []string, ok bool) {
+	segments = strings.Split(strings.Trim(path, "/"), "/")
+	for i, segment := range segments {
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			return nil, false
+		}
+		segments[i] = decoded
+	}
+	return segments, true
 }
 
 // matchSegments compares a registered route's path segments against an

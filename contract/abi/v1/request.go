@@ -6,7 +6,11 @@ import "time"
 type Request struct {
 	ID     string `msgpack:"id"`
 	Method string `msgpack:"method"`
-	Path   string `msgpack:"path"`
+
+	// Path is the request path relative to the module's route prefix,
+	// still percent-encoded, so an encoded "/" inside a path parameter is
+	// distinguishable from a separator. PathParams holds decoded values.
+	Path string `msgpack:"path"`
 
 	// Model and Action identify the engine.Action route the engine matched;
 	// both are empty for a route registered by path.
