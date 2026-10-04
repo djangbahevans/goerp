@@ -8,6 +8,7 @@ import (
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
 	"github.com/djangbahevans/goerp/internal/engine/abi"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 )
@@ -20,7 +21,7 @@ import (
 func setupEngineTablesTest(t *testing.T) (*sql.DB, string, []string) {
 	t.Helper()
 	ctx := t.Context()
-	primaryDB := openTestPrimaryDB(t)
+	primaryDB := membershiptest.New(t)
 	slug := fmt.Sprintf("dbengtables%d", time.Now().UnixNano())
 	createFixtureTenantSchema(t, primaryDB, slug)
 	if err := enginetables.CreateAll(ctx, primaryDB, slug, nil); err != nil {

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -17,12 +16,12 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/auditlog"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/session"
 	"github.com/djangbahevans/goerp/internal/engine/auth/sessionrevoke"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit"
 	"github.com/djangbahevans/goerp/internal/engine/authaudit/audittest"
 	"github.com/djangbahevans/goerp/internal/engine/cache"
-	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/jobqueue"
 	"github.com/djangbahevans/goerp/internal/engine/mfa"
 	"github.com/djangbahevans/goerp/internal/engine/role"
@@ -57,41 +56,7 @@ type accountFixture struct {
 func newAccountFixture(t *testing.T) *accountFixture {
 	t.Helper()
 	ctx := t.Context()
-	conn, err := db.New(localPostgresDSN)
-	if err != nil {
-		t.Skipf("dev Postgres unavailable: %v", err)
-	}
-
-	adminDB := conn
-	t.Cleanup(func() { _ = adminDB.Close() })
-
-	// A private database keeps schema-sensitive account tests independent of shared dev data.
-	databaseName := "operatoraccounts" + strings.ReplaceAll(uuid.NewV7().String(), "-", "")
-	if _, err := conn.ExecContext(ctx, "CREATE DATABASE "+databaseName); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		if _, err := adminDB.ExecContext(context.Background(), "DROP DATABASE "+databaseName); err != nil {
-			t.Errorf("drop private account test database: %v", err)
-		}
-	})
-
-	dsn, err := url.Parse(localPostgresDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dsn.Path = "/" + databaseName
-	conn, err = db.New(dsn.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() { _ = conn.Close() })
-	if _, err := conn.ExecContext(ctx, `CREATE SCHEMA partman; CREATE EXTENSION pg_partman SCHEMA partman`); err != nil {
-		t.Fatal(err)
-	}
+	conn := membershiptest.New(t)
 
 	client, err := cache.New(ctx, cache.Config{Addr: "localhost:6379", MaxRetries: 1})
 	if err != nil {

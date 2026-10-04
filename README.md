@@ -65,7 +65,11 @@ docker compose -f compose.dev.yml down -v
 
 Point the locally-run engine binary at PgBouncer (not Postgres directly) and the other services above using their `localhost` ports. All services expose healthchecks where startup ordering matters (PgBouncer waits on Postgres being healthy).
 
-The engine logs in as two Postgres roles (data-layer.md §2.2): `engine_user` for its primary and job-queue pools, through PgBouncer, and `schema_sync_user` for schema sync, provisioning and startup bootstrap, directly. `schema_sync_user` owns the `system` schema and every tenant table; `engine_user` has DML on them and no DDL. `docker/postgres-initdb/` creates the roles, the `goerp_dev` database and the tenant-role functions when the `postgres_data` volume is first initialized, so a volume created before those scripts existed needs `docker compose -f compose.dev.yml down -v` to pick them up. A production cluster runs the same two scripts once at cluster setup: `01-roles.sql` as the superuser, without its dev-only `CREATE DATABASE goerp_dev`, then `database/setup.sql` in the engine's database, with real passwords.
+The engine logs in as two Postgres roles (data-layer.md §2.2): `engine_user` for its primary and job-queue pools, through PgBouncer, and `schema_sync_user` for schema sync, provisioning and startup bootstrap, directly. `schema_sync_user` owns the `system` schema and every tenant table; `engine_user` has DML on them and no DDL. `docker/postgres-initdb/` creates the roles, the `goerp_dev` database and the tenant-role functions when the `postgres_data` volume is first initialized, so a volume created before those scripts existed needs `docker compose -f compose.dev.yml down -v` to pick them up.
+
+Membership integration fixtures allocate private databases, apply `database/setup.sql`, and bootstrap `system.tenants`, `system.users`, the membership index and its trigger function as `schema_sync_user`. The engine uses the primary pool for ordinary member writes and notification reads. Membership bootstrap rejects existing index tables or trigger functions owned by another role with an actionable setup error; existing shared databases require coordinated ownership repair or an authorized reset.
+
+A production cluster runs the same two scripts once at cluster setup: `01-roles.sql` as the superuser, without its dev-only `CREATE DATABASE goerp_dev`, then `database/setup.sql` in the engine's database, with real passwords.
 
 ### Running the engine
 

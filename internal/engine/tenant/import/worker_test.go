@@ -17,6 +17,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/auth/rowcrypt"
 	"github.com/djangbahevans/goerp/internal/engine/checkpoint"
 	"github.com/djangbahevans/goerp/internal/engine/db"
@@ -56,10 +57,6 @@ func widgetModelDecl() model.ModelDeclaration {
 	}
 }
 
-// importTestFixture bundles a real Worker wired against real Postgres and
-// local storage, plus a module registry containing testmodule/widget —
-// mirroring tenantexport's own worker_test.go fixture, so that package's
-// output is exactly what this package's input needs to look like.
 type importTestFixture struct {
 	worker  *Worker
 	conn    *sql.DB
@@ -68,11 +65,6 @@ type importTestFixture struct {
 	keys    *rowcrypt.RowKeySet
 }
 
-// testRowKeySet builds a RowKeySet directly, without rowcrypt.Store's own
-// Postgres/secrets.Backend-backed bootstrap — Encrypt/Decrypt only ever
-// touch ks.Active.Key, so a random in-memory key is enough for these
-// tests, same as tenantexport's own tests don't stand up a real key
-// management flow just to exercise AES-256-GCM round-tripping.
 func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
 	t.Helper()
 	key := make([]byte, 32)
@@ -84,8 +76,8 @@ func testRowKeySet(t *testing.T) *rowcrypt.RowKeySet {
 
 func newImportTestFixture(t *testing.T) *importTestFixture {
 	t.Helper()
-	ctx := context.Background()
-	conn := openTestPrimaryDB(t)
+	ctx := t.Context()
+	conn := membershiptest.New(t)
 
 	tenantStore := tenant.NewStore(conn)
 	if err := tenantStore.Bootstrap(ctx); err != nil {
@@ -148,17 +140,6 @@ func testFinalAttemptJob(id int64, args Args) *river.Job[Args] {
 	return &river.Job[Args]{JobRow: &rivertype.JobRow{ID: id, Attempt: 3, MaxAttempts: 3}, Args: args}
 }
 
-// encryptTestArchive builds a plaintext zip archive (manifest.json plus one
-// .jsonl file per module) and AES-256-GCM encrypts it — mirroring
-// tenantexport's own buildArchive/encryptArchive, duplicated here rather
-// than imported (this package stays independent of tenantexport's
-// unexported internals, same as production code never imports across that
-// boundary either).
-// encryptTestArchive deliberately keeps this file's own encoding/json
-// import on v1 rather than following import/worker.go's v2 migration —
-// building fixtures with it is what makes TestWorkerRun_ImportsArchiveIntoNewTenant
-// a genuine "a v1-encoded archive still imports" check (goerp#532), not
-// just a v2-writes/v2-reads round trip.
 func encryptTestArchive(t *testing.T, man manifest, moduleData map[string][]byte) (ciphertext []byte, keyB64 string) {
 	t.Helper()
 

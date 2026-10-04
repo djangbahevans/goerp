@@ -9,6 +9,7 @@ import (
 	"time"
 
 	abiv1 "github.com/djangbahevans/goerp/contract/abi/v1"
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/dbscope"
 	"github.com/djangbahevans/goerp/internal/engine/enginetables"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
@@ -21,7 +22,7 @@ import (
 // for the first.
 func setupTenantRoleTest(t *testing.T) (primaryDB *sql.DB, slug, other string, mc *ModuleContext) {
 	t.Helper()
-	primaryDB = openTestPrimaryDB(t)
+	primaryDB = membershiptest.New(t)
 	slug = fmt.Sprintf("dbrole%d", time.Now().UnixNano())
 	other = slug + "other"
 	for _, s := range []string{slug, other} {

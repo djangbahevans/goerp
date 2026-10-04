@@ -10,18 +10,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djangbahevans/goerp/internal/engine/auth/membership/membershiptest"
 	"github.com/djangbahevans/goerp/internal/engine/config"
 	"github.com/djangbahevans/goerp/internal/engine/httpx"
 	"google.golang.org/grpc"
 )
 
-// baseTestConfig returns a Config pointing at the compose.dev.yml dev stack
-// (README.md's local development section: PgBouncer on 6432, direct
-// Postgres on 15432 for schema sync, Redis on 6379, credentials
-// goerp/dev/goerp). Individual tests override the one field they're
-// exercising.
 func baseTestConfig(t *testing.T) *config.Config {
 	t.Helper()
+	conn := membershiptest.New(t)
+	var database string
+	if err := conn.QueryRowContext(t.Context(), `SELECT current_database()`).Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Setenv("GOERP_STORAGE_LOCAL_DIR", t.TempDir())
 	t.Setenv("GOERP_ADMIN_TOKEN", "test-admin-token")
 	// 127.0.0.1, not "localhost": gRPC's dialer can stall for several
@@ -39,8 +41,8 @@ func baseTestConfig(t *testing.T) *config.Config {
 		LogFormat:                "text",
 		ShutdownTimeout:          time.Second,
 		ShutdownDrainDelay:       0,
-		DBPrimaryDSN:             "postgres://goerp:dev@localhost:6432/goerp",
-		DBSchemaSyncDSN:          "postgres://goerp:dev@localhost:15432/goerp",
+		DBPrimaryDSN:             "postgres://engine_user:dev@localhost:15432/" + database,
+		DBSchemaSyncDSN:          "postgres://schema_sync_user:dev@localhost:15432/" + database,
 		RedisAddr:                "localhost:6379",
 		RedisMaxRetries:          1,
 		SecretsBackend:           "env",
@@ -53,10 +55,22 @@ func baseTestConfig(t *testing.T) *config.Config {
 	}
 }
 
-func skipIfInfraUnreachable(t *testing.T, err error) {
+func closeTestEnginePools(t *testing.T, e *Engine) {
+	t.Helper()
+	t.Cleanup(func() {
+		e.jobQueuePool.Close()
+		_ = e.syncPool.Raw().Close()
+		_ = e.primaryDB.Close()
+		if e.replicaDB != nil {
+			_ = e.replicaDB.Close()
+		}
+	})
+}
+
+func requireEngineConstruction(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Skipf("dev infra not reachable (start compose.dev.yml): %v", err)
+		t.Fatalf("initialize private engine test database: %v", err)
 	}
 }
 
@@ -64,8 +78,8 @@ func TestNewSuccess(t *testing.T) {
 	cfg := baseTestConfig(t)
 
 	e, err := New(cfg)
-	skipIfInfraUnreachable(t, err)
-	t.Cleanup(func() { _ = e.primaryDB.Close() })
+	requireEngineConstruction(t, err)
+	closeTestEnginePools(t, e)
 
 	if e.primaryDB == nil {
 		t.Error("primaryDB is nil after a successful New()")
@@ -96,7 +110,7 @@ func TestNewRedisUnreachableFailsHard(t *testing.T) {
 	cfg.RedisAddr = "127.0.0.1:1"
 
 	_, err := New(cfg)
-	skipIfPrimaryUnreachable(t, cfg, err)
+	requirePrimaryConnection(t, cfg, err)
 	if err == nil {
 		t.Fatal("New() with unreachable Redis: expected an error (fail-hard per engine-internals.md §2 step 5, not warn-only), got nil")
 	}
@@ -107,8 +121,8 @@ func TestNewReplicaDBUnreachableWarnsOnly(t *testing.T) {
 	cfg.DBReplicaDSN = "postgres://user:pass@127.0.0.1:1/db"
 
 	e, err := New(cfg)
-	skipIfInfraUnreachable(t, err)
-	t.Cleanup(func() { _ = e.primaryDB.Close() })
+	requireEngineConstruction(t, err)
+	closeTestEnginePools(t, e)
 
 	if err != nil {
 		t.Fatalf("New() with an unreachable replica DB: expected success (warn-only per engine-internals.md §2 step 4), got error: %v", err)
@@ -118,20 +132,19 @@ func TestNewReplicaDBUnreachableWarnsOnly(t *testing.T) {
 	}
 }
 
-// skipIfPrimaryUnreachable distinguishes "the test's own primary DB isn't
-// reachable" (skip, same as skipIfInfraUnreachable) from "Redis was
-// unreachable as intended by the test" (not a skip condition) by checking
-// whether a healthy control run against baseTestConfig succeeds first.
-func skipIfPrimaryUnreachable(t *testing.T, cfg *config.Config, gotErr error) {
+func requirePrimaryConnection(t *testing.T, cfg *config.Config, gotErr error) {
 	t.Helper()
 	if gotErr == nil {
 		return
 	}
 	control := *cfg
 	control.RedisAddr = "localhost:6379"
-	if _, controlErr := New(&control); controlErr != nil {
-		t.Skipf("dev infra not reachable (start compose.dev.yml): %v", controlErr)
+	e, controlErr := New(&control)
+	if controlErr != nil {
+		t.Fatalf("initialize private engine test database: %v", controlErr)
 	}
+
+	closeTestEnginePools(t, e)
 }
 
 func TestNewUnknownSecretsBackendFailsHard(t *testing.T) {
@@ -174,8 +187,8 @@ func TestStart_FailsWhenAListenerCannotBind(t *testing.T) {
 			tc.set(cfg, addr)
 
 			e, newErr := New(cfg)
-			skipIfInfraUnreachable(t, newErr)
-			t.Cleanup(func() { _ = e.primaryDB.Close() })
+			requireEngineConstruction(t, newErr)
+			closeTestEnginePools(t, e)
 
 			err = e.Start(t.Context())
 			if err == nil {
@@ -212,8 +225,8 @@ func TestHealthEndpointDefaultConfigDoesNotPanic(t *testing.T) {
 	cfg.ListenAddr = addr
 
 	e, newErr := New(cfg)
-	skipIfInfraUnreachable(t, newErr)
-	t.Cleanup(func() { _ = e.primaryDB.Close() })
+	requireEngineConstruction(t, newErr)
+	closeTestEnginePools(t, e)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -273,8 +286,8 @@ func TestNewWithOTelEndpoint(t *testing.T) {
 	cfg.OTelExporterOTLPEndpoint = ln.Addr().String()
 
 	e, newErr := New(cfg)
-	skipIfInfraUnreachable(t, newErr)
-	t.Cleanup(func() { _ = e.primaryDB.Close() })
+	requireEngineConstruction(t, newErr)
+	closeTestEnginePools(t, e)
 
 	if e.Tracer() == nil {
 		t.Fatal("expected non-nil Tracer(), got nil")
@@ -309,8 +322,8 @@ func TestNewMalformedOTelEndpointWarnsOnly(t *testing.T) {
 	cfg.OTelExporterOTLPEndpoint = "not a valid endpoint!!! \x00"
 
 	e, err := New(cfg)
-	skipIfInfraUnreachable(t, err)
-	t.Cleanup(func() { _ = e.primaryDB.Close() })
+	requireEngineConstruction(t, err)
+	closeTestEnginePools(t, e)
 
 	if err != nil {
 		t.Fatalf("New() with a malformed OTel endpoint: expected success (warn-only per engine-internals.md §2), got error: %v", err)

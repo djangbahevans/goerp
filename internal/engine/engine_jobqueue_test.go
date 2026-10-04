@@ -15,8 +15,8 @@ func TestStart_JobQueueWorkerProcessesJobs(t *testing.T) {
 	cfg := baseTestConfig(t)
 
 	e, err := New(cfg)
-	skipIfInfraUnreachable(t, err)
-	t.Cleanup(func() { _ = e.primaryDB.Close() })
+	requireEngineConstruction(t, err)
+	closeTestEnginePools(t, e)
 
 	// 20s, not the 5s most other Start()-timeout tests in this package use
 	// (engine_test.go, ratelimit_test.go) — this is the one test whose
@@ -24,7 +24,7 @@ func TestStart_JobQueueWorkerProcessesJobs(t *testing.T) {
 	// (systemworker.Worker.Start), which has been observed timing out under
 	// CI resource contention (many packages' test binaries hitting the same
 	// shared Postgres/Temporal instances concurrently) well short of a hang.
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 
 	if err := e.Start(ctx); err != nil {
@@ -45,10 +45,6 @@ func TestStart_JobQueueWorkerProcessesJobs(t *testing.T) {
 		t.Fatalf("Insert: %v", err)
 	}
 
-	// Polling JobGet (the shared job row) rather than Subscribe (which
-	// only delivers events this client instance itself worked) stays
-	// correct even if another concurrently running test's client races in
-	// and processes the job first.
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		job, err := client.JobGet(context.Background(), row.Job.ID)
