@@ -254,18 +254,18 @@ func SyncOne(ctx context.Context, pool *schema.SchemaSyncPool, diffEngine *schem
 // logged and skipped rather than failing the sync, and then no default is
 // deleted, so a variant that used to store keeps its row.
 func seedNotificationTemplates(ctx context.Context, pool *schema.SchemaSyncPool, tenantSlug string, mod *module.LoadedModule) error {
-	if mod.NotifTemplates == nil {
-		return nil
-	}
 	store := notifications.NewStore(pool.Raw())
 	seed := store.SeedDefaultTemplates
+
 	rows, err := mod.NotifTemplates.Rows(mod.Manifest.Name)
 	if err != nil {
 		log.Warn().Err(err).Str("tenant", tenantSlug).Str("module", mod.Manifest.Name).Msg("some notification templates cannot be stored as notification_templates rows")
 		seed = store.UpsertDefaultTemplates
 	}
+
 	if err := seed(ctx, tenantSlug, mod.Manifest.Name, rows); err != nil {
 		return fmt.Errorf("seed notification templates: %w", err)
 	}
+
 	return nil
 }
