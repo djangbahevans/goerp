@@ -30,7 +30,6 @@ export function isCRUDAction(value: string): value is CRUDAction {
 export const RouteSchemaSchema = v.looseObject({
   method: v.string(),
   path: v.string(),
-  // The engine always sends an array: a nil Go slice encodes as `[]`.
   permissions: v.array(v.string()),
   model: v.optional(v.string()),
   // Any string: the engine also sends non-CRUD actions ("workflow_transition",
@@ -39,6 +38,9 @@ export const RouteSchemaSchema = v.looseObject({
   // with isCRUDAction instead.
   crud_action: v.optional(v.string()),
   name: v.optional(v.string()),
+  // CRUD selection requires an engine-native route or a reserved action name.
+  // Raw engine.Model bindings carry model/crud_action solely for field security.
+  engine_native: v.optional(v.boolean()),
   response_is_list: v.boolean(),
   view: v.optional(v.string()),
 });

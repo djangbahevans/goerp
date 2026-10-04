@@ -86,7 +86,9 @@ func schemaNotificationTypesFrom(types []manifest.NotificationType) []SchemaNoti
 // SchemaRoute is shell-architecture.md §9's RouteSchema — a subset of
 // RouteManifest, only the fields the shell needs. Path is always the
 // engine-expanded path (RouteEntry.PathTemplate) — not the module-relative
-// declared path, which isn't part of this contract.
+// declared path, which isn't part of this contract. Raw engine.Model routes
+// retain their field-security binding; CRUD consumers require EngineNative
+// or a Name matching the reserved CrudAction.
 type SchemaRoute struct {
 	Method         string   `json:"method"`
 	Path           string   `json:"path"`

@@ -109,9 +109,8 @@ func resourceOps(catalog map[string]*CatalogModule, qualified string) (map[strin
 }
 
 // catalogFor builds the catalog entry for one module from its models and
-// routes, workflow transitions included. A route bound to one of the
-// module's models through a CRUD action (a reserved-name engine.Action
-// override, or engine.Model on a raw route) adds that op.
+// routes, workflow transitions included. Reserved-name engine.Action
+// overrides add ops; raw engine.Model bindings only govern field security.
 func catalogFor(models []Model, routes []Route) *CatalogModule {
 	c := &CatalogModule{Ops: map[string]map[string]bool{}, Actions: map[string]bool{}}
 	for _, m := range models {
@@ -125,7 +124,7 @@ func catalogFor(models []Model, routes []Route) *CatalogModule {
 		if r.Name != "" {
 			c.Actions[r.Name] = true
 		}
-		if r.Model != "" && r.CRUDAction != "" && c.Ops[r.Model] != nil {
+		if r.Model != "" && r.CRUDAction != "" && r.Name == r.CRUDAction && c.Ops[r.Model] != nil {
 			c.Ops[r.Model][r.CRUDAction] = true
 		}
 	}

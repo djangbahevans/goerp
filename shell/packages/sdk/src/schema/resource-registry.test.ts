@@ -8,6 +8,7 @@ function route(overrides: Partial<MetaSchema["modules"][string]["routes"][number
     path: "",
     permissions: [],
     response_is_list: false,
+    engine_native: true,
     ...overrides,
   };
 }
@@ -35,12 +36,9 @@ const schema: MetaSchema = {
         route({ method: "GET", path: "/contacts/{id}", model: "contacts.contact", crud_action: "get" }),
         route({ method: "POST", path: "/contacts", model: "contacts.contact", crud_action: "create" }),
         route({ method: "PUT", path: "/contacts/{id}", model: "contacts.contact", crud_action: "update" }),
-        // No delete route for contacts.contact.
         route({ method: "GET", path: "/contacts/tags", model: "contacts.tag", crud_action: "list" }),
         route({ method: "GET", path: "/contacts/tags/{id}", model: "contacts.tag", crud_action: "get" }),
-        // A named action route — no model/crud_action, must be skipped entirely.
         route({ method: "POST", path: "/contacts/{id}/merge", name: "merge" }),
-        // Only a create route, no list or get — must be skipped (no usable routes).
         route({ method: "POST", path: "/contacts/import", model: "contacts.import_job", crud_action: "create" }),
       ],
     },
@@ -71,6 +69,74 @@ const schema: MetaSchema = {
 };
 
 describe("buildResourceRegistry", () => {
+  it.each(["before", "after"])("ignores a raw model binding %s the CRUD route", (order) => {
+    const native = route({ path: "/contacts/contacts", model: "contacts.contact", crud_action: "list" });
+    const raw = route({
+      path: "/contacts/search",
+      model: "contacts.contact",
+      crud_action: "list",
+      engine_native: false,
+    });
+    const registry = buildResourceRegistry({
+      ...schema,
+      modules: {
+        contacts: { ...schema.modules.contacts!, routes: order === "before" ? [raw, native] : [native, raw] },
+      },
+    });
+
+    expect(registry.get("contacts.contact")?.listPath).toBe("/contacts/contacts");
+  });
+
+  it("does not register a model from a raw field-security binding alone", () => {
+    const registry = buildResourceRegistry({
+      ...schema,
+      modules: {
+        contacts: {
+          ...schema.modules.contacts!,
+          routes: [
+            route({
+              path: "/contacts/search",
+              model: "contacts.contact",
+              crud_action: "list",
+              engine_native: undefined,
+            }),
+          ],
+        },
+      },
+    });
+
+    expect(registry.has("contacts.contact")).toBe(false);
+  });
+
+  it("resolves a reserved action override and ignores a later raw binding", () => {
+    const registry = buildResourceRegistry({
+      ...schema,
+      modules: {
+        contacts: {
+          ...schema.modules.contacts!,
+          routes: [
+            route({
+              path: "/contacts/contacts",
+              model: "contacts.contact",
+              crud_action: "list",
+              name: "list",
+              engine_native: undefined,
+              permissions: ["contacts:read"],
+            }),
+            route({
+              path: "/contacts/search",
+              model: "contacts.contact",
+              crud_action: "list",
+              engine_native: undefined,
+            }),
+          ],
+        },
+      },
+    });
+
+    expect(registry.get("contacts.contact")?.listPath).toBe("/contacts/contacts");
+  });
+
   it("resolves a model's full CRUD paths", () => {
     const registry = buildResourceRegistry(schema);
 
@@ -181,8 +247,6 @@ describe("buildResourceRegistry", () => {
 
   it("skips routes with no model/crud_action set", () => {
     const registry = buildResourceRegistry(schema);
-    // The merge action route has no model — asserting the registry has
-    // exactly the models expected confirms it contributed no stray entry.
     expect([...registry.keys()].sort()).toEqual(["contacts.contact", "contacts.tag", "sales.order"]);
   });
 

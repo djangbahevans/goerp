@@ -111,6 +111,23 @@ func TestInputFromSchema_ValidatesAgainstOtherModules(t *testing.T) {
 	}
 }
 
+func TestInputFromSchema_RawModelBindingDoesNotProvideCRUD(t *testing.T) {
+	raw := `{"modules":{"contacts":{
+		"models":{"contacts.contact":{"label_plural":"Contacts","enabled_ops":[],"fields":[]}},
+		"routes":[{"method":"GET","path":"/contacts/search","model":"contacts.contact","crud_action":"list"}],
+		"views":[{"name":"contacts_list","type":"list","resource":"contacts.contact"}]
+	}}}`
+	in, err := InputFromSchema([]byte(raw), "contacts")
+	if err != nil {
+		t.Fatalf("InputFromSchema() error: %v", err)
+	}
+
+	_, err = Generate(in)
+	if err == nil || !strings.Contains(err.Error(), `resource contacts.contact has no "list" op`) {
+		t.Fatalf("Generate() error = %v, want a missing list op", err)
+	}
+}
+
 func TestInputFromSchema_UnknownModule(t *testing.T) {
 	if _, err := InputFromSchema([]byte(metaSchemaFixture), "billing"); err == nil || !strings.Contains(err.Error(), "billing is not loaded") {
 		t.Fatalf("InputFromSchema(billing) error = %v, want a not-loaded error", err)

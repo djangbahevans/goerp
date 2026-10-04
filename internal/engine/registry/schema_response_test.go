@@ -101,7 +101,7 @@ func TestSchemaViewFor(t *testing.T) {
 		{"get", "widgets.form"},
 		{"create", "widgets.form"},
 		{"update", "widgets.form"},
-		{"delete", ""}, // no view claims delete
+		{"delete", ""},
 	}
 	for _, c := range cases {
 		if got := schemaViewFor(views, "widgets.widget", c.crudAction); got != c.want {
@@ -114,12 +114,67 @@ func TestSchemaViewFor(t *testing.T) {
 	}
 }
 
-// TestModuleRegistry_Update_SchemaResponseCachedPerSnapshot is goerp#591's
-// own regression guard: GET /_meta/schema's response is built once per
-// published snapshot (here, the same *SchemaResponse pointer for two
-// Snapshot() reads against one publish), and a later Update produces a
-// distinct, correctly updated response — the cache is snapshot-scoped, not
-// process-lifetime.
+func TestBuildSchemaResponse_CRUDRouteIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		override bool
+	}{
+		{name: "EnableOps"},
+		{name: "reserved action", override: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			md := model.Define("contacts.contact").EnableOps(model.List)
+			explicit := []engine.RouteDeclaration{{
+				Method: "GET", Path: "/search", Auth: "required", Model: "contacts.contact", CRUDAction: "list",
+			}}
+			if tt.override {
+				explicit = append(explicit, engine.RouteDeclaration{Model: "contacts.contact", Name: "list", CRUDAction: "list", Auth: "required"})
+			}
+			modules := map[string]*module.LoadedModule{"contacts": {
+				Status: module.StatusReady, Manifest: manifest.Manifest{Type: "domain"},
+				ModelDecls: []model.ModelDeclaration{*md}, ExplicitRoutes: explicit,
+			}}
+
+			table, err := buildRouteTable(modules)
+			if err != nil {
+				t.Fatalf("buildRouteTable() error: %v", err)
+			}
+			resp := buildSchemaResponse(modules, table, "")
+			out, err := json.Marshal(resp.Modules["contacts"].Routes)
+			if err != nil {
+				t.Fatalf("marshal routes: %v", err)
+			}
+			var routes []SchemaRoute
+			if err := json.Unmarshal(out, &routes); err != nil {
+				t.Fatalf("unmarshal routes: %v", err)
+			}
+
+			if len(routes) != 2 {
+				t.Fatalf("routes = %+v, want one CRUD route and one raw binding", routes)
+			}
+			for _, r := range routes {
+				if r.Model != "contacts.contact" || r.CrudAction != "list" {
+					t.Errorf("route = %+v, want the model and list binding", r)
+				}
+				switch r.Path {
+				case "/contacts/search":
+					if r.EngineNative || r.Name != "" {
+						t.Errorf("raw route = %+v, want neither engine_native nor name", r)
+					}
+				case "/contacts/contacts":
+					if r.EngineNative != !tt.override || (r.Name == "list") != tt.override {
+						t.Errorf("CRUD route = %+v, want engine_native=%v, reserved name=%v", r, !tt.override, tt.override)
+					}
+				default:
+					t.Errorf("unexpected route path %q", r.Path)
+				}
+			}
+		})
+	}
+}
+
 func TestModuleRegistry_Update_SchemaResponseCachedPerSnapshot(t *testing.T) {
 	r := &ModuleRegistry{}
 	modules1 := map[string]*module.LoadedModule{

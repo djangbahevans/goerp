@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,7 +56,6 @@ func copyExampleModule(t *testing.T) string {
 	return dir
 }
 
-// generateExample builds the example module and generates its client.
 func generateExample(t *testing.T, dir string) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -126,5 +126,27 @@ func TestLoadLocal_RebuildsStaleWasm(t *testing.T) {
 
 	if out := generateExample(t, dir); !bytes.Contains(out, []byte("putSettings")) {
 		t.Errorf("after a source change, output has no putSettings: the stale module.wasm was not rebuilt")
+	}
+}
+
+func TestLoadLocal_RawModelBindingDoesNotProvideCRUD(t *testing.T) {
+	dir := copyExampleModule(t)
+	mainGo := filepath.Join(dir, "cmd", "module", "main.go")
+	src, err := os.ReadFile(mainGo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src = bytes.Replace(src, []byte("EnableOps(model.List, model.Get, model.Create"), []byte("EnableOps(model.Get, model.Create"), 1)
+	if err := os.WriteFile(mainGo, src, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	in, err := LoadLocal(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("LoadLocal() error: %v", err)
+	}
+	_, err = Generate(in)
+	if err == nil || !strings.Contains(err.Error(), `resource contacts.contact has no "list" op`) {
+		t.Fatalf("Generate() error = %v, want a missing list op", err)
 	}
 }

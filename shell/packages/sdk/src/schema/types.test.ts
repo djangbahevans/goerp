@@ -11,6 +11,12 @@ import {
 const baseRoute = { method: "GET", path: "/x", permissions: [], response_is_list: false };
 
 describe("RouteSchemaSchema", () => {
+  it("accepts only boolean engine_native markers", () => {
+    expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, engine_native: true }).success).toBe(true);
+    expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, engine_native: false }).success).toBe(true);
+    expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, engine_native: "true" }).success).toBe(false);
+  });
+
   it("requires permissions to be an array: [] and a string array parse, null and a missing member do not", () => {
     expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, permissions: null }).success).toBe(false);
     expect(v.safeParse(RouteSchemaSchema, { ...baseRoute, permissions: [] }).success).toBe(true);

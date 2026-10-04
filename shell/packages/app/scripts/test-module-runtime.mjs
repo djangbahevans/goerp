@@ -124,6 +124,15 @@ createRoot(document.getElementById('root')).render(
             permissions: [],
             model: "crm.contact",
             crud_action: "list",
+            engine_native: true,
+            response_is_list: true,
+          },
+          {
+            method: "GET",
+            path: "/crm/search",
+            permissions: [],
+            model: "crm.contact",
+            crud_action: "list",
             response_is_list: true,
           },
         ],
@@ -143,6 +152,10 @@ createRoot(document.getElementById('root')).render(
     await page.route("**/crm/contacts*", (route) =>
       route.fulfill({ json: { data: [{ name: "Kofi Mensah" }], meta: { has_more: false } } }),
     );
+    await page.route("**/crm/search*", (route) => {
+      errors.push("Generated CRUD client called the raw field-security route");
+      return route.fulfill({ json: { data: [], meta: { has_more: false } } });
+    });
     await page.goto(url);
     await page.getByRole("button", { name: "Kofi Mensah:0" }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.runtimeIdentity), { react: true, client: true, query: true });
