@@ -87,7 +87,7 @@ describe("passkey ceremonies", () => {
     expect(BrowserCredential.parseRequestOptionsFromJSON).toHaveBeenCalledWith({ challenge: "AP8" });
 
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ password_update_recommended: true })));
-    expect(await verifyMFA("token", assertion!)).toBe(true);
+    expect(await verifyMFA("token", assertion!)).toEqual({ recommended: true, deadline: null });
     expect(fetchMock.mock.calls.at(-1)![0]).toBe("/auth/mfa/verify");
     expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).toEqual({
       mfa_token: "token",

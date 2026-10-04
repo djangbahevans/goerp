@@ -18,6 +18,10 @@ const FAKE_USER = {
   amr: ["pwd"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -64,8 +68,6 @@ const EXPIRED: AuthContextValue = {
   tenant: FAKE_TENANT,
 };
 
-// setAuth swaps the live auth value in place, the way AuthProvider does
-// when the machine transitions.
 function mount(path: string, auth: AuthContextValue) {
   const history = createMemoryHistory({ initialEntries: [path] });
   const router = createRouter({ routeTree, context: { auth }, history });
@@ -268,4 +270,120 @@ describe("root layout", () => {
       expect(expiredDialog()).toBeNull();
     });
   });
+});
+
+describe("password-change restrictions", () => {
+  const user = { ...FAKE_USER, passwordChangeRequired: true, passwordMinLength: 18 };
+  const restricted: AuthContextValue = {
+    ...SIGNED_IN,
+    user,
+    state: { status: "authenticated", user, tenant: FAKE_TENANT },
+  };
+
+  it.each([
+    ["/activities?source=auth#events", "/activities?source=auth#events"],
+    ["/auth/login?redirect=%2Factivities", "/activities"],
+    ["/auth/mfa?redirect=%2Factivities", "/activities"],
+    ["/auth/handoff?code=secret&redirect=%2Factivities", "/activities"],
+    ["/settings/profile", "/"],
+    ["/403", "/403"],
+  ])("holds %s on the password card and preserves its destination", async (path, onward) => {
+    const router = renderAt(path, restricted);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/profile"));
+    expect(router.state.location.hash).toBe("change-password");
+    expect(router.state.location.search).toEqual({ redirect: onward });
+    expect(await screen.findByRole("heading", { name: /Change your password to keep using Acme Corp/ })).toBeTruthy();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByLabelText("Full name")).toBeNull();
+    expect(screen.getByText("It needs at least 18 characters.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Current password")));
+  });
+
+  it("requires a password change before enrolling in MFA", async () => {
+    const both = { ...user, mfaSetupRequired: true };
+    const router = renderAt("/activities", {
+      ...restricted,
+      user: both,
+      state: { status: "authenticated", user: both, tenant: FAKE_TENANT },
+    });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/profile"));
+    expect(router.state.location.search).toEqual({ redirect: "/activities" });
+  });
+
+  it("redirects immediately when a live session becomes restricted", async () => {
+    const { router, setAuth } = mount("/settings/profile", SIGNED_IN);
+    await screen.findByLabelText("Full name");
+    setAuth(restricted);
+    await screen.findByRole("heading", { name: /Change your password to keep using/ });
+    await waitFor(() => expect(router.state.location.hash).toBe("change-password"));
+    expect(screen.queryByLabelText("Full name")).toBeNull();
+    expect(screen.queryByRole("navigation")).toBeNull();
+  });
+
+  it("returns to the intended page after changing the password and reloading the session", async () => {
+    const changePassword = vi.fn(async () => {});
+    const reloadSession = vi.fn(async () => setAuth(SIGNED_IN));
+    const { router, setAuth } = mount("/settings/profile?redirect=%2Fsettings%2Fappearance#change-password", {
+      ...restricted,
+      changePassword,
+      reloadSession,
+    });
+    await screen.findByLabelText("Current password");
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "old password" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "a new long passphrase" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "a new long passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/appearance"));
+    expect(changePassword).toHaveBeenCalledTimes(1);
+    expect(reloadSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed session reload without submitting the password again", async () => {
+    const changePassword = vi.fn(async () => {});
+    const reloadSession = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementationOnce(async () => setAuth(SIGNED_IN));
+    const { router, setAuth } = mount("/settings/profile?redirect=%2Fsettings%2Fappearance#change-password", {
+      ...restricted,
+      changePassword,
+      reloadSession,
+    });
+    await screen.findByLabelText("Current password");
+    for (const label of ["Current password", "New password", "Confirm new password"]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value: "a new long passphrase" } });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Your password is updated");
+    expect(screen.queryByLabelText("Current password")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/appearance"));
+    expect(changePassword).toHaveBeenCalledTimes(1);
+    expect(reloadSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("signs out from restricted mode", async () => {
+    const logout = vi.fn(async () => setAuth(SIGNED_OUT));
+    const { router, setAuth } = mount("/settings/profile#change-password", { ...restricted, logout });
+    await screen.findByRole("button", { name: "Sign out" });
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/auth/login"));
+    expect(logout).toHaveBeenCalledTimes(1);
+  });
+});
+
+it("lets an expired restricted session sign in again while preserving its original destination", async () => {
+  const user = { ...FAKE_USER, passwordChangeRequired: true };
+  const expired: AuthContextValue = {
+    ...SIGNED_OUT,
+    user,
+    tenant: FAKE_TENANT,
+    state: { status: "unauthenticated", sessionExpired: true, user, tenant: FAKE_TENANT },
+  };
+  const router = renderAt("/settings/profile?redirect=%2Factivities#change-password", expired);
+  await screen.findByRole("alertdialog");
+  fireEvent.click(screen.getByRole("button", { name: "Sign in again" }));
+  await screen.findByRole("heading", { name: "Sign in" });
+  expect(router.state.location.search).toEqual({ redirect: "/activities" });
+  expect(screen.queryByLabelText("Current password")).toBeNull();
 });

@@ -1,7 +1,6 @@
 import { type AuthMachine, authMachine } from "../auth/auth-machine.js";
 import type { AuthState } from "../auth/types.js";
 
-// shell-architecture.md §12's WebSocketManager sketch.
 const WS_PATH = "/_ws";
 const INITIAL_RECONNECT_DELAY_MS = 1000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -174,15 +173,10 @@ export class WebSocketManager {
   }
 }
 
-// "refreshing" counts as connected too (matching AuthContextValue.
-// isAuthenticated), so a token refresh cycle never tears down the socket.
-function isConnectedStatus(status: AuthState["status"]): boolean {
-  return status === "authenticated" || status === "refreshing";
+function canConnect(state: AuthState): boolean {
+  return (state.status === "authenticated" || state.status === "refreshing") && !state.user.passwordChangeRequired;
 }
 
-// Connects/disconnects in reaction to the auth machine's own state, since
-// session_expired can fire from outside auth-provider.tsx too (e.g. an
-// unrecoverable 401 in http/api-client.ts).
 export function wireWebSocketManager(
   machine: AuthMachine,
   manager: WebSocketManager = new WebSocketManager(),
@@ -191,19 +185,17 @@ export function wireWebSocketManager(
     machine.transition({ type: "session_expired" });
   };
 
-  let previousStatus = machine.getState().status;
+  let wasConnected = canConnect(machine.getState());
 
   machine.subscribe(() => {
-    const { status } = machine.getState();
-    const wasConnected = isConnectedStatus(previousStatus);
-    const isConnected = isConnectedStatus(status);
+    const isConnected = canConnect(machine.getState());
 
     if (isConnected && !wasConnected) {
       manager.connect();
     } else if (!isConnected && wasConnected) {
       manager.disconnect();
     }
-    previousStatus = status;
+    wasConnected = isConnected;
   });
 
   return manager;

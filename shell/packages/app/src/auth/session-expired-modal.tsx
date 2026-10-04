@@ -4,7 +4,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { focusManager } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect } from "react";
-import { isAuthPath } from "./safe-redirect.js";
+import { isAuthPath, safeRedirect } from "./safe-redirect.js";
 
 export interface SessionExpiredModalProps {
   onSignIn: () => void;
@@ -49,7 +49,7 @@ export function SessionExpiredModal({ onSignIn }: SessionExpiredModalProps): Rea
 // expired; "Sign in again" comes back to the page it was shown over. A
 // suspended tenant's page owns that flow instead (shell-ux.md §6.6).
 export function SessionExpiredGate(): ReactNode {
-  const { state } = useAuth();
+  const { state, user } = useAuth();
   const tenantSuspended = useTenantSuspended();
   const navigate = useNavigate();
   const location = useRouterState({ select: (s) => s.resolvedLocation ?? s.location });
@@ -68,7 +68,9 @@ export function SessionExpiredGate(): ReactNode {
   }, [showing]);
 
   if (!showing) return null;
-  return (
-    <SessionExpiredModal onSignIn={() => void navigate({ to: "/auth/login", search: { redirect: location.href } })} />
-  );
+  const onward =
+    user?.passwordChangeRequired && location.pathname === "/settings/profile"
+      ? safeRedirect((location.search as { redirect?: unknown }).redirect)
+      : location.href;
+  return <SessionExpiredModal onSignIn={() => void navigate({ to: "/auth/login", search: { redirect: onward } })} />;
 }

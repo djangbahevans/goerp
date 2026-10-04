@@ -95,7 +95,6 @@ const WORK_PHONE: MFAFactor = {
   lastUsedAt: null,
 };
 
-// A placeholder QR image; the engine renders the real one.
 const QR_SVG =
   "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 21 21'><rect width='21' height='21' fill='#fff'/><path d='M0 0h7v7H0zM14 0h7v7h-7zM0 14h7v7H0zM9 9h3v3H9zM15 15h2v2h-2z' fill='#000'/></svg>";
 
@@ -143,6 +142,10 @@ const fakeUser = {
   amr: ["pwd", "totp"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,

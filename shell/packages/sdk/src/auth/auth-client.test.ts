@@ -61,6 +61,10 @@ describe("fetchCurrentSession", () => {
           roles: ["admin"],
           amr: ["pwd"],
           mfa_verified_at: null,
+          password_change_required: true,
+          password_min_length: 18,
+          phone: "+233201234567",
+          title: "Consultant",
           theme: "dark",
           contrast: "high",
           locale: "fr",
@@ -93,6 +97,10 @@ describe("fetchCurrentSession", () => {
         amr: ["pwd"],
         mfaVerifiedAt: null,
         mfaSetupRequired: false,
+        passwordChangeRequired: true,
+        passwordMinLength: 18,
+        phone: "+233201234567",
+        title: "Consultant",
         theme: "dark",
         contrast: "high",
         locale: "fr",
@@ -337,7 +345,7 @@ describe("login", () => {
 
     const result = await login(credentials);
 
-    expect(result).toEqual({ kind: "authenticated", passwordUpdateRecommended: false });
+    expect(result).toEqual({ kind: "authenticated", passwordUpdateRecommended: false, passwordUpdateDeadline: null });
     expect(fetchMock).toHaveBeenCalledWith(
       "/auth/login",
       expect.objectContaining({ method: "POST", credentials: "include" }),
@@ -350,7 +358,11 @@ describe("login", () => {
       vi.fn(async () => jsonResponse(200, { expires_in: 900, password_update_recommended: true })),
     );
 
-    expect(await login(credentials)).toEqual({ kind: "authenticated", passwordUpdateRecommended: true });
+    expect(await login(credentials)).toEqual({
+      kind: "authenticated",
+      passwordUpdateRecommended: true,
+      passwordUpdateDeadline: null,
+    });
   });
 
   it("returns mfa_required with the challenge token and methods", async () => {
@@ -553,7 +565,10 @@ describe("verifyMFA", () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { expires_in: 900 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(await verifyMFA("mfa-tok", { type: "totp", code: "123456" })).toBe(false);
+    expect(await verifyMFA("mfa-tok", { type: "totp", code: "123456" })).toEqual({
+      recommended: false,
+      deadline: null,
+    });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/auth/mfa/verify",
@@ -571,7 +586,7 @@ describe("verifyMFA", () => {
       vi.fn(async () => jsonResponse(200, { expires_in: 900, password_update_recommended: true })),
     );
 
-    expect(await verifyMFA("mfa-tok", { type: "totp", code: "123456" })).toBe(true);
+    expect(await verifyMFA("mfa-tok", { type: "totp", code: "123456" })).toEqual({ recommended: true, deadline: null });
   });
 
   it("throws an AppError on an invalid code", async () => {
@@ -839,7 +854,11 @@ describe("exchangeHandoff", () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { expires_in: 900, password_update_recommended: true }));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(await exchangeHandoff("c0de")).toEqual({ kind: "authenticated", passwordUpdateRecommended: true });
+    expect(await exchangeHandoff("c0de")).toEqual({
+      kind: "authenticated",
+      passwordUpdateRecommended: true,
+      passwordUpdateDeadline: null,
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/auth/handoff",
       expect.objectContaining({ method: "POST", credentials: "include", body: JSON.stringify({ code: "c0de" }) }),

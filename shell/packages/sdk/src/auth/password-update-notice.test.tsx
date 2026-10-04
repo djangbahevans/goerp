@@ -3,13 +3,14 @@ import { useContext } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthContextValue } from "./types.js";
 
-const STORAGE_KEY = "goerp-password-update-recommended";
+const STORAGE_KEY = "goerp-password-update-notice";
+const DEADLINE = "2026-10-20T12:00:00Z";
 
 const ME_BODY = {
   user: {
     id: "u1",
     email: "ada@example.com",
-    contact_id: null,
+    contact_id: null as string | null,
     name: "Ada",
     avatar_url: null,
     roles: [],
@@ -42,16 +43,14 @@ function json(status: number, body: unknown): Response {
   } as Response;
 }
 
-// Routes each auth endpoint to a canned response; signedIn flips /auth/me
-// from 401 to 200 once a sign-in has succeeded.
-function stubAuthServer(responses: { login?: unknown; verify?: unknown; handoff?: unknown }) {
+function stubAuthServer(responses: { login?: unknown; verify?: unknown; handoff?: unknown; me?: typeof ME_BODY }) {
   let signedIn = false;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
       switch (url) {
         case "/auth/me":
-          return signedIn ? json(200, ME_BODY) : json(401, {});
+          return signedIn ? json(200, responses.me ?? ME_BODY) : json(401, {});
         case "/auth/login": {
           const body = responses.login as { mfa_required?: boolean; handoff?: unknown };
           if (!body.mfa_required && !body.handoff) signedIn = true;
@@ -119,7 +118,7 @@ describe("PasswordUpdateNoticeStore", () => {
 
     store.set(true);
     expect(store.get()).toBe(true);
-    expect(window.sessionStorage.getItem(STORAGE_KEY)).toBe("1");
+    expect(window.sessionStorage.getItem(STORAGE_KEY)).toBe(JSON.stringify({ recommended: true, deadline: null }));
     expect(listener).toHaveBeenCalledTimes(1);
 
     store.set(false);
@@ -128,36 +127,40 @@ describe("PasswordUpdateNoticeStore", () => {
   });
 
   it("restores the flag after a reload", async () => {
-    window.sessionStorage.setItem(STORAGE_KEY, "1");
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ recommended: true, deadline: DEADLINE }));
     const { PasswordUpdateNoticeStore } = await import("./password-update-notice.js");
-    expect(new PasswordUpdateNoticeStore().get()).toBe(true);
+    expect(new PasswordUpdateNoticeStore().getSnapshot()).toEqual({ recommended: true, deadline: DEADLINE });
   });
 
   it("usePasswordUpdateNotice dismisses", async () => {
     const { passwordUpdateNotice, usePasswordUpdateNotice } = await import("./password-update-notice.js");
-    passwordUpdateNotice.set(true);
+    passwordUpdateNotice.set(true, DEADLINE);
     const { result } = renderHook(() => usePasswordUpdateNotice());
+    expect(result.current.deadline).toBe(DEADLINE);
     expect(result.current.recommended).toBe(true);
 
     act(() => result.current.dismiss());
     expect(result.current.recommended).toBe(false);
+    expect(result.current.deadline).toBeNull();
   });
 });
 
 describe("AuthProvider and the password update notice", () => {
   it("sets the flag from a password sign-in and clears it on logout", async () => {
-    stubAuthServer({ login: { expires_in: 900, password_update_recommended: true } });
+    stubAuthServer({
+      login: { expires_in: 900, password_update_recommended: true, password_update_deadline: DEADLINE },
+    });
     const { auth, notice } = await mountProvider();
 
     await act(() => auth().login({ email: "ada@example.com", password: "pw", tenant: "acme" }));
-    expect(notice.get()).toBe(true);
+    expect(notice.getSnapshot()).toEqual({ recommended: true, deadline: DEADLINE });
 
     await act(() => auth().logout());
     await waitFor(() => expect(notice.get()).toBe(false));
   });
 
   it("keeps the flag across a reload that finds a live session", async () => {
-    window.sessionStorage.setItem(STORAGE_KEY, "1");
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ recommended: true, deadline: null }));
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => json(200, ME_BODY)),
@@ -180,32 +183,34 @@ describe("AuthProvider and the password update notice", () => {
   });
 
   it("drops the flag when a reload finds no session", async () => {
-    window.sessionStorage.setItem(STORAGE_KEY, "1");
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ recommended: true, deadline: null }));
     stubAuthServer({ login: { expires_in: 900 } });
     const { notice } = await mountProvider();
 
-    expect(notice.get()).toBe(false);
+    expect(notice.getSnapshot()).toEqual({ recommended: false, deadline: null });
   });
 
   it("sets the flag from an MFA verify", async () => {
     stubAuthServer({
       login: { mfa_required: true, mfa_token: "tok", mfa_methods: ["totp"] },
-      verify: { expires_in: 900, password_update_recommended: true },
+      verify: { expires_in: 900, password_update_recommended: true, password_update_deadline: DEADLINE },
     });
     const { auth, notice } = await mountProvider();
 
     await act(() => auth().login({ email: "ada@example.com", password: "pw", tenant: "acme" }));
     await act(() => auth().submitMFA({ type: "totp", code: "123456" }));
-    expect(notice.get()).toBe(true);
+    expect(notice.getSnapshot()).toEqual({ recommended: true, deadline: DEADLINE });
   });
 
   it("clears the flag after a password change", async () => {
-    stubAuthServer({ login: { expires_in: 900, password_update_recommended: true } });
+    stubAuthServer({
+      login: { expires_in: 900, password_update_recommended: true, password_update_deadline: DEADLINE },
+    });
     const { auth, notice } = await mountProvider();
 
     await act(() => auth().login({ email: "ada@example.com", password: "pw", tenant: "acme" }));
     await act(() => auth().changePassword({ currentPassword: "pw", newPassword: "a new passphrase" }));
-    expect(notice.get()).toBe(false);
+    expect(notice.getSnapshot()).toEqual({ recommended: false, deadline: null });
   });
 });
 
@@ -224,12 +229,53 @@ describe("AuthProvider and the shared-domain handoff", () => {
   });
 
   it("signs in on the tenant's host by exchanging the code", async () => {
-    stubAuthServer({ handoff: { expires_in: 900, password_update_recommended: true } });
+    stubAuthServer({
+      handoff: { expires_in: 900, password_update_recommended: true, password_update_deadline: DEADLINE },
+    });
     const { auth, notice } = await mountProvider();
 
     await act(() => auth().completeHandoff("c0de"));
 
     expect(auth().state.status).toBe("authenticated");
-    expect(notice.get()).toBe(true);
+    expect(notice.getSnapshot()).toEqual({ recommended: true, deadline: DEADLINE });
   });
 });
+
+it.each(["password", "mfa", "handoff"] as const)(
+  "loads a restricted session after %s sign-in and clears it on reload",
+  async (mode) => {
+    const me = {
+      ...ME_BODY,
+      user: {
+        ...ME_BODY.user,
+        contact_id: "contact-current-tenant",
+        password_change_required: true,
+        password_min_length: 18,
+      },
+    };
+    const success = { expires_in: 900, password_update_recommended: true, password_update_deadline: DEADLINE };
+    stubAuthServer({
+      me,
+      login: mode === "mfa" ? { mfa_required: true, mfa_token: "tok", mfa_methods: ["totp"] } : success,
+      verify: success,
+      handoff: success,
+    });
+    const { auth, notice } = await mountProvider();
+    if (mode === "handoff") await act(() => auth().completeHandoff("code"));
+    else {
+      await act(() => auth().login({ email: "ada@example.com", password: "pw" }));
+      if (mode === "mfa") await act(() => auth().submitMFA({ type: "totp", code: "123456" }));
+    }
+    expect(auth().user).toMatchObject({
+      passwordChangeRequired: true,
+      passwordMinLength: 18,
+      contactId: "contact-current-tenant",
+    });
+    expect(notice.getSnapshot()).toEqual({ recommended: true, deadline: DEADLINE });
+    await act(() => auth().changePassword({ currentPassword: "pw", newPassword: "a new long passphrase" }));
+    expect(notice.getSnapshot()).toEqual({ recommended: false, deadline: null });
+    me.user.password_change_required = false;
+    await act(() => auth().reloadSession());
+    expect(auth().user?.passwordChangeRequired).toBe(false);
+  },
+);

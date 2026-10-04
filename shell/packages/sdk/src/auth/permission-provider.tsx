@@ -50,8 +50,6 @@ export function createPermissionContextValue(data: PermissionData): PermissionCo
   };
 }
 
-// Exported for testing — lets tests drive isAuthenticated/tenantId directly
-// instead of standing up a full AuthProvider/auth machine.
 export function PermissionProviderForUser({
   isAuthenticated,
   sessionExpired = false,
@@ -94,25 +92,18 @@ export function PermissionProviderForUser({
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelled = false;
-    // Deny-by-default on failure: check()/checkField() must still return a boolean.
     refresh(() => cancelled, true);
     return () => {
       cancelled = true;
     };
   }, [isAuthenticated, refresh]);
 
-  // Live refresh on module install (goerp#614/#621), role change (goerp#624/#619),
-  // and tenant plan change (goerp#629/#628).
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "module.installed", refresh);
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "plan.changed", refresh);
   useChannelRefresh(isAuthenticated, userId && userChannel(userId), "role.changed", refresh);
 
   const hasSession = isAuthenticated || sessionExpired;
   const data = hasSession ? loadedData : EMPTY_DATA;
-  // Keeps permissionDataRef in lockstep with `data` for every transition
-  // (login, logout, refetch, account switch via the key= remount above) —
-  // a single effect here is simpler and harder to get wrong than mirroring
-  // the assignment at every place `data` can change.
   useEffect(() => {
     permissionDataRef.current = data;
   }, [data]);
@@ -133,8 +124,8 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
   return (
     <PermissionProviderForUser
       key={user?.id ?? "anonymous"}
-      isAuthenticated={isAuthenticated}
-      sessionExpired={isSessionExpired(state)}
+      isAuthenticated={isAuthenticated && !user?.passwordChangeRequired}
+      sessionExpired={isSessionExpired(state) && !user?.passwordChangeRequired}
       tenantId={tenant?.id ?? null}
       userId={user?.id ?? null}
     >

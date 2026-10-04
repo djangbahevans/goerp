@@ -47,7 +47,7 @@ export function AuthRouterProvider({ router }: AuthRouterProviderProps): ReactNo
   // the same as a sign-out.
   const signedIn =
     auth.isAuthenticated || (isSessionExpired(auth.state) && !isAuthPath(router.state.location.pathname));
-  const gateKey = `${signedIn}:${auth.user?.mfaSetupRequired === true}:${tenantSuspended}:${registryStatus}:${permissionsStatus}`;
+  const gateKey = `${signedIn}:${auth.user?.mfaSetupRequired === true}:${auth.user?.passwordChangeRequired === true}:${tenantSuspended}:${registryStatus}:${permissionsStatus}`;
   useEffect(() => {
     if (
       !sessionSettled ||

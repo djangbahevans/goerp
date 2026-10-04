@@ -24,6 +24,10 @@ const fakeUser = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -71,7 +75,6 @@ const withProviders: Decorator = (Story) => {
   const infinite: InfiniteData<PagedResponse<Notification>> = { pages: [emptyPage], pageParams: [undefined] };
   queryClient.setQueryData(["notifications", 20], infinite);
   queryClient.setQueryData(["notifications", "unread-count"], { count: 2 });
-  // Three overdue or due-today activities for the user menu's badge.
   const today = new Date().toISOString().slice(0, 10);
   const due: PagedResponse<MyScheduledActivity> = {
     data: [1, 2, 3].map((n) => ({

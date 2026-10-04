@@ -19,6 +19,10 @@ const fakeUser = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -67,8 +71,6 @@ const exampleCommands: Command[] = [
 ];
 commandRegistry.register(exampleCommands);
 
-// CommandPalette has no props — it reads auth/router/query-client/permission
-// context directly, so it needs the same providers command-palette.test.tsx wraps it in.
 const withProviders: Decorator = (Story) => {
   const queryClient = new QueryClient();
   const rootRoute = createRootRoute({

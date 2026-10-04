@@ -12,6 +12,7 @@ export interface PasswordFieldProps {
   // autofill/generation behavior, and a wrong silent default is worse than
   // forcing every call site to state its context explicitly.
   autoComplete: "current-password" | "new-password";
+  minLength?: number | undefined;
   error?: string | undefined;
   disabled?: boolean | undefined;
   onBlur?: (() => void) | undefined;
@@ -22,6 +23,7 @@ export function PasswordField({
   value,
   onChange,
   autoComplete,
+  minLength,
   error,
   disabled = false,
   onBlur,
@@ -37,6 +39,7 @@ export function PasswordField({
         id={id}
         type={revealed ? "text" : "password"}
         autoComplete={autoComplete}
+        minLength={minLength}
         value={value}
         disabled={disabled}
         invalid={error !== undefined || undefined}

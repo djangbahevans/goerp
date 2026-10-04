@@ -251,7 +251,6 @@ describe("FetchAPIClient silent refresh on 401", () => {
     const fetchMock = vi.fn(async (url: string) => {
       calls.push(url);
       if (url === "/contacts/1") {
-        // First call 401s, the post-refresh retry succeeds.
         return calls.filter((c) => c === "/contacts/1").length === 1
           ? jsonResponse(401, { error: { code: "unauthenticated" } })
           : jsonResponse(200, { id: "1" });
@@ -318,7 +317,6 @@ describe("FetchAPIClient silent refresh on 401", () => {
     await expect(client.get("/contacts/1")).rejects.toMatchObject({ httpStatus: 401 });
 
     expect(transitionSpy).toHaveBeenCalledWith({ type: "session_expired" });
-    // Exactly one call to the original path (no retry attempted after a failed refresh).
     expect(fetchMock.mock.calls.filter(([url]) => url === "/contacts/1")).toHaveLength(1);
     expect(fetchMock.mock.calls.filter(([url]) => url === "/auth/refresh")).toHaveLength(1);
   });
@@ -333,7 +331,6 @@ describe("FetchAPIClient silent refresh on 401", () => {
           refreshCalls += 1;
           return jsonResponse(200, { expires_in: 900 });
         }
-        // Each distinct URL 401s on its own first attempt, then succeeds.
         if (!firstAttemptDone.has(url)) {
           firstAttemptDone.add(url);
           return jsonResponse(401, { error: { code: "unauthenticated" } });
@@ -393,7 +390,6 @@ describe("FetchAPIClient silent refresh on 401", () => {
 
   it("retries a network error during the refresh call itself", async () => {
     let refreshAttempts = 0;
-    // /contacts/1 401s once to trigger the refresh path, then succeeds.
     let originalAttempts = 0;
     vi.stubGlobal(
       "fetch",
@@ -498,7 +494,6 @@ describe("FetchAPIClient network error retry", () => {
     const client = new FetchAPIClient({ retryBaseDelayMs: 1 });
 
     await expect(client.get("/contacts")).rejects.toThrow("network down");
-    // 1 initial attempt + 3 retries.
     expect(attempts).toBe(4);
   });
 
@@ -616,4 +611,18 @@ describe("FetchAPIClient cli mode", () => {
 
     await client.get("/contacts");
   });
+});
+
+it("flags the session on a 403 password_change_required without refreshing", async () => {
+  const transitionSpy = vi.spyOn(authMachine, "transition");
+  const fetchMock = vi.fn(async () =>
+    jsonResponse(403, { error: { code: "password_change_required", message: "change password" } }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(new FetchAPIClient().get("/contacts/1")).rejects.toMatchObject({
+    httpStatus: 403,
+    code: "password_change_required",
+  });
+  expect(transitionSpy).toHaveBeenCalledWith({ type: "password_change_required" });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });

@@ -30,6 +30,10 @@ const USER: CurrentUser = {
   amr: ["pwd"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system",
   contrast: "system",
   locale: null,
@@ -511,7 +515,6 @@ describe("/settings/security two-factor authentication", () => {
 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(within(section("Two-factor authentication")).getByText(/10 recovery codes left/)).toBeTruthy();
-    // Regenerating signs out the other sessions, so the list is refetched.
     expect(backend.listCalls()).toBeGreaterThan(listsBefore);
   });
 
@@ -544,7 +547,6 @@ describe("/settings/security two-factor authentication", () => {
     const list = await within(sheet).findByRole("list", { name: "Recovery codes" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(10);
 
-    // Shown only once, so the sheet won't close until they're marked saved.
     fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
     expect(screen.getByRole("dialog", { name: "Add authenticator app" })).toBeTruthy();
     fireEvent.click(within(sheet).getByLabelText("I've saved these codes"));

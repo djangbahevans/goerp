@@ -28,6 +28,10 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     amr: [],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    passwordChangeRequired: false,
+    passwordMinLength: 12,
+    phone: null,
+    title: null,
     theme: "system" as const,
     contrast: "system" as const,
     locale: null,
@@ -193,7 +197,6 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(options()[1]?.getAttribute("aria-selected")).toBe("true");
 
-    // Clamps at the last option instead of wrapping back to the first.
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(options()[1]?.getAttribute("aria-selected")).toBe("true");
 

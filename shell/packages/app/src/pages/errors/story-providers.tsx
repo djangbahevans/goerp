@@ -15,6 +15,10 @@ export function storyAuth(roles: string[]): AuthContextValue {
     amr: ["pwd"],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    passwordChangeRequired: false,
+    passwordMinLength: 12,
+    phone: null,
+    title: null,
     theme: "system" as const,
     contrast: "system" as const,
     locale: null,
@@ -49,9 +53,6 @@ export function storyAuth(roles: string[]): AuthContextValue {
   };
 }
 
-// Wraps a story: the error pages' links need a router, the 403 page reads
-// the signed-in user and the view registry, and the tenant-suspended page
-// clears a cached query.
 export function ErrorPageStoryProviders({
   auth = storyAuth([]),
   registry = buildEmptyViewRegistry(),

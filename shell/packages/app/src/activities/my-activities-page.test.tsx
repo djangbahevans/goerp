@@ -30,6 +30,10 @@ function fakeAuth(): AuthContextValue {
     amr: [],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    passwordChangeRequired: false,
+    passwordMinLength: 12,
+    phone: null,
+    title: null,
     theme: "system" as const,
     contrast: "system" as const,
     locale: null,
@@ -160,14 +164,12 @@ describe("MyActivitiesPage", () => {
     await waitFor(() =>
       expect(within(overdueRow).getByRole("link", { name: "SO-0007" }).getAttribute("href")).toBe("/_m/orders/o7"),
     );
-    // One copy per layout: beside the summary from sm up, on the record line below it.
     const dates = within(overdueRow).getAllByText(dueLabel(addDays(today, -3), today));
     expect(dates).toHaveLength(2);
     for (const date of dates) expect(date.className).toContain("text-danger");
 
     const todayRow = within(group("Today")).getByRole("listitem");
     for (const date of within(todayRow).getAllByText("Today")) expect(date.className).not.toContain("text-danger");
-    // No form view and no display name: the record id, as plain text.
     expect(within(todayRow).getByText("n1").closest("a")).toBeNull();
   });
 

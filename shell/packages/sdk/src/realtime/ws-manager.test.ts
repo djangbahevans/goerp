@@ -13,6 +13,10 @@ const user: CurrentUser = {
   amr: ["pwd"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -441,4 +445,17 @@ describe("wireWebSocketManager", () => {
 
     expect(machine.getState()).toMatchObject({ status: "unauthenticated", sessionExpired: true });
   });
+});
+
+it("keeps a restricted session disconnected until its password change is accepted", () => {
+  const machine = new AuthMachine();
+  const manager = wireWebSocketManager(machine, testManager());
+  machine.transition({ type: "check_session" });
+  machine.transition({ type: "session_checked", user: { ...user, passwordChangeRequired: true }, tenant });
+  expect(FakeSocket.instances).toHaveLength(0);
+  machine.transition({ type: "session_reloaded", user, tenant });
+  expect(FakeSocket.instances).toHaveLength(1);
+  machine.transition({ type: "password_change_required" });
+  expect(latestSocket().closed).toBe(true);
+  manager.disconnect();
 });

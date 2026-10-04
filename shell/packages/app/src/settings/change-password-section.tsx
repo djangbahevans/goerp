@@ -6,8 +6,6 @@ import { useLocation } from "@tanstack/react-router";
 import { type ReactNode, type SubmitEvent, useEffect, useRef, useState } from "react";
 import { PASSWORD_MISMATCH, policyMessageAsSentence } from "../auth/password-messages.js";
 
-// The #change-password anchor the password update banner links to
-// (shell-ux.md §2.1, §4.1).
 export const CHANGE_PASSWORD_ANCHOR = "change-password";
 
 interface FieldErrors {
@@ -16,11 +14,16 @@ interface FieldErrors {
   confirm?: string | undefined;
 }
 
-// shell-ux.md §4.1 "Change password section". Independent of the profile
-// form's "Save changes": it's a separate request that signs out every other
-// session.
-export function ChangePasswordSection(): ReactNode {
-  const { changePassword, tenant } = useAuth();
+export function ChangePasswordSection({
+  restricted = false,
+  onChanged,
+  onBusyChange,
+}: {
+  restricted?: boolean;
+  onChanged?: (() => Promise<void>) | undefined;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
+}): ReactNode {
+  const { changePassword, user } = useAuth();
   const hash = useLocation({ select: (location) => location.hash });
   const sectionRef = useRef<HTMLDivElement>(null);
 
@@ -32,15 +35,15 @@ export function ChangePasswordSection(): ReactNode {
   // A 422's details.min_length is the rule the engine applied, should the
   // tenant's policy have changed since the session was loaded.
   const [rejectedMinLength, setRejectedMinLength] = useState<number | null>(null);
-  const minLength = rejectedMinLength ?? tenant?.passwordMinLength ?? GLOBAL_PASSWORD_MIN_LENGTH;
+  const minLength = rejectedMinLength ?? user?.passwordMinLength ?? GLOBAL_PASSWORD_MIN_LENGTH;
 
   useEffect(() => {
-    if (hash !== CHANGE_PASSWORD_ANCHOR) return;
+    if (!restricted && hash !== CHANGE_PASSWORD_ANCHOR) return;
     const section = sectionRef.current;
     if (!section) return;
     section.scrollIntoView?.({ block: "start" });
     section.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')?.focus();
-  }, [hash]);
+  }, [hash, restricted]);
 
   const handleConfirmBlur = () => {
     setErrors((e) => ({ ...e, confirm: confirm && confirm !== next ? PASSWORD_MISMATCH : undefined }));
@@ -59,12 +62,14 @@ export function ChangePasswordSection(): ReactNode {
     if (Object.keys(found).length > 0) return;
 
     setSubmitting(true);
+    onBusyChange?.(true);
     try {
       await changePassword({ currentPassword: current, newPassword: next });
       setCurrent("");
       setNext("");
       setConfirm("");
       toast.success("Password updated. Other sessions were signed out.");
+      await onChanged?.();
     } catch (err) {
       if (isAppError(err) && err.code === "invalid_password") {
         setCurrent("");
@@ -77,12 +82,18 @@ export function ChangePasswordSection(): ReactNode {
       }
     } finally {
       setSubmitting(false);
+      onBusyChange?.(false);
     }
   };
 
   return (
     <div id={CHANGE_PASSWORD_ANCHOR} ref={sectionRef} className="scroll-mt-(--space-4)">
       <SectionCard title="Change password">
+        {restricted && (
+          <p className="mb-4 text-sm text-text-secondary">
+            Changing your password signs you out of your other sessions in every organisation.
+          </p>
+        )}
         <form noValidate onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
           <PasswordField
             label="Current password"
@@ -96,12 +107,12 @@ export function ChangePasswordSection(): ReactNode {
             <PasswordField
               label="New password"
               autoComplete="new-password"
+              minLength={minLength}
               value={next}
               onChange={setNext}
               error={errors.next}
               disabled={submitting}
             />
-            {/* Guidance only: the server's tenant policy decides. */}
             <PasswordStrengthMeter password={next} minLength={minLength} />
           </div>
           <PasswordField

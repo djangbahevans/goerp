@@ -21,6 +21,10 @@ const me = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -159,7 +163,6 @@ export const STORY_ACTIVITY: Record<string, FakeActivity[]> = {
   ],
 };
 
-// A story's beforeEach: installs the in-memory backend and returns its cleanup.
 export function fakeBackend(options: Partial<FakeBackendOptions> = {}) {
   return () => {
     const backend = installFakeAdminUsersBackend({

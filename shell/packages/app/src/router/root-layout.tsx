@@ -1,3 +1,4 @@
+import { isSessionExpired, useAuth, useTenantSuspended } from "@goerp/sdk/auth";
 import { ConfirmDialogHost, Toast } from "@goerp/sdk/components";
 import { ModuleNavigationProvider } from "@goerp/sdk/react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
@@ -5,6 +6,7 @@ import { isAuthPath } from "../auth/safe-redirect.js";
 import { SessionExpiredGate } from "../auth/session-expired-modal.js";
 import { ChromeLayout, CommandPalette } from "../chrome/index.js";
 import { isErrorPath, rendersErrorPage } from "../pages/errors/index.js";
+import { RestrictedPasswordPage } from "../settings/restricted-password-page.js";
 import { GlobalShortcuts, KeyboardShortcutsDialog } from "../shortcuts/index.js";
 import { useModuleNavigate } from "./use-module-navigate.js";
 
@@ -20,6 +22,22 @@ export function RootLayout() {
     },
   });
   const navigate = useModuleNavigate();
+  const { user, state, isAuthenticated } = useAuth();
+  const tenantSuspended = useTenantSuspended();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const restricted =
+    user?.passwordChangeRequired &&
+    !tenantSuspended &&
+    (isAuthenticated || (isSessionExpired(state) && !isAuthPath(pathname)));
+  if (restricted) {
+    return (
+      <>
+        <RestrictedPasswordPage />
+        <Toast />
+        <SessionExpiredGate />
+      </>
+    );
+  }
   return (
     <ModuleNavigationProvider navigate={navigate}>
       {bare ? <Outlet /> : <ChromeLayout />}

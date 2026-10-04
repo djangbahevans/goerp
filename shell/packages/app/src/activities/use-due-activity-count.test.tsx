@@ -26,6 +26,10 @@ function auth(timezone: string | null, defaultTimezone = "UTC"): AuthContextValu
     amr: [],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    passwordChangeRequired: false,
+    passwordMinLength: 12,
+    phone: null,
+    title: null,
     theme: "system" as const,
     contrast: "system" as const,
     locale: null,
@@ -88,7 +92,6 @@ describe("useDueActivityCount", () => {
     const { result } = renderHook(useDueActivityCount, { wrapper: wrapper() });
 
     await waitFor(() => expect(result.current).toBe(MY_ACTIVITIES_PAGE_SIZE + 11));
-    // The second page ends past today, so the third is never requested.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fake.requests).toHaveLength(2);
   });

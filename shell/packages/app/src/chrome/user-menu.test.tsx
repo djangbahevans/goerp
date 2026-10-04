@@ -27,6 +27,10 @@ function fakeAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
     amr: [],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    passwordChangeRequired: false,
+    passwordMinLength: 12,
+    phone: null,
+    title: null,
     theme: "system" as const,
     contrast: "system" as const,
     locale: null,
@@ -93,8 +97,6 @@ async function renderUserMenu(auth: AuthContextValue = fakeAuth()) {
   return router;
 }
 
-// GET /_meta/scheduled-activities/mine answering with one page of
-// activities due on the given dates.
 function mockMyActivities(dueDates: string[]) {
   const data = dueDates.map((due_date, i) => ({
     id: `s${i}`,
@@ -264,6 +266,10 @@ describe("UserMenu", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -285,6 +291,10 @@ describe("UserMenu", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -306,6 +316,10 @@ describe("UserMenu", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
