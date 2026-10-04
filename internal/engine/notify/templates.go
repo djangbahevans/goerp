@@ -1,8 +1,8 @@
 package notify
 
 import (
-	"cmp"
 	"context"
+	"maps"
 	"slices"
 
 	"github.com/djangbahevans/goerp/internal/engine/notifications"
@@ -15,22 +15,45 @@ import (
 // closest first.
 type sendTemplates map[string][]notiftemplate.Row
 
-// loadSendTemplates loads templateKey's rows for userLocale's fallback
-// locales from tenantSlug's notification_templates.
 func loadSendTemplates(ctx context.Context, store *notifications.Store, tenantSlug, templateKey, userLocale string) (sendTemplates, error) {
-	candidates := notiftemplate.LocaleCandidates(userLocale)
-	rows, err := store.Templates(ctx, tenantSlug, templateKey, candidates)
+	templates, err := loadSendTemplatesForLocales(ctx, store, tenantSlug, templateKey, map[string]bool{userLocale: true})
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(rows, func(a, b notifications.StoredTemplate) int {
-		return cmp.Compare(slices.Index(candidates, a.Locale), slices.Index(candidates, b.Locale))
-	})
-	st := sendTemplates{}
-	for _, r := range rows {
-		st[r.Channel] = append(st[r.Channel], r.Row)
+
+	return templates[userLocale], nil
+}
+
+func loadSendTemplatesForLocales(ctx context.Context, store *notifications.Store, tenantSlug, templateKey string, userLocales map[string]bool) (map[string]sendTemplates, error) {
+	candidates := make(map[string]bool)
+	for locale := range userLocales {
+		for _, candidate := range notiftemplate.LocaleCandidates(locale) {
+			candidates[candidate] = true
+		}
 	}
-	return st, nil
+
+	rows, err := store.Templates(ctx, tenantSlug, templateKey, slices.Collect(maps.Keys(candidates)))
+	if err != nil {
+		return nil, err
+	}
+
+	byLocale := make(map[string][]notiftemplate.Row)
+	for _, row := range rows {
+		byLocale[row.Locale] = append(byLocale[row.Locale], row.Row)
+	}
+
+	templates := make(map[string]sendTemplates, len(userLocales))
+	for locale := range userLocales {
+		st := sendTemplates{}
+		for _, candidate := range notiftemplate.LocaleCandidates(locale) {
+			for _, row := range byLocale[candidate] {
+				st[row.Channel] = append(st[row.Channel], row)
+			}
+		}
+		templates[locale] = st
+	}
+
+	return templates, nil
 }
 
 // part returns the columns cols of channel's template from the closest
