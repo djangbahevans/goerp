@@ -113,6 +113,71 @@ func TestDispatchHandler_PathParamsReachBuiltinHandlerViaContext(t *testing.T) {
 	}
 }
 
+func TestRouteResolutionMiddleware_MatchesEscapedPath(t *testing.T) {
+	reg := &registry.ModuleRegistry{}
+	if _, err := reg.Update(map[string]*module.LoadedModule{
+		"contacts": {
+			Manifest: manifest.Manifest{Type: "standard"},
+			ExplicitRoutes: []engine.RouteDeclaration{
+				{Method: "GET", Path: "/by-email/{email}"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+
+	var got *routeResolution
+	h := routeResolutionMiddleware(reg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = routeResolutionFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	tests := []struct {
+		name, target, wantEmail string
+	}{
+		{"encoded slash in parameter", "/contacts/by-email/a%2Bb%2Fc%40d.test", "a+b/c@d.test"},
+		{"unencoded parameter", "/contacts/by-email/a+b@d.test", "a+b@d.test"},
+		{"encoded literal segment", "/con%74acts/by-email/a%2Fb", "a/b"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got = nil
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.target, nil))
+
+			if w.Code != http.StatusOK || got == nil {
+				t.Fatalf("status = %d, want the route resolved; body: %s", w.Code, w.Body.String())
+			}
+			if got.entry.PathTemplate != "/contacts/by-email/{email}" {
+				t.Errorf("PathTemplate = %q, want /contacts/by-email/{email}", got.entry.PathTemplate)
+			}
+			if email := got.pathParams["email"]; email != tc.wantEmail {
+				t.Errorf("params[email] = %q, want %q", email, tc.wantEmail)
+			}
+		})
+	}
+}
+
+func TestModuleRelativePath(t *testing.T) {
+	tests := []struct {
+		name, escapedPath, prefix, want string
+	}{
+		{"keeps parameter escaping", "/contacts/by-email/a%2Bb%2Fc%40d.test", "/contacts", "/by-email/a%2Bb%2Fc%40d.test"},
+		{"module root", "/contacts", "/contacts", "/"},
+		{"module root with trailing slash", "/contacts/", "/contacts", "/"},
+		{"encoded prefix", "/con%74acts/a%2Fb", "/contacts", "/a%2Fb"},
+		{"duplicate slashes", "//contacts//orders/1", "/contacts", "/orders/1"},
+		{"connector prefix", "/connectors/connector_paystack/hooks/x%2Fy", "/connectors/connector_paystack", "/hooks/x%2Fy"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := moduleRelativePath(tc.escapedPath, tc.prefix); got != tc.want {
+				t.Errorf("moduleRelativePath(%q, %q) = %q, want %q", tc.escapedPath, tc.prefix, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDispatchHandler_UnknownPathReturns404(t *testing.T) {
 	h := testDispatchHandler(t)
 
