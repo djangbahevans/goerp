@@ -4,7 +4,7 @@
 // channel recipient, and each non-in_app channel's delivery job — then
 // push the new feed entry to the recipient's open sessions (§9).
 //
-// Module code reaches it through host.notify.send (goerp#1288); the engine
+// Module code reaches it through host.notify.send; the engine
 // calls it directly for its own engine.* types. The two differ only in
 // whose declaration the type is checked against.
 package notify
@@ -29,14 +29,12 @@ import (
 	"github.com/djangbahevans/goerp/internal/engine/providerselect"
 	"github.com/djangbahevans/goerp/internal/engine/registry"
 	"github.com/djangbahevans/goerp/internal/engine/tenant"
-	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/djangbahevans/goerp/internal/engine/ws"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// Priorities a notification type or a send can ask for.
 const (
 	PriorityNormal = "normal"
 	PriorityHigh   = "high"
@@ -143,7 +141,7 @@ type TenantLookup interface {
 // MembershipChecker reports whether a user belongs to a tenant — satisfied
 // by *role.Store.
 type MembershipChecker interface {
-	IsMember(ctx context.Context, tenantSlug, userID string) (bool, error)
+	CheckMemberships(ctx context.Context, tenantSlug string, userIDs []string) (map[string]bool, error)
 }
 
 // Broadcaster pushes a message to one user's subscribers of a channel in
@@ -184,6 +182,7 @@ func (s *Sender) Send(ctx context.Context, tenantID, moduleName, notificationTyp
 	if err != nil {
 		return nil, err
 	}
+
 	return results[0], nil
 }
 
@@ -197,7 +196,8 @@ func (s *Sender) SendTx(ctx context.Context, tx *sql.Tx, tenantID, moduleName, n
 	if err != nil {
 		return nil, err
 	}
-	p, err := s.prepareRecipient(ctx, spec, userID, data, opts)
+
+	prepared, err := s.prepareRecipients(ctx, spec, uniqueUsers([]string{userID}), data, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,8 @@ func (s *Sender) SendTx(ctx context.Context, tx *sql.Tx, tenantID, moduleName, n
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT notify_send"); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTxAborted, err)
 	}
-	res, err := s.write(ctx, tx, p)
+
+	res, err := s.write(ctx, tx, prepared[0])
 	if err != nil {
 		if _, rbErr := tx.ExecContext(context.WithoutCancel(ctx), "ROLLBACK TO SAVEPOINT notify_send"); rbErr != nil {
 			return nil, errors.Join(err, fmt.Errorf("%w: %w", ErrTxAborted, rbErr))
@@ -235,11 +236,9 @@ func (s *Sender) SendBulk(ctx context.Context, tenantID, moduleName, notificatio
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
-	prepared := make([]*preparedSend, len(userIDs))
-	for i, userID := range userIDs {
-		if prepared[i], err = s.prepareRecipient(ctx, spec, userID, data, opts); err != nil {
-			return nil, err
-		}
+	prepared, err := s.prepareRecipients(ctx, spec, userIDs, data, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -263,7 +262,6 @@ func (s *Sender) SendBulk(ctx context.Context, tenantID, moduleName, notificatio
 	return results, nil
 }
 
-// sendSpec is what a send resolves once, whoever it goes to.
 type sendSpec struct {
 	tenant           *tenant.Tenant
 	cfg              *notifconfig.Config
@@ -275,7 +273,6 @@ type sendSpec struct {
 	// providers memoizes resolveProvider by category: every recipient of a
 	// send shares its tenant's provider.
 	providers map[string]string
-	// templates memoizes the send's templates by recipient locale.
 	templates map[string]sendTemplates
 }
 
@@ -321,28 +318,18 @@ func (s *Sender) prepareSend(ctx context.Context, tenantID, moduleName, notifica
 	return &sendSpec{
 		tenant: t, cfg: cfg,
 		moduleName: moduleName, notificationType: notificationType, declared: nt, priority: priority,
-		providers: make(map[string]string), templates: make(map[string]sendTemplates),
+		providers: make(map[string]string),
 	}, nil
 }
 
-// prepareRecipient routes spec's send to userID and renders its in_app
-// content. It only reads, so a send runs it outside the transaction.
-func (s *Sender) prepareRecipient(ctx context.Context, spec *sendSpec, userID string, data map[string]any, opts Options) (*preparedSend, error) {
+func (s *Sender) prepareRecipient(ctx context.Context, spec *sendSpec, user *recipient, data map[string]any, opts Options) (*preparedSend, error) {
 	t := spec.tenant
-	user, err := s.loadRecipient(ctx, t.Slug, userID)
-	if err != nil {
-		return nil, err
-	}
-	prefs, err := s.Store.Preferences(ctx, t.Slug, t.ID, userID)
-	if err != nil {
-		return nil, err
-	}
 
 	routed := route(routeInput{
 		notificationType: spec.notificationType,
 		manifestDefaults: spec.declared.DefaultChannels,
 		available:        spec.declared.AvailableChannels,
-		prefs:            prefs,
+		prefs:            user.prefs,
 		config:           spec.cfg,
 		force:            opts.ForceChannels,
 		additional:       opts.AdditionalChannels,
@@ -352,13 +339,7 @@ func (s *Sender) prepareRecipient(ctx context.Context, spec *sendSpec, userID st
 		return nil, err
 	}
 
-	tmpls, ok := spec.templates[user.locale]
-	if !ok {
-		if tmpls, err = loadSendTemplates(ctx, s.Store, t.Slug, spec.notificationType, user.locale); err != nil {
-			return nil, err
-		}
-		spec.templates[user.locale] = tmpls
-	}
+	tmpls := spec.templates[user.locale]
 	vars := templateVars(data, t, user, opts)
 	content, err := renderInApp(tmpls, spec.declared.Label, vars)
 	if err != nil {
@@ -370,13 +351,11 @@ func (s *Sender) prepareRecipient(ctx context.Context, spec *sendSpec, userID st
 	provider := renderProviderChannels(tmpls, plan, content, vars)
 
 	return &preparedSend{
-		sendSpec: spec, userID: userID, data: data, plan: plan, content: content, provider: provider,
+		sendSpec: spec, userID: user.id, data: data, plan: plan, content: content, provider: provider,
 		traceID: opts.TraceID, idempotencyKey: opts.IdempotencyKey,
 	}, nil
 }
 
-// write inserts p's feed row, its delivery rows and its delivery jobs on
-// tx.
 func (s *Sender) write(ctx context.Context, tx *sql.Tx, p *preparedSend) (*Result, error) {
 	t := p.tenant
 	n, created, err := notifications.CreateTx(ctx, tx, t.Slug, notifications.NewNotification{
@@ -450,47 +429,6 @@ func (s *Sender) Announce(ctx context.Context, res *Result) {
 	}
 }
 
-// recipient is the user a notification goes to, as delivery needs them.
-type recipient struct {
-	id     string
-	email  string
-	name   string
-	locale string
-	phone  string
-}
-
-// loadRecipient loads userID, who must be a member of the tenant: a
-// notification carries the tenant's data to wherever it is delivered.
-func (s *Sender) loadRecipient(ctx context.Context, tenantSlug, userID string) (*recipient, error) {
-	if _, err := uuid.Parse(userID); err != nil {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownUser, userID)
-	}
-	member, err := s.Members.IsMember(ctx, tenantSlug, userID)
-	if err != nil {
-		return nil, fmt.Errorf("check notification recipient membership: %w", err)
-	}
-	if !member {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownUser, userID)
-	}
-	u := &recipient{id: userID}
-	// The phone is the number the member gave this tenant (auth-internals.md
-	// §2 "Tenant members"), never one given to another.
-	err = s.DB.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT u.email, COALESCE(p.name, ''), COALESCE(p.locale, ''), COALESCE(tm.phone, '')
-		FROM system.users u
-		LEFT JOIN system.user_profiles p ON p.user_id = u.id
-		LEFT JOIN %s.tenant_members tm ON tm.user_id = u.id
-		WHERE u.id = $1 AND u.deleted_at IS NULL
-	`, tenantschema.Name(tenantSlug)), userID).Scan(&u.email, &u.name, &u.locale, &u.phone)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownUser, userID)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load notification recipient: %w", err)
-	}
-	return u, nil
-}
-
 // channelPlan is one routed channel's deliveries: every address it goes
 // to, and the provider that sends it (the email adapter's name, or the
 // connector module a provider category resolved to).
@@ -505,10 +443,8 @@ type planRecipient struct {
 	platform string // push only
 }
 
-// planDeliveries is routing step 5: it keeps each routed channel that can
-// actually reach user, with its recipients, and drops the rest.
 func (s *Sender) planDeliveries(ctx context.Context, spec *sendSpec, user *recipient, channels []string) ([]channelPlan, error) {
-	t, cfg := spec.tenant, spec.cfg
+	cfg := spec.cfg
 	var plan []channelPlan
 	for _, ch := range channels {
 		switch ch {
@@ -542,15 +478,11 @@ func (s *Sender) planDeliveries(ctx context.Context, spec *sendSpec, user *recip
 			if provider == "" {
 				continue
 			}
-			tokens, err := s.Store.DeviceTokens(ctx, t.Slug, t.ID, user.id)
-			if err != nil {
-				return nil, err
-			}
-			if len(tokens) == 0 {
+			if len(user.tokens) == 0 {
 				continue
 			}
 			p := channelPlan{channel: ch, provider: provider}
-			for _, tok := range tokens {
+			for _, tok := range user.tokens {
 				p.recipients = append(p.recipients, planRecipient{address: tok.Token, platform: tok.Platform})
 			}
 			plan = append(plan, p)
