@@ -197,6 +197,9 @@ export class FetchAPIClient implements APIClient, SessionRefresher {
       if (response.status === 403 && body.code === "mfa_setup_required") {
         authMachine.transition({ type: "mfa_setup_required" });
       }
+      if (response.status === 403 && body.code === "password_change_required") {
+        authMachine.transition({ type: "password_change_required" });
+      }
       const error = toAppError(response, body);
       noteTenantSuspension(error);
       throw error;

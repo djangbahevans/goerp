@@ -17,6 +17,10 @@ const user = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -64,8 +68,6 @@ const allLinks: HelpLink[] = [
   { label: "What's new", icon: "sparkles", href: "https://example.com/changelog" },
 ];
 
-// The shortcuts section reads auth, router, query client, permissions and
-// the global command registry, so each story gets those here.
 const withShell: Decorator = (Story) => {
   const queryClient = new QueryClient();
   const rootRoute = createRootRoute({

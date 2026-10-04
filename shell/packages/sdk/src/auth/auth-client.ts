@@ -45,6 +45,10 @@ interface MeResponseBody {
     amr: string[];
     mfa_verified_at: string | null;
     mfa_setup_required?: boolean;
+    password_change_required: boolean;
+    password_min_length: number;
+    phone: string | null;
+    title: string | null;
     theme: ThemePreference;
     contrast: ContrastPreference;
     locale: string | null;
@@ -74,6 +78,10 @@ function mapUser(user: MeResponseBody["user"]): CurrentUser {
     amr: user.amr,
     mfaVerifiedAt: user.mfa_verified_at,
     mfaSetupRequired: user.mfa_setup_required === true,
+    passwordChangeRequired: user.password_change_required === true,
+    passwordMinLength: minLengthOr(user.password_min_length),
+    phone: user.phone ?? null,
+    title: user.title ?? null,
     theme: user.theme,
     contrast: user.contrast,
     locale: user.locale,
@@ -194,7 +202,7 @@ export async function fetchTenantContext(): Promise<TenantContext | null> {
 }
 
 export type LoginResult =
-  | { kind: "authenticated"; passwordUpdateRecommended: boolean }
+  | { kind: "authenticated"; passwordUpdateRecommended: boolean; passwordUpdateDeadline: string | null }
   | { kind: "mfa_required"; challengeToken: string; methods: MFAMethod[] }
   | { kind: "handoff"; handoff: SignInHandoff };
 
@@ -204,6 +212,7 @@ type LoginResponseBody = {
   mfa_token?: string;
   mfa_methods?: MFAMethod[];
   password_update_recommended?: boolean;
+  password_update_deadline?: string;
 };
 
 function toLoginResult(body: LoginResponseBody): LoginResult {
@@ -211,7 +220,11 @@ function toLoginResult(body: LoginResponseBody): LoginResult {
   if (body.mfa_required && body.mfa_token) {
     return { kind: "mfa_required", challengeToken: body.mfa_token, methods: body.mfa_methods ?? [] };
   }
-  return { kind: "authenticated", passwordUpdateRecommended: body.password_update_recommended === true };
+  return {
+    kind: "authenticated",
+    passwordUpdateRecommended: body.password_update_recommended === true,
+    passwordUpdateDeadline: body.password_update_deadline ?? null,
+  };
 }
 
 // The login response contains no user or tenant data; a session reload supplies the authenticated identity.
@@ -272,7 +285,10 @@ function verificationBody(input: MFAVerification) {
     : { type: input.type, code: input.code };
 }
 
-export async function verifyMFA(challengeToken: string, input: MFAVerification): Promise<boolean> {
+export async function verifyMFA(
+  challengeToken: string,
+  input: MFAVerification,
+): Promise<{ recommended: boolean; deadline: string | null }> {
   const response = await fetch("/auth/mfa/verify", {
     method: "POST",
     credentials: "include",
@@ -280,8 +296,8 @@ export async function verifyMFA(challengeToken: string, input: MFAVerification):
     body: JSON.stringify({ mfa_token: challengeToken, ...verificationBody(input) }),
   });
   if (!response.ok) throw await readError(response);
-  const body = (await response.json().catch(() => ({}))) as { password_update_recommended?: boolean };
-  return body.password_update_recommended === true;
+  const body = (await response.json().catch(() => ({}))) as LoginResponseBody;
+  return { recommended: body.password_update_recommended === true, deadline: body.password_update_deadline ?? null };
 }
 
 export async function updateProfile(input: UpdateProfileInput): Promise<void> {
@@ -289,7 +305,7 @@ export async function updateProfile(input: UpdateProfileInput): Promise<void> {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: input.name, avatar_id: input.avatarId }),
+    body: JSON.stringify({ name: input.name, avatar_id: input.avatarId, phone: input.phone, title: input.title }),
   });
   if (!response.ok) throw await readError(response);
 }

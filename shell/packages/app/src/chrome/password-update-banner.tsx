@@ -1,4 +1,5 @@
-import { usePasswordUpdateNotice } from "@goerp/sdk/auth";
+import { useAuth, usePasswordUpdateNotice } from "@goerp/sdk/auth";
+import { useLocale } from "@goerp/sdk/i18n";
 import type { ReactNode } from "react";
 import { ChromeBanner } from "./chrome-banner.js";
 
@@ -6,9 +7,18 @@ export interface PasswordUpdateBannerProps {
   onDismissed: () => void;
 }
 
-// components/chrome-banner.md "PasswordUpdateBanner" (shell-ux.md §2.1).
 export function PasswordUpdateBanner({ onDismissed }: PasswordUpdateBannerProps): ReactNode {
-  const { recommended, dismiss } = usePasswordUpdateNotice();
+  const { recommended, deadline, dismiss } = usePasswordUpdateNotice();
+  const { tenant, user } = useAuth();
+  const { locale } = useLocale();
+  const date = deadline ? new Date(deadline) : null;
+  const formattedDeadline =
+    date && !Number.isNaN(date.getTime())
+      ? new Intl.DateTimeFormat(locale, {
+          dateStyle: "long",
+          timeZone: user?.timezone ?? tenant?.defaultTimezone ?? "UTC",
+        }).format(date)
+      : null;
   if (!recommended) return null;
 
   return (
@@ -21,7 +31,14 @@ export function PasswordUpdateBanner({ onDismissed }: PasswordUpdateBannerProps)
       }}
       dismissLabel="Dismiss password notice"
     >
-      Your organization has updated its password requirements. Update your password to keep your account secure.
+      Your password doesn't meet {tenant?.name ?? "your organisation"}'s requirements. Update it to keep your account
+      secure.
+      {formattedDeadline && (
+        <>
+          {" "}
+          You'll need to change it by {formattedDeadline} to keep using {tenant?.name ?? "your organisation"}.
+        </>
+      )}
     </ChromeBanner>
   );
 }

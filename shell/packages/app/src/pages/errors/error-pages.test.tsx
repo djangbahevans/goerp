@@ -33,6 +33,10 @@ function authWithRoles(roles: string[], overrides: Partial<AuthContextValue> = {
     amr: ["pwd"],
     mfaVerifiedAt: null,
     mfaSetupRequired: false,
+    passwordChangeRequired: false,
+    passwordMinLength: 12,
+    phone: null,
+    title: null,
     theme: "system" as const,
     contrast: "system" as const,
     locale: null,
@@ -68,8 +72,6 @@ function authWithRoles(roles: string[], overrides: Partial<AuthContextValue> = {
   };
 }
 
-// Renders `page` at /start, after /previous in history, with / and
-// /auth/login routes to navigate to.
 async function renderPage(
   page: ReactNode,
   {

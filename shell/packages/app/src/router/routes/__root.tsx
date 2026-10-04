@@ -7,7 +7,7 @@ import {
 } from "@goerp/sdk/auth";
 import type { LoadStatus, ViewRegistry } from "@goerp/sdk/schema";
 import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
-import { isAuthPath } from "../../auth/safe-redirect.js";
+import { isAuthPath, safeRedirect } from "../../auth/safe-redirect.js";
 import { NotFoundPage } from "../../pages/errors/index.js";
 import { RootLayout } from "../root-layout.js";
 
@@ -32,6 +32,20 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     // in or not, so its page is exempt from the sign-in gate below.
     if (location.pathname === TENANT_SUSPENDED_PATH) return;
     if (tenantSuspension.get()) throw redirect({ to: TENANT_SUSPENDED_PATH });
+    if (context.auth.isAuthenticated && context.auth.user?.passwordChangeRequired) {
+      const isPasswordPage = location.pathname === "/settings/profile";
+      if (isPasswordPage && location.hash === "change-password") return;
+      const onward =
+        isAuthPath(location.pathname) || isPasswordPage
+          ? (location.search as { redirect?: unknown }).redirect
+          : location.href;
+      throw redirect({
+        to: "/settings/profile",
+        hash: "change-password",
+        search: { redirect: safeRedirect(onward) },
+        replace: true,
+      });
+    }
     // shell-ux.md §2.7: a user the tenant requires to enroll in MFA stays on
     // the setup wizard until it's done.
     if (

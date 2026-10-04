@@ -11,6 +11,11 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChromeLayout } from "./chrome-layout.js";
 
+vi.mock("@goerp/sdk/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@goerp/sdk/auth")>()),
+  useAuth: () => ({ tenant: { name: "Acme", defaultTimezone: "UTC" }, user: { timezone: "UTC" } }),
+}));
+
 vi.mock("./chrome-header.js", () => ({
   ChromeHeader: () => (
     <header>
@@ -103,7 +108,7 @@ describe("ChromeLayout", () => {
     const main = screen.getByRole("main");
     expect(header.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(status.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(status.textContent).toContain("updated its password requirements");
+    expect(status.textContent).toContain("Your password doesn't meet Acme's requirements");
   });
 
   it("moves focus to <main> when a banner is dismissed", async () => {
@@ -190,4 +195,13 @@ describe("ChromeLayout below 768px", () => {
     expect(screen.queryByText("bottom bar")).toBeNull();
     expect(screen.getByRole("main").parentElement?.className).not.toContain("--bottom-nav-height");
   });
+});
+
+it("formats a password update deadline in the user's locale", async () => {
+  localeStore.setLocale("fr");
+  passwordUpdateNotice.set(true, "2026-10-20T12:00:00Z");
+  await renderLayout();
+  expect(screen.getByRole("status").textContent).toContain(
+    "You'll need to change it by 20 octobre 2026 to keep using Acme.",
+  );
 });

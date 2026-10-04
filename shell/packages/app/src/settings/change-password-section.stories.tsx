@@ -16,6 +16,10 @@ const fakeUser = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -81,7 +85,6 @@ type Story = StoryObj<typeof meta>;
 
 async function fillAndSubmit(canvasElement: HTMLElement, current: string, next: string, confirm: string) {
   const canvas = within(canvasElement);
-  // RouterProvider renders asynchronously, after play starts.
   await userEvent.type(await canvas.findByLabelText("Current password"), current);
   await userEvent.type(canvas.getByLabelText("New password"), next);
   await userEvent.type(canvas.getByLabelText("Confirm new password"), confirm);

@@ -12,6 +12,10 @@ const user: CurrentUser = {
   amr: ["pwd"],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -251,5 +255,19 @@ describe("isSessionExpired and sessionIdentity", () => {
     expect(sessionIdentity({ status: "refreshing", user, tenant })).toEqual({ user, tenant });
     expect(sessionIdentity({ status: "unauthenticated" })).toBeNull();
     expect(sessionIdentity({ status: "logging_out" })).toBeNull();
+  });
+});
+
+describe("password_change_required", () => {
+  it.each(["authenticated", "refreshing"] as const)("restricts a %s session and clears it on reload", (status) => {
+    const initial: AuthState = { status, user, tenant };
+    const restricted = authTransition(initial, { type: "password_change_required" });
+    expect(restricted).toEqual({ status, user: { ...user, passwordChangeRequired: true }, tenant });
+    expect(authTransition(restricted, { type: "password_change_required" })).toBe(restricted);
+    expect(authTransition(restricted, { type: "session_reloaded", user, tenant })).toEqual(initial);
+  });
+  it("ignores a late restriction response after sign-out", () => {
+    const initial: AuthState = { status: "unauthenticated" };
+    expect(authTransition(initial, { type: "password_change_required" })).toBe(initial);
   });
 });

@@ -15,6 +15,10 @@ export interface CurrentUser {
   // auth-internals.md §8 "MFA enrollment": the tenant requires MFA and the
   // user has no factor yet, so the shell holds them on /auth/mfa-setup.
   mfaSetupRequired: boolean;
+  passwordChangeRequired: boolean;
+  passwordMinLength: number;
+  phone: string | null;
+  title: string | null;
   theme: ThemePreference;
   contrast: ContrastPreference;
   // BCP 47; null = the tenant's defaultLocale.
@@ -191,6 +195,7 @@ export type AuthEvent =
   | { type: "logout_complete" }
   | { type: "profile_updated"; user: CurrentUser }
   | { type: "mfa_setup_required" }
+  | { type: "password_change_required" }
   | { type: "session_reloaded"; user: CurrentUser; tenant: CurrentTenant };
 
 export interface ChangePasswordInput {
@@ -200,6 +205,8 @@ export interface ChangePasswordInput {
 
 export interface UpdateProfileInput {
   name: string;
+  phone?: string | null | undefined;
+  title?: string | null | undefined;
   avatarId?: string | undefined;
 }
 

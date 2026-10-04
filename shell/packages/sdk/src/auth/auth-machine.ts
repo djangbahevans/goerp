@@ -81,7 +81,6 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
         : state;
 
     case "logout_started":
-      // Signing out of an expired session drops the user and tenant it kept.
       return state.status === "authenticated" || state.status === "refreshing" || isSessionExpired(state)
         ? { status: "logging_out" }
         : state;
@@ -90,10 +89,13 @@ export function authTransition(state: AuthState, event: AuthEvent): AuthState {
       return state.status === "logging_out" ? { status: "unauthenticated" } : state;
 
     case "mfa_setup_required":
-      // A 403 mfa_setup_required from any request: the tenant's policy now
-      // applies to a user with no factor.
       return (state.status === "authenticated" || state.status === "refreshing") && !state.user.mfaSetupRequired
         ? { status: state.status, user: { ...state.user, mfaSetupRequired: true }, tenant: state.tenant }
+        : state;
+
+    case "password_change_required":
+      return (state.status === "authenticated" || state.status === "refreshing") && !state.user.passwordChangeRequired
+        ? { status: state.status, user: { ...state.user, passwordChangeRequired: true }, tenant: state.tenant }
         : state;
 
     case "session_reloaded":

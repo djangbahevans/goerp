@@ -86,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
-    passwordUpdateNotice.set(result.passwordUpdateRecommended);
+    passwordUpdateNotice.set(result.passwordUpdateRecommended, result.passwordUpdateDeadline);
     const session = await fetchCurrentSession();
     if (!session) {
       authMachine.transition({ type: "login_failed" });
@@ -131,7 +131,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mfaInFlight.current = true;
     try {
       try {
-        passwordUpdateNotice.set(await verifyMFA(challengeToken, confirmation));
+        const notice = await verifyMFA(challengeToken, confirmation);
+        passwordUpdateNotice.set(notice.recommended, notice.deadline);
       } catch (err) {
         // A server rejection spends the MFA token; a request that never reaches the server leaves it usable.
         if (err instanceof AppError) {

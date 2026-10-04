@@ -20,8 +20,6 @@ const FAKE_TENANT = {
   passwordMinLength: 12,
 };
 
-// Same __root.tsx-renders-CommandPalette-regardless reasoning
-// -[_m].$.test.tsx's own FAKE_AUTH comment documents.
 function fakeAuth(
   user: CurrentUser,
   updateProfile = vi.fn(async () => {}),
@@ -77,6 +75,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -100,6 +102,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -123,6 +129,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -136,7 +146,12 @@ describe("/settings/profile", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
-      expect(updateProfile).toHaveBeenCalledWith({ name: "Grace Hopper", avatarId: undefined });
+      expect(updateProfile).toHaveBeenCalledWith({
+        name: "Grace Hopper",
+        avatarId: undefined,
+        phone: null,
+        title: null,
+      });
     });
   });
 
@@ -151,6 +166,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -180,6 +199,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -211,6 +234,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -223,12 +250,8 @@ describe("/settings/profile", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove avatar" }));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    // "" (not undefined) — undefined means "avatar untouched" and would
-    // be dropped from the PATCH body entirely (auth-client.ts), which is
-    // exactly the bug this test guards: removing the avatar and saving
-    // must be distinguishable from never touching it (goerp#819 review).
     await waitFor(() => {
-      expect(updateProfile).toHaveBeenCalledWith({ name: "Ada Lovelace", avatarId: "" });
+      expect(updateProfile).toHaveBeenCalledWith({ name: "Ada Lovelace", avatarId: "", phone: null, title: null });
     });
   });
 
@@ -243,6 +266,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -255,7 +282,12 @@ describe("/settings/profile", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
-      expect(updateProfile).toHaveBeenCalledWith({ name: "Ada Lovelace", avatarId: undefined });
+      expect(updateProfile).toHaveBeenCalledWith({
+        name: "Ada Lovelace",
+        avatarId: undefined,
+        phone: null,
+        title: null,
+      });
     });
   });
 
@@ -270,6 +302,10 @@ describe("/settings/profile", () => {
       amr: [],
       mfaVerifiedAt: null,
       mfaSetupRequired: false,
+      passwordChangeRequired: false,
+      passwordMinLength: 12,
+      phone: null,
+      title: null,
       theme: "system" as const,
       contrast: "system" as const,
       locale: null,
@@ -298,6 +334,10 @@ const ADA: CurrentUser = {
   amr: [],
   mfaVerifiedAt: null,
   mfaSetupRequired: false,
+  passwordChangeRequired: false,
+  passwordMinLength: 12,
+  phone: null,
+  title: null,
   theme: "system" as const,
   contrast: "system" as const,
   locale: null,
@@ -380,7 +420,7 @@ describe("/settings/profile change password", () => {
     expect(await screen.findByText("Password is too common.")).toBeTruthy();
   });
 
-  it("shows the tenant's minimum length, and the one a length rejection reports", async () => {
+  it("shows the account's combined minimum length, and the one a length rejection reports", async () => {
     const changePassword = vi.fn(async () => {
       throw new AppError({
         code: "auth.password_too_weak",
@@ -390,8 +430,9 @@ describe("/settings/profile change password", () => {
       });
     });
     const auth = fakeAuth(ADA, undefined, changePassword);
-    const tenant = { ...FAKE_TENANT, passwordMinLength: 16 };
-    await renderProfilePage({ ...auth, tenant, state: { status: "authenticated", user: ADA, tenant } });
+    const tenant = { ...FAKE_TENANT, passwordMinLength: 12 };
+    const user = { ...ADA, passwordMinLength: 16 };
+    await renderProfilePage({ ...auth, user, tenant, state: { status: "authenticated", user, tenant } });
 
     fillPasswords("old passphrase here", "schmetterling", "schmetterling");
     expect(screen.getByText(/At least 16 characters/)).toBeTruthy();
@@ -408,4 +449,18 @@ describe("/settings/profile change password", () => {
       expect(document.activeElement).toBe(screen.getByLabelText("Current password"));
     });
   });
+});
+
+it("pre-fills and saves this organisation's phone and job title", async () => {
+  const updateProfile = vi.fn(async () => {});
+  await renderProfilePage(fakeAuth({ ...ADA, phone: "+233201234567", title: "Consultant" }, updateProfile));
+  expect((screen.getByLabelText("Phone") as HTMLInputElement).value).toBe("+233201234567");
+  expect((screen.getByLabelText("Job title") as HTMLInputElement).value).toBe("Consultant");
+  expect(screen.getByText("Your name and photo are shared with every organisation you belong to.")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Phone"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Job title"), { target: { value: "  Manager  " } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(updateProfile).toHaveBeenCalledWith({ name: ADA.name, avatarId: undefined, phone: null, title: "Manager" }),
+  );
 });

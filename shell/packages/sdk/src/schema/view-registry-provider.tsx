@@ -29,12 +29,6 @@ const EMPTY_REGISTRY = buildEmptyViewRegistry();
 // `PermissionContext`.
 export const viewRegistryRef: { current: ViewRegistry } = { current: EMPTY_REGISTRY };
 
-// Mirrors permission-provider.tsx's PermissionProviderForUser/PermissionProvider
-// split exactly — same shape of problem (server-derived data that needs a
-// live WS-triggered refresh), same fix. `onUpdate` is how the app tells its
-// router to re-run active loaders after a rebuild (`router.invalidate()`);
-// kept as an injected callback rather than importing the router here, so
-// this package never depends on the concrete router instance app.tsx owns.
 export function ViewRegistryProviderForTenant({
   isAuthenticated,
   sessionExpired = false,
@@ -85,17 +79,11 @@ export function ViewRegistryProviderForTenant({
     };
   }, [isAuthenticated, refresh]);
 
-  // schema.updated (goerp#671/djangbahevans/goerp#802): a module hot-reload
-  // completed. module.installed: a newly installed module also changes the
-  // schema — its views/routes/navigation weren't in any prior fetch.
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "schema.updated", refresh);
   useChannelRefresh(isAuthenticated, tenantId && tenantChannel(tenantId), "module.installed", refresh);
 
   const hasSession = isAuthenticated || sessionExpired;
   const value = hasSession ? registry : EMPTY_REGISTRY;
-  // Keeps viewRegistryRef (and the router, via onUpdate) in lockstep with
-  // `value` for every transition — same reasoning as
-  // permission-provider.tsx's identical effect over permissionDataRef.
   useEffect(() => {
     viewRegistryRef.current = value;
     onUpdate?.();
@@ -121,12 +109,12 @@ export function ViewRegistryProvider({
   onUpdate?: (() => void) | undefined;
   children: ReactNode;
 }) {
-  const { isAuthenticated, state, tenant } = useAuth();
+  const { isAuthenticated, state, user, tenant } = useAuth();
   return (
     <ViewRegistryProviderForTenant
       key={tenant?.id ?? "anonymous"}
-      isAuthenticated={isAuthenticated}
-      sessionExpired={isSessionExpired(state)}
+      isAuthenticated={isAuthenticated && !user?.passwordChangeRequired}
+      sessionExpired={isSessionExpired(state) && !user?.passwordChangeRequired}
       tenantId={tenant?.id ?? null}
       onUpdate={onUpdate}
     >

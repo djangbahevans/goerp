@@ -15,7 +15,9 @@
     "pretest-session-idle": "npm run build -w @goerp/sdk",
     "test-session-idle": "node scripts/test-session-idle.mjs",
     "pretest-module-runtime": "npm run build -w @goerp/sdk",
-    "test-module-runtime": "node scripts/test-module-runtime.mjs"
+    "test-module-runtime": "node scripts/test-module-runtime.mjs",
+    "pretest-password-policy": "npm run build -w @goerp/sdk",
+    "test-password-policy": "node scripts/test-password-policy.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
