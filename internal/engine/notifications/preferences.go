@@ -9,11 +9,11 @@ import (
 	"uuid"
 
 	"github.com/djangbahevans/goerp/internal/engine/cache"
+	"github.com/djangbahevans/goerp/internal/engine/db"
 	"github.com/djangbahevans/goerp/internal/engine/tenantschema"
 	"github.com/rs/zerolog/log"
 )
 
-// PreferencesTable is the channel-preference table's unqualified name.
 const PreferencesTable = "notification_preferences"
 
 // Channel names, as the preference routes spell them. in_app has no
@@ -25,8 +25,6 @@ const (
 	ChannelPush  = "push"
 )
 
-// preferencesCacheTTL is how long a user's cached preferences live
-// (notification-system.md §8 "Preference cache").
 const preferencesCacheTTL = 15 * time.Minute
 
 // Channels is one set of per-channel switches: a user's global defaults,
@@ -187,6 +185,12 @@ func (s *Store) updatePreferences(ctx context.Context, tenantSlug, tenantID, use
 		return fmt.Errorf("update notification preferences: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Lock before reading, including when no preference rows exist yet.
+	lockKey := db.AdvisoryLockKey("notifications.preferences:" + tenantID + ":" + userID)
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
+		return fmt.Errorf("lock notification preferences: %w", err)
+	}
 
 	current, err := loadPreferences(ctx, tx, tenantSlug, tenantID, userID)
 	if err != nil {
