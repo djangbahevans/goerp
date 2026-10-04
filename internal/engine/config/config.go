@@ -134,6 +134,9 @@ type Config struct {
 	SMTPUser string `env:"GOERP_SMTP_USER"`
 	SMTPPass string `env:"GOERP_SMTP_PASSWORD"`
 	SMTPFrom string `env:"GOERP_SMTP_FROM" envDefault:"noreply@goerp.local"`
+
+	NotificationSMTPAllowPrivateHosts bool `env:"GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS" envDefault:"false"`
+
 	// AppBaseURL is the app's URL on the shared-domain host. Emailed links
 	// keep its scheme and port on the tenant's default domain,
 	// {slug}.{PlatformDomain}. Its host is the one unresolved host

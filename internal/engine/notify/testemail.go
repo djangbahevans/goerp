@@ -23,12 +23,13 @@ var testEmailBody = htmltemplate.Must(htmltemplate.New("body").Parse(
 // provider adapters and layout as email_send, without a notification or
 // delivery row behind it.
 type EmailTester struct {
-	Registry       Registry
-	Tenants        EmailTenants
-	AppBaseURL     string
-	PlatformDomain string
-	ResendBaseURL  string
-	HTTPClient     *http.Client
+	Registry              Registry
+	Tenants               EmailTenants
+	AppBaseURL            string
+	PlatformDomain        string
+	ResendBaseURL         string
+	HTTPClient            *http.Client
+	SMTPAllowPrivateHosts bool
 }
 
 // ConfigError is a test email that cannot be sent because cfg is
@@ -46,7 +47,7 @@ func (e *ConfigError) Unwrap() error { return e.Err }
 // the provider cfg selects, returning that provider's name. A cfg that
 // cannot send is a *ConfigError; any other error is the provider's.
 func (t *EmailTester) Send(ctx context.Context, tenantID string, cfg notifconfig.EmailConfig, to string) (string, error) {
-	sender, err := emailSender(cfg, t.ResendBaseURL, t.HTTPClient)
+	sender, err := emailSender(cfg, t.ResendBaseURL, t.HTTPClient, t.SMTPAllowPrivateHosts)
 	if err != nil {
 		return "", &ConfigError{Field: "email", Err: err}
 	}

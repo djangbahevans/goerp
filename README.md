@@ -80,9 +80,12 @@ export GOERP_DB_PRIMARY_DSN="postgres://engine_user:dev@localhost:6432/goerp_dev
 export GOERP_DB_SCHEMA_SYNC_DSN="postgres://schema_sync_user:dev@localhost:15432/goerp_dev"
 export GOERP_ADMIN_TOKEN="dev-admin-token"
 export GOERP_STORAGE_LOCAL_DIR="./storage"
+export GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS="true"
 
 go run ./cmd/engine
 ```
+
+Tenant notification SMTP connections require public destinations by default. `GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS=true` allows local and private destinations for development, including Mailpit at `localhost:1025`. `make engine` enables this development allowance; override it with `make engine GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS=false` to enforce the public destination policy locally. The operator-configured authentication mailer uses `GOERP_SMTP_*` independently of tenant notification settings.
 
 Confirm it's up:
 

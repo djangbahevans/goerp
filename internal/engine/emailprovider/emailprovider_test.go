@@ -1,6 +1,7 @@
 package emailprovider
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -162,7 +163,13 @@ func TestSMTP_PlaintextPasswordToARemoteServerFailsPermanently(t *testing.T) {
 		}
 	}()
 
-	s := &SMTP{Host: "127.0.0.2", Port: ln.Addr().(*net.TCPAddr).Port, User: "u", Password: "p"}
+	s := &SMTP{
+		Host:              "127.0.0.2",
+		Port:              ln.Addr().(*net.TCPAddr).Port,
+		User:              "u",
+		Password:          "p",
+		AllowPrivateHosts: true,
+	}
 	if _, err := s.Send(t.Context(), testMessage("a@example.test")); !errors.Is(err, ErrPermanent) {
 		t.Errorf("Send() error = %v, want ErrPermanent", err)
 	}
@@ -235,7 +242,7 @@ func TestSMTP_DeliversToMailpit(t *testing.T) {
 	to := fmt.Sprintf("smtp%d@example.test", time.Now().UnixNano())
 	msg := testMessage(to)
 	msg.MessageID = fmt.Sprintf("<n-%d@acme.test>", time.Now().UnixNano())
-	s := &SMTP{Host: mailpitSMTPHost, Port: mailpitSMTPPort}
+	s := &SMTP{Host: mailpitSMTPHost, Port: mailpitSMTPPort, AllowPrivateHosts: true}
 
 	id, err := s.Send(t.Context(), msg)
 	if err != nil {
@@ -260,8 +267,29 @@ func TestSMTP_DeliversToMailpit(t *testing.T) {
 	}
 }
 
+func TestResend_TransportFailuresPreserveCause(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = io.WriteString(w, `{"id":"truncated`)
+	}))
+	t.Cleanup(srv.Close)
+	sender := &Resend{APIKey: "test-key", BaseURL: srv.URL}
+
+	_, err := sender.Send(t.Context(), testMessage("test@example.test"))
+	if !errors.Is(err, ErrConnection) || !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("truncated HTTP response = %v, want a connection failure wrapping unexpected EOF", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = sender.Send(ctx, testMessage("test@example.test"))
+	if !errors.Is(err, ErrConnection) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled HTTP request = %v, want a connection failure wrapping cancellation", err)
+	}
+}
+
 func TestSMTP_RequiresSTARTTLSWhenUseTLS(t *testing.T) {
-	s := &SMTP{Host: mailpitSMTPHost, Port: mailpitSMTPPort, UseTLS: true}
+	s := &SMTP{Host: mailpitSMTPHost, Port: mailpitSMTPPort, UseTLS: true, AllowPrivateHosts: true}
 	_, err := s.Send(t.Context(), testMessage("tls@example.test"))
 	if err != nil && strings.Contains(err.Error(), "connection refused") {
 		t.Skipf("mailpit SMTP not reachable: %v", err)

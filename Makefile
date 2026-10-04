@@ -9,6 +9,7 @@ GOERP_STORAGE_LOCAL_DIR ?= $(CURDIR)/storage
 GOERP_MODULE_DIR ?= $(CURDIR)/.dev/modules
 GOERP_PLATFORM_DOMAIN ?= localhost
 GOERP_REGISTRATION_ENABLED ?= true
+GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS ?= true
 # The shell's Vite dev server (make shell), so emailed links open there.
 GOERP_APP_BASE_URL ?= http://localhost:5173
 
@@ -38,6 +39,7 @@ engine: ## Run the engine against the dev infrastructure, loading modules from G
 	GOERP_MODULE_DIR='$(GOERP_MODULE_DIR)' \
 	GOERP_PLATFORM_DOMAIN='$(GOERP_PLATFORM_DOMAIN)' \
 	GOERP_REGISTRATION_ENABLED='$(GOERP_REGISTRATION_ENABLED)' \
+	GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS='$(GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS)' \
 	GOERP_APP_BASE_URL='$(GOERP_APP_BASE_URL)' \
 	go run ./cmd/engine
 

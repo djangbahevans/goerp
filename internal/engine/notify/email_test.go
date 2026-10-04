@@ -128,14 +128,15 @@ func openEmailEnv(t *testing.T) *emailEnv {
 	})
 	resend := newResendStub(t)
 	worker := NewEmailWorker(EmailDeps{
-		DB:             env.conn,
-		Registry:       reg,
-		Config:         staticConfig{env.config},
-		Tenants:        tenant.NewStore(env.conn),
-		Unsubscribe:    codec,
-		AppBaseURL:     "http://localhost:8080",
-		PlatformDomain: "goerp.local",
-		ResendBaseURL:  resend.srv.URL,
+		DB:                    env.conn,
+		Registry:              reg,
+		Config:                staticConfig{env.config},
+		Tenants:               tenant.NewStore(env.conn),
+		Unsubscribe:           codec,
+		AppBaseURL:            "http://localhost:8080",
+		PlatformDomain:        "goerp.local",
+		ResendBaseURL:         resend.srv.URL,
+		SMTPAllowPrivateHosts: true,
 	})
 	return &emailEnv{testEnv: env, worker: worker, codec: codec, resend: resend}
 }
@@ -344,6 +345,22 @@ func TestEmailWorker_DeliversRenderedEmailThroughSMTP(t *testing.T) {
 	if row.status != notifications.DeliveryDelivered || !row.delivered || row.provider != notifconfig.ProviderSMTP ||
 		row.providerID != "<"+args.NotificationID+"@acme.test>" || row.attempts != 1 {
 		t.Errorf("delivery row = %+v", row)
+	}
+}
+
+func TestEmailWorker_BlockedSMTPDestinationFailsPermanently(t *testing.T) {
+	env := openEmailEnv(t)
+	env.worker.SMTPAllowPrivateHosts = false
+	_, args := env.send(t)
+
+	err := env.work(t, args, 1)
+	if _, ok := errors.AsType[*river.JobCancelError](err); !ok {
+		t.Fatalf("Work() = %v, want permanent cancellation for a blocked SMTP destination", err)
+	}
+
+	row := env.row(t, args.DeliveryID)
+	if row.status != notifications.DeliveryFailed || row.attempts != 1 || row.delivered || !strings.Contains(row.reason, "not a public address") {
+		t.Fatalf("blocked SMTP delivery = %+v, want failed on the first attempt", row)
 	}
 }
 

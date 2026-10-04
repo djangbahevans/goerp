@@ -875,10 +875,11 @@ func New(cfg *config.Config) (*Engine, error) {
 		Registry:                moduleRegistry,
 		Users:                   userStore,
 		TestEmail: &notify.EmailTester{
-			Registry:       moduleRegistry,
-			Tenants:        tenantStore,
-			AppBaseURL:     cfg.AppBaseURL,
-			PlatformDomain: cfg.PlatformDomain,
+			Registry:              moduleRegistry,
+			Tenants:               tenantStore,
+			AppBaseURL:            cfg.AppBaseURL,
+			PlatformDomain:        cfg.PlatformDomain,
+			SMTPAllowPrivateHosts: cfg.NotificationSMTPAllowPrivateHosts,
 		},
 		Templates:      notificationStore,
 		AppBaseURL:     cfg.AppBaseURL,
@@ -928,13 +929,14 @@ func New(cfg *config.Config) (*Engine, error) {
 	river.AddWorker(jobWorkers, &jobqueue.DeviceTokenCleanupWorker{TenantStore: tenantStore, NotificationStore: notificationStore})
 	unsubscribeCodec := notifications.NewUnsubscribeCodec(signingKeySet)
 	river.AddWorker(jobWorkers, notify.NewEmailWorker(notify.EmailDeps{
-		DB:             primaryPool,
-		Registry:       moduleRegistry,
-		Config:         notificationConfig,
-		Tenants:        tenantStore,
-		Unsubscribe:    unsubscribeCodec,
-		AppBaseURL:     cfg.AppBaseURL,
-		PlatformDomain: cfg.PlatformDomain,
+		DB:                    primaryPool,
+		Registry:              moduleRegistry,
+		Config:                notificationConfig,
+		Tenants:               tenantStore,
+		Unsubscribe:           unsubscribeCodec,
+		AppBaseURL:            cfg.AppBaseURL,
+		PlatformDomain:        cfg.PlatformDomain,
+		SMTPAllowPrivateHosts: cfg.NotificationSMTPAllowPrivateHosts,
 	}))
 	river.AddWorker(jobWorkers, &jobdispatch.Worker{
 		ModuleRegistry: moduleRegistry,

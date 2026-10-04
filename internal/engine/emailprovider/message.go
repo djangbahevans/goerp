@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-// Header is one extra message header. Headers keep their order.
 type Header struct {
 	Name, Value string
 }
@@ -45,6 +44,9 @@ type Sender interface {
 }
 
 var (
+	// ErrConnection marks transport failures whose details must stay out of
+	// tenant-facing test-email responses.
+	ErrConnection = errors.New("email provider connection failed")
 	// ErrPermanent: the provider rejected the message in a way a retry
 	// cannot fix.
 	ErrPermanent = errors.New("email rejected permanently")

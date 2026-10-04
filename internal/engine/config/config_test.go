@@ -7,13 +7,32 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// setRequiredEnv sets the env vars Load() requires to succeed at all
-// (GOERP_DB_PRIMARY_DSN, GOERP_DB_SCHEMA_SYNC_DSN), so individual tests
-// can focus on the one value they're actually exercising.
 func setRequiredEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("GOERP_DB_PRIMARY_DSN", "postgres://primary")
 	t.Setenv("GOERP_DB_SCHEMA_SYNC_DSN", "postgres://schema-sync")
+}
+
+func TestLoadNotificationSMTPNetworkPolicy(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NotificationSMTPAllowPrivateHosts {
+		t.Fatal("private tenant SMTP destinations allowed by default")
+	}
+
+	t.Setenv("GOERP_NOTIFICATION_SMTP_ALLOW_PRIVATE_HOSTS", "true")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.NotificationSMTPAllowPrivateHosts {
+		t.Fatal("development allowance did not enable private tenant SMTP destinations")
+	}
 }
 
 func TestLoadDefaults(t *testing.T) {
